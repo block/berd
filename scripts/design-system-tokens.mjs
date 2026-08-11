@@ -108,6 +108,7 @@ const allowedBridgePatterns = [
   /^sidebar-section-action-(?:bg|fg)(?:-hover)?$/,
   /^surface-(?:composer(?:-(?:glass|hover|action(?:-(?:hover|active))?)?)?|chat-(?:composer(?:-hover)?|responding-pill-(?:bg|fg))|editor-panel|glass-(?:subtle|strong(?:-(?:hover|fg))?)|agent-tile-action-(?:bg|fg)(?:-hover)?)$/,
   /^surface-agent-profile-(?:bg|fg(?:-(?:80|muted|subtle|faint|placeholder))?|border|dot|control-bg(?:-hover)?|action-(?:fg|bg-hover))$/,
+  /^agent-share-card-ink$/,
   /^message-user-bg$/,
   /^chip-(?:file|chat|project|agent|skill|automation)-(?:bg|fg)$/,
   /^skill-pill-fg$/,
@@ -211,6 +212,7 @@ const rawCssColorAllowlist = new Set([
 // value with no `.dark` override. Every other `:root` color token must have a
 // matching `.dark` value. Documented in docs/color-token-mapping.md.
 const darkPairingExemptTokens = new Set([
+  "agent-share-card-ink", // collectible artwork ink is theme-invariant
   "project-tint", // runtime hook, transparent until a project wrapper sets it
   "clock-hand", // second hand stays red in both themes
   "chart-1",

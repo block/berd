@@ -60,6 +60,7 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 | `surface-agent-tile-action-*` | Agent tile View/Chat/⋯ controls: glass white + charcoal text in light theme, inverted surface in dark theme; hover/active/open invert foreground/background in both themes. | `bg-surface-agent-tile-action-bg text-surface-agent-tile-action-fg`, `hover:bg-surface-agent-tile-action-bg-hover` |
 | `surface-editor-panel` | Large slide-out editor panels use a translucent glass surface over the canvas. | `bg-surface-editor-panel` |
 | `surface-agent-profile-*` | Agent profile and avatar-editing surfaces are product-specific and theme-aware; their light and dark values do not perfectly match shared shadcn tokens. | `bg-surface-agent-profile-bg text-surface-agent-profile-fg` |
+| `agent-share-card-ink` | Collectible agent-card artwork uses a fixed brand ink independent of the app theme. | `text-agent-share-card-ink` |
 | `message-user-bg` | User message bubble fill is a chat-specific surface that should not become a broad card or muted token. | `bg-message-user-bg` |
 | `text-placeholder-composer` | Composer placeholder needs a denser value than normal muted text. | `placeholder:text-placeholder-composer` |
 | `chip-*-bg`, `chip-*-fg` | File/chat/project/agent/skill/automation identity chips. | `bg-chip-agent-bg text-chip-agent-fg` |

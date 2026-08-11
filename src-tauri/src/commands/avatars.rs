@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use futures_util::{stream, StreamExt};
 use reqwest::{StatusCode, Url};
 use serde::de::DeserializeOwned;
@@ -12,6 +13,7 @@ use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::broadcast;
+use uuid::Uuid;
 
 const AVATAR_CDN_BASE: &str = "https://dwwgwmfqqjotj.cloudfront.net/avatars/";
 const APP_AVATAR_REF_PREFIX: &str = "app-avatar:";
@@ -28,6 +30,11 @@ const ASSET_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const ASSET_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 const AVATAR_WARM_RETRY_DELAY: Duration = Duration::from_secs(5);
 const DEFAULT_DOWNLOAD_CONCURRENCY: usize = 8;
+const MAX_IMPORTED_AVATAR_BYTES: usize = 5 * 1024 * 1024;
+const MAX_IMPORTED_POSTER_BYTES: usize = 5 * 1024 * 1024;
+const PNG_SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
+const WEBM_SIGNATURE: &[u8; 4] = b"\x1a\x45\xdf\xa3";
+const MP4_FILE_TYPE_BOX: &[u8; 4] = b"ftyp";
 // A `.part` file older than this is treated as an orphan left behind by a
 // crashed process and is safe to delete. It must comfortably exceed the longest
 // a live download can run (connect + download timeout) so cleanup never removes
@@ -240,6 +247,8 @@ struct UserAvatarManifest {
     mime_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     alpha_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    poster_path: Option<String>,
     byte_size: u64,
     created_at_ms: u128,
 }
@@ -318,6 +327,110 @@ pub async fn get_cached_avatar_for_ref(
 }
 
 #[tauri::command]
+pub async fn import_user_avatar_data_url(
+    app: AppHandle,
+    data_url: String,
+    alpha_mode: Option<String>,
+    poster_data_url: Option<String>,
+) -> Result<String, String> {
+    let (bytes, mime_type) = decode_imported_avatar_data_url(&data_url)?;
+    let poster = poster_data_url
+        .as_deref()
+        .map(decode_imported_poster_data_url)
+        .transpose()?;
+    write_user_avatar_with_poster(
+        &app,
+        &bytes,
+        mime_type,
+        alpha_mode.as_deref(),
+        poster.as_deref().map(|bytes| (bytes, "image/png")),
+    )
+}
+
+fn decode_imported_avatar_data_url(data_url: &str) -> Result<(Vec<u8>, &'static str), String> {
+    const WEBM_PREFIX: &str = "data:video/webm;base64,";
+    const MP4_PREFIX: &str = "data:video/mp4;base64,";
+    let (mime_type, encoded) = data_url
+        .strip_prefix(WEBM_PREFIX)
+        .map(|encoded| ("video/webm", encoded))
+        .or_else(|| {
+            data_url
+                .strip_prefix(MP4_PREFIX)
+                .map(|encoded| ("video/mp4", encoded))
+        })
+        .ok_or_else(|| "Imported avatar animation has an unsupported format".to_string())?;
+    let decoded_size = decoded_base64_len(encoded)
+        .ok_or_else(|| "Imported avatar animation contains invalid base64".to_string())?;
+    if decoded_size == 0 || decoded_size > MAX_IMPORTED_AVATAR_BYTES {
+        return Err("Imported avatar animation must be 5 MB or smaller".to_string());
+    }
+    let bytes = BASE64
+        .decode(encoded)
+        .map_err(|_| "Imported avatar animation contains invalid base64".to_string())?;
+    validate_imported_avatar_signature(&bytes, mime_type)?;
+    Ok((bytes, mime_type))
+}
+
+fn decoded_base64_len(encoded: &str) -> Option<usize> {
+    if encoded.is_empty() || !encoded.len().is_multiple_of(4) {
+        return None;
+    }
+    let padding = encoded
+        .as_bytes()
+        .iter()
+        .rev()
+        .take_while(|&&byte| byte == b'=')
+        .count();
+    if padding > 2 {
+        return None;
+    }
+    encoded
+        .len()
+        .checked_div(4)?
+        .checked_mul(3)?
+        .checked_sub(padding)
+}
+
+fn validate_imported_avatar_signature(bytes: &[u8], mime_type: &str) -> Result<(), String> {
+    let valid = match mime_type {
+        "video/webm" => bytes.starts_with(WEBM_SIGNATURE),
+        // ISO BMFF files begin with a sized box; imported MP4 must identify its
+        // first box as the mandatory file-type box.
+        "video/mp4" => bytes.get(4..8) == Some(MP4_FILE_TYPE_BOX.as_slice()),
+        _ => false,
+    };
+    if valid {
+        Ok(())
+    } else {
+        Err(format!(
+            "Imported avatar animation is not a valid {} file",
+            mime_type.strip_prefix("video/").unwrap_or("video")
+        ))
+    }
+}
+
+fn decode_imported_poster_data_url(data_url: &str) -> Result<Vec<u8>, String> {
+    const PNG_PREFIX: &str = "data:image/png;base64,";
+    let encoded = data_url
+        .strip_prefix(PNG_PREFIX)
+        .ok_or_else(|| "Imported avatar poster has an unsupported format".to_string())?;
+    let max_encoded_len = MAX_IMPORTED_POSTER_BYTES.div_ceil(3) * 4;
+    if encoded.is_empty() || encoded.len() > max_encoded_len {
+        return Err("Imported avatar poster must be 5 MB or smaller".to_string());
+    }
+    let bytes = BASE64
+        .decode(encoded)
+        .map_err(|_| "Imported avatar poster contains invalid base64".to_string())?;
+    if bytes.is_empty() || bytes.len() > MAX_IMPORTED_POSTER_BYTES {
+        return Err("Imported avatar poster must be 5 MB or smaller".to_string());
+    }
+    if !bytes.starts_with(PNG_SIGNATURE) {
+        return Err("Imported avatar poster is not a valid PNG".to_string());
+    }
+    Ok(bytes)
+}
+
+#[tauri::command]
 pub async fn delete_user_avatar(app: AppHandle, avatar_ref: String) -> Result<(), String> {
     delete_user_avatar_by_ref(&app, &avatar_ref)
 }
@@ -344,7 +457,14 @@ fn delete_user_avatar_at(paths: &UserAvatarPaths, avatar_ref: &str) -> Result<()
 
     let manifest = read_user_avatar_manifest(paths, &avatar_id)?;
     let media_path = user_avatar_media_path(paths, &manifest)?;
+    let poster_path = manifest
+        .poster_path
+        .as_deref()
+        .map(|relative_path| paths.media.join(relative_path));
     delete_file_if_exists(&media_path)?;
+    if let Some(poster_path) = poster_path {
+        delete_file_if_exists(&poster_path)?;
+    }
     delete_file_if_exists(&manifest_path)
 }
 
@@ -1521,6 +1641,91 @@ fn user_avatar_paths(app: &AppHandle) -> Result<UserAvatarPaths, String> {
     })
 }
 
+pub(crate) fn write_user_avatar_with_poster(
+    app: &AppHandle,
+    bytes: &[u8],
+    mime_type: &str,
+    alpha_mode: Option<&str>,
+    poster: Option<(&[u8], &str)>,
+) -> Result<String, String> {
+    let id = format!("gloopie-{}", Uuid::new_v4());
+    let paths = user_avatar_paths(app)?;
+    write_user_avatar_at(&paths, &id, bytes, mime_type, alpha_mode, poster)
+}
+
+fn write_user_avatar_at(
+    paths: &UserAvatarPaths,
+    id: &str,
+    bytes: &[u8],
+    mime_type: &str,
+    alpha_mode: Option<&str>,
+    poster: Option<(&[u8], &str)>,
+) -> Result<String, String> {
+    validate_user_avatar_alpha_mode(alpha_mode)?;
+    validate_avatar_id(id)?;
+    let extension = user_avatar_extension(mime_type)
+        .ok_or_else(|| format!("Unsupported generated avatar media type: {mime_type}"))?;
+    let poster_extension = poster
+        .map(|(_, poster_mime_type)| {
+            user_avatar_extension(poster_mime_type)
+                .filter(|_| poster_mime_type.starts_with("image/"))
+                .ok_or_else(|| "Unsupported generated avatar poster type".to_string())
+        })
+        .transpose()?;
+
+    let media_relative_path = format!("{id}.{extension}");
+    let media_path = paths.media.join(&media_relative_path);
+    atomic_write(&media_path, bytes)?;
+
+    let poster_relative_path = poster_extension.map(|extension| format!("{id}.poster.{extension}"));
+    let poster_path = poster_relative_path
+        .as_deref()
+        .map(|relative_path| paths.media.join(relative_path));
+    if let (Some((poster_bytes, _)), Some(poster_path)) = (poster, poster_path.as_ref()) {
+        if let Err(error) = atomic_write(poster_path, poster_bytes) {
+            rollback_user_avatar_files(&[&media_path]);
+            return Err(error);
+        }
+    }
+
+    let created_at_ms = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis());
+    let manifest = UserAvatarManifest {
+        id: id.to_string(),
+        path: media_relative_path,
+        mime_type: mime_type.to_string(),
+        alpha_mode: alpha_mode.map(str::to_string),
+        poster_path: poster_relative_path,
+        byte_size: bytes.len() as u64,
+        created_at_ms,
+    };
+    let result = serde_json::to_vec_pretty(&manifest)
+        .map_err(|error| format!("Failed to serialize generated avatar manifest: {error}"))
+        .and_then(|bytes| atomic_write(&paths.meta.join(format!("{id}.json")), &bytes));
+    if let Err(error) = result {
+        let mut written_paths: Vec<&Path> = vec![media_path.as_path()];
+        if let Some(poster_path) = poster_path.as_ref() {
+            written_paths.push(poster_path.as_path());
+        }
+        rollback_user_avatar_files(&written_paths);
+        return Err(error);
+    }
+
+    Ok(format!("{USER_AVATAR_REF_PREFIX}{id}"))
+}
+
+fn rollback_user_avatar_files(paths: &[&Path]) {
+    for path in paths {
+        if let Err(error) = delete_file_if_exists(path) {
+            log::warn!(
+                "Failed to roll back generated avatar file '{}': {error}",
+                path.display()
+            );
+        }
+    }
+}
+
 fn cached_user_avatar_for_id(
     app: &AppHandle,
     avatar_id: &str,
@@ -1543,7 +1748,9 @@ fn cached_user_avatar_for_id(
             path: media_path.to_string_lossy().to_string(),
             mime_type: manifest.mime_type,
             alpha_mode: manifest.alpha_mode,
-            poster_path: None,
+            poster_path: manifest
+                .poster_path
+                .map(|poster| paths.media.join(poster).to_string_lossy().to_string()),
         },
     }))
 }
@@ -1558,12 +1765,34 @@ fn read_user_avatar_manifest(
     if manifest.id != avatar_id {
         return Err("Generated avatar manifest id mismatch".to_string());
     }
-    validate_safe_relative_path(&manifest.path)?;
+    validate_user_avatar_manifest_paths(&manifest)?;
     if user_avatar_extension(&manifest.mime_type).is_none() {
         return Err("Generated avatar manifest has unsupported media type".to_string());
     }
     validate_user_avatar_alpha_mode(manifest.alpha_mode.as_deref())?;
     Ok(manifest)
+}
+
+fn validate_user_avatar_manifest_paths(manifest: &UserAvatarManifest) -> Result<(), String> {
+    let extension = user_avatar_extension(&manifest.mime_type)
+        .ok_or_else(|| "Generated avatar manifest has unsupported media type".to_string())?;
+    let expected_media_path = format!("{}.{}", manifest.id, extension);
+    if manifest.path != expected_media_path {
+        return Err("Generated avatar manifest media path does not belong to its id".to_string());
+    }
+    validate_safe_relative_path(&manifest.path)?;
+
+    if let Some(poster_path) = manifest.poster_path.as_deref() {
+        validate_safe_relative_path(poster_path)?;
+        let prefix = format!("{}.poster.", manifest.id);
+        let poster_extension = poster_path.strip_prefix(&prefix);
+        if !matches!(poster_extension, Some("png" | "jpg" | "webp")) {
+            return Err(
+                "Generated avatar manifest poster path does not belong to its id".to_string(),
+            );
+        }
+    }
+    Ok(())
 }
 
 fn user_avatar_media_path(
@@ -2250,6 +2479,7 @@ mod tests {
             path: media_relative_path,
             mime_type: "image/png".to_string(),
             alpha_mode: None,
+            poster_path: None,
             byte_size: 9,
             created_at_ms: 0,
         };
@@ -2259,6 +2489,86 @@ mod tests {
         )
         .unwrap();
         media_path
+    }
+
+    fn imported_webm_data_url(size: usize) -> String {
+        let mut bytes = vec![0; size];
+        bytes[..WEBM_SIGNATURE.len()].copy_from_slice(WEBM_SIGNATURE);
+        format!("data:video/webm;base64,{}", BASE64.encode(bytes))
+    }
+
+    #[test]
+    fn imported_avatar_limit_accounts_for_base64_padding_exactly() {
+        for size in [MAX_IMPORTED_AVATAR_BYTES - 1, MAX_IMPORTED_AVATAR_BYTES] {
+            let (bytes, mime_type) =
+                decode_imported_avatar_data_url(&imported_webm_data_url(size)).unwrap();
+            assert_eq!(bytes.len(), size);
+            assert_eq!(mime_type, "video/webm");
+        }
+
+        let error =
+            decode_imported_avatar_data_url(&imported_webm_data_url(MAX_IMPORTED_AVATAR_BYTES + 1))
+                .unwrap_err();
+        assert!(error.contains("5 MB or smaller"));
+    }
+
+    #[test]
+    fn imported_avatar_requires_matching_webm_or_mp4_signature() {
+        let disguised_webm = format!("data:video/webm;base64,{}", BASE64.encode(b"not webm"));
+        assert!(decode_imported_avatar_data_url(&disguised_webm)
+            .unwrap_err()
+            .contains("valid webm"));
+
+        let valid_mp4 = format!(
+            "data:video/mp4;base64,{}",
+            BASE64.encode(b"\0\0\0\x18ftypisom")
+        );
+        assert!(decode_imported_avatar_data_url(&valid_mp4).is_ok());
+
+        let webm_as_mp4 = format!("data:video/mp4;base64,{}", BASE64.encode(WEBM_SIGNATURE));
+        assert!(decode_imported_avatar_data_url(&webm_as_mp4)
+            .unwrap_err()
+            .contains("valid mp4"));
+    }
+
+    #[test]
+    fn imported_poster_requires_png_data_url_and_signature() {
+        let png = BASE64.encode([PNG_SIGNATURE.as_slice(), b"payload"].concat());
+        assert!(decode_imported_poster_data_url(&format!("data:image/png;base64,{png}")).is_ok());
+
+        let disguised = BASE64.encode(b"not a png");
+        assert!(
+            decode_imported_poster_data_url(&format!("data:image/png;base64,{disguised}"))
+                .unwrap_err()
+                .contains("not a valid PNG")
+        );
+        assert!(
+            decode_imported_poster_data_url("data:image/jpeg;base64,AAAA")
+                .unwrap_err()
+                .contains("unsupported format")
+        );
+    }
+
+    #[test]
+    fn imported_poster_rejects_oversized_encoded_input_before_decode() {
+        let encoded = "A".repeat(MAX_IMPORTED_POSTER_BYTES.div_ceil(3) * 4 + 1);
+        assert!(
+            decode_imported_poster_data_url(&format!("data:image/png;base64,{encoded}"))
+                .unwrap_err()
+                .contains("5 MB or smaller")
+        );
+    }
+
+    #[test]
+    fn imported_poster_rejects_oversized_decoded_input() {
+        let mut bytes = vec![0; MAX_IMPORTED_POSTER_BYTES + 1];
+        bytes[..PNG_SIGNATURE.len()].copy_from_slice(PNG_SIGNATURE);
+        let encoded = BASE64.encode(bytes);
+        assert!(
+            decode_imported_poster_data_url(&format!("data:image/png;base64,{encoded}"))
+                .unwrap_err()
+                .contains("5 MB or smaller")
+        );
     }
 
     #[test]
@@ -2271,6 +2581,45 @@ mod tests {
 
         assert!(!media_path.exists());
         assert!(!manifest_path.exists());
+    }
+
+    #[test]
+    fn delete_user_avatar_removes_poster_and_is_idempotent() {
+        let (_dir, paths) = temp_user_avatar_paths();
+        let media_path = seed_user_avatar(&paths, "gloopie-1");
+        let poster_path = paths.media.join("gloopie-1.poster.png");
+        fs::write(&poster_path, b"poster").unwrap();
+        let manifest_path = paths.meta.join("gloopie-1.json");
+        let mut manifest: UserAvatarManifest = read_json_file(&manifest_path).unwrap();
+        manifest.poster_path = Some("gloopie-1.poster.png".to_string());
+        fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+        delete_user_avatar_at(&paths, "user-avatar:gloopie-1").unwrap();
+        delete_user_avatar_at(&paths, "user-avatar:gloopie-1").unwrap();
+
+        assert!(!media_path.exists());
+        assert!(!poster_path.exists());
+        assert!(!manifest_path.exists());
+    }
+
+    #[test]
+    fn write_user_avatar_rolls_back_media_and_poster_when_manifest_write_fails() {
+        let (dir, mut paths) = temp_user_avatar_paths();
+        paths.meta = dir.path().join("not-a-directory");
+        fs::write(&paths.meta, b"block directory creation").unwrap();
+
+        let result = write_user_avatar_at(
+            &paths,
+            "gloopie-rollback",
+            b"media",
+            "video/webm",
+            None,
+            Some((b"poster", "image/png")),
+        );
+
+        assert!(result.is_err());
+        assert!(!paths.media.join("gloopie-rollback.webm").exists());
+        assert!(!paths.media.join("gloopie-rollback.poster.png").exists());
     }
 
     #[test]
@@ -2303,6 +2652,51 @@ mod tests {
         assert!(delete_user_avatar_at(&paths, "user-avatar:../secret").is_err());
         assert!(delete_user_avatar_at(&paths, "user-avatar:/etc/passwd").is_err());
         assert!(outside.exists());
+    }
+
+    #[test]
+    fn corrupted_manifest_for_avatar_a_cannot_delete_avatar_b_files() {
+        let (_dir, paths) = temp_user_avatar_paths();
+        let avatar_a_media = seed_user_avatar(&paths, "gloopie-a");
+        let avatar_b_media = seed_user_avatar(&paths, "gloopie-b");
+        let avatar_b_poster = paths.media.join("gloopie-b.poster.png");
+        fs::write(&avatar_b_poster, b"poster").unwrap();
+        let avatar_a_manifest_path = paths.meta.join("gloopie-a.json");
+
+        let mut manifest: UserAvatarManifest = read_json_file(&avatar_a_manifest_path).unwrap();
+        manifest.path = "gloopie-b.png".to_string();
+        manifest.poster_path = Some("gloopie-b.poster.png".to_string());
+        fs::write(
+            &avatar_a_manifest_path,
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        assert!(delete_user_avatar_at(&paths, "user-avatar:gloopie-a").is_err());
+        assert!(avatar_a_media.exists());
+        assert!(avatar_b_media.exists());
+        assert!(avatar_b_poster.exists());
+        assert!(avatar_a_manifest_path.exists());
+    }
+
+    #[test]
+    fn corrupted_manifest_poster_for_avatar_a_cannot_delete_avatar_b_poster() {
+        let (_dir, paths) = temp_user_avatar_paths();
+        seed_user_avatar(&paths, "gloopie-a");
+        let avatar_b_poster = paths.media.join("gloopie-b.poster.png");
+        fs::write(&avatar_b_poster, b"poster").unwrap();
+        let avatar_a_manifest_path = paths.meta.join("gloopie-a.json");
+
+        let mut manifest: UserAvatarManifest = read_json_file(&avatar_a_manifest_path).unwrap();
+        manifest.poster_path = Some("gloopie-b.poster.png".to_string());
+        fs::write(
+            &avatar_a_manifest_path,
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        assert!(delete_user_avatar_at(&paths, "user-avatar:gloopie-a").is_err());
+        assert!(avatar_b_poster.exists());
     }
 
     #[test]

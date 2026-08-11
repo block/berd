@@ -277,7 +277,15 @@ function StackedAlphaVideo({
       draw();
     } else {
       video.pause();
-      drawWhenReady();
+      try {
+        if (video.currentTime !== 0) {
+          video.currentTime = 0;
+        } else {
+          drawWhenReady();
+        }
+      } catch {
+        drawWhenReady();
+      }
     }
 
     return () => {
@@ -409,6 +417,11 @@ export const AvatarMedia = memo(function AvatarMedia({
 
     if (!shouldAnimateVideo) {
       video.pause();
+      try {
+        video.currentTime = 0;
+      } catch {
+        // The source may not be seekable until metadata is available.
+      }
       return;
     }
 
@@ -542,6 +555,8 @@ export const AvatarMedia = memo(function AvatarMedia({
     <img
       src={media.src}
       alt={alt}
+      loading={lazy ? "lazy" : "eager"}
+      decoding="async"
       className={cn("aspect-square size-full object-cover", className)}
       onError={onError}
       onLoad={onReady}

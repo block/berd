@@ -98,7 +98,8 @@ function propertyToRecord(value: unknown): Record<string, unknown> | undefined {
 function personaProperties(
   request: CreatePersonaRequest,
 ): AgentSourceProperties {
-  const properties: AgentSourceProperties = {};
+  // Direct creation paths produce finished agents, never builder drafts.
+  const properties: AgentSourceProperties = { draft: false };
   if (request.provider) properties.provider = request.provider;
   if (request.modelProviderId) {
     properties.modelProviderId = request.modelProviderId;
@@ -274,7 +275,9 @@ function serializePersonaMarkdown(source: AgentSourceEntry): ExportResult {
       source.content.trimEnd(),
       "",
     ].join("\n"),
-    filename: `${slugifyPersonaName(name)}${PERSONA_MD_EXTENSION}`,
+    // Keep the portable .persona.md suffix required by the import parser, but
+    // derive the downloaded filename from the agent's current display name.
+    filename: `${slugifyPersonaName(source.name)}${PERSONA_MD_EXTENSION}`,
     mimeType: "text/markdown",
   };
 }
@@ -805,7 +808,15 @@ export async function createPersona(
     throw new Error(`Unexpected source type returned: ${response.source.type}`);
   }
 
-  return toPersona(response.source);
+  const avatar = avatarToProperty(request.avatar);
+  return toPersona(
+    avatar && normalizeAvatarUrl(response.source.properties?.avatar) !== avatar
+      ? {
+          ...response.source,
+          properties: { ...(response.source.properties ?? {}), avatar },
+        }
+      : response.source,
+  );
 }
 
 export async function updatePersona(
@@ -891,6 +902,76 @@ export async function exportPersona(id: string): Promise<ExportResult> {
   return serializePersonaMarkdown(source);
 }
 
+export interface PersonaImportPreview {
+  displayName: string;
+  systemPrompt: string;
+  /** Only local/data-backed media is safe to render before import consent. */
+  avatar?: string;
+  identity: string;
+}
+
+function previewSafeAvatar(
+  avatar: string | null | undefined,
+): string | undefined {
+  const normalized = normalizeAvatarUrl(avatar);
+  return normalized?.startsWith("data:image/png;base64,") ||
+    normalized?.startsWith("app-avatar:") ||
+    normalized?.startsWith("user-avatar:")
+    ? normalized
+    : undefined;
+}
+
+export function previewPersonaImport(
+  fileContents: string,
+  fileName: string,
+): PersonaImportPreview {
+  if (!isSupportedImportFile(fileName)) {
+    throw new Error("File must have a .persona.md or .json extension");
+  }
+
+  if (isPersonaMarkdownFile(fileName)) {
+    const request = personaMarkdownToCreateRequest(fileContents);
+    return {
+      displayName: request.name,
+      systemPrompt: request.content,
+      avatar: previewSafeAvatar(request.properties.avatar),
+      identity: fileName,
+    };
+  }
+
+  const parsed = readImportJson(fileContents);
+  if (parsed.type === AGENT_SOURCE_TYPE) {
+    const properties = propertyToRecord(parsed.properties);
+    const metadata = propertyToRecord(parsed.metadata);
+    const displayName =
+      propertyToString(parsed.name)?.trim() ??
+      propertyToString(metadata?.name)?.trim();
+    const systemPrompt =
+      propertyToString(parsed.content)?.trim() ??
+      propertyToString(parsed.instructions)?.trim();
+    if (!displayName || !systemPrompt) {
+      throw new Error("Agent JSON must include a name and instructions");
+    }
+    return {
+      displayName,
+      systemPrompt,
+      avatar: previewSafeAvatar(
+        legacyAvatarToProperty(properties?.avatar) ??
+          legacyAvatarToProperty(metadata?.avatar),
+      ),
+      identity: fileName,
+    };
+  }
+
+  validateLegacyPersonaImport(parsed);
+  return {
+    displayName: parsed.displayName as string,
+    systemPrompt: parsed.systemPrompt as string,
+    avatar: previewSafeAvatar(legacyPersonaProperties(parsed).avatar),
+    identity: fileName,
+  };
+}
+
 export async function importPersonas(
   fileContents: string,
   fileName: string,
@@ -943,6 +1024,19 @@ export async function importPersonas(
 export interface ImportFileReadResult {
   fileContents: string;
   fileName: string;
+}
+
+export interface ImportBinaryFileReadResult {
+  fileBytes: number[];
+  fileName: string;
+}
+
+export async function readImportAgentImage(
+  sourcePath: string,
+): Promise<ImportBinaryFileReadResult> {
+  return invoke<ImportBinaryFileReadResult>("read_import_agent_image", {
+    sourcePath,
+  });
 }
 
 export async function readImportPersonaFile(

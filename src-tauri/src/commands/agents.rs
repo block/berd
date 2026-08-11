@@ -1,10 +1,14 @@
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+};
 use tauri::{Manager, State};
 
 use crate::services::{bundled_agents, distro_bundle::DistroBundleState};
 
 const MAX_PERSONA_IMPORT_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_AGENT_IMAGE_IMPORT_BYTES: u64 = 10 * 1024 * 1024;
 const PERSONA_MARKDOWN_SUFFIX: &str = ".persona.md";
 const AGENT_MARKDOWN_SUFFIX: &str = ".md";
 
@@ -15,12 +19,32 @@ pub struct ImportFileReadResult {
     pub file_name: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportBinaryFileReadResult {
+    pub file_bytes: Vec<u8>,
+    pub file_name: String,
+}
+
 fn validate_import_persona_path(source_path: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(source_path);
     let metadata = validate_existing_regular_file(&path, "import")?;
     validate_supported_import_extension(&path)?;
     validate_file_size(metadata.len(), "Persona import file")?;
     canonicalize_path(&path, "import")
+}
+
+fn validate_import_agent_image_path(source_path: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(source_path);
+    let metadata = validate_existing_regular_file(&path, "agent image import")?;
+    let lower_name = lower_file_name(&path)?;
+    if !lower_name.ends_with(".png") {
+        return Err("Unsupported file type. Expected a PNG file.".to_string());
+    }
+    if metadata.len() > MAX_AGENT_IMAGE_IMPORT_BYTES {
+        return Err("Agent image import file must be 10 MB or smaller.".to_string());
+    }
+    canonicalize_path(&path, "agent image import")
 }
 
 fn validate_agent_source_path(
@@ -157,6 +181,29 @@ pub fn read_import_persona_file(source_path: String) -> Result<ImportFileReadRes
 }
 
 #[tauri::command]
+pub fn read_import_agent_image(source_path: String) -> Result<ImportBinaryFileReadResult, String> {
+    let path = validate_import_agent_image_path(&source_path)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Selected file is missing a valid filename".to_string())?
+        .to_string();
+    let file = std::fs::File::open(&path)
+        .map_err(|err| format!("Failed to open agent image '{}': {err}", path.display()))?;
+    let mut file_bytes = Vec::new();
+    file.take(MAX_AGENT_IMAGE_IMPORT_BYTES + 1)
+        .read_to_end(&mut file_bytes)
+        .map_err(|err| format!("Failed to read agent image '{}': {err}", path.display()))?;
+    if file_bytes.len() as u64 > MAX_AGENT_IMAGE_IMPORT_BYTES {
+        return Err("Agent image import file must be 10 MB or smaller.".to_string());
+    }
+    Ok(ImportBinaryFileReadResult {
+        file_bytes,
+        file_name,
+    })
+}
+
+#[tauri::command]
 pub fn read_agent_source_file(
     app: tauri::AppHandle,
     source_path: String,
@@ -202,9 +249,9 @@ fn read_persona_file(path: PathBuf, context: &'static str) -> Result<ImportFileR
 #[cfg(test)]
 mod tests {
     use super::{
-        read_agent_source_file_with_roots, read_import_persona_file,
-        validate_agent_source_path_with_roots, validate_import_persona_path,
-        MAX_PERSONA_IMPORT_BYTES,
+        read_agent_source_file_with_roots, read_import_agent_image, read_import_persona_file,
+        validate_agent_source_path_with_roots, validate_import_agent_image_path,
+        validate_import_persona_path, MAX_AGENT_IMAGE_IMPORT_BYTES, MAX_PERSONA_IMPORT_BYTES,
     };
     use tempfile::{tempdir, Builder};
 
@@ -266,6 +313,52 @@ mod tests {
         let result = validate_import_persona_path(file.path().to_str().unwrap());
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_import_agent_image_path_accepts_agent_png() {
+        let file = Builder::new()
+            .prefix("scout-")
+            .suffix(".agent.png")
+            .tempfile()
+            .unwrap();
+        std::fs::write(file.path(), b"png bytes").unwrap();
+
+        let validated = validate_import_agent_image_path(file.path().to_str().unwrap()).unwrap();
+
+        assert_eq!(validated, file.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn validate_import_agent_image_path_accepts_plain_png_for_compatibility_detection() {
+        let file = Builder::new().suffix(".png").tempfile().unwrap();
+
+        let validated = validate_import_agent_image_path(file.path().to_str().unwrap()).unwrap();
+
+        assert_eq!(validated, file.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn read_import_agent_image_rejects_oversized_files() {
+        let file = Builder::new().suffix(".agent.png").tempfile().unwrap();
+        file.as_file()
+            .set_len(MAX_AGENT_IMAGE_IMPORT_BYTES + 1)
+            .unwrap();
+
+        let result = read_import_agent_image(file.path().to_string_lossy().into_owned());
+
+        assert!(result.unwrap_err().contains("10 MB or smaller"));
+    }
+
+    #[test]
+    fn read_import_agent_image_returns_binary_bytes() {
+        let file = Builder::new().suffix(".agent.png").tempfile().unwrap();
+        std::fs::write(file.path(), [0x89, 0x50, 0x4e, 0x47]).unwrap();
+
+        let result = read_import_agent_image(file.path().to_string_lossy().into_owned()).unwrap();
+
+        assert_eq!(result.file_bytes, [0x89, 0x50, 0x4e, 0x47]);
+        assert!(result.file_name.ends_with(".agent.png"));
     }
 
     #[test]

@@ -296,13 +296,16 @@ describe("agents API", () => {
       content: "Research carefully.",
       target: { scope: "global" },
       properties: {
+        draft: false,
         provider: "goose",
         modelProviderId: "openai",
+
         model: "gpt-4.1",
         avatar: "https://example.test/scout.png",
       },
     });
     expect(result.displayName).toBe("Scout");
+    expect(result.avatar).toBe("https://example.test/scout.png");
   });
 
   it("does not store unsupported avatar values on create", async () => {
@@ -321,7 +324,7 @@ describe("agents API", () => {
       description: "Agent",
       content: "Research carefully.",
       target: { scope: "global" },
-      properties: {},
+      properties: { draft: false },
     });
   });
 
@@ -350,6 +353,7 @@ describe("agents API", () => {
       content: "Research carefully.",
       target: { scope: "global" },
       properties: {
+        draft: false,
         avatar: appAvatarRef,
       },
     });
@@ -705,6 +709,30 @@ describe("agents API", () => {
     });
   });
 
+  it("uses the agent display name for portable markdown filenames", async () => {
+    mockGooseSourcesList.mockResolvedValue({
+      sources: [
+        {
+          ...agentSource,
+          name: "Research Helper",
+          path: "/Users/test/.agents/agents/old-file-name.md",
+          properties: {
+            ...agentSource.properties,
+            sprout: { name: "old-sprout-name" },
+          },
+        },
+      ],
+    });
+
+    const { exportPersona } = await import("../agents");
+    const result = await exportPersona(
+      "/Users/test/.agents/agents/old-file-name.md",
+    );
+
+    expect(result.filename).toBe("research-helper.persona.md");
+    expect(result.contents).toContain("display_name: Research Helper");
+  });
+
   it("exports app avatar refs in persona markdown", async () => {
     mockGooseSourcesList.mockResolvedValue({
       sources: [
@@ -776,6 +804,28 @@ describe("agents API", () => {
       filename: "scout.persona.md",
       mimeType: "text/markdown",
     });
+  });
+
+  it("does not expose remote avatar URLs in pre-consent previews", async () => {
+    const { previewPersonaImport } = await import("../agents");
+    const remoteAvatar = "https://attacker.example/track.png";
+
+    const markdown = previewPersonaImport(
+      `---\nname: scout\ndisplay_name: Scout\navatar: ${remoteAvatar}\n---\n\nResearch carefully.`,
+      "scout.md",
+    );
+    const legacyJson = previewPersonaImport(
+      JSON.stringify({
+        version: 1,
+        displayName: "Scout",
+        systemPrompt: "Research carefully.",
+        avatar: { type: "url", value: remoteAvatar },
+      }),
+      "scout.json",
+    );
+
+    expect(markdown.avatar).toBeUndefined();
+    expect(legacyJson.avatar).toBeUndefined();
   });
 
   it("imports legacy persona JSON through ACP source create", async () => {

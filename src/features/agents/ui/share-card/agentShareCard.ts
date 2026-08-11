@@ -38,7 +38,7 @@ export function getAgentShareFilename(name: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80)
     .replace(/-+$/g, "");
-  return `${slug || "agent"}-card.png`;
+  return `${slug || "agent"}.agent.png`;
 }
 
 export function loadAvatarVideo(src: string): Promise<HTMLVideoElement> {
@@ -84,6 +84,8 @@ export async function createAvatarPoster(
   if (media.mediaType === "image") return media.src;
 
   const video = await loadAvatarVideo(media.src);
+  // Legacy animated avatars may not have retained their source still. In
+  // that case the share card intentionally uses the video's starting frame.
   const sourceWidth = video.videoWidth;
   const sourceHeight =
     media.alphaMode === "stacked"
@@ -347,6 +349,13 @@ export async function renderAgentShareCard(
       "image/png",
     );
   });
+}
+
+export async function blobToBytes(blob: Blob): Promise<Uint8Array> {
+  if (typeof blob.arrayBuffer === "function") {
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+  return new Uint8Array(await new Response(blob).arrayBuffer());
 }
 
 export function downloadBlob(blob: Blob, filename: string): void {

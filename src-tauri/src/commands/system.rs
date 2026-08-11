@@ -8,7 +8,8 @@ use tauri_plugin_opener::OpenerExt;
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
@@ -270,6 +271,131 @@ pub async fn save_exported_agent_file(
         .map_err(|e| format!("Failed to write file '{}': {}", path.display(), e))?;
 
     Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+pub async fn save_exported_agent_image(
+    window: Window,
+    default_filename: String,
+    contents: Vec<u8>,
+) -> Result<Option<String>, String> {
+    let desktop =
+        dirs::desktop_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("Desktop"));
+
+    let mut dialog = window
+        .dialog()
+        .file()
+        .set_title("Export Agent Image")
+        .set_file_name(default_filename)
+        .set_directory(desktop)
+        .add_filter("Agent image", &["png"]);
+
+    #[cfg(desktop)]
+    {
+        dialog = dialog.set_parent(&window);
+    }
+
+    let Some(path) = dialog.blocking_save_file() else {
+        return Ok(None);
+    };
+    let path = path
+        .into_path()
+        .map_err(|_| "Selected save path is not available".to_string())?;
+    write_agent_image_atomically(&path, &contents)
+        .map_err(|error| format!("Failed to write file '{}': {error}", path.display()))?;
+    Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+fn write_agent_image_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
+    write_sibling_then_replace(path, |temporary| {
+        temporary.write_all(contents)?;
+        temporary.sync_all()
+    })
+}
+
+fn write_sibling_then_replace(
+    path: &Path,
+    write_temporary: impl FnOnce(&mut File) -> io::Result<()>,
+) -> io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "agent image export path has no parent directory",
+        )
+    })?;
+    let filename = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "agent image export path has no file name",
+        )
+    })?;
+    let temporary_path = parent.join(format!(
+        ".{}.{}.tmp",
+        filename.to_string_lossy(),
+        uuid::Uuid::new_v4()
+    ));
+
+    let result = (|| {
+        let mut temporary = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary_path)?;
+        write_temporary(&mut temporary)?;
+        drop(temporary);
+        replace_file_atomically(&temporary_path, path)
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary_path);
+    }
+    result
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_file_atomically(from: &Path, to: &Path) -> io::Result<()> {
+    fs::rename(from, to)
+}
+
+#[cfg(target_os = "windows")]
+fn replace_file_atomically(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn MoveFileExW(
+            existing_file_name: *const u16,
+            new_file_name: *const u16,
+            flags: u32,
+        ) -> i32;
+    }
+
+    let from = from
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let to = to
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    // Same-directory MoveFileExW provides the Windows replacement counterpart
+    // to rename(2); REPLACE_EXISTING avoids deleting the destination first.
+    let replaced = unsafe {
+        MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
 }
 
 #[tauri::command]
@@ -1761,11 +1887,13 @@ mod tests {
         get_or_build_file_mention_index_from_cache, inspect_attachment_path,
         inspect_attachment_paths, normalize_attachment_paths, normalize_roots,
         read_directory_entries, read_image_attachment, read_text_file,
-        search_file_mentions_blocking, validate_external_url, FileMentionIndexCache,
-        MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
+        search_file_mentions_blocking, validate_external_url, write_agent_image_atomically,
+        write_sibling_then_replace, FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES,
+        MAX_TEXT_FILE_BYTES,
     };
     use base64::Engine;
     use std::fs;
+    use std::io::Write;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
     use std::panic::{self, AssertUnwindSafe};
@@ -1788,6 +1916,49 @@ mod tests {
             .output()
             .expect("git init");
         dir
+    }
+
+    #[test]
+    fn atomic_agent_image_write_creates_and_replaces_destination() {
+        let dir = tempdir().expect("tempdir");
+        let destination = dir.path().join("agent.png");
+
+        write_agent_image_atomically(&destination, b"first image").expect("initial export");
+        assert_eq!(fs::read(&destination).unwrap(), b"first image");
+
+        write_agent_image_atomically(&destination, b"replacement image").expect("replacement");
+        assert_eq!(fs::read(&destination).unwrap(), b"replacement image");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_agent_image_temp_write_preserves_destination_and_cleans_up() {
+        let dir = tempdir().expect("tempdir");
+        let destination = dir.path().join("agent.png");
+        fs::write(&destination, b"existing image").unwrap();
+
+        let error = write_sibling_then_replace(&destination, |temporary| {
+            temporary.write_all(b"partial replacement")?;
+            Err(std::io::Error::other("injected write failure"))
+        })
+        .expect_err("temporary write should fail");
+
+        assert_eq!(error.to_string(), "injected write failure");
+        assert_eq!(fs::read(&destination).unwrap(), b"existing image");
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn failed_agent_image_replace_cleans_up_temporary_file() {
+        let dir = tempdir().expect("tempdir");
+        let destination = dir.path().join("agent.png");
+        fs::create_dir(&destination).unwrap();
+
+        write_agent_image_atomically(&destination, b"replacement")
+            .expect_err("a file cannot replace a directory");
+
+        assert!(destination.is_dir());
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     fn mention_paths_joined(entries: &[super::FileMentionPathEntry]) -> String {

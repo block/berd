@@ -1,4 +1,4 @@
-const PERSONA_MARKDOWN_IMPORT_PATTERN = /\.persona(?:\s+\(\d+\))?\.md$/i;
+const PERSONA_MARKDOWN_IMPORT_PATTERN = /\.md$/i;
 
 export function isPersonaMarkdownImportFileName(fileName: string): boolean {
   return PERSONA_MARKDOWN_IMPORT_PATTERN.test(fileName.trim());

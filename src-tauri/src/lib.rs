@@ -436,6 +436,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::agents::read_import_persona_file,
+            commands::agents::read_import_agent_image,
             commands::agents::read_agent_source_file,
             commands::agents::repair_bundled_agent,
             commands::auth::auth_status,
@@ -448,6 +449,7 @@ pub fn run() {
             commands::avatars::get_avatar_library_snapshot,
             commands::avatars::get_cached_avatar_for_ref,
             commands::avatars::get_cached_avatars_for_refs,
+            commands::avatars::import_user_avatar_data_url,
             commands::avatars::delete_user_avatar,
             commands::avatars::ensure_avatar_collection,
             commands::cache::clear_local_media_caches,
@@ -541,6 +543,7 @@ pub fn run() {
             commands::system::get_home_dir,
             commands::system::open_in_chrome,
             commands::system::save_exported_agent_file,
+            commands::system::save_exported_agent_image,
             commands::system::save_exported_session_file,
             commands::system::save_exported_session_files,
             commands::system::path_exists,

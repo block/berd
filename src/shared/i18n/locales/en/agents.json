@@ -124,6 +124,9 @@
   },
   "gallery": {
     "createAria": "Create new agent",
+    "addAgentAria": "Add agent options",
+    "importViaImage": "Import",
+    "createNew": "Create new",
     "continueDraft": "Continue editing",
     "continueDraftAria": "Continue editing {{name}}",
     "deleteDraft": "Delete",
@@ -136,7 +139,7 @@
       "aboutDescription": "An agent is a focused helper you give a job to - it uses tools, follows instructions, and works through tasks on its own so you don't have to babysit it.",
       "valueTitle": "What can it do for me?",
       "valueDescription": "Hand off the repetitive or fiddly stuff - researching, drafting, organizing files, calling APIs, running multi-step workflows - and get back results instead of a to-do list.",
-      "createFirst": "Create My First Agent"
+      "createFirst": "Create my first agent"
     },
     "loading": "Loading agents",
     "new": "New Agent"
@@ -144,14 +147,15 @@
   "share": {
     "action": "Share agent",
     "title": "Share {{name}}",
-    "description": "Download a collectible card or the agent file to share.",
+    "description": "Share the card to bring this agent’s instructions and settings into Berd. You can also download the .md file.",
     "cardAlt": "Share card for {{name}}",
     "downloadCard": "Download card",
     "downloadingCard": "Downloading card…",
     "downloadAgent": "Download {{name}}.md",
     "downloadingAgent": "Downloading agent…",
     "cardDownloaded": "Downloaded {{filename}}",
-    "cardDownloadFailed": "Couldn't create the card. Try again."
+    "cardDownloadFailed": "Couldn't create the card. Try again.",
+    "loadingCard": "Loading card"
   },
   "statuses": {
     "error": "Error",
@@ -183,5 +187,33 @@
     "more": "More",
     "source": "Source",
     "updated": "Updated"
+  },
+  "imageImport": {
+    "description": "Set up your imported agent",
+    "previewAlt": "Imported agent preview",
+    "name": "Agent name",
+    "default": "Default",
+    "unsupportedConfiguration": "The source provider or model is unavailable. Choose a supported configuration, or leave both unset to use Berd defaults.",
+    "memoryIgnored": "This card contains memory. Berd won’t import it.",
+    "noInstructions": "No instructions provided.",
+    "cancel": "Cancel",
+    "adding": "Adding…",
+    "add": "Add agent",
+    "pickerTitle": "Add agent from image",
+    "export": "Export as image",
+    "added": "Agent added from image.",
+    "invalid": "The agent image is invalid or damaged.",
+    "missing": "This image doesn’t contain a compatible agent.",
+    "unsupportedVersion": "This agent image uses a newer format that this version of Berd doesn’t support.",
+    "tooLarge": "Agent image must be 10 MB or smaller.",
+    "pngOnly": "Agent image must be a PNG file."
+  },
+  "importDialog": {
+    "title": "Import an agent",
+    "description": "Import an agent with an image, .md, or JSON file.",
+    "dropTitle": "Drag and drop an agent file here",
+    "openFinder": "Open Finder",
+    "previewAlt": "Preview of {{name}}",
+    "import": "Import agent"
   }
 }

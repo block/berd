@@ -4649,13 +4649,13 @@ describe("AppShell global navigation", () => {
     expect(screen.getByText("Habilidades")).toBeInTheDocument();
   });
 
-  it("keeps non-chat breadcrumbs out of the top bar except the Skills title", async () => {
+  it("shows the Agents and Skills titles but keeps detail breadcrumbs out of the top bar", async () => {
     const user = userEvent.setup();
     renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
-    expect(screen.queryByText("Agents")).not.toBeInTheDocument();
+    expect(screen.getByText("Agents")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
     expect(screen.getByText("Skills")).toBeInTheDocument();

@@ -88,6 +88,16 @@ export async function saveExportedAgentFile(
   return invoke("save_exported_agent_file", { defaultFilename, contents });
 }
 
+export async function saveExportedAgentImage(
+  defaultFilename: string,
+  contents: Uint8Array,
+): Promise<string | null> {
+  return invoke("save_exported_agent_image", {
+    defaultFilename,
+    contents: Array.from(contents),
+  });
+}
+
 export async function saveExportedSessionFile(
   defaultFilename: string,
   contents: string,

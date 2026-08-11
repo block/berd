@@ -1,13 +1,9 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { useTranslation } from "react-i18next";
-import { open } from "@tauri-apps/plugin-dialog";
-import { IconPlus, IconUpload } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { buttonVariants } from "@/shared/ui/button";
-import { PageHeaderButton } from "@/shared/ui/page-header-button";
 import { PageShell } from "@/shared/ui/page-shell";
-import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,16 +26,21 @@ import { AgentShareDialog } from "@/features/agents/ui/share-card";
 import {
   exportPersona,
   importPersonas,
-  readImportPersonaFile,
+  previewPersonaImport,
 } from "@/shared/api/agents";
 import { saveExportedAgentFile } from "@/shared/api/system";
+import {
+  decodeAgentImage,
+  MAX_SNAPSHOT_PNG_BYTES,
+  type SnapshotV1,
+} from "@/features/agents/agent-snapshot";
+import { AgentImageImportDialog } from "@/features/agents/ui/AgentImageImportDialog";
+import { AgentImportDialog } from "@/features/agents/ui/AgentImportDialog";
 import { usePersonas } from "@/features/agents/hooks/usePersonas";
 import type { Persona } from "@/shared/types/agents";
 import {
   formatAgentError,
   formatImportSuccessMessage,
-  formatPersonaImportFileSize,
-  MAX_PERSONA_IMPORT_BYTES,
   validatePersonaImportFile,
 } from "@/features/agents/lib/personaImport";
 import { isEmptyAgentsGallerySimulated } from "@/features/agents/lib/emptyGallerySimulation";
@@ -50,11 +51,9 @@ import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 
-function decodeImportFileBytes(fileBytes: number[]): string {
+function decodeImportFileBytes(fileBytes: Uint8Array): string {
   try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(
-      new Uint8Array(fileBytes),
-    );
+    return new TextDecoder("utf-8", { fatal: true }).decode(fileBytes);
   } catch {
     throw new Error("File is not valid UTF-8 text");
   }
@@ -67,6 +66,10 @@ function sourcePathToSlug(pathOrId: string): string {
     return baseName.slice(0, -".persona.md".length);
   }
   return lowerName.endsWith(".md") ? baseName.slice(0, -3) : baseName;
+}
+
+function isAgentImageFileName(fileName: string): boolean {
+  return fileName.toLowerCase().endsWith(".png");
 }
 
 function exportFilenameFromPath(
@@ -107,6 +110,11 @@ export function AgentsView({
   const isActivePersonaControlled = activePersonaId !== undefined;
   const [deletingPersona, setDeletingPersona] = useState<Persona | null>(null);
   const [sharingPersonaId, setSharingPersonaId] = useState<string | null>(null);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [imageImport, setImageImport] = useState<{
+    snapshot: SnapshotV1;
+    bytes: Uint8Array;
+  } | null>(null);
   const [internalActivePersonaId, setInternalActivePersonaId] = useState<
     string | null
   >(null);
@@ -330,31 +338,28 @@ export function AgentsView({
     async (persona: Persona) => {
       try {
         const result = await exportPersona(persona.id);
-
         if (window.__TAURI_INTERNALS__) {
           const savedPath = await saveExportedAgentFile(
             result.filename,
             result.contents,
           );
-          if (!savedPath) {
-            return;
-          }
-          const savedFilename = exportFilenameFromPath(
-            savedPath,
-            result.filename,
+          if (!savedPath) return;
+          toast.success(
+            t("view.exportedTo", {
+              filename: exportFilenameFromPath(savedPath, result.filename),
+            }),
           );
-          toast.success(t("view.exportedTo", { filename: savedFilename }));
           return;
         }
-
-        const blob = new Blob([result.contents], { type: result.mimeType });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = result.filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        const url = URL.createObjectURL(
+          new Blob([result.contents], { type: result.mimeType }),
+        );
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = result.filename;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
         URL.revokeObjectURL(url);
         toast.success(t("view.exportedTo", { filename: result.filename }));
       } catch (err) {
@@ -364,12 +369,39 @@ export function AgentsView({
     [t],
   );
 
+  const handleConfirmImageImport = useCallback(
+    async (request: Parameters<typeof createPersona>[0]) => {
+      try {
+        // The configuration dialog owns provider/model validation and only
+        // submits the reviewed selection. Do not independently reinterpret it
+        // here or the persisted request can drift from what the user saw.
+        const created = await createPersona(request);
+        setImageImport(null);
+        setActivePersona(created.id);
+        toast.success(t("imageImport.added"));
+      } catch (error) {
+        toast.error(formatAgentError(error, t("editor.saveFailed")));
+        throw error;
+      }
+    },
+    [createPersona, setActivePersona, t],
+  );
+
   const handleImportError = useCallback((message: string) => {
     toast.error(message);
   }, []);
 
   const validateImportFile = useCallback(
     (file: Pick<File, "name" | "type" | "size">) => {
+      if (isAgentImageFileName(file.name)) {
+        if (file.size > MAX_SNAPSHOT_PNG_BYTES) {
+          return t("imageImport.tooLarge");
+        }
+        if (file.type && file.type !== "image/png") {
+          return t("imageImport.pngOnly");
+        }
+        return null;
+      }
       const message = validatePersonaImportFile(file);
       return message ? t(message.key, message.options) : null;
     },
@@ -391,8 +423,19 @@ export function AgentsView({
   );
 
   const handleImportFileBytes = useCallback(
-    async (fileBytes: number[], fileName: string) => {
+    async (
+      fileBytes: Uint8Array,
+      fileName: string,
+      preview?: { snapshot?: ReturnType<typeof decodeAgentImage> },
+    ) => {
       try {
+        if (isAgentImageFileName(fileName)) {
+          setImageImport({
+            snapshot: preview?.snapshot ?? decodeAgentImage(fileBytes),
+            bytes: fileBytes,
+          });
+          return;
+        }
         await handleImportContents(decodeImportFileBytes(fileBytes), fileName);
       } catch (err) {
         toast.error(formatAgentError(err, t("view.importFailed")));
@@ -401,78 +444,48 @@ export function AgentsView({
     [handleImportContents, t],
   );
 
-  const setTopBarActions = useSetTopBarActions();
-
-  const handleImportPicker = useCallback(async () => {
-    try {
-      const selected = await open({
-        multiple: false,
-        directory: false,
-        title: t("common:actions.import"),
-        filters: [
-          {
-            name: "Agent",
-            extensions: ["md", "json"],
-          },
-        ],
-      });
-
-      if (!selected || Array.isArray(selected)) {
-        return;
-      }
-
-      const { fileContents, fileName } = await readImportPersonaFile(selected);
-      const validationMessage = validateImportFile({
-        name: fileName,
-        type: "",
-        size: new TextEncoder().encode(fileContents).byteLength,
-      });
-
-      if (validationMessage) {
-        toast.error(validationMessage);
-        return;
-      }
-
-      await handleImportContents(fileContents, fileName);
-    } catch (err) {
-      toast.error(formatAgentError(err, t("view.importFailed")));
-    }
-  }, [handleImportContents, t, validateImportFile]);
-
-  useEffect(() => {
-    if (activePersona) {
-      setTopBarActions(null);
-      return;
-    }
-    setTopBarActions(
-      <>
-        <PageHeaderButton
-          type="button"
-          onClick={() => void handleImportPicker()}
-          leftIcon={<IconUpload />}
-        >
-          {t("common:actions.import")}
-        </PageHeaderButton>
-        <PageHeaderButton
-          type="button"
-          onClick={handleCreatePersona}
-          leftIcon={<IconPlus />}
-        >
-          {t("view.newPersona")}
-        </PageHeaderButton>
-      </>,
-    );
-    return () => setTopBarActions(null);
-  }, [
-    activePersona,
-    handleImportPicker,
-    handleCreatePersona,
-    setTopBarActions,
-    t,
-  ]);
-
   const dialogs = (
     <>
+      {importDialogOpen ? (
+        <AgentImportDialog
+          open
+          onOpenChange={setImportDialogOpen}
+          onImportFile={handleImportFileBytes}
+          prepareImport={(bytes, name) => {
+            if (isAgentImageFileName(name)) {
+              const snapshot = decodeAgentImage(bytes);
+              return {
+                displayName:
+                  snapshot.profile?.displayName ??
+                  snapshot.definition.name ??
+                  "Imported agent",
+                systemPrompt: snapshot.definition.systemPrompt ?? "",
+                identity: name,
+                snapshot,
+                cardImageUrl: URL.createObjectURL(
+                  new Blob([new Uint8Array(bytes).buffer], {
+                    type: "image/png",
+                  }),
+                ),
+              };
+            }
+            return previewPersonaImport(decodeImportFileBytes(bytes), name);
+          }}
+          validateImportFile={validateImportFile}
+          onImportError={handleImportError}
+          maxImportBytes={MAX_SNAPSHOT_PNG_BYTES}
+          importTooLargeMessage={t("imageImport.tooLarge")}
+        />
+      ) : null}
+      {imageImport ? (
+        <AgentImageImportDialog
+          key={imageImport.snapshot.definition.name ?? "imported-agent"}
+          snapshot={imageImport.snapshot}
+          imageBytes={imageImport.bytes}
+          onCancel={() => setImageImport(null)}
+          onConfirm={handleConfirmImageImport}
+        />
+      ) : null}
       <AlertDialog
         open={!!deletingPersona}
         onOpenChange={(open) => !open && setDeletingPersona(null)}
@@ -538,7 +551,9 @@ export function AgentsView({
     <PageShell
       contentWidth="full"
       contentAlign={isVerticallyCentered ? "center" : "top"}
-      contentClassName="agents-gallery-transition-surface"
+      contentClassName="agents-gallery-transition-surface pb-40"
+      showTopFade
+      showBottomFade={false}
     >
       <motion.section
         layout="position"
@@ -560,15 +575,14 @@ export function AgentsView({
           onExportPersona={handleExportPersona}
           onSharePersona={shareCardEnabled ? handleSharePersona : undefined}
           onCreatePersona={handleCreatePersona}
+          onImportAgentImage={() => setImportDialogOpen(true)}
           onContinueDraft={handleContinueDraft}
           onDeleteDraft={handleDeleteDraft}
           onImportFile={handleImportFileBytes}
           validateImportFile={validateImportFile}
           onImportError={handleImportError}
-          maxImportBytes={MAX_PERSONA_IMPORT_BYTES}
-          importTooLargeMessage={t("view.importTooLarge", {
-            maxSize: formatPersonaImportFileSize(MAX_PERSONA_IMPORT_BYTES),
-          })}
+          maxImportBytes={MAX_SNAPSHOT_PNG_BYTES}
+          importTooLargeMessage={t("imageImport.tooLarge")}
           isLoading={personasLoading}
         />
       </motion.section>

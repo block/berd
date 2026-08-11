@@ -68,7 +68,9 @@ export function TopBar({
   const topBarTitle =
     breadcrumbs.find((breadcrumb) => breadcrumb.id === "chat-session")?.label ??
     breadcrumbs.find((breadcrumb) => breadcrumb.id === "skills")?.label ??
-    null;
+    (breadcrumbs.length === 1 && breadcrumbs[0]?.id === "agents"
+      ? breadcrumbs[0].label
+      : null);
   const sidebarLabel = sidebarCollapsed
     ? t("actions.expand")
     : t("actions.collapse");

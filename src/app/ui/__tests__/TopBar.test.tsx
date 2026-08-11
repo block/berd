@@ -58,6 +58,15 @@ describe("TopBar", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows the agents page title in the chat-title position", () => {
+    renderTopBar({ breadcrumbs: [{ id: "agents", label: "Agents" }] });
+
+    expect(screen.getByText("Agents")).toHaveClass(
+      "text-[length:var(--text-app-top-bar-title)]",
+      "font-normal",
+    );
+  });
+
   it("keeps a long chat title in the flexible middle track", () => {
     const { container } = renderTopBar({
       breadcrumbs: [

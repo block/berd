@@ -114,7 +114,6 @@ const buttonStylingPattern =
 
 const buttonStylingBaseline = new Set([
   "src/features/agents/ui/AgentDetailPage.tsx",
-  "src/features/agents/ui/PersonaGallery.tsx",
   "src/features/chat/ui/ChatInputToolbar.tsx",
   "src/features/chat/ui/MessageBubbleActions.tsx",
   "src/features/chat/ui/PersonaPicker.tsx",

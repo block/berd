@@ -79,9 +79,9 @@ const AVATAR_FIELD_INPUT_CLASS =
 const AVATAR_FIELD_LABEL_CLASS =
   "text-xs leading-4 font-medium text-surface-agent-profile-fg-muted";
 const INSTRUCTIONS_PANEL_CLASS =
-  "relative h-[min(32rem,calc(100vh-var(--spacing-app-top-bar)-7rem))] min-h-0 w-full overflow-hidden rounded-md bg-card text-sm leading-relaxed text-surface-agent-profile-fg";
+  "relative h-[min(32rem,calc(100vh-var(--spacing-app-top-bar)-7rem))] min-h-0 w-full overflow-hidden rounded-md bg-surface-agent-profile-control-bg text-sm leading-relaxed text-surface-agent-profile-fg shadow-none";
 const INSTRUCTIONS_SCROLL_CLASS =
-  "agent-instructions-scrollbar h-full overflow-y-scroll overscroll-contain rounded-[inherit] p-4 outline-none scrollbar-visible [scrollbar-gutter:stable] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
+  "agent-instructions-scrollbar h-full overflow-y-auto overscroll-contain rounded-[inherit] p-4 outline-none scrollbar-visible focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 
 function formatDate(value: string): string {
   const date = new Date(value);

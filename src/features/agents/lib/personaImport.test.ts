@@ -30,15 +30,13 @@ describe("validatePersonaImportFile", () => {
     ).toBeNull();
   });
 
-  it("rejects plain markdown imports", () => {
+  it("accepts plain markdown agent imports", () => {
     expect(
       validatePersonaImportFile({
         name: "scout.md",
         type: "text/markdown",
       }),
-    ).toEqual({
-      key: "view.importInvalidExtension",
-    });
+    ).toBeNull();
   });
 
   it("rejects persona imports larger than the configured cap", () => {

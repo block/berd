@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { cn } from "@/shared/lib/cn";
 import { BottomFade } from "./BottomFade";
+import { TopFade } from "./TopFade";
 import { MainPanelLayout } from "./MainPanelLayout";
 
 interface ShellProps {
@@ -10,6 +11,7 @@ interface ShellProps {
   contentWidth?: "default" | "narrow" | "full";
   contentAlign?: "top" | "center";
   showBottomFade?: boolean;
+  showTopFade?: boolean;
 }
 
 const SHELL_WIDTH_CLASSES = {
@@ -40,6 +42,7 @@ export function PageShell({
   contentWidth = "default",
   contentAlign = "top",
   showBottomFade = true,
+  showTopFade = false,
 }: ShellProps) {
   return (
     <PageScrollFrame
@@ -48,6 +51,7 @@ export function PageShell({
       contentWidth={contentWidth}
       contentAlign={contentAlign}
       showBottomFade={showBottomFade}
+      showTopFade={showTopFade}
       minContentHeight
     >
       {children}
@@ -81,6 +85,7 @@ function PageScrollFrame({
   contentWidth = "default",
   contentAlign = "top",
   showBottomFade = true,
+  showTopFade = false,
   minContentHeight = false,
 }: ShellProps & { minContentHeight?: boolean }) {
   const widthClassName = SHELL_WIDTH_CLASSES[contentWidth];
@@ -90,6 +95,12 @@ function PageScrollFrame({
 
   return (
     <MainPanelLayout className={cn("relative", className)}>
+      {showTopFade ? (
+        <TopFade
+          scrollElement={scrollElement}
+          className="absolute inset-x-0 top-0 z-10"
+        />
+      ) : null}
       <div
         ref={setScrollElement}
         className="min-h-0 flex-1 overflow-y-scroll [scrollbar-gutter:stable]"

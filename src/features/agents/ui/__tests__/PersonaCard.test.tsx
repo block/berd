@@ -1,11 +1,23 @@
 import { beforeEach, describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { resetHomeWidgetStoreForTests } from "@/features/home/stores/homeWidgetStore";
 import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { PersonaCard } from "../PersonaCard";
 import type { Persona } from "@/shared/types/agents";
+
+const avatarMediaMocks = vi.hoisted(() => ({
+  media: undefined as
+    | { src: string; mediaType: "image" | "video"; posterSrc?: string }
+    | undefined,
+  image: undefined as string | undefined,
+}));
+
+vi.mock("@/shared/hooks/useAvatarSrc", () => ({
+  useAvatarMedia: () => avatarMediaMocks.media,
+  useAvatarImage: () => avatarMediaMocks.image,
+}));
 
 function makePersona(overrides: Partial<Persona> = {}): Persona {
   return {
@@ -23,11 +35,85 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
 describe("PersonaCard", () => {
   beforeEach(() => {
     resetHomeWidgetStoreForTests();
+    avatarMediaMocks.media = undefined;
+    avatarMediaMocks.image = undefined;
   });
 
   it("renders persona name", () => {
     render(<PersonaCard persona={makePersona({ displayName: "Coder" })} />);
     expect(screen.getByText("Coder")).toBeInTheDocument();
+  });
+
+  it("autoplays animated avatars without scroll-triggered loading", () => {
+    avatarMediaMocks.media = {
+      src: "asset://animated.mp4",
+      mediaType: "video",
+      posterSrc: "asset://still.png",
+    };
+    avatarMediaMocks.image = "asset://still.png";
+    const { container } = render(
+      <PersonaCard persona={makePersona({ avatar: "user-avatar:one" })} />,
+    );
+
+    expect(screen.queryByRole("img", { name: "Berd Default" })).toHaveAttribute(
+      "src",
+      "asset://still.png",
+    );
+    const video = container.querySelector("video");
+    const still = container.querySelector('img[src="asset://still.png"]');
+    expect(video).toHaveAttribute("src", "asset://animated.mp4");
+    expect(video).toHaveClass("opacity-0");
+    expect(still).not.toHaveClass("opacity-0");
+
+    fireEvent.loadedData(video as HTMLVideoElement);
+    expect(video).toHaveClass("opacity-100");
+    expect(still).toHaveClass("opacity-0");
+  });
+
+  it("keeps the next poster visible until a changed video is ready", () => {
+    avatarMediaMocks.media = {
+      src: "asset://first.mp4",
+      mediaType: "video",
+      posterSrc: "asset://first.png",
+    };
+    avatarMediaMocks.image = "asset://first.png";
+    const persona = makePersona({ avatar: "user-avatar:first" });
+    const { container, rerender } = render(<PersonaCard persona={persona} />);
+    fireEvent.loadedData(container.querySelector("video") as HTMLVideoElement);
+
+    avatarMediaMocks.media = {
+      src: "asset://second.mp4",
+      mediaType: "video",
+      posterSrc: "asset://second.png",
+    };
+    avatarMediaMocks.image = "asset://second.png";
+    rerender(
+      <PersonaCard persona={{ ...persona, avatar: "user-avatar:second" }} />,
+    );
+
+    expect(
+      container.querySelector('img[src="asset://second.png"]'),
+    ).not.toHaveClass("opacity-0");
+    expect(
+      container.querySelector('video[src="asset://second.mp4"]'),
+    ).toHaveClass("opacity-0");
+  });
+
+  it("uses the first video frame when no static avatar exists", () => {
+    avatarMediaMocks.media = {
+      src: "asset://animated-without-poster.mp4",
+      mediaType: "video",
+    };
+    const { container } = render(
+      <PersonaCard persona={makePersona({ avatar: "user-avatar:legacy" })} />,
+    );
+
+    const video = container.querySelector("video");
+    expect(video).toHaveAttribute("src", "asset://animated-without-poster.mp4");
+    expect(container.querySelector("img")).toHaveAttribute(
+      "src",
+      expect.stringContaining("goose-"),
+    );
   });
 
   it("does not show source tags", () => {

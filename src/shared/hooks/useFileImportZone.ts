@@ -1,7 +1,7 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 interface FileImportZoneOptions {
-  onImportFile: (fileBytes: number[], fileName: string) => void;
+  onImportFile: (fileBytes: Uint8Array, fileName: string) => void;
   validateFile?: (file: Pick<File, "name" | "type" | "size">) => string | null;
   onImportError?: (message: string) => void;
   maxBytes?: number;
@@ -20,10 +20,21 @@ export function useFileImportZone({
   fileTooLargeMessage,
 }: FileImportZoneOptions) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importGenerationRef = useRef(0);
+  const mountedRef = useRef(true);
   const [isDragOver, setIsDragOver] = useState(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      importGenerationRef.current += 1;
+    };
+  }, []);
 
   const importFile = useCallback(
     async (file: File) => {
+      const generation = ++importGenerationRef.current;
       const validationMessage = validateFile?.(file);
       if (validationMessage) {
         onImportError?.(validationMessage);
@@ -36,9 +47,19 @@ export function useFileImportZone({
         );
         return;
       }
-      const buffer = await file.arrayBuffer();
-      const bytes = Array.from(new Uint8Array(buffer));
-      onImportFile(bytes, file.name);
+      try {
+        const buffer = await file.arrayBuffer();
+        if (!mountedRef.current || generation !== importGenerationRef.current) {
+          return;
+        }
+        onImportFile(new Uint8Array(buffer), file.name);
+      } catch (error) {
+        if (mountedRef.current && generation === importGenerationRef.current) {
+          onImportError?.(
+            error instanceof Error ? error.message : "Failed to read file",
+          );
+        }
+      }
     },
     [fileTooLargeMessage, maxBytes, onImportFile, onImportError, validateFile],
   );

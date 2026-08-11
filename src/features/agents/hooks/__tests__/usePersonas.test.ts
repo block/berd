@@ -5,6 +5,12 @@ import type { Persona } from "@/shared/types/agents";
 
 // ── mocks ────────────────────────────────────────────────────────────
 
+const avatarApiMocks = vi.hoisted(() => ({
+  deleteUserAvatar: vi.fn(),
+}));
+
+vi.mock("@/shared/api/avatars", () => avatarApiMocks);
+
 vi.mock("@/shared/api/agents", () => ({
   listPersonas: vi.fn().mockResolvedValue([]),
   createPersona: vi.fn().mockResolvedValue({
@@ -55,6 +61,7 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
 describe("usePersonas", () => {
   beforeEach(() => {
     // Re-establish default mock implementations (clearAllMocks would wipe them)
+    avatarApiMocks.deleteUserAvatar.mockReset().mockResolvedValue(undefined);
     vi.mocked(api.listPersonas).mockReset().mockResolvedValue([]);
     vi.mocked(api.createPersona).mockReset().mockResolvedValue({
       id: "new-id",
@@ -213,6 +220,84 @@ describe("usePersonas", () => {
       ).toBe("Updated");
     });
 
+    it("reclaims a replaced user avatar after the final reference changes", async () => {
+      const existing = makePersona({
+        id: "test-id",
+        avatar: "user-avatar:shared",
+      });
+      const shared = makePersona({
+        id: "shared-id",
+        avatar: "user-avatar:shared",
+      });
+      vi.mocked(api.listPersonas).mockResolvedValueOnce([existing, shared]);
+      vi.mocked(api.updatePersona).mockResolvedValue({
+        ...existing,
+        avatar: "user-avatar:new",
+      });
+      const { result } = renderHook(() => usePersonas());
+      await waitFor(() => expect(result.current.personas).toHaveLength(2));
+
+      await act(async () => {
+        await result.current.updatePersona(existing, {
+          avatar: "user-avatar:new",
+        });
+      });
+      expect(avatarApiMocks.deleteUserAvatar).not.toHaveBeenCalled();
+
+      vi.mocked(api.updatePersona).mockResolvedValue({
+        ...shared,
+        avatar: null,
+      });
+      await act(async () => {
+        await result.current.updatePersona(shared, { avatar: null });
+      });
+      expect(avatarApiMocks.deleteUserAvatar).toHaveBeenCalledWith(
+        "user-avatar:shared",
+      );
+    });
+
+    it("reclaims avatars displaced by overlapping updates", async () => {
+      const existing = makePersona({ id: "test-id", avatar: "user-avatar:a" });
+      vi.mocked(api.listPersonas).mockResolvedValueOnce([existing]);
+      const first = makePersona({ id: "test-id", avatar: "user-avatar:b" });
+      const second = makePersona({ id: "test-id", avatar: "user-avatar:c" });
+      const firstResult = vi.fn<() => Promise<Persona>>();
+      let resolveFirst!: (persona: Persona) => void;
+      let resolveSecond!: (persona: Persona) => void;
+      firstResult
+        .mockImplementationOnce(
+          () => new Promise((resolve) => (resolveFirst = resolve)),
+        )
+        .mockImplementationOnce(
+          () => new Promise((resolve) => (resolveSecond = resolve)),
+        );
+      vi.mocked(api.updatePersona).mockImplementation(firstResult);
+      const { result } = renderHook(() => usePersonas());
+      await waitFor(() => expect(result.current.personas).toHaveLength(1));
+
+      const updateOne = result.current.updatePersona(existing, {
+        avatar: "user-avatar:b",
+      });
+      const updateTwo = result.current.updatePersona(existing, {
+        avatar: "user-avatar:c",
+      });
+      await act(async () => {
+        resolveFirst(first);
+        await updateOne;
+      });
+      await act(async () => {
+        resolveSecond(second);
+        await updateTwo;
+      });
+
+      expect(avatarApiMocks.deleteUserAvatar).toHaveBeenCalledWith(
+        "user-avatar:a",
+      );
+      expect(avatarApiMocks.deleteUserAvatar).toHaveBeenCalledWith(
+        "user-avatar:b",
+      );
+    });
+
     it("deletePersona calls API and removes from store", async () => {
       const existing = makePersona({ id: "del-id" });
       // Return existing persona from initial load so the store has it
@@ -233,6 +318,32 @@ describe("usePersonas", () => {
       expect(
         result.current.personas.find((p) => p.id === "del-id"),
       ).toBeUndefined();
+    });
+
+    it("reclaims a deleted user avatar only after its final reference", async () => {
+      const first = makePersona({
+        id: "first",
+        avatar: "user-avatar:shared",
+      });
+      const second = makePersona({
+        id: "second",
+        avatar: "user-avatar:shared",
+      });
+      vi.mocked(api.listPersonas).mockResolvedValueOnce([first, second]);
+      const { result } = renderHook(() => usePersonas());
+      await waitFor(() => expect(result.current.personas).toHaveLength(2));
+
+      await act(async () => {
+        await result.current.deletePersona("first");
+      });
+      expect(avatarApiMocks.deleteUserAvatar).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await result.current.deletePersona("second");
+      });
+      expect(avatarApiMocks.deleteUserAvatar).toHaveBeenCalledWith(
+        "user-avatar:shared",
+      );
     });
   });
 

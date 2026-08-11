@@ -217,7 +217,7 @@ export function AvatarLibraryPicker({
             void library.openCollection(collection);
           }}
         >
-          <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-background">
+          <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/40">
             {cachedCoverMedia ? (
               <AvatarMedia
                 media={cachedCoverMedia}
@@ -268,7 +268,7 @@ export function AvatarLibraryPicker({
       key={index}
       className="flex w-full items-center gap-4 rounded-xl bg-popover p-4"
     >
-      <span className="flex size-14 shrink-0 items-center justify-center rounded-lg bg-background">
+      <span className="flex size-14 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/40">
         <Spinner className="size-4 text-muted-foreground" />
       </span>
       <span className="text-sm text-muted-foreground">

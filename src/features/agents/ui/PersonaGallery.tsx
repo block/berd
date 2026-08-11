@@ -1,13 +1,16 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconPlus } from "@tabler/icons-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { IconPhotoPlus, IconPlus } from "@tabler/icons-react";
 import { selectAvatarImageUrl } from "@/shared/api/artifacts";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { AgentTileButton } from "@/shared/ui/agent-tile-button";
+import { AgentAddChoiceButton } from "@/shared/ui/agent-add-choice-button";
+import { AgentImportSecondaryButton } from "@/shared/ui/agent-import-secondary-button";
+import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Badge } from "@/shared/ui/badge";
 import { Skeleton } from "@/shared/ui/skeleton";
-import { AvatarMedia } from "@/shared/ui/avatar-media";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { Persona } from "@/shared/types/agents";
 import { PersonaCard } from "@/features/agents/ui/PersonaCard";
@@ -25,7 +28,12 @@ import {
 // onboarding Figma. Resolved from the startup artifacts catalog.
 const EMPTY_STATE_GLOOPY_AVATAR_ID = "gloopies-14";
 
-const GALLERY_CARD_STAGGER_MS = 55;
+const GALLERY_CARD_STAGGER_MS = 40;
+const MAX_STAGGERED_CARDS = 6;
+
+function galleryCardDelay(index: number): string {
+  return `${Math.min(index, MAX_STAGGERED_CARDS) * GALLERY_CARD_STAGGER_MS}ms`;
+}
 
 interface PersonaGalleryProps {
   personas: Persona[];
@@ -36,12 +44,15 @@ interface PersonaGalleryProps {
   onEditPersona: (persona: Persona) => void;
   onDuplicatePersona: (persona: Persona) => void;
   onDeletePersona: (persona: Persona) => void;
+
   onExportPersona?: (persona: Persona) => void | Promise<void>;
   onSharePersona?: (persona: Persona) => void;
+
   onCreatePersona: () => void;
+  onImportAgentImage?: () => void;
   onContinueDraft?: (sessionId: string) => void;
   onDeleteDraft?: (sessionId: string) => void;
-  onImportFile?: (fileBytes: number[], fileName: string) => void;
+  onImportFile?: (fileBytes: Uint8Array, fileName: string) => void;
   validateImportFile?: (
     file: Pick<File, "name" | "type" | "size">,
   ) => string | null;
@@ -79,6 +90,9 @@ function PersonaDraftCard({
   onDelete?: (sessionId: string) => void;
 }) {
   const { t } = useTranslation("agents");
+  const [readyAnimatedAvatarSrc, setReadyAnimatedAvatarSrc] = useState<
+    string | null
+  >(null);
   const { data } = usePersonaSource(session.targetAgentPath ?? null, {
     builderSessionId: session.id,
   });
@@ -87,6 +101,12 @@ function PersonaDraftCard({
     draftDescription(data?.content) ?? t("gallery.draftDescription");
   const avatar = draftAvatar(data?.properties?.avatar);
   const avatarMedia = useAvatarMedia(avatar);
+  const staticAvatarSrc =
+    avatarMedia?.posterSrc ??
+    (avatarMedia?.mediaType === "image" ? avatarMedia.src : undefined);
+  const animatedAvatarReady =
+    avatarMedia?.mediaType === "video" &&
+    readyAnimatedAvatarSrc === avatarMedia.src;
   const fallbackIconSrc = resolveAgentIcon(
     session.targetAgentPath ?? session.id,
   );
@@ -126,28 +146,34 @@ function PersonaDraftCard({
     <div className="group relative flex w-full flex-col gap-4 rounded-md bg-transparent p-2 transition-colors duration-200">
       <div className="relative">
         <div className="relative aspect-square w-full overflow-hidden rounded-sm">
-          {avatarMedia ? (
+          <img
+            alt={staticAvatarSrc ? title : ""}
+            aria-hidden={staticAvatarSrc ? undefined : true}
+            src={staticAvatarSrc ?? fallbackIconSrc}
+            loading="lazy"
+            decoding="async"
+            className={cn(
+              "pointer-events-none absolute inset-0 size-full object-contain opacity-55 saturate-[0.8] transition-[transform,opacity] duration-300",
+              "group-hover:scale-[1.02] group-hover:opacity-70",
+              animatedAvatarReady && "opacity-0",
+            )}
+          />
+          {avatarMedia?.mediaType === "video" ? (
             <AvatarMedia
               media={avatarMedia}
-              alt={title}
-              lazy
-              loadingStrategy="visible-video"
-              className={cn(
-                "object-contain opacity-55 saturate-[0.8] transition-transform duration-300",
-                "group-hover:scale-[1.02] group-hover:opacity-70",
-              )}
-            />
-          ) : (
-            <img
               alt=""
-              aria-hidden="true"
-              src={fallbackIconSrc}
+              loadingStrategy="eager"
+              poster={staticAvatarSrc}
+              onReady={() => setReadyAnimatedAvatarSrc(avatarMedia.src)}
               className={cn(
-                "pointer-events-none size-full object-contain opacity-55 saturate-[0.8] transition-transform duration-300",
-                "group-hover:scale-[1.02] group-hover:opacity-70",
+                "pointer-events-none absolute inset-0 object-contain opacity-0 saturate-[0.8] transition-[transform,opacity] duration-200",
+                "group-hover:scale-[1.02]",
+                animatedAvatarReady
+                  ? "opacity-55 group-hover:opacity-70"
+                  : null,
               )}
             />
-          )}
+          ) : null}
         </div>
         {hoverActionsOverlay}
       </div>
@@ -200,6 +226,7 @@ export function PersonaGallery({
   onExportPersona,
   onSharePersona,
   onCreatePersona,
+  onImportAgentImage,
   onContinueDraft,
   onDeleteDraft,
   onImportFile,
@@ -210,6 +237,27 @@ export function PersonaGallery({
   isLoading = false,
 }: PersonaGalleryProps) {
   const { t } = useTranslation("agents");
+  const shouldReduceMotion = useReducedMotion();
+  const [showAddActions, setShowAddActions] = useState(false);
+  const addTileRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!showAddActions) return;
+    const collapseOnOutsidePointer = (event: PointerEvent) => {
+      if (!addTileRef.current?.contains(event.target as Node)) {
+        setShowAddActions(false);
+      }
+    };
+    const collapseOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowAddActions(false);
+    };
+    document.addEventListener("pointerdown", collapseOnOutsidePointer);
+    document.addEventListener("keydown", collapseOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", collapseOnOutsidePointer);
+      document.removeEventListener("keydown", collapseOnEscape);
+    };
+  }, [showAddActions]);
   const emptyGloopyQuery = useArtifacts({
     enabled: !isLoading && personas.length === 0,
     select: (artifacts) =>
@@ -301,22 +349,30 @@ export function PersonaGallery({
               </p>
             </div>
 
-            <Button
-              type="button"
-              aria-label={t("gallery.createAria")}
-              onClick={onCreatePersona}
-              size="sm"
-              className="mt-[35px] bg-surface-agent-profile-fg text-sm leading-[15px] text-surface-agent-profile-action-fg hover:bg-surface-agent-profile-action-bg-hover"
-            >
-              {t("gallery.empty.createFirst")}
-            </Button>
+            <div className="mt-[35px] flex w-full flex-col gap-2">
+              <Button
+                type="button"
+                aria-label={t("gallery.createAria")}
+                onClick={onCreatePersona}
+                className="w-full text-sm"
+              >
+                {t("gallery.empty.createFirst")}
+              </Button>
+              <AgentImportSecondaryButton
+                type="button"
+                onClick={onImportAgentImage}
+                className="w-full text-sm"
+              >
+                {t("gallery.importViaImage")}
+              </AgentImportSecondaryButton>
+            </div>
           </div>
         </div>
         {onImportFile && (
           <input
             ref={fileInputRef}
             type="file"
-            accept=".persona.md,.json,text/markdown,text/plain,application/json"
+            accept=".agent.png,.persona.md,.json,image/png,text/markdown,text/plain,application/json"
             className="hidden"
             onChange={handleFileChange}
           />
@@ -327,25 +383,81 @@ export function PersonaGallery({
 
   return (
     <div {...dropHandlers} className={gridClass}>
-      <button
-        type="button"
-        onClick={onCreatePersona}
-        aria-label={t("gallery.createAria")}
-        className={cn(
-          "agents-gallery-card-enter group flex h-full w-full items-center justify-center rounded-md border border-transparent p-4",
-          "text-muted-foreground transition-[background-color,backdrop-filter,border-color,color] duration-200",
-          "hover:border-card/40 hover:bg-card/40 hover:text-foreground hover:backdrop-blur-sm",
-          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-        )}
+      <div
+        ref={addTileRef}
+        className="agents-gallery-card-enter flex min-h-40 w-full items-center justify-center p-4"
       >
-        <IconPlus className="size-8 stroke-[1.25]" aria-hidden="true" />
-      </button>
+        <AnimatePresence mode="wait" initial={false}>
+          {showAddActions ? (
+            <motion.div
+              key="add-actions"
+              initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.92 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={
+                shouldReduceMotion ? undefined : { opacity: 0, scale: 0.92 }
+              }
+              transition={{
+                duration: shouldReduceMotion ? 0 : 0.18,
+                ease: [0.22, 1, 0.36, 1],
+              }}
+              className="flex flex-col items-stretch gap-2"
+            >
+              {onImportAgentImage ? (
+                <AgentAddChoiceButton
+                  type="button"
+                  onClick={() => {
+                    setShowAddActions(false);
+                    onImportAgentImage();
+                  }}
+                >
+                  <IconPhotoPlus />
+                  {t("gallery.importViaImage")}
+                </AgentAddChoiceButton>
+              ) : null}
+              <AgentAddChoiceButton
+                type="button"
+                onClick={() => {
+                  setShowAddActions(false);
+                  onCreatePersona();
+                }}
+              >
+                <IconPlus />
+                {t("gallery.createNew")}
+              </AgentAddChoiceButton>
+            </motion.div>
+          ) : (
+            <motion.button
+              key="add-trigger"
+              type="button"
+              initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.82 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={
+                shouldReduceMotion ? undefined : { opacity: 0, scale: 0.82 }
+              }
+              transition={{
+                duration: shouldReduceMotion ? 0 : 0.2,
+                ease: [0.22, 1, 0.36, 1],
+              }}
+              aria-label={t("gallery.addAgentAria")}
+              onClick={() => setShowAddActions(true)}
+              className={cn(
+                "group flex size-full min-h-32 items-center justify-center rounded-md bg-card/70 p-4 dark:bg-background/25",
+                "text-muted-foreground transition-colors duration-200",
+                "hover:bg-card hover:text-foreground dark:hover:bg-background/45",
+                "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              )}
+            >
+              <IconPlus className="size-8 stroke-[1.25]" aria-hidden="true" />
+            </motion.button>
+          )}
+        </AnimatePresence>
+      </div>
       {sorted.map((persona, index) => (
         <div
           key={persona.id}
           className="agents-gallery-card-enter"
           style={{
-            animationDelay: `${(index + 1) * GALLERY_CARD_STAGGER_MS}ms`,
+            animationDelay: galleryCardDelay(index + 1),
           }}
         >
           <PersonaCard
@@ -366,7 +478,7 @@ export function PersonaGallery({
           key={`draft:${session.id}`}
           className="agents-gallery-card-enter"
           style={{
-            animationDelay: `${(sorted.length + index + 1) * GALLERY_CARD_STAGGER_MS}ms`,
+            animationDelay: galleryCardDelay(sorted.length + index + 1),
           }}
         >
           <PersonaDraftCard
@@ -380,7 +492,7 @@ export function PersonaGallery({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".persona.md,.json,text/markdown,text/plain,application/json"
+          accept=".agent.png,.persona.md,.json,image/png,text/markdown,text/plain,application/json"
           className="hidden"
           onChange={handleFileChange}
         />

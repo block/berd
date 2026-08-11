@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   isRemoteAvatarUrl,
+  isSafePngAvatarDataUrl,
   isSupportedAvatarUrl,
   normalizeAvatarRef,
   normalizeAvatarUrl,
@@ -41,6 +42,23 @@ describe("avatarUrl", () => {
     expect(resolveAvatarSrc("user-avatar:gloopie-1")).toBeUndefined();
     expect(resolveAvatarMedia("user-avatar:gloopie-1")).toBeUndefined();
     expect(normalizeAvatarUrl("user-avatar:../secret")).toBeUndefined();
+  });
+
+  it("accepts only bounded, structurally valid PNG data URLs", () => {
+    const value =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=";
+    expect(isSafePngAvatarDataUrl(value)).toBe(true);
+    expect(normalizeAvatarUrl(value)).toBe(value);
+    expect(resolveAvatarSrc(value)).toBe(value);
+    expect(isSafePngAvatarDataUrl("data:image/png;base64,iVBORw0KGgo=")).toBe(
+      false,
+    );
+    expect(isSafePngAvatarDataUrl("data:image/png;base64,aWNvbg==")).toBe(
+      false,
+    );
+    expect(isSafePngAvatarDataUrl("data:image/svg+xml;base64,PHN2Zz4=")).toBe(
+      false,
+    );
   });
 
   it("rejects unsafe avatar URL schemes and credentials", () => {

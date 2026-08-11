@@ -193,6 +193,22 @@ export async function getCachedAvatarsForRefs({
   }
 }
 
+export async function importUserAvatarDataUrl({
+  dataUrl,
+  alphaMode,
+  posterDataUrl,
+}: {
+  dataUrl: string;
+  alphaMode?: "stacked";
+  posterDataUrl?: string;
+}): Promise<string> {
+  return invoke<string>("import_user_avatar_data_url", {
+    dataUrl,
+    alphaMode,
+    posterDataUrl,
+  });
+}
+
 export async function deleteUserAvatar(avatarRef: string): Promise<void> {
   if (!window.__TAURI_INTERNALS__) {
     return;

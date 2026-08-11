@@ -86,9 +86,9 @@ describe("agentShareCard", () => {
 
   it("creates a safe bounded filename", () => {
     expect(getAgentShareFilename("  My Helpful Agent!  ")).toBe(
-      "my-helpful-agent-card.png",
+      "my-helpful-agent.agent.png",
     );
-    expect(getAgentShareFilename("✨✨✨")).toBe("agent-card.png");
+    expect(getAgentShareFilename("✨✨✨")).toBe("agent.agent.png");
   });
 
   it("clamps wrapped text and adds an ellipsis", () => {

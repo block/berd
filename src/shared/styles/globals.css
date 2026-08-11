@@ -409,6 +409,7 @@
   --surface-agent-profile-control-bg-hover: rgba(255, 255, 255, 0.9);
   --surface-agent-profile-action-fg: rgba(245, 245, 245, 0.96);
   --surface-agent-profile-action-bg-hover: rgba(36, 36, 36, 0.9);
+  --agent-share-card-ink: #43005c;
   --surface-glass-subtle: rgba(255, 255, 255, 0.1);
   --backdrop-glass-subtle: blur(6px) saturate(120%) brightness(1.01);
   --surface-glass-strong: rgba(255, 255, 255, 0.72);
@@ -865,8 +866,8 @@
     var(--surface-agent-profile-fg) 14%,
     transparent
   );
-  --surface-agent-profile-control-bg: var(--color-gray-800);
-  --surface-agent-profile-control-bg-hover: var(--color-gray-700);
+  --surface-agent-profile-control-bg: var(--sidebar-navigation-panel-bg);
+  --surface-agent-profile-control-bg-hover: var(--color-gray-900);
   --surface-agent-profile-action-fg: var(--color-gray-900);
   --surface-agent-profile-action-bg-hover: var(--color-gray-300);
   --surface-glass-subtle: rgba(255, 255, 255, 0.04);
@@ -1110,6 +1111,7 @@
   --color-surface-agent-profile-action-bg-hover: var(
     --surface-agent-profile-action-bg-hover
   );
+  --color-agent-share-card-ink: var(--agent-share-card-ink);
   --color-surface-glass-strong: var(--surface-glass-strong);
   --color-surface-glass-strong-hover: var(--surface-glass-strong-hover);
   --color-surface-glass-strong-fg: var(--surface-glass-strong-fg);
@@ -2271,9 +2273,8 @@ code[data-streamdown="inline-code"],
   transform-origin: center;
 }
 
-.gallery-card-enter,
-.agents-gallery-card-enter {
-  animation: agents-gallery-card-enter 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+.gallery-card-enter {
+  animation: gallery-card-enter 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
   filter: blur(12px);
   opacity: 0;
   transform: scale(0.97);
@@ -2281,7 +2282,7 @@ code[data-streamdown="inline-code"],
   will-change: filter, opacity, transform;
 }
 
-@keyframes agents-gallery-card-enter {
+@keyframes gallery-card-enter {
   from {
     filter: blur(12px);
     opacity: 0;
@@ -2291,6 +2292,22 @@ code[data-streamdown="inline-code"],
     filter: blur(0);
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+.agents-gallery-card-enter {
+  animation: agents-gallery-card-enter 0.24s cubic-bezier(0.16, 1, 0.3, 1)
+    backwards;
+}
+
+@keyframes agents-gallery-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 

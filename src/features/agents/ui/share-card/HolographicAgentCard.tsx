@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { cn } from "@/shared/lib/cn";
+import { resetCardTilt, updateCardTilt } from "./cardTilt";
 
 export type HolographicFinish = "metallic" | "holographic" | "prismatic";
 
@@ -38,7 +39,7 @@ export const holographicCardPresets = {
     finish: "prismatic",
     metalness: 38,
     rainbow: 34,
-    glare: 52,
+    glare: 36,
     grain: 14,
     diffraction: 42,
     speed: 20,
@@ -147,6 +148,7 @@ export function HolographicAgentCard({
   const [contextGeneration, setContextGeneration] = useState(0);
   const pointer = useRef({ x: 0, y: 0 });
   const target = useRef({ x: 0, y: 0 });
+  const hoverBoundsRef = useRef<DOMRect | null>(null);
   const settingsRef = useRef<HolographicCardSettings>(settings);
   const startAnimationRef = useRef<() => void>(() => undefined);
 
@@ -249,8 +251,8 @@ export function HolographicAgentCard({
 
       const previousX = pointer.current.x;
       const previousY = pointer.current.y;
-      pointer.current.x += (target.current.x - pointer.current.x) * 0.095;
-      pointer.current.y += (target.current.y - pointer.current.y) * 0.095;
+      pointer.current.x += (target.current.x - pointer.current.x) * 0.22;
+      pointer.current.y += (target.current.y - pointer.current.y) * 0.22;
 
       const current = settingsRef.current;
       const movement = Math.hypot(
@@ -280,13 +282,9 @@ export function HolographicAgentCard({
         gl.drawArrays(gl.TRIANGLES, 0, 6);
       }
 
-      if (reducedMotion) {
-        card.style.transform = "none";
-      } else {
-        const tiltX = -pointer.current.y * current.tilt;
-        const tiltY = pointer.current.x * current.tilt;
-        card.style.transform = `rotateX(${tiltX}deg) rotateY(${tiltY}deg)`;
-      }
+      // Physical tilt is owned by the shared pointer helper on every surface.
+      // The frame loop only eases holographic lighting toward that pointer.
+      if (reducedMotion) card.style.transform = "none";
       const unsettled =
         Math.abs(target.current.x - pointer.current.x) > 0.0004 ||
         Math.abs(target.current.y - pointer.current.y) > 0.0004;
@@ -339,16 +337,28 @@ export function HolographicAgentCard({
         "relative aspect-[642/898] w-full overflow-hidden rounded-[4.8%] shadow-[0_30px_60px_rgba(46,32,18,0.22),0_8px_18px_rgba(46,32,18,0.16)] [transform-origin:50%_50%] [transform-style:preserve-3d] [will-change:transform] motion-reduce:transform-none",
         className,
       )}
+      onPointerEnter={(event) => {
+        hoverBoundsRef.current = event.currentTarget.getBoundingClientRect();
+      }}
       onPointerMove={(event) => {
-        const bounds = event.currentTarget.getBoundingClientRect();
+        const bounds =
+          hoverBoundsRef.current ?? event.currentTarget.getBoundingClientRect();
         target.current = {
           x: ((event.clientX - bounds.left) / bounds.width - 0.5) * 2,
           y: ((event.clientY - bounds.top) / bounds.height - 0.5) * 2,
         };
+        updateCardTilt(
+          event.currentTarget,
+          event,
+          settingsRef.current.tilt,
+          bounds,
+        );
         cardRef.current?.dispatchEvent(new Event("holographic-card-move"));
       }}
       onPointerLeave={(event) => {
+        hoverBoundsRef.current = null;
         target.current = { x: 0, y: 0 };
+        resetCardTilt(event.currentTarget);
         event.currentTarget.dispatchEvent(new Event("holographic-card-move"));
       }}
     >

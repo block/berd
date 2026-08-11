@@ -41,9 +41,9 @@ export function useSkillImportExport({
     }
   };
 
-  const handleImport = async (fileBytes: number[], fileName: string) => {
+  const handleImport = async (fileBytes: Uint8Array, fileName: string) => {
     try {
-      await importSkills(fileBytes, fileName);
+      await importSkills(Array.from(fileBytes), fileName);
       toast.success(t("view.importSuccess"));
       onImportSuccess?.();
     } catch (error) {

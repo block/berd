@@ -124,6 +124,9 @@
   },
   "gallery": {
     "createAria": "Crear nuevo agente",
+    "addAgentAria": "Opciones para agregar agente",
+    "importViaImage": "Importar",
+    "createNew": "Crear nuevo",
     "continueDraft": "Continuar editando",
     "continueDraftAria": "Continuar editando {{name}}",
     "deleteDraft": "Eliminar",
@@ -144,14 +147,15 @@
   "share": {
     "action": "Compartir agente",
     "title": "Compartir {{name}}",
-    "description": "Descarga una tarjeta coleccionable o el archivo del agente para compartir.",
+    "description": "Comparte la tarjeta para llevar las instrucciones y la configuración de este agente a Berd. También puedes descargar el archivo .md.",
     "cardAlt": "Tarjeta para compartir de {{name}}",
     "downloadCard": "Descargar tarjeta",
     "downloadingCard": "Descargando tarjeta…",
     "downloadAgent": "Descargar {{name}}.md",
     "downloadingAgent": "Descargando agente…",
     "cardDownloaded": "Se descargó {{filename}}",
-    "cardDownloadFailed": "No se pudo crear la tarjeta. Inténtalo de nuevo."
+    "cardDownloadFailed": "No se pudo crear la tarjeta. Inténtalo de nuevo.",
+    "loadingCard": "Cargando tarjeta"
   },
   "statuses": {
     "error": "Error",
@@ -183,5 +187,33 @@
     "more": "Más",
     "source": "Origen",
     "updated": "Actualizado"
+  },
+  "imageImport": {
+    "description": "Configura tu agente importado",
+    "previewAlt": "Vista previa del agente importado",
+    "name": "Nombre del agente",
+    "default": "Predeterminado",
+    "unsupportedConfiguration": "El proveedor o modelo de origen no está disponible. Elige una configuración compatible o deja ambos sin seleccionar para usar los valores predeterminados de Berd.",
+    "memoryIgnored": "Esta tarjeta contiene memoria. Berd no la importará.",
+    "noInstructions": "No se proporcionaron instrucciones.",
+    "cancel": "Cancelar",
+    "adding": "Agregando…",
+    "add": "Agregar agente",
+    "pickerTitle": "Agregar agente desde una imagen",
+    "export": "Exportar como imagen",
+    "added": "Agente agregado desde una imagen.",
+    "invalid": "La imagen del agente no es válida o está dañada.",
+    "missing": "Esta imagen no contiene un agente compatible.",
+    "unsupportedVersion": "Esta imagen usa un formato más reciente que esta versión de Berd no admite.",
+    "tooLarge": "La imagen del agente debe ser de 10 MB o menos.",
+    "pngOnly": "La imagen del agente debe ser un archivo PNG."
+  },
+  "importDialog": {
+    "title": "Importar un agente",
+    "description": "Importa un agente con una imagen o un archivo .md o JSON.",
+    "dropTitle": "Arrastra y suelta aquí un archivo de agente",
+    "openFinder": "Abrir Finder",
+    "previewAlt": "Vista previa de {{name}}",
+    "import": "Importar agente"
   }
 }

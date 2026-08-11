@@ -11,15 +11,15 @@ import {
 import { PinIcon } from "lucide-react";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { cn } from "@/shared/lib/cn";
-import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { AgentTileButton } from "@/shared/ui/agent-tile-button";
+import { AvatarMedia } from "@/shared/ui/avatar-media";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
-import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
+import { useAvatarImage, useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import type { Persona } from "@/shared/types/agents";
 import {
   canDeletePersona,
@@ -37,8 +37,12 @@ interface PersonaCardProps {
   onEdit?: (persona: Persona) => void;
   onDuplicate?: (persona: Persona) => void;
   onDelete?: (persona: Persona) => void;
+
   onExport?: (persona: Persona) => void | Promise<void>;
   onShare?: (persona: Persona) => void;
+  /** @deprecated Share-card downloads now carry the importable agent data. */
+  onExportImage?: (persona: Persona) => void;
+
   isActive?: boolean;
 }
 
@@ -66,8 +70,19 @@ export const PersonaCard = memo(function PersonaCard({
   const shareCardEnabled =
     useExperiment(AGENT_SHARE_CARD_EXPERIMENT_ID)?.enabled === true;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [readyAnimatedAvatarSrc, setReadyAnimatedAvatarSrc] = useState<
+    string | null
+  >(null);
 
   const avatarMedia = useAvatarMedia(persona.avatar);
+  const avatarImage = useAvatarImage(persona.avatar);
+  const staticAvatarSrc =
+    avatarImage ??
+    avatarMedia?.posterSrc ??
+    (avatarMedia?.mediaType === "image" ? avatarMedia.src : undefined);
+  const animatedAvatarReady =
+    avatarMedia?.mediaType === "video" &&
+    readyAnimatedAvatarSrc === avatarMedia.src;
   const fallbackIconSrc = resolveAgentIcon(persona.id);
   const isEditable = canEditPersona(persona);
   const isDeletable = canDeletePersona(persona);
@@ -130,6 +145,7 @@ export const PersonaCard = memo(function PersonaCard({
           <IconCopy className="size-3.5" />
           {t("common:actions.duplicate")}
         </DropdownMenuItem>
+
         {shareCardEnabled && onShare ? (
           <DropdownMenuItem onSelect={() => onShare(persona)}>
             <IconShare className="size-3.5" />
@@ -141,6 +157,7 @@ export const PersonaCard = memo(function PersonaCard({
             {t("common:actions.export")}
           </DropdownMenuItem>
         ) : null}
+
         {isDeletable && (
           <DropdownMenuItem
             variant="destructive"
@@ -194,7 +211,7 @@ export const PersonaCard = memo(function PersonaCard({
         "group relative flex w-full flex-col gap-4",
         "rounded-md bg-transparent p-2",
         "transition-colors duration-200",
-        isActive && "bg-muted/40",
+        isActive && "bg-card ring-1 ring-border",
       )}
     >
       <div className="relative">
@@ -202,28 +219,32 @@ export const PersonaCard = memo(function PersonaCard({
           className="relative aspect-square w-full overflow-hidden rounded-sm"
           style={{ viewTransitionName: avatarTransitionName }}
         >
-          {avatarMedia ? (
+          <img
+            alt={staticAvatarSrc ? persona.displayName : ""}
+            aria-hidden={staticAvatarSrc ? undefined : true}
+            src={staticAvatarSrc ?? fallbackIconSrc}
+            loading="lazy"
+            decoding="async"
+            className={cn(
+              "pointer-events-none absolute inset-0 size-full object-contain transition-[transform,opacity] duration-300",
+              "group-hover:scale-[1.02]",
+              animatedAvatarReady && "opacity-0",
+            )}
+          />
+          {avatarMedia?.mediaType === "video" ? (
             <AvatarMedia
               media={avatarMedia}
-              alt={persona.displayName}
-              lazy
-              loadingStrategy="visible-video"
-              className={cn(
-                "object-contain transition-transform duration-300",
-                "group-hover:scale-[1.02]",
-              )}
-            />
-          ) : (
-            <img
               alt=""
-              aria-hidden="true"
-              src={fallbackIconSrc}
+              loadingStrategy="eager"
+              poster={staticAvatarSrc}
+              onReady={() => setReadyAnimatedAvatarSrc(avatarMedia.src)}
               className={cn(
-                "pointer-events-none size-full object-contain transition-transform duration-300",
+                "pointer-events-none absolute inset-0 object-contain opacity-0 transition-[transform,opacity] duration-200",
                 "group-hover:scale-[1.02]",
+                animatedAvatarReady && "opacity-100",
               )}
             />
-          )}
+          ) : null}
         </div>
         {hoverActionsOverlay}
       </div>

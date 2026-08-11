@@ -302,6 +302,37 @@ describe("AvatarMedia", () => {
     expect(observeMock.mock.calls.length).toBe(observeCallsAfterAttach);
   });
 
+  it("seeks a paused video back to its first frame", async () => {
+    const { rerender } = render(
+      <AvatarMedia
+        media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
+        alt="avatar"
+        loadingStrategy="eager"
+        paused={false}
+      />,
+    );
+    const video = screen.getByRole("img", {
+      name: "avatar",
+    }) as HTMLVideoElement;
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      writable: true,
+      value: 1.25,
+    });
+
+    rerender(
+      <AvatarMedia
+        media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
+        alt="avatar"
+        loadingStrategy="eager"
+        paused
+      />,
+    );
+
+    await waitFor(() => expect(video.currentTime).toBe(0));
+    expect(pauseMock).toHaveBeenCalled();
+  });
+
   it("renders the matching poster instead of loading video when animation is disabled", () => {
     localStorage.setItem("goose:animated-avatars-enabled", "false");
 

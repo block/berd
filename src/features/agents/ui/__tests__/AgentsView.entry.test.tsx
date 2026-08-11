@@ -7,13 +7,13 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { exportPersona } from "@/shared/api/agents";
-import { saveExportedAgentFile } from "@/shared/api/system";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
-import { toast } from "sonner";
 import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { toast } from "sonner";
 import { AgentsView } from "../AgentsView";
 
 const mockCreatePersona = vi.hoisted(() => vi.fn());
@@ -46,6 +46,27 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn(),
 }));
 
+vi.mock("@/shared/api/artifacts", () => ({
+  ARTIFACTS_QUERY_KEY: ["artifacts"],
+  getArtifacts: vi.fn().mockResolvedValue({
+    catalogVersion: "test",
+    assets: [
+      {
+        kind: "collectionImage",
+        path: "/avatars/gloopies-1.png",
+        mimeType: "image/png",
+        byteSize: 4,
+        sha256: "test",
+      },
+    ],
+  }),
+  selectAvatarImageUrl: (
+    artifacts: { assets: Array<{ path: string }> },
+    id: string,
+  ) =>
+    artifacts.assets.find((asset) => asset.path.endsWith(`/${id}.png`))?.path,
+}));
+
 vi.mock("@/shared/api/agents", () => ({
   exportPersona: vi.fn(),
   importPersonas: vi.fn(),
@@ -58,6 +79,7 @@ vi.mock("@/shared/api/agents", () => ({
 
 vi.mock("@/shared/api/system", () => ({
   saveExportedAgentFile: vi.fn(),
+  saveExportedAgentImage: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -73,6 +95,10 @@ vi.mock("@/features/agents/hooks/usePersonas", () => ({
     deletePersona: vi.fn(),
     refreshFromDisk: vi.fn(),
   }),
+}));
+
+vi.mock("@/features/agents/ui/PersonaFields/ProviderModelFields", () => ({
+  ProviderModelFields: () => <div data-testid="provider-model-fields" />,
 }));
 
 vi.mock("@/features/agents/hooks/useAvatarLibrary", () => ({
@@ -99,31 +125,11 @@ const persona = {
   writable: true,
 };
 
-const exportedPersona = {
-  contents: "---\nname: code-reviewer\n---\n\nReview code carefully.\n",
-  filename: "code-reviewer.persona.md",
-  mimeType: "text/markdown",
-};
-
-function setTauriInternals(value: unknown = {}): void {
-  Object.defineProperty(window, "__TAURI_INTERNALS__", {
-    configurable: true,
-    value,
-  });
-}
-
 async function openDetailShareDialog(): Promise<void> {
   const user = userEvent.setup();
   await user.click(screen.getByRole("button", { name: "detail.moreActions" }));
   await user.click(
     await screen.findByRole("menuitem", { name: "share.action" }),
-  );
-}
-
-async function clickDetailAgentDownload(): Promise<void> {
-  await openDetailShareDialog();
-  await userEvent.click(
-    await screen.findByRole("button", { name: "share.downloadAgent" }),
   );
 }
 
@@ -169,6 +175,26 @@ describe("AgentsView entry points", () => {
     });
   });
 
+  it("offers equal stacked create and reviewed import actions in the empty state", async () => {
+    const user = userEvent.setup();
+    render(<AgentsView />);
+
+    const createButton = screen.getByRole("button", {
+      name: "gallery.createAria",
+    });
+    const importButton = screen.getByRole("button", {
+      name: "gallery.importViaImage",
+    });
+    expect(createButton).toHaveClass("w-full", "text-sm");
+    expect(importButton).toHaveClass("w-full", "text-sm");
+
+    await user.click(importButton);
+    expect(
+      screen.getByRole("heading", { name: "importDialog.title" }),
+    ).toBeInTheDocument();
+    expect(mockCreatePersona).not.toHaveBeenCalled();
+  });
+
   it("hides share-card actions when the experiment is toggled off", async () => {
     useAgentStore.setState({ personas: [persona] });
     const user = userEvent.setup();
@@ -197,14 +223,89 @@ describe("AgentsView entry points", () => {
     ).toBeInTheDocument();
   });
 
-  it("clicking Create calls onStartAgentBuilderSession", () => {
+  it("opens a no-write preview when selecting a compatible PNG", async () => {
+    const fixtureBytes = readFileSync(
+      resolve(
+        process.cwd(),
+        "src/features/agents/agent-snapshot/fixtures/buzz-v1-config-only.agent.png",
+      ),
+    );
+    const file = new File([fixtureBytes], "shared.png", { type: "image/png" });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi
+        .fn()
+        .mockResolvedValue(
+          fixtureBytes.buffer.slice(
+            fixtureBytes.byteOffset,
+            fixtureBytes.byteOffset + fixtureBytes.byteLength,
+          ),
+        ),
+    });
+    const { container } = render(<AgentsView />);
+    const input = container.querySelector<HTMLInputElement>(
+      'input[type="file"][accept*="image/png"]',
+    );
+    expect(input).not.toBeNull();
+
+    fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
+
+    expect(
+      await screen.findByRole("heading", { name: "imageImport.description" }),
+    ).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Test Agent Display")).toBeInTheDocument();
+    expect(screen.getByText("You are a test agent.")).toBeInTheDocument();
+  });
+
+  it("reports malformed PNG imports instead of rejecting silently", async () => {
+    const file = new File([new Uint8Array([1, 2, 3])], "broken.png", {
+      type: "image/png",
+    });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]).buffer),
+    });
+    const { container } = render(<AgentsView />);
+    const input = container.querySelector<HTMLInputElement>(
+      'input[type="file"][accept*="image/png"]',
+    );
+
+    fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(
+      screen.queryByRole("heading", { name: "imageImport.description" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers image import or new agent from the plus tile", async () => {
     const onStartAgentBuilderSession = vi.fn();
+    useAgentStore.setState({ personas: [persona] });
     render(
       <AgentsView onStartAgentBuilderSession={onStartAgentBuilderSession} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "gallery.createAria" }));
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: "gallery.addAgentAria" }),
+    );
 
+    expect(
+      await screen.findByRole("button", { name: "gallery.importViaImage" }),
+    ).toBeInTheDocument();
+    await user.click(document.body);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "gallery.importViaImage" }),
+      ).not.toBeInTheDocument(),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "gallery.addAgentAria" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "gallery.createNew" }),
+    );
     expect(onStartAgentBuilderSession).toHaveBeenCalledWith({});
   });
 
@@ -345,8 +446,8 @@ describe("AgentsView entry points", () => {
       });
     });
 
-    expect(screen.getAllByText("Updated reviewer")).toHaveLength(2);
-    expect(screen.getAllByText("Updated instructions.")).toHaveLength(2);
+    expect(screen.getByText("Updated reviewer")).toBeInTheDocument();
+    expect(screen.getByText("Updated instructions.")).toBeInTheDocument();
 
     act(() => {
       useAgentStore.getState().removePersona(persona.id);
@@ -387,79 +488,6 @@ describe("AgentsView entry points", () => {
         model: "gpt-5.6",
       }),
     );
-  });
-  it("exports agents through the native save dialog in Tauri", async () => {
-    const createObjectUrl = vi.spyOn(URL, "createObjectURL");
-    vi.mocked(exportPersona).mockResolvedValue(exportedPersona);
-    vi.mocked(saveExportedAgentFile).mockResolvedValue(
-      "/Users/x/Desktop/custom-name.persona.md",
-    );
-    setTauriInternals();
-    useAgentStore.setState({ personas: [persona] });
-
-    render(<AgentsView activePersonaId={persona.id} />);
-
-    await clickDetailAgentDownload();
-
-    await waitFor(() => {
-      expect(exportPersona).toHaveBeenCalledWith(persona.id);
-      expect(saveExportedAgentFile).toHaveBeenCalledWith(
-        "code-reviewer.persona.md",
-        exportedPersona.contents,
-      );
-      expect(toast.success).toHaveBeenCalledWith(
-        "view.exportedTo:custom-name.persona.md",
-      );
-    });
-    expect(createObjectUrl).not.toHaveBeenCalled();
-  });
-
-  it("stays silent when native agent export is canceled", async () => {
-    vi.mocked(exportPersona).mockResolvedValue(exportedPersona);
-    vi.mocked(saveExportedAgentFile).mockResolvedValue(null);
-    setTauriInternals();
-    useAgentStore.setState({ personas: [persona] });
-
-    render(<AgentsView activePersonaId={persona.id} />);
-
-    await clickDetailAgentDownload();
-
-    await waitFor(() => {
-      expect(saveExportedAgentFile).toHaveBeenCalledWith(
-        "code-reviewer.persona.md",
-        exportedPersona.contents,
-      );
-    });
-    expect(toast.success).not.toHaveBeenCalled();
-    expect(toast.error).not.toHaveBeenCalled();
-  });
-
-  it("keeps the browser download fallback outside Tauri", async () => {
-    const createObjectUrl = vi
-      .spyOn(URL, "createObjectURL")
-      .mockReturnValue("blob:agent-export");
-    const revokeObjectUrl = vi
-      .spyOn(URL, "revokeObjectURL")
-      .mockImplementation(() => {});
-    const clickAnchor = vi
-      .spyOn(HTMLAnchorElement.prototype, "click")
-      .mockImplementation(() => {});
-    vi.mocked(exportPersona).mockResolvedValue(exportedPersona);
-    useAgentStore.setState({ personas: [persona] });
-
-    render(<AgentsView activePersonaId={persona.id} />);
-
-    await clickDetailAgentDownload();
-
-    await waitFor(() => {
-      expect(createObjectUrl).toHaveBeenCalledTimes(1);
-      expect(clickAnchor).toHaveBeenCalledTimes(1);
-      expect(revokeObjectUrl).toHaveBeenCalledWith("blob:agent-export");
-      expect(toast.success).toHaveBeenCalledWith(
-        "view.exportedTo:code-reviewer.persona.md",
-      );
-    });
-    expect(saveExportedAgentFile).not.toHaveBeenCalled();
   });
 
   it("starts a gallery-to-profile view transition when opening detail", () => {
