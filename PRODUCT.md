@@ -6,7 +6,7 @@ product
 
 ## Users
 
-Berd is for people doing real work with AI agents inside a desktop workspace: engineers, product designers, and other internal builders who need a persistent agent companion that can use projects, skills, extensions, automations, model providers, and local workspace context. Users are often moving between broad product thinking and concrete implementation, so the interface needs to support fast chat, precise context selection, and confidence about what the agent can see or do.
+Berd is for people doing real work with AI agents inside a desktop workspace: engineers, product designers, and other builders who need a persistent agent companion that can use projects, skills, extensions, automations, model providers, and local workspace context. Users are often moving between broad product thinking and concrete implementation, so the interface needs to support fast chat, precise context selection, and confidence about what the agent can see or do.
 
 ## Product Purpose
 

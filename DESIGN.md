@@ -118,7 +118,7 @@ components:
 
 **Creative North Star: "The Grounded Workbench"**
 
-This file documents the actual Berd design-system source in [globals.css](/Users/morganm/Development/berd/src/shared/styles/globals.css), especially the `:root` semantic tokens and the Tailwind `@theme inline` aliases. The frontmatter lists the Tailwind-facing tokens agents should use in component code, such as `text-foreground`, `bg-background`, `border-border`, and `text-muted-foreground`. The prose explains the lower-level CSS variable chain behind them.
+This file documents the actual Berd design-system source in [globals.css](src/shared/styles/globals.css), especially the `:root` semantic tokens and the Tailwind `@theme inline` aliases. The frontmatter lists the Tailwind-facing tokens agents should use in component code, such as `text-foreground`, `bg-background`, `border-border`, and `text-muted-foreground`. The prose explains the lower-level CSS variable chain behind them.
 
 The current implementation provides useful product bones: semantic color tokens, shared UI primitives, a persistent sidebar, compact top bar, and a strong chat composer pattern. This document is not a blanket endorsement of every current surface. The Automations feature UI is explicitly excluded as design precedent because it did not receive the same craft pass.
 
@@ -255,7 +255,7 @@ Corner radii use a 5-step scale built on Tailwind's standard utility names: `rou
 
 ### Buttons
 
-Use [Button](/Users/morganm/Development/berd/src/shared/ui/button.tsx) and its variants before adding feature-level styling.
+Use [Button](src/shared/ui/button.tsx) and its variants before adding feature-level styling.
 
 - **Shape:** `rounded-full` for all buttons — text and icon-only alike. The base `Button` applies this automatically; feature code should not override the radius. Buttons are exempt from the geometric nesting rule — their effective radius is half their height, not a scale step.
 - **Primary:** `bg-primary text-primary-foreground`, mapping through semantic primary surface and readable-on-primary text tokens.
@@ -265,7 +265,7 @@ Use [Button](/Users/morganm/Development/berd/src/shared/ui/button.tsx) and its v
 
 ### Chips
 
-Use [Badge](/Users/morganm/Development/berd/src/shared/ui/badge.tsx), composer chips, or a shared variant.
+Use [Badge](src/shared/ui/badge.tsx), composer chips, or a shared variant.
 
 - **Shape:** `rounded-xs` (6px). Badges and status chips deliberately differ from buttons in shape because they differ in semantic purpose — buttons are interactive controls and use `rounded-full` to read as "press me"; badges are static labels conveying state and use `rounded-xs` so they read as "tag" rather than "control." This affordance separation reduces the chance of users attempting to click a static status indicator.
 - **Color:** `bg-muted`, `text-foreground`, `text-muted`, and state tokens when the chip communicates state.
@@ -273,7 +273,7 @@ Use [Badge](/Users/morganm/Development/berd/src/shared/ui/badge.tsx), composer c
 
 ### Cards / Containers
 
-Use [Card](/Users/morganm/Development/berd/src/shared/ui/card.tsx) only when a meaningful object boundary exists.
+Use [Card](src/shared/ui/card.tsx) only when a meaningful object boundary exists.
 
 - **Shape:** `rounded-md` (18px) on the base `Card` primitive, matching the sidenav panel. Use `rounded-lg` (24px) for the largest framing cards and `rounded-sm` (12px) for sub-cards nested inside another card.
 - **Color:** `bg-card text-card-foreground`, mapping through `--card` and `--card-foreground` to semantic card surface and text tokens.
@@ -283,7 +283,7 @@ Use [Card](/Users/morganm/Development/berd/src/shared/ui/card.tsx) only when a m
 
 ### Inputs / Fields
 
-Use [Input](/Users/morganm/Development/berd/src/shared/ui/input.tsx), shared textareas, or shared selector components.
+Use [Input](src/shared/ui/input.tsx), shared textareas, or shared selector components.
 
 - **Shape:** `rounded-input` for default inputs.
 - **Color:** `border-input`, `hover:border-foreground/20`, `text-foreground`, and `placeholder:text-placeholder`.

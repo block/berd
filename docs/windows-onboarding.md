@@ -6,7 +6,7 @@ Mac/Hermit flow, and it does not build a Windows installer yet.
 The first Windows milestone is:
 
 - install or diagnose native Windows prerequisites
-- verify Block npm access
+- verify npm and pnpm access
 - build the pinned Goose backend natively
 - launch the real Tauri dev app with `just dev-windows`
 
@@ -70,101 +70,11 @@ Bootstrap installs or validates:
 - Lefthook
 - just
 
-Bootstrap does not create or mutate Block npm configuration. If Block npm is
-not already configured, bootstrap may warn that Corepack/pnpm or Block npm HTTPS
-is not ready. Configure Block npm with the manual steps below, then rerun
-`just bootstrap-windows install`.
+Bootstrap does not create or mutate npm registry or TLS configuration. If your environment uses a registry mirror, proxy, or custom certificate authority, configure those through your normal Node/npm tooling before running `just setup-windows`. Never bypass TLS verification with `strict-ssl=false`.
 
-On a truly fresh machine, npm is not available until this first install pass
-installs Node through `fnm`. Configure Block npm after
-`just bootstrap-windows install` has made `npm.cmd` available, before running
-`just setup-windows`.
+> **Current limitation:** the checked-in Windows scripts still validate a legacy organization-specific npm mirror. External contributors cannot complete `doctor-windows` or `setup-windows` on a fresh machine until those checks are made distribution-neutral. This guide intentionally does not publish the private environment configuration; contributors working on Windows should follow [the tracking issue](https://github.com/squareup/berd/issues) or use the supported macOS setup in the meantime.
 
 Open a fresh PowerShell after install mode if PATH changes are not visible.
-
-## Block Npm And Artifactory Manual Setup
-
-After the first bootstrap install pass, configure npm, pnpm, Corepack, and Node
-TLS for the Block Artifactory npm mirror before running `setup-windows`. The
-Windows bootstrap does not write these settings because they are
-developer/corporate environment configuration, not Berd-owned tool state.
-
-```text
-%USERPROFILE%\.block-certs\root-certs.pem
-https://global.block-artifacts.com/artifactory/api/npm/square-npm/
-NPM_CONFIG_REGISTRY
-NPM_CONFIG_CAFILE
-NODE_EXTRA_CA_CERTS
-COREPACK_NPM_REGISTRY
-COREPACK_INTEGRITY_KEYS=0
-```
-
-Recommended manual setup:
-
-```powershell
-New-Item -ItemType Directory -Force "$env:USERPROFILE\.block-certs" | Out-Null
-
-# Use the current Block/corporate root certificate bundle for your machine.
-# Save it at:
-#   $env:USERPROFILE\.block-certs\root-certs.pem
-
-npm.cmd config set registry "https://global.block-artifacts.com/artifactory/api/npm/square-npm/"
-npm.cmd config set cafile "$env:USERPROFILE\.block-certs\root-certs.pem"
-
-[System.Environment]::SetEnvironmentVariable("NPM_CONFIG_REGISTRY", "https://global.block-artifacts.com/artifactory/api/npm/square-npm/", "User")
-[System.Environment]::SetEnvironmentVariable("NPM_CONFIG_CAFILE", "$env:USERPROFILE\.block-certs\root-certs.pem", "User")
-[System.Environment]::SetEnvironmentVariable("NODE_EXTRA_CA_CERTS", "$env:USERPROFILE\.block-certs\root-certs.pem", "User")
-[System.Environment]::SetEnvironmentVariable("COREPACK_NPM_REGISTRY", "https://global.block-artifacts.com/artifactory/api/npm/square-npm/", "User")
-[System.Environment]::SetEnvironmentVariable("COREPACK_INTEGRITY_KEYS", "0", "User")
-
-$env:NPM_CONFIG_REGISTRY = "https://global.block-artifacts.com/artifactory/api/npm/square-npm/"
-$env:NPM_CONFIG_CAFILE = "$env:USERPROFILE\.block-certs\root-certs.pem"
-$env:NODE_EXTRA_CA_CERTS = "$env:USERPROFILE\.block-certs\root-certs.pem"
-$env:COREPACK_NPM_REGISTRY = "https://global.block-artifacts.com/artifactory/api/npm/square-npm/"
-$env:COREPACK_INTEGRITY_KEYS = "0"
-
-corepack.cmd prepare pnpm@10.33.0 --activate
-```
-
-`doctor-windows` and `setup-windows` verify HTTPS reachability to Block
-Artifactory using Node with the configured certificate bundle.
-
-If you see `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` or a Block npm HTTPS failure:
-
-1. Connect to the Block VPN or proxy.
-2. Confirm the cert bundle exists:
-
-   ```powershell
-   Test-Path "$env:USERPROFILE\.block-certs\root-certs.pem"
-   ```
-
-3. Confirm npm and pnpm point at the Block registry and cert:
-
-   ```powershell
-   npm.cmd config get registry
-   npm.cmd config get cafile
-   pnpm.cmd config get registry
-   pnpm.cmd config get cafile
-   ```
-
-4. Replace `%USERPROFILE%\.block-certs\root-certs.pem` with the correct
-   Block/corporate certificate bundle if local trust is still wrong.
-5. Rerun bootstrap install if pnpm was not ready yet:
-
-   ```powershell
-   just bootstrap-windows install
-   ```
-
-6. Rerun doctor:
-
-   ```powershell
-   just doctor-windows
-   ```
-
-Do not work around TLS failures with `strict-ssl=false`.
-
-For manual pnpm commands in PowerShell, prefer `pnpm.cmd ...`. Some Windows
-machines block `pnpm.ps1` through PowerShell execution policy.
 
 ## Verify Readiness
 
@@ -176,7 +86,8 @@ just doctor-windows
 
 Expected result:
 
-- all required checks pass
+- organization-distributed builds pass all required checks after their npm environment is configured
+- external builds remain blocked by the legacy npm validation described above
 - one warning is acceptable: native Windows sign-in is deferred
 
 If doctor reports managed Goose is missing, continue with `setup-windows`.
@@ -277,8 +188,8 @@ just cleanup-windows remove -Yes -YesShared -IncludeNodeState
 ```
 
 Use `-All` to select every optional cleanup group except the WebView2 Runtime.
-Block npm registry/certificate settings are not included because bootstrap does
-not own corporate npm configuration:
+User npm registry and certificate settings are not included because bootstrap does
+not own machine-level npm configuration:
 
 ```powershell
 just cleanup-windows remove -All -Yes -YesShared
