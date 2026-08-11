@@ -721,10 +721,13 @@ describe("usePersonaSource", () => {
     });
 
     let saveResolved = false;
-    const savePromise = result.current.saveNow().then(() => {
-      saveResolved = true;
+    let savePromise!: Promise<void>;
+    await act(async () => {
+      savePromise = result.current.saveNow().then(() => {
+        saveResolved = true;
+      });
+      await Promise.resolve();
     });
-    await Promise.resolve();
 
     expect(saveResolved).toBe(false);
     expect(updateMock).toHaveBeenCalledTimes(1);

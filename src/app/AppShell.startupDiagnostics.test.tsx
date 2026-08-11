@@ -79,6 +79,10 @@ vi.mock("@/features/updates/ui/BetaBadge", () => ({
   BetaBadge: () => null,
 }));
 
+vi.mock("@/shared/ui/GlobalComposerPill", () => ({
+  GlobalComposerPill: () => null,
+}));
+
 vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
   useAgentProviderStatus: () => ({
     readyAgentIds: new Set(["goose"]),
@@ -140,7 +144,9 @@ describe("AppShell startup diagnostics", () => {
     useProjectStore.setState({
       projects: [],
       loading: false,
+      hasFetchedProjects: true,
       activeProjectId: null,
+      fetchProjects: vi.fn().mockResolvedValue(undefined),
     });
   });
 

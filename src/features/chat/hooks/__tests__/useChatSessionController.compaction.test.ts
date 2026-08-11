@@ -189,7 +189,7 @@ describe("useChatSessionController compaction behavior", () => {
     });
   });
 
-  it("hides context usage until a fresh usage snapshot exists after switching models", () => {
+  it("hides context usage until a fresh usage snapshot exists after switching models", async () => {
     const store = useChatStore.getState();
     store.replaceTokenState(
       "session-1",
@@ -204,6 +204,10 @@ describe("useChatSessionController compaction behavior", () => {
       useChatSessionController({ sessionId: "session-1" }),
     );
 
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
     act(() => {
       result.current.handleModelChange("claude-sonnet-4");
     });
@@ -213,7 +217,7 @@ describe("useChatSessionController compaction behavior", () => {
     expect(runtime.tokenState).toEqual(INITIAL_TOKEN_STATE);
   });
 
-  it("hides context usage after switching models even when a snapshot existed", () => {
+  it("hides context usage after switching models even when a snapshot existed", async () => {
     const store = useChatStore.getState();
     store.replaceTokenState(
       "session-1",
@@ -229,6 +233,10 @@ describe("useChatSessionController compaction behavior", () => {
       useChatSessionController({ sessionId: "session-1" }),
     );
 
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
     act(() => {
       result.current.handleModelChange("claude-sonnet-4");
     });
@@ -238,7 +246,7 @@ describe("useChatSessionController compaction behavior", () => {
     expect(runtime.tokenState).toEqual(INITIAL_TOKEN_STATE);
   });
 
-  it("hides pending home context usage after switching models", () => {
+  it("hides pending home context usage after switching models", async () => {
     const store = useChatStore.getState();
     store.replaceTokenState(
       "__home_pending__",
@@ -254,6 +262,10 @@ describe("useChatSessionController compaction behavior", () => {
       useChatSessionController({ sessionId: null }),
     );
 
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
     act(() => {
       result.current.handleModelChange("claude-sonnet-4");
     });
@@ -265,7 +277,7 @@ describe("useChatSessionController compaction behavior", () => {
     expect(runtime.tokenState).toEqual(INITIAL_TOKEN_STATE);
   });
 
-  it("enables manual compaction when idle and no backend run is blocking sends", () => {
+  it("enables manual compaction when idle and no backend run is blocking sends", async () => {
     mockMessages = [
       {
         id: "assistant-1",
@@ -280,10 +292,14 @@ describe("useChatSessionController compaction behavior", () => {
       useChatSessionController({ sessionId: "session-1" }),
     );
 
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
     expect(result.current.canCompactContext).toBe(true);
   });
 
-  it("disables manual compaction while a backend run is still active", () => {
+  it("disables manual compaction while a backend run is still active", async () => {
     mockMessages = [
       {
         id: "assistant-1",
@@ -299,10 +315,14 @@ describe("useChatSessionController compaction behavior", () => {
       useChatSessionController({ sessionId: "session-1" }),
     );
 
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
     expect(result.current.canCompactContext).toBe(false);
   });
 
-  it("disables manual compaction while stop cancellation is pending", () => {
+  it("disables manual compaction while stop cancellation is pending", async () => {
     mockMessages = [
       {
         id: "assistant-1",
@@ -317,6 +337,10 @@ describe("useChatSessionController compaction behavior", () => {
     const { result } = renderHook(() =>
       useChatSessionController({ sessionId: "session-1" }),
     );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
 
     expect(result.current.canCompactContext).toBe(false);
   });
@@ -339,7 +363,7 @@ describe("useChatSessionController compaction behavior", () => {
     );
 
     await act(async () => {
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
     await act(async () => {
       await result.current.handleSend("hello");
@@ -371,7 +395,7 @@ describe("useChatSessionController compaction behavior", () => {
     expect(result.current.supportsCompactionControls).toBe(true);
 
     await act(async () => {
-      await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
     await act(async () => {
       await result.current.handleSend("hello");

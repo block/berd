@@ -31,6 +31,10 @@ const mocks = vi.hoisted(() => ({
   // Scroll position the fake virtualizer reports. Real `getVirtualItems()`
   // leads with overscan rows sitting above the viewport, so tests that care
   // which row is genuinely visible drive this instead of the item list.
+  sessionWindowSupport: {
+    supported: true,
+    reason: undefined as string | undefined,
+  },
   virtualizerState: { scrollOffset: 0 },
 }));
 
@@ -38,6 +42,10 @@ vi.mock("@/shared/api/acp", () => ({
   acpExportSession: (...args: unknown[]) => mocks.acpExportSession(...args),
   acpImportSession: (...args: unknown[]) => mocks.acpImportSession(...args),
   acpSearchSessions: (...args: unknown[]) => mocks.acpSearchSessions(...args),
+}));
+
+vi.mock("@/features/chat/hooks/useSessionWindowSupport", () => ({
+  useSessionWindowSupport: () => mocks.sessionWindowSupport,
 }));
 
 vi.mock("@/features/chat/lib/sessionWindowCommands", () => ({
@@ -234,6 +242,8 @@ function scrollHistoryTo(scrollTop: number) {
 
 describe("SessionHistoryView", () => {
   beforeEach(() => {
+    mocks.sessionWindowSupport.supported = true;
+    mocks.sessionWindowSupport.reason = undefined;
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
       value: {},
@@ -274,17 +284,14 @@ describe("SessionHistoryView", () => {
   });
 
   it("does not expose open-in-window from history when session windows are unsupported", async () => {
-    vi.mocked(getSessionWindowSupport).mockResolvedValue({
-      supported: false,
-      reason: "unsupported platform",
-    });
+    mocks.sessionWindowSupport.supported = false;
+    mocks.sessionWindowSupport.reason = "unsupported platform";
     setSessionStoreState({
       sessions: [session()],
     });
 
     renderHistory();
 
-    await waitFor(() => expect(getSessionWindowSupport).toHaveBeenCalled());
     expect(
       screen.queryByRole("button", { name: /open in new window chat one/i }),
     ).not.toBeInTheDocument();

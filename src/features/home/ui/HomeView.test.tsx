@@ -479,8 +479,9 @@ describe("HomeView", () => {
     expect(canvasProps.viewportLeftOcclusionPx).toBe(260);
     expect(canvasProps.onRecenter).toEqual(expect.any(Function));
 
-    act(() => {
+    await act(async () => {
       canvasProps.onRecenter?.();
+      await vi.waitFor(() => expect(saveLayoutCamera).toHaveBeenCalled());
     });
 
     expect(useHomeWidgetStore.getState().camera).toEqual({

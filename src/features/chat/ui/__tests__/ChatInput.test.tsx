@@ -1,6 +1,7 @@
-import { beforeEach, describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -62,6 +63,15 @@ vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
   }),
 }));
 
+function immediatelyResolved<T>(value: T): Promise<T> {
+  return {
+    // biome-ignore lint/suspicious/noThenProperty: this test helper intentionally resolves synchronously.
+    then(onfulfilled) {
+      return Promise.resolve(onfulfilled?.(value));
+    },
+  } as Promise<T>;
+}
+
 const mockSearchFilesForMentions = vi.fn<
   (input: {
     roots: string[];
@@ -83,7 +93,7 @@ const mockReadImageAttachment = vi.fn<
   (path: string) => Promise<{ base64: string; mimeType: string }>
 >(async () => ({ base64: "abc", mimeType: "image/png" }));
 vi.mock("@/shared/api/system", () => ({
-  getHomeDir: vi.fn().mockResolvedValue("/Users/wesb"),
+  getHomeDir: vi.fn(() => immediatelyResolved("/Users/wesb")),
   searchFilesForMentions: (input: {
     roots: string[];
     query: string;
@@ -95,7 +105,11 @@ vi.mock("@/shared/api/system", () => ({
 }));
 
 vi.mock("@/features/skills/api/skills", () => ({
-  listSkills: vi.fn().mockResolvedValue([]),
+  listSkills: vi.fn(() => immediatelyResolved([])),
+}));
+
+vi.mock("@/features/skills/api/skillsQuery", () => ({
+  fetchSkillsList: vi.fn(() => immediatelyResolved([])),
 }));
 
 const TEST_PERSONAS: Persona[] = [
@@ -356,6 +370,8 @@ describe("ChatInput", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
+
+  afterEach(cleanup);
 
   beforeEach(() => {
     resetVoiceDictationShortcutControllerForTests();
@@ -2020,7 +2036,9 @@ describe("ChatInput", () => {
       fireEvent.change(input, {
         target: { value: "@r", selectionStart: 2 },
       });
-      await vi.advanceTimersByTimeAsync(100);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
 
       expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
     } finally {

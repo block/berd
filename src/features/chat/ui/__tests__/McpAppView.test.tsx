@@ -1,6 +1,12 @@
 import type { AppRendererProps, RequestHandlerExtra } from "@mcp-ui/client";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { McpAppView } from "../McpAppView";
 import packageJson from "../../../../../package.json";
@@ -555,10 +561,13 @@ describe("McpAppView nested tool calls", () => {
       expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
     });
 
-    const promise = getLatestAppRendererProps().onOpenLink?.(
-      { url: "https://example.com" },
-      {} as RequestHandlerExtra,
-    );
+    let promise: Promise<unknown> | undefined;
+    await act(async () => {
+      promise = getLatestAppRendererProps().onOpenLink?.(
+        { url: "https://example.com" },
+        {} as RequestHandlerExtra,
+      );
+    });
 
     if (!promise) {
       throw new Error("Expected onOpenLink to be registered");

@@ -34,6 +34,7 @@ if (!HTMLElement.prototype.scrollIntoView) {
 const gitMocks = vi.hoisted(() => ({
   getGitState: vi.fn(),
 }));
+const pendingProjectProbe = new Promise<never>(() => {});
 
 vi.mock("@/shared/api/system", () => ({
   getHomeDir: vi.fn().mockResolvedValue("/home/user"),
@@ -215,16 +216,7 @@ describe("CreateProjectDialog", () => {
     window.localStorage.clear();
     setMultiWorkspaceEnabled(true);
     vi.mocked(openDialog).mockResolvedValue(null);
-    gitMocks.getGitState.mockResolvedValue({
-      isGitRepo: true,
-      currentBranch: "main",
-      dirtyFileCount: 0,
-      incomingCommitCount: 0,
-      worktrees: [{ path: "/home/user/code", branch: "main", isMain: true }],
-      isWorktree: false,
-      mainWorktreePath: "/home/user/code",
-      localBranches: ["main"],
-    });
+    gitMocks.getGitState.mockImplementation(() => pendingProjectProbe);
     vi.mocked(resolvePath).mockImplementation(async ({ parts }) => ({
       path: parts[0],
     }));
@@ -232,7 +224,7 @@ describe("CreateProjectDialog", () => {
   });
 
   describe("form populates on open", () => {
-    it("populates the name field when opening with an editingProject", () => {
+    it("populates the name field when opening with an editingProject", async () => {
       const editingProject = makeEditingProject();
 
       render(
@@ -245,9 +237,10 @@ describe("CreateProjectDialog", () => {
 
       const nameInput = screen.getByPlaceholderText("Project Alpha");
       expect(nameInput).toHaveValue("My Project");
+      await waitFor(() => expect(gitMocks.getGitState).toHaveBeenCalled());
     });
 
-    it("shows Edit project title when editingProject is provided", () => {
+    it("shows Edit project title when editingProject is provided", async () => {
       render(
         <CreateProjectDialog
           {...defaultProps}
@@ -257,6 +250,7 @@ describe("CreateProjectDialog", () => {
       );
 
       expect(screen.getByText("Edit project")).toBeInTheDocument();
+      await waitFor(() => expect(gitMocks.getGitState).toHaveBeenCalled());
     });
 
     it("shows Create a project title without editingProject", () => {
@@ -265,7 +259,7 @@ describe("CreateProjectDialog", () => {
       expect(screen.getByText("Create a project")).toBeInTheDocument();
     });
 
-    it("populates the prompt textarea when editing", () => {
+    it("populates the prompt textarea when editing", async () => {
       const editingProject = makeEditingProject({
         prompt: "Goal of this project",
       });
@@ -282,6 +276,7 @@ describe("CreateProjectDialog", () => {
         "Describe your project, goals, subject etc",
       );
       expect(textarea).toHaveValue("Goal of this project");
+      await waitFor(() => expect(gitMocks.getGitState).toHaveBeenCalled());
     });
   });
 
@@ -367,11 +362,12 @@ describe("CreateProjectDialog", () => {
         "Describe your project, goals, subject etc",
       );
       expect(textarea).toHaveValue("Beta goal");
+      await waitFor(() => expect(gitMocks.getGitState).toHaveBeenCalled());
     });
   });
 
   describe("create mode", () => {
-    it("uses initialWorkingDir to derive project name", () => {
+    it("uses initialWorkingDir to derive project name", async () => {
       render(
         <CreateProjectDialog
           {...defaultProps}
@@ -382,6 +378,7 @@ describe("CreateProjectDialog", () => {
 
       const nameInput = screen.getByPlaceholderText("Project Alpha");
       expect(nameInput).toHaveValue("my-repo");
+      await waitFor(() => expect(gitMocks.getGitState).toHaveBeenCalled());
     });
 
     it("labels the submit button as create project", () => {

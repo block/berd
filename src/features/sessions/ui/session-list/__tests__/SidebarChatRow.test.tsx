@@ -19,6 +19,10 @@ const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
   writeTextToTauriClipboard: vi.fn(),
+  sessionWindowSupport: {
+    supported: true,
+    reason: undefined as string | undefined,
+  },
 }));
 
 vi.mock("@tauri-apps/plugin-clipboard-manager", () => ({
@@ -30,6 +34,10 @@ vi.mock("sonner", () => ({
     error: (...args: unknown[]) => mocks.toastError(...args),
     success: (...args: unknown[]) => mocks.toastSuccess(...args),
   },
+}));
+
+vi.mock("@/features/chat/hooks/useSessionWindowSupport", () => ({
+  useSessionWindowSupport: () => mocks.sessionWindowSupport,
 }));
 
 vi.mock("@/features/chat/lib/sessionWindowCommands", () => ({
@@ -52,10 +60,9 @@ describe("SidebarChatRow", () => {
     mocks.toastSuccess.mockReset();
     mocks.writeTextToTauriClipboard.mockReset();
     mocks.writeTextToTauriClipboard.mockResolvedValue(undefined);
-    Object.defineProperty(window, "__TAURI_INTERNALS__", {
-      configurable: true,
-      value: {},
-    });
+    mocks.sessionWindowSupport.supported = true;
+    mocks.sessionWindowSupport.reason = undefined;
+    Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
     resetHomeWidgetStoreForTests();
     localStorage.clear();
     useSessionWindowStore.getState().setSnapshot([]);
@@ -476,10 +483,8 @@ describe("SidebarChatRow", () => {
   it("selects normally when a session window exists but session windows are unsupported", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
-    vi.mocked(getSessionWindowSupport).mockResolvedValue({
-      supported: false,
-      reason: "unsupported platform",
-    });
+    mocks.sessionWindowSupport.supported = false;
+    mocks.sessionWindowSupport.reason = "unsupported platform";
 
     useSessionWindowStore
       .getState()
@@ -494,7 +499,6 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    await waitFor(() => expect(getSessionWindowSupport).toHaveBeenCalled());
     expect(screen.queryByLabelText(/open in window/i)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Windowed Chat" }));
@@ -506,6 +510,10 @@ describe("SidebarChatRow", () => {
   it("focuses an existing session window instead of selecting the row when session windows are supported", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
 
     useSessionWindowStore
       .getState()

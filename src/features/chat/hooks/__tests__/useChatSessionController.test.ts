@@ -1,8 +1,8 @@
 import { getModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { emitSkillsChanged } from "@/features/skills/lib/skillsEvents";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
@@ -174,6 +174,16 @@ vi.mock("../useChat", () => ({
 
 vi.mock("../useMessageQueue", () => ({
   useMessageQueue: (...args: unknown[]) => mockUseMessageQueue(...args),
+}));
+
+vi.mock("../useAutoCompactPreferences", () => ({
+  useAutoCompactPreferences: () => ({
+    autoCompactEnabled: false,
+    autoCompactThresholdPercent: 80,
+    preferencesLoading: false,
+    setAutoCompactEnabled: vi.fn(),
+    setAutoCompactThresholdPercent: vi.fn(),
+  }),
 }));
 
 vi.mock("@/features/agents/lib/agentBuilderSession", () => ({
@@ -367,6 +377,8 @@ function patchReasoningEffort(sessionId: string, currentValue = "off") {
 }
 
 describe("useChatSessionController", () => {
+  afterEach(cleanup);
+
   beforeEach(() => {
     resetSessionTargetCoordinatorsForTests();
     vi.clearAllMocks();
@@ -439,12 +451,16 @@ describe("useChatSessionController", () => {
       }),
     );
     mockDeletePersonaSource.mockResolvedValue(undefined);
-    mockListSkills.mockReset().mockResolvedValue([]);
+    mockListSkills
+      .mockReset()
+      .mockImplementation(() => immediatelyResolved([]));
     mockListBerdAppSkills
       .mockReset()
       .mockImplementation(() => immediatelyResolved([]));
     mockListGooseSourceSkills.mockReset().mockResolvedValue([]);
-    mockLoadWorkspaceInstructionFiles.mockResolvedValue([]);
+    mockLoadWorkspaceInstructionFiles.mockImplementation(() =>
+      immediatelyResolved([]),
+    );
     useProviderCatalogStore.getState().reset();
     useProviderCatalogStore.getState().setEntries([
       {
@@ -959,7 +975,7 @@ describe("useChatSessionController", () => {
     });
   });
 
-  it("passes all included workspaces to the agent system prompt", () => {
+  it("passes all included workspaces to the agent system prompt", async () => {
     useChatSessionStore.setState({
       sessions: [
         sessionFixture({
@@ -998,6 +1014,10 @@ describe("useChatSessionController", () => {
 
     const systemPrompt = mockUseChatHook.mock.calls.at(-1)?.[2];
     expect(systemPrompt).toContain("<included-workspaces>");
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     expect(systemPrompt).toContain("path: /tmp/project");
     expect(systemPrompt).toContain("branch: main");
     expect(systemPrompt).toContain("path: /tmp/project-worktrees/phase-3");
@@ -1327,7 +1347,7 @@ describe("useChatSessionController", () => {
     expect(systemPrompt).not.toContain("goose artifacts");
   });
 
-  it("does not seed project workspaces into an existing chat prompt", () => {
+  it("does not seed project workspaces into an existing chat prompt", async () => {
     setMultiWorkspaceEnabled(true);
     useProjectStore.setState({
       projects: [
@@ -1398,6 +1418,10 @@ describe("useChatSessionController", () => {
 
     const systemPrompt = mockUseChatHook.mock.calls.at(-1)?.[2] ?? "";
     expect(systemPrompt).toContain("<included-workspaces>");
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     expect(systemPrompt).toContain("path: /repo/builderbot");
     expect(systemPrompt).not.toContain("/repo/bbsubscriber");
   });
@@ -2527,7 +2551,7 @@ describe("useChatSessionController", () => {
     });
   });
 
-  it("queues persona-switch sends immediately with immutable FIFO selections", () => {
+  it("queues persona-switch sends immediately with immutable FIFO selections", async () => {
     useAgentStore.setState({
       personas: [
         personaFixture({
@@ -2642,6 +2666,10 @@ describe("useChatSessionController", () => {
       },
     ]);
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
   });
 
   it("preserves a newer draft when a persona-switch queue commits later", () => {

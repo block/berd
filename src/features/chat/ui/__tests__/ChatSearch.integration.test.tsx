@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -15,6 +15,13 @@ import {
   type MockHighlight,
   stubHighlightRegistry,
 } from "@/test/highlightRegistryStub";
+
+vi.mock("@/shared/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => children,
+  TooltipContent: ({ children }: { children: ReactNode }) => children,
+  TooltipProvider: ({ children }: { children: ReactNode }) => children,
+  TooltipTrigger: ({ children }: { children: ReactNode }) => children,
+}));
 
 let registry: Map<string, MockHighlight>;
 const scrollIntoViewMock = vi.fn();
@@ -346,10 +353,19 @@ function createFakeBackend(
   };
 
   const emit = (next: TranscriptSearchSnapshot) => {
-    snapshot = next;
-    for (const listener of listeners) {
-      listener(next);
+    if (
+      snapshot.total === next.total &&
+      snapshot.activeOrdinal === next.activeOrdinal &&
+      snapshot.indexing === next.indexing
+    ) {
+      return;
     }
+    act(() => {
+      snapshot = next;
+      for (const listener of listeners) {
+        listener(next);
+      }
+    });
   };
 
   const backend: TranscriptSearchBackend = {
@@ -408,6 +424,12 @@ function BackendHarness({ backend }: { backend: TranscriptSearchBackend }) {
           onClose={search.close}
         />
       ) : null}
+      <div data-testid="backend-raw-match-state">
+        {`${search.matchCount}:${search.activeMatchIndex}:${search.isIndexing}`}
+      </div>
+      <div data-testid="backend-raw-announced-state">
+        {`${search.announcedMatchCount}:${search.announcedActiveMatchIndex}:${search.announcedIsIndexing}`}
+      </div>
       <div ref={rootRef} />
     </div>
   );
@@ -441,6 +463,30 @@ describe("chat search backend delegation", () => {
     await user.keyboard("{Escape}");
     expect(backend.clear).toHaveBeenCalled();
     expect(input).not.toBeInTheDocument();
+  });
+
+  it("resets backend-owned state when the query is cleared", async () => {
+    const { backend } = createFakeBackend(3);
+    vi.mocked(backend.clear).mockImplementation(() => {});
+    renderWithProviders(<BackendHarness backend={backend} />);
+
+    const { user, input } = await openSearchAndType("needle");
+    await waitFor(() => {
+      expect(screen.getByTestId("backend-raw-match-state")).toHaveTextContent(
+        "3:0:true",
+      );
+    });
+
+    await user.clear(input);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("backend-raw-match-state")).toHaveTextContent(
+        "0:-1:false",
+      );
+      expect(
+        screen.getByTestId("backend-raw-announced-state"),
+      ).toHaveTextContent("0:-1:false");
+    });
   });
 
   it("refreshes the visible count silently while indexing, announcing once converged", async () => {

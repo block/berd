@@ -89,6 +89,43 @@ const mockController = {
   isContextUsageReady: false,
 };
 
+vi.mock("@/features/chat/hooks/useVoiceDictation", () => ({
+  useAnyVoiceDictationActive: () => false,
+  useVoiceDictation: () => ({
+    isEnabled: false,
+    isRecording: false,
+    isTranscribing: false,
+    isStarting: () => false,
+    stopRecording: vi.fn(),
+    toggleRecording: vi.fn(),
+  }),
+}));
+
+vi.mock("@/features/chat/hooks/useMentionHandlers", () => ({
+  useMentionHandlers: () => ({
+    mentionOpen: false,
+    atMentionCategory: "agents",
+    mentionSelectedIndex: 0,
+    filteredPersonas: [],
+    filteredSkills: [],
+    filteredFiles: [],
+    fileMentionsLoading: false,
+    fileMentionsError: null,
+    detectMention: vi.fn(),
+    closeMention: vi.fn(),
+    navigateMention: vi.fn(),
+    setAtMentionCategory: vi.fn(),
+    handleMentionCategoryKey: vi.fn(),
+    confirmMention: vi.fn(),
+    handleMentionConfirm: vi.fn(),
+    resolveSkillSlashCommand: vi.fn(),
+    handlePersonaMentionSelect: vi.fn(),
+    handleSkillMentionSelect: vi.fn(),
+    handleFileMentionSelect: vi.fn(),
+    skillMentionItems: [],
+  }),
+}));
+
 vi.mock("@/shared/api/acp", () => ({
   discoverAcpProviders: vi.fn().mockResolvedValue([
     { id: "goose", label: "Goose" },

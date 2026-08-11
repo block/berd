@@ -102,6 +102,8 @@ export function useChatTranscriptSearch(
   const [focusSignal, setFocusSignal] = useState(0);
   const [matchState, setMatchState] = useState(EMPTY_MATCH_STATE);
   const [announcedState, setAnnouncedState] = useState(EMPTY_MATCH_STATE);
+  const matchStateRef = useRef(EMPTY_MATCH_STATE);
+  const announcedStateRef = useRef(EMPTY_MATCH_STATE);
   const matchesRef = useRef<{ ranges: Range[]; activeIndex: number }>({
     ranges: [],
     activeIndex: -1,
@@ -115,14 +117,26 @@ export function useChatTranscriptSearch(
   const applyMatches = useCallback(
     (ranges: Range[], activeIndex: number, options: { announce: boolean }) => {
       matchesRef.current = { ranges, activeIndex };
-      const next = (previous: MatchState): MatchState =>
-        previous.count === ranges.length &&
-        previous.activeIndex === activeIndex &&
-        !previous.indexing
-          ? previous
-          : { count: ranges.length, activeIndex, indexing: false };
-      setMatchState(next);
-      if (options.announce) {
+      const next = {
+        count: ranges.length,
+        activeIndex,
+        indexing: false,
+      };
+      if (
+        matchStateRef.current.count !== next.count ||
+        matchStateRef.current.activeIndex !== next.activeIndex ||
+        matchStateRef.current.indexing
+      ) {
+        matchStateRef.current = next;
+        setMatchState(next);
+      }
+      if (
+        options.announce &&
+        (announcedStateRef.current.count !== next.count ||
+          announcedStateRef.current.activeIndex !== next.activeIndex ||
+          announcedStateRef.current.indexing)
+      ) {
+        announcedStateRef.current = next;
         setAnnouncedState(next);
       }
       paintTranscriptSearchHighlights(ranges, activeIndex);
@@ -135,18 +149,26 @@ export function useChatTranscriptSearch(
   // async remainder (indexing, streaming) without announcing.
   const adoptBackendSnapshot = useCallback(
     (snapshot: TranscriptSearchSnapshot, announce: boolean) => {
-      const next = (previous: MatchState): MatchState =>
-        previous.count === snapshot.total &&
-        previous.activeIndex === snapshot.activeOrdinal &&
-        previous.indexing === snapshot.indexing
-          ? previous
-          : {
-              count: snapshot.total,
-              activeIndex: snapshot.activeOrdinal,
-              indexing: snapshot.indexing,
-            };
-      setMatchState(next);
-      if (announce) {
+      const next: MatchState = {
+        count: snapshot.total,
+        activeIndex: snapshot.activeOrdinal,
+        indexing: snapshot.indexing,
+      };
+      if (
+        matchStateRef.current.count !== next.count ||
+        matchStateRef.current.activeIndex !== next.activeIndex ||
+        matchStateRef.current.indexing !== next.indexing
+      ) {
+        matchStateRef.current = next;
+        setMatchState(next);
+      }
+      if (
+        announce &&
+        (announcedStateRef.current.count !== next.count ||
+          announcedStateRef.current.activeIndex !== next.activeIndex ||
+          announcedStateRef.current.indexing !== next.indexing)
+      ) {
+        announcedStateRef.current = next;
         setAnnouncedState(next);
       }
     },

@@ -1,4 +1,9 @@
-import { useState, type ComponentProps, type ReactElement } from "react";
+import {
+  useState,
+  type ComponentProps,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
@@ -32,6 +37,13 @@ const designSystemExplorer = vi.hoisted(() => ({
   isEnabled: vi.fn(() => false),
 }));
 const sidebarChatRowRender = vi.hoisted(() => vi.fn());
+
+vi.mock("@/shared/ui/tooltip", () => ({
+  Tooltip: ({ children }: { children: ReactNode }) => children,
+  TooltipContent: ({ children }: { children: ReactNode }) => children,
+  TooltipProvider: ({ children }: { children: ReactNode }) => children,
+  TooltipTrigger: ({ children }: { children: ReactNode }) => children,
+}));
 
 vi.mock("@/features/providers/hooks/useAgentUpdatesAvailable", () => ({
   useAgentUpdatesAvailable: () => false,
@@ -197,7 +209,10 @@ function mockElementRect(element: Element, top: number, bottom: number) {
 }
 
 async function waitForAnimationFrame() {
-  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  await act(
+    () =>
+      new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+  );
 }
 
 function attachScrollTo(element: HTMLElement) {

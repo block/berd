@@ -1,13 +1,14 @@
 import type { ReactNode, Ref } from "react";
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   TopBarActionsProvider,
   useTopBarActions,
@@ -87,6 +88,24 @@ vi.mock("motion/react", () => {
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: mocks.t }),
+}));
+
+vi.mock(
+  "@/features/voice-conversation/hooks/useVoiceConversationController",
+  () => ({
+    useVoiceConversationController: () => ({
+      lifecycle: "stopped",
+      uiState: "off",
+      microphoneMuted: false,
+      start: vi.fn(),
+      stop: vi.fn(),
+      toggleMicrophone: vi.fn(),
+    }),
+  }),
+);
+
+vi.mock("@/shared/artifacts/useResolvedArtifactRoot", () => ({
+  useResolvedArtifactRoot: () => null,
 }));
 
 // Deterministic find-shortcut modifier across dev machines and CI.
@@ -365,6 +384,10 @@ function chatSessionWithWorkingDir(workingDir: string): ChatSession {
 }
 
 describe("ChatView MCP app messaging", () => {
+  afterEach(() => {
+    act(() => cleanup());
+  });
+
   beforeEach(() => {
     mocks.messageTimelineSpy.mockClear();
     mocks.chatInputSpy.mockClear();

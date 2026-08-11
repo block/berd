@@ -126,13 +126,14 @@ describe("App", () => {
     return { promise, resolve };
   }
 
-  it("prevents default window navigation when files are dragged into the app", () => {
+  it("prevents default window navigation when files are dragged into the app", async () => {
     vi.stubGlobal(
       "DragEvent",
       window.DragEvent ?? class DragEvent extends Event {},
     );
 
     renderApp();
+    await waitFor(() => expect(mocks.getAuthStatus).toHaveBeenCalled());
 
     const dragOverEvent = new DragEvent("dragover", {
       bubbles: true,

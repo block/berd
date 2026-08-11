@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useLayoutEffect } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -79,12 +85,14 @@ describe("LoginView", () => {
   });
 
   it("does not overwrite a user edit during the initial auth org sync", async () => {
-    render(
-      <>
-        {loginView(loggedOutStatus("tes"))}
-        <EditOrgBeforePassiveEffects value="test" />
-      </>,
-    );
+    await act(async () => {
+      render(
+        <>
+          {loginView(loggedOutStatus("tes"))}
+          <EditOrgBeforePassiveEffects value="test" />
+        </>,
+      );
+    });
 
     expect(screen.getByLabelText("Organization")).toHaveValue("test");
     await userEvent.click(screen.getByRole("button", { name: "Log In" }));

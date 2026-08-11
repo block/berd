@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -61,7 +61,9 @@ vi.mock("@/shared/theme/ThemeProvider", () => ({
 async function loadMainAt(search: string) {
   window.history.replaceState({}, "", `/${search}`);
   document.body.innerHTML = '<div id="root"></div>';
-  await import("./main");
+  await act(async () => {
+    await import("./main");
+  });
 }
 
 describe("main entrypoint telemetry startup", () => {

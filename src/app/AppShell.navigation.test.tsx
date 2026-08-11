@@ -2,6 +2,7 @@ import { getModelSelectionIntent } from "@/features/chat/model-selection/modelSe
 import { beginModelSelectionIntent } from "@/features/chat/model-selection/modelSelectionIntent";
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -11,7 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { i18n } from "@/shared/i18n";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { getAppNavigationController } from "@/features/berdctl/navigation";
 import { resetAgentBuilderSourceLifecycleForTests } from "@/features/agents/lib/agentBuilderSourceLifecycle";
@@ -480,6 +481,26 @@ vi.mock("@/shared/api/pathResolver", () => ({
     mockCheckDirectoriesExist(...args),
 }));
 
+vi.mock("@/features/chat/hooks/useMentionHandlers", () => ({
+  useMentionHandlers: () => ({
+    mentionOpen: false,
+    atMentionCategory: "agents",
+    mentionSelectedIndex: 0,
+    filteredPersonas: [],
+    filteredSkills: [],
+    filteredFiles: [],
+    fileMentionsLoading: false,
+    fileMentionsError: null,
+    detectMention: vi.fn(),
+    closeMention: vi.fn(),
+    navigateMention: vi.fn(),
+    setAtMentionCategory: vi.fn(),
+    handleMentionCategoryKey: vi.fn(),
+    confirmMention: vi.fn(),
+    handleMentionConfirm: vi.fn(),
+  }),
+}));
+
 vi.mock("@/shared/api/system", () => ({
   getHomeDir: vi.fn().mockResolvedValue("/Users/test"),
   pathExists: (...args: unknown[]) => mockPathExists(...args),
@@ -823,6 +844,8 @@ describe("AppShell global navigation", () => {
       }),
     ).toBe(false);
   });
+  afterEach(cleanup);
+
   beforeEach(() => {
     resetHomeWidgetStoreForTests();
     mockRepairManagedGooseModelSelection.mockReset();
@@ -1639,11 +1662,13 @@ describe("AppShell global navigation", () => {
     expect(screen.queryByTestId("pane-jump-overlay")).not.toBeInTheDocument();
   });
 
-  it("starts pane jump mode from the main composer", () => {
+  it("starts pane jump mode from the main composer", async () => {
     mockVisibleRegionRects();
     renderAppShell();
 
-    screen.getByPlaceholderText("Start a conversation").focus();
+    await act(async () => {
+      screen.getByPlaceholderText("Start a conversation").focus();
+    });
     fireEvent.keyDown(screen.getByPlaceholderText("Start a conversation"), {
       key: ";",
       ctrlKey: true,
@@ -2114,10 +2139,13 @@ describe("AppShell global navigation", () => {
     });
     renderAppShell();
 
-    const outcome = await getAppNavigationController().archiveSession(
-      "session-1",
-      "discard",
-    );
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await getAppNavigationController().archiveSession(
+        "session-1",
+        "discard",
+      );
+    });
 
     expect(outcome).toEqual({ ok: true });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -2362,10 +2390,13 @@ describe("AppShell global navigation", () => {
     renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Open session 1" }));
-    const outcome = await getAppNavigationController().archiveSession(
-      "session-1",
-      "confirm",
-    );
+    let outcome: unknown;
+    await act(async () => {
+      outcome = await getAppNavigationController().archiveSession(
+        "session-1",
+        "confirm",
+      );
+    });
 
     expect(outcome).toEqual({
       ok: true,
@@ -2397,17 +2428,21 @@ describe("AppShell global navigation", () => {
     });
     renderAppShell();
 
-    const outcome = getAppNavigationController().archiveSession(
-      "session-1",
-      "reject",
-    );
+    let outcome!: Promise<unknown>;
+    act(() => {
+      outcome = getAppNavigationController().archiveSession(
+        "session-1",
+        "reject",
+      );
+    });
     await waitFor(() => {
       expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
     });
 
-    act(() => {
+    await act(async () => {
       useChatStore.getState().setChatState("session-1", "thinking");
       resolveArchive();
+      await outcome;
     });
 
     await expect(outcome).resolves.toEqual({
@@ -2798,24 +2833,26 @@ describe("AppShell global navigation", () => {
     expect(record?.kind).toBe("transport-ready");
     expect(record?.recordId).toEqual(expect.any(String));
 
-    useChatSessionStore
-      .getState()
-      .patchSession("created-session", { personaId: "later-session-persona" });
-    expect(
-      chat.deferTransportReadyMessage(
-        "created-session",
-        record?.recordId ?? "missing",
-        { type: "compaction", status: "pending" },
-      ),
-    ).toBe(true);
-    expect(
-      useChatStore
-        .getState()
-        .releaseDeferredMessage(
+    act(() => {
+      useChatSessionStore.getState().patchSession("created-session", {
+        personaId: "later-session-persona",
+      });
+      expect(
+        chat.deferTransportReadyMessage(
           "created-session",
           record?.recordId ?? "missing",
+          { type: "compaction", status: "pending" },
         ),
-    ).toBe(true);
+      ).toBe(true);
+      expect(
+        useChatStore
+          .getState()
+          .releaseDeferredMessage(
+            "created-session",
+            record?.recordId ?? "missing",
+          ),
+      ).toBe(true);
+    });
 
     expect(
       useChatStore.getState().queuedMessageBySession["created-session"]?.[0],
@@ -3224,7 +3261,7 @@ describe("AppShell global navigation", () => {
       });
       expect(mockAcpSetSessionConfigOption).toHaveBeenCalled();
 
-      act(() => {
+      await act(async () => {
         vi.advanceTimersByTime(220);
       });
 
@@ -3233,7 +3270,9 @@ describe("AppShell global navigation", () => {
         "session-1",
       );
     } finally {
-      configUpdate.resolve({});
+      await act(async () => {
+        configUpdate.resolve({});
+      });
       vi.useRealTimers();
     }
   });
@@ -3500,7 +3539,7 @@ describe("AppShell global navigation", () => {
     expect(useChatSessionStore.getState().sessions).toHaveLength(1);
     expect(mockAcpCreateSession).toHaveBeenCalledTimes(1);
 
-    act(() => {
+    await act(async () => {
       pendingSession.resolve({ sessionId: "created-session" });
     });
   });
@@ -4493,11 +4532,13 @@ describe("AppShell global navigation", () => {
     });
     const user = userEvent.setup();
     renderAppShell();
-    useSessionWindowStore
-      .getState()
-      .setSnapshot([
-        { sessionId: "session-1", windowLabel: "session-session-1" },
-      ]);
+    await act(async () => {
+      useSessionWindowStore
+        .getState()
+        .setSnapshot([
+          { sessionId: "session-1", windowLabel: "session-session-1" },
+        ]);
+    });
 
     await user.click(screen.getByRole("button", { name: "Search" }));
     const search = screen.getByRole("textbox", { name: "Universal search" });

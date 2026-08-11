@@ -12,6 +12,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
 import { listSkills } from "@/features/skills/api/skills";
 import { GlobalComposerPill } from "./GlobalComposerPill";
 import { resetVoiceDictationShortcutControllerForTests } from "@/features/chat/lib/voiceDictationShortcutController";
@@ -23,6 +24,7 @@ const mockNormalizeImageBase64 = vi.fn();
 const mockSearchFilesForMentions = vi.fn();
 const mockResizeImage = vi.fn();
 const mockGetModelsForAgent = vi.fn();
+const pendingMentionLoad = new Promise<never>(() => {});
 const mockRefreshAllModelProviders = vi.fn();
 const mockRefreshAgentProviderStatus = vi.fn();
 const mockProviderModelsState = {
@@ -54,7 +56,7 @@ vi.mock("@/shared/api/system", () => ({
   inspectAttachmentPaths: (paths: string[]) =>
     mockInspectAttachmentPaths(paths),
   readImageAttachment: (path: string) => mockReadImageAttachment(path),
-  getHomeDir: vi.fn().mockResolvedValue("/Users/wesb"),
+  getHomeDir: vi.fn(() => pendingMentionLoad),
   searchFilesForMentions: (input: {
     roots: string[];
     query: string;
@@ -236,7 +238,7 @@ describe("GlobalComposerPill", () => {
     mockSearchFilesForMentions.mockReset();
     mockResizeImage.mockReset();
     vi.mocked(listSkills).mockReset();
-    vi.mocked(listSkills).mockResolvedValue([]);
+    vi.mocked(listSkills).mockImplementation(() => pendingMentionLoad);
     mockGetModelsForAgent.mockReset();
     mockGetModelsForAgent.mockReturnValue([]);
     mockRefreshAllModelProviders.mockReset();
@@ -266,6 +268,9 @@ describe("GlobalComposerPill", () => {
     delete window.__TAURI_INTERNALS__;
     localStorage.clear();
     localStorage.setItem("goose:defaultProvider", "goose");
+    useDefaultProviderReadinessStore.setState({
+      readiness: { status: "ready", providerId: "goose" },
+    });
     useAgentStore.setState({
       personas: [],
       providers: [
@@ -554,7 +559,7 @@ describe("GlobalComposerPill", () => {
         y: 10,
         toJSON: () => ({}),
       }) as DOMRect;
-    input.blur();
+    act(() => input.blur());
     expect(input).not.toHaveFocus();
 
     const wasNotPrevented = fireEvent.keyDown(document.body, {

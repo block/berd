@@ -311,8 +311,12 @@ describe("ProvidersSettings", () => {
     ).toEqual(runtimeDatabricks);
   });
 
-  it("does not show the restart banner for provider credential changes", () => {
+  it("does not show the restart banner for provider credential changes", async () => {
     renderProviders(<ProvidersSettings />);
+
+    await waitFor(() => {
+      expect(mocks.listCustomProviders).toHaveBeenCalledTimes(1);
+    });
 
     expect(
       screen.queryByText(/restart to apply credential changes/i),

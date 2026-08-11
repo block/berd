@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -184,6 +185,7 @@ describe("MessageBubble", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
     restoreScrollHeight();
     useProviderCatalogStore.getState().reset();

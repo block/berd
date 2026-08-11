@@ -152,14 +152,21 @@ function usePrefersReducedMotion() {
     () => getReducedMotionMediaQuery()?.matches ?? false,
   );
 
+  const prefersReducedMotionRef = useRef(prefersReducedMotion);
+
   useEffect(() => {
     const mediaQuery = getReducedMotionMediaQuery();
     if (!mediaQuery) {
       return;
     }
 
-    const handleChange = () => setPrefersReducedMotion(mediaQuery.matches);
-    handleChange();
+    const handleChange = () => {
+      prefersReducedMotionRef.current = mediaQuery.matches;
+      setPrefersReducedMotion(mediaQuery.matches);
+    };
+    if (mediaQuery.matches !== prefersReducedMotionRef.current) {
+      handleChange();
+    }
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
   }, []);

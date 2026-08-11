@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ComponentProps } from "react";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -60,6 +60,19 @@ const {
     refreshRuntimeConfig: vi.fn(),
     setFakeRuntimeConfig: vi.fn(),
   },
+}));
+
+vi.mock("@/shared/artifacts/useArtifactRootPreference", () => ({
+  useArtifactRootPreference: () => ({
+    rootPath: "~/goose artifacts",
+    customRootPath: null,
+    defaultRootPath: "~/goose artifacts",
+    hasCustomRoot: false,
+    setRootPath: async (path: string) => {
+      localStorage.setItem("goose:artifact-root-path", path);
+    },
+    resetRootPath: vi.fn().mockResolvedValue(undefined),
+  }),
 }));
 
 vi.mock("@/shared/lib/platform", () => ({
@@ -956,12 +969,20 @@ describe("GeneralSettings appearance section", () => {
       .mockReturnValueOnce(currentDisabled.promise);
     renderGeneralSettings();
 
-    const firstRefresh = useDistroStore.getState().refresh();
-    const secondRefresh = useDistroStore.getState().refresh();
-    currentDisabled.resolve({ present: false, kgooseConfigured: false });
-    await secondRefresh;
-    staleSuccess.resolve({ present: false, kgooseConfigured: true });
-    await firstRefresh;
+    let firstRefresh!: ReturnType<
+      typeof useDistroStore.getState
+    >["refresh"] extends () => infer Result
+      ? Result
+      : never;
+    let secondRefresh!: typeof firstRefresh;
+    await act(async () => {
+      firstRefresh = useDistroStore.getState().refresh();
+      secondRefresh = useDistroStore.getState().refresh();
+      currentDisabled.resolve({ present: false, kgooseConfigured: false });
+      await secondRefresh;
+      staleSuccess.resolve({ present: false, kgooseConfigured: true });
+      await firstRefresh;
+    });
 
     expect(screen.getByTestId("voice-dictation-capability")).toHaveTextContent(
       "false",
@@ -979,12 +1000,16 @@ describe("GeneralSettings appearance section", () => {
       .mockReturnValueOnce(staleFailure.promise)
       .mockReturnValueOnce(currentEnabled.promise);
 
-    const thirdRefresh = useDistroStore.getState().refresh();
-    const fourthRefresh = useDistroStore.getState().refresh();
-    currentEnabled.resolve({ present: false, kgooseConfigured: true });
-    await fourthRefresh;
-    staleFailure.reject(new Error("stale failure"));
-    await expect(thirdRefresh).rejects.toThrow("stale failure");
+    let thirdRefresh!: typeof firstRefresh;
+    let fourthRefresh!: typeof firstRefresh;
+    await act(async () => {
+      thirdRefresh = useDistroStore.getState().refresh();
+      fourthRefresh = useDistroStore.getState().refresh();
+      currentEnabled.resolve({ present: false, kgooseConfigured: true });
+      await fourthRefresh;
+      staleFailure.reject(new Error("stale failure"));
+      await expect(thirdRefresh).rejects.toThrow("stale failure");
+    });
 
     expect(screen.getByTestId("voice-dictation-capability")).toHaveTextContent(
       "true",

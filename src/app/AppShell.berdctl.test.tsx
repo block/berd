@@ -550,10 +550,11 @@ describe("AppShell berdctl integration", () => {
       expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
     });
 
-    act(() => {
+    await act(async () => {
       useChatSessionStore.getState().setActiveSession("session-2");
       useChatStore.getState().setActiveSession("session-2");
       resolveArchive();
+      await outcome;
     });
 
     await expect(outcome).resolves.toEqual({ ok: true });

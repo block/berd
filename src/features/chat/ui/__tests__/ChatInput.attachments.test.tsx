@@ -10,6 +10,43 @@ import {
 import userEvent from "@testing-library/user-event";
 import { ChatInput } from "./chatInputTestUtils";
 
+vi.mock("@/features/chat/hooks/useVoiceDictation", () => ({
+  useAnyVoiceDictationActive: () => false,
+  useVoiceDictation: () => ({
+    isEnabled: false,
+    isRecording: false,
+    isTranscribing: false,
+    isStarting: () => false,
+    stopRecording: vi.fn(),
+    toggleRecording: vi.fn(),
+  }),
+}));
+
+vi.mock("@/features/chat/hooks/useMentionHandlers", () => ({
+  useMentionHandlers: () => ({
+    mentionOpen: false,
+    atMentionCategory: "agents",
+    mentionSelectedIndex: 0,
+    filteredPersonas: [],
+    filteredSkills: [],
+    filteredFiles: [],
+    fileMentionsLoading: false,
+    fileMentionsError: null,
+    skillMentionItems: [],
+    detectMention: vi.fn(),
+    closeMention: vi.fn(),
+    navigateMention: vi.fn(),
+    setAtMentionCategory: vi.fn(),
+    handleMentionCategoryKey: vi.fn(),
+    confirmMention: vi.fn(),
+    handleMentionConfirm: vi.fn(),
+    resolveSkillSlashCommand: vi.fn(),
+    handlePersonaMentionSelect: vi.fn(),
+    handleSkillMentionSelect: vi.fn(),
+    handleFileMentionSelect: vi.fn(),
+  }),
+}));
+
 vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
   useAgentProviderStatus: () => ({
     readyAgentIds: new Set(["goose", "claude-acp", "codex-acp"]),
