@@ -721,6 +721,12 @@ describe("verify-release-ref", () => {
     expect(git(["tag", "--no-sign", "v1.2.3"]).status).toBe(0);
     expect(git(["remote", "add", "origin", remote]).status).toBe(0);
     expect(git(["push", "origin", "HEAD", "refs/tags/v1.2.3"]).status).toBe(0);
+    const verifyEnv = {
+      ...process.env,
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GITHUB_EVENT_NAME: "push",
+      GITHUB_REF: "refs/tags/v1.2.3",
+    };
 
     const result = spawnSync(
       resolve(repo, "scripts/release/github/verify-release-ref.sh"),
@@ -728,7 +734,7 @@ describe("verify-release-ref", () => {
       {
         cwd: checkout,
         encoding: "utf8",
-        env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" },
+        env: verifyEnv,
       },
     );
     expect(result.status, result.stderr).toBe(0);
@@ -741,7 +747,7 @@ describe("verify-release-ref", () => {
       {
         cwd: checkout,
         encoding: "utf8",
-        env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null" },
+        env: verifyEnv,
       },
     );
     expect(mismatch.status).not.toBe(0);
