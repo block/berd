@@ -285,6 +285,7 @@ export async function acpSteerMessage(
     "assistantPrompt" | "goose" | "images"
   > = {},
 ): Promise<AcpSteerResponse> {
+  sessionRegistry.requireSessionInvocationSelection(sessionId);
   const { assistantPrompt, goose, images } = options;
   const content: ContentBlock[] = [];
   const assistantText = assistantPrompt?.trim();

@@ -36,7 +36,7 @@ async function importRegistry() {
 
 async function importPreparedRegistry(
   providerId = "codex-acp",
-  modelId?: string,
+  modelId: string | undefined = "default-model",
 ) {
   const registry = await importRegistry();
   registry.registerPreparedSession(
@@ -273,6 +273,36 @@ describe("applySessionModel", () => {
       "gpt-5.6",
       noRequestModelContext("openai"),
     );
+  });
+
+  it("blocks prompting when preparation has no acknowledged model", async () => {
+    const registry = await importRegistry();
+    registry.registerPreparedSession("session-1", "codex-acp", "/project");
+    const prompt = vi.fn().mockResolvedValue("complete");
+
+    await expect(
+      registry.runPreparedSessionPrompt("session-1", prompt),
+    ).rejects.toThrow("configured provider and model");
+
+    expect(registry.isSessionPrepared("session-1")).toBe(true);
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("admits prompting after provider preparation acknowledges a model", async () => {
+    const registry = await importRegistry();
+    registry.registerPreparedSession("session-1", "openai", "/project");
+    mockSetProvider.mockResolvedValueOnce(
+      modelConfigResponse("gpt-5.5", "GPT-5.5"),
+    );
+    const prompt = vi.fn().mockResolvedValue("complete");
+
+    await registry.prepareSession("session-1", "anthropic", "/project");
+
+    await expect(
+      registry.runPreparedSessionPrompt("session-1", prompt),
+    ).resolves.toBe("complete");
+    expect(registry.isSessionPrepared("session-1")).toBe(true);
+    expect(prompt).toHaveBeenCalledWith("anthropic");
   });
 
   it("does not time out a long-running prompt or admit config work mid-turn", async () => {

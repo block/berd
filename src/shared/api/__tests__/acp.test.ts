@@ -14,6 +14,7 @@ const mockNewSession = vi.fn();
 const mockSetProvider = vi.fn();
 const mockSetModel = vi.fn();
 const mockPrompt = vi.fn();
+const mockSteerSession = vi.fn();
 const mockAppendSessionSystemPrompt = vi.fn();
 const mockForkSession = vi.fn();
 const mockRenameSession = vi.fn();
@@ -118,6 +119,7 @@ vi.mock("../acpApi", () => ({
     mockAppendSessionSystemPrompt(...args),
   setModel: (...args: unknown[]) => mockSetModel(...args),
   setProvider: (...args: unknown[]) => mockSetProvider(...args),
+  steerSession: (...args: unknown[]) => mockSteerSession(...args),
   listSessions: vi.fn(),
   loadSession: (...args: unknown[]) => mockLoadSession(...args),
   newSession: (...args: unknown[]) => mockNewSession(...args),
@@ -146,6 +148,29 @@ vi.mock("../sessionSearch", () => ({
   searchSessionsViaExports: vi.fn(),
 }));
 
+describe("acpSteerMessage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("blocks transport when the prepared session has no acknowledged model", async () => {
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSteerMessage } = await import("../acp");
+    sessionRegistry.registerPreparedSession(
+      "acp-session-steer-missing-model",
+      "goose",
+      "/tmp/project",
+    );
+
+    await expect(
+      acpSteerMessage("acp-session-steer-missing-model", "run-1", "more"),
+    ).rejects.toThrow("configured provider and model");
+
+    expect(mockSteerSession).not.toHaveBeenCalled();
+  });
+});
+
 describe("acpSendMessage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -156,6 +181,23 @@ describe("acpSendMessage", () => {
     localStorage.removeItem(STYLE_GUIDELINES_STORAGE_KEY);
   });
 
+  it("blocks transport when the prepared session has no acknowledged model", async () => {
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+    sessionRegistry.registerPreparedSession(
+      "acp-session-missing-model",
+      "goose",
+      "/tmp/project",
+    );
+
+    await expect(
+      acpSendMessage("acp-session-missing-model", "hello"),
+    ).rejects.toThrow("configured provider and model");
+
+    expect(mockAppendSessionSystemPrompt).not.toHaveBeenCalled();
+    expect(mockPrompt).not.toHaveBeenCalled();
+  });
+
   it("reports dispatch only after ACP setup reaches the transport boundary", async () => {
     const sessionRegistry = await import("../acpSessionRegistry");
     const { acpSendMessage } = await import("../acp");
@@ -164,6 +206,7 @@ describe("acpSendMessage", () => {
       "acp-session-dispatch-boundary",
       "goose",
       "/tmp/project",
+      "test-model",
     );
     mockAppendSessionSystemPrompt.mockRejectedValueOnce(
       new Error("ACP setup failed"),
@@ -193,6 +236,7 @@ describe("acpSendMessage", () => {
       "acp-session-dispatched",
       "goose",
       "/tmp/project",
+      "test-model",
     );
 
     const send = acpSendMessage("acp-session-dispatched", "hello", {
@@ -219,6 +263,7 @@ describe("acpSendMessage", () => {
       sessionId,
       providerId,
       "/tmp/project",
+      "test-model",
     );
 
     await acpSendMessage(sessionId, "hello", {
@@ -260,6 +305,7 @@ describe("acpSendMessage", () => {
       "acp-session-default-style",
       "goose",
       "/tmp/project",
+      "test-model",
     );
 
     await acpSendMessage("acp-session-default-style", "hello", {
@@ -290,6 +336,7 @@ describe("acpSendMessage", () => {
       "acp-session-empty-style",
       "goose",
       "/tmp/project",
+      "test-model",
     );
 
     await acpSendMessage("acp-session-empty-style", "hello", {
@@ -314,6 +361,7 @@ describe("acpSendMessage", () => {
       "acp-session-preamble",
       "goose",
       "/tmp/project",
+      "test-model",
     );
 
     await acpSendMessage("acp-session-preamble", "hello", {});
@@ -337,6 +385,7 @@ describe("acpSendMessage", () => {
       "acp-session-preamble-ext",
       "claude-acp",
       "/tmp/project",
+      "test-model",
     );
 
     await acpSendMessage("acp-session-preamble-ext", "hello", {
@@ -364,6 +413,7 @@ describe("acpSendMessage", () => {
       "acp-session-preamble-only",
       "codex-acp",
       "/tmp/project",
+      "test-model",
     );
 
     await acpSendMessage("acp-session-preamble-only", "hello", {});
@@ -385,6 +435,7 @@ describe("acpSendMessage", () => {
       `acp-session-${providerId}`,
       providerId,
       "/tmp/project",
+      "test-model",
     );
 
     await acpSendMessage(`acp-session-${providerId}`, "hello", {
@@ -413,6 +464,7 @@ describe("acpSendMessage", () => {
       "acp-session-canceled-handoff",
       "claude-acp",
       "/tmp/project",
+      "test-model",
     );
     mockPrompt.mockImplementationOnce(
       (
@@ -452,6 +504,7 @@ describe("acpSendMessage", () => {
       "acp-session-codex",
       "codex-acp",
       "/tmp/project",
+      "test-model",
     );
 
     await acpSendMessage("acp-session-codex", "hello", {
@@ -480,6 +533,7 @@ describe("acpSendMessage", () => {
       "acp-session-switch",
       "claude-acp",
       "/tmp/project",
+      "test-model",
     );
 
     await acpSendMessage("acp-session-switch", "first", {
@@ -503,6 +557,7 @@ describe("acpSendMessage", () => {
       "acp-session-switch",
       "codex-acp",
       "/tmp/project",
+      "test-model",
     );
     await acpSendMessage("acp-session-switch", "third", {
       systemPrompt: "You are Starfriend.",

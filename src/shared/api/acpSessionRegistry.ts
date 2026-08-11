@@ -355,6 +355,19 @@ export function getPreparedProviderId(sessionId: string): string | undefined {
   return prepared.get(sessionId)?.executionSelection?.providerId;
 }
 
+/** Return the complete backend execution selection observed by this window. */
+export function requireSessionInvocationSelection(
+  sessionId: string,
+): AcpSessionExecutionSelection & { modelId: string } {
+  const selection = prepared.get(sessionId)?.executionSelection;
+  if (!selection?.providerId || !selection.modelId) {
+    throw new Error(
+      "Session requires a configured provider and model before prompting. Re-prepare the session after completing provider setup.",
+    );
+  }
+  return { ...selection, modelId: selection.modelId };
+}
+
 /** Run prompt setup and transport without allowing session config to interleave. */
 export function runPreparedSessionPrompt<T>(
   sessionId: string,
@@ -362,14 +375,7 @@ export function runPreparedSessionPrompt<T>(
 ): Promise<T> {
   return serializeSessionMutation(
     sessionId,
-    () => {
-      const providerId =
-        prepared.get(sessionId)?.executionSelection?.providerId;
-      if (!providerId) {
-        throw new Error("Session not prepared. Call acpPrepareSession first.");
-      }
-      return prompt(providerId);
-    },
+    () => prompt(requireSessionInvocationSelection(sessionId).providerId),
     false,
   );
 }
