@@ -18,6 +18,10 @@ export const STARTER_TASKS = [
     id: "build-agent",
     labelKey: "onboarding.starterTasks.buildAgent",
   },
+  {
+    id: "add-widget",
+    labelKey: "onboarding.starterTasks.addWidget",
+  },
 ] as const;
 
 export type StarterTask = (typeof STARTER_TASKS)[number];

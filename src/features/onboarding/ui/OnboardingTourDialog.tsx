@@ -3,8 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import tourTexture from "../assets/texture.png";
-import tourHomeImage from "../assets/tour-1-home.png";
-import tourHomeDarkImage from "../assets/tour-1-home-dark.png";
+import tourHomeImage from "../assets/tour-1.png";
+import tourHomeDarkImage from "../assets/tour-1-dark.png";
 import { ProjectArtifactPreview } from "@/features/projects/artifact/ProjectArtifactPreview";
 import type {
   ProjectArtifactInput,
@@ -120,17 +120,19 @@ export function OnboardingTourDialog({
           <DialogDescription className="max-w-[390px] leading-5 text-foreground">
             {t(`onboarding.tour.steps.${step + 1}.body`)}
           </DialogDescription>
-          {step < TOUR_STEP_COUNT - 1 ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="subtle"
-              className="mt-4 rounded-[10px] text-sm"
-              onClick={advance}
-            >
-              {t("onboarding.tour.nextAction")}
-            </Button>
-          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            variant="subtle"
+            className="mt-4 rounded-[10px] text-sm"
+            onClick={advance}
+          >
+            {t(
+              step === TOUR_STEP_COUNT - 1
+                ? "onboarding.tour.doneAction"
+                : "onboarding.tour.nextAction",
+            )}
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

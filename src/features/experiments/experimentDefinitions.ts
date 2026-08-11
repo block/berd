@@ -65,6 +65,10 @@ export const FIRST_RUN_ONBOARDING_EXPERIMENT_ID = "first-run-onboarding";
 
 export const AGENT_SHARE_CARD_EXPERIMENT_ID = "agent-share-card";
 
+export const HIDDEN_EXPERIMENT_IDS = new Set<string>([
+  FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
+]);
+
 export const EXPERIMENT_DEFINITIONS = [
   {
     id: BUILDERBOT_SURFACE_EXPERIMENT_ID,

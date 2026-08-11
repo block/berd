@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   BERDY_ONBOARDING_EXPERIMENT_ID,
   EXPERIMENT_DEFINITIONS,
-  FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
+  HIDDEN_EXPERIMENT_IDS,
   type ExperimentDefinition,
 } from "./experimentDefinitions";
 import { ExperimentConfigControls } from "./ExperimentConfigControls";
@@ -35,7 +35,6 @@ import {
 import { Switch } from "@/shared/ui/switch";
 import { STARTER_TASKS_EXPERIMENT_ID } from "./experimentDefinitions";
 import { resetAssistiveUxMoment } from "@/shared/assistive-ux/state";
-import { replayOnboarding, resetOnboarding } from "@/features/onboarding/model";
 
 interface ExperimentsSettingsProps {
   registry?: ExperimentRegistry;
@@ -60,7 +59,10 @@ export function ExperimentsSettings({
   const [resetAllConfirmationOpen, setResetAllConfirmationOpen] =
     useState(false);
   const visibleRegistry = useMemo(
-    () => getVisibleExperimentRegistry(registry),
+    () =>
+      getVisibleExperimentRegistry(registry).filter(
+        (definition) => !HIDDEN_EXPERIMENT_IDS.has(definition.id),
+      ),
     [registry],
   );
   const experiments = useExperimentList(visibleRegistry);
@@ -176,28 +178,6 @@ export function ExperimentsSettings({
                     {t("experiments.starterTasks.reset")}
                   </Button>
                 ) : null}
-                {definition.id === FIRST_RUN_ONBOARDING_EXPERIMENT_ID ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={!experiment.enabled}
-                    onClick={() => {
-                      const didEnable = setExperimentEnabled(
-                        FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
-                        true,
-                        registry,
-                      );
-                      if (!didEnable) {
-                        toast.error(t("experiments.saveError"));
-                        return;
-                      }
-                      replayOnboarding();
-                    }}
-                  >
-                    {t("experiments.firstRunOnboarding.replay")}
-                  </Button>
-                ) : null}
                 {definition.id === BERDY_ONBOARDING_EXPERIMENT_ID ? (
                   <Button
                     type="button"
@@ -257,7 +237,6 @@ export function ExperimentsSettings({
   const onboardingExperimentIds = new Set([
     STARTER_TASKS_EXPERIMENT_ID,
     BERDY_ONBOARDING_EXPERIMENT_ID,
-    FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
   ]);
   const onboardingDefinitions = visibleRegistry.filter((definition) =>
     onboardingExperimentIds.has(definition.id),
@@ -284,10 +263,6 @@ export function ExperimentsSettings({
       BERDY_ONBOARDING_EXPERIMENT_ID,
       registry,
     );
-    const previousFirstRun = getExperiment(
-      FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
-      registry,
-    );
     let resetSucceeded = false;
     try {
       const starterTasksEnabled = setExperimentEnabled(
@@ -300,17 +275,11 @@ export function ExperimentsSettings({
         true,
         registry,
       );
-      const firstRunEnabled = setExperimentEnabled(
-        FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
-        true,
-        registry,
-      );
-      if (!starterTasksEnabled || !berdyEnabled || !firstRunEnabled) {
+      if (!starterTasksEnabled || !berdyEnabled) {
         throw new Error("Unable to enable onboarding experiments");
       }
       const didReset = await resetHomeForOnboardingExperience();
       if (didReset) {
-        resetOnboarding();
         resetAssistiveUxMoment("home.starterTasks");
         window.dispatchEvent(new Event("starter-tasks-state-reset"));
         setResetAllConfirmationOpen(false);
@@ -329,18 +298,6 @@ export function ExperimentsSettings({
           setExperimentEnabled(
             STARTER_TASKS_EXPERIMENT_ID,
             previousStarterTasks.enabled,
-            registry,
-          );
-        }
-        if (previousFirstRun?.enabledSource === "auto") {
-          clearExperimentEnabledOverride(
-            FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
-            registry,
-          );
-        } else if (previousFirstRun) {
-          setExperimentEnabled(
-            FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
-            previousFirstRun.enabled,
             registry,
           );
         }
@@ -406,10 +363,7 @@ export function ExperimentsSettings({
                 </Button>
               </div>
               {onboardingDefinitions.map((definition) =>
-                renderExperimentControls(definition, "", {
-                  showResetToAuto:
-                    definition.id !== FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
-                }),
+                renderExperimentControls(definition),
               )}
             </SettingsSection>
           ) : null}

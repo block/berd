@@ -24,6 +24,7 @@ export const EMPTY_STARTER_TASK_COMPLETION: StarterTaskCompletionState = {
   "start-chat": false,
   "create-project": false,
   "build-agent": false,
+  "add-widget": false,
 };
 
 const taskIds = new Set<StarterTaskId>(STARTER_TASKS.map((task) => task.id));
@@ -74,6 +75,13 @@ export function saveStarterTaskProgress(progress: StarterTaskProgress): void {
   } catch {
     // Progress remains available for this app session when storage is unavailable.
   }
+}
+
+export function persistStarterTaskCompletion(taskId: StarterTaskId): void {
+  const progress = loadStarterTaskProgress();
+  progress.completion[taskId] = true;
+  progress.awaiting.delete(taskId);
+  saveStarterTaskProgress(progress);
 }
 
 export function clearStarterTaskProgress(): void {

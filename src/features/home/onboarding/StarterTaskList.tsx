@@ -143,7 +143,7 @@ export function StarterTaskList({
       data-mode={mode}
       style={overlayStyle}
       className={cn(
-        "h-full w-full overflow-hidden rounded-xs bg-sticky-note-blue px-4 pb-4 pt-3 text-sm text-sticky-note-foreground shadow-sticky-note",
+        "h-full w-full overflow-hidden rounded-xs bg-sticky-note-blue p-4 text-sm text-sticky-note-foreground shadow-sticky-note",
         mode === "overlay" &&
           "fixed right-4 bottom-28 z-40 max-h-[min(24rem,calc(100dvh-8rem))] h-auto w-[min(16rem,calc(100vw-2rem))] overflow-y-auto smooth-shadow-sm",
         overlayPosition && "right-auto bottom-auto",

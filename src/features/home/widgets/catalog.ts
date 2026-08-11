@@ -57,13 +57,15 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
     labelKey: "onboarding.callout.action",
     defaultSize: { width: 448, height: 180 },
     sizeBounds: {
+      // The avatar + chat bubble require the full default footprint. Keep the
+      // resize affordance for enlarging Berdy without allowing a smaller frame
+      // to clip the interactive chat content.
       minWidth: 448,
-      maxWidth: 448,
+      maxWidth: 672,
       minHeight: 180,
-      maxHeight: 180,
+      maxHeight: 270,
       lockAspectRatio: true,
     },
-    hideResizeHandle: true,
     Component: OnboardingTourWidget,
   },
   {

@@ -10,6 +10,7 @@ import {
   saveLayoutItems,
 } from "@/features/layout/api/layout";
 import { HOME_LAYOUT_REPLACE_KINDS } from "../lib/homeLayoutMapper";
+import { loadStarterTaskProgress } from "../onboarding/starterTaskProgress";
 import type { WidgetInstance } from "../widgets/types";
 import {
   resetHomeWidgetStoreForTests,
@@ -1148,6 +1149,45 @@ describe("homeWidgetStore", () => {
     expect(toast.error).toHaveBeenCalledWith(
       "home:widgetLayer.toasts.copyFailed",
     );
+  });
+
+  it("completes the widget task only after the widget save is confirmed", async () => {
+    const pendingSave = deferred<SaveItemsResult>();
+    setReadyHomeState({
+      instances: [clockWidget({ id: BACKEND_CLOCK_ID, x: 120, y: 120 })],
+    });
+    vi.mocked(saveLayoutItems).mockReturnValue(pendingSave.promise);
+
+    useHomeWidgetStore
+      .getState()
+      .addWidget("agentPin", 240, 240, { agentId: "a1" }, CANVAS_BOUNDS);
+
+    expect(loadStarterTaskProgress().completion["add-widget"]).toBe(false);
+
+    pendingSave.resolve({
+      ok: true,
+      layout: layout({
+        itemRevision: 5,
+        items: vi.mocked(saveLayoutItems).mock.calls[0][0].items,
+      }),
+    });
+    await flushMicrotasks();
+
+    expect(loadStarterTaskProgress().completion["add-widget"]).toBe(true);
+  });
+
+  it("does not complete the widget task when the widget save fails", async () => {
+    setReadyHomeState({
+      instances: [clockWidget({ id: BACKEND_CLOCK_ID, x: 120, y: 120 })],
+    });
+    vi.mocked(saveLayoutItems).mockRejectedValue(new Error("save failed"));
+
+    useHomeWidgetStore
+      .getState()
+      .addWidget("agentPin", 240, 240, { agentId: "a1" }, CANVAS_BOUNDS);
+    await flushMicrotasks();
+
+    expect(loadStarterTaskProgress().completion["add-widget"]).toBe(false);
   });
 
   it("optimistically updates actions and saves with revision and replace kinds", async () => {

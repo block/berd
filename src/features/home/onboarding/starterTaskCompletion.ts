@@ -62,5 +62,6 @@ export function deriveStarterTaskCompletion({
     "create-project":
       projectsFetched && projects.some((project) => !project.archivedAt),
     "build-agent": personasLoaded && personas.some(isUserCreatedPersona),
+    "add-widget": false,
   };
 }

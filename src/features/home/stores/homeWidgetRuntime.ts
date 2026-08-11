@@ -11,6 +11,11 @@ import {
   type LayoutConstraints,
 } from "@/features/layout/api/layout";
 import { i18n } from "@/shared/i18n";
+import { markStarterAgentPinsEligible } from "@/features/home/onboarding/starterAgents";
+import {
+  notifyHomeCameraSaveConfirmed,
+  notifyHomeCameraSaveDiscarded,
+} from "@/features/home/onboarding/homeWidgetSaveLifecycle";
 import {
   createDefaultHomeLayoutItems,
   createDefaultOnboardingWidgets,
@@ -521,6 +526,7 @@ export function createHomeWidgetRuntime({
           setReadyLayout(result.layout, generation);
           return;
         }
+        markStarterAgentPinsEligible();
 
         if (!berdyOnboardingEnabled) {
           setReadyLayout(result.layout, generation);
@@ -742,6 +748,7 @@ export function createHomeWidgetRuntime({
 
             if (!result.ok) {
               runtime.queuedCamera = null;
+              notifyHomeCameraSaveDiscarded();
               setState((current) => ({
                 ...adoptLayoutCamera(result.layout, current),
                 error: null,
@@ -757,12 +764,14 @@ export function createHomeWidgetRuntime({
                 : result.layout.camera,
               error: null,
             }));
+            if (!runtime.queuedCamera) notifyHomeCameraSaveConfirmed();
           } catch {
             if (generation !== runtime.generation) {
               break;
             }
 
             runtime.queuedCamera = null;
+            notifyHomeCameraSaveDiscarded();
             setState({ error: null });
             toast.error(i18n.t("home:widgetLayer.toasts.saveFailed"));
             break;

@@ -12,6 +12,7 @@ const labels: StarterTaskListLabels = {
     "start-chat": "Start a chat",
     "create-project": "Create a project",
     "build-agent": "Build an agent",
+    "add-widget": "Add a widget to Home",
   },
   openTask: (label) => `Open task: ${label}`,
   completedTask: (label) => `Completed task: ${label}`,
@@ -23,6 +24,7 @@ const incomplete = {
   "start-chat": false,
   "create-project": false,
   "build-agent": false,
+  "add-widget": false,
 };
 
 function renderList(
@@ -45,7 +47,7 @@ describe("StarterTaskList", () => {
   it("renders all requested tasks and selects one", () => {
     const onTaskSelect = vi.fn();
     renderList({ onTaskSelect });
-    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+    expect(screen.getAllByRole("listitem")).toHaveLength(5);
     fireEvent.click(
       screen.getByRole("button", { name: "Open task: Start a chat" }),
     );
@@ -55,7 +57,7 @@ describe("StarterTaskList", () => {
   it("omits tasks completed in an earlier onboarding flow", () => {
     renderList({ omittedTaskIds: new Set(["connect-provider"]) });
 
-    expect(screen.getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
     expect(
       screen.queryByRole("button", {
         name: "Open task: Connect an AI provider",

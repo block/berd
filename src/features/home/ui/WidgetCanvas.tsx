@@ -10,6 +10,11 @@ import { cn } from "@/shared/lib/cn";
 import { GlassButton } from "@/shared/ui/glass-button";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import {
+  consumeStarterWidgetPickerRequest,
+  hasStarterWidgetPickerRequest,
+  OPEN_STARTER_WIDGET_PICKER_EVENT,
+} from "@/features/home/onboarding/starterWidgetTask";
+import {
   hasVisibleHomeCanvasWidget,
   isHomeCanvasPointInsideViewport,
   isHomeCanvasWidgetVisible,
@@ -65,6 +70,7 @@ interface PickerState {
   worldX: number;
   worldY: number;
   side: "left" | "right";
+  focusOnOpen: boolean;
 }
 
 // We decide which side to open the picker on up front using its widest stage,
@@ -341,6 +347,7 @@ export function WidgetCanvas({
     worldX: 0,
     worldY: 0,
     side: "right",
+    focusOnOpen: false,
   });
   const devicePixelRatio = useDevicePixelRatio();
 
@@ -452,10 +459,59 @@ export function WidgetCanvas({
         worldX: worldPoint.x,
         worldY: worldPoint.y,
         side,
+        focusOnOpen: false,
       });
     },
     [canvasRef, worldPointForClientPoint],
   );
+
+  useEffect(() => {
+    const openStarterPicker = (): boolean => {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      if (!rect) return false;
+      const starterTasks = instances.find(
+        (instance) =>
+          instance.type === "stickyNote" &&
+          instance.state?.noteId === "onboarding:starter-tasks",
+      );
+      if (!starterTasks) return false;
+
+      const taskSize = widgetSizeForInstance(starterTasks);
+      const anchorWorld = {
+        x: starterTasks.x - 24,
+        y: starterTasks.y + 56,
+      };
+      const screenPoint = {
+        x: anchorWorld.x * viewport.zoom + viewport.x,
+        y: anchorWorld.y * viewport.zoom + viewport.y,
+      };
+      setPicker({
+        open: true,
+        x: screenPoint.x,
+        y: screenPoint.y,
+        worldX: anchorWorld.x,
+        worldY: starterTasks.y + taskSize.height + 96,
+        side: "left",
+        focusOnOpen: true,
+      });
+      return true;
+    };
+    const handleStarterPickerRequest = () => {
+      if (hasStarterWidgetPickerRequest() && openStarterPicker()) {
+        consumeStarterWidgetPickerRequest();
+      }
+    };
+    window.addEventListener(
+      OPEN_STARTER_WIDGET_PICKER_EVENT,
+      handleStarterPickerRequest,
+    );
+    handleStarterPickerRequest();
+    return () =>
+      window.removeEventListener(
+        OPEN_STARTER_WIDGET_PICKER_EVENT,
+        handleStarterPickerRequest,
+      );
+  }, [canvasRef, instances, viewport]);
 
   const handleCanvasPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
@@ -610,7 +666,10 @@ export function WidgetCanvas({
             ...renderedWidgetStyle({
               position: renderPosition,
               size,
-              zIndex: visuallyLiftedZ[instance.id] ?? instance.z,
+              zIndex:
+                instance.type === "onboardingTour"
+                  ? currentMaxZ + 1
+                  : (visuallyLiftedZ[instance.id] ?? instance.z),
               zoom: viewport.zoom,
             }),
             "--widget-scale": widgetScale,
@@ -751,6 +810,7 @@ export function WidgetCanvas({
         x={picker.x}
         y={picker.y}
         side={picker.side}
+        focusOnOpen={picker.focusOnOpen}
         instances={pickerInstances}
         onClose={closePicker}
         onSelect={(type, state) => {

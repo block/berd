@@ -10,15 +10,17 @@ const incomplete = {
   "start-chat": false,
   "create-project": false,
   "build-agent": false,
+  "add-widget": false,
 };
 
 describe("starter task model", () => {
-  it("defines the four requested tasks in order", () => {
+  it("defines the requested tasks in order", () => {
     expect(STARTER_TASKS.map((task) => task.id)).toEqual([
       "connect-provider",
       "start-chat",
       "create-project",
       "build-agent",
+      "add-widget",
     ]);
   });
 

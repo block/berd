@@ -62,6 +62,8 @@ interface WidgetPickerProps {
    * of the click instead of flipping across it near the right screen edge.
    */
   side?: "left" | "right";
+  /** Moves focus into stage one when opened from a keyboard-driven action. */
+  focusOnOpen?: boolean;
   instances: WidgetInstance[];
   onClose: () => void;
   onSelect: (type: string, state?: Record<string, unknown>) => void;
@@ -356,6 +358,7 @@ export function WidgetPicker({
   x,
   y,
   side = "right",
+  focusOnOpen = false,
   instances,
   onClose,
   onSelect,
@@ -537,7 +540,9 @@ export function WidgetPicker({
         onPointerDownCapture={(event) => event.stopPropagation()}
         onDoubleClickCapture={(event) => event.stopPropagation()}
         onWheelCapture={(event) => event.stopPropagation()}
-        onOpenAutoFocus={(event) => event.preventDefault()}
+        onOpenAutoFocus={(event) => {
+          if (!focusOnOpen) event.preventDefault();
+        }}
         // Transparent shell: stage 1 is just floating pills, stage 2 supplies
         // its own white card. The popover surface itself contributes no chrome.
         style={{

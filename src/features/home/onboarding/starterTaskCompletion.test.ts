@@ -46,6 +46,7 @@ describe("deriveStarterTaskCompletion", () => {
       "start-chat": true,
       "create-project": true,
       "build-agent": true,
+      "add-widget": false,
     });
   });
 

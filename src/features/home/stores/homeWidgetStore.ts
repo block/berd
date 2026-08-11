@@ -5,6 +5,15 @@ import {
   STARTER_PROJECT_ID,
   STARTER_TASKS_NOTE_ID,
 } from "@/features/home/onboarding/starterTasks";
+import { notifyStarterWidgetAdded } from "@/features/home/onboarding/starterWidgetTask";
+import {
+  notifyHomeWidgetSaveConfirmed,
+  notifyHomeWidgetSaveDiscarded,
+} from "@/features/home/onboarding/homeWidgetSaveLifecycle";
+import {
+  resetStarterHomeArrangement,
+  STARTER_HOME_LAYOUT,
+} from "@/features/home/onboarding/starterHomeLayout";
 import { getExperiment } from "@/features/experiments/experimentPreferences";
 import type {
   LayoutCamera,
@@ -178,7 +187,8 @@ interface HomeWidgetStore extends HomeWidgetState {
     y: number,
     state?: Record<string, unknown>,
     bounds?: WidgetPlacementInput,
-  ) => void;
+    options?: { notifyStarterTask?: boolean },
+  ) => boolean;
   moveWidget: (
     id: string,
     x: number,
@@ -219,6 +229,7 @@ function createHomeWidgetStore() {
     UNCHANGED_SNAPSHOT;
   let cleanUpSnapshotOnSaveDiscarded: PendingCleanUpSnapshot =
     UNCHANGED_SNAPSHOT;
+  let starterWidgetCompletionPending = false;
 
   function applyPendingCleanUpSnapshot(snapshot: PendingCleanUpSnapshot): void {
     if (snapshot === UNCHANGED_SNAPSHOT) {
@@ -247,11 +258,18 @@ function createHomeWidgetStore() {
   function handleItemSaveConfirmed(): void {
     applyPendingCleanUpSnapshot(cleanUpSnapshotOnSaveConfirmed);
     clearPendingCleanUpSaveOutcomes();
+    if (starterWidgetCompletionPending) {
+      starterWidgetCompletionPending = false;
+      notifyStarterWidgetAdded();
+    }
+    notifyHomeWidgetSaveConfirmed();
   }
 
   function handleItemSaveDiscarded(): void {
     applyPendingCleanUpSnapshot(cleanUpSnapshotOnSaveDiscarded);
     clearPendingCleanUpSaveOutcomes();
+    starterWidgetCompletionPending = false;
+    notifyHomeWidgetSaveDiscarded();
   }
 
   const runtime = createHomeWidgetRuntime({
@@ -302,14 +320,14 @@ function createHomeWidgetStore() {
           toast.error(i18n.t("home:widgetLayer.toasts.copyFailed"));
         }
       },
-      addWidget: (type, x, y, state, bounds) => {
+      addWidget: (type, x, y, state, bounds, options) => {
         if (!HOME_WIDGET_CATALOG_BY_ID[type]) {
-          return;
+          return false;
         }
 
         const current = get();
         if (!canMutateWidgets(current)) {
-          return;
+          return false;
         }
 
         const placementBounds = resolvePlacementBounds(bounds);
@@ -325,14 +343,14 @@ function createHomeWidgetStore() {
             bounds: placementBounds,
           });
           if (!withManualPlacement) {
-            return;
+            return false;
           }
 
           const added = withManualPlacement.find(
             (instance) => instance.id === id,
           );
           if (!added) {
-            return;
+            return false;
           }
 
           const nextSnapshot = [
@@ -349,10 +367,14 @@ function createHomeWidgetStore() {
             instances: next,
             cleanUpSnapshot: nextSnapshot,
           });
+          if (options?.notifyStarterTask !== false) {
+            starterWidgetCompletionPending = true;
+          }
           runtime.enqueueSave(next);
-          return;
+          return true;
         }
 
+        const previousInstances = get().instances;
         applyMutation((instances) =>
           addWidgetMutation(instances, {
             id,
@@ -363,6 +385,11 @@ function createHomeWidgetStore() {
             bounds: placementBounds,
           }),
         );
+        const added = get().instances !== previousInstances;
+        if (added && options?.notifyStarterTask !== false) {
+          starterWidgetCompletionPending = true;
+        }
+        return added;
       },
       moveWidget: (id, x, y, bounds, options) => {
         applyMutation((instances) =>
@@ -560,15 +587,16 @@ function createHomeWidgetStore() {
         const initialItemRevision = state.itemRevision;
         const initialCameraRevision = state.cameraRevision;
 
+        resetStarterHomeArrangement();
         const clock = {
           ...createDefaultClockWidget(),
-          x: -520,
-          y: -260,
+          x: STARTER_HOME_LAYOUT.clock.x,
+          y: STARTER_HOME_LAYOUT.clock.y,
         };
         const onboardingTour = {
           ...createDefaultOnboardingTourWidget(clock),
-          x: -520,
-          y: 40,
+          x: STARTER_HOME_LAYOUT.berdy.x,
+          y: STARTER_HOME_LAYOUT.berdy.y,
         };
         const nextInstances: WidgetInstance[] = [
           { ...clock, z: 1 },
@@ -576,31 +604,21 @@ function createHomeWidgetStore() {
           {
             id: crypto.randomUUID(),
             type: "stickyNote",
-            x: -20,
-            y: -260,
+            x: STARTER_HOME_LAYOUT.tasks.x,
+            y: STARTER_HOME_LAYOUT.tasks.y,
             z: 3,
-            width: 256,
-            height: 196,
+            width: STARTER_HOME_LAYOUT.tasks.width,
+            height: STARTER_HOME_LAYOUT.tasks.height,
             state: { noteId: STARTER_TASKS_NOTE_ID },
           },
           {
             id: crypto.randomUUID(),
-            type: "stickyNote",
-            x: -20,
-            y: 40,
-            z: 4,
-            width: 224,
-            height: 196,
-            state: { text: "", tone: "warm", fontSize: "md" },
-          },
-          {
-            id: crypto.randomUUID(),
             type: "onboardingProjectArtifact",
-            x: 300,
-            y: -260,
-            z: 5,
-            width: 400,
-            height: 400,
+            x: STARTER_HOME_LAYOUT.project.x,
+            y: STARTER_HOME_LAYOUT.project.y,
+            z: 4,
+            width: STARTER_HOME_LAYOUT.project.width,
+            height: STARTER_HOME_LAYOUT.project.height,
             state: {
               projectId: STARTER_PROJECT_ID,
               onboardingStarterProject: true,
@@ -610,8 +628,8 @@ function createHomeWidgetStore() {
         const expectedCamera = state.camera
           ? {
               ...state.camera,
-              centerX: 90,
-              centerY: 0,
+              centerX: 80,
+              centerY: 44,
               zoomBps: 10_000,
             }
           : null;

@@ -31,6 +31,11 @@ import {
   resetHomeWidgetStoreForTests,
   useHomeWidgetStore,
 } from "@/features/home/stores/homeWidgetStore";
+import { useStarterTasks } from "@/features/home/onboarding/StarterTasksContext";
+import {
+  hasStarterWidgetPickerRequest,
+  resetStarterWidgetPickerRequestForTests,
+} from "@/features/home/onboarding/starterWidgetTask";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
@@ -570,6 +575,7 @@ vi.mock("./ui/AppShellContent", () => ({
     onStartProjectChat,
     onStartChatWithPrompt,
   }) => {
+    const starterTasks = useStarterTasks();
     const activeView = targetLocation.view;
     const activeSettingsSection =
       targetLocation.view === "settings"
@@ -605,6 +611,12 @@ vi.mock("./ui/AppShellContent", () => ({
         <div data-testid="builderbot-route">
           {JSON.stringify(activeBuilderbotRoute)}
         </div>
+        <button
+          type="button"
+          onClick={() => starterTasks?.onTaskSelect("add-widget")}
+        >
+          Select add widget starter task
+        </button>
         <button
           type="button"
           onClick={() => onStartProjectChat?.("project-startup")}
@@ -848,6 +860,7 @@ describe("AppShell global navigation", () => {
 
   beforeEach(() => {
     resetHomeWidgetStoreForTests();
+    resetStarterWidgetPickerRequestForTests();
     mockRepairManagedGooseModelSelection.mockReset();
     mockRepairManagedGooseModelSelection.mockImplementation(
       async (selection: unknown) => selection,
@@ -4155,6 +4168,34 @@ describe("AppShell global navigation", () => {
       intent: "build-agent",
     });
     expect(useChatSessionStore.getState().isRightRailOpen).toBe(false);
+  });
+
+  it("guards the add-widget starter task against unsaved automation changes", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar automations" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Open automation builder" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Mark automation edits unsaved" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Select add widget starter task" }),
+    );
+
+    expect(
+      await screen.findByText("Unsaved automation changes"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("active-view")).toHaveTextContent("automations");
+    expect(hasStarterWidgetPickerRequest()).toBe(false);
+
+    await user.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(screen.getByTestId("active-view")).toHaveTextContent("automations");
+    expect(hasStarterWidgetPickerRequest()).toBe(false);
   });
 
   it("prompts before leaving unsaved automation builder changes", async () => {

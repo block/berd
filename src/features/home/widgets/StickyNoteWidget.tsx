@@ -438,6 +438,7 @@ export function StickyNoteWidget({
             "start-chat": t("onboarding.starterTasks.startChat"),
             "create-project": t("onboarding.starterTasks.createProject"),
             "build-agent": t("onboarding.starterTasks.buildAgent"),
+            "add-widget": t("onboarding.starterTasks.addWidget"),
           },
           openTask: (label) => t("onboarding.starterTasks.openTask", { label }),
           completedTask: (label) =>

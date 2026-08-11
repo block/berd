@@ -3,6 +3,7 @@ import {
   clearStarterTaskProgress,
   EMPTY_STARTER_TASK_COMPLETION,
   loadStarterTaskProgress,
+  persistStarterTaskCompletion,
   saveStarterTaskProgress,
   STARTER_TASK_PROGRESS_STORAGE_KEY,
 } from "./starterTaskProgress";
@@ -21,6 +22,20 @@ describe("starterTaskProgress", () => {
     expect(loadStarterTaskProgress()).toEqual({
       completion: { ...EMPTY_STARTER_TASK_COMPLETION, "start-chat": true },
       awaiting: new Set(["create-project"]),
+    });
+  });
+
+  it("durably completes a task and clears its awaiting state", () => {
+    saveStarterTaskProgress({
+      completion: EMPTY_STARTER_TASK_COMPLETION,
+      awaiting: new Set(["add-widget"]),
+    });
+
+    persistStarterTaskCompletion("add-widget");
+
+    expect(loadStarterTaskProgress()).toEqual({
+      completion: { ...EMPTY_STARTER_TASK_COMPLETION, "add-widget": true },
+      awaiting: new Set(),
     });
   });
 

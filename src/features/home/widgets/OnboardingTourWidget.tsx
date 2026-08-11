@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, ChevronLeft, X } from "lucide-react";
 import {
@@ -24,15 +24,8 @@ import {
 import type { WidgetRenderProps } from "./types";
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
 
-const LIQUID_BUBBLE_PATHS = [
-  "M -6 73 C -8 73 -10 74 -11 76 C -12 78 -11 81 -9 82 C -8 83 -7 84 -6 84 C -4 84 -2 83 -2 81 C -1 79 -2 77 -3 76 C -4 74 -5 73 -6 73 C -6 73 -6 73 -6 73 C -6 73 -6 73 -6 73 Z",
-  "M 12 51 C 3 52 -4 58 -7 67 C -10 76 -5 89 4 96 C 10 101 18 103 28 103 C 50 103 77 98 93 88 C 105 80 108 68 103 57 C 99 47 88 40 73 38 C 51 35 25 42 12 51 C 12 51 12 51 12 51 Z",
-  "M 18 15 C 6 17 -2 28 -2 43 C -2 61 1 84 14 98 C 23 107 37 110 54 110 C 100 112 169 108 209 98 C 229 93 240 82 241 67 C 243 50 235 31 220 21 C 181 -4 61 6 18 15 C 18 15 18 15 18 15 Z",
-  "M 17 2 C 7 2 0 9 0 18 C -1 43 1 72 0 94 C 0 104 8 112 18 111 C 92 113 199 110 270 112 C 281 112 288 105 288 96 C 290 73 286 39 288 17 C 289 7 281 -1 271 0 C 205 -2 78 1 17 2 Z",
-  "M 16 0 C 8 0 0 8 0 16 C 0 42 0 70 0 96 C 0 105 7 112 16 112 C 90 112 198 112 272 112 C 281 112 288 105 288 96 C 288 70 288 42 288 16 C 288 7 281 0 272 0 C 196 0 91 0 16 0 Z",
-];
-
-const SETTLED_BUBBLE_PATH = LIQUID_BUBBLE_PATHS.at(-1) ?? "";
+const SETTLED_BUBBLE_PATH =
+  "M 16 0 C 7 0 0 4 0 8 C 0 40 0 72 0 104 C 0 108 7 112 16 112 C 90 112 198 112 272 112 C 281 112 288 108 288 104 C 288 72 288 40 288 8 C 288 4 281 0 272 0 C 196 0 91 0 16 0 Z";
 
 const SWAY_X_SPRING = { stiffness: 110, damping: 12, mass: 0.85 };
 const SWAY_Y_SPRING = { stiffness: 190, damping: 24, mass: 0.7 };
@@ -85,6 +78,7 @@ export function OnboardingTourWidget({
   const { t } = useTranslation("home");
   const { enabled: alwaysShowLabel } = useHomePinLabelsPreference();
   const shouldReduceMotion = useReducedMotion();
+  const bubbleShadowId = `berdy-bubble-shadow-${useId().replace(/:/g, "")}`;
   const [isBubbleSettled, setIsBubbleSettled] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [composerOpen, setComposerOpen] = useState(false);
@@ -286,74 +280,120 @@ export function OnboardingTourWidget({
           <motion.div
             key={welcomeDismissed ? "help" : "welcome"}
             data-onboarding-tour-bubble=""
-            className="pointer-events-auto relative ml-2 w-72 text-sm text-card-foreground"
-            initial={shouldReduceMotion ? false : { opacity: 0, scale: 0.86 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={shouldReduceMotion ? undefined : { opacity: 0, scale: 0.9 }}
+            className="pointer-events-auto absolute bottom-24 left-36 w-72 text-sm text-card-foreground"
+            initial={false}
+            animate={{ opacity: 1 }}
+            exit={shouldReduceMotion ? undefined : { opacity: 0, scale: 0.96 }}
             transition={{
-              duration: shouldReduceMotion ? 0 : 0.2,
+              duration: shouldReduceMotion ? 0 : 0.28,
               ease: [0.22, 1, 0.36, 1],
             }}
             style={{
               x: swayX,
               y: swayY,
               rotate: swayRotate,
-              transformOrigin: "-8px 50%",
+              transformOrigin: "52px calc(100% + 8px)",
               willChange: shouldReduceMotion ? "auto" : "transform",
             }}
           >
             <div
               aria-hidden="true"
               data-onboarding-tour-bubble-flow=""
-              className="onboarding-tour-bubble-flow absolute inset-0 drop-shadow-[0_12px_18px_rgba(0,0,0,0.14)] dark:drop-shadow-[0_12px_18px_rgba(0,0,0,0.32)]"
+              className="onboarding-tour-bubble-flow absolute inset-0"
             >
               <motion.svg
-                data-onboarding-tour-liquid=""
-                viewBox="-16 0 304 112"
+                aria-hidden="true"
+                data-onboarding-tour-liquid-shadow=""
+                viewBox="0 0 288 112"
                 preserveAspectRatio="none"
-                className="absolute -left-4 top-0 h-full w-[calc(100%+1rem)] overflow-hidden"
+                className="absolute inset-0 size-full overflow-visible"
+                initial={shouldReduceMotion ? false : { opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{
+                  delay: shouldReduceMotion ? 0 : 0.72,
+                  duration: shouldReduceMotion ? 0 : 0.2,
+                  ease: [0.16, 1, 0.3, 1],
+                }}
               >
-                <motion.path
-                  className="fill-card"
-                  initial={
-                    shouldReduceMotion ? false : { d: LIQUID_BUBBLE_PATHS[0] }
-                  }
-                  animate={
-                    shouldReduceMotion
-                      ? { d: SETTLED_BUBBLE_PATH }
-                      : { d: LIQUID_BUBBLE_PATHS }
-                  }
-                  transition={{
-                    duration: shouldReduceMotion ? 0 : 0.55,
-                    times: [0, 0.24, 0.56, 0.82, 1],
-                    ease: "easeInOut",
-                  }}
-                  onAnimationComplete={() => setIsBubbleSettled(true)}
+                <defs>
+                  <filter
+                    id={bubbleShadowId}
+                    x="-30%"
+                    y="-30%"
+                    width="160%"
+                    height="190%"
+                    colorInterpolationFilters="sRGB"
+                  >
+                    <feGaussianBlur
+                      in="SourceAlpha"
+                      stdDeviation="9"
+                      result="blur"
+                    />
+                    <feOffset in="blur" dx="0" dy="12" result="offsetBlur" />
+                    <feFlood
+                      floodColor="rgb(0 0 0)"
+                      floodOpacity="0.14"
+                      result="shadowColor"
+                    />
+                    <feComposite
+                      in="shadowColor"
+                      in2="offsetBlur"
+                      operator="in"
+                    />
+                  </filter>
+                </defs>
+                <path
+                  className="fill-card dark:fill-sidebar-navigation-panel-bg"
+                  d={SETTLED_BUBBLE_PATH}
+                  filter={`url(#${bubbleShadowId})`}
+                />
+              </motion.svg>
+              <motion.svg
+                data-onboarding-tour-liquid=""
+                viewBox="0 0 288 112"
+                preserveAspectRatio="none"
+                className="absolute inset-0 size-full origin-bottom-left overflow-visible"
+                initial={
+                  shouldReduceMotion
+                    ? false
+                    : { opacity: 0, scaleX: 0.04, scaleY: 0.04 }
+                }
+                animate={{ opacity: 1, scaleX: 1, scaleY: 1 }}
+                transition={{
+                  delay: shouldReduceMotion ? 0 : 0.38,
+                  duration: shouldReduceMotion ? 0 : 0.62,
+                  ease: [0.16, 1, 0.3, 1],
+                }}
+                onAnimationComplete={() => setIsBubbleSettled(true)}
+              >
+                <path
+                  className="fill-card dark:fill-sidebar-navigation-panel-bg"
+                  d={SETTLED_BUBBLE_PATH}
                 />
               </motion.svg>
               <motion.div
                 data-onboarding-tour-caret-dot="small"
-                className="absolute -left-[19px] top-[calc(50%_+_4px)] size-2 origin-right rounded-full bg-card"
+                className="absolute -bottom-9 left-1 size-3 origin-top rounded-full bg-card dark:bg-sidebar-navigation-panel-bg"
                 initial={
                   shouldReduceMotion
                     ? false
-                    : { opacity: 0, scale: 0, x: -4, y: 6 }
+                    : { opacity: 0, scale: 0, x: 6, y: 4 }
                 }
                 animate={{ opacity: 1, scale: 1, x: 0, y: 0 }}
                 transition={
                   shouldReduceMotion
                     ? { duration: 0 }
                     : {
-                        type: "spring",
+                        type: "tween",
                         duration: 0.28,
-                        bounce: 0.12,
-                        delay: 0.18,
+                        delay: 0,
+                        ease: [0.16, 1, 0.3, 1],
                       }
                 }
               />
               <motion.div
                 data-onboarding-tour-caret-dot="large"
-                className="absolute -left-3 top-[calc(50%_-_10px)] size-5 origin-right rounded-full bg-card"
+                className="absolute -bottom-4 left-4 size-8 origin-top rounded-full bg-card dark:bg-sidebar-navigation-panel-bg"
                 initial={
                   shouldReduceMotion ? false : { opacity: 0, scale: 0, x: -5 }
                 }
@@ -362,49 +402,32 @@ export function OnboardingTourWidget({
                   shouldReduceMotion
                     ? { duration: 0 }
                     : {
-                        type: "spring",
-                        duration: 0.32,
-                        bounce: 0.12,
-                        delay: 0.26,
+                        type: "tween",
+                        duration: 0.34,
+                        delay: 0.16,
+                        ease: [0.16, 1, 0.3, 1],
                       }
                 }
               >
                 <span
                   data-onboarding-tour-connector-fillet="top"
-                  className="absolute -top-0.5 left-2 size-2 rounded-full bg-card"
+                  className="absolute top-2 -left-0.5 size-2 rounded-full bg-card dark:bg-sidebar-navigation-panel-bg"
                 />
                 <span
                   data-onboarding-tour-connector-fillet="bottom"
-                  className="absolute -bottom-0.5 left-2 size-2 rounded-full bg-card"
+                  className="absolute top-2 -right-0.5 size-2 rounded-full bg-card dark:bg-sidebar-navigation-panel-bg"
                 />
               </motion.div>
-              <motion.div
-                className="onboarding-tour-bubble-shell size-full rounded-2xl bg-card"
-                initial={shouldReduceMotion ? false : { opacity: 0 }}
-                animate={
-                  shouldReduceMotion ? { opacity: 1 } : { opacity: [0, 0, 1] }
-                }
-                transition={
-                  shouldReduceMotion
-                    ? { duration: 0 }
-                    : {
-                        opacity: {
-                          duration: 0.55,
-                          times: [0, 0.8, 1],
-                          ease: "easeOut",
-                        },
-                      }
-                }
-              />
             </div>
             <motion.div
-              className="onboarding-tour-bubble-content relative z-10 p-5"
+              className="onboarding-tour-bubble-content relative z-10 rounded-2xl p-5"
+              inert={!shouldReduceMotion && !isBubbleSettled ? true : undefined}
               initial={false}
               animate={{
                 opacity: shouldReduceMotion || isBubbleSettled ? 1 : 0,
               }}
               transition={{
-                duration: shouldReduceMotion ? 0 : 0.14,
+                duration: shouldReduceMotion ? 0 : 0.34,
                 ease: "easeOut",
               }}
             >
@@ -588,7 +611,7 @@ export function OnboardingTourWidget({
                     type="button"
                     variant="subtle"
                     size="sm"
-                    className="text-sm"
+                    className="text-sm shadow-none drop-shadow-none dark:bg-sidebar-accent dark:text-sidebar-accent-foreground dark:hover:bg-sidebar-accent"
                     onClick={start}
                   >
                     {t("onboarding.callout.action")}
@@ -596,29 +619,41 @@ export function OnboardingTourWidget({
                 </>
               )}
             </motion.div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
+            <motion.div
               className="absolute right-3 top-2.5 z-20"
-              aria-label={t(
-                welcomeDismissed
-                  ? "onboarding.callout.closeHelp"
-                  : "onboarding.callout.dismiss",
-              )}
-              onClick={(event) => {
-                event.stopPropagation();
-                if (welcomeDismissed) {
-                  setComposerOpen(false);
-                  setActivePreset(null);
-                  setHelpOpen(false);
-                } else {
-                  onUpdateState({ welcomeDismissed: true });
-                }
+              inert={!shouldReduceMotion && !isBubbleSettled ? true : undefined}
+              initial={false}
+              animate={{
+                opacity: shouldReduceMotion || isBubbleSettled ? 1 : 0,
+              }}
+              transition={{
+                duration: shouldReduceMotion ? 0 : 0.34,
+                ease: "easeOut",
               }}
             >
-              <X />
-            </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t(
+                  welcomeDismissed
+                    ? "onboarding.callout.closeHelp"
+                    : "onboarding.callout.dismiss",
+                )}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (welcomeDismissed) {
+                    setComposerOpen(false);
+                    setActivePreset(null);
+                    setHelpOpen(false);
+                  } else {
+                    onUpdateState({ welcomeDismissed: true });
+                  }
+                }}
+              >
+                <X />
+              </Button>
+            </motion.div>
           </motion.div>
         ) : null}
       </AnimatePresence>

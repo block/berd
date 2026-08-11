@@ -987,7 +987,7 @@ describe("WidgetCanvas", () => {
     );
   });
 
-  it("does not show a resize handle for the fixed-size onboarding widget", () => {
+  it("shows a resize handle for the onboarding widget", () => {
     renderCanvas({
       instances: [
         widget({
@@ -999,8 +999,8 @@ describe("WidgetCanvas", () => {
     });
 
     expect(
-      screen.queryByRole("button", { name: /resize take a tour/i }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: /resize take a tour/i }),
+    ).toBeInTheDocument();
   });
 
   it("clears temporary lift when resize ends without movement", async () => {

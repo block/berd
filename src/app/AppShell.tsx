@@ -255,6 +255,10 @@ import {
   STARTER_TASK_PROGRESS_STORAGE_KEY,
 } from "@/features/home/onboarding/starterTaskProgress";
 import { StarterTasksProvider } from "@/features/home/onboarding/StarterTasksContext";
+import {
+  requestStarterWidgetPicker,
+  STARTER_WIDGET_ADDED_EVENT,
+} from "@/features/home/onboarding/starterWidgetTask";
 import { STARTER_TASKS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
   recordAssistiveMomentRetired,
@@ -4693,6 +4697,30 @@ export function AppShell({
     }
   }, [renderedLocation.view, starterTasksDocked]);
 
+  useEffect(() => {
+    const handleStarterWidgetAdded = () => {
+      setStarterTasksAwaitingCompletion((awaiting) => {
+        if (!awaiting.has("add-widget")) return awaiting;
+        const next = new Set(awaiting);
+        next.delete("add-widget");
+        return next;
+      });
+      setStarterTaskOverrides((overrides) => ({
+        ...overrides,
+        "add-widget": true,
+      }));
+    };
+    window.addEventListener(
+      STARTER_WIDGET_ADDED_EVENT,
+      handleStarterWidgetAdded,
+    );
+    return () =>
+      window.removeEventListener(
+        STARTER_WIDGET_ADDED_EVENT,
+        handleStarterWidgetAdded,
+      );
+  }, []);
+
   const handleStarterTaskToggle = (taskId: StarterTaskId) => {
     setStarterTasksAwaitingCompletion((awaiting) => {
       if (!awaiting.has(taskId)) return awaiting;
@@ -4756,6 +4784,17 @@ export function AppShell({
         break;
       case "build-agent":
         agentBuilder.create();
+        break;
+      case "add-widget":
+        guardAppNavigation(() => {
+          // This task stays on Home, so keep the checklist on the canvas instead
+          // of docking it as an overlay with a redundant back arrow.
+          setStarterTasksDocked(false);
+          setActiveSession(null);
+          clearSettingsSectionUrl();
+          setActiveView("home");
+          window.setTimeout(requestStarterWidgetPicker, 0);
+        });
         break;
     }
   };
@@ -5001,6 +5040,7 @@ export function AppShell({
                       "home:onboarding.starterTasks.createProject",
                     ),
                     "build-agent": t("home:onboarding.starterTasks.buildAgent"),
+                    "add-widget": t("home:onboarding.starterTasks.addWidget"),
                   },
                   openTask: (label) =>
                     t("home:onboarding.starterTasks.openTask", { label }),

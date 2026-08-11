@@ -40,7 +40,7 @@ describe("OnboardingTourDialog", () => {
       document
         .querySelector("[data-onboarding-tour-home-image]")
         ?.getAttribute("src"),
-    ).toContain("tour-1-home-dark.png");
+    ).toContain("tour-1-dark.png");
   });
 
   it("advances through four steps and finishes", async () => {
@@ -67,7 +67,7 @@ describe("OnboardingTourDialog", () => {
       "[data-onboarding-tour-home-image]",
     );
     expect(homeImage).toBeInTheDocument();
-    expect(homeImage?.getAttribute("src")).toContain("tour-1-home.png");
+    expect(homeImage?.getAttribute("src")).toContain("tour-1.png");
     expect(homeImage).toHaveStyle({ transformOrigin: "100% 0%" });
     expect(
       document.querySelector("[data-onboarding-tour-home-frame]"),
@@ -147,10 +147,9 @@ describe("OnboardingTourDialog", () => {
       "Your project: A place for chats, files, context, and ongoing work.",
     );
 
-    expect(
-      screen.queryByRole("button", { name: "Done" }),
-    ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Finish tour" }));
+    const doneButton = screen.getByRole("button", { name: "Done" });
+    expect(doneButton).toHaveClass("bg-accent", "rounded-[10px]", "text-sm");
+    await user.click(doneButton);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 

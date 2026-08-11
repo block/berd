@@ -88,29 +88,25 @@ describe("OnboardingTourWidget", () => {
       .getByText("Welcome to Berd!")
       .closest("[data-onboarding-tour-bubble]");
 
-    expect(bubble).toHaveClass("ml-2", "text-sm");
-    const bubbleShell = bubble?.querySelector(".onboarding-tour-bubble-shell");
-    expect(bubbleShell).toBeInTheDocument();
-    expect(bubbleShell).not.toHaveClass("before:size-3");
-    expect(bubbleShell).not.toHaveClass("shadow-[var(--shadow-modal)]");
+    expect(bubble).toHaveClass("absolute", "bottom-24", "left-36", "text-sm");
+    expect(
+      bubble?.querySelector(".onboarding-tour-bubble-shell"),
+    ).not.toBeInTheDocument();
     expect(
       bubble?.querySelector("[data-onboarding-tour-bubble-flow]"),
-    ).toHaveClass("drop-shadow-[0_12px_18px_rgba(0,0,0,0.14)]");
+    ).not.toHaveClass("drop-shadow-[0_12px_18px_rgba(0,0,0,0.14)]");
+    expect(
+      bubble?.querySelector("[data-onboarding-tour-liquid-shadow] filter"),
+    ).toHaveAttribute("x", "-30%");
     expect(
       bubble?.querySelector("[data-onboarding-tour-liquid] path"),
     ).toHaveClass("fill-card");
-    expect(bubbleShell).toHaveClass("bg-card");
     expect(
       bubble?.querySelector('[data-onboarding-tour-caret-dot="small"]'),
-    ).toHaveClass("top-[calc(50%_+_4px)]", "size-2", "rounded-full");
+    ).toHaveClass("-bottom-9", "left-1", "size-3", "rounded-full");
     expect(
       bubble?.querySelector('[data-onboarding-tour-caret-dot="large"]'),
-    ).toHaveClass(
-      "-left-3",
-      "top-[calc(50%_-_10px)]",
-      "size-5",
-      "rounded-full",
-    );
+    ).toHaveClass("-bottom-4", "left-4", "size-8", "rounded-full");
     expect(
       bubble?.querySelector('[data-onboarding-tour-connector-fillet="top"]'),
     ).toHaveClass("rounded-full");
@@ -119,7 +115,10 @@ describe("OnboardingTourWidget", () => {
     ).toHaveClass("rounded-full");
     expect(
       bubble?.querySelector(".onboarding-tour-bubble-content"),
-    ).toBeInTheDocument();
+    ).not.toHaveClass(
+      "drop-shadow-[0_12px_18px_rgba(0,0,0,0.14)]",
+      "dark:drop-shadow-[0_12px_18px_rgba(0,0,0,0.32)]",
+    );
     expect(screen.getByText("Welcome to Berd!")).toHaveClass("pr-5");
     expect(
       bubble?.querySelector(".onboarding-tour-bubble-content"),
@@ -127,6 +126,10 @@ describe("OnboardingTourWidget", () => {
     expect(screen.getByRole("button", { name: "Take a tour" })).toHaveClass(
       "bg-accent",
       "text-sm",
+      "shadow-none",
+      "drop-shadow-none",
+      "dark:bg-sidebar-accent",
+      "dark:text-sidebar-accent-foreground",
     );
     expect(
       screen.queryByText("I’m here to answer any questions you might have."),
@@ -213,9 +216,9 @@ describe("OnboardingTourWidget", () => {
       "group-focus-visible:opacity-100",
       "motion-reduce:transition-none",
     );
-    expect(screen.getByRole("button", { name: "Close help" })).toHaveClass(
-      "right-3",
-    );
+    expect(
+      screen.getByRole("button", { name: "Close help" }).parentElement,
+    ).toHaveClass("right-3");
     expect(
       screen.getByRole("button", { name: /How do I start a project/ }),
     ).toBeInTheDocument();

@@ -14,6 +14,7 @@
       "startChat": "Inicia un chat",
       "createProject": "Ponle nombre a tu primer proyecto",
       "buildAgent": "Crea un agente",
+      "addWidget": "Añade un widget a Inicio",
       "openTask": "Abrir tarea: {{label}}",
       "completedTask": "Tarea completada: {{label}}",
       "checkTask": "Marcar {{label}}",
