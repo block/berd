@@ -213,6 +213,9 @@ function WorkRail({
 }) {
   const isActive = status === "pending" || status === "in_progress";
   const colorClassName = getRailColor(status, primary);
+  // The bullet circle masks the rail spine behind it. It must match the
+  // transcript surface (bg-card) — bg-background diverges from it in dark
+  // mode and shows as a clipped dark disc (BOT-1599).
   return (
     <div
       aria-hidden
@@ -223,7 +226,7 @@ function WorkRail({
       ) : null}
       <div
         className={cn(
-          "relative z-10 mt-0.5 flex size-5 items-center justify-center rounded-full bg-background ring-2 ring-background",
+          "relative z-10 mt-0.5 flex size-5 items-center justify-center rounded-full bg-card ring-2 ring-card",
           colorClassName,
           isActive && "animate-pulse",
         )}

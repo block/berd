@@ -81,6 +81,10 @@ function ChainStepRail({
   isLast?: boolean;
   lineTailVisible?: boolean;
 }) {
+  // The bullet circle and line tail are masks painted over the rail spine.
+  // They must match the transcript surface (bg-card, see the timeline surface
+  // in VirtualMessageTimeline) — bg-background diverges from it in dark mode
+  // and shows as a clipped dark disc (BOT-1599).
   return (
     <div
       aria-hidden="true"
@@ -89,12 +93,12 @@ function ChainStepRail({
       {isLast && (
         <div
           className={cn(
-            "pointer-events-none absolute top-5 bottom-0 left-1/2 z-11 w-2.5 -translate-x-1/2 bg-background transition-opacity duration-150",
+            "pointer-events-none absolute top-5 bottom-0 left-1/2 z-11 w-2.5 -translate-x-1/2 bg-card transition-opacity duration-150",
             lineTailVisible ? "opacity-0" : "opacity-100",
           )}
         />
       )}
-      <div className="relative z-10 mt-1 flex h-4 w-4 items-center justify-center rounded-full bg-background ring-2 ring-background">
+      <div className="relative z-10 mt-1 flex h-4 w-4 items-center justify-center rounded-full bg-card ring-2 ring-card">
         <ChainStepBullet status={status} />
       </div>
     </div>
