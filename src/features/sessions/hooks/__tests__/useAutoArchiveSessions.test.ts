@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
 import { setAutoArchiveAfter } from "@/features/settings/lib/autoArchivePreference";
 import { runAutoArchiveSweep } from "../useAutoArchiveSessions";
@@ -79,7 +80,9 @@ function resetStores() {
     nonEmptyDraftSessionIds: new Set(),
     skillDraftsBySession: {},
     draftAttachmentsBySession: {},
+    hasHydratedMessageQueues: true,
   });
+  useSessionWindowStore.getState().setSnapshot([]);
   useHomeWidgetStore.setState({ instances: [] });
 }
 
@@ -111,6 +114,37 @@ describe("runAutoArchiveSweep", () => {
     await runAutoArchiveSweep({ archiveSession });
 
     expect(mocks.loadAllSessions).not.toHaveBeenCalled();
+    expect(archiveSession).not.toHaveBeenCalled();
+  });
+
+  it("waits for persisted message queues to hydrate", async () => {
+    const stale = session("stale");
+    mocks.loadAllSessions.mockResolvedValue([stale]);
+    useChatStore.setState({ hasHydratedMessageQueues: false });
+    const archiveSession = vi.fn();
+
+    await runAutoArchiveSweep({ archiveSession });
+
+    expect(archiveSession).not.toHaveBeenCalled();
+  });
+
+  it("skips sessions with a pending archive-state mutation", async () => {
+    const stale = session("stale");
+    mocks.loadAllSessions.mockResolvedValue([stale]);
+    useChatSessionStore.setState({
+      sessions: [stale],
+      archiveMutationBySessionId: {
+        stale: {
+          operationId: 1,
+          desiredState: "unarchived",
+          status: "pending",
+        },
+      },
+    });
+    const archiveSession = vi.fn();
+
+    await runAutoArchiveSweep({ archiveSession });
+
     expect(archiveSession).not.toHaveBeenCalled();
   });
 
@@ -203,6 +237,22 @@ describe("runAutoArchiveSweep", () => {
   });
 
   it.each([
+    [
+      "a running session",
+      () => {
+        useChatStore.getState().setChatState("stale", "streaming");
+        return {};
+      },
+    ],
+    [
+      "a detached window",
+      () => {
+        useSessionWindowStore
+          .getState()
+          .setSnapshot([{ sessionId: "stale", windowLabel: "session:stale" }]);
+        return {};
+      },
+    ],
     ["composer text", () => ({ nonEmptyDraftSessionIds: new Set(["stale"]) })],
     [
       "queued message",

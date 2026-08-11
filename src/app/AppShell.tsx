@@ -3565,6 +3565,21 @@ export function AppShell({
           }
         }
 
+        // Noninteractive callers must inspect again at the last practical
+        // point before archiving. Git state can change while this transaction
+        // waits behind another archive or loads all sessions.
+        if (cleanupPolicy === "reject" && plans.length > 0) {
+          try {
+            plans = await inspectSessionWorkspaceCleanup(plans);
+          } catch (error) {
+            console.error("Failed to re-inspect session Git resources:", error);
+            return {
+              ok: false as const,
+              reason: "git_inspection_failed" as const,
+            };
+          }
+        }
+
         const wouldDiscardFiles = plans.some(
           wouldSessionWorkspaceCleanupDiscardFiles,
         );
@@ -3638,6 +3653,16 @@ export function AppShell({
           | "timed_out"
           | null = null;
         try {
+          if (cleanupPolicy === "reject" && plans.length > 0) {
+            const finalPlans = await inspectSessionWorkspaceCleanup(plans);
+            if (finalPlans.some(wouldSessionWorkspaceCleanupDiscardFiles)) {
+              cleanupFailureReason = "workspace_cleanup_failed";
+              throw new Error(
+                "Workspace changed after automatic archive preflight; preserving local files.",
+              );
+            }
+            plans = finalPlans;
+          }
           await cleanupSessionWorkspaces(plans, {
             getInterruptionReason: () =>
               getSessionArchiveInterruptionReason(

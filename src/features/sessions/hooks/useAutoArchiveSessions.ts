@@ -1,7 +1,11 @@
 import { useEffect } from "react";
 import { acpSessionToChatSession } from "@/features/chat/lib/acpSessionMapping";
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import { sessionActivityAt } from "@/features/chat/lib/sessionActivity";
+import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
+import {
+  isSessionRunning,
+  sessionActivityAt,
+} from "@/features/chat/lib/sessionActivity";
 import { loadAllSessionsForWorkspaceCleanup } from "@/features/chat/lib/sessionWorkspaceCleanup";
 import { acpGetSessionInfo } from "@/shared/api/acp";
 import {
@@ -50,9 +54,13 @@ function persistedChatPins(
     .map((item) => ({ type: "chatPin", state: { sessionId: item.targetId } }));
 }
 
-function hasUnsentSessionInput(sessionId: string): boolean {
+function hasLocalAutoArchiveBlocker(sessionId: string): boolean {
   const chatState = useChatStore.getState();
+  const runtime = chatState.getSessionRuntime(sessionId);
   return (
+    useSessionWindowStore.getState().isOpenInWindow(sessionId) ||
+    isSessionRunning(runtime.chatState) ||
+    runtime.isRunCancellationPending ||
     chatState.nonEmptyDraftSessionIds.has(sessionId) ||
     (chatState.queuedMessageBySession[sessionId]?.length ?? 0) > 0 ||
     (chatState.skillDraftsBySession[sessionId]?.length ?? 0) > 0 ||
@@ -67,8 +75,10 @@ async function revalidateAutoArchiveCandidate(
   if (afterMs === null) return null;
 
   const sessionStore = useChatSessionStore.getState();
+  if (!useChatStore.getState().hasHydratedMessageQueues) return null;
   if (sessionStore.activeSessionId === originalSession.id) return null;
-  if (hasUnsentSessionInput(originalSession.id)) return null;
+  if (sessionStore.archiveMutationBySessionId[originalSession.id]) return null;
+  if (hasLocalAutoArchiveBlocker(originalSession.id)) return null;
 
   const sessionInfo = await acpGetSessionInfo(originalSession.id);
   const refreshedSession = sessionInfo
@@ -108,7 +118,7 @@ async function revalidateAutoArchiveCandidate(
   const latestSessionStore = useChatSessionStore.getState();
   if (
     latestSessionStore.activeSessionId === originalSession.id ||
-    hasUnsentSessionInput(originalSession.id) ||
+    hasLocalAutoArchiveBlocker(originalSession.id) ||
     getAutoArchiveAfterMs() === null
   ) {
     return null;
@@ -133,6 +143,7 @@ export async function runAutoArchiveSweep({
   ]);
   if (getAutoArchiveAfterMs() === null) return;
 
+  if (!useChatStore.getState().hasHydratedMessageQueues) return;
   const sessionStore = useChatSessionStore.getState();
   const localSessionsById = new Map(
     sessionStore.sessions.map((session) => [session.id, session]),
