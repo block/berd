@@ -9,7 +9,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
-import { SIDEBAR_INVERSE_MENU_CONTENT_CLASS } from "@/shared/ui/sidebar-tokens";
+import { SIDEBAR_RAISED_MENU_CONTENT_CLASS } from "@/shared/ui/sidebar-tokens";
 
 interface SidebarDisplayOptionsMenuProps {
   /** Sidebar-namespace translation key for the trigger's aria-label/title
@@ -85,8 +85,8 @@ export function SidebarDisplayOptionsMenu({
         align="start"
         side="bottom"
         sideOffset={4}
-        variant="inverse"
-        className={cn(SIDEBAR_INVERSE_MENU_CONTENT_CLASS, "w-auto min-w-48")}
+        variant="raised"
+        className={cn(SIDEBAR_RAISED_MENU_CONTENT_CLASS, "w-auto min-w-48")}
       >
         {onShowChatIconsChange ? (
           <CheckableMenuItem

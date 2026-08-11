@@ -28,15 +28,15 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/shared/ui/dropdown-menu";
-import { SIDEBAR_INVERSE_MENU_CONTENT_CLASS } from "@/shared/ui/sidebar-tokens";
+import { SIDEBAR_RAISED_MENU_CONTENT_CLASS } from "@/shared/ui/sidebar-tokens";
 
 export const SESSION_ACTIONS_MENU_CONTENT_CLASS = cn(
-  SIDEBAR_INVERSE_MENU_CONTENT_CLASS,
+  SIDEBAR_RAISED_MENU_CONTENT_CLASS,
   "w-52",
 );
 
 const SESSION_ACTIONS_MENU_SEPARATOR_CLASS =
-  "mx-2 bg-popover-inverse-muted-foreground/35";
+  "mx-2 bg-popover-raised-muted-foreground/35";
 
 type MenuItemComponent = ComponentType<{
   children?: ReactNode;
@@ -335,7 +335,7 @@ export function SessionActionsMenuContent({
   Omit<ComponentProps<typeof DropdownMenuContent>, "children" | "variant">) {
   return (
     <DropdownMenuContent
-      variant="inverse"
+      variant="raised"
       align={align}
       alignOffset={alignOffset}
       sideOffset={sideOffset}
@@ -358,7 +358,7 @@ export function SessionActionsContextMenuContent({
   Omit<ComponentProps<typeof ContextMenuContent>, "children" | "variant">) {
   return (
     <ContextMenuContent
-      variant="inverse"
+      variant="raised"
       className={cn(SESSION_ACTIONS_MENU_CONTENT_CLASS, className)}
     >
       <SessionActionsMenuItems

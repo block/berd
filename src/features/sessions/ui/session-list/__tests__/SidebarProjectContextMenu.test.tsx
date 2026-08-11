@@ -70,7 +70,7 @@ describe("project row context menu", () => {
     const content = document.querySelector(
       '[data-slot="context-menu-content"]',
     );
-    expect(content).toHaveAttribute("data-variant", "inverse");
+    expect(content).toHaveAttribute("data-variant", "raised");
     expect(
       document.querySelector('[data-slot="dropdown-menu-content"]'),
     ).not.toBeInTheDocument();

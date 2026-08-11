@@ -586,6 +586,7 @@
     0 1px 1px rgba(0, 0, 0, 0.03), 0 6px 18px rgba(0, 0, 0, 0.06),
     0 16px 32px rgba(0, 0, 0, 0.03);
   --shadow-popover-inverse: 22px 25px 24px rgba(0, 0, 0, 0.09);
+  --shadow-popover-raised: 22px 25px 24px rgba(0, 0, 0, 0.09);
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.2);
   /* Floating panel hover (sidebar). */
   --shadow-sidebar-panel-elevated: 30px 42px 60px rgba(0, 0, 0, 0.05);
@@ -603,12 +604,20 @@
   --shadow-editor-footer: 0 -12px 24px rgba(36, 36, 36, 0.06);
   --shadow-color-picker-swatches: 0 10px 26px rgba(15, 23, 42, 0.12);
 
-  /* Goose inverse popover — dark menu on light surface (Alex tile menu).
-     Reuses gray-900 / white so the chain stays inside the existing palette. */
+  /* Goose inverse popover — contrast-inverted chip (tooltips, floating
+     pills). Reuses gray-900 / white so the chain stays inside the palette. */
   --popover-inverse: var(--color-gray-900);
   --popover-inverse-foreground: var(--color-white);
   --popover-inverse-muted-foreground: rgba(255, 255, 255, 0.4);
   --popover-inverse-focus: rgba(255, 255, 255, 0.1);
+
+  /* Raised popover — overflow menus (sidebar rows, session actions, card
+     tiles). Dark in both themes so menus read as dark surfaces across the
+     app (BOT-1600); matches the inverse chip on light backgrounds. */
+  --popover-raised: var(--color-gray-900);
+  --popover-raised-foreground: var(--color-white);
+  --popover-raised-muted-foreground: rgba(255, 255, 255, 0.4);
+  --popover-raised-focus: rgba(255, 255, 255, 0.1);
 
   /* Charts */
   --chart-1: #f6b44a;
@@ -658,7 +667,9 @@
   --foreground: var(--color-white);
   --card: var(--color-gray-800);
   --card-foreground: var(--foreground);
-  --popover: var(--color-gray-800);
+  /* Overflow menus and other floating popovers sit one step darker than
+     cards so they read as distinct surfaces against dark content (BOT-1600). */
+  --popover: var(--color-gray-900);
   --popover-foreground: var(--foreground);
   --primary: var(--color-white);
   --primary-foreground: var(--color-black);
@@ -983,6 +994,7 @@
     0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 8px 22px rgba(0, 0, 0, 0.36),
     0 2px 6px rgba(0, 0, 0, 0.24);
   --shadow-popover-inverse: 22px 25px 24px rgba(0, 0, 0, 0.45);
+  --shadow-popover-raised: 22px 25px 24px rgba(0, 0, 0, 0.45);
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.6);
   --shadow-sidebar-panel-elevated: 30px 42px 60px rgba(0, 0, 0, 0.15);
   --shadow-global-composer-pill-hover: 30px 24px 52px rgba(0, 0, 0, 0.2);
@@ -997,11 +1009,20 @@
   --shadow-editor-footer: 0 -12px 24px rgba(0, 0, 0, 0.24);
   --shadow-color-picker-swatches: 0 10px 26px rgba(0, 0, 0, 0.36);
 
-  /* Inverse popover — light menu on dark surface (inverted for dark theme). */
+  /* Inverse popover — contrast-inverted chip (tooltips, floating pills):
+     light on dark theme. */
   --popover-inverse: var(--color-gray-50);
   --popover-inverse-foreground: var(--color-gray-900);
   --popover-inverse-muted-foreground: rgba(26, 26, 26, 0.4);
   --popover-inverse-focus: rgba(26, 26, 26, 0.1);
+
+  /* Raised popover — overflow menus stay dark in dark theme (BOT-1600),
+     one step lighter than the gray-900 default popover base so the two
+     menu tiers still separate. */
+  --popover-raised: var(--color-gray-800);
+  --popover-raised-foreground: var(--color-white);
+  --popover-raised-muted-foreground: rgba(255, 255, 255, 0.4);
+  --popover-raised-focus: rgba(255, 255, 255, 0.1);
 
   --status-added: var(--color-green-400);
   --status-deleted: var(--color-red-400);
@@ -1128,6 +1149,12 @@
     --popover-inverse-muted-foreground
   );
   --color-popover-inverse-focus: var(--popover-inverse-focus);
+  --color-popover-raised: var(--popover-raised);
+  --color-popover-raised-foreground: var(--popover-raised-foreground);
+  --color-popover-raised-muted-foreground: var(
+    --popover-raised-muted-foreground
+  );
+  --color-popover-raised-focus: var(--popover-raised-focus);
 
   /* Skill pills — primitives in @theme generate bg-pill-* utilities directly,
      no bridge layer needed (would be a self-reference tautology). */
@@ -1212,6 +1239,7 @@
   --shadow-sticky-note: var(--sticky-note-shadow);
   --shadow-popover: var(--shadow-popover);
   --shadow-popover-inverse: var(--shadow-popover-inverse);
+  --shadow-popover-raised: var(--shadow-popover-raised);
   --shadow-modal: var(--shadow-modal);
   --shadow-sidebar-panel-elevated: var(--shadow-sidebar-panel-elevated);
   --shadow-global-composer-pill-hover: var(--shadow-global-composer-pill-hover);
@@ -1909,10 +1937,24 @@ body,
     }
   }
 
+  /* Menu surfaces and items paint their own focus highlight (focus:bg-*),
+     so the global focus ring is suppressed for them. */
   *:not(body):is(
       [data-slot="dropdown-menu-content"],
       [data-slot="popover-content"],
-      [data-slot="context-menu-content"]
+      [data-slot="context-menu-content"],
+      [data-slot="dropdown-menu-item"],
+      [data-slot="dropdown-menu-checkbox-item"],
+      [data-slot="dropdown-menu-radio-item"],
+      [data-slot="dropdown-menu-sub-trigger"],
+      [data-slot="context-menu-item"],
+      [data-slot="context-menu-checkbox-item"],
+      [data-slot="context-menu-radio-item"],
+      [data-slot="context-menu-sub-trigger"],
+      [data-slot="menubar-item"],
+      [data-slot="menubar-checkbox-item"],
+      [data-slot="menubar-radio-item"],
+      [data-slot="menubar-sub-trigger"]
     ) {
     &:focus-visible {
       @apply ring-0 ring-offset-0;

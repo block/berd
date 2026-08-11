@@ -100,7 +100,7 @@ export const PersonaCard = memo(function PersonaCard({
         </AgentTileButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        variant="inverse"
+        variant="raised"
         align="end"
         alignOffset={-2}
         sideOffset={4}

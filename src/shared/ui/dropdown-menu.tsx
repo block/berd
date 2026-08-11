@@ -5,7 +5,7 @@ import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 
-type DropdownMenuVariant = "default" | "inverse";
+type DropdownMenuVariant = "default" | "raised";
 
 const DropdownMenuVariantContext =
   React.createContext<DropdownMenuVariant>("default");
@@ -60,7 +60,7 @@ function DropdownMenuContent({
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content> & {
   variant?: DropdownMenuVariant;
 }) {
-  const isInverse = variant === "inverse";
+  const isRaised = variant === "raised";
   const interactedOutsideRef = React.useRef(false);
   return (
     <DropdownMenuVariantContext.Provider value={variant}>
@@ -91,8 +91,8 @@ function DropdownMenuContent({
           }}
           className={cn(
             "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto shadow-popover",
-            isInverse
-              ? "bg-popover-inverse text-popover-inverse-foreground shadow-popover-inverse rounded-[10px] px-2 py-1.5"
+            isRaised
+              ? "bg-popover-raised text-popover-raised-foreground shadow-popover-raised rounded-[10px] px-2 py-1.5"
               : "bg-popover text-foreground rounded-md p-1.5",
             className,
           )}
@@ -121,7 +121,7 @@ function DropdownMenuItem({
   variant?: "default" | "destructive";
 }) {
   const menuVariant = React.useContext(DropdownMenuVariantContext);
-  const isInverse = menuVariant === "inverse";
+  const isRaised = menuVariant === "raised";
   return (
     <DropdownMenuPrimitive.Item
       {...getDesignSystemMetadata({
@@ -141,8 +141,8 @@ function DropdownMenuItem({
       data-variant={variant}
       className={cn(
         "relative flex cursor-pointer items-center gap-2 outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        isInverse
-          ? "text-popover-inverse-foreground focus:text-popover-inverse-foreground focus:bg-popover-inverse-focus rounded-[4px] px-1 py-1 text-xs leading-tight"
+        isRaised
+          ? "text-popover-raised-foreground focus:text-popover-raised-foreground focus:bg-popover-raised-focus rounded-[4px] px-1 py-1 text-xs leading-tight"
           : "text-foreground focus:bg-accent focus:text-foreground data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 dark:data-[variant=destructive]:focus:bg-destructive/10 data-[variant=destructive]:focus:text-destructive data-[variant=destructive]:*:[svg]:!text-destructive [&_svg:not([class*='text-'])]:text-muted-foreground rounded-sm px-2 py-1.5 text-sm",
         className,
       )}
@@ -164,7 +164,7 @@ function DropdownMenuCheckboxItem({
   indicatorSide?: "start" | "end";
 }) {
   const menuVariant = React.useContext(DropdownMenuVariantContext);
-  const isInverse = menuVariant === "inverse";
+  const isRaised = menuVariant === "raised";
   return (
     <DropdownMenuPrimitive.CheckboxItem
       {...getDesignSystemMetadata({
@@ -182,8 +182,8 @@ function DropdownMenuCheckboxItem({
       data-slot="dropdown-menu-checkbox-item"
       className={cn(
         "relative flex cursor-pointer items-center gap-2 outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        isInverse
-          ? "text-popover-inverse-foreground focus:text-popover-inverse-foreground focus:bg-popover-inverse-focus rounded-[4px] px-1 py-1 text-xs leading-tight"
+        isRaised
+          ? "text-popover-raised-foreground focus:text-popover-raised-foreground focus:bg-popover-raised-focus rounded-[4px] px-1 py-1 text-xs leading-tight"
           : "text-foreground focus:bg-accent focus:text-foreground rounded-sm px-2 py-1.5 text-sm",
         indicatorSide === "start" && "pl-8",
         className,
@@ -311,8 +311,8 @@ function DropdownMenuSeparator({
       data-slot="dropdown-menu-separator"
       className={cn(
         "-mx-1 my-1 h-px",
-        menuVariant === "inverse"
-          ? "bg-popover-inverse-muted-foreground/35"
+        menuVariant === "raised"
+          ? "bg-popover-raised-muted-foreground/35"
           : "bg-border",
         className,
       )}

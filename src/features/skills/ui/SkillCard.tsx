@@ -122,7 +122,7 @@ export function SkillCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
-              variant="inverse"
+              variant="raised"
               align="start"
               alignOffset={-4}
               sideOffset={4}

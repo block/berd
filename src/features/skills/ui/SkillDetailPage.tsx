@@ -159,7 +159,7 @@ export function SkillDetailPage({
               </TooltipTrigger>
               <TooltipContent>{moreLabel}</TooltipContent>
             </Tooltip>
-            <DropdownMenuContent variant="inverse" align="end" sideOffset={8}>
+            <DropdownMenuContent variant="raised" align="end" sideOffset={8}>
               <DropdownMenuItem onSelect={() => onShare(skill)}>
                 <IconShare className="size-3.5" />
                 {t("view.share")}

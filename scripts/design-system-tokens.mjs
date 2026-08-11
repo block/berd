@@ -113,6 +113,7 @@ const allowedBridgePatterns = [
   /^placeholder-composer$/,
   /^(?:success|warning|info)(?:-foreground)?$/,
   /^popover-inverse(?:-(?:foreground|muted-foreground|focus))?$/,
+  /^popover-raised(?:-(?:foreground|muted-foreground|focus))?$/,
   /^clock-(?:face|mark|minute-hand|hand)$/,
   /^sticky-note-(?:warm|cool|rose|blue|lavender|peach|foreground|muted)$/,
   /^dark-(?:04|10|40)$/,

@@ -5,7 +5,7 @@ import { Pencil, PinIcon, Trash2 } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 import { SidebarRowMenuButton } from "@/shared/ui/sidebar-row-menu-button";
-import { SIDEBAR_INVERSE_MENU_CONTENT_CLASS } from "@/shared/ui/sidebar-tokens";
+import { SIDEBAR_RAISED_MENU_CONTENT_CLASS } from "@/shared/ui/sidebar-tokens";
 import { ContextMenuContent, ContextMenuItem } from "@/shared/ui/context-menu";
 import {
   DropdownMenu,
@@ -86,8 +86,8 @@ export function SidebarItemContextMenuContent({
   Omit<ComponentProps<typeof ContextMenuContent>, "children" | "variant">) {
   return (
     <ContextMenuContent
-      variant="inverse"
-      className={cn(SIDEBAR_INVERSE_MENU_CONTENT_CLASS, className)}
+      variant="raised"
+      className={cn(SIDEBAR_RAISED_MENU_CONTENT_CLASS, className)}
     >
       <SidebarItemMenuItems {...actions} Item={ContextMenuItem} />
     </ContextMenuContent>
@@ -123,11 +123,11 @@ export function SidebarItemMenu({
         </SidebarRowMenuButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        variant="inverse"
+        variant="raised"
         align="start"
         alignOffset={-4}
         sideOffset={4}
-        className={SIDEBAR_INVERSE_MENU_CONTENT_CLASS}
+        className={SIDEBAR_RAISED_MENU_CONTENT_CLASS}
       >
         <SidebarItemMenuItems {...actions} Item={DropdownMenuItem} />
       </DropdownMenuContent>

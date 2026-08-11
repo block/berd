@@ -20,7 +20,7 @@ import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
-import { SIDEBAR_INVERSE_MENU_CONTENT_CLASS } from "@/shared/ui/sidebar-tokens";
+import { SIDEBAR_RAISED_MENU_CONTENT_CLASS } from "@/shared/ui/sidebar-tokens";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
@@ -344,11 +344,11 @@ export function AgentDetailPage({
           <TooltipContent>{t("detail.moreActions")}</TooltipContent>
         </Tooltip>
         <DropdownMenuContent
-          variant="inverse"
+          variant="raised"
           align="end"
           alignOffset={-4}
           sideOffset={4}
-          className={SIDEBAR_INVERSE_MENU_CONTENT_CLASS}
+          className={SIDEBAR_RAISED_MENU_CONTENT_CLASS}
         >
           <DropdownMenuItem onSelect={() => onDuplicate(persona)}>
             <Copy className="size-3.5" />

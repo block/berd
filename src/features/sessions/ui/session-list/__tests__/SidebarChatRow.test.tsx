@@ -1006,7 +1006,7 @@ describe("SidebarChatRow", () => {
     ).toBeInTheDocument();
     expect(
       document.querySelector('[data-slot="context-menu-content"]'),
-    ).toHaveAttribute("data-variant", "inverse");
+    ).toHaveAttribute("data-variant", "raised");
     expect(
       document.querySelector('[data-slot="context-menu-content"]'),
     ).toHaveClass("w-52", "px-1", "py-1", "text-sm");
