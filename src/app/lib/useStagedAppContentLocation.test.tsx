@@ -37,7 +37,7 @@ const otherChatLocation: AppNavigationLocation = {
 };
 const settingsLocation: AppNavigationLocation = {
   view: "settings",
-  settingsSection: "general",
+  settingsSection: "appearance",
 };
 const otherSettingsLocation: AppNavigationLocation = {
   view: "settings",
@@ -198,7 +198,7 @@ describe("useStagedAppContentLocation", () => {
   it("uses navigation equality instead of object identity", () => {
     const { result, rerender } = renderStagedLocation(settingsLocation);
 
-    rerender({ location: { view: "settings", settingsSection: "general" } });
+    rerender({ location: { view: "settings", settingsSection: "appearance" } });
 
     expect(result.current.renderedLocation).toBe(settingsLocation);
     expect(result.current.isPreparingContent).toBe(false);

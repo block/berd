@@ -4391,30 +4391,30 @@ describe("AppShell global navigation", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("settings-section")).toHaveTextContent(
-        "general",
+        "appearance",
       );
     });
   });
 
-  it("redirects a disabled deep-linked Doctor settings section to General", async () => {
+  it("redirects a legacy deep-linked Doctor settings section to System", async () => {
+    // rev 4: Doctor is a dialog opened from a row inside System, not a
+    // settings section -- `?section=doctor` is a legacy URL now, resolved
+    // to System (where that row lives) via LEGACY_SECTION_REDIRECTS at
+    // initial parse time. That resolution only affects which section
+    // renders, not the URL string itself (nothing rewrites the URL unless a
+    // capability-gating effect fires, which System has no reason to), so
+    // the address bar keeps showing the legacy `?section=doctor` param.
     window.history.replaceState(null, "", "/settings?section=doctor");
-    setReadyRuntimeConfig({
-      ...DEFAULT_RUNTIME_CONFIG,
-      doctor: { enabled: false },
-    });
 
     renderAppShell();
 
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
       expect(screen.getByTestId("settings-section")).toHaveTextContent(
-        "general",
+        "system",
       );
     });
     expect(window.location.pathname).toBe("/settings");
-    expect(new URLSearchParams(window.location.search).get("section")).toBe(
-      "general",
-    );
   });
 
   it("closes the design system takeover back to the previous view", async () => {

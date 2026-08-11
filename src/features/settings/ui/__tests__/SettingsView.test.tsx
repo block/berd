@@ -72,18 +72,18 @@ describe("SettingsView", () => {
     voiceConversationEnabled = true;
   });
 
-  it("renders security settings when security ML is enabled", () => {
+  // Rev 3: Security is a permanent section now -- SettingsView no longer
+  // gates it on the securityMl build flag. SecuritySettings.tsx gates its
+  // own ML rows internally instead, which is out of scope for this mock.
+  it("renders security settings regardless of the security ML flag", () => {
     renderSettingsView();
 
     expect(screen.getByText("security.title")).toBeInTheDocument();
-  });
 
-  it("does not render security settings when security ML is disabled", () => {
     securityMlEnabled = false;
-
     renderSettingsView();
 
-    expect(screen.queryByText("security.title")).not.toBeInTheDocument();
+    expect(screen.getAllByText("security.title").length).toBeGreaterThan(0);
   });
 
   it("does not mount native Voice settings when the experiment is off", () => {

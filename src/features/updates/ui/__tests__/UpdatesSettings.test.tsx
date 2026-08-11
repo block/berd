@@ -121,17 +121,15 @@ describe("UpdatesSettings", () => {
 
     renderWithProviders(<UpdatesSettings />);
 
-    expect(screen.getByText("App Version")).toBeInTheDocument();
+    expect(screen.getByText("App version")).toBeInTheDocument();
     expect(
       screen.getByText(
         "Keep Berd up to date with the latest features and fixes.",
       ),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("Check if a new version is available."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Check for a new version")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Check for Updates" }));
+    await user.click(screen.getByRole("button", { name: "Check for updates" }));
 
     expect(state.checkForUpdate).toHaveBeenCalledTimes(1);
   });
@@ -180,7 +178,7 @@ describe("UpdatesSettings", () => {
 
     renderWithProviders(<UpdatesSettings />);
 
-    await user.click(screen.getByRole("button", { name: "Restart to Update" }));
+    await user.click(screen.getByRole("button", { name: "Restart to update" }));
 
     expect(state.relaunch).toHaveBeenCalledTimes(1);
   });
@@ -195,7 +193,7 @@ describe("UpdatesSettings", () => {
     renderWithProviders(<UpdatesSettings />);
 
     expect(screen.getByText("download failed")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Try Again" }));
+    await user.click(screen.getByRole("button", { name: "Try again" }));
 
     expect(state.checkForUpdate).toHaveBeenCalledTimes(1);
   });
@@ -206,7 +204,7 @@ describe("UpdatesSettings", () => {
     const { rerender } = renderWithProviders(<UpdatesSettings />);
 
     // Retrying after a failure is the exact transition that garbled: the label
-    // flips to "Try Again" while the button cross-fades back out of loading.
+    // flips to "Try again" while the button cross-fades back out of loading.
     setUpdaterState({ status: "checking" });
     rerender(<UpdatesSettings />);
 
@@ -215,7 +213,7 @@ describe("UpdatesSettings", () => {
     // preserveWidth stacks every feedback layer in one centered grid cell, but
     // only the busy layer carries a spinner, so only it is a different width.
     // If it repeated a resting label, centering would offset the two identical
-    // strings and the fade would paint both ("Try Againin", BOT-1466). Layers
+    // strings and the fade would paint both ("Try againin", BOT-1466). Layers
     // without a spinner share geometry and superimpose exactly, so repeats
     // among those are harmless — the busy label just has to differ from them.
     const layers = Array.from(button.querySelectorAll('[class*="grid-area"]'));

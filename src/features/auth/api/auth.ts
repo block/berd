@@ -13,6 +13,10 @@ export interface AuthStatus {
   userId?: string | null;
 }
 
+// Workspace switching (main #965, ported during the BOT-1430 reconciliation,
+// rev 2.5): lets an authenticated user view/switch the BuilderBot workspace
+// attached to their session from Berd's Account settings, without leaving
+// the app.
 export interface AuthWorkspace {
   workspaceIdentifier?: string | null;
   displayName?: string | null;

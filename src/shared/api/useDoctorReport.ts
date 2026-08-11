@@ -6,6 +6,7 @@ import {
 import {
   runDoctor,
   runDoctorFresh,
+  type DoctorCheck,
   type DoctorReport,
 } from "@/shared/api/doctor";
 
@@ -123,6 +124,62 @@ export async function refreshDoctorReportFreshness(qc: QueryClient) {
 // stay up through the slow leg, not just the fast `runDoctor` queryFn.
 export function useDoctorReportFreshnessFetching(): boolean {
   return useIsFetching({ queryKey: DOCTOR_REPORT_FRESHNESS_QUERY_KEY }) > 0;
+}
+
+// Worst status across all checks, ignoring the `agents` category (mirrors
+// DoctorSettings' own filter -- that category's checks render on the AI
+// providers page instead, so a stale agent auth warning shouldn't light up
+// the System row's indicator for a surface the row doesn't represent).
+export function worstDoctorStatus(
+  report: DoctorReport,
+): DoctorCheck["status"] | null {
+  let worst: DoctorCheck["status"] | null = null;
+  for (const check of report.checks) {
+    if (check.category === "agents") continue;
+    if (check.status === "fail") return "fail";
+    if (check.status === "warn") worst = "warn";
+    else if (!worst) worst = "pass";
+  }
+  return worst;
+}
+
+export interface DoctorStatusSummary {
+  status: DoctorCheck["status"];
+  // Count of non-passing checks (warn + fail), ignoring `agents` (see
+  // worstDoctorStatus). Used for the row's status text, e.g. "2 checks need
+  // attention" -- a count reads as informational, not an action nag, unlike
+  // a bare colored dot.
+  attentionCount: number;
+}
+
+function summarizeDoctorStatus(
+  report: DoctorReport,
+): DoctorStatusSummary | null {
+  const status = worstDoctorStatus(report);
+  if (!status) return null;
+  const attentionCount = report.checks.filter(
+    (check) => check.category !== "agents" && check.status !== "pass",
+  ).length;
+  return { status, attentionCount };
+}
+
+// Row-level summary for the System settings row that opens the Doctor
+// dialog: reads the same shared cache Doctor itself reads (no extra
+// fetch -- this is purely a subscriber), and reports `null` until a report
+// has actually loaded once (e.g. the very first Settings visit before
+// SettingsView's mount effect has warmed the cache).
+export function useDoctorStatusSummary(): DoctorStatusSummary | null {
+  const query = useQuery({
+    queryKey: DOCTOR_REPORT_QUERY_KEY,
+    queryFn: runDoctor,
+    staleTime: DOCTOR_REPORT_STALE_TIME,
+    retry: false,
+    refetchOnMount: false,
+    // Never triggers its own fetch; only reads whatever SettingsView's mount
+    // effect (or a prior Doctor dialog open) has already populated.
+    enabled: false,
+  });
+  return query.data ? summarizeDoctorStatus(query.data) : null;
 }
 
 // Manual rerun / post-fix refresh. Bust the shared key (forcing a real

@@ -1,15 +1,16 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { AboutSettings } from "./AboutSettings";
+import { AppearanceSettings } from "./AppearanceSettings";
 import { ArchiveSettings } from "./ArchiveSettings";
-import { DoctorSettings } from "./DoctorSettings";
+import { BehaviorSettings } from "./BehaviorSettings";
 import { ProvidersSettings } from "./ProvidersSettings";
-import { GeneralSettings } from "./GeneralSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { SecuritySettings } from "./SecuritySettings";
+import { SystemSettings } from "./SystemSettings";
 import type { SectionId } from "./settingsSections";
 import { ExperimentsSettings } from "@/features/experiments/ExperimentsSettings";
 import { KeyboardShortcutsSettings } from "@/features/shortcuts/ui/KeyboardShortcutsSettings";
-import { UpdatesSettings } from "@/features/updates/ui/UpdatesSettings";
 import { ConnectionsSettings } from "@/features/connections/ui/ConnectionsSettings";
 import { VoiceSettings } from "@/features/voice-conversation/ui/VoiceSettings";
 import type { AuthStatus } from "@/features/auth/api/auth";
@@ -17,7 +18,6 @@ import { SettingsPane } from "@/shared/ui/SettingsPage";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import { refreshDoctorReportFreshness } from "@/shared/api/useDoctorReport";
 import { useProfileCapability } from "@/shared/profile/capabilities";
-import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 
 interface SettingsViewProps {
   activeSection: SectionId;
@@ -29,6 +29,16 @@ interface SettingsViewProps {
   onReturnToAgentDraft?: () => void;
 }
 
+// Rev 3 (Aug 10): "general" split into appearance/chat/system/about (see
+// settingsSections.ts for the full rationale). Security is now permanent --
+// no more securityMl gate at this level; SecuritySettings.tsx gates its own
+// ML rows internally.
+//
+// Rev 4: Doctor is no longer a routable settings section at all -- it opens
+// as a dialog from a row inside SystemSettings.tsx instead (see
+// SystemSettings.tsx and DoctorSettings.tsx for the rationale). SettingsView
+// still warms the shared doctor report on every Settings visit below, since
+// the AI providers page and the Doctor dialog both read that same cache.
 export function SettingsView({
   activeSection,
   authStatus,
@@ -38,9 +48,7 @@ export function SettingsView({
 }: SettingsViewProps) {
   const queryClient = useQueryClient();
   const doctorEnabled = useProfileCapability("doctor");
-  const updatesEnabled = useProfileCapability("updates");
   const voiceConversationEnabled = useProfileCapability("voiceConversation");
-  const securityMlEnabled = getBuildFeatureState().securityMl;
 
   // Warm the shared doctor report once per Settings visit. SettingsView mounts
   // whenever Settings opens (every entry path: sidebar, restored URL, returning
@@ -61,6 +69,8 @@ export function SettingsView({
 
   return (
     <SettingsPane>
+      {activeSection === "appearance" && <AppearanceSettings />}
+      {activeSection === "behavior" && <BehaviorSettings />}
       {activeSection === "connections" && <ConnectionsSettings />}
       {activeSection === "providers" && (
         <ProvidersSettings
@@ -68,21 +78,18 @@ export function SettingsView({
           onReturnToAgentDraft={onReturnToAgentDraft}
         />
       )}
-      {activeSection === "doctor" && doctorEnabled && <DoctorSettings />}
-      {activeSection === "experiments" && <ExperimentsSettings />}
-      {activeSection === "general" && (
-        <GeneralSettings authStatus={authStatus} onLoggedOut={onLoggedOut} />
-      )}
-      {activeSection === "security" && securityMlEnabled && (
-        <SecuritySettings />
-      )}
       {activeSection === "notifications" && <NotificationSettings />}
+      {activeSection === "shortcuts" && <KeyboardShortcutsSettings />}
       {activeSection === "voice" && voiceConversationEnabled && (
         <VoiceSettings />
       )}
-      {activeSection === "shortcuts" && <KeyboardShortcutsSettings />}
       {activeSection === "archive" && <ArchiveSettings />}
-      {activeSection === "updates" && updatesEnabled && <UpdatesSettings />}
+      {activeSection === "security" && <SecuritySettings />}
+      {activeSection === "system" && <SystemSettings />}
+      {activeSection === "about" && (
+        <AboutSettings authStatus={authStatus} onLoggedOut={onLoggedOut} />
+      )}
+      {activeSection === "experiments" && <ExperimentsSettings />}
     </SettingsPane>
   );
 }

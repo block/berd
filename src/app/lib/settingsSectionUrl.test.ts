@@ -27,7 +27,7 @@ describe("settingsSectionUrl", () => {
 
     it("returns the default section when /settings has no section param", () => {
       window.history.replaceState({}, "", "/settings");
-      expect(getInitialSettingsSection()).toBe("general");
+      expect(getInitialSettingsSection()).toBe("appearance");
     });
 
     it("redirects legacy ?section=projects to archive", () => {
@@ -37,7 +37,7 @@ describe("settingsSectionUrl", () => {
 
     it("falls back to the default section for an unknown ?section value", () => {
       window.history.replaceState({}, "", "/settings?section=bogus");
-      expect(getInitialSettingsSection()).toBe("general");
+      expect(getInitialSettingsSection()).toBe("appearance");
     });
   });
 

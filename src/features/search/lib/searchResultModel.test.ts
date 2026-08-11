@@ -9,7 +9,7 @@ import {
 
 describe("searchResultModel", () => {
   const visibleSections = [
-    { id: "general" as const, labelKey: "nav.general" },
+    { id: "appearance" as const, labelKey: "nav.appearance" },
     { id: "providers" as const, labelKey: "nav.providers" },
   ];
 
@@ -28,7 +28,7 @@ describe("searchResultModel", () => {
         visibleSections,
       }),
     ).toEqual([
-      expect.objectContaining({ sectionId: "general", title: "Theme" }),
+      expect.objectContaining({ sectionId: "appearance", title: "Theme" }),
     ]);
     expect(
       buildSettingsSearchResults({
@@ -51,7 +51,7 @@ describe("searchResultModel", () => {
   it("excludes results belonging to hidden settings sections", () => {
     const labels: Record<string, string> = {
       "nav.doctor": "Doctor",
-      "nav.general": "General",
+      "nav.appearance": "Appearance",
     };
 
     expect(

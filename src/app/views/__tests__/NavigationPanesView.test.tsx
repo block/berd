@@ -2118,8 +2118,8 @@ describe("NavigationPanesView", () => {
     await user.click(screen.getByRole("button", { name: /^back$/i }));
     expect(onSettingsBack).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole("button", { name: /general/i }));
-    expect(onSettingsSectionChange).toHaveBeenCalledWith("general");
+    await user.click(screen.getByRole("button", { name: /appearance/i }));
+    expect(onSettingsSectionChange).toHaveBeenCalledWith("appearance");
   });
 
   it("keeps the main navigation surface active on the design system view", () => {

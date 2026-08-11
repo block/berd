@@ -67,7 +67,7 @@ describe("PocketVoiceSetupDialog", () => {
     );
 
     expect(
-      screen.getByRole("heading", { name: "Voice Conversation" }),
+      screen.getByRole("heading", { name: "Voice conversation" }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -239,7 +239,7 @@ describe("PocketVoiceSetupDialog", () => {
 
     expect(screen.getByText("Pocket TTS")).toBeInTheDocument();
     expect(
-      screen.getByRole("heading", { name: "Voice Conversation" }),
+      screen.getByRole("heading", { name: "Voice conversation" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Parakeet STT")).toBeInTheDocument();
     expect(screen.getByText(/131.7 MB on disk/)).toBeInTheDocument();

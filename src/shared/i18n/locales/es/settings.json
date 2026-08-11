@@ -1,5 +1,20 @@
 {
-  "navigationLabel": "Navegación de configuración",
+  "about": {
+    "buildModes": {
+      "development": "Desarrollo",
+      "production": "Producción"
+    },
+    "fields": {
+      "buildMode": "Modo de compilación",
+      "identifier": "Identificador de la app",
+      "license": "Licencia",
+      "name": "Nombre de la app",
+      "tauriVersion": "Versión de Tauri",
+      "version": "Versión de la app"
+    },
+    "title": "Acerca de",
+    "unavailable": "No disponible"
+  },
   "account": {
     "loggingOut": "Cerrando sesión...",
     "logout": "Cerrar sesión",
@@ -19,34 +34,21 @@
       "unavailable": "No hay espacios de trabajo"
     }
   },
-  "about": {
-    "buildModes": {
-      "development": "Desarrollo",
-      "production": "Producción"
-    },
-    "fields": {
-      "buildMode": "Modo de compilación",
-      "identifier": "Identificador de la app",
-      "license": "Licencia",
-      "name": "Nombre de la app",
-      "tauriVersion": "Versión de Tauri",
-      "version": "Versión de la app"
-    },
-    "unavailable": "No disponible",
-    "title": "Acerca de"
-  },
   "appearance": {
     "animatedAvatars": {
       "description": "Reproduce avatares de video en bucle en chats, listas de agentes y vistas previas.",
       "label": "Avatares animados"
     },
-    "workingIndicatorAnimation": {
-      "description": "Anima el indicador de actividad de los chats que están trabajando actualmente en la barra lateral.",
-      "label": "Animar indicadores de trabajo de la barra lateral"
-    },
     "homePinLabels": {
       "description": "Muestra siempre los nombres de los agentes y proyectos fijados, no solo al pasar el cursor.",
       "label": "Mostrar siempre las etiquetas de los pines"
+    },
+    "primary": {
+      "custom": "Personalizado",
+      "description": "Usa el color primario del tema de forma predeterminada o elige un color primario para conservarlo entre temas.",
+      "label": "Color primario",
+      "reset": "Usar tema",
+      "theme": "Tema"
     },
     "theme": {
       "darkLabel": "Oscuro",
@@ -56,14 +58,14 @@
       "systemDescription": "Coincide con tu dispositivo.",
       "systemLabel": "Sistema"
     },
-    "primary": {
-      "custom": "Personalizado",
-      "description": "Usa el color primario del tema de forma predeterminada o elige un color primario para conservarlo entre temas.",
-      "label": "Color primario",
-      "reset": "Usar tema",
-      "theme": "Tema"
-    },
-    "title": "Apariencia"
+    "title": "Apariencia",
+    "workingIndicatorAnimation": {
+      "description": "Anima el indicador de actividad de los chats que están trabajando actualmente en la barra lateral.",
+      "label": "Animar indicadores de trabajo de la barra lateral"
+    }
+  },
+  "archive": {
+    "title": "Archivo"
   },
   "chats": {
     "empty": "No hay chats archivados.",
@@ -76,80 +78,51 @@
     "goose": {
       "autoCompact": {
         "helper": "Ajústalo al 100% para desactivar la compactación automática.",
-        "label": "Umbral de compactación automática",
+        "label": "Umbral",
         "loading": "Cargando...",
         "off": "Desactivado",
         "saveError": "No se pudo guardar la configuración de compactación automática."
       },
-      "builtIn": "Integrado",
-      "description": "Elige cuándo el harness Goose compacta el contexto anterior durante las sesiones. Esto se aplica a los chats que usan Goose.",
-      "label": "Goose (harness)"
+      "description": "Compacta automáticamente el contexto anterior y reinicia el recuento de tokens durante las sesiones. Esto solo se aplica a los chats que usan el harness Goose.",
+      "label": "Compactación automática (solo harness Goose)"
     },
     "title": "Compactación"
+  },
+  "connections": {
+    "configure": "Configurar",
+    "connect": "Conectar",
+    "connectError": "No se pudo abrir el flujo de conexión. Inténtalo de nuevo.",
+    "description": "Inicia sesión en apps y servicios que Berd puede usar en tu nombre.",
+    "disconnect": "Desconectar",
+    "disconnectError": "No se pudo desconectar. Inténtalo de nuevo.",
+    "empty": {
+      "description": "Agrega un servidor MCP para conectar Berd a las apps y servicios que usas.",
+      "title": "Aún no hay conexiones"
+    },
+    "expiresInDays": "Caduca en {{count}} días",
+    "expiresToday": "Caduca hoy",
+    "expiresTomorrow": "Caduca mañana",
+    "extendAccess": "Ampliar acceso",
+    "noResults": "Ninguna conexión coincide con tu búsqueda.",
+    "reconnect": "Reconectar",
+    "search": "Buscar conexiones",
+    "sections": {
+      "available": "Disponibles",
+      "installed": "Instaladas"
+    },
+    "status": {
+      "active": "Activa",
+      "disconnected": "Desconectada",
+      "expired": "Caducada"
+    },
+    "title": "Conexiones"
   },
   "deleteProject": {
     "description": "Este proyecto y todos sus datos se eliminarán de forma permanente.",
     "title": "¿Eliminar \"{{name}}\" de forma permanente?"
   },
-  "extensions": {
-    "title": "Extensiones",
-    "description": "Conecta Berd con apps, servicios y capacidades integradas.",
-    "search": "Buscar extensiones",
-    "emptyCustom": "No hay extensiones personalizadas configuradas.",
-    "noResults": "Ninguna extensión coincide con tu búsqueda.",
-    "addExtension": "Agregar extensión",
-    "editExtension": "Editar extensión",
-    "deleteExtension": "Eliminar extensión",
-    "deleteConfirmation": {
-      "title": "¿Eliminar \"{{name}}\" de forma permanente?",
-      "description": "Esto eliminará de forma permanente esta extensión y toda su configuración.",
-      "confirm": "Eliminar extensión",
-      "deleting": "Eliminando..."
-    },
-    "configure": "Configurar {{name}}",
-    "save": "Guardar",
-    "cancel": "Cancelar",
-    "fields": {
-      "name": "Nombre",
-      "namePlaceholder": "mi-extension",
-      "type": "Tipo",
-      "command": "Comando",
-      "commandPlaceholder": "npx",
-      "arguments": "Argumentos",
-      "argumentsPlaceholder": "Un argumento por línea",
-      "url": "URL",
-      "urlPlaceholder": "http://localhost:3000/mcp",
-      "description": "Descripción",
-      "descriptionPlaceholder": "¿Qué hace esta extensión?",
-      "timeout": "Tiempo de espera (segundos)",
-      "envVars": "Variables de entorno",
-      "envKeyPlaceholder": "CLAVE",
-      "envValuePlaceholder": "valor",
-      "addEnvVar": "Agregar variable",
-      "removeEnvVar": "Eliminar variable"
-    },
-    "types": {
-      "stdio": "Stdio",
-      "streamable_http": "HTTP",
-      "builtin": "Integrada"
-    },
-    "errors": {
-      "saveFailed": "Error al guardar la extensión. Inténtalo de nuevo.",
-      "deleteFailed": "Error al eliminar la extensión. Inténtalo de nuevo.",
-      "resetFailed": "No se pudo restablecer la extensión. Inténtalo de nuevo.",
-      "nameConflict": "Ya existe una extensión llamada \"{{name}}\"."
-    },
-    "alwaysOn": {
-      "label": "Siempre activa",
-      "reset": "Restablecer",
-      "resetAria": "Restablecer {{name}} a bajo demanda",
-      "tooltip": "Esta extensión se carga en cada chat. Restablécela para que esté disponible bajo demanda."
-    },
-    "disabledBanner": {
-      "title": "Algunas extensiones se cargan ahora bajo demanda",
-      "description": "Estas extensiones se cargaban automáticamente en cada sesión, pero ahora solo se cargan cuando se necesitan: {{names}}.",
-      "dismiss": "Descartar"
-    }
+  "developerTools": {
+    "title": "Herramientas para desarrolladores"
   },
   "doctor": {
     "agents": "Agentes",
@@ -157,16 +130,19 @@
     "copied": "Copiado",
     "copyDetails": "Copiar detalles",
     "empty": "Todavía no hay comprobaciones disponibles.",
+    "longRunning": "Sigue ejecutándose después de {{seconds}} s. Dejaremos de esperar después de {{timeoutSeconds}} s si una comprobación se bloquea.",
+    "open": "Abrir",
     "rerun": "Volver a intentar",
+    "rowDescription": "Ejecuta verificaciones de estado de Berd, agentes y herramientas.",
+    "rowStatus_one": "{{count}} comprobación necesita atención",
+    "rowStatus_other": "{{count}} comprobaciones necesitan atención",
     "runFix": "¿Ejecutar corrección?",
     "runFixDescription": "Esto ejecutará el siguiente comando:",
     "running": "Ejecutando comprobaciones...",
-    "longRunning": "Sigue ejecutándose después de {{seconds}} s. Dejaremos de esperar después de {{timeoutSeconds}} s si una comprobación se bloquea.",
     "title": "Diagnóstico",
     "tools": "Herramientas",
     "version": {
       "bridge": "puente ACP",
-      "updateAvailable": "Actualización disponible → {{version}}",
       "line": {
         "full": "Instalado mediante {{source}} · {{version}}",
         "named": "{{name}} {{version}} mediante {{source}}",
@@ -186,50 +162,22 @@
         "system": "sistema",
         "unknown": "un origen desconocido"
       },
+      "updateAvailable": "Actualización disponible → {{version}}",
       "updateLabel": "Actualizar {{name}} a {{version}}"
     }
   },
   "experiments": {
-    "autoEnable": {
-      "description": "Las compilaciones de desarrollo activan los experimentos de forma predeterminada. Desactiva experimentos individuales abajo cuando necesites el flujo estable.",
-      "label": "Activar nuevos experimentos automáticamente"
-    },
     "agentShareCard": {
       "description": "Comparte agentes como tarjetas coleccionables descargables desde la galería y la página de detalles del agente.",
       "title": "Tarjetas para compartir agentes"
     },
+    "autoEnable": {
+      "description": "Las compilaciones de desarrollo activan los experimentos de forma predeterminada. Desactiva experimentos individuales abajo cuando necesites el flujo estable.",
+      "label": "Activar nuevos experimentos automáticamente"
+    },
     "avatarCollectionPage": {
       "description": "Elige avatares de agentes en un lienzo de colección de pantalla completa y desplazable en lugar del selector integrado en el generador de agentes.",
       "title": "Lienzo de colección de avatares"
-    },
-    "builderbot": {
-      "description": "Muestra la superficie de tareas y automatizaciones de Builderbot.",
-      "title": "Builderbot"
-    },
-    "voiceConversation": {
-      "description": "Prueba conversaciones de voz bidireccionales continuas en chats de Goose.",
-      "title": "Conversaciones de voz"
-    },
-    "description": "Activa funciones de Berd en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
-    "defaultLabel": "predeterminado",
-    "emptyDescription": "Los nuevos experimentos aparecerán aquí cuando estén listos para probarse.",
-    "resetToAuto": "Restablecer a automático",
-    "saveError": "No se pudo guardar el ajuste del experimento. Inténtalo de nuevo.",
-    "skillDiscovery": {
-      "description": "Agrega una pestaña Descubrir a Skills para explorar e instalar skills del catálogo de Block sin salir de la app. Requiere la CLI sq-agents.",
-      "title": "Descubrimiento de skills"
-    },
-    "transcriptVirtualRenderer": {
-      "description": "Envía los chats por el puente del renderizador virtual de transcripciones para probar la implementación.",
-      "title": "Renderizador virtual de transcripciones"
-    },
-    "title": "Experimentos",
-    "starterTasks": {
-      "title": "Tareas iniciales de incorporación",
-      "description": "Muestra la nota adhesiva de tareas iniciales en Inicio para probar el flujo de incorporación.",
-      "reset": "Restablecer",
-      "resetSuccess": "Se restablecieron las tareas iniciales.",
-      "resetAria": "Restablecer incorporación de tareas iniciales"
     },
     "berdyOnboarding": {
       "description": "Muestra la guía interactiva de introducción y ayuda de Berdy en Inicio.",
@@ -239,22 +187,111 @@
       "resetSuccess": "Se restableció la introducción de Berdy.",
       "title": "Introducción de Berdy"
     },
-    "onboarding": {
-      "title": "Incorporación",
-      "description": "Prueba y restablece las experiencias de incorporación juntas.",
-      "resetAll": "Restablecer toda la incorporación",
-      "resetAllSuccess": "Se restablecieron todas las experiencias de incorporación.",
-      "resetAllError": "No se pudieron restablecer todas las experiencias de incorporación. Inténtalo de nuevo.",
-      "confirmTitle": "¿Restablecer el lienzo de incorporación?",
-      "confirmDescription": "Esto reemplaza todo el contenido del lienzo de Inicio con el diseño inicial. Tus proyectos, chats, agentes y archivos no se eliminarán.",
-      "cancel": "Cancelar",
-      "confirm": "Restablecer lienzo",
-      "confirming": "Restableciendo…"
+    "builderbot": {
+      "description": "Muestra la superficie de tareas y automatizaciones de Builderbot.",
+      "title": "Builderbot"
     },
+    "defaultLabel": "predeterminado",
+    "description": "Activa funciones de Berd en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
+    "emptyDescription": "Los nuevos experimentos aparecerán aquí cuando estén listos para probarse.",
     "firstRunOnboarding": {
       "description": "Previsualiza el nuevo flujo de incorporación de la primera instalación. El progreso sin terminar se reanuda cuando se vuelve a activar el experimento.",
-      "title": "Incorporación del primer inicio",
-      "replay": "Repetir incorporación"
+      "replay": "Repetir incorporación",
+      "title": "Incorporación del primer inicio"
+    },
+    "onboarding": {
+      "cancel": "Cancelar",
+      "confirm": "Restablecer lienzo",
+      "confirmDescription": "Esto reemplaza todo el contenido del lienzo de Inicio con el diseño inicial. Tus proyectos, chats, agentes y archivos no se eliminarán.",
+      "confirmTitle": "¿Restablecer el lienzo de incorporación?",
+      "confirming": "Restableciendo…",
+      "description": "Prueba y restablece las experiencias de incorporación juntas.",
+      "resetAll": "Restablecer toda la incorporación",
+      "resetAllError": "No se pudieron restablecer todas las experiencias de incorporación. Inténtalo de nuevo.",
+      "resetAllSuccess": "Se restablecieron todas las experiencias de incorporación.",
+      "title": "Incorporación"
+    },
+    "resetToAuto": "Restablecer a automático",
+    "saveError": "No se pudo guardar el ajuste del experimento. Inténtalo de nuevo.",
+    "skillDiscovery": {
+      "description": "Agrega una pestaña Descubrir a Skills para explorar e instalar skills del catálogo de Block sin salir de la app. Requiere la CLI sq-agents.",
+      "title": "Descubrimiento de skills"
+    },
+    "starterTasks": {
+      "description": "Muestra la nota adhesiva de tareas iniciales en Inicio para probar el flujo de incorporación.",
+      "reset": "Restablecer",
+      "resetAria": "Restablecer incorporación de tareas iniciales",
+      "resetSuccess": "Se restablecieron las tareas iniciales.",
+      "title": "Tareas iniciales de incorporación"
+    },
+    "title": "Experimentos",
+    "transcriptVirtualRenderer": {
+      "description": "Envía los chats por el puente del renderizador virtual de transcripciones para probar la implementación.",
+      "title": "Renderizador virtual de transcripciones"
+    },
+    "voiceConversation": {
+      "description": "Prueba conversaciones de voz bidireccionales continuas en chats de Goose.",
+      "title": "Conversaciones de voz"
+    }
+  },
+  "extensions": {
+    "addExtension": "Agregar conexión",
+    "alwaysOn": {
+      "label": "Siempre activa",
+      "reset": "Restablecer",
+      "resetAria": "Restablecer {{name}} a bajo demanda",
+      "tooltip": "Esta extensión se carga en cada chat. Restablécela para que esté disponible bajo demanda."
+    },
+    "cancel": "Cancelar",
+    "configure": "Configurar {{name}}",
+    "deleteConfirmation": {
+      "confirm": "Eliminar conexión",
+      "deleting": "Eliminando...",
+      "description": "Esto eliminará de forma permanente esta conexión y toda su configuración.",
+      "title": "¿Eliminar \"{{name}}\" de forma permanente?"
+    },
+    "deleteExtension": "Eliminar conexión",
+    "description": "Conecta Berd con apps, servicios y capacidades integradas.",
+    "disabledBanner": {
+      "description": "Estas extensiones se cargaban automáticamente en cada sesión, pero ahora solo se cargan cuando se necesitan: {{names}}.",
+      "dismiss": "Descartar",
+      "title": "Algunas extensiones se cargan ahora bajo demanda"
+    },
+    "editExtension": "Editar conexión",
+    "emptyCustom": "No hay extensiones personalizadas configuradas.",
+    "errors": {
+      "deleteFailed": "Error al eliminar la conexión. Inténtalo de nuevo.",
+      "nameConflict": "Ya existe una conexión llamada \"{{name}}\".",
+      "resetFailed": "No se pudo restablecer la conexión. Inténtalo de nuevo.",
+      "saveFailed": "Error al guardar la conexión. Inténtalo de nuevo."
+    },
+    "fields": {
+      "addEnvVar": "Agregar variable",
+      "arguments": "Argumentos",
+      "argumentsPlaceholder": "Un argumento por línea",
+      "command": "Comando",
+      "commandPlaceholder": "npx",
+      "description": "Descripción",
+      "descriptionPlaceholder": "¿Qué hace esta conexión?",
+      "envKeyPlaceholder": "CLAVE",
+      "envValuePlaceholder": "valor",
+      "envVars": "Variables de entorno",
+      "name": "Nombre",
+      "namePlaceholder": "mi-extension",
+      "removeEnvVar": "Eliminar variable",
+      "timeout": "Tiempo de espera (segundos)",
+      "type": "Tipo",
+      "url": "URL",
+      "urlPlaceholder": "http://localhost:3000/mcp"
+    },
+    "noResults": "Ninguna extensión coincide con tu búsqueda.",
+    "save": "Guardar",
+    "search": "Buscar extensiones",
+    "title": "Extensiones",
+    "types": {
+      "builtin": "Integrada",
+      "stdio": "Stdio",
+      "streamable_http": "HTTP"
     }
   },
   "general": {
@@ -262,11 +299,9 @@
       "description": "Berd mostrará consejos en el chat sobre herramientas, skills o flujos relevantes.",
       "label": "Consejos de chat"
     },
-    "atMentionDefault": {
-      "agents": "Agentes",
-      "description": "Elige qué pestaña se abre primero cuando escribes @ en el chat.",
-      "files": "Archivos",
-      "label": "Predeterminado de menciones @"
+    "artifactAutoOpen": {
+      "description": "Cuando el agente crea o abre un archivo visualizable (como markdown o una imagen), muéstralo automáticamente en el visor.",
+      "label": "Abrir archivos automáticamente en el visor"
     },
     "artifacts": {
       "change": "Cambiar",
@@ -278,6 +313,12 @@
       "resetSuccess": "Ubicación de artefactos restablecida.",
       "saveError": "No se pudo actualizar la ubicación de artefactos. Inténtalo de nuevo.",
       "saveSuccess": "Ubicación de artefactos actualizada."
+    },
+    "atMentionDefault": {
+      "agents": "Agentes",
+      "description": "Elige qué pestaña se abre primero cuando escribes @ en el chat.",
+      "files": "Archivos",
+      "label": "Predeterminado de menciones @"
     },
     "bbCli": {
       "description": "Goose instala o repara automáticamente el enlace /usr/local/bin/bb al comando incluido con esta app.",
@@ -292,12 +333,38 @@
       "version": "Incluido: {{version}}",
       "versionUnknown": "Versión incluida no disponible"
     },
+    "followUpBehavior": {
+      "description": "Pon seguimientos en cola mientras Berd responde o guía la ejecucion actual. Pulsa Cmd+Enter para hacer lo opuesto en un mensaje.",
+      "label": "Comportamiento de seguimiento",
+      "queue": "Cola",
+      "steer": "Guiar (solo arnés de Goose)"
+    },
+    "globalShortcut": {
+      "description": "Usa el atajo global configurado para crear y encontrar chats desde cualquier lugar de macOS.",
+      "label": "Activar atajo global"
+    },
+    "groupChatsByProject": {
+      "description": "Muestra grupos de proyectos en la barra lateral. Desactiva esto para tener una sola lista de chats ordenada por actividad.",
+      "label": "Agrupar chats por proyecto"
+    },
     "language": {
       "description": "Elige cómo Berd formatea y muestra la interfaz.",
       "english": "Inglés",
       "label": "Idioma",
       "spanish": "Español",
       "system": "Predeterminado del sistema ({{language}})"
+    },
+    "multiWorkspace": {
+      "description": "Activa varios espacios de trabajo en chats y proyectos, políticas de inicio de espacios de trabajo y contexto de agente con varios espacios.",
+      "label": "Compatibilidad con varios espacios de trabajo"
+    },
+    "responseStartGutter": {
+      "description": "Muestra una flecha hacia arriba flotante junto a respuestas largas del agente.",
+      "label": "Mostrar botón flotante de inicio de respuesta"
+    },
+    "sessionCost": {
+      "description": "Muestra el costo estimado acumulado en el chat cuando esté disponible.",
+      "label": "Mostrar costo de sesión"
     },
     "styleGuidelines": {
       "promptDescription": "Personaliza la guía de estilo predeterminada que Goose recibe para el estilo y comportamiento de las respuestas.",
@@ -307,24 +374,6 @@
       "save": "Guardar guía",
       "saveError": "No se pudo guardar tu guía de estilo. Inténtalo de nuevo.",
       "title": "Guía de estilo"
-    },
-    "followUpBehavior": {
-      "description": "Pon seguimientos en cola mientras Berd responde o guía la ejecucion actual. Pulsa Cmd+Enter para hacer lo opuesto en un mensaje.",
-      "label": "Comportamiento de seguimiento",
-      "queue": "Cola",
-      "steer": "Guiar (solo arnés de Goose)"
-    },
-    "groupChatsByProject": {
-      "description": "Muestra grupos de proyectos en la barra lateral. Desactiva esto para tener una sola lista de chats ordenada por actividad.",
-      "label": "Agrupar chats por proyecto"
-    },
-    "globalShortcut": {
-      "description": "Usa el atajo global configurado para crear y encontrar chats desde cualquier lugar de macOS.",
-      "label": "Activar atajo global"
-    },
-    "multiWorkspace": {
-      "description": "Activa varios espacios de trabajo en chats y proyectos, políticas de inicio de espacios de trabajo y contexto de agente con varios espacios.",
-      "label": "Compatibilidad con varios espacios de trabajo"
     },
     "terminalFallback": {
       "change": "Cambiar",
@@ -337,102 +386,15 @@
       "saveError": "No se pudo actualizar la carpeta de reserva del terminal. Inténtalo de nuevo.",
       "saveSuccess": "Carpeta de reserva del terminal actualizada."
     },
-    "title": "General",
-    "sessionCost": {
-      "label": "Mostrar costo de sesión",
-      "description": "Muestra el costo estimado acumulado en el chat cuando esté disponible."
-    },
-    "responseStartGutter": {
-      "label": "Mostrar botón flotante de inicio de respuesta",
-      "description": "Muestra una flecha hacia arriba flotante junto a respuestas largas del agente."
-    }
-  },
-  "runtimeConfig": {
-    "clearError": "No se pudo limpiar la respuesta del endpoint falso.",
-    "clearSuccess": "Respuesta del endpoint falso limpiada.",
-    "clearing": "Limpiando...",
-    "editorLabel": "Respuesta del endpoint falso",
-    "jsonLabel": "JSON del endpoint falso",
-    "refreshError": "No se pudo recargar la respuesta del endpoint falso.",
-    "refreshSuccess": "Respuesta del endpoint falso recargada.",
-    "refreshing": "Recargando...",
-    "saveError": "No se pudo guardar la respuesta del endpoint falso.",
-    "saveSuccess": "Respuesta del endpoint falso guardada.",
-    "saving": "Guardando...",
-    "status": {
-      "ready": "Cargado desde {{source}}.",
-      "unavailable": "{{reason}}: {{message}}"
-    },
-    "title": "Configuración de runtime"
-  },
-  "storage": {
-    "cachedMedia": {
-      "clear": "Limpiar medios en caché",
-      "clearing": "Limpiando...",
-      "confirm": "Limpiar medios en caché",
-      "confirmDescription": "Esto elimina de este dispositivo los avatares descargados y los medios de vista previa de proyectos. Los avatares seleccionados y otras configuraciones no cambian.",
-      "confirmTitle": "¿Limpiar medios en caché?",
-      "description": "Elimina de este dispositivo los avatares descargados y los medios de vista previa de proyectos. Los avatares seleccionados y la configuración no cambiarán.",
-      "error": "No se pudo limpiar el contenido en caché. Inténtalo de nuevo.",
-      "label": "Medios en caché",
-      "success": "Contenido en caché limpiado."
-    },
-    "title": "Almacenamiento",
-    "trustedDomains": {
-      "clear": "Limpiar todo",
-      "clearSuccess": "Dominios de enlaces confiables limpiados.",
-      "description": "Dominios que marcaste como confiables desde avisos de seguridad de enlaces. Los enlaces a estos dominios se abren sin preguntar.",
-      "empty": "Aún no hay dominios de enlaces confiables.",
-      "label": "Dominios de enlaces confiables",
-      "listLabel": "Dominios de enlaces confiables",
-      "remove": "Quitar",
-      "removeAria": "Quitar {{domain}} de los dominios de enlaces confiables",
-      "removeSuccess": "{{domain}} se quitó de los dominios de enlaces confiables.",
-      "count_one": "{{count}} dominio",
-      "count_other": "{{count}} dominios",
-      "manage": "Administrar"
-    }
-  },
-  "archive": {
-    "title": "Archivo"
-  },
-  "connections": {
-    "title": "Conexiones",
-    "description": "Inicia sesión en apps y servicios que Berd puede usar en tu nombre.",
-    "search": "Buscar conexiones",
-    "noResults": "Ninguna conexión coincide con tu búsqueda.",
-    "sections": {
-      "installed": "Instaladas",
-      "available": "Disponibles"
-    },
-    "configure": "Configurar",
-    "connect": "Conectar",
-    "reconnect": "Reconectar",
-    "extendAccess": "Ampliar acceso",
-    "disconnect": "Desconectar",
-    "connectError": "No se pudo abrir el flujo de conexión. Inténtalo de nuevo.",
-    "disconnectError": "No se pudo desconectar. Inténtalo de nuevo.",
-    "expiresToday": "Caduca hoy",
-    "expiresTomorrow": "Caduca mañana",
-    "expiresInDays": "Caduca en {{count}} días",
-    "empty": {
-      "title": "Aún no hay conexiones",
-      "description": "Agrega un servidor MCP para conectar Berd a las apps y servicios que usas."
-    },
-    "status": {
-      "active": "Activa",
-      "expired": "Caducada",
-      "disconnected": "Desconectada"
-    }
-  },
-  "navigation": {
-    "title": "Navegación"
+    "title": "General"
   },
   "nav": {
     "about": "Acerca de",
     "appearance": "Apariencia",
     "archive": "Archivo",
+    "behavior": "Comportamiento",
     "compaction": "Compactación",
+    "connections": "Conexiones",
     "doctor": "Diagnóstico",
     "experiments": "Experimentos",
     "extensions": "Extensiones",
@@ -440,30 +402,35 @@
     "notifications": "Notificaciones",
     "providers": "Proveedores de IA",
     "providersUpdateAvailable": "Actualización disponible",
+    "security": "Seguridad",
     "shortcuts": "Atajos de teclado",
+    "system": "Sistema",
     "updates": "Actualizaciones",
     "voice": "Voz"
   },
+  "navigation": {
+    "title": "Navegación"
+  },
+  "navigationLabel": "Navegación de configuración",
   "notifications": {
-    "title": "Notificaciones",
+    "desktop": {
+      "description": "Enviar una notificación del sistema cuando la app está en segundo plano.",
+      "label": "Escritorio"
+    },
+    "desktopSound": {
+      "ariaLabel": "Elegir sonido de escritorio",
+      "label": "Elegir sonido"
+    },
     "enabled": {
       "label": "Activar notificaciones"
     },
     "inApp": {
-      "label": "En la app",
-      "description": "Mostrar un aviso cuando un chat termina y estás en otra sesión."
+      "description": "Mostrar un aviso cuando un chat termina y estás en otra sesión.",
+      "label": "En la app"
     },
     "inAppSound": {
-      "label": "Elegir sonido",
-      "ariaLabel": "Elegir sonido en la app"
-    },
-    "desktop": {
-      "label": "Escritorio",
-      "description": "Enviar una notificación del sistema cuando la app está en segundo plano."
-    },
-    "desktopSound": {
-      "label": "Elegir sonido",
-      "ariaLabel": "Elegir sonido de escritorio"
+      "ariaLabel": "Elegir sonido en la app",
+      "label": "Elegir sonido"
     },
     "soundPreview": {
       "ariaLabel": "Previsualizar {{sound}}"
@@ -477,96 +444,8 @@
       "quickPeep": "Chime",
       "silent": "Silencio",
       "youHaveGotGoose": "Twinkle"
-    }
-  },
-  "updates": {
-    "actions": {
-      "check": "Buscar actualizaciones",
-      "checking": "Comprobando...",
-      "downloading": "Descargando...",
-      "installing": "Instalando...",
-      "restart": "Reiniciar",
-      "retry": "Intentar de nuevo",
-      "update": "Actualizar Berd",
-      "cancel": "Cancelar",
-      "restartToFinish": "Reiniciar para terminar el cambio a {{channel}}",
-      "switchTo": "Cambiar a {{channel}}"
     },
-    "card": {
-      "checkPrompt": "Busca si hay una nueva versión disponible.",
-      "description": "Mantén Berd actualizado con las últimas funciones y correcciones.",
-      "title": "Actualizaciones de software",
-      "currentVersion": "Versión {{version}}"
-    },
-    "description": "Berd comprueba actualizaciones firmadas de la app en segundo plano y espera a que reinicies.",
-    "details": {
-      "available": "La actualización {{version}} está lista para descargarse.",
-      "checking": "Buscando actualizaciones...",
-      "downloading": "Descargando la actualización firmada más reciente.",
-      "error": "El último intento de actualización falló.",
-      "idle": "Berd buscará actualizaciones automáticamente cada pocas horas.",
-      "installing": "Instalando la actualización descargada.",
-      "ready": "La actualización {{version}} está instalada y se aplicará al reiniciar.",
-      "unavailable": "Las actualizaciones solo están disponibles en builds de lanzamiento firmadas de Tauri.",
-      "upToDate": "Berd está actualizado.",
-      "switchReady": "{{channel}} {{version}} está instalado. Reinicia cuando quieras terminar el cambio."
-    },
-    "errors": {
-      "detail": "Detalles: {{detail}}",
-      "generic": "La actualización falló. Inténtalo de nuevo.",
-      "networkAccess": "No se pudo buscar actualizaciones. Conéctate a Cloudflare WARP e inténtalo de nuevo.",
-      "switchUnavailable": "Todavía no hay una versión {{channel}} disponible para esta compilación."
-    },
-    "progress": {
-      "downloading": "Descargando",
-      "installing": "Instalando",
-      "percent": "{{progress}}%"
-    },
-    "status": {
-      "available": "Disponible",
-      "checking": "Comprobando",
-      "downloading": "Descargando",
-      "error": "Error",
-      "idle": "Inactivo",
-      "installing": "Instalando",
-      "ready": "Lista",
-      "unavailable": "No disponible",
-      "upToDate": "Actualizado"
-    },
-    "title": "Actualizaciones",
-    "toast": {
-      "error": {
-        "description": "{{message}}",
-        "title": "La actualización falló"
-      },
-      "ready": {
-        "description": "Berd {{version}} se aplicará al reiniciar.",
-        "title": "Actualización lista"
-      }
-    },
-    "channel": {
-      "title": "Versión de lanzamiento",
-      "description": "Elige Main para las versiones recomendadas o Beta para probar funciones antes.",
-      "waitingDescription": "Las actualizaciones beta están desactivadas. Berd volverá a Main cuando haya una versión compatible.",
-      "unknown": "Versión actual"
-    },
-    "switchDialog": {
-      "title": "¿Cambiar a {{channel}}?",
-      "betaDescription": "Berd descargará la beta más reciente y se reiniciará. Las betas reciben funciones nuevas primero y pueden tener detalles por pulir. Puedes volver a Main en cualquier momento desde Ajustes o la insignia Beta.",
-      "mainDescription": "Berd comprobará que todo lo de la beta funcione con Main, luego la descargará y se reiniciará.",
-      "builds": "Estás usando {{source}} {{currentVersion}}. Berd encontró {{target}} {{targetVersion}}.",
-      "restartLater": "Puedes seguir trabajando después de la descarga y reiniciar cuando quieras."
-    },
-    "betaBadge": {
-      "open": "Abrir detalles de Beta",
-      "title": "Versión beta",
-      "build": "Berd {{version}}",
-      "whatToTest": "Qué probar",
-      "defaultWhatToTest": "Prueba las funciones más recientes e informa de cualquier detalle que necesite pulirse.",
-      "waitingForMain": "Las actualizaciones beta están desactivadas. Berd cambiará a Main cuando haya una versión compatible.",
-      "reportIssue": "Informar de un problema",
-      "reportIssueUnavailable": "Los informes de problemas beta no están configurados para esta compilación."
-    }
+    "title": "Notificaciones"
   },
   "projects": {
     "empty": "No hay proyectos archivados.",
@@ -576,15 +455,14 @@
   "providers": {
     "agents": {
       "applyUpdates": "Actualizar",
-      "description": "Conecta un proveedor de modelos para usar Goose, o conecta otro harness de agente.",
-      "refresh": "Actualizar",
       "collapseLabel": "Contraer detalles de {{name}}",
+      "description": "Conecta un proveedor de modelos para usar Goose, o conecta otro harness de agente.",
       "errors": {
         "genericSetupFailure": "La configuración tuvo un tropiezo.",
+        "installStart": "No se pudo iniciar la instalación",
         "installVerificationFailed": "La instalación terminó, pero no se encontró la CLI en PATH. Puede que tengas que reiniciar tu terminal.",
         "unknownPath": "esa ruta",
-        "unknownPlatform": "otra plataforma",
-        "installStart": "No se pudo iniciar la instalación"
+        "unknownPlatform": "otra plataforma"
       },
       "expandLabel": "Expandir detalles de {{name}}",
       "fix": "Reparar",
@@ -593,14 +471,15 @@
       "installLabel": "Instalar {{name}}",
       "missingComponent": "{{name}} no está instalado",
       "progress": {
+        "installedProvider": "{{name}} se instaló correctamente.",
         "installing": "Instalando {{name}}...",
+        "installingForBerd": "Instalando {{name}} para Berd…",
+        "preparingProvider": "Preparando la instalación de {{name}}…",
         "preparingRuntime": "Preparando el entorno de Node.js...",
         "step": "Paso {{step}} de {{total}}",
-        "verifyingInstallation": "Verificando instalación...",
-        "preparingProvider": "Preparando la instalación de {{name}}…",
-        "installingForBerd": "Instalando {{name}} para Berd…",
-        "installedProvider": "{{name}} se instaló correctamente."
+        "verifyingInstallation": "Verificando instalación..."
       },
+      "refresh": "Actualizar",
       "signIn": "Iniciar sesión",
       "signInLabel": "Iniciar sesión en {{name}}",
       "status": {
@@ -617,9 +496,9 @@
     },
     "connectionHints": {
       "keyRejected": "La clave fue rechazada: verifícala en la consola de tu proveedor. ({{message}})",
-      "urlLooksWrong": "El servidor respondió, pero no en esa ruta: revisa la URL (¿incluiste /v1?). ({{message}})",
+      "rateLimited": "La clave funciona, pero el proveedor está limitando las solicitudes. Inténtalo de nuevo en breve. ({{message}})",
       "unreachable": "No se puede acceder al servidor: revisa la URL y asegúrate de que esté en ejecución. ({{message}})",
-      "rateLimited": "La clave funciona, pero el proveedor está limitando las solicitudes. Inténtalo de nuevo en breve. ({{message}})"
+      "urlLooksWrong": "El servidor respondió, pero no en esa ruta: revisa la URL (¿incluiste /v1?). ({{message}})"
     },
     "custom": {
       "actions": {
@@ -681,18 +560,6 @@
       "modelCount_one": "{{count}} modelo",
       "modelCount_other": "{{count}} modelos",
       "notConfigured": "No configurado",
-      "validation": {
-        "apiKeyRequired": "La clave API es obligatoria.",
-        "apiUrlInvalid": "Introduce una URL HTTP o HTTPS válida.",
-        "apiUrlRequired": "La URL de API es obligatoria.",
-        "displayNameRequired": "El nombre visible es obligatorio.",
-        "engineRequired": "Elige un tipo de API.",
-        "headerDuplicate": "Los nombres de encabezado deben ser únicos.",
-        "headerNameInvalid": "Los nombres de encabezado solo pueden contener caracteres HTTP token válidos.",
-        "headerNameRequired": "El nombre del encabezado es obligatorio.",
-        "headerValueRequired": "El valor del encabezado es obligatorio.",
-        "modelsRequired": "Agrega al menos un modelo."
-      },
       "sections": {
         "template": "Comenzar con plantilla"
       },
@@ -709,6 +576,18 @@
         "searchPlaceholder": "Buscar proveedores",
         "useTemplate": "Usar una plantilla",
         "useTemplateDescription": "Comienza con valores predeterminados de endpoint y modelos para un proveedor conocido."
+      },
+      "validation": {
+        "apiKeyRequired": "La clave API es obligatoria.",
+        "apiUrlInvalid": "Introduce una URL HTTP o HTTPS válida.",
+        "apiUrlRequired": "La URL de API es obligatoria.",
+        "displayNameRequired": "El nombre visible es obligatorio.",
+        "engineRequired": "Elige un tipo de API.",
+        "headerDuplicate": "Los nombres de encabezado deben ser únicos.",
+        "headerNameInvalid": "Los nombres de encabezado solo pueden contener caracteres HTTP token válidos.",
+        "headerNameRequired": "El nombre del encabezado es obligatorio.",
+        "headerValueRequired": "El valor del encabezado es obligatorio.",
+        "modelsRequired": "Agrega al menos un modelo."
       }
     },
     "disconnect": "Desconectar",
@@ -717,16 +596,16 @@
     "modelRefreshWarning": "Credenciales guardadas. La actualización de modelos necesita atención: {{message}}",
     "models": {
       "active": "Activo",
+      "checkingStatus": "Comprobando estado del proveedor...",
       "configured": "Configurado",
       "connectPrompt": "Conectar un proveedor de modelos",
       "description": "Goose requiere un modelo de IA para ejecutarse.",
-      "summaryLabel": "Proveedor de modelos",
-      "summaryLabelPlural": "Proveedores de modelos",
       "details": {
         "configuredUrl": "URL configurada"
       },
       "notSet": "No configurado",
       "setup": {
+        "configLoadFallback": "No se pudieron cargar los ajustes del proveedor. Aún puedes ingresar valores y guardar.",
         "connected": {
           "cloudCredentials": "Conectado mediante tus credenciales de nube.",
           "local": "Ejecutándose localmente.",
@@ -746,10 +625,10 @@
           "local": "Este proveedor se ejecuta localmente y no necesita ajustes guardados.",
           "oauthGuided": "Berd te guiará por el inicio de sesión.",
           "oauthTerminal": "Ejecuta `goose configure` en tu terminal para terminar de iniciar sesión."
-        },
-        "configLoadFallback": "No se pudieron cargar los ajustes del proveedor. Aún puedes ingresar valores y guardar."
+        }
       },
-      "checkingStatus": "Comprobando estado del proveedor...",
+      "summaryLabel": "Proveedor de modelos",
+      "summaryLabelPlural": "Proveedores de modelos",
       "title": "Proveedores de modelos"
     },
     "needsAttention": "Requiere atención",
@@ -763,48 +642,225 @@
       "copyDeviceCode": "Copiar código de dispositivo",
       "deviceCode": "Código de dispositivo"
     },
+    "setupRequired": {
+      "body": "Esta versión no incluye un proveedor de modelos preconfigurado. Configura uno antes de iniciar un chat de Goose.",
+      "openProviders": "Abrir proveedores de IA",
+      "title": "Elige un proveedor de IA para empezar a chatear",
+      "toast": "Elige un proveedor de IA antes de iniciar un chat."
+    },
     "showFewer": "Mostrar menos",
     "showMore": "Mostrar {{count}} proveedores más",
     "title": "Proveedores",
-    "waitingForSignIn": "Esperando inicio de sesión...",
-    "setupRequired": {
-      "title": "Elige un proveedor de IA para empezar a chatear",
-      "body": "Esta versión no incluye un proveedor de modelos preconfigurado. Configura uno antes de iniciar un chat de Goose.",
-      "openProviders": "Abrir proveedores de IA",
-      "toast": "Elige un proveedor de IA antes de iniciar un chat."
+    "waitingForSignIn": "Esperando inicio de sesión..."
+  },
+  "runtimeConfig": {
+    "clearError": "No se pudo limpiar la respuesta del endpoint falso.",
+    "clearSuccess": "Respuesta del endpoint falso limpiada.",
+    "clearing": "Limpiando...",
+    "editorLabel": "Respuesta del endpoint falso",
+    "jsonLabel": "JSON del endpoint falso",
+    "refreshError": "No se pudo recargar la respuesta del endpoint falso.",
+    "refreshSuccess": "Respuesta del endpoint falso recargada.",
+    "refreshing": "Recargando...",
+    "saveError": "No se pudo guardar la respuesta del endpoint falso.",
+    "saveSuccess": "Respuesta del endpoint falso guardada.",
+    "saving": "Guardando...",
+    "status": {
+      "ready": "Cargado desde {{source}}.",
+      "unavailable": "{{reason}}: {{message}}"
+    },
+    "title": "Configuración de runtime"
+  },
+  "security": {
+    "commandClassifier": {
+      "description": "Analiza las llamadas a herramientas para detectar contenido malicioso con un clasificador de ML, con respaldo basado en patrones.",
+      "label": "Detección de inyección de comandos"
+    },
+    "description": "Protege contra ataques de inyección de instrucciones y de comandos.",
+    "managedByOrg": "Estas protecciones están gestionadas por tu organización y no se pueden desactivar.",
+    "promptInjection": {
+      "description": "Analiza el contexto de la conversación para detectar ataques de inyección de instrucciones. Usa clasificación basada en ML.",
+      "label": "Detección de inyección de instrucciones"
+    },
+    "status": {
+      "active": "Activo"
+    },
+    "threshold": {
+      "description": "El nivel de confianza al que una acción marcada te pedirá permitirla o bloquearla. Valores más bajos son más sensibles (más avisos); valores más altos son menos sensibles. Rango 0.0–1.0.",
+      "label": "Sensibilidad de detección",
+      "rangeError": "Ingresa un valor entre 0.0 y 1.0.",
+      "restartHint": "Los cambios surten efecto después de reiniciar Berd.",
+      "save": "Guardar",
+      "saveError": "No se pudo actualizar la sensibilidad de detección.",
+      "saved": "Sensibilidad de detección actualizada."
+    },
+    "title": "Seguridad",
+    "warpNotice": "La clasificación por ML requiere una conexión a WARP para acceder al servicio de clasificación."
+  },
+  "securityConfirmation": {
+    "allow": "Permitir una vez",
+    "backgroundChat": "Desde el chat: {{title}}",
+    "backgroundChatUnknown": "Desde otro chat",
+    "block": "Bloquear",
+    "commandLabel": "Comando marcado",
+    "connectGoose": "Conectar Goose",
+    "connectGooseDescription": "Conecta Goose para obtener explicaciones generadas por IA para futuras alertas de seguridad.",
+    "description": "Esta acción fue marcada como un posible riesgo de seguridad. Revisa los detalles a continuación antes de decidir si permitirla.",
+    "detectionConfidence": "Confianza de detección",
+    "findingId": "ID del hallazgo: {{id}}",
+    "inferenceFailed": "No se pudo generar una explicación. Revisa el comando cuidadosamente antes de permitirlo.",
+    "inferredLabel": "Por qué se pudo haber marcado (inferido)",
+    "inferring": "Analizando por qué se marcó esto…",
+    "title": "Alerta de seguridad"
+  },
+  "storage": {
+    "cachedMedia": {
+      "clear": "Limpiar medios en caché",
+      "clearing": "Limpiando...",
+      "confirm": "Limpiar medios en caché",
+      "confirmDescription": "Esto elimina de este dispositivo los avatares descargados y los medios de vista previa de proyectos. Los avatares seleccionados y otras configuraciones no cambian.",
+      "confirmTitle": "¿Limpiar medios en caché?",
+      "description": "Elimina de este dispositivo los avatares descargados y los medios de vista previa de proyectos. Los avatares seleccionados y la configuración no cambiarán.",
+      "error": "No se pudo limpiar el contenido en caché. Inténtalo de nuevo.",
+      "label": "Medios en caché",
+      "success": "Contenido en caché limpiado."
+    },
+    "title": "Almacenamiento",
+    "trustedDomains": {
+      "clear": "Limpiar todo",
+      "clearSuccess": "Dominios de enlaces confiables limpiados.",
+      "count_one": "{{count}} dominio",
+      "count_other": "{{count}} dominios",
+      "description": "Dominios que marcaste como confiables desde avisos de seguridad de enlaces. Los enlaces a estos dominios se abren sin preguntar.",
+      "empty": "Aún no hay dominios de enlaces confiables.",
+      "label": "Dominios de enlaces confiables",
+      "listLabel": "Dominios de enlaces confiables",
+      "manage": "Administrar",
+      "remove": "Quitar",
+      "removeAria": "Quitar {{domain}} de los dominios de enlaces confiables",
+      "removeSuccess": "{{domain}} se quitó de los dominios de enlaces confiables."
+    }
+  },
+  "title": "Configuración",
+  "updates": {
+    "actions": {
+      "cancel": "Cancelar",
+      "check": "Buscar actualizaciones",
+      "checking": "Comprobando...",
+      "downloading": "Descargando...",
+      "installing": "Instalando...",
+      "restart": "Reiniciar",
+      "restartToFinish": "Reiniciar para terminar el cambio a {{channel}}",
+      "retry": "Intentar de nuevo",
+      "switchTo": "Cambiar a {{channel}}",
+      "update": "Actualizar Berd"
+    },
+    "betaBadge": {
+      "build": "Berd {{version}}",
+      "defaultWhatToTest": "Prueba las funciones más recientes e informa de cualquier detalle que necesite pulirse.",
+      "open": "Abrir detalles de Beta",
+      "reportIssue": "Informar de un problema",
+      "reportIssueUnavailable": "Los informes de problemas beta no están configurados para esta compilación.",
+      "title": "Versión beta",
+      "waitingForMain": "Las actualizaciones beta están desactivadas. Berd cambiará a Main cuando haya una versión compatible.",
+      "whatToTest": "Qué probar"
+    },
+    "card": {
+      "checkPrompt": "Buscar una nueva versión",
+      "currentVersion": "Versión {{version}}",
+      "description": "Mantén Berd actualizado con las últimas funciones y correcciones.",
+      "title": "Actualizaciones de software"
+    },
+    "channel": {
+      "description": "Elige Main para las versiones recomendadas o Beta para probar funciones antes.",
+      "title": "Versión de lanzamiento",
+      "unknown": "Versión actual",
+      "waitingDescription": "Las actualizaciones beta están desactivadas. Berd volverá a Main cuando haya una versión compatible."
+    },
+    "description": "Berd comprueba actualizaciones firmadas de la app en segundo plano y espera a que reinicies.",
+    "details": {
+      "available": "La actualización {{version}} está lista para descargarse.",
+      "checking": "Buscando actualizaciones...",
+      "downloading": "Descargando la actualización firmada más reciente.",
+      "error": "El último intento de actualización falló.",
+      "idle": "Berd buscará actualizaciones automáticamente cada pocas horas.",
+      "installing": "Instalando la actualización descargada.",
+      "ready": "La actualización {{version}} está instalada y se aplicará al reiniciar.",
+      "switchReady": "{{channel}} {{version}} está instalado. Reinicia cuando quieras terminar el cambio.",
+      "unavailable": "Las actualizaciones solo están disponibles en builds de lanzamiento firmadas de Tauri.",
+      "upToDate": "Berd está actualizado."
+    },
+    "errors": {
+      "detail": "Detalles: {{detail}}",
+      "generic": "La actualización falló. Inténtalo de nuevo.",
+      "networkAccess": "No se pudo buscar actualizaciones. Conéctate a Cloudflare WARP e inténtalo de nuevo.",
+      "switchUnavailable": "Todavía no hay una versión {{channel}} disponible para esta compilación."
+    },
+    "progress": {
+      "downloading": "Descargando",
+      "installing": "Instalando",
+      "percent": "{{progress}}%"
+    },
+    "status": {
+      "available": "Disponible",
+      "checking": "Comprobando",
+      "downloading": "Descargando",
+      "error": "Error",
+      "idle": "Inactivo",
+      "installing": "Instalando",
+      "ready": "Lista",
+      "unavailable": "No disponible",
+      "upToDate": "Actualizado"
+    },
+    "switchDialog": {
+      "betaDescription": "Berd descargará la beta más reciente y se reiniciará. Las betas reciben funciones nuevas primero y pueden tener detalles por pulir. Puedes volver a Main en cualquier momento desde Ajustes o la insignia Beta.",
+      "builds": "Estás usando {{source}} {{currentVersion}}. Berd encontró {{target}} {{targetVersion}}.",
+      "mainDescription": "Berd comprobará que todo lo de la beta funcione con Main, luego la descargará y se reiniciará.",
+      "restartLater": "Puedes seguir trabajando después de la descarga y reiniciar cuando quieras.",
+      "title": "¿Cambiar a {{channel}}?"
+    },
+    "title": "Actualizaciones",
+    "toast": {
+      "error": {
+        "description": "{{message}}",
+        "title": "La actualización falló"
+      },
+      "ready": {
+        "description": "Berd {{version}} se aplicará al reiniciar.",
+        "title": "Actualización lista"
+      }
     }
   },
   "voice": {
-    "title": "Conversación por voz",
     "description": "Instala Pocket TTS y Parakeet STT para usar Conversación por voz.",
-    "settingsDescription": "Instala Pocket TTS, elige entre 12 voces y escúchalas en el dispositivo de salida seleccionado.",
-    "useSelected": "Usar la voz seleccionada",
-    "notNow": "Ahora no",
-    "downloadProgress": "{{downloaded}} de {{total}}",
-    "retryDownload": "Reintentar descarga del modelo",
     "download": "Descargar modelo",
-    "modelInstalled": "Instalado",
-    "modelNotInstalled": "No instalado",
-    "modelInstalledSize": "Instalado · {{size}} en disco",
-    "modelMissingSize": "No instalado · descarga de {{size}}",
     "downloadPhase": {
-      "queued": "En cola",
+      "complete": "Instalado",
       "downloading": "Descargando",
       "extracting": "Preparando modelo",
-      "verifying": "Verificando modelo",
       "publishing": "Instalando modelo",
-      "complete": "Instalado"
+      "queued": "En cola",
+      "verifying": "Verificando modelo"
     },
-    "removeModel": "Eliminar modelo",
-    "removeModelQueued": "En cola para eliminar…",
-    "removingModel": "Eliminando modelo…",
-    "removeModelTitle": "¿Eliminar {{model}}?",
-    "removeModelDescription": "La conversación por voz se detendrá antes de eliminar {{model}}. Puedes volver a descargar el modelo más tarde.",
+    "downloadProgress": "{{downloaded}} de {{total}}",
+    "modelInstalled": "Instalado",
+    "modelInstalledSize": "Instalado · {{size}} en disco",
+    "modelMissingSize": "No instalado · descarga de {{size}}",
+    "modelNotInstalled": "No instalado",
+    "notNow": "Ahora no",
     "playbackSpeed": "Velocidad de reproducción",
-    "voiceLabel": "Voz de Pocket TTS",
-    "previewVoice": "Escuchar {{voice}}",
     "playing": "Reproduciendo",
-    "preview": "Escuchar"
-  },
-  "title": "Configuración"
+    "preview": "Escuchar",
+    "previewVoice": "Escuchar {{voice}}",
+    "removeModel": "Eliminar modelo",
+    "removeModelDescription": "La conversación por voz se detendrá antes de eliminar {{model}}. Puedes volver a descargar el modelo más tarde.",
+    "removeModelQueued": "En cola para eliminar…",
+    "removeModelTitle": "¿Eliminar {{model}}?",
+    "removingModel": "Eliminando modelo…",
+    "retryDownload": "Reintentar descarga del modelo",
+    "settingsDescription": "Instala Pocket TTS, elige entre 12 voces y escúchalas en el dispositivo de salida seleccionado.",
+    "title": "Conversación por voz",
+    "useSelected": "Usar la voz seleccionada",
+    "voiceLabel": "Voz de Pocket TTS"
+  }
 }

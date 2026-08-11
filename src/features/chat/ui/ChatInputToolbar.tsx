@@ -291,7 +291,8 @@ export function ChatInputToolbar({
 
   const handleOpenAutoCompactSettings = () => {
     setOpenMenu(null);
-    requestOpenSettings("general");
+    // Auto-compact settings live in the Chat section (BOT-1430 redesign).
+    requestOpenSettings("chat");
   };
 
   if (!showContextUsage && isContextPopoverOpen) {

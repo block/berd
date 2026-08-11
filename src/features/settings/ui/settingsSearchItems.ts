@@ -6,87 +6,98 @@ export interface SettingsSearchItem {
   labelKey: string;
 }
 
+// Rev 3 (Aug 10): rewritten against the appearance/behavior/system/about
+// split (see settingsSections.ts). "group-chats"
+// (general.groupChatsByProject) was dropped -- that control now lives in
+// the sidebar's own display-options menu (SidebarDisplayOptionsMenu.tsx),
+// not in Settings, so there's no page for a search hit to land on.
+// "language" moved from "behavior" to "system" alongside the row itself.
 /** Searchable controls and destinations that are visible within Settings. */
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
     id: "theme",
-    sectionId: "general",
+    sectionId: "appearance",
     labelKey: "appearance.theme.label",
   },
   {
     id: "primary-color",
-    sectionId: "general",
+    sectionId: "appearance",
     labelKey: "appearance.primary.label",
   },
   {
     id: "animated-avatars",
-    sectionId: "general",
+    sectionId: "appearance",
     labelKey: "appearance.animatedAvatars.label",
   },
   {
     id: "working-indicator",
-    sectionId: "general",
+    sectionId: "appearance",
     labelKey: "appearance.workingIndicatorAnimation.label",
   },
   {
     id: "pin-labels",
-    sectionId: "general",
+    sectionId: "appearance",
     labelKey: "appearance.homePinLabels.label",
   },
   {
-    id: "language",
-    sectionId: "general",
-    labelKey: "general.language.label",
-  },
-  {
     id: "chat-tips",
-    sectionId: "general",
+    sectionId: "behavior",
     labelKey: "general.agentToolsTips.label",
   },
   {
     id: "mention-default",
-    sectionId: "general",
+    sectionId: "behavior",
     labelKey: "general.atMentionDefault.label",
   },
   {
     id: "follow-up",
-    sectionId: "general",
+    sectionId: "behavior",
     labelKey: "general.followUpBehavior.label",
   },
   {
-    id: "group-chats",
-    sectionId: "general",
-    labelKey: "general.groupChatsByProject.label",
-  },
-  {
     id: "session-cost",
-    sectionId: "general",
+    sectionId: "behavior",
     labelKey: "general.sessionCost.label",
   },
   {
     id: "response-gutter",
-    sectionId: "general",
+    sectionId: "behavior",
     labelKey: "general.responseStartGutter.label",
   },
   {
     id: "artifact-auto-open",
-    sectionId: "general",
+    sectionId: "behavior",
     labelKey: "general.artifactAutoOpen.label",
   },
   {
+    id: "style-guidelines",
+    sectionId: "behavior",
+    labelKey: "general.styleGuidelines.title",
+  },
+  {
+    id: "language",
+    sectionId: "system",
+    labelKey: "general.language.label",
+  },
+  {
     id: "artifact-location",
-    sectionId: "general",
+    sectionId: "system",
     labelKey: "general.artifacts.label",
   },
   {
     id: "terminal-folder",
-    sectionId: "general",
+    sectionId: "system",
     labelKey: "general.terminalFallback.label",
   },
   {
-    id: "style-guidelines",
-    sectionId: "general",
-    labelKey: "general.styleGuidelines.title",
+    id: "cached-media",
+    sectionId: "system",
+    labelKey: "storage.cachedMedia.label",
+  },
+  {
+    id: "bb-cli",
+    sectionId: "system",
+    labelKey: "general.bbCli.title",
   },
   {
     id: "connections",
@@ -124,14 +135,24 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     labelKey: "nav.archive",
   },
   {
-    id: "updates",
-    sectionId: "updates",
-    labelKey: "nav.updates",
+    id: "trusted-domains",
+    sectionId: "security",
+    labelKey: "storage.trustedDomains.label",
   },
   {
-    id: "doctor",
-    sectionId: "doctor",
-    labelKey: "nav.doctor",
+    id: "security",
+    sectionId: "security",
+    labelKey: "nav.security",
+  },
+  {
+    id: "about",
+    sectionId: "about",
+    labelKey: "nav.about",
+  },
+  {
+    id: "updates",
+    sectionId: "about",
+    labelKey: "updates.title",
   },
   {
     id: "experiments",

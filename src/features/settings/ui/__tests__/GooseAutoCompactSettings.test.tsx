@@ -41,7 +41,7 @@ describe("GooseAutoCompactSettings", () => {
     render(<GooseAutoCompactSettings />);
 
     const slider = screen.getByRole("slider", {
-      name: /auto-compact threshold/i,
+      name: /threshold/i,
     });
     slider.focus();
     await user.keyboard("{ArrowRight}");
@@ -62,7 +62,7 @@ describe("GooseAutoCompactSettings", () => {
     render(<GooseAutoCompactSettings />);
 
     const slider = screen.getByRole("slider", {
-      name: /auto-compact threshold/i,
+      name: /threshold/i,
     });
 
     expect(screen.getByText("Off")).toBeInTheDocument();

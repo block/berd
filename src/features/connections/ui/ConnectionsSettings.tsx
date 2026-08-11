@@ -8,7 +8,6 @@ import {
   IconPlus,
   IconX,
 } from "@tabler/icons-react";
-import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import {
   CONNECTIONS_QUERY_KEY,
   type Connection,
@@ -31,7 +30,6 @@ import { useMigrationStore } from "@/features/migration/stores/migrationStore";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
-import { PageHeaderButton } from "@/shared/ui/page-header-button";
 import { PageHeader } from "@/shared/ui/page-shell";
 import {
   SettingsSection,
@@ -97,7 +95,6 @@ function CardSkeleton() {
 export function ConnectionsSettings() {
   const { t } = useTranslation("settings");
   const queryClient = useQueryClient();
-  const setTopBarActions = useSetTopBarActions();
   const [searchTerm, setSearchTerm] = useState("");
 
   // Gates the kgoose-backed OAuth catalog. The capability is named after the
@@ -118,19 +115,6 @@ export function ConnectionsSettings() {
     handleReset,
     handleModalClose,
   } = useExtensionsSettings();
-
-  useEffect(() => {
-    setTopBarActions(
-      <PageHeaderButton
-        type="button"
-        onClick={handleAdd}
-        leftIcon={<IconPlus />}
-      >
-        {t("extensions.addExtension")}
-      </PageHeaderButton>,
-    );
-    return () => setTopBarActions(null);
-  }, [handleAdd, setTopBarActions, t]);
 
   const { data: connectionsData, isLoading: isOAuthLoading } = useQuery({
     queryKey: CONNECTIONS_QUERY_KEY,
@@ -269,6 +253,12 @@ export function ConnectionsSettings() {
         variant="default"
         titleClassName="font-medium"
         descriptionClassName="text-xs font-normal text-muted-foreground"
+        actions={
+          <Button type="button" variant="outline" size="sm" onClick={handleAdd}>
+            <IconPlus className="size-3.5" />
+            {t("extensions.addExtension")}
+          </Button>
+        }
       />
 
       {showDisabledBanner ? (

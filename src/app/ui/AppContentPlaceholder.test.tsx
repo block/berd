@@ -7,7 +7,7 @@ function renderSettingsPlaceholder() {
   return render(
     <I18nProvider>
       <AppContentPlaceholder
-        location={{ view: "settings", settingsSection: "general" }}
+        location={{ view: "settings", settingsSection: "appearance" }}
       />
     </I18nProvider>,
   );

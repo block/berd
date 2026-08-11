@@ -4356,17 +4356,24 @@ export function AppShell({
           activeSettingsSection !== DEFAULT_SETTINGS_SECTION &&
           Boolean(settingsSection);
 
-        return showSettingsSection && settingsSection
-          ? [
-              parent("settings", "Settings", () =>
-                openSettings(DEFAULT_SETTINGS_SECTION),
-              ),
-              current(
-                "settings-section",
-                t(`settings:${settingsSection.labelKey}`),
-              ),
-            ]
-          : [current("settings", "Settings")];
+        if (!showSettingsSection || !settingsSection) {
+          return [current("settings", "Settings")];
+        }
+
+        // rev 4: Doctor no longer needs a "back to parent section"
+        // breadcrumb segment here -- it moved from a hidden sub-page (routed
+        // through activeSettingsSection) to a dialog opened directly from a
+        // row inside System, so it never becomes the active settings
+        // section in the first place.
+        return [
+          parent("settings", "Settings", () =>
+            openSettings(DEFAULT_SETTINGS_SECTION),
+          ),
+          current(
+            "settings-section",
+            t(`settings:${settingsSection.labelKey}`),
+          ),
+        ];
       }
       case "projects":
         return [current("projects", "Projects")];

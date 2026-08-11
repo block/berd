@@ -78,6 +78,12 @@ export function GooseAutoCompactSettings() {
 
   return (
     <div className="space-y-3">
+      {/* This renders inside the "Goose harness" SettingsRow's `details`
+        slot (see BehaviorSettings.tsx) rather than as its own row, so
+        auto-compact reads as part of that one row instead of a separate
+        peer setting with a divider before it. The label lives here (not on
+        the outer row, which is labeled "Goose harness") and sits on the
+        same line as the current value so they read as one control. */}
       <div className="flex items-center justify-between gap-2">
         <p className="min-w-0 text-sm">{t(`${translationKeyPrefix}.label`)}</p>
         <div className="flex items-center gap-1.5 text-xs text-foreground">

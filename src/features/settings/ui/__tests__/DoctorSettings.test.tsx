@@ -3,20 +3,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { renderWithProviders } from "@/test/render";
-import {
-  TopBarActionsProvider,
-  useTopBarActions,
-} from "@/app/contexts/TopBarActionsContext";
 import type { DoctorCheck, DoctorReport } from "@/shared/api/doctor";
 import {
   DoctorSettings,
   formatDebugReport,
 } from "@/features/settings/ui/DoctorSettings";
-
-function TopBarActionsSurface() {
-  const actions = useTopBarActions();
-  return <div data-testid="top-bar-actions">{actions}</div>;
-}
 
 function renderDoctor() {
   const queryClient = new QueryClient({
@@ -24,10 +15,7 @@ function renderDoctor() {
   });
   return renderWithProviders(
     <QueryClientProvider client={queryClient}>
-      <TopBarActionsProvider>
-        <DoctorSettings />
-        <TopBarActionsSurface />
-      </TopBarActionsProvider>
+      <DoctorSettings open onOpenChange={() => {}} />
     </QueryClientProvider>,
   );
 }
@@ -168,7 +156,14 @@ describe("DoctorSettings", () => {
     renderDoctor();
 
     await screen.findByText("Integration");
-    const headings = screen.getAllByRole("heading", { level: 2 });
+    // Exclude the dialog's own "Doctor" title -- DialogTitle renders as an
+    // <h2> too (Radix's default), so an unscoped level-2 query would pick it
+    // up alongside the check-group category headings this test cares about.
+    const headings = screen
+      .getAllByRole("heading", { level: 2 })
+      .filter(
+        (heading) => heading.getAttribute("data-slot") !== "dialog-title",
+      );
     expect(headings.map((heading) => heading.textContent)).toEqual([
       "Integrations",
       "Tools",

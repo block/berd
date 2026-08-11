@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { ProfileCapabilityState } from "@/shared/profile/capabilities";
 import {
   DEFAULT_SETTINGS_SECTION,
@@ -22,18 +22,18 @@ const enabledCapabilities: ProfileCapabilityState = {
   updates: true,
 };
 
+// Rev 3 (Aug 10): rewritten for the appearance/behavior/system/about split.
+// "general" and "updates" are gone as real sections -- "general" resolves
+// to "appearance" via legacy redirect, "updates" redirects to "about"
+// (the update check now lives embedded there). Security is permanent now
+// (no securityMl-gated omission at the nav level -- SecuritySettings.tsx
+// gates its ML rows internally instead). Doctor is a hidden, routable
+// sub-page reached from a row inside System, not a nav destination.
 describe("settingsSections", () => {
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.resetModules();
-  });
-  it("includes experiments in settings navigation after doctor", () => {
+  it("includes experiments in settings navigation", () => {
     const sectionIds = SETTINGS_SECTIONS.map((section) => section.id);
 
     expect(sectionIds).toContain("experiments");
-    expect(sectionIds.indexOf("experiments")).toBeGreaterThan(
-      sectionIds.indexOf("doctor"),
-    );
     expect(resolveSettingsSection("experiments")).toBe("experiments");
   });
 
@@ -47,29 +47,29 @@ describe("settingsSections", () => {
     expect(resolveSettingsSection("shortcuts")).toBe("shortcuts");
   });
 
-  it("omits security from settings navigation by default", () => {
-    expect(SETTINGS_SECTIONS.map((section) => section.id)).not.toContain(
-      "security",
+  it("includes security in settings navigation permanently", () => {
+    expect(
+      getVisibleSettingsSections(enabledCapabilities).map(
+        (section) => section.id,
+      ),
+    ).toContain("security");
+    expect(resolveSettingsSection("security")).toBe("security");
+
+    // Security has no capability gate at the nav level -- it's always
+    // visible even when the caller's capability state has nothing to do
+    // with security ML. SecuritySettings.tsx itself gates the ML rows via
+    // getBuildFeatureState().securityMl, which is a build-time flag, not a
+    // capability, so it's not exercised by getVisibleSettingsSections.
+    expect(isSettingsSectionEnabled("security", enabledCapabilities)).toBe(
+      true,
     );
-    expect(resolveSettingsSection("security")).toBe("general");
   });
 
-  it("includes security when security ML is enabled", async () => {
-    vi.resetModules();
-    vi.stubEnv("VITE_SECURITY_ML", "1");
-
-    const {
-      SETTINGS_SECTIONS: enabledSections,
-      resolveSettingsSection: resolveEnabledSettingsSection,
-    } = await import("../settingsSections");
-
-    expect(enabledSections.map((section) => section.id)).toContain("security");
-    expect(resolveEnabledSettingsSection("security")).toBe("security");
-  });
-
-  it("includes updates in settings navigation", () => {
-    expect(SETTINGS_SECTIONS.map((section) => section.id)).toContain("updates");
-    expect(resolveSettingsSection("updates")).toBe("updates");
+  it("redirects the legacy general and updates routes to their new homes", () => {
+    expect(resolveSettingsSection("general")).toBe("appearance");
+    // Updates lives embedded on the About page now -- app identity and
+    // "is it current" are one concept, not split across two sections.
+    expect(resolveSettingsSection("updates")).toBe("about");
   });
 
   it("hosts connections and redirects the legacy extensions route", () => {
@@ -83,34 +83,26 @@ describe("settingsSections", () => {
     expect(resolveSettingsSection("connections")).toBe("connections");
   });
 
+  it("redirects the legacy doctor route to System (rev 4: dialog, not a page)", () => {
+    expect(SETTINGS_SECTIONS.map((section) => section.id)).not.toContain(
+      "doctor",
+    );
+    expect(resolveSettingsSection("doctor")).toBe("system");
+  });
+
   it("filters and redirects capability-gated settings sections", () => {
     const capabilities = {
       ...enabledCapabilities,
-      doctor: false,
+      voiceConversation: false,
     };
 
-    expect(isSettingsSectionEnabled("doctor", capabilities)).toBe(false);
-    expect(isSettingsSectionEnabled("general", capabilities)).toBe(true);
-    expect(resolveEnabledSettingsSection("doctor", capabilities)).toBe(
+    expect(isSettingsSectionEnabled("voice", capabilities)).toBe(false);
+    expect(isSettingsSectionEnabled("appearance", capabilities)).toBe(true);
+    expect(resolveEnabledSettingsSection("voice", capabilities)).toBe(
       DEFAULT_SETTINGS_SECTION,
     );
     expect(
       getVisibleSettingsSections(capabilities).map((section) => section.id),
-    ).not.toContain("doctor");
-  });
-
-  it("filters updates when the updater build feature is disabled", () => {
-    const capabilities = {
-      ...enabledCapabilities,
-      updates: false,
-    };
-
-    expect(isSettingsSectionEnabled("updates", capabilities)).toBe(false);
-    expect(resolveEnabledSettingsSection("updates", capabilities)).toBe(
-      DEFAULT_SETTINGS_SECTION,
-    );
-    expect(
-      getVisibleSettingsSections(capabilities).map((section) => section.id),
-    ).not.toContain("updates");
+    ).not.toContain("voice");
   });
 });

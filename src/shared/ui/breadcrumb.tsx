@@ -9,7 +9,7 @@ function Breadcrumb({ ...props }: React.ComponentProps<"nav">) {
   return <nav aria-label="breadcrumb" data-slot="breadcrumb" {...props} />;
 }
 
-type BreadcrumbListVariant = "default" | "top-bar";
+type BreadcrumbListVariant = "default" | "top-bar" | "settings";
 type BreadcrumbTopBarTone = "title" | "current";
 
 export type BreadcrumbTrailItem = {
@@ -22,23 +22,79 @@ type BreadcrumbPagePassthroughProps = React.ComponentProps<"span"> & {
   [key: string]: unknown;
 };
 
+// Variants that share the "clickable parent / muted-or-not current" trail
+// structure (as opposed to the plain "default" list breadcrumb).
+const BREADCRUMB_TRAIL_VARIANTS = new Set<BreadcrumbListVariant>([
+  "top-bar",
+  "settings",
+]);
+
+function isTrailVariant(variant: BreadcrumbListVariant): boolean {
+  return BREADCRUMB_TRAIL_VARIANTS.has(variant);
+}
+
 const breadcrumbListVariants: Record<BreadcrumbListVariant, string> = {
   default:
     "text-muted-foreground flex flex-wrap items-center gap-1.5 text-sm break-words sm:gap-2.5",
   "top-bar":
     "flex flex-nowrap items-center gap-0 break-normal whitespace-nowrap font-sans text-[length:var(--text-app-top-bar-title)] font-normal leading-[length:var(--text-app-top-bar-title-leading)] tracking-normal text-foreground",
+  // Used when a breadcrumb trail stands in for a page's own title (e.g. a
+  // SettingsPage heading). Deliberately sets no font-size/weight/tracking/
+  // color of its own so it inherits the exact typography and position of
+  // the surrounding title element - only the tone colors below differ.
+  settings: "flex flex-nowrap items-center gap-0 min-w-0",
 };
 
-const breadcrumbTopBarToneClassNames: Record<BreadcrumbTopBarTone, string> = {
-  title: "text-foreground",
-  current: "text-muted-foreground",
+// Horizontal margin around the separator glyph. The settings trail sits
+// inline with a page title, so it should read tightly (title / sub-page)
+// rather than with the more generous top-bar chrome spacing.
+const breadcrumbSeparatorMarginClassNameByVariant: Record<
+  "top-bar" | "settings",
+  string
+> = {
+  "top-bar": "mx-1.5",
+  settings: "mx-1",
 };
+
+// Color mapping differs by variant: the top-bar trail (used for chrome like
+// the app TopBar / chat titles) keeps the parent segment full-color and
+// mutes the trailing "current" segment. Settings breadcrumbs use the
+// opposite, more conventional convention: the clickable parent is muted,
+// and the current page reads as normal foreground text.
+const breadcrumbToneClassNamesByVariant: Record<
+  "top-bar" | "settings",
+  Record<BreadcrumbTopBarTone, string>
+> = {
+  "top-bar": {
+    title: "text-foreground",
+    current: "text-muted-foreground",
+  },
+  settings: {
+    title: "text-muted-foreground",
+    current: "text-foreground",
+  },
+};
+
+function getBreadcrumbToneClassName(
+  variant: BreadcrumbListVariant,
+  tone: BreadcrumbTopBarTone,
+): string {
+  if (variant === "top-bar" || variant === "settings") {
+    return breadcrumbToneClassNamesByVariant[variant][tone];
+  }
+  return "";
+}
 
 const breadcrumbTopBarToneTransitionClassName =
   "motion-safe:transition-[color,opacity] motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]";
 
-const breadcrumbTopBarInteractiveClassName =
-  "hover:opacity-[var(--app-top-bar-control-hover-opacity)]";
+const breadcrumbInteractiveClassNamesByVariant: Record<
+  "top-bar" | "settings",
+  string
+> = {
+  "top-bar": "hover:opacity-[var(--app-top-bar-control-hover-opacity)]",
+  settings: "cursor-pointer hover:text-foreground",
+};
 
 const breadcrumbTopBarEnterClassName =
   "motion-safe:animate-in motion-safe:fade-in-0 motion-reduce:animate-none";
@@ -78,22 +134,23 @@ function BreadcrumbLink({
   ...props
 }: React.ComponentProps<"a"> & {
   asChild?: boolean;
-  variant?: "default" | "top-bar";
+  variant?: BreadcrumbListVariant;
   tone?: BreadcrumbTopBarTone;
 }) {
   const Comp = asChild ? Slot : "a";
+  const isTrail = isTrailVariant(variant);
 
   return (
     <Comp
       data-slot="breadcrumb-link"
       className={cn(
-        variant === "top-bar"
-          ? breadcrumbTopBarToneTransitionClassName
-          : "transition-colors",
-        variant === "top-bar"
+        isTrail ? breadcrumbTopBarToneTransitionClassName : "transition-colors",
+        isTrail
           ? cn(
-              breadcrumbTopBarToneClassNames[tone],
-              breadcrumbTopBarInteractiveClassName,
+              getBreadcrumbToneClassName(variant, tone),
+              breadcrumbInteractiveClassNamesByVariant[
+                variant as "top-bar" | "settings"
+              ],
             )
           : "hover:text-foreground",
         className,
@@ -106,14 +163,13 @@ function BreadcrumbLink({
 function BreadcrumbPage({
   className,
   variant = "default",
-  tone,
+  tone = "title",
   ...props
 }: React.ComponentProps<"span"> & {
-  variant?: "default" | "top-bar-root" | "top-bar-current";
+  variant?: BreadcrumbListVariant;
   tone?: BreadcrumbTopBarTone;
 }) {
-  const topBarTone =
-    tone ?? (variant === "top-bar-current" ? "current" : "title");
+  const isTrail = isTrailVariant(variant);
 
   return (
     <span
@@ -122,10 +178,10 @@ function BreadcrumbPage({
       aria-disabled="true"
       aria-current="page"
       className={cn(
-        (variant === "top-bar-root" || variant === "top-bar-current") &&
+        isTrail &&
           cn(
             breadcrumbTopBarToneTransitionClassName,
-            breadcrumbTopBarToneClassNames[topBarTone],
+            getBreadcrumbToneClassName(variant, tone),
           ),
         variant === "default" && "text-foreground font-normal",
         className,
@@ -142,9 +198,10 @@ function BreadcrumbSeparator({
   tone = "current",
   ...props
 }: React.ComponentProps<"li"> & {
-  variant?: "default" | "top-bar";
+  variant?: BreadcrumbListVariant;
   tone?: BreadcrumbTopBarTone;
 }) {
+  const isTrail = isTrailVariant(variant);
   return (
     <li
       data-slot="breadcrumb-separator"
@@ -152,11 +209,13 @@ function BreadcrumbSeparator({
       aria-hidden="true"
       className={cn(
         "[&>svg]:size-3.5",
-        variant === "top-bar" &&
+        isTrail &&
           cn(
-            "mx-1.5",
+            breadcrumbSeparatorMarginClassNameByVariant[
+              variant as "top-bar" | "settings"
+            ],
             breadcrumbTopBarToneTransitionClassName,
-            breadcrumbTopBarToneClassNames[tone],
+            getBreadcrumbToneClassName(variant, tone),
           ),
         className,
       )}
@@ -182,6 +241,9 @@ function BreadcrumbTrail({
 }) {
   const { className: pageClassName, ...restPageProps } = pageProps ?? {};
 
+  const isTrail = isTrailVariant(variant);
+  const isTopBar = variant === "top-bar";
+
   return (
     <Breadcrumb className={className}>
       <BreadcrumbList variant={variant} className={listClassName}>
@@ -189,42 +251,39 @@ function BreadcrumbTrail({
           const isFirst = index === 0;
           const isLast = index === items.length - 1;
           const isClickable = Boolean(item.onClick) && !isLast;
-          const topBarTone: BreadcrumbTopBarTone =
+          const tone: BreadcrumbTopBarTone =
             isLast && !isFirst ? "current" : "title";
-          const topBarItemClassName =
-            variant === "top-bar"
-              ? cn(
-                  "min-w-0",
-                  isLast ? "shrink" : "shrink-0",
-                  breadcrumbTopBarToneTransitionClassName,
-                  breadcrumbTopBarToneClassNames[topBarTone],
-                  index > 1 && breadcrumbTopBarEnterClassName,
-                )
-              : undefined;
-          const topBarSeparatorClassName =
-            variant === "top-bar" && index > 1
-              ? breadcrumbTopBarEnterClassName
-              : undefined;
+          const trailItemClassName = isTrail
+            ? cn(
+                "min-w-0",
+                isLast ? "shrink" : "shrink-0",
+                breadcrumbTopBarToneTransitionClassName,
+                getBreadcrumbToneClassName(variant, tone),
+                isTopBar && index > 1 && breadcrumbTopBarEnterClassName,
+              )
+            : undefined;
+          const trailSeparatorClassName =
+            isTopBar && index > 1 ? breadcrumbTopBarEnterClassName : undefined;
 
           return (
             <Fragment key={item.id ?? item.label}>
               {index > 0 ? (
                 <BreadcrumbSeparator
                   variant={variant}
-                  tone={topBarTone}
-                  className={topBarSeparatorClassName}
+                  tone={tone}
+                  className={trailSeparatorClassName}
                 >
-                  {variant === "top-bar" ? "/" : undefined}
+                  {isTopBar ? "/" : undefined}
                 </BreadcrumbSeparator>
               ) : null}
-              <BreadcrumbItem className={topBarItemClassName}>
+              <BreadcrumbItem className={trailItemClassName}>
                 {isClickable ? (
                   <BreadcrumbLink
                     href="#"
                     variant={variant}
-                    tone={topBarTone}
+                    tone={tone}
                     className={
-                      variant === "top-bar"
+                      isTrail
                         ? cn(
                             "block min-w-0 truncate text-inherit",
                             breadcrumbTopBarTextClipClassName,
@@ -241,16 +300,10 @@ function BreadcrumbTrail({
                 ) : (
                   <BreadcrumbPage
                     {...restPageProps}
-                    variant={
-                      variant === "top-bar"
-                        ? isFirst
-                          ? "top-bar-root"
-                          : "top-bar-current"
-                        : "default"
-                    }
-                    tone={topBarTone}
+                    variant={variant}
+                    tone={tone}
                     className={cn(
-                      variant === "top-bar" &&
+                      isTrail &&
                         cn(
                           "block min-w-0 truncate text-inherit",
                           breadcrumbTopBarTextClipClassName,

@@ -2,8 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, ClipboardCopy, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
-import { PageHeaderButton } from "@/shared/ui/page-header-button";
+import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
 import type { DoctorCheck, DoctorReport } from "@/shared/api/doctor";
 import {
@@ -15,7 +14,14 @@ import {
   type AgentBinaryReadout,
 } from "@/features/settings/lib/agentVersionDisplay";
 import { DoctorCheckRow } from "./DoctorCheckRow";
-import { SettingsPage } from "@/shared/ui/SettingsPage";
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/shared/ui/dialog";
 import {
   SettingsSection,
   SettingsSections,
@@ -152,16 +158,29 @@ export function formatDebugReport(report: DoctorReport): string {
   return lines.join("\n");
 }
 
-export function DoctorSettings() {
+interface DoctorSettingsProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+// Doctor (rev 4): moved from a hidden full-page sub-route (reached via a row
+// in System) into a dialog opened directly from that row -- feedback was
+// that Doctor being the only settings surface with a deeper nav level felt
+// off, especially now that its action buttons (Copy report/Rerun) already
+// live in a settings-surface actions slot rather than the app's top bar,
+// which is what made a dialog workable. The content/logic below (grouping,
+// the report query, the loading/elapsed-time states, the debug-report
+// formatter) is otherwise unchanged from the page version -- only the outer
+// shell moved from SettingsPage+BreadcrumbTrail to Dialog/DialogContent.
+export function DoctorSettings({ open, onOpenChange }: DoctorSettingsProps) {
   const { t } = useTranslation("settings");
-  const setTopBarActions = useSetTopBarActions();
   const queryClient = useQueryClient();
   const [copied, setCopied] = useState(false);
 
   const query = useDoctorReport();
   const report = query.data ?? null;
   // `isPending` is only true before the first result, so a warm prefetch
-  // renders the page instantly; `isFetching` keeps the spinner up during a
+  // renders the dialog instantly; `isFetching` keeps the spinner up during a
   // manual rerun.
   const loading = query.isPending || query.isFetching;
   const elapsedSeconds = useLoadingElapsedSeconds(loading);
@@ -175,7 +194,7 @@ export function DoctorSettings() {
   }, [queryClient]);
 
   // The agents category is rendered on the AI providers detail page (with
-  // richer install/auth UI); hide it here so the Doctor page focuses on
+  // richer install/auth UI); hide it here so Doctor focuses on
   // environment/tools/etc.
   const checkGroups = report
     ? groupDoctorChecks(report.checks).filter(
@@ -190,72 +209,79 @@ export function DoctorSettings() {
     setTimeout(() => setCopied(false), 2000);
   }, [report]);
 
-  useEffect(() => {
-    if (loading) {
-      setTopBarActions(null);
-      return;
-    }
-    setTopBarActions(
-      <>
-        {report ? (
-          <PageHeaderButton
-            type="button"
-            onClick={copyDebugInfo}
-            leftIcon={copied ? <Check /> : <ClipboardCopy />}
-          >
-            {copied ? t("doctor.copied") : t("doctor.copyDetails")}
-          </PageHeaderButton>
-        ) : null}
-        <PageHeaderButton
-          type="button"
-          onClick={runChecks}
-          leftIcon={<RefreshCw />}
-        >
-          {t("doctor.rerun")}
-        </PageHeaderButton>
-      </>,
-    );
-    return () => setTopBarActions(null);
-  }, [copied, copyDebugInfo, loading, report, runChecks, setTopBarActions, t]);
-
   return (
-    <SettingsPage title={t("doctor.title")}>
-      <div className="space-y-6">
-        {loading ? (
-          <div className="flex min-h-[160px] flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-            <div className="flex items-center justify-center gap-2">
-              <Spinner className="h-5 w-5" />
-              <span>{t("doctor.running")}</span>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="xl" className="max-h-[min(720px,calc(100dvh-2rem))]">
+        <DialogHeader>
+          <DialogTitle>{t("doctor.title")}</DialogTitle>
+        </DialogHeader>
+        <DialogBody>
+          {loading ? (
+            <div className="flex min-h-[160px] flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+              <div className="flex items-center justify-center gap-2">
+                <Spinner className="h-5 w-5" />
+                <span>{t("doctor.running")}</span>
+              </div>
+              {showLongRunningHint ? (
+                <p className="text-xs">
+                  {t("doctor.longRunning", {
+                    seconds: elapsedSeconds,
+                    timeoutSeconds: DOCTOR_REPORT_TIMEOUT_SECONDS,
+                  })}
+                </p>
+              ) : null}
             </div>
-            {showLongRunningHint ? (
-              <p className="text-xs">
-                {t("doctor.longRunning", {
-                  seconds: elapsedSeconds,
-                  timeoutSeconds: DOCTOR_REPORT_TIMEOUT_SECONDS,
-                })}
-              </p>
-            ) : null}
-          </div>
-        ) : report ? (
-          <SettingsSections>
-            {checkGroups.map((group) => (
-              <SettingsSection key={group.category} title={group.categoryLabel}>
-                {group.checks.map((check) => (
-                  <DoctorCheckRow
-                    key={check.id}
-                    check={check}
-                    onFixed={runChecks}
-                  />
-                ))}
-              </SettingsSection>
-            ))}
-          </SettingsSections>
-        ) : (
-          <div className="flex min-h-[160px] items-center justify-center text-sm text-muted-foreground">
-            {t("doctor.empty")}
-          </div>
-        )}
-      </div>
-    </SettingsPage>
+          ) : report ? (
+            <SettingsSections>
+              {checkGroups.map((group) => (
+                <SettingsSection
+                  key={group.category}
+                  title={group.categoryLabel}
+                >
+                  {group.checks.map((check) => (
+                    <DoctorCheckRow
+                      key={check.id}
+                      check={check}
+                      onFixed={runChecks}
+                    />
+                  ))}
+                </SettingsSection>
+              ))}
+            </SettingsSections>
+          ) : (
+            <div className="flex min-h-[160px] items-center justify-center text-sm text-muted-foreground">
+              {t("doctor.empty")}
+            </div>
+          )}
+        </DialogBody>
+        <DialogFooter>
+          {report ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void copyDebugInfo()}
+            >
+              {copied ? (
+                <Check className="size-3.5" />
+              ) : (
+                <ClipboardCopy className="size-3.5" />
+              )}
+              {copied ? t("doctor.copied") : t("doctor.copyDetails")}
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={loading}
+            onClick={runChecks}
+          >
+            <RefreshCw className="size-3.5" />
+            {t("doctor.rerun")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
