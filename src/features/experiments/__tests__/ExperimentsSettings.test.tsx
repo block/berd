@@ -112,8 +112,9 @@ describe("ExperimentsSettings", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the registered experiments", () => {
+  it("renders the registered experiments when their build family is enabled", () => {
     vi.stubEnv("DEV", false);
+    vi.stubEnv("VITE_BUILDERBOT", "1");
     renderWithProviders(<ExperimentsSettings />);
 
     expect(

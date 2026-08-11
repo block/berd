@@ -186,8 +186,15 @@ export function SearchView({
         enabled: Boolean(onOpenSettings),
         translate: (key) => t(`settings:${key}`),
         visibleSections: visibleSettingsSections,
+        hiddenItemIds: capabilities.agentTools ? [] : ["chat-tips"],
       }),
-    [onOpenSettings, t, trimmedDebouncedQuery, visibleSettingsSections],
+    [
+      capabilities.agentTools,
+      onOpenSettings,
+      t,
+      trimmedDebouncedQuery,
+      visibleSettingsSections,
+    ],
   );
 
   // Sweeps are keyed on who is in the list and what version of them we hold,

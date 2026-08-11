@@ -64,6 +64,22 @@ describe("searchResultModel", () => {
     ).toEqual([]);
   });
 
+  it("excludes hidden controls within a visible settings section", () => {
+    const labels: Record<string, string> = {
+      "general.agentToolsTips.label": "Agent Tools tips",
+    };
+
+    expect(
+      buildSettingsSearchResults({
+        query: "agent tools",
+        enabled: true,
+        translate: (key) => labels[key] ?? key,
+        visibleSections,
+        hiddenItemIds: ["chat-tips"],
+      }),
+    ).toEqual([]);
+  });
+
   it("references existing English labels for every settings search item", () => {
     for (const item of SETTINGS_SEARCH_ITEMS) {
       const value = item.labelKey.split(".").reduce<unknown>((current, key) => {

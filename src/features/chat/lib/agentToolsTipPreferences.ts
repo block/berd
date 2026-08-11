@@ -13,7 +13,7 @@ const agentToolsTipsPreference = createBooleanLocalStoragePreference({
 });
 
 function getAgentToolsTipsCapability() {
-  return getProfileCapabilitySnapshot("agentToolsTip");
+  return getProfileCapabilitySnapshot("agentTools");
 }
 
 export function getAgentToolsTipsEnabled() {
@@ -28,7 +28,7 @@ export function setAgentToolsTipsEnabled(enabled: boolean) {
 
 export function useAgentToolsTipsPreference() {
   const preference = agentToolsTipsPreference.useValue();
-  const enabledByRuntimeConfig = useProfileCapability("agentToolsTip");
+  const enabledByRuntimeConfig = useProfileCapability("agentTools");
   if (enabledByRuntimeConfig) {
     return preference;
   }

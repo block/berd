@@ -28,6 +28,7 @@ export function buildSettingsSearchResults({
   enabled,
   translate,
   visibleSections,
+  hiddenItemIds = [],
 }: {
   query: string;
   enabled: boolean;
@@ -36,6 +37,7 @@ export function buildSettingsSearchResults({
     id: SectionId;
     labelKey: string;
   }[];
+  hiddenItemIds?: readonly string[];
 }): SettingsSearchResult[] {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   if (!enabled || !normalizedQuery) return [];
@@ -43,9 +45,12 @@ export function buildSettingsSearchResults({
   const visibleSectionIds = new Set(
     visibleSections.map((section) => section.id),
   );
+  const hiddenSearchItemIds = new Set(hiddenItemIds);
   const visibleSearchItems: readonly SettingsSearchItem[] =
-    SETTINGS_SEARCH_ITEMS.filter((item) =>
-      visibleSectionIds.has(item.sectionId),
+    SETTINGS_SEARCH_ITEMS.filter(
+      (item) =>
+        visibleSectionIds.has(item.sectionId) &&
+        !hiddenSearchItemIds.has(item.id),
     );
   const itemResults = visibleSearchItems
     .filter((item) =>

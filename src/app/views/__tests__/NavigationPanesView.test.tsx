@@ -369,6 +369,8 @@ vi.mock("@/features/design-system/lib/designSystemEnabled", () => ({
 
 describe("NavigationPanesView", () => {
   beforeEach(() => {
+    vi.stubEnv("VITE_AUTOMATIONS", "1");
+    vi.stubEnv("VITE_BUILDERBOT", "1");
     seedSessions();
     mockDraftsBySession = {};
     mockHasMoreSessions = false;
@@ -394,7 +396,15 @@ describe("NavigationPanesView", () => {
     resetHomeWidgetStoreForTests();
     window.localStorage.clear();
     designSystemExplorer.isEnabled.mockReturnValue(false);
-    setReadyRuntimeConfig();
+    setReadyRuntimeConfig({
+      ...DEFAULT_RUNTIME_CONFIG,
+      kgoose: { baseUrl: "https://kgoose.example.test" },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.useRealTimers();
   });
 
   it("omits latest message snippets in chat rows by default", () => {
@@ -480,10 +490,6 @@ describe("NavigationPanesView", () => {
     expect(
       screen.queryByRole("menuitemcheckbox", { name: "Show git branches" }),
     ).not.toBeInTheDocument();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
   });
 
   it("shows an empty state when there are no projects or chats", async () => {

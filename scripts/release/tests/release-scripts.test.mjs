@@ -336,7 +336,7 @@ describe("local macOS bundle version propagation", () => {
     const justfile = await readFile(join(repo, "justfile"), "utf8");
     const versionEnvironment = `CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" \\
       BERD_APP_VERSION="$BERD_APP_VERSION" \\
-      VITE_AUTH_GATE=0 \\
+      VITE_AUTH_GATE="\${VITE_BUILDERBOT:-0}" \\
       VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \\
       `;
 
@@ -344,8 +344,103 @@ describe("local macOS bundle version propagation", () => {
       `${versionEnvironment}"\${TAURI_BUILD_ARGS[@]}"`,
     );
     expect(justfile).toContain(
-      `${versionEnvironment}pnpm tauri build --features berdctl,devtools --config "$DEBUG_CONFIG"`,
+      `${versionEnvironment}pnpm tauri build --features "$CARGO_FEATURES_CSV" --config "$DEBUG_CONFIG"`,
     );
+  });
+});
+
+describe("local macOS bundle feature-gate propagation", () => {
+  const gates = [
+    ["VITE_AGENT_TOOLS", "block-agent-tools"],
+    ["VITE_AUTOMATIONS", "block-automations"],
+    ["VITE_BUILDERBOT", "block-builderbot"],
+    ["VITE_FEEDBACK", "block-feedback"],
+    ["VITE_MANAGED_CONNECTIONS", "block-managed-connections"],
+    ["VITE_VOICE_DICTATION", "block-voice-dictation"],
+  ];
+
+  it("maps all six positive opt-ins in both release and debug recipes", async () => {
+    const justfile = await readFile(join(repo, "justfile"), "utf8");
+    const releaseRecipe = justfile.slice(
+      justfile.indexOf("_bundle-unix:"),
+      justfile.indexOf("# Build macOS app and DMG bundles."),
+    );
+    const debugRecipe = justfile.slice(
+      justfile.indexOf("_bundle-debug-unix:"),
+      justfile.indexOf("# ── Test"),
+    );
+
+    for (const recipe of [releaseRecipe, debugRecipe]) {
+      for (const [viteGate, cargoFeature] of gates) {
+        expect(recipe).toContain(`\${${viteGate}:-0}`);
+        expect(recipe).toContain(cargoFeature);
+      }
+      expect(recipe).toContain(`VITE_AUTH_GATE="\${VITE_BUILDERBOT:-0}"`);
+      expect(recipe).toContain("no-voice-dictation");
+      expect(recipe).toContain("prepare-bb-cli-resource.sh");
+      expect(recipe).toContain('"../resources/bb"');
+      expect(recipe).toContain(`VITE_FEEDBACK="\${VITE_FEEDBACK:-0}"`);
+    }
+  });
+});
+
+describe("development Block-feature resources", () => {
+  it.each([
+    "justfile",
+    "scripts/dev-e2e.sh",
+  ])("%s keeps the standalone CLI and Agent Tools resource aligned with renderer gates", async (path) => {
+    const source = await readFile(join(repo, path), "utf8");
+    expect(source).toContain(
+      `[[ "\${VITE_FEEDBACK:-0}" == "1" ]] && BERDCTL_FEATURES+=(--features block-feedback)`,
+    );
+    expect(source).toContain(
+      `cargo build -p berdctl "\${BERDCTL_FEATURES[@]}"`,
+    );
+    expect(source).toContain(`[[ "\${VITE_AGENT_TOOLS:-0}" == "1" ]]`);
+    expect(source).toContain("prepare-bb-cli-resource.sh");
+  });
+});
+
+describe("build-macos Block-service feature seam", () => {
+  it("defaults all six families off and maps each opt-in to packaging", async () => {
+    const script = await readFile(
+      join(repo, "scripts/release/build-macos.sh"),
+      "utf8",
+    );
+    const gates = [
+      ["AGENT_TOOLS", "block-agent-tools"],
+      ["AUTOMATIONS", "block-automations"],
+      ["BUILDERBOT", "block-builderbot"],
+      ["FEEDBACK", "block-feedback"],
+      ["MANAGED_CONNECTIONS", "block-managed-connections"],
+      ["VOICE_DICTATION", "block-voice-dictation"],
+    ];
+
+    for (const [gate, cargoFeature] of gates) {
+      expect(script).toContain(`VITE_${gate}_VALUE="\${VITE_${gate}:-0}"`);
+      expect(script).toContain(cargoFeature);
+      expect(script).toContain(`VITE_${gate}="$VITE_${gate}_VALUE"`);
+    }
+    expect(script).toContain('VITE_AUTH_GATE_VALUE="$VITE_BUILDERBOT_VALUE"');
+    expect(script).toContain("no-voice-dictation");
+    expect(script).toContain('if [[ "$VITE_AGENT_TOOLS_VALUE" == "1" ]]; then');
+    expect(script).toContain(
+      'jq \'.bundle.resources["../resources/bb"] = "bb"\'',
+    );
+    expect(script).toContain(
+      'VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" ./scripts/prepare-berdctl-sidecar.sh',
+    );
+  });
+
+  it("preserves the custom-build telemetry privacy opt-out outside the six gates", async () => {
+    const script = await readFile(
+      join(repo, "scripts/release/build-macos.sh"),
+      "utf8",
+    );
+    expect(script).toContain(
+      `jq -r '.featureToggles.telemetry == false' "$RUNTIME_CONFIG"`,
+    );
+    expect(script).toContain("set_vite_env VITE_TELEMETRY 0");
   });
 });
 
@@ -879,5 +974,48 @@ fi
     expect(result.stderr).toContain("not publicly accessible");
     const calls = await readFile(f.calls, "utf8");
     expect(calls).not.toContain("latest.json");
+  });
+});
+
+describe("Block feature gate propagation", () => {
+  it("maps every public-off default to the fail-closed Cargo posture", () => {
+    const result = run("bash", ["scripts/block-feature-gates.sh", "berdctl"]);
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe("berdctl,no-voice-dictation");
+  });
+
+  it("maps the six independent renderer gates to matching Cargo features", () => {
+    const env = {
+      VITE_AGENT_TOOLS: "1",
+      VITE_AUTOMATIONS: "1",
+      VITE_BUILDERBOT: "1",
+      VITE_FEEDBACK: "1",
+      VITE_MANAGED_CONNECTIONS: "1",
+      VITE_VOICE_DICTATION: "1",
+    };
+    const result = run(
+      "bash",
+      ["scripts/block-feature-gates.sh", "berdctl,app-test-driver"],
+      env,
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim().split(",")).toEqual([
+      "berdctl",
+      "app-test-driver",
+      "block-agent-tools",
+      "block-automations",
+      "block-builderbot",
+      "block-feedback",
+      "block-managed-connections",
+      "block-voice-dictation",
+    ]);
+  });
+
+  it("rejects ambiguous gate values instead of desynchronizing renderer and Rust", () => {
+    const result = run("bash", ["scripts/block-feature-gates.sh", "berdctl"], {
+      VITE_AUTOMATIONS: "true",
+    });
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("VITE_AUTOMATIONS must be 0 or 1");
   });
 });

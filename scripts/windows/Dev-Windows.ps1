@@ -113,7 +113,11 @@ $version = Resolve-AppVersion
 $env:VITE_APP_VERSION = $version.RichVersion
 Write-WindowsDevInfo "Using app version: $($version.Version) ($($version.RichVersion))"
 
-Invoke-CheckedCommand -FilePath "cargo" -ArgumentList @("build", "-p", "berdctl") -WorkingDirectory (Join-Path (Get-BerdRepoRoot) "src-tauri") -Label "cargo build berdctl"
+$berdctlArgs = @("build", "-p", "berdctl")
+if ($env:VITE_FEEDBACK -eq "1") {
+    $berdctlArgs += @("--features", "block-feedback")
+}
+Invoke-CheckedCommand -FilePath "cargo" -ArgumentList $berdctlArgs -WorkingDirectory (Join-Path (Get-BerdRepoRoot) "src-tauri") -Label "cargo build berdctl"
 $env:BERDCTL_BIN = Join-Path (Join-Path $env:CARGO_TARGET_DIR "debug") "berdctl.exe"
 if (-not (Test-Path $env:BERDCTL_BIN -PathType Leaf)) {
     throw "Expected berdctl.exe at $env:BERDCTL_BIN after cargo build."
@@ -184,6 +188,7 @@ $devConfigJson = $devConfig | ConvertTo-Json -Depth 8
 [System.IO.File]::WriteAllText($devConfigPath, $devConfigJson, [System.Text.UTF8Encoding]::new($false))
 Write-WindowsDevInfo "Using Tauri dev config: $devConfigPath"
 
+$env:VITE_AUTH_GATE = if ($env:VITE_BUILDERBOT -eq "1") { "1" } else { "0" }
 $tauriArguments = @(
     "exec", "tauri", "dev",
     "--features", (Get-BerdAppFeatures),

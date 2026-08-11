@@ -101,7 +101,7 @@ export function ConnectionsSettings() {
   // backing system (kgoose), not the UI concept — the mismatch is deliberate,
   // don't "fix" it. When off (public tier today), the grid holds only the
   // user's own MCP servers.
-  const showOAuthCatalog = useProfileCapability("kgooseConnections");
+  const showOAuthCatalog = useProfileCapability("managedConnections");
 
   const {
     extensions,

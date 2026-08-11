@@ -10,11 +10,11 @@ import { useProviderModels } from "./useProviderModels";
 vi.mock("@/shared/profile/buildProfile", () => ({
   getBuildFeatureState: () => ({
     authGate: false,
-    agentToolsTip: true,
+    agentTools: true,
     automations: true,
     builderbot: true,
     byoKeyProviders: true,
-    kgooseConnections: true,
+    managedConnections: true,
     telemetry: true,
     updater: true,
     voiceDictation: true,

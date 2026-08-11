@@ -30,6 +30,9 @@ fi
 
 EXPLICIT_TRIPLE="${1:-${BERDCTL_TRIPLE:-}}"
 CARGO_ARGS=(build -p berdctl --release)
+if [[ "${VITE_FEEDBACK:-0}" == "1" ]]; then
+  CARGO_ARGS+=(--features block-feedback)
+fi
 if [[ -n "$EXPLICIT_TRIPLE" ]]; then
   TRIPLE="$EXPLICIT_TRIPLE"
   CARGO_ARGS+=(--target "$TRIPLE")

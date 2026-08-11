@@ -16,11 +16,11 @@ import type { RuntimeFeatureToggleKey } from "./runtimeFeatureToggles";
 export type ProfileCapabilityId =
   | "automations"
   | "builderbot"
-  | "agentToolsTip"
+  | "agentTools"
   | "telemetry"
   | "voiceDictation"
   | "voiceConversation"
-  | "kgooseConnections"
+  | "managedConnections"
   | "updates"
   | "feedback"
   | "doctor";
@@ -31,6 +31,7 @@ type CapabilitySource =
       feature: BuildFeature;
       experiment?: string;
       requiresKgoose?: true;
+      runtimeConfigSection?: "feedback";
     }
   | {
       kind: "runtimeFeature";
@@ -41,7 +42,7 @@ type CapabilitySource =
     }
   | {
       kind: "runtimeConfigSection";
-      field: "feedback" | "doctor";
+      field: "doctor";
       requiresKgoose?: true;
     };
 
@@ -62,10 +63,11 @@ export const PROFILE_CAPABILITY_REGISTRY: ProfileCapabilityRegistry = {
     feature: "builderbot",
     toggle: "builderbot",
     experiment: BUILDERBOT_SURFACE_EXPERIMENT_ID,
+    requiresKgoose: true,
   },
-  agentToolsTip: {
+  agentTools: {
     kind: "runtimeFeature",
-    feature: "agentToolsTip",
+    feature: "agentTools",
     toggle: "agentToolsTip",
   },
   telemetry: {
@@ -80,14 +82,13 @@ export const PROFILE_CAPABILITY_REGISTRY: ProfileCapabilityRegistry = {
     requiresKgoose: true,
   },
   voiceConversation: {
-    kind: "runtimeFeature",
-    feature: "voiceDictation",
-    toggle: "voiceDictation",
+    kind: "buildFeature",
+    feature: "voiceConversation",
     experiment: VOICE_CONVERSATION_EXPERIMENT_ID,
   },
-  kgooseConnections: {
+  managedConnections: {
     kind: "runtimeFeature",
-    feature: "kgooseConnections",
+    feature: "managedConnections",
     toggle: "kgooseConnections",
     requiresKgoose: true,
   },
@@ -96,9 +97,10 @@ export const PROFILE_CAPABILITY_REGISTRY: ProfileCapabilityRegistry = {
     feature: "updater",
   },
   feedback: {
-    kind: "runtimeConfigSection",
-    field: "feedback",
+    kind: "buildFeature",
+    feature: "feedback",
     requiresKgoose: true,
+    runtimeConfigSection: "feedback",
   },
   doctor: { kind: "runtimeConfigSection", field: "doctor" },
 };
@@ -147,6 +149,9 @@ export function resolveProfileCapabilities({
       capabilities[id] =
         kgooseAvailable &&
         buildFeatures[source.feature] &&
+        (!source.runtimeConfigSection ||
+          !runtimeConfigReady ||
+          runtimeConfig[source.runtimeConfigSection]?.enabled !== false) &&
         (!source.experiment ||
           isExperimentEnabled(experiments, source.experiment));
       continue;

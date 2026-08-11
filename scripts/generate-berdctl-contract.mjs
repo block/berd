@@ -22,6 +22,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createServer } from "vite";
 
 const require = createRequire(import.meta.url);
 const repoRoot = path.resolve(
@@ -34,35 +35,42 @@ const packageJson = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"),
 );
 
-const { createServer } = await import("vite");
-// Mirror the app's vite resolution (the `@` alias and VITE_APP_VERSION
-// define) so the pure command descriptor graph loads exactly as it does in
-// the app and in vitest.
-const server = await createServer({
-  configFile: false,
-  root: repoRoot,
-  logLevel: "error",
-  resolve: {
-    alias: [{ find: "@", replacement: path.join(repoRoot, "src") }],
-  },
-  define: {
-    "import.meta.env.VITE_APP_VERSION": JSON.stringify(packageJson.version),
-  },
-  server: { middlewareMode: true, hmr: false },
-  optimizeDeps: { noDiscovery: true },
-});
+async function loadContracts(feedbackEnabled) {
+  // Mirror the app's vite resolution (the `@` alias and build-feature defines)
+  // so each generated projection comes from the exact renderer registry that
+  // its build will dispatch.
+  const server = await createServer({
+    configFile: false,
+    root: repoRoot,
+    logLevel: "error",
+    resolve: {
+      alias: [{ find: "@", replacement: path.join(repoRoot, "src") }],
+    },
+    define: {
+      "import.meta.env.VITE_APP_VERSION": JSON.stringify(packageJson.version),
+      "import.meta.env.VITE_FEEDBACK": JSON.stringify(
+        feedbackEnabled ? "1" : "0",
+      ),
+    },
+    server: { middlewareMode: true, hmr: false },
+    optimizeDeps: { noDiscovery: true },
+  });
 
-let api;
-let surface;
-try {
-  const contract = await server.ssrLoadModule(
-    "/src/features/berdctl/commands/contract.ts",
-  );
-  api = contract.buildApiSurfaceContract();
-  surface = contract.buildCliSurfaceContract();
-} finally {
-  await server.close();
+  try {
+    const contract = await server.ssrLoadModule(
+      "/src/features/berdctl/commands/contract.ts",
+    );
+    return {
+      api: contract.buildApiSurfaceContract(),
+      surface: contract.buildCliSurfaceContract(),
+    };
+  } finally {
+    await server.close();
+  }
 }
+
+const publicContracts = await loadContracts(false);
+const feedbackContracts = await loadContracts(true);
 
 // Resolve the repo's biome binary (same pattern as
 // scripts/design-system-manifest.mjs) so the emitted JSON matches the
@@ -94,8 +102,10 @@ function render(fileName, contract) {
 
 let stale = false;
 for (const [fileName, contract] of [
-  ["api-surface.json", api],
-  ["cli-surface.json", surface],
+  ["api-surface.json", publicContracts.api],
+  ["cli-surface.json", publicContracts.surface],
+  ["api-surface-feedback.json", feedbackContracts.api],
+  ["cli-surface-feedback.json", feedbackContracts.surface],
 ]) {
   const target = path.join(crateDir, fileName);
   const rendered = render(fileName, contract);

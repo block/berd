@@ -5,6 +5,7 @@ import {
   registerAppNavigationController,
 } from "@/features/berdctl/bridge/appNavigationController";
 import {
+  ALL_TOOL_GROUPS,
   dispatchCommand,
   TOOL_GROUPS,
 } from "@/features/berdctl/commands/registry";
@@ -4068,7 +4069,7 @@ describe("info", () => {
 describe("feedback schemas", () => {
   it("requires bounded report content and defaults diagnostics off", () => {
     for (const action of ["open", "submit"] as const) {
-      const schema = TOOL_GROUPS.feedback.actions[action].schema;
+      const schema = ALL_TOOL_GROUPS.feedback.actions[action].schema;
       expect(
         schema.safeParse({ title: "Bug", description: "Details" }),
       ).toMatchObject({ success: true, data: { include_logs: false } });

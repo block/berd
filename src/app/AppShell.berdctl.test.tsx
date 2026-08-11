@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import {
   getAppNavigationController,
@@ -250,6 +250,7 @@ async function runCommand(
 
 describe("AppShell berdctl integration", () => {
   beforeEach(() => {
+    vi.stubEnv("VITE_AUTOMATIONS", "1");
     window.history.replaceState(null, "", "/");
     window.localStorage.clear();
     useShortcutsDialogStore.setState({ open: false });
@@ -335,7 +336,14 @@ describe("AppShell berdctl integration", () => {
       loading: false,
       activeProjectId: null,
     });
-    setReadyRuntimeConfig();
+    setReadyRuntimeConfig({
+      ...DEFAULT_RUNTIME_CONFIG,
+      kgoose: { baseUrl: "https://kgoose.example.test" },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("registers the controller after mount and clears it on unmount", () => {

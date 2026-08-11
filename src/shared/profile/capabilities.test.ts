@@ -21,13 +21,15 @@ import {
 
 const enabledBuildFeatures: Record<BuildFeature, boolean> = {
   authGate: false,
-  agentToolsTip: true,
+  agentTools: true,
   automations: true,
   builderbot: true,
   byoKeyProviders: false,
+  feedback: true,
+  managedConnections: true,
   telemetry: true,
+  voiceConversation: true,
   voiceDictation: true,
-  kgooseConnections: true,
   securityMl: true,
   updater: true,
 };
@@ -56,14 +58,14 @@ describe("profile capabilities", () => {
         buildFeatures: {
           ...enabledBuildFeatures,
           automations: false,
-          agentToolsTip: false,
+          agentTools: false,
           telemetry: false,
           updater: false,
         },
       }),
     ).toMatchObject({
       automations: false,
-      agentToolsTip: false,
+      agentTools: false,
       telemetry: false,
       updates: false,
     });
@@ -142,7 +144,7 @@ describe("profile capabilities", () => {
         },
         experiments: [{ id: VOICE_CONVERSATION_EXPERIMENT_ID, enabled: true }],
       }).voiceConversation,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("AND-gates telemetry across its build feature and runtime toggle", () => {
@@ -179,9 +181,9 @@ describe("profile capabilities", () => {
     ).toBe(true);
   });
 
-  it("AND-gates kgooseConnections across its build feature and runtime toggle", () => {
+  it("AND-gates managedConnections across its build feature and runtime toggle", () => {
     // Both build feature and runtime toggle allow it -> enabled.
-    expect(resolve().kgooseConnections).toBe(true);
+    expect(resolve().managedConnections).toBe(true);
 
     // Build feature off -> disabled regardless of runtime config (build-time is
     // the hard floor: a gated build can never be turned back on by config).
@@ -189,9 +191,9 @@ describe("profile capabilities", () => {
       resolve({
         buildFeatures: {
           ...enabledBuildFeatures,
-          kgooseConnections: false,
+          managedConnections: false,
         },
-      }).kgooseConnections,
+      }).managedConnections,
     ).toBe(false);
 
     // Runtime toggle off -> disabled even with the build feature on.
@@ -201,7 +203,7 @@ describe("profile capabilities", () => {
           ...DEFAULT_RUNTIME_CONFIG,
           featureToggles: { kgooseConnections: false },
         },
-      }).kgooseConnections,
+      }).managedConnections,
     ).toBe(false);
 
     // Runtime config not yet loaded -> safe default of enabled (build feature
@@ -210,7 +212,7 @@ describe("profile capabilities", () => {
       resolve({
         runtimeConfigLoaded: true,
         runtimeConfig: null,
-      }).kgooseConnections,
+      }).managedConnections,
     ).toBe(true);
   });
 
@@ -225,9 +227,9 @@ describe("profile capabilities", () => {
       automations: false,
       voiceDictation: false,
       voiceConversation: true,
-      kgooseConnections: false,
+      managedConnections: false,
       feedback: false,
-      agentToolsTip: true,
+      agentTools: true,
       telemetry: true,
       doctor: true,
     });
@@ -257,7 +259,7 @@ describe("profile capabilities", () => {
       automations: true,
       voiceDictation: true,
       voiceConversation: true,
-      kgooseConnections: true,
+      managedConnections: true,
       feedback: true,
     });
   });
@@ -276,7 +278,7 @@ describe("profile capabilities", () => {
       automations: true,
       voiceDictation: true,
       voiceConversation: true,
-      kgooseConnections: true,
+      managedConnections: true,
       feedback: true,
     });
   });
@@ -297,7 +299,7 @@ describe("profile capabilities", () => {
       ).toMatchObject({
         automations: false,
         voiceDictation: false,
-        kgooseConnections: false,
+        managedConnections: false,
         feedback: false,
       });
     }
@@ -326,7 +328,7 @@ describe("profile capabilities", () => {
       }),
     ).toMatchObject({
       voiceDictation: false,
-      kgooseConnections: false,
+      managedConnections: false,
       feedback: false,
     });
   });
@@ -334,7 +336,7 @@ describe("profile capabilities", () => {
   it("defaults runtime config capabilities to enabled when fields are absent", () => {
     expect(resolve()).toMatchObject({
       automations: true,
-      agentToolsTip: true,
+      agentTools: true,
       feedback: true,
       doctor: true,
     });
@@ -349,7 +351,7 @@ describe("profile capabilities", () => {
     ).toMatchObject({
       automations: true,
       builderbot: false,
-      agentToolsTip: true,
+      agentTools: true,
       telemetry: true,
       feedback: true,
       doctor: true,
@@ -370,7 +372,7 @@ describe("profile capabilities", () => {
         },
       }),
     ).toMatchObject({
-      agentToolsTip: false,
+      agentTools: false,
       automations: false,
       builderbot: false,
       telemetry: true,

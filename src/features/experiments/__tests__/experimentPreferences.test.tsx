@@ -1,7 +1,10 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ExperimentDefinition } from "../experimentDefinitions";
+import {
+  BUILDERBOT_SURFACE_EXPERIMENT_ID,
+  type ExperimentDefinition,
+} from "../experimentDefinitions";
 import {
   EXPERIMENT_PREFERENCES_CHANGE_EVENT,
   EXPERIMENT_PREFERENCES_STORAGE_KEY,
@@ -9,6 +12,7 @@ import {
   clearExperimentEnabledOverride,
   getExperiment,
   getExperimentAutoEnable,
+  getVisibleExperimentRegistry,
   resolveAutoEnabled,
   setExperimentAutoEnable,
   setExperimentConfigValue,
@@ -127,6 +131,36 @@ describe("experimentPreferences", () => {
       configurable: true,
       value: originalLocalStorage,
     });
+  });
+
+  it("hides the Builderbot experiment when its build family is unavailable", () => {
+    const registry = [
+      testRegistry[0],
+      {
+        ...testRegistry[0],
+        id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
+      },
+    ];
+
+    expect(getVisibleExperimentRegistry(registry).map(({ id }) => id)).toEqual([
+      "test-experiment",
+    ]);
+  });
+
+  it("shows the Builderbot experiment when its build family is enabled", () => {
+    vi.stubEnv("VITE_BUILDERBOT", "1");
+    const registry = [
+      testRegistry[0],
+      {
+        ...testRegistry[0],
+        id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
+      },
+    ];
+
+    expect(getVisibleExperimentRegistry(registry).map(({ id }) => id)).toEqual([
+      "test-experiment",
+      BUILDERBOT_SURFACE_EXPERIMENT_ID,
+    ]);
   });
 
   it("defaults auto-enable on in dev builds", () => {

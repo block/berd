@@ -282,9 +282,24 @@ _bundle-unix:
 
     TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)"
     ./scripts/prepare-goose-sidecar.sh
-    CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
-    ./scripts/prepare-bb-cli-resource.sh
+    VITE_FEEDBACK="${VITE_FEEDBACK:-0}" CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-catch-sidecar.sh
+
+    CARGO_FEATURES=(berdctl)
+    [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]] && CARGO_FEATURES+=(block-agent-tools)
+    [[ "${VITE_AUTOMATIONS:-0}" == "1" ]] && CARGO_FEATURES+=(block-automations)
+    [[ "${VITE_BUILDERBOT:-0}" == "1" ]] && CARGO_FEATURES+=(block-builderbot)
+    [[ "${VITE_FEEDBACK:-0}" == "1" ]] && CARGO_FEATURES+=(block-feedback)
+    [[ "${VITE_MANAGED_CONNECTIONS:-0}" == "1" ]] && CARGO_FEATURES+=(block-managed-connections)
+    if [[ "${VITE_VOICE_DICTATION:-0}" == "1" ]]; then
+      CARGO_FEATURES+=(block-voice-dictation)
+    else
+      CARGO_FEATURES+=(no-voice-dictation)
+    fi
+    if [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]]; then
+      ./scripts/prepare-bb-cli-resource.sh
+    fi
+    CARGO_FEATURES_CSV="$(IFS=,; echo "${CARGO_FEATURES[*]}")"
 
     # Derive a git-based version so non-release bundles don't ship the 0.1.0
     # placeholder. Injected via a temp --config overlay to keep the tree clean.
@@ -292,16 +307,20 @@ _bundle-unix:
     echo "Building Berd ${BERD_APP_VERSION} (${BERD_APP_VERSION_RICH})"
     VERSION_CONFIG="$(mktemp -t berd-tauri-version.XXXXXX.json)"
     trap 'rm -f "$VERSION_CONFIG"' EXIT
-    jq -n --arg v "$BERD_APP_VERSION" '{ version: $v }' > "$VERSION_CONFIG"
+    jq -n \
+      --arg v "$BERD_APP_VERSION" \
+      --argjson agent_tools "$( [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]] && echo true || echo false )" \
+      '{ version: $v } + if $agent_tools then { bundle: { resources: { "../resources/bb": "bb" } } } else {} end' \
+      > "$VERSION_CONFIG"
 
-    TAURI_BUILD_ARGS=(pnpm tauri build --features berdctl --config "$VERSION_CONFIG")
+    TAURI_BUILD_ARGS=(pnpm tauri build --features "$CARGO_FEATURES_CSV" --config "$VERSION_CONFIG")
     if [[ "$(uname -s)" = "Darwin" ]]; then
       TAURI_BUILD_ARGS+=(--bundles app)
     fi
 
     CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" \
       BERD_APP_VERSION="$BERD_APP_VERSION" \
-      VITE_AUTH_GATE=0 \
+      VITE_AUTH_GATE="${VITE_BUILDERBOT:-0}" \
       VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \
       "${TAURI_BUILD_ARGS[@]}"
 
@@ -349,9 +368,24 @@ _bundle-debug-unix:
 
     TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)"
     ./scripts/prepare-goose-sidecar.sh
-    CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
-    ./scripts/prepare-bb-cli-resource.sh
+    VITE_FEEDBACK="${VITE_FEEDBACK:-0}" CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-catch-sidecar.sh
+
+    CARGO_FEATURES=(berdctl devtools)
+    [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]] && CARGO_FEATURES+=(block-agent-tools)
+    [[ "${VITE_AUTOMATIONS:-0}" == "1" ]] && CARGO_FEATURES+=(block-automations)
+    [[ "${VITE_BUILDERBOT:-0}" == "1" ]] && CARGO_FEATURES+=(block-builderbot)
+    [[ "${VITE_FEEDBACK:-0}" == "1" ]] && CARGO_FEATURES+=(block-feedback)
+    [[ "${VITE_MANAGED_CONNECTIONS:-0}" == "1" ]] && CARGO_FEATURES+=(block-managed-connections)
+    if [[ "${VITE_VOICE_DICTATION:-0}" == "1" ]]; then
+      CARGO_FEATURES+=(block-voice-dictation)
+    else
+      CARGO_FEATURES+=(no-voice-dictation)
+    fi
+    if [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]]; then
+      ./scripts/prepare-bb-cli-resource.sh
+    fi
+    CARGO_FEATURES_CSV="$(IFS=,; echo "${CARGO_FEATURES[*]}")"
 
     # Use a temporary config overlay so normal release bundles keep devtools
     # disabled, and fold in the git-derived version so the bundle doesn't ship
@@ -360,14 +394,17 @@ _bundle-debug-unix:
     echo "Building Berd ${BERD_APP_VERSION} (${BERD_APP_VERSION_RICH})"
     DEBUG_CONFIG="$(mktemp -t berd-tauri-debug.XXXXXX.json)"
     trap 'rm -f "$DEBUG_CONFIG"' EXIT
-    jq --arg v "$BERD_APP_VERSION" '.version = $v | .app.windows[0].devtools = true' \
+    jq \
+      --arg v "$BERD_APP_VERSION" \
+      --argjson agent_tools "$( [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]] && echo true || echo false )" \
+      '.version = $v | .app.windows[0].devtools = true | if $agent_tools then .bundle.resources["../resources/bb"] = "bb" else . end' \
       src-tauri/tauri.conf.json > "$DEBUG_CONFIG"
 
     CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" \
       BERD_APP_VERSION="$BERD_APP_VERSION" \
-      VITE_AUTH_GATE=0 \
+      VITE_AUTH_GATE="${VITE_BUILDERBOT:-0}" \
       VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \
-      pnpm tauri build --features berdctl,devtools --config "$DEBUG_CONFIG"
+      pnpm tauri build --features "$CARGO_FEATURES_CSV" --config "$DEBUG_CONFIG"
 
 # ── Test ─────────────────────────────────────────────────────
 
@@ -419,11 +456,13 @@ dev:
     # tauri dev only builds the root package; the berdctl CLI workspace
     # member needs an explicit build, resolved at runtime via BERDCTL_BIN
     # because tauri.dev.conf.json blanks externalBin.
-    (cd src-tauri && cargo build -p berdctl)
+    BERDCTL_FEATURES=()
+    [[ "${VITE_FEEDBACK:-0}" == "1" ]] && BERDCTL_FEATURES+=(--features block-feedback)
+    (cd src-tauri && cargo build -p berdctl "${BERDCTL_FEATURES[@]}")
     export BERDCTL_BIN="${CARGO_TARGET_DIR}/debug/berdctl"
     echo "Using berdctl CLI: ${BERDCTL_BIN}"
 
-    if [[ ! -x resources/bb ]]; then
+    if [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]]; then
         ./scripts/prepare-bb-cli-resource.sh
     fi
 
@@ -471,7 +510,8 @@ dev:
         EXTRA_CONFIG_ARGS+=(--config "$DEV_ICON_CONFIG")
     fi
 
-    pnpm tauri dev --features {{ app_features }} "${EXTRA_CONFIG_ARGS[@]}"
+    CARGO_FEATURES="$(./scripts/block-feature-gates.sh "{{ app_features }}")"
+    VITE_AUTH_GATE="${VITE_BUILDERBOT:-0}" pnpm tauri dev --features "$CARGO_FEATURES" "${EXTRA_CONFIG_ARGS[@]}"
 
 [unix]
 dev-debug: dev

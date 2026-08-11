@@ -51,9 +51,11 @@ export CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)"
 eval "$(./scripts/resolve-app-version.sh)"
 export VITE_APP_VERSION="$BERD_APP_VERSION_RICH"
 
-(cd src-tauri && cargo build -p berdctl)
+BERDCTL_FEATURES=()
+[[ "${VITE_FEEDBACK:-0}" == "1" ]] && BERDCTL_FEATURES+=(--features block-feedback)
+(cd src-tauri && cargo build -p berdctl "${BERDCTL_FEATURES[@]}")
 export BERDCTL_BIN="${CARGO_TARGET_DIR}/debug/berdctl"
-if [[ ! -x resources/bb ]]; then
+if [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]]; then
   ./scripts/prepare-bb-cli-resource.sh
 fi
 if [[ -z "${GOOSE_BIN:-}" ]]; then
@@ -70,8 +72,9 @@ printf 'BERD_E2E_RUN_ROOT=%q\nAPP_TEST_DRIVER_TOKEN=%q\n' \
   "$BERD_E2E_RUN_ROOT" "$APP_TEST_DRIVER_TOKEN" > "$BERD_E2E_RUN_ROOT/client.env"
 chmod 600 "$BERD_E2E_RUN_ROOT/client.env"
 
-pnpm tauri dev \
-  --features berdctl,app-test-driver \
+CARGO_FEATURES="$(./scripts/block-feature-gates.sh "berdctl,app-test-driver")"
+VITE_AUTH_GATE="${VITE_BUILDERBOT:-0}" pnpm tauri dev \
+  --features "$CARGO_FEATURES" \
   --config src-tauri/tauri.dev.conf.json \
   --config "$TAURI_E2E_CONFIG" \
   --config "{\"version\":\"${BERD_APP_VERSION}\",\"build\":{\"devUrl\":\"http://localhost:${VITE_PORT}\",\"beforeDevCommand\":{\"script\":\"exec pnpm exec vite --port ${VITE_PORT} --strictPort\",\"cwd\":\"..\",\"wait\":false}}}" &

@@ -3,16 +3,23 @@ pub mod agent_setup;
 pub mod agent_skills;
 pub mod agents;
 pub mod artifacts;
+#[cfg_attr(not(feature = "block-builderbot"), allow(dead_code))]
 pub mod auth;
+#[cfg(feature = "block-automations")]
 pub mod automations;
 pub mod avatars;
+#[cfg(feature = "block-builderbot")]
 pub mod builderbot;
 pub mod cache;
+#[cfg(feature = "block-agent-tools")]
 pub mod cli;
+#[cfg(feature = "block-managed-connections")]
 pub mod connections;
 pub mod diagnostics;
 pub mod distro;
+#[cfg_attr(not(feature = "block-feedback"), allow(dead_code))]
 pub mod doctor;
+#[cfg(feature = "block-feedback")]
 pub mod feedback;
 pub mod git;
 pub mod git_changes;
@@ -24,6 +31,7 @@ pub mod migration;
 pub mod model_setup;
 pub mod native_voice;
 pub mod notifications;
+#[cfg(feature = "block-voice-dictation")]
 pub mod openai_realtime;
 pub mod path_resolver;
 #[cfg(target_os = "macos")]

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { FolderOpen, RotateCcw, Terminal, Trash2 } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
+import { getPlatform } from "@/shared/lib/platform";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import {
@@ -66,13 +67,15 @@ export function SystemSettings() {
   const artifactRootPreference = useArtifactRootPreference();
   const terminalFallbackCwdPreference = useTerminalFallbackCwdPreference();
   const doctorEnabled = useProfileCapability("doctor");
+  const agentToolsEnabled = useProfileCapability("agentTools");
+  const isMac = getPlatform() === "mac";
   const doctorStatus = useDoctorStatusSummary();
   const terminalFallbackPath =
     terminalFallbackCwdPreference.fallbackCwd ??
     artifactRootPreference.rootPath;
 
   const refreshBbCliStatus = useCallback(async () => {
-    if (!window.__TAURI_INTERNALS__) {
+    if (!isMac || !agentToolsEnabled || !window.__TAURI_INTERNALS__) {
       return;
     }
 
@@ -85,7 +88,7 @@ export function SystemSettings() {
     } finally {
       setBbCliLoading(false);
     }
-  }, []);
+  }, [agentToolsEnabled, isMac]);
 
   useEffect(() => {
     void refreshBbCliStatus();
@@ -354,9 +357,10 @@ export function SystemSettings() {
           `no-bb-cli-install` Cargo feature reports `unsupportedInBuild`;
           hide the bb CLI row entirely rather than showing a button that can
           never install. Runtime config only renders in dev builds. */}
-        {!bbCliStatus?.unsupportedInBuild || import.meta.env.DEV ? (
+        {(isMac && agentToolsEnabled && !bbCliStatus?.unsupportedInBuild) ||
+        import.meta.env.DEV ? (
           <SettingsSection title={t("developerTools.title")}>
-            {!bbCliStatus?.unsupportedInBuild ? (
+            {isMac && agentToolsEnabled && !bbCliStatus?.unsupportedInBuild ? (
               <SettingsRow
                 label={t("general.bbCli.label")}
                 description={

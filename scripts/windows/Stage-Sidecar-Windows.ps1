@@ -72,6 +72,9 @@ $tauriTargetDir = Get-TauriCargoTargetDir
 $env:CARGO_TARGET_DIR = $tauriTargetDir
 $hostTriple = Get-RustHostTriple
 $cargoArgs = @("build", "-p", "berdctl", "--release")
+if ($env:VITE_FEEDBACK -eq "1") {
+    $cargoArgs += @("--features", "block-feedback")
+}
 if (-not [string]::IsNullOrWhiteSpace($hostTriple) -and $Triple -ne $hostTriple) {
     $cargoArgs += @("--target", $Triple)
     $berdctlReleaseDir = Join-Path (Join-Path $tauriTargetDir $Triple) "release"

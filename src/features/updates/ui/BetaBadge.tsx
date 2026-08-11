@@ -4,11 +4,13 @@ import { useFeedbackDialogStore } from "@/features/feedback/feedbackDialogStore"
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+import { useProfileCapability } from "@/shared/profile/capabilities";
 
 export function BetaBadge() {
   const { t } = useTranslation("settings");
   const { runtime, status, prepareChannelSwitch } = useUpdaterContext();
   const openFeedback = useFeedbackDialogStore((state) => state.openDialog);
+  const feedbackEnabled = useProfileCapability("feedback");
   const runningBuild = runtime.runningBuild;
   const previewMode = import.meta.env.DEV && !window.__TAURI_INTERNALS__;
   if (runningBuild?.channelId !== "beta") return null;
@@ -17,7 +19,8 @@ export function BetaBadge() {
   const betaLabel =
     runtime.channels.find((channel) => channel.id === "beta")?.label ?? "Beta";
   const betaLabelId = import.meta.env.VITE_BETA_LINEAR_LABEL_ID?.trim();
-  const betaFeedbackAvailable = previewMode || Boolean(betaLabelId);
+  const betaFeedbackAvailable =
+    feedbackEnabled && (previewMode || Boolean(betaLabelId));
   const switchDisabled =
     !main ||
     status === "checking" ||
@@ -61,32 +64,34 @@ export function BetaBadge() {
           </p>
         ) : null}
         <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={!betaFeedbackAvailable}
-            title={
-              betaFeedbackAvailable
-                ? undefined
-                : t("updates.betaBadge.reportIssueUnavailable")
-            }
-            onClick={() => {
-              openFeedback({
-                title: "",
-                description: "",
-                includeLogs: false,
-                titleSuffix: ` [Berd ${runningBuild.version} ${betaLabel}]`,
-                metadata: {
-                  "Release channel": betaLabel,
-                  "Running build": runningBuild.version,
-                },
-                labelIds: betaLabelId ? [betaLabelId] : [],
-              });
-            }}
-          >
-            {t("updates.betaBadge.reportIssue")}
-          </Button>
+          {feedbackEnabled ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!betaFeedbackAvailable}
+              title={
+                betaFeedbackAvailable
+                  ? undefined
+                  : t("updates.betaBadge.reportIssueUnavailable")
+              }
+              onClick={() => {
+                openFeedback({
+                  title: "",
+                  description: "",
+                  includeLogs: false,
+                  titleSuffix: ` [Berd ${runningBuild.version} ${betaLabel}]`,
+                  metadata: {
+                    "Release channel": betaLabel,
+                    "Running build": runningBuild.version,
+                  },
+                  labelIds: betaLabelId ? [betaLabelId] : [],
+                });
+              }}
+            >
+              {t("updates.betaBadge.reportIssue")}
+            </Button>
+          ) : null}
           {main ? (
             <Button
               type="button"

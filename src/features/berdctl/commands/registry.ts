@@ -50,7 +50,7 @@ import { CommandError, type CommandContext, type ToolGroup } from "./types";
  * the action names, with `cli.verbs` (verb → action) for the cases where the
  * CLI spelling diverges.
  */
-export const TOOL_GROUPS = {
+export const ALL_TOOL_GROUPS = {
   sessions: {
     description:
       "Manage the user's chat sessions: create (fire-and-forget, on any " +
@@ -183,6 +183,17 @@ export const TOOL_GROUPS = {
     },
   },
 } as const satisfies Record<string, ToolGroup>;
+
+/**
+ * Build-owned command registry. Public builds omit Feedback entirely; an
+ * enabled distribution opts it back in with the same VITE_FEEDBACK boolean
+ * that owns the renderer and backend surfaces.
+ */
+export const TOOL_GROUPS: Record<string, ToolGroup> = Object.fromEntries(
+  Object.entries(ALL_TOOL_GROUPS).filter(
+    ([name]) => name !== "feedback" || import.meta.env.VITE_FEEDBACK === "1",
+  ),
+);
 
 function formatZodError(error: ZodError): string {
   const parts = error.issues.map((issue) =>

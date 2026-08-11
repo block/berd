@@ -330,7 +330,7 @@ export function ChatInput({
     enabled: agentToolsTipsEnabled,
     setEnabled: setAgentToolsTipsEnabled,
   } = useAgentToolsTipsPreference();
-  const kgooseConnectionsEnabled = useProfileCapability("kgooseConnections");
+  const kgooseConnectionsEnabled = useProfileCapability("managedConnections");
   const [internalSelectedSkills, setInternalSelectedSkills] = useState<
     ChatSkillDraft[]
   >([]);

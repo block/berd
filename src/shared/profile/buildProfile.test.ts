@@ -1,26 +1,59 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getBuildFeatureState } from "./buildProfile";
 
 describe("buildProfile", () => {
+  beforeEach(() => {
+    // Feature env stubs from other files share the worker's import.meta.env.
+    // Every case in this suite begins from the real public-build default.
+    vi.unstubAllEnvs();
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();
   });
 
-  it("enables generic bundled app build features", () => {
+  it("defaults all six Block-service-dependent product families off", () => {
     expect(getBuildFeatureState()).toEqual({
       authGate: false,
-      agentToolsTip: true,
-      automations: true,
-      builderbot: true,
+      agentTools: false,
+      automations: false,
+      builderbot: false,
       byoKeyProviders: true,
+      feedback: false,
+      managedConnections: false,
       telemetry: true,
-      voiceDictation: true,
-      kgooseConnections: true,
+      voiceConversation: true,
+      voiceDictation: false,
       securityMl: false,
       updater: true,
     });
+  });
+
+  it.each([
+    ["VITE_AGENT_TOOLS", "agentTools"],
+    ["VITE_AUTOMATIONS", "automations"],
+    ["VITE_BUILDERBOT", "builderbot"],
+    ["VITE_FEEDBACK", "feedback"],
+    ["VITE_MANAGED_CONNECTIONS", "managedConnections"],
+    ["VITE_VOICE_DICTATION", "voiceDictation"],
+  ] as const)("enables %s independently", async (env, feature) => {
+    vi.resetModules();
+    vi.stubEnv(env, "1");
+    const { getBuildFeatureState: fresh } = await import("./buildProfile");
+    const enabled = fresh();
+    expect(enabled[feature]).toBe(true);
+    for (const other of [
+      "agentTools",
+      "automations",
+      "builderbot",
+      "feedback",
+      "managedConnections",
+      "voiceDictation",
+    ] as const) {
+      if (other !== feature) expect(enabled[other]).toBe(false);
+    }
   });
 
   it("disables bring-your-own-key providers when VITE_BYO_KEY_PROVIDERS is 0 (inverse-positive default-on)", async () => {
@@ -67,15 +100,15 @@ describe("buildProfile", () => {
     expect(getFreshBuildFeatureState().telemetry).toBe(true);
   });
 
-  it("disables kgooseConnections when VITE_KGOOSE_CONNECTIONS is set to 0 (inverse-positive default-on)", async () => {
+  it("keeps managed connections off for a non-opt-in value", async () => {
     vi.resetModules();
-    vi.stubEnv("VITE_KGOOSE_CONNECTIONS", "0");
+    vi.stubEnv("VITE_MANAGED_CONNECTIONS", "0");
 
     const { getBuildFeatureState: getFreshBuildFeatureState } = await import(
       "./buildProfile"
     );
 
-    expect(getFreshBuildFeatureState().kgooseConnections).toBe(false);
+    expect(getFreshBuildFeatureState().managedConnections).toBe(false);
   });
 
   it("enables security ML only when VITE_SECURITY_ML is set to 1", async () => {

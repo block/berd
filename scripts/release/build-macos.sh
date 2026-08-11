@@ -99,6 +99,12 @@ CARGO_FEATURES="berdctl"
 VITE_APP_VERSION_VALUE="$RELEASE_VERSION"
 VITE_ENVIRONMENT_VALUE="production"
 VITE_AUTH_GATE_VALUE=0
+VITE_AGENT_TOOLS_VALUE="${VITE_AGENT_TOOLS:-0}"
+VITE_AUTOMATIONS_VALUE="${VITE_AUTOMATIONS:-0}"
+VITE_BUILDERBOT_VALUE="${VITE_BUILDERBOT:-0}"
+VITE_FEEDBACK_VALUE="${VITE_FEEDBACK:-0}"
+VITE_MANAGED_CONNECTIONS_VALUE="${VITE_MANAGED_CONNECTIONS:-0}"
+VITE_VOICE_DICTATION_VALUE="${VITE_VOICE_DICTATION:-0}"
 VITE_BYO_KEY_PROVIDERS_VALUE=0
 # Public builds have no external security classifier. Internal distributions may
 # opt in by supplying their implementation and setting VITE_SECURITY_ML=1.
@@ -120,6 +126,24 @@ set_vite_env() {
       ;;
     VITE_AUTH_GATE)
       VITE_AUTH_GATE_VALUE="$value"
+      ;;
+    VITE_AGENT_TOOLS)
+      VITE_AGENT_TOOLS_VALUE="$value"
+      ;;
+    VITE_AUTOMATIONS)
+      VITE_AUTOMATIONS_VALUE="$value"
+      ;;
+    VITE_BUILDERBOT)
+      VITE_BUILDERBOT_VALUE="$value"
+      ;;
+    VITE_FEEDBACK)
+      VITE_FEEDBACK_VALUE="$value"
+      ;;
+    VITE_MANAGED_CONNECTIONS)
+      VITE_MANAGED_CONNECTIONS_VALUE="$value"
+      ;;
+    VITE_VOICE_DICTATION)
+      VITE_VOICE_DICTATION_VALUE="$value"
       ;;
     VITE_BYO_KEY_PROVIDERS)
       VITE_BYO_KEY_PROVIDERS_VALUE="$value"
@@ -309,22 +333,11 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
   mv "$merged" "$RUNTIME_CONFIG"
   rm -f "$overrides"
 
-  # `== false` matches only an explicitly-disabled toggle; an absent toggle
-  # (null) stays enabled. (Do NOT use `// true` here — jq's alternative
-  # operator treats an explicit `false` as absent and would mask the disable.)
-  if [[ "$(jq -r '.featureToggles.voiceDictation == false' "$RUNTIME_CONFIG")" == "true" ]]; then
-    CARGO_FEATURES="$CARGO_FEATURES,no-voice-dictation"
-    set_vite_env VITE_VOICE_DICTATION 0
-  fi
+  # Preserve non-Block custom-build policies independently of the six
+  # positive opt-ins below. An explicit telemetry disable must take effect at
+  # renderer build time, before runtime config is available.
   if [[ "$(jq -r '.featureToggles.telemetry == false' "$RUNTIME_CONFIG")" == "true" ]]; then
     set_vite_env VITE_TELEMETRY 0
-  fi
-  # kgoose-backed "Company-managed" connections tab. Purely a renderer gate:
-  # flipping the VITE_* build feature hides the tab and skips the kgoose query.
-  # The Rust `list_connections` command stays registered (no backend feature) —
-  # a gated renderer just never calls it.
-  if [[ "$(jq -r '.featureToggles.kgooseConnections == false' "$RUNTIME_CONFIG")" == "true" ]]; then
-    set_vite_env VITE_KGOOSE_CONNECTIONS 0
   fi
 
   printf '%s' "$CUSTOM_BUILD_ENV" | jq -e '
@@ -383,6 +396,25 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
   fi
 fi
 
+
+# Resolve the six independent Block-service product gates into matching
+# renderer and backend/package gates. Values are positive opt-ins: absent is
+# public-off and no runtime config can revive a build-disabled family.
+for value in "$VITE_AGENT_TOOLS_VALUE" "$VITE_AUTOMATIONS_VALUE" "$VITE_BUILDERBOT_VALUE" "$VITE_FEEDBACK_VALUE" "$VITE_MANAGED_CONNECTIONS_VALUE" "$VITE_VOICE_DICTATION_VALUE"; do
+  [[ "$value" == "0" || "$value" == "1" ]] || { echo "Block-service feature gates must be 0 or 1" >&2; exit 1; }
+done
+VITE_AUTH_GATE_VALUE="$VITE_BUILDERBOT_VALUE"
+[[ "$VITE_AGENT_TOOLS_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-agent-tools"
+[[ "$VITE_AUTOMATIONS_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-automations"
+[[ "$VITE_BUILDERBOT_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-builderbot"
+[[ "$VITE_FEEDBACK_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-feedback"
+[[ "$VITE_MANAGED_CONNECTIONS_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-managed-connections"
+if [[ "$VITE_VOICE_DICTATION_VALUE" == "1" ]]; then
+  CARGO_FEATURES="$CARGO_FEATURES,block-voice-dictation"
+else
+  CARGO_FEATURES="$CARGO_FEATURES,no-voice-dictation"
+fi
+
 # bb CLI PATH install has no runtime-config representation; the custom pipeline
 # exposes a dedicated select that disables it via the Cargo feature.
 if [[ "$BUILD_KIND" == "custom" && "$DISABLE_BB_CLI" == "true" ]]; then
@@ -424,8 +456,13 @@ echo "+++ :hammer: pnpm tauri build (unsigned)"
 ./scripts/prepare-goose-sidecar.sh
 # ACP bridges are installed into the managed Node runtime on demand; they are
 # no longer staged as build resources.
-./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"
-./scripts/prepare-bb-cli-resource.sh "$TARGET_TRIPLE"
+VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" ./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"
+if [[ "$VITE_AGENT_TOOLS_VALUE" == "1" ]]; then
+  ./scripts/prepare-bb-cli-resource.sh "$TARGET_TRIPLE"
+  tmp="$(mktemp)"
+  jq '.bundle.resources["../resources/bb"] = "bb"' src-tauri/tauri.release.conf.json > "$tmp" \
+    && mv "$tmp" src-tauri/tauri.release.conf.json
+fi
 ./scripts/prepare-catch-sidecar.sh "$TARGET_TRIPLE"
 # Pass the build-time env via `env`, not as shell assignment-prefix words.
 # Custom-only extra VITE_* values are expanded from an array, and bash
@@ -439,6 +476,12 @@ env \
   VITE_APP_VERSION="$VITE_APP_VERSION_VALUE" \
   VITE_ENVIRONMENT="$VITE_ENVIRONMENT_VALUE" \
   VITE_AUTH_GATE="$VITE_AUTH_GATE_VALUE" \
+  VITE_AGENT_TOOLS="$VITE_AGENT_TOOLS_VALUE" \
+  VITE_AUTOMATIONS="$VITE_AUTOMATIONS_VALUE" \
+  VITE_BUILDERBOT="$VITE_BUILDERBOT_VALUE" \
+  VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" \
+  VITE_MANAGED_CONNECTIONS="$VITE_MANAGED_CONNECTIONS_VALUE" \
+  VITE_VOICE_DICTATION="$VITE_VOICE_DICTATION_VALUE" \
   VITE_BYO_KEY_PROVIDERS="$VITE_BYO_KEY_PROVIDERS_VALUE" \
   VITE_SECURITY_ML="$VITE_SECURITY_ML_VALUE" \
   VITE_UPDATER_ENABLED="$VITE_UPDATER_ENABLED_VALUE" \

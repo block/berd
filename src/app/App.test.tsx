@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   appShellRender: vi.fn(),
   buildFeatures: {
     authGate: false,
-    agentToolsTip: true,
+    agentTools: true,
     automations: true,
     builderbot: true,
     telemetry: true,

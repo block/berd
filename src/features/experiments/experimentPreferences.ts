@@ -1,11 +1,13 @@
 import { useSyncExternalStore } from "react";
 
 import {
+  BUILDERBOT_SURFACE_EXPERIMENT_ID,
   EXPERIMENT_DEFINITIONS,
   type ExperimentConfigControl,
   type ExperimentConfigValue,
   type ExperimentDefinition,
 } from "./experimentDefinitions";
+import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 export const EXPERIMENT_PREFERENCES_STORAGE_KEY = "goose:experimental-features";
 export const EXPERIMENT_PREFERENCES_STORAGE_VERSION = 2;
 export const EXPERIMENT_PREFERENCES_CHANGE_EVENT =
@@ -326,7 +328,11 @@ function findDefinition(id: string, registry: ExperimentRegistry) {
 export function getVisibleExperimentRegistry(
   registry: ExperimentRegistry = EXPERIMENT_DEFINITIONS,
 ): ExperimentRegistry {
-  return registry;
+  if (getBuildFeatureState().builderbot) return registry;
+
+  return registry.filter(
+    (definition) => definition.id !== BUILDERBOT_SURFACE_EXPERIMENT_ID,
+  );
 }
 
 export function listExperiments(

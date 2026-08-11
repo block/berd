@@ -53,7 +53,7 @@ export function BehaviorSettings() {
   );
   const followUpBehavior =
     streamingShortcutPreference.mode === "cmd-enter-steers" ? "queue" : "steer";
-  const showAgentToolsTipsSetting = useProfileCapability("agentToolsTip");
+  const showAgentToolsTipsSetting = useProfileCapability("agentTools");
   const isMac = getPlatform() === "mac";
 
   useEffect(() => {

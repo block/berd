@@ -473,10 +473,38 @@ function Join-WindowsProcessArguments {
     return ($quoted -join " ")
 }
 
-# Single source of truth for the cargo feature set of the full dev posture on
-# Windows (mirrors `app_features` in the justfile).
+# Single source of truth for mapping the six renderer build gates onto the
+# matching Tauri Cargo feature set. Callers may add posture features (for
+# example berdctl/app-test-driver/devtools) without duplicating gate policy.
 function Get-BerdAppFeatures {
-    return "berdctl,app-test-driver"
+    param([string[]]$BaseFeatures = @("berdctl", "app-test-driver"))
+
+    $features = New-Object System.Collections.Generic.List[string]
+    foreach ($feature in $BaseFeatures) {
+        if (-not [string]::IsNullOrWhiteSpace($feature)) {
+            $features.Add($feature)
+        }
+    }
+    $gates = @(
+        @{ Env = "VITE_AGENT_TOOLS"; Feature = "block-agent-tools" },
+        @{ Env = "VITE_AUTOMATIONS"; Feature = "block-automations" },
+        @{ Env = "VITE_BUILDERBOT"; Feature = "block-builderbot" },
+        @{ Env = "VITE_FEEDBACK"; Feature = "block-feedback" },
+        @{ Env = "VITE_MANAGED_CONNECTIONS"; Feature = "block-managed-connections" },
+        @{ Env = "VITE_VOICE_DICTATION"; Feature = "block-voice-dictation" }
+    )
+    foreach ($gate in $gates) {
+        $value = [Environment]::GetEnvironmentVariable($gate.Env, "Process")
+        if ([string]::IsNullOrWhiteSpace($value)) { $value = "0" }
+        if ($value -ne "0" -and $value -ne "1") {
+            throw "$($gate.Env) must be 0 or 1 (got: $value)"
+        }
+        if ($value -eq "1") { $features.Add($gate.Feature) }
+    }
+    if ([Environment]::GetEnvironmentVariable("VITE_VOICE_DICTATION", "Process") -ne "1") {
+        $features.Add("no-voice-dictation")
+    }
+    return ($features -join ",")
 }
 
 function Normalize-FullPath {

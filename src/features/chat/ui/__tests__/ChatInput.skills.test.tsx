@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
   fireEvent,
@@ -114,6 +114,8 @@ function setReadyRuntimeConfig(config: RuntimeConfig = DEFAULT_RUNTIME_CONFIG) {
 
 describe("ChatInput skill mentions", () => {
   beforeEach(() => {
+    vi.stubEnv("VITE_AGENT_TOOLS", "1");
+    vi.stubEnv("VITE_MANAGED_CONNECTIONS", "1");
     localStorage.clear();
     mockListSkills.mockClear();
     mockListSkills.mockResolvedValue([]);
@@ -122,7 +124,14 @@ describe("ChatInput skill mentions", () => {
     lastVoiceDictationOptions = null;
     mockVoiceDictation.isStarting.mockReset();
     mockVoiceDictation.isStarting.mockReturnValue(false);
-    setReadyRuntimeConfig();
+    setReadyRuntimeConfig({
+      ...DEFAULT_RUNTIME_CONFIG,
+      kgoose: { baseUrl: "https://kgoose.example.test" },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("does not show skills in @mention results", async () => {

@@ -80,13 +80,14 @@ Write-WindowsDevInfo "Building Berd $($resolvedVersion.Version) ($($resolvedVers
 
 $env:CARGO_TARGET_DIR = $targetDir
 $env:BERD_APP_VERSION = $resolvedVersion.Version
-$env:VITE_AUTH_GATE = "0"
+$env:VITE_AUTH_GATE = if ($env:VITE_BUILDERBOT -eq "1") { "1" } else { "0" }
 $env:VITE_APP_VERSION = $resolvedVersion.RichVersion
 
-$features = "berdctl"
+$baseFeatures = @("berdctl")
 if ($Debug) {
-    $features = "berdctl,devtools"
+    $baseFeatures += "devtools"
 }
+$features = Get-BerdAppFeatures -BaseFeatures $baseFeatures
 
 # Build the config overlay. Keep main's bundle target and updater controls;
 # debug bundles also fold in the base config with devtools enabled. Write

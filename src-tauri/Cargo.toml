@@ -116,6 +116,14 @@ no-block-doctor-checks = []
 # nothing installs at runtime and the related doctor checks stay silent — the
 # analogue of the old empty-`acp-tools.lock.json` restricted-build lever.
 no-managed-acp-tools = []
+# Positive product-family gates. Public builds enable none; a distribution
+# opts into each Block-service-backed family independently.
+block-agent-tools = []
+block-automations = []
+block-builderbot = []
+block-feedback = []
+block-managed-connections = []
+block-voice-dictation = []
 # Admin runtime-config endpoint fetch. Default-OFF: a normal build never
 # compiles the kgoose-backed fetch/cache path and instead loads the bundled
 # src-tauri/resources/runtime-config.json as the source of truth (falling back

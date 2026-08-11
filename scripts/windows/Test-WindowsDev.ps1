@@ -58,6 +58,23 @@ try {
     Assert-Equal "process args: trailing backslash doubled inside quotes" (Join-WindowsProcessArguments -Arguments @("C:\Program Files\")) '"C:\Program Files\\"'
     Assert-Equal "process args: embedded quote escaped" (Join-WindowsProcessArguments -Arguments @('say "hi"')) '"say \"hi\""'
 
+    Assert-Equal "public app feature defaults fail closed" (Get-BerdAppFeatures) "berdctl,app-test-driver,no-voice-dictation"
+    $featureGateNames = @("VITE_AGENT_TOOLS", "VITE_AUTOMATIONS", "VITE_BUILDERBOT", "VITE_FEEDBACK", "VITE_MANAGED_CONNECTIONS", "VITE_VOICE_DICTATION")
+    $savedFeatureGates = @{}
+    foreach ($name in $featureGateNames) {
+        $savedFeatureGates[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+        [Environment]::SetEnvironmentVariable($name, "1", "Process")
+    }
+    try {
+        Assert-Equal "all six renderer gates map to app Cargo features" `
+            (Get-BerdAppFeatures -BaseFeatures @("berdctl")) `
+            "berdctl,block-agent-tools,block-automations,block-builderbot,block-feedback,block-managed-connections,block-voice-dictation"
+    } finally {
+        foreach ($name in $featureGateNames) {
+            [Environment]::SetEnvironmentVariable($name, $savedFeatureGates[$name], "Process")
+        }
+    }
+
     $justfile = Get-Content -Raw (Join-Path (Get-BerdRepoRoot) "justfile")
     Assert-Equal "justfile selects PowerShell for ordinary Windows recipes" ($justfile -match '(?m)^set windows-shell := \["powershell\.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"\]\r?$') $true
     foreach ($recipe in @("_tauri-cargo-windows", "_clean-windows")) {

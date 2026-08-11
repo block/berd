@@ -17,10 +17,5 @@
         }
       }
     ]
-  },
-  "bundle": {
-    "resources": {
-      "../resources/bb": "bb"
-    }
   }
 }

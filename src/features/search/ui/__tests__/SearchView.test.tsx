@@ -8,7 +8,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
@@ -61,6 +61,7 @@ function render(ui: ReactElement) {
 
 describe("SearchView", () => {
   beforeEach(() => {
+    vi.stubEnv("VITE_AUTOMATIONS", "1");
     mockListExtensions.mockReset();
     mockListExtensions.mockResolvedValue([]);
     mockGetAutomationTiles.mockReset();
@@ -105,6 +106,10 @@ describe("SearchView", () => {
     useChatSessionStore.setState({ sessions: [] });
     useChatStore.setState({ messagesBySession: {} });
     useProjectStore.setState({ projects: [] });
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("does not render stale or duplicate extension results", async () => {

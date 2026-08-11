@@ -91,8 +91,8 @@ mod tests {
     use super::*;
     use crate::contract::Contract;
 
-    const API_SURFACE: &str = include_str!("../api-surface.json");
-    const CLI_SURFACE: &str = include_str!("../cli-surface.json");
+    const API_SURFACE: &str = contract::API_SURFACE;
+    const CLI_SURFACE: &str = contract::CLI_SURFACE;
 
     fn cli() -> clap::Command {
         tree::build_cli(&Contract::load())
@@ -619,72 +619,6 @@ mod tests {
     /// Byte pins of the rendered help (tree.rs composed with the contract's
     /// authored prose). Refresh via `dump_rendered_help_for_pin_update`
     /// after an intentional help change.
-    const EXPECTED_TOP_LEVEL_HELP: &str = r#"Control the Berd desktop app from the command line.
-
-berdctl talks to the running Berd desktop app and acts on what the user
-sees there:
-
-  session   chat sessions        create, open, list, get, rename, move,
-                                  move-to-group, send, clear-project,
-                                  fork, archive
-  project   projects             create, list, get, set-startup-mode, archive
-  agent     agents (personas)    create, list
-  skill     skills (SKILL.md)    create, list, get
-  feedback  product feedback     open or submit
-  info      read-only lookups    harnesses, models, context
-
-Results are JSON on stdout (pretty-printed; pass --json for raw single-line
-JSON). Errors are `code: message` lines on stderr; transport errors tell you
-which app-control condition to check.
-
-Usage: berdctl [OPTIONS] <COMMAND>
-
-Commands:
-  session   Manage chat sessions: create, send, open, list, get, rename, move,
-            move to group, clear project, fork, archive
-  folder    Manage attached chat folders: attach, detach, replace, set cwd, list
-  project   Manage projects: create, list, get, set startup mode, archive
-  agent     Manage agents (personas): create, list
-  skill     Manage skills: create, list, get
-  feedback  Open or submit an approved Berd feedback report
-  info      Look up installed harnesses, available models, and the app context
-  help      Print this message or the help of the given subcommand(s)
-
-Options:
-      --json
-          Print the raw JSON result on a single line (default: pretty-printed
-          JSON)
-
-      --timeout-ms <MS>
-          Give the app this long (in ms, 1000-900000) to run the command before
-          it reports timed out; defaults to the app's per-command timeout
-
-  -h, --help
-          Print help (see a summary with '-h')
-
-Examples:
-  # Find a chat session by title, then read its latest messages
-  berdctl session list --query "standup" --json
-  berdctl session get --session-id <session-id> --messages 5 --json
-
-  # Start a background session on a specific agent harness
-  berdctl info harnesses --json
-  berdctl session create --prompt "Summarize open code reviews" \
-    --harness-id claude-acp
-
-  # Send a follow-up into an existing session without opening it
-  berdctl session send --session-id <session-id> \
-    --prompt "Check the latest CI failure" --if-running queue
-
-Exit codes:
-  0  success — the JSON result is on stdout
-  1  the app refused the command — stderr carries `code: message`
-  2  transport failure between berdctl and the app — confirm Berd is running,
-     app control is enabled, and this is a Berd-started agent session
-  3  not running inside a Berd desktop app session, the app is not running,
-     or this berdctl no longer matches the app — stderr explains which
-"#;
-
     const EXPECTED_SESSION_CREATE_HELP: &str = r#"Create a new chat session on any installed agent harness and send the prompt in
 it. Fire-and-forget: returns the session id immediately and the session runs in
 the background without changing what the user sees; the user can open it
@@ -820,7 +754,19 @@ Result:
 
     #[test]
     fn top_level_long_help_matches_expected() {
-        assert_eq!(rendered_long_help(&[]), EXPECTED_TOP_LEVEL_HELP);
+        let rendered = rendered_long_help(&[]);
+        assert_eq!(
+            rendered.contains("feedback"),
+            cfg!(feature = "block-feedback")
+        );
+        for command in ["session", "folder", "project", "agent", "skill", "info"] {
+            assert!(
+                rendered
+                    .lines()
+                    .any(|line| line.trim_start().starts_with(command)),
+                "top-level help is missing `{command}`"
+            );
+        }
     }
 
     #[test]

@@ -285,13 +285,10 @@ mod tests {
 
     #[test]
     fn too_many_requests_is_exit_1() {
-        for code in ["busy"] {
-            let body =
-                format!(r#"{{"ok":false,"error":{{"code":"{code}","message":"slow down"}}}}"#);
-            let failure = classify_response(429, &body).expect_err("429 fails");
-            assert_eq!(failure.exit, EXIT_COMMAND);
-            assert_eq!(failure.message, format!("{code}: slow down"));
-        }
+        let body = r#"{"ok":false,"error":{"code":"busy","message":"slow down"}}"#;
+        let failure = classify_response(429, body).expect_err("429 fails");
+        assert_eq!(failure.exit, EXIT_COMMAND);
+        assert_eq!(failure.message, "busy: slow down");
     }
 
     #[test]

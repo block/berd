@@ -318,12 +318,12 @@ function seedProviderModels(
 vi.mock("@/shared/profile/buildProfile", () => ({
   getBuildFeatureState: () => ({
     authGate: false,
-    agentToolsTip: true,
+    agentTools: true,
     automations: true,
     builderbot: true,
     telemetry: true,
     voiceDictation: true,
-    kgooseConnections: true,
+    managedConnections: true,
     securityMl: true,
     updater: true,
     ...mockBuildFeatures,

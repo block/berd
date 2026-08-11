@@ -28,7 +28,6 @@ sees there:
   project   projects             create, list, get, set-startup-mode, archive
   agent     agents (personas)    create, list
   skill     skills (SKILL.md)    create, list, get
-  feedback  product feedback     open or submit
   info      read-only lookups    harnesses, models, context
 
 Results are JSON on stdout (pretty-printed; pass --json for raw single-line

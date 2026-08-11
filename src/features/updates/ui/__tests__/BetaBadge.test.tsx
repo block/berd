@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/shared/i18n";
 import { useFeedbackDialogStore } from "@/features/feedback/feedbackDialogStore";
 import { BetaBadge } from "../BetaBadge";
@@ -45,6 +45,7 @@ function renderBadge() {
 
 describe("BetaBadge", () => {
   beforeEach(() => {
+    vi.stubEnv("VITE_FEEDBACK", "1");
     vi.stubEnv(
       "VITE_BETA_LINEAR_LABEL_ID",
       "12345678-1234-1234-1234-123456789abc",
@@ -62,6 +63,10 @@ describe("BetaBadge", () => {
       },
       whatToTest: undefined,
     };
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("stays hidden for Main builds", () => {

@@ -192,6 +192,7 @@ pub fn run() {
             // skills/agents is filesystem work and is deferred below.
             app.manage(DistroBundleState::new(app.handle()));
             app.manage(bundled_skills::BundledSkillsState::default());
+            #[cfg(feature = "block-automations")]
             app.manage(commands::automations::AutomationStreamState::default());
             app.manage(commands::terminal::TerminalState::default());
             app.manage(commands::window_session::WindowSessionRegistry::default());
@@ -225,7 +226,7 @@ pub fn run() {
             // fires on the main thread once setup has returned and the event
             // loop is running.
 
-            #[cfg(not(feature = "no-bb-cli-install"))]
+            #[cfg(all(feature = "block-agent-tools", not(feature = "no-bb-cli-install")))]
             commands::cli::schedule_bb_cli_auto_install(app.handle());
 
             services::diagnostic_log::record_event(
@@ -439,12 +440,19 @@ pub fn run() {
             commands::agents::read_import_agent_image,
             commands::agents::read_agent_source_file,
             commands::agents::repair_bundled_agent,
+            #[cfg(feature = "block-builderbot")]
             commands::auth::auth_status,
+            #[cfg(feature = "block-builderbot")]
             commands::auth::start_login,
+            #[cfg(feature = "block-builderbot")]
             commands::auth::login,
+            #[cfg(feature = "block-builderbot")]
             commands::auth::cancel_login,
+            #[cfg(feature = "block-builderbot")]
             commands::auth::logout,
+            #[cfg(feature = "block-builderbot")]
             commands::auth::list_auth_workspaces,
+            #[cfg(feature = "block-builderbot")]
             commands::auth::switch_auth_workspace,
             commands::avatars::get_avatar_library_snapshot,
             commands::avatars::get_cached_avatar_for_ref,
@@ -453,30 +461,52 @@ pub fn run() {
             commands::avatars::delete_user_avatar,
             commands::avatars::ensure_avatar_collection,
             commands::cache::clear_local_media_caches,
+            #[cfg(feature = "block-agent-tools")]
             commands::cli::get_bb_cli_status,
             #[cfg(not(feature = "no-bb-cli-install"))]
+            #[cfg(feature = "block-agent-tools")]
             commands::cli::install_bb_cli,
             commands::global_shortcut::launch_global_shortcut_handler,
             commands::global_shortcut::stop_global_shortcut_handler,
+            #[cfg(feature = "block-managed-connections")]
             commands::connections::list_connections,
+            #[cfg(feature = "block-managed-connections")]
             commands::connections::disconnect_connection,
+            #[cfg(feature = "block-automations")]
             commands::automations::get_automation_tiles,
+            #[cfg(feature = "block-automations")]
             commands::automations::get_automation_tile,
+            #[cfg(feature = "block-automations")]
             commands::automations::get_automation_tile_results,
+            #[cfg(feature = "block-automations")]
             commands::automations::create_automation_tile,
+            #[cfg(feature = "block-automations")]
             commands::automations::push_automation_builder_messages,
+            #[cfg(feature = "block-automations")]
             commands::automations::cancel_automation_builder_message,
+            #[cfg(feature = "block-automations")]
             commands::automations::start_automation_builder_stream,
+            #[cfg(feature = "block-automations")]
             commands::automations::stop_automation_builder_stream,
+            #[cfg(feature = "block-automations")]
             commands::automations::update_automation_tile,
+            #[cfg(feature = "block-automations")]
             commands::automations::delete_automation_tile,
+            #[cfg(feature = "block-automations")]
             commands::automations::refresh_automation_tile,
+            #[cfg(feature = "block-automations")]
             commands::automations::generate_automation_schedule,
+            #[cfg(feature = "block-automations")]
             commands::automations::get_automation_session_messages,
+            #[cfg(feature = "block-builderbot")]
             commands::builderbot::get_builderbot_tasks,
+            #[cfg(feature = "block-builderbot")]
             commands::builderbot::get_builderbot_scheduled_triggers,
+            #[cfg(feature = "block-builderbot")]
             commands::builderbot::get_builderbot_routing_rules,
+            #[cfg(feature = "block-builderbot")]
             commands::builderbot::update_builderbot_scheduled_trigger,
+            #[cfg(feature = "block-builderbot")]
             commands::builderbot::update_builderbot_routing_rule,
             commands::whoami::whoami,
             commands::acp::get_goose_serve_url,
@@ -488,6 +518,7 @@ pub fn run() {
             commands::doctor::run_doctor,
             commands::doctor::run_doctor_fresh,
             commands::doctor::run_doctor_fix,
+            #[cfg(feature = "block-feedback")]
             commands::feedback::submit_feedback_issue,
             commands::git::get_git_state,
             commands::git_changes::get_changed_files,
@@ -520,9 +551,13 @@ pub fn run() {
             commands::model_setup::list_model_setup_status,
             commands::model_setup::clear_model_setup_status,
             commands::notifications::show_completion_notification,
+            #[cfg(feature = "block-voice-dictation")]
             commands::openai_realtime::get_openai_realtime_status,
+            #[cfg(feature = "block-voice-dictation")]
             commands::openai_realtime::create_openai_realtime_session,
+            #[cfg(feature = "block-voice-dictation")]
             commands::openai_realtime::claim_voice_dictation_microphone,
+            #[cfg(feature = "block-voice-dictation")]
             commands::openai_realtime::release_voice_dictation_microphone,
             commands::agent_setup::start_agent_setup,
             commands::agent_setup::get_agent_setup_status,
@@ -603,6 +638,7 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| match event {
             RunEvent::Exit => {
+                #[cfg(feature = "block-automations")]
                 app.state::<commands::automations::AutomationStreamState>()
                     .abort_all();
                 app.state::<commands::global_shortcut::GlobalShortcutHandlerState>()

@@ -10,7 +10,7 @@ import {
 } from "../settingsSections";
 
 const enabledCapabilities: ProfileCapabilityState = {
-  agentToolsTip: true,
+  agentTools: true,
   automations: true,
   builderbot: true,
   doctor: true,
@@ -18,7 +18,7 @@ const enabledCapabilities: ProfileCapabilityState = {
   telemetry: true,
   voiceDictation: true,
   voiceConversation: true,
-  kgooseConnections: true,
+  managedConnections: true,
   updates: true,
 };
 
