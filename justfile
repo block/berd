@@ -64,7 +64,8 @@ sync-schema:
 # Install dependencies and build workspace packages.
 [unix]
 _setup-dev-deps:
-    pnpm install
+    # Buildkite release jobs call `just setup` directly rather than pnpm_install.
+    . ./scripts/npm-registry.sh && configure_buildkite_npm_registry && pnpm install
     cd sdk && pnpm build
 
 [unix]

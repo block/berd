@@ -8,6 +8,12 @@ DOCKER="${DOCKER:-docker}"
 IMAGE="${GOOSE_LINUX_BUILDER_IMAGE:-goose-internal-linux-builder:bookworm}"
 OUTPUT_DIR="${GOOSE_LINUX_DOCKER_OUTPUT:-$repo_root/dist/linux-docker}"
 NPM_REGISTRY="${NPM_CONFIG_REGISTRY:-${COREPACK_NPM_REGISTRY:-}}"
+if [[ -z "$NPM_REGISTRY" ]] && command -v npm >/dev/null 2>&1; then
+  configured_registry="$(npm config get registry 2>/dev/null || true)"
+  if [[ -n "$configured_registry" && "$configured_registry" != "undefined" ]]; then
+    NPM_REGISTRY="$configured_registry"
+  fi
+fi
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-}"
 
 if [[ -z "$DOCKER_PLATFORM" && "$(uname -s)" != "Linux" ]]; then

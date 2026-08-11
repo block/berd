@@ -3,6 +3,7 @@ import {
   access,
   mkdtemp,
   mkdir,
+  chmod,
   readFile,
   rm,
   writeFile,
@@ -32,6 +33,98 @@ afterEach(async () => {
   await Promise.all(
     tempDirs.splice(0).map((path) => rm(path, { recursive: true })),
   );
+});
+
+describe("Buildkite registry setup", () => {
+  const registry =
+    "https://global.block-artifacts.com/artifactory/api/npm/square-npm/";
+
+  async function runSetupDeps(buildkite, registryEnv = {}) {
+    const dir = await tempDir();
+    const bin = join(dir, "bin");
+    const capture = join(dir, "pnpm-env");
+    await mkdir(bin);
+    const pnpm = join(bin, "pnpm");
+    const dollar = "$";
+    await writeFile(
+      pnpm,
+      `#!/bin/sh\nprintf '%s|%s|%s|%s\\n' "${dollar}1" "${dollar}{npm_config_registry-}" "${dollar}{COREPACK_NPM_REGISTRY-}" "${dollar}{COREPACK_INTEGRITY_KEYS-}" >> "${dollar}PNPM_CAPTURE"\n`,
+    );
+    await chmod(pnpm, 0o755);
+    const result = run("just", ["--shell", "/bin/sh", "_setup-dev-deps"], {
+      BUILDKITE: buildkite ? "1" : "",
+      PNPM_CAPTURE: capture,
+      ...registryEnv,
+      PATH: `${bin}:${process.env.PATH}`,
+    });
+    return { result, capture };
+  }
+
+  it("uses the real just setup dependency path under POSIX sh before every Buildkite install", async () => {
+    const { result, capture } = await runSetupDeps(true);
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(result.stderr).not.toContain("[[: not found");
+    expect((await readFile(capture, "utf8")).trim().split("\n")).toContain(
+      `install|${registry}|${registry}|0`,
+    );
+  });
+
+  it("leaves public-clone registry defaults untouched outside Buildkite", async () => {
+    const inheritedRegistry = "https://public.example.test/npm/";
+    const inheritedCorepackRegistry = "https://public.example.test/corepack/";
+    const { result, capture } = await runSetupDeps(false, {
+      npm_config_registry: inheritedRegistry,
+      COREPACK_NPM_REGISTRY: inheritedCorepackRegistry,
+      COREPACK_INTEGRITY_KEYS: "inherited-keys",
+    });
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(result.stderr).not.toContain("[[: not found");
+    expect((await readFile(capture, "utf8")).trim().split("\n")).toContain(
+      `install|${inheritedRegistry}|${inheritedCorepackRegistry}|inherited-keys`,
+    );
+  });
+});
+
+describe("Docker Linux registry setup", () => {
+  it("forwards the host npm registry when Docker replaces HOME", async () => {
+    const dir = await tempDir();
+    const bin = join(dir, "bin");
+    const capture = join(dir, "docker-args");
+    const output = join(dir, "output");
+    const calls = join(dir, "docker-calls");
+    await mkdir(bin);
+    const dollar = "$";
+    await writeFile(
+      join(bin, "npm"),
+      `#!/bin/sh\nif [ "${dollar}1" = config ] && [ "${dollar}2" = get ] && [ "${dollar}3" = registry ]; then printf '%s\\n' 'https://host.example.test/npm/'; fi\n`,
+    );
+    await writeFile(
+      join(bin, "docker"),
+      `#!/bin/sh\nprintf '%s\\n' "${dollar}@" >> "${dollar}DOCKER_CAPTURE"\ncalls=$(cat "${dollar}DOCKER_CALLS" 2>/dev/null || true)\ncalls="${dollar}calls x"\nprintf '%s' "${dollar}calls" > "${dollar}DOCKER_CALLS"\nif [ "${dollar}calls" = ' x x' ]; then mkdir -p .docker-cache/tauri-target/release/bundle; touch .docker-cache/tauri-target/release/bundle/Berd.deb; fi\n`,
+    );
+    await Promise.all([
+      chmod(join(bin, "npm"), 0o755),
+      chmod(join(bin, "docker"), 0o755),
+    ]);
+    const result = run("bash", ["scripts/build_linux_docker.sh"], {
+      DOCKER: join(bin, "docker"),
+      DOCKER_CAPTURE: capture,
+      DOCKER_CALLS: calls,
+      GOOSE_LINUX_DOCKER_OUTPUT: output,
+      NPM_CONFIG_REGISTRY: "",
+      COREPACK_NPM_REGISTRY: "",
+      PATH: `${bin}:${process.env.PATH}`,
+    });
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    const args = await readFile(capture, "utf8");
+    expect(args).toContain("NPM_REGISTRY=https://host.example.test/npm/");
+    expect(args).toContain(
+      "NPM_CONFIG_REGISTRY=https://host.example.test/npm/",
+    );
+    expect(args).toContain(
+      "npm_config_registry=https://host.example.test/npm/",
+    );
+  });
 });
 
 describe("build-tauri-release-config", () => {

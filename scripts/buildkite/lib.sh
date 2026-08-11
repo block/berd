@@ -30,8 +30,13 @@ ensure_pnpm() {
   exit 1
 }
 
+# shellcheck source=scripts/npm-registry.sh
+source "$(dirname "${BASH_SOURCE[0]}")/../npm-registry.sh"
+
 pnpm_install() {
   section "Install pnpm dependencies"
+  # This must precede ensure_pnpm: Corepack can download pnpm during bootstrap.
+  configure_buildkite_npm_registry
   ensure_pnpm
   pnpm install --frozen-lockfile
 }
