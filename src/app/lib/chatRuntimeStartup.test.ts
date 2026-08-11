@@ -5,6 +5,15 @@ const mockLoadPersistedMessageQueues = vi.hoisted(() =>
 );
 const mockGetClient = vi.hoisted(() => vi.fn<() => Promise<unknown>>());
 const mockRefreshAllModelProviders = vi.hoisted(() => vi.fn());
+const mockMigratePersonaTargetIfUnchanged = vi.hoisted(() => vi.fn());
+const mockAgentState = vi.hoisted(() => ({
+  personas: [] as Array<Record<string, unknown>>,
+  providers: [] as Array<{ id: string; label?: string }>,
+}));
+const mockModelCacheState = vi.hoisted(() => ({
+  providers: new Map<string, { models: Array<Record<string, unknown>> }>(),
+  runtimeManagedProviderIds: new Set<string>(),
+}));
 
 // The latch under test wraps startChatRuntime, whose body touches most of the
 // startup module graph. Everything it reaches is stubbed inert (resolved,
@@ -18,6 +27,7 @@ vi.mock("@/features/agents/stores/agentStore", () => ({
       setProviders: () => {},
       setPersonas: () => {},
       setPersonasLoading: () => {},
+      ...mockAgentState,
     }),
   },
 }));
@@ -52,8 +62,11 @@ vi.mock("@/features/providers/modelCacheRefresh", () => ({
 }));
 
 vi.mock("@/features/providers/providerCatalog", () => ({
+  canonicalProviderCatalogIdFromEntries: (_entries: unknown, id: string) => id,
   getModelProviders: () => [],
   getProviderCatalog: () => [],
+  resolveAgentProviderCatalogIdStrictFromEntries: () => null,
+  resolveModelProviderCatalogIdStrictFromEntries: () => null,
 }));
 
 vi.mock("@/features/providers/runtimeProviderConfig", () => ({
@@ -110,8 +123,7 @@ vi.mock("@/features/providers/stores/defaultProviderReadinessStore", () => ({
 vi.mock("@/features/providers/stores/providerModelCacheStore", () => ({
   useProviderModelCacheStore: {
     getState: () => ({
-      providers: new Map(),
-      runtimeManagedProviderIds: new Set(),
+      ...mockModelCacheState,
       loadPersisted: () => {},
       refreshAllModelProviders: (...args: unknown[]) =>
         mockRefreshAllModelProviders(...args),
@@ -166,8 +178,9 @@ vi.mock("@/shared/api/distro", () => ({
 }));
 
 vi.mock("@/shared/api/agents", () => ({
-  listPersonas: async () => [],
-  migratePersonaTargetIfUnchanged: async () => null,
+  listPersonas: async () => mockAgentState.personas,
+  migratePersonaTargetIfUnchanged: (...args: unknown[]) =>
+    mockMigratePersonaTargetIfUnchanged(...args),
 }));
 
 function deferred<T>() {
@@ -190,6 +203,12 @@ describe("runChatRuntimeStartup", () => {
     mockGetClient.mockResolvedValue({});
     mockRefreshAllModelProviders.mockReset();
     mockRefreshAllModelProviders.mockResolvedValue(undefined);
+    mockMigratePersonaTargetIfUnchanged.mockReset();
+    mockMigratePersonaTargetIfUnchanged.mockResolvedValue(null);
+    mockAgentState.personas = [];
+    mockAgentState.providers = [];
+    mockModelCacheState.providers = new Map();
+    mockModelCacheState.runtimeManagedProviderIds = new Set();
   });
 
   it("collapses concurrent callers onto one startup run", async () => {
@@ -219,6 +238,37 @@ describe("runChatRuntimeStartup", () => {
     expect(mockRefreshAllModelProviders).toHaveBeenCalledTimes(1);
 
     inventoryRefresh.resolve();
+  });
+
+  it("migrates an authoritative unsupported persona model without losing its harness", async () => {
+    mockAgentState.providers = [{ id: "claude-acp", label: "Claude Code" }];
+    mockAgentState.personas = [
+      {
+        id: "persona-1",
+        displayName: "Legacy Claude",
+        systemPrompt: "Help.",
+        provider: "claude-acp",
+        modelProviderId: "openai",
+        model: "gpt-5",
+        isBuiltin: false,
+        writable: true,
+      },
+    ];
+    mockModelCacheState.runtimeManagedProviderIds = new Set(["claude-acp"]);
+    mockModelCacheState.providers = new Map([["claude-acp", { models: [] }]]);
+
+    const { runChatRuntimeStartup } = await import("./chatRuntimeStartup");
+    await runChatRuntimeStartup();
+    await vi.waitFor(() => {
+      expect(mockMigratePersonaTargetIfUnchanged).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "persona-1" }),
+        {
+          provider: "claude-acp",
+          modelProviderId: "claude-acp",
+          model: null,
+        },
+      );
+    });
   });
 
   it("stays latched after a successful run", async () => {

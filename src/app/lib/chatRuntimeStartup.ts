@@ -268,7 +268,8 @@ async function startChatRuntime(
     const targetContext = {
       providers: useAgentStore.getState().providers,
       models: cachedModels,
-      isModelInventoryAuthoritative: authoritativeProviderIds.has,
+      isModelInventoryAuthoritative: (providerId: string) =>
+        authoritativeProviderIds.has(providerId),
       catalogEntries: getProviderCatalog(),
     };
     const personas = useAgentStore.getState().personas;
