@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   compareSessionsByActivityDesc,
   sessionActivityAt,
+  sessionNeedsWindowHandoff,
 } from "./sessionActivity";
 
 describe("sessionActivityAt", () => {
@@ -24,6 +25,35 @@ describe("sessionActivityAt", () => {
     expect(sessionActivityAt({ lastMessageAt: "unknown", updatedAt })).toBe(
       updatedAt,
     );
+  });
+});
+
+describe("sessionNeedsWindowHandoff", () => {
+  it("includes an idle runtime while its streaming message is still live", () => {
+    expect(
+      sessionNeedsWindowHandoff({
+        chatState: "idle",
+        streamingMessageId: "message-1",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not hand off a fully settled idle runtime", () => {
+    expect(
+      sessionNeedsWindowHandoff({
+        chatState: "idle",
+        streamingMessageId: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("hands off any running runtime without a streaming id", () => {
+    expect(
+      sessionNeedsWindowHandoff({
+        chatState: "thinking",
+        streamingMessageId: null,
+      }),
+    ).toBe(true);
   });
 });
 

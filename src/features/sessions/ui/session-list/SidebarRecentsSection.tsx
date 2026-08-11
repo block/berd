@@ -44,8 +44,12 @@ export function SidebarRecentsSection({
   selectionActionsDisabled = false,
   onSelectionClear,
   onSelectionChange,
+  onRangeSelect,
   onArchiveSelected,
   onPinSelectedToHome,
+  onUnpinSelectedFromHome,
+  isSelectionPinnedToHome,
+  onOpenSelectedInWindows,
   isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
@@ -78,8 +82,12 @@ export function SidebarRecentsSection({
   selectionActionsDisabled?: boolean;
   onSelectionClear?: () => void;
   onSelectionChange?: (sessionId: string, selected: boolean) => void;
+  onRangeSelect?: (sessionId: string) => void;
   onArchiveSelected?: () => void;
   onPinSelectedToHome?: () => void;
+  onUnpinSelectedFromHome?: () => void;
+  isSelectionPinnedToHome?: boolean;
+  onOpenSelectedInWindows?: () => void;
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
@@ -258,6 +266,7 @@ export function SidebarRecentsSection({
                 onSelect={onSelectSession}
                 onSelectionClear={onSelectionClear}
                 onSelectionChange={onSelectionChange}
+                onRangeSelect={onRangeSelect}
                 onRename={onRenameChat}
                 onFork={onForkChat}
                 onMarkRead={onMarkChatRead}
@@ -265,6 +274,9 @@ export function SidebarRecentsSection({
                 onArchive={onArchiveChat}
                 onArchiveSelected={onArchiveSelected}
                 onPinSelectedToHome={onPinSelectedToHome}
+                onUnpinSelectedFromHome={onUnpinSelectedFromHome}
+                isSelectionPinnedToHome={isSelectionPinnedToHome}
+                onOpenSelectedInWindows={onOpenSelectedInWindows}
                 isPinningSelectedToHome={isPinningSelectedToHome}
                 onMarkSelectedRead={onMarkSelectedRead}
                 onMarkSelectedUnread={onMarkSelectedUnread}

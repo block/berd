@@ -60,6 +60,8 @@ export interface SessionActionsMenuProps {
   hasUnread?: boolean;
   isPinned?: boolean;
   isPinning?: boolean;
+  /** Whether every chat in the current selection is already pinned to home. */
+  isSelectionPinned?: boolean;
   isOpenInWindow?: boolean;
   selectionCount?: number;
   selectionActionsDisabled?: boolean;
@@ -68,11 +70,15 @@ export interface SessionActionsMenuProps {
   onTogglePin?: () => void;
   onRename?: () => void;
   onOpenInWindow?: () => void;
+  /** Bulk variant of open-in-window; opens every selected chat. */
+  onOpenSelectedInWindows?: () => void;
   onDuplicate?: () => void;
   editProjectLabel?: string;
   onEditProject?: () => void;
   showCopyLink?: boolean;
   onExport?: () => void;
+  /** Bulk variant of export; exports every selected chat. */
+  onExportSelected?: () => void;
   onArchive?: () => void;
   onRestore?: () => void;
 }
@@ -87,6 +93,7 @@ function SessionActionsMenuItems({
   hasUnread = false,
   isPinned = false,
   isPinning = false,
+  isSelectionPinned = false,
   isOpenInWindow = false,
   selectionCount = 0,
   selectionActionsDisabled = false,
@@ -95,11 +102,13 @@ function SessionActionsMenuItems({
   onTogglePin,
   onRename,
   onOpenInWindow,
+  onOpenSelectedInWindows,
   onDuplicate,
   editProjectLabel,
   onEditProject,
   showCopyLink = true,
   onExport,
+  onExportSelected,
   onArchive,
   onRestore,
 }: SessionActionsMenuProps & {
@@ -143,20 +152,27 @@ function SessionActionsMenuItems({
   const markAction = hasUnread ? onMarkRead : onMarkUnread;
   const showAttentionGroup =
     !archived && (markAction != null || onTogglePin != null);
+  // Single-chat-only actions are hidden (not disabled) during multi-select;
+  // bulk-capable actions stay when their bulk callback exists.
+  const showRenameItem = onRename != null && !appliesToSelection;
+  const showOpenInWindowItem =
+    onOpenInWindow != null &&
+    (!appliesToSelection || onOpenSelectedInWindows != null);
+  const showDuplicateItem = onDuplicate != null && !appliesToSelection;
+  const showEditProjectItem = onEditProject != null && !appliesToSelection;
+  const showCopyLinkItem = showCopyLink && !appliesToSelection;
+  const showExportItem =
+    onExport != null && (!appliesToSelection || onExportSelected != null);
   const showRegularActions =
     !archived &&
-    !appliesToSelection &&
-    (onRename != null ||
-      onOpenInWindow != null ||
-      onDuplicate != null ||
-      onEditProject != null ||
-      showCopyLink ||
-      onExport != null);
-  const showSelectionActions =
-    !archived && appliesToSelection && onExport != null;
+    (showRenameItem ||
+      showOpenInWindowItem ||
+      showDuplicateItem ||
+      showEditProjectItem ||
+      showCopyLinkItem ||
+      showExportItem);
   const showArchivedActions = archived && onExport != null;
-  const showMiddleGroup =
-    showRegularActions || showSelectionActions || showArchivedActions;
+  const showMiddleGroup = showRegularActions || showArchivedActions;
   const showLifecycleGroup = archived ? onRestore != null : onArchive != null;
 
   return (
@@ -196,12 +212,18 @@ function SessionActionsMenuItems({
             <Item onClick={() => invoke(onTogglePin)} disabled={isPinning}>
               <PinIcon
                 className="size-3.5"
-                fill={!appliesToSelection && isPinned ? "currentColor" : "none"}
+                fill={
+                  (appliesToSelection ? isSelectionPinned : isPinned)
+                    ? "currentColor"
+                    : "none"
+                }
               />
               {appliesToSelection
-                ? isPinning
-                  ? t("common:actions.pinningChat")
-                  : t("common:actions.pinChat")
+                ? isSelectionPinned
+                  ? t("common:actions.unpinChats")
+                  : isPinning
+                    ? t("common:actions.pinningChat")
+                    : t("common:actions.pinChats")
                 : isPinned
                   ? t("common:actions.unpinChat")
                   : isPinning
@@ -218,35 +240,46 @@ function SessionActionsMenuItems({
 
       {showMiddleGroup ? (
         <>
-          {!archived && !appliesToSelection ? (
+          {!archived ? (
             <>
-              {onRename ? (
+              {showRenameItem ? (
                 <Item onClick={() => invoke(onRename)}>
                   <Pencil className="size-3.5" />
                   {t("common:actions.rename")}
                 </Item>
               ) : null}
-              {onOpenInWindow ? (
-                <Item onClick={() => invoke(onOpenInWindow)}>
+              {showOpenInWindowItem ? (
+                <Item
+                  onClick={() =>
+                    invoke(
+                      appliesToSelection
+                        ? onOpenSelectedInWindows
+                        : onOpenInWindow,
+                    )
+                  }
+                  disabled={appliesToSelection && selectionActionsDisabled}
+                >
                   <ExternalLink className="size-3.5" />
-                  {isOpenInWindow
-                    ? t("sessions:card.openWindow")
-                    : t("sessions:card.openInNewWindow")}
+                  {appliesToSelection
+                    ? t("sidebar:actions.openInNewWindows")
+                    : isOpenInWindow
+                      ? t("sessions:card.openWindow")
+                      : t("sessions:card.openInNewWindow")}
                 </Item>
               ) : null}
-              {onDuplicate ? (
+              {showDuplicateItem ? (
                 <Item onClick={() => invoke(onDuplicate)}>
                   <CopyPlus className="size-3.5" />
                   {t("common:actions.duplicate")}
                 </Item>
               ) : null}
-              {onEditProject ? (
+              {showEditProjectItem ? (
                 <Item onClick={() => invoke(onEditProject)}>
                   <Pencil className="size-3.5" />
                   {editProjectLabel}
                 </Item>
               ) : null}
-              {showCopyLink ? (
+              {showCopyLinkItem ? (
                 <Item onClick={handleCopyLink}>
                   <Copy className="size-3.5" />
                   {t("sidebar:actions.copyLink")}
@@ -254,9 +287,11 @@ function SessionActionsMenuItems({
               ) : null}
             </>
           ) : null}
-          {onExport ? (
+          {showExportItem ? (
             <Item
-              onClick={() => invoke(onExport)}
+              onClick={() =>
+                invoke(appliesToSelection ? onExportSelected : onExport)
+              }
               disabled={appliesToSelection && selectionActionsDisabled}
             >
               <Download className="size-3.5" />

@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   applySessionActionToIds,
+  getSessionRangeSelection,
   isMultiSelectModifier,
+  isRangeSelectModifier,
   toggleSessionSelection,
 } from "../sessionSelection";
 
@@ -38,6 +40,66 @@ describe("sessionSelection", () => {
         clearActiveOnlySelection: true,
       }),
     ).toEqual(new Set());
+  });
+
+  it("treats shift as the range-select modifier", () => {
+    expect(isRangeSelectModifier({ shiftKey: true })).toBe(true);
+    expect(isRangeSelectModifier({ shiftKey: false })).toBe(false);
+  });
+
+  it("selects every chat between the anchor and the target", () => {
+    const orderedIds = ["a", "b", "c", "d", "e"];
+
+    expect(
+      getSessionRangeSelection({
+        current: new Set(["b"]),
+        anchorId: "b",
+        targetId: "d",
+        orderedIds,
+      }),
+    ).toEqual(new Set(["b", "c", "d"]));
+
+    // Ranges work upward too.
+    expect(
+      getSessionRangeSelection({
+        current: new Set(["d"]),
+        anchorId: "d",
+        targetId: "a",
+        orderedIds,
+      }),
+    ).toEqual(new Set(["a", "b", "c", "d"]));
+  });
+
+  it("keeps prior selections when extending a range", () => {
+    expect(
+      getSessionRangeSelection({
+        current: new Set(["a", "c"]),
+        anchorId: "c",
+        targetId: "e",
+        orderedIds: ["a", "b", "c", "d", "e"],
+      }),
+    ).toEqual(new Set(["a", "c", "d", "e"]));
+  });
+
+  it("falls back to selecting only the target without a usable anchor", () => {
+    expect(
+      getSessionRangeSelection({
+        current: new Set(),
+        anchorId: null,
+        targetId: "c",
+        orderedIds: ["a", "b", "c"],
+      }),
+    ).toEqual(new Set(["c"]));
+
+    // Anchor not in the rendered list (e.g. filtered out by search).
+    expect(
+      getSessionRangeSelection({
+        current: new Set(["z"]),
+        anchorId: "z",
+        targetId: "b",
+        orderedIds: ["a", "b", "c"],
+      }),
+    ).toEqual(new Set(["z", "b"]));
   });
 
   it("runs every action and reports partial failures", async () => {

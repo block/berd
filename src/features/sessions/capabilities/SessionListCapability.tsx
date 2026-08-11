@@ -31,7 +31,13 @@ import {
   compareSessionsByActivityDesc,
   isSessionRunning,
   sessionActivityAt,
+  sessionNeedsWindowHandoff,
 } from "@/features/chat/lib/sessionActivity";
+import {
+  focusSessionWindow,
+  openSessionWindow,
+} from "@/features/chat/lib/sessionWindowCommands";
+import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { getPinnedHomeChatSessionIdsInOrder } from "@/features/home/lib/pinnedHomeChats";
 import { usePinBatchToHome } from "@/features/home/hooks/usePinToHomeWidget";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
@@ -40,6 +46,8 @@ import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useBulkSessionActions } from "@/features/sessions/hooks/useBulkSessionActions";
 import {
   areSetsEqual,
+  getRenderedSessionIdsInOrder,
+  getSessionRangeSelection,
   normalizeSelectedSessionIds,
   toggleSessionSelection as getToggledSessionSelection,
 } from "@/features/sessions/lib/sessionSelection";
@@ -503,6 +511,8 @@ export function SessionListCapability({
         ? value.filter((item): item is string => typeof item === "string")
         : [],
   );
+  // Last chat toggled via cmd/ctrl-click; shift-click ranges extend from it.
+  const selectionAnchorRef = useRef<string | null>(null);
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -688,7 +698,18 @@ export function SessionListCapability({
   );
 
   const selectedCount = selectedSessionIds.size;
-  const clearSelection = () => setSelectedSessionIds(new Set());
+  const isSelectionPinnedToHome = useMemo(
+    () =>
+      selectedCount > 0 &&
+      [...selectedSessionIds].every((sessionId) =>
+        pinnedHomeChatSessionIds.has(sessionId),
+      ),
+    [pinnedHomeChatSessionIds, selectedCount, selectedSessionIds],
+  );
+  const clearSelection = () => {
+    selectionAnchorRef.current = null;
+    setSelectedSessionIds(new Set());
+  };
 
   useEffect(() => {
     if (selectedCount === 0) return;
@@ -703,6 +724,7 @@ export function SessionListCapability({
       ) {
         return;
       }
+      selectionAnchorRef.current = null;
       setSelectedSessionIds(new Set());
     };
     document.addEventListener("mousedown", handleMouseDown);
@@ -731,11 +753,31 @@ export function SessionListCapability({
     onFailure: reportBulkFailure,
   });
 
-  const { pinBatchToHome, isPinningBatch } = usePinBatchToHome();
+  const { pinBatchToHome, unpinBatchFromHome, isPinningBatch } =
+    usePinBatchToHome();
   const handlePinSelectedToHome = useCallback(async () => {
     await pinBatchToHome("chat", Array.from(selectedSessionIds));
+    selectionAnchorRef.current = null;
     setSelectedSessionIds(new Set());
   }, [pinBatchToHome, selectedSessionIds]);
+
+  const handleUnpinSelectedFromHome = useCallback(() => {
+    unpinBatchFromHome("chat", Array.from(selectedSessionIds));
+    selectionAnchorRef.current = null;
+    setSelectedSessionIds(new Set());
+  }, [selectedSessionIds, unpinBatchFromHome]);
+
+  const handleOpenSelectedInWindows = useCallback(() => {
+    void applySelectionAction((sessionId) => {
+      if (useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
+        return focusSessionWindow(sessionId);
+      }
+      const runtime = sessionStateById[sessionId];
+      return openSessionWindow(sessionId, {
+        handoff: runtime ? sessionNeedsWindowHandoff(runtime) : false,
+      });
+    });
+  }, [applySelectionAction, sessionStateById]);
 
   const selectSession = useCallback(
     (sessionId: string) => {
@@ -945,6 +987,7 @@ export function SessionListCapability({
       setDisplayOptions((prev) => ({ ...prev, [key]: value }));
     };
   const toggleSessionSelection = (sessionId: string, selected: boolean) => {
+    selectionAnchorRef.current = selected ? sessionId : null;
     setSelectedSessionIds((current) =>
       getToggledSessionSelection({
         current,
@@ -956,6 +999,27 @@ export function SessionListCapability({
         clearActiveOnlySelection: true,
       }),
     );
+  };
+
+  const rangeSelectSessions = (sessionId: string) => {
+    const current = selectedSessionIds;
+    // With no selection yet, the active chat acts as the implicit anchor so
+    // shift-click selects everything between it and the clicked chat.
+    const seedActiveId =
+      current.size === 0 &&
+      activeSessionId &&
+      activeSessionIds.has(activeSessionId)
+        ? activeSessionId
+        : null;
+    const anchorId = selectionAnchorRef.current ?? seedActiveId;
+    const next = getSessionRangeSelection({
+      current: seedActiveId ? new Set([seedActiveId]) : current,
+      anchorId,
+      targetId: sessionId,
+      orderedIds: getRenderedSessionIdsInOrder(),
+    });
+    selectionAnchorRef.current = anchorId ?? sessionId;
+    setSelectedSessionIds((prev) => (areSetsEqual(next, prev) ? prev : next));
   };
 
   const sectionProps: SidebarProjectsSectionProps = {
@@ -1011,8 +1075,12 @@ export function SessionListCapability({
     selectionActionsDisabled: isApplyingSelectionAction,
     onSelectionClear: clearSelection,
     onSelectionChange: toggleSessionSelection,
+    onRangeSelect: rangeSelectSessions,
     onArchiveSelected: requestArchiveSelected,
     onPinSelectedToHome: handlePinSelectedToHome,
+    onUnpinSelectedFromHome: handleUnpinSelectedFromHome,
+    isSelectionPinnedToHome,
+    onOpenSelectedInWindows: handleOpenSelectedInWindows,
     isPinningSelectedToHome: isPinningBatch,
     onMarkSelectedRead: () => void applySelectionAction(onMarkChatRead),
     onMarkSelectedUnread: () => void applySelectionAction(onMarkChatUnread),

@@ -287,6 +287,11 @@
       "successPartial_one": "Pinned 1 chat to home. {{skipped}} already pinned.",
       "successPartial_other": "Pinned {{displayCount}} chats to home. {{skipped}} already pinned."
     },
+    "unpinBatchFromHome": {
+      "error": "Could not unpin chats from home.",
+      "success_one": "Unpinned 1 chat from home.",
+      "success_other": "Unpinned {{displayCount}} chats from home."
+    },
     "unpinFromHome": {
       "error": "Could not unpin from home.",
       "success": "Unpinned from home."

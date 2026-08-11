@@ -27,6 +27,7 @@
     "markRead": "Mark read",
     "markUnread": "Mark unread",
     "openInNewWindow": "Open in new window",
+    "openInNewWindows": "Open in new windows",
     "openInWindow": "Open in window",
     "editProject": "Edit {{name}} Project",
     "editProjectFallback": "Edit Project",

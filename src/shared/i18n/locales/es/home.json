@@ -287,6 +287,11 @@
       "successPartial_one": "Se fijó 1 chat en inicio. {{skipped}} ya estaban fijados.",
       "successPartial_other": "Se fijaron {{displayCount}} chats en inicio. {{skipped}} ya estaban fijados."
     },
+    "unpinBatchFromHome": {
+      "error": "No se pudieron desfijar los chats de inicio.",
+      "success_one": "Se desfijó 1 chat de inicio.",
+      "success_other": "Se desfijaron {{displayCount}} chats de inicio."
+    },
     "unpinFromHome": {
       "error": "No se pudo desfijar de inicio.",
       "success": "Desfijado de inicio."

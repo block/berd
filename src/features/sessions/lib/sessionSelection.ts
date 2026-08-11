@@ -16,6 +16,59 @@ export function isMultiSelectModifier(
   return event.metaKey || (platform !== "mac" && event.ctrlKey);
 }
 
+export function isRangeSelectModifier(event: { shiftKey: boolean }) {
+  return event.shiftKey;
+}
+
+/**
+ * Reads the sidebar chat rows currently in the DOM, in render order. Range
+ * selection works over this list so it only spans rows the user can see.
+ */
+export function getRenderedSessionIdsInOrder(
+  root: ParentNode = document,
+): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const row of root.querySelectorAll(
+    "[data-sidebar-chat-row][data-session-id]",
+  )) {
+    const id = row.getAttribute("data-session-id");
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
+export function getSessionRangeSelection({
+  current,
+  anchorId,
+  targetId,
+  orderedIds,
+}: {
+  current: Set<string>;
+  anchorId?: string | null;
+  targetId: string;
+  orderedIds: readonly string[];
+}): Set<string> {
+  const next = new Set(current);
+  next.add(targetId);
+
+  const targetIndex = orderedIds.indexOf(targetId);
+  const anchorIndex = anchorId ? orderedIds.indexOf(anchorId) : -1;
+  if (targetIndex === -1 || anchorIndex === -1) {
+    return next;
+  }
+
+  const start = Math.min(anchorIndex, targetIndex);
+  const end = Math.max(anchorIndex, targetIndex);
+  for (let index = start; index <= end; index += 1) {
+    next.add(orderedIds[index]);
+  }
+  return next;
+}
+
 export function areSetsEqual<T>(left: Set<T>, right: Set<T>) {
   return (
     left.size === right.size && [...left].every((value) => right.has(value))

@@ -1231,6 +1231,127 @@ describe("SidebarChatRow", () => {
     expect(onMarkRead).toHaveBeenCalledWith("session-1");
   });
 
+  it("range-selects with shift-click instead of opening the chat", async () => {
+    const user = userEvent.setup();
+    const onRangeSelect = vi.fn();
+    const onSelect = vi.fn();
+    const onSelectionChange = vi.fn();
+
+    render(
+      <SidebarChatRow
+        id="session-3"
+        title="Range Chat"
+        isActive={false}
+        onRangeSelect={onRangeSelect}
+        onSelect={onSelect}
+        onSelectionChange={onSelectionChange}
+      />,
+    );
+
+    await user.keyboard("{Shift>}");
+    await user.click(screen.getByRole("button", { name: "Range Chat" }));
+    await user.keyboard("{/Shift}");
+
+    expect(onRangeSelect).toHaveBeenCalledWith("session-3");
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(onSelectionChange).not.toHaveBeenCalled();
+  });
+
+  it("hides single-chat actions and keeps bulk actions when multiple chats are selected", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Bulk Chat"
+        isActive={false}
+        selected
+        selectionEnabled
+        selectedSessionIds={new Set(["session-1", "session-2"])}
+        onSelectionChange={vi.fn()}
+        onFork={vi.fn()}
+        onArchiveSelected={vi.fn()}
+        onMarkSelectedUnread={vi.fn()}
+        onOpenSelectedInWindows={vi.fn()}
+        onPinSelectedToHome={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /options for bulk chat/i }),
+    );
+
+    expect(screen.getByText("2 chats selected")).toBeInTheDocument();
+
+    for (const name of [/rename/i, /duplicate/i, /copy chat link/i]) {
+      expect(screen.queryByRole("menuitem", { name })).not.toBeInTheDocument();
+    }
+    for (const name of ["Pin chats", /mark unread/i, /archive/i]) {
+      expect(screen.getByRole("menuitem", { name })).not.toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
+    }
+  });
+
+  it("opens every selected chat in its own window from the bulk menu", async () => {
+    const user = userEvent.setup();
+    const onOpenSelectedInWindows = vi.fn();
+
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Bulk Chat"
+        isActive={false}
+        selected
+        selectionEnabled
+        selectedSessionIds={new Set(["session-1", "session-2"])}
+        onSelectionChange={vi.fn()}
+        onOpenSelectedInWindows={onOpenSelectedInWindows}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /options for bulk chat/i }),
+    );
+    await user.click(
+      await screen.findByRole("menuitem", { name: /open in new windows/i }),
+    );
+
+    expect(onOpenSelectedInWindows).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers unpin for a fully pinned multi-selection", async () => {
+    const user = userEvent.setup();
+    const onUnpinSelectedFromHome = vi.fn();
+    const onPinSelectedToHome = vi.fn();
+
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Bulk Chat"
+        isActive={false}
+        selected
+        selectionEnabled
+        selectedSessionIds={new Set(["session-1", "session-2"])}
+        onSelectionChange={vi.fn()}
+        isSelectionPinnedToHome
+        onPinSelectedToHome={onPinSelectedToHome}
+        onUnpinSelectedFromHome={onUnpinSelectedFromHome}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /options for bulk chat/i }),
+    );
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Unpin chats" }),
+    );
+
+    expect(onUnpinSelectedFromHome).toHaveBeenCalledTimes(1);
+    expect(onPinSelectedToHome).not.toHaveBeenCalled();
+  });
+
   it("keeps the localized default title in rename mode without persisting it", async () => {
     const user = userEvent.setup();
     const onRename = vi.fn();

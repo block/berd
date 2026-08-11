@@ -94,8 +94,12 @@ export interface SidebarProjectsSectionProps {
   selectionActionsDisabled?: boolean;
   onSelectionClear?: () => void;
   onSelectionChange?: (sessionId: string, selected: boolean) => void;
+  onRangeSelect?: (sessionId: string) => void;
   onArchiveSelected?: () => void;
   onPinSelectedToHome?: () => void;
+  onUnpinSelectedFromHome?: () => void;
+  isSelectionPinnedToHome?: boolean;
+  onOpenSelectedInWindows?: () => void;
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
@@ -167,8 +171,12 @@ export function SidebarProjectsSection({
   selectionActionsDisabled = false,
   onSelectionClear,
   onSelectionChange,
+  onRangeSelect,
   onArchiveSelected,
   onPinSelectedToHome,
+  onUnpinSelectedFromHome,
+  isSelectionPinnedToHome,
+  onOpenSelectedInWindows,
   isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
@@ -217,8 +225,12 @@ export function SidebarProjectsSection({
         selectionActionsDisabled={selectionActionsDisabled}
         onSelectionClear={onSelectionClear}
         onSelectionChange={onSelectionChange}
+        onRangeSelect={onRangeSelect}
         onArchiveSelected={onArchiveSelected}
         onPinSelectedToHome={onPinSelectedToHome}
+        onUnpinSelectedFromHome={onUnpinSelectedFromHome}
+        isSelectionPinnedToHome={isSelectionPinnedToHome}
+        onOpenSelectedInWindows={onOpenSelectedInWindows}
         isPinningSelectedToHome={isPinningSelectedToHome}
         onMarkSelectedRead={onMarkSelectedRead}
         onMarkSelectedUnread={onMarkSelectedUnread}
@@ -255,8 +267,12 @@ export function SidebarProjectsSection({
           selectionActionsDisabled={selectionActionsDisabled}
           onSelectionClear={onSelectionClear}
           onSelectionChange={onSelectionChange}
+          onRangeSelect={onRangeSelect}
           onArchiveSelected={onArchiveSelected}
           onPinSelectedToHome={onPinSelectedToHome}
+          onUnpinSelectedFromHome={onUnpinSelectedFromHome}
+          isSelectionPinnedToHome={isSelectionPinnedToHome}
+          onOpenSelectedInWindows={onOpenSelectedInWindows}
           isPinningSelectedToHome={isPinningSelectedToHome}
           onMarkSelectedRead={onMarkSelectedRead}
           onMarkSelectedUnread={onMarkSelectedUnread}
@@ -342,8 +358,12 @@ export function SidebarProjectsSection({
             selectionActionsDisabled={selectionActionsDisabled}
             onSelectionClear={onSelectionClear}
             onSelectionChange={onSelectionChange}
+            onRangeSelect={onRangeSelect}
             onArchiveSelected={onArchiveSelected}
             onPinSelectedToHome={onPinSelectedToHome}
+            onUnpinSelectedFromHome={onUnpinSelectedFromHome}
+            isSelectionPinnedToHome={isSelectionPinnedToHome}
+            onOpenSelectedInWindows={onOpenSelectedInWindows}
             isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
@@ -476,8 +496,12 @@ export function SidebarProjectsSection({
             selectionActionsDisabled={selectionActionsDisabled}
             onSelectionClear={onSelectionClear}
             onSelectionChange={onSelectionChange}
+            onRangeSelect={onRangeSelect}
             onArchiveSelected={onArchiveSelected}
             onPinSelectedToHome={onPinSelectedToHome}
+            onUnpinSelectedFromHome={onUnpinSelectedFromHome}
+            isSelectionPinnedToHome={isSelectionPinnedToHome}
+            onOpenSelectedInWindows={onOpenSelectedInWindows}
             isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}

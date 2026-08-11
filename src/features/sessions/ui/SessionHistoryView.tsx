@@ -5,7 +5,10 @@ import { History } from "lucide-react";
 import { IconCheck, IconCopy, IconUpload, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
-import { sessionActivityAt } from "@/features/chat/lib/sessionActivity";
+import {
+  sessionActivityAt,
+  sessionNeedsWindowHandoff,
+} from "@/features/chat/lib/sessionActivity";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import {
   focusSessionWindow,
@@ -47,6 +50,8 @@ import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { exportSessionAction } from "../lib/exportSessionAction";
 import { saveExportedSessionFiles } from "@/shared/api/system";
 import { usePinBatchToHome } from "@/features/home/hooks/usePinToHomeWidget";
+import { getPinnedHomeChatSessionIds } from "@/features/home/lib/pinnedHomeChats";
+import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
 import { defaultExportFilename, downloadJson } from "../lib/exportSession";
 import {
   areSetsEqual,
@@ -607,12 +612,10 @@ export function SessionHistoryView({
       const isOpenInWindow =
         sessionId in useSessionWindowStore.getState().openSessions;
       const runtime = useChatStore.getState().sessionStateById[sessionId];
-      const isRunning = Boolean(
-        runtime && (runtime.chatState !== "idle" || runtime.streamingMessageId),
-      );
+      const needsHandoff = runtime ? sessionNeedsWindowHandoff(runtime) : false;
       const action = isOpenInWindow
         ? () => focusSessionWindow(sessionId)
-        : () => openSessionWindow(sessionId, { handoff: isRunning });
+        : () => openSessionWindow(sessionId, { handoff: needsHandoff });
 
       void action().catch((error) => {
         console.error(
@@ -631,13 +634,30 @@ export function SessionHistoryView({
     [t],
   );
 
-  const { pinBatchToHome, isPinningBatch } = usePinBatchToHome();
+  const { pinBatchToHome, unpinBatchFromHome, isPinningBatch } =
+    usePinBatchToHome();
   const handlePinSelectedToHome = useCallback(async () => {
     const ids = Array.from(selectedSessionIds);
     if (ids.length === 0) return;
     await pinBatchToHome("chat", ids);
     clearSelection();
   }, [clearSelection, pinBatchToHome, selectedSessionIds]);
+
+  const handleUnpinSelectedFromHome = useCallback(() => {
+    const ids = Array.from(selectedSessionIds);
+    if (ids.length === 0) return;
+    unpinBatchFromHome("chat", ids);
+    clearSelection();
+  }, [clearSelection, selectedSessionIds, unpinBatchFromHome]);
+
+  const homeWidgetInstances = useHomeWidgetStore((state) => state.instances);
+  const isSelectionPinnedToHome = useMemo(() => {
+    if (selectedSessionIds.size === 0) return false;
+    const pinnedIds = getPinnedHomeChatSessionIds(homeWidgetInstances);
+    return [...selectedSessionIds].every((sessionId) =>
+      pinnedIds.has(sessionId),
+    );
+  }, [homeWidgetInstances, selectedSessionIds]);
 
   const handleMarkSelectedRead = useCallback(() => {
     const markSessionRead = useChatStore.getState().markSessionRead;
@@ -893,6 +913,8 @@ export function SessionHistoryView({
           }
           isOpenInWindow={isMultiWindowEnabled && session.id in openSessions}
           onPinSelectedToHome={handlePinSelectedToHome}
+          onUnpinSelectedFromHome={handleUnpinSelectedFromHome}
+          isSelectionPinnedToHome={isSelectionPinnedToHome}
           isPinningSelectedToHome={isPinningBatch}
           onMarkSelectedRead={handleMarkSelectedRead}
           onMarkSelectedUnread={handleMarkSelectedUnread}
@@ -937,6 +959,8 @@ export function SessionHistoryView({
       handleExportSelected,
       handleOpenInWindow,
       handlePinSelectedToHome,
+      handleUnpinSelectedFromHome,
+      isSelectionPinnedToHome,
       handleMarkSelectedRead,
       handleMarkSelectedUnread,
       isInitialReveal,

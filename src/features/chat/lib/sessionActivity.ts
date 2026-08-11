@@ -9,6 +9,16 @@ export function isSessionRunning(chatState: ChatState): boolean {
   );
 }
 
+/** A new window needs a live snapshot until the runtime and stream are settled. */
+export function sessionNeedsWindowHandoff(runtime: {
+  chatState: ChatState;
+  streamingMessageId?: string | null;
+}): boolean {
+  return (
+    isSessionRunning(runtime.chatState) || Boolean(runtime.streamingMessageId)
+  );
+}
+
 interface SessionActivityTimestamp {
   lastMessageAt?: string | null;
   updatedAt: string;

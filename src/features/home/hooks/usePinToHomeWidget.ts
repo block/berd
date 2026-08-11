@@ -284,21 +284,26 @@ export function usePinToHomeWidget(target: PinToHomeTarget) {
   };
 }
 
+function normalizedUniqueIds(ids: string[]): string[] {
+  const normalizedIds: string[] = [];
+  const seen = new Set<string>();
+  for (const id of ids) {
+    const normalized = normalizedTargetId(id);
+    if (normalized && !seen.has(normalized)) {
+      normalizedIds.push(normalized);
+      seen.add(normalized);
+    }
+  }
+  return normalizedIds;
+}
+
 export function usePinBatchToHome() {
   const { t } = useTranslation("home");
   const [isPinningBatch, setIsPinningBatch] = useState(false);
 
   const pinBatchToHome = useCallback(
     async (kind: PinToHomeTargetKind, ids: string[]) => {
-      const normalizedIds: string[] = [];
-      const seen = new Set<string>();
-      for (const id of ids) {
-        const normalized = normalizedTargetId(id);
-        if (normalized && !seen.has(normalized)) {
-          normalizedIds.push(normalized);
-          seen.add(normalized);
-        }
-      }
+      const normalizedIds = normalizedUniqueIds(ids);
       if (normalizedIds.length === 0) {
         return;
       }
@@ -393,5 +398,45 @@ export function usePinBatchToHome() {
     [t],
   );
 
-  return { pinBatchToHome, isPinningBatch };
+  const unpinBatchFromHome = useCallback(
+    (kind: PinToHomeTargetKind, ids: string[]) => {
+      const normalizedIds = normalizedUniqueIds(ids);
+      if (normalizedIds.length === 0) {
+        return;
+      }
+
+      try {
+        if (useHomeWidgetStore.getState().loadStatus !== "ready") {
+          toast.error(t("widgets.unpinBatchFromHome.error"));
+          return;
+        }
+
+        let removed = 0;
+        for (const id of normalizedIds) {
+          // Re-read the store each iteration: removeWidget replaces instances.
+          const state = useHomeWidgetStore.getState();
+          const widgetId = findPinnedHomeWidgetId(state.instances, {
+            kind,
+            id,
+          });
+          if (widgetId) {
+            state.removeWidget(widgetId);
+            removed += 1;
+          }
+        }
+
+        toast.success(
+          t("widgets.unpinBatchFromHome.success", {
+            count: removed,
+            displayCount: removed,
+          }),
+        );
+      } catch {
+        toast.error(t("widgets.unpinBatchFromHome.error"));
+      }
+    },
+    [t],
+  );
+
+  return { pinBatchToHome, unpinBatchFromHome, isPinningBatch };
 }

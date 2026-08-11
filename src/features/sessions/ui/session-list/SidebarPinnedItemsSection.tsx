@@ -38,8 +38,12 @@ export function SidebarPinnedItemsSection({
   selectionActionsDisabled,
   onSelectionClear,
   onSelectionChange,
+  onRangeSelect,
   onArchiveSelected,
   onPinSelectedToHome,
+  onUnpinSelectedFromHome,
+  isSelectionPinnedToHome,
+  onOpenSelectedInWindows,
   isPinningSelectedToHome,
   onMarkSelectedRead,
   onMarkSelectedUnread,
@@ -73,8 +77,12 @@ export function SidebarPinnedItemsSection({
   selectionActionsDisabled?: boolean;
   onSelectionClear?: () => void;
   onSelectionChange?: (sessionId: string, selected: boolean) => void;
+  onRangeSelect?: (sessionId: string) => void;
   onArchiveSelected?: () => void;
   onPinSelectedToHome?: () => void;
+  onUnpinSelectedFromHome?: () => void;
+  isSelectionPinnedToHome?: boolean;
+  onOpenSelectedInWindows?: () => void;
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
@@ -220,6 +228,12 @@ export function SidebarPinnedItemsSection({
               <div
                 key={key}
                 data-pinned-reorder-row={key}
+                // Mirrors the row's selected state so the contiguous-selection
+                // merge styling can see selected neighbors through this
+                // wrapper (see SELECTED_CHAT_ROW_MERGE_CLASS).
+                data-selected={
+                  selectedSessionIds?.has(item.session.id) ? "" : undefined
+                }
                 ref={(element) => {
                   if (element) rowRefs.current.set(key, element);
                   else rowRefs.current.delete(key);
@@ -284,6 +298,7 @@ export function SidebarPinnedItemsSection({
                       onSelect={onSelectSession}
                       onSelectionClear={onSelectionClear}
                       onSelectionChange={onSelectionChange}
+                      onRangeSelect={onRangeSelect}
                       onRename={onRenameChat}
                       onFork={onForkChat}
                       onMarkRead={onMarkChatRead}
@@ -291,6 +306,9 @@ export function SidebarPinnedItemsSection({
                       onArchive={onArchiveChat}
                       onArchiveSelected={onArchiveSelected}
                       onPinSelectedToHome={onPinSelectedToHome}
+                      onUnpinSelectedFromHome={onUnpinSelectedFromHome}
+                      isSelectionPinnedToHome={isSelectionPinnedToHome}
+                      onOpenSelectedInWindows={onOpenSelectedInWindows}
                       isPinningSelectedToHome={isPinningSelectedToHome}
                       onMarkSelectedRead={onMarkSelectedRead}
                       onMarkSelectedUnread={onMarkSelectedUnread}

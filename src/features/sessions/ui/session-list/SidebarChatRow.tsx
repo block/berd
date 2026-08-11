@@ -7,8 +7,8 @@ import {
   type PointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { Check, ExternalLink, MoreHorizontal } from "lucide-react";
-import { IconGitBranch } from "@tabler/icons-react";
+import { ExternalLink, MoreHorizontal } from "lucide-react";
+import { IconCheck, IconGitBranch } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
   getDisplaySessionTitle,
@@ -22,7 +22,10 @@ import {
 import { useSessionWindowSupport } from "@/features/chat/hooks/useSessionWindowSupport";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { exportSessionAction } from "@/features/sessions/lib/exportSessionAction";
-import { isMultiSelectModifier } from "@/features/sessions/lib/sessionSelection";
+import {
+  isMultiSelectModifier,
+  isRangeSelectModifier,
+} from "@/features/sessions/lib/sessionSelection";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import {
   SessionActionsContextMenuContent,
@@ -76,8 +79,26 @@ const ACTIVE_CHAT_ROW_CLASS = cn(
 );
 const SELECTED_CHAT_ROW_CLASS = cn(
   SIDEBAR_ROW_ACTIVE_CLASS,
-  "ring-1 ring-inset ring-sidebar-border/80",
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+);
+/**
+ * Merge contiguous selected rows into one visual block: a selected row drops
+ * its top radius when the neighboring row is also selected.
+ *
+ * Structural contract: this works via CSS sibling selectors, so sections must
+ * render chat rows as direct DOM siblings. A section that wraps each row in an
+ * extra element (e.g. the pinned section's reorder wrapper) must mirror
+ * `data-selected` onto that wrapper; the second selector group below matches
+ * selected wrappers. Only the row's own button (`data-sidebar-chat-row-button`)
+ * changes shape — auxiliary buttons like the menu trigger keep their radius.
+ */
+const SELECTED_CHAT_ROW_MERGE_CLASS = cn(
+  // Rows as direct siblings (project/recents/flat sections).
+  "[[data-selected]+&]:rounded-t-none [[data-selected]+&>[data-sidebar-chat-row-button]]:rounded-t-none",
+  "has-[+[data-selected]]:rounded-b-none [&:has(+[data-selected])>[data-sidebar-chat-row-button]]:rounded-b-none",
+  // Rows inside selected wrappers that are direct siblings (pinned section).
+  "[[data-selected]+[data-selected]>&]:rounded-t-none [[data-selected]+[data-selected]>&>[data-sidebar-chat-row-button]]:rounded-t-none",
+  "[[data-selected]:has(+[data-selected])>&]:rounded-b-none [[data-selected]:has(+[data-selected])>&>[data-sidebar-chat-row-button]]:rounded-b-none",
 );
 
 /**
@@ -152,11 +173,15 @@ interface SidebarChatRowProps {
   onSelect?: (id: string) => void;
   onSelectionClear?: () => void;
   onSelectionChange?: (id: string, selected: boolean) => void;
+  onRangeSelect?: (sessionId: string) => void;
   onRename?: (id: string, nextTitle: string) => void;
   onFork?: (id: string) => void;
   onArchive?: (id: string) => void;
   onArchiveSelected?: () => void;
   onPinSelectedToHome?: () => void;
+  onUnpinSelectedFromHome?: () => void;
+  isSelectionPinnedToHome?: boolean;
+  onOpenSelectedInWindows?: () => void;
   isPinningSelectedToHome?: boolean;
   onMenuOpenChange?: (open: boolean) => void;
   onMarkRead?: (id: string) => void;
@@ -199,11 +224,15 @@ export function SidebarChatRow({
   onSelect,
   onSelectionClear,
   onSelectionChange,
+  onRangeSelect,
   onRename,
   onFork,
   onArchive,
   onArchiveSelected,
   onPinSelectedToHome,
+  onUnpinSelectedFromHome,
+  isSelectionPinnedToHome = false,
+  onOpenSelectedInWindows,
   isPinningSelectedToHome = false,
   onMenuOpenChange,
   onMarkRead,
@@ -398,6 +427,11 @@ export function SidebarChatRow({
   };
 
   const handleRowClick = (event: MouseEvent<HTMLButtonElement>) => {
+    if (onRangeSelect && isRangeSelectModifier(event)) {
+      event.preventDefault();
+      onRangeSelect(id);
+      return;
+    }
     if (isMultiSelectModifier(event)) {
       onSelectionChange?.(id, !selected);
       return;
@@ -423,6 +457,7 @@ export function SidebarChatRow({
       type="button"
       variant="ghost"
       size="sm"
+      data-sidebar-chat-row-button
       onClick={handleRowClick}
       onDoubleClick={handleRowDoubleClick}
       aria-label={displayTitle}
@@ -652,7 +687,9 @@ export function SidebarChatRow({
       ? onMarkSelectedUnread
       : () => onMarkUnread?.(id),
     onTogglePin: shouldApplyToSelection
-      ? onPinSelectedToHome
+      ? isSelectionPinnedToHome
+        ? onUnpinSelectedFromHome
+        : onPinSelectedToHome
       : () => {
           if (isPinnedToHome) {
             unpinFromHome();
@@ -660,19 +697,21 @@ export function SidebarChatRow({
           }
           void pinToHome();
         },
+    isSelectionPinned: isSelectionPinnedToHome,
     onRename: startRename,
     onOpenInWindow: isMultiWindowEnabled
       ? isOpenInWindow
         ? focusExistingWindow
         : handleOpenInWindow
       : undefined,
+    onOpenSelectedInWindows,
     onDuplicate: onFork ? () => onFork(id) : undefined,
     editProjectLabel: projectEditLabel,
     onEditProject:
       currentProjectId && onEditProject && hasFlatProjectColumn
         ? () => onEditProject(currentProjectId)
         : undefined,
-    onExport: shouldApplyToSelection ? undefined : handleExport,
+    onExport: handleExport,
     onArchive: shouldApplyToSelection
       ? onArchiveSelected
       : () => onArchive?.(id),
@@ -725,6 +764,7 @@ export function SidebarChatRow({
           data-session-id={id}
           data-sidebar-chat-row
           data-sidebar-chat-draggable
+          data-selected={selected ? "" : undefined}
           onPointerDown={pointerDragEnabled ? handlePointerDown : undefined}
           onClickCapture={(event) => {
             if (!suppressNextClickRef.current) return;
@@ -742,6 +782,7 @@ export function SidebarChatRow({
               (!selectionEnabled || selected) &&
               "bg-[var(--sidebar-row-active)]",
             selected && SELECTED_CHAT_ROW_CLASS,
+            selected && SELECTED_CHAT_ROW_MERGE_CLASS,
             draggingSession !== null && "pointer-events-none",
             dragging && "bg-[var(--sidebar-row-active)] opacity-40",
             hasFlatProjectColumn && densityClasses.flatProjectGap,
@@ -882,9 +923,7 @@ export function SidebarChatRow({
               )}
               aria-hidden="true"
             >
-              <span className="flex size-3.5 items-center justify-center rounded-full border border-sidebar-foreground bg-sidebar-foreground text-sidebar transition-colors">
-                <Check className="size-2.5" strokeWidth={3} />
-              </span>
+              <IconCheck className="size-4 text-sidebar-foreground" />
             </span>
           ) : null}
 

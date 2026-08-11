@@ -46,6 +46,8 @@ interface SessionCardProps {
   onOpenInWindow?: (id: string) => void;
   isOpenInWindow?: boolean;
   onPinSelectedToHome?: () => void;
+  onUnpinSelectedFromHome?: () => void;
+  isSelectionPinnedToHome?: boolean;
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
@@ -80,6 +82,8 @@ export function SessionCard({
   onOpenInWindow,
   isOpenInWindow = false,
   onPinSelectedToHome,
+  onUnpinSelectedFromHome,
+  isSelectionPinnedToHome = false,
   isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
@@ -320,7 +324,11 @@ export function SessionCard({
           }
           onTogglePin={() => {
             if (shouldApplyToSelection) {
-              onPinSelectedToHome?.();
+              if (isSelectionPinnedToHome) {
+                onUnpinSelectedFromHome?.();
+              } else {
+                onPinSelectedToHome?.();
+              }
               return;
             }
             if (isPinnedToHome) {
@@ -329,15 +337,13 @@ export function SessionCard({
             }
             void pinToHome();
           }}
+          isSelectionPinned={isSelectionPinnedToHome}
           onRename={onRename ? startRename : undefined}
           onOpenInWindow={onOpenInWindow ? () => onOpenInWindow(id) : undefined}
           onDuplicate={onFork ? () => onFork(id) : undefined}
-          onExport={
-            shouldApplyToSelection
-              ? onExportSelected
-              : onExport
-                ? () => onExport(id)
-                : undefined
+          onExport={onExport ? () => onExport(id) : undefined}
+          onExportSelected={
+            shouldApplyToSelection ? onExportSelected : undefined
           }
           onArchive={
             shouldApplyToSelection

@@ -194,6 +194,32 @@ describe("SessionCard", () => {
     ).toBeInTheDocument();
   });
 
+  it("exports all selected chats from a multi-selected card", async () => {
+    const user = userEvent.setup();
+    const onExportSelected = vi.fn();
+
+    render(
+      <SessionCard
+        {...defaultProps}
+        selected
+        selectionEnabled
+        selectionCount={2}
+        onSelectionChange={vi.fn()}
+        onExport={vi.fn()}
+        onExportSelected={onExportSelected}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /options for fix sidebar bug/i }),
+    );
+    const exportItem = screen.getByRole("menuitem", { name: /export/i });
+    expect(exportItem).not.toHaveAttribute("aria-disabled", "true");
+
+    await user.click(exportItem);
+    expect(onExportSelected).toHaveBeenCalledTimes(1);
+  });
+
   it("shows restore option for archived sessions", async () => {
     const user = userEvent.setup();
 
