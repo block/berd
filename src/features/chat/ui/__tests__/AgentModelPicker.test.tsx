@@ -714,6 +714,124 @@ describe("AgentModelPicker", () => {
     );
   });
 
+  it("shows search for a long list without a recommended shortlist", async () => {
+    const user = userEvent.setup();
+    const models = Array.from({ length: 12 }, (_, index) => ({
+      id: `model-${index}`,
+      name: `Model ${index}`,
+    }));
+
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="model-0"
+        currentModelName="Model 0"
+        availableModels={models}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    const searchButton = within(picker).getByRole("button", {
+      name: "Search models...",
+    });
+    // Nothing is hidden behind a shortlist, so "View more" must not render.
+    expect(
+      within(picker).queryByRole("button", { name: "View more" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(searchButton);
+    const search = within(picker).getByRole("searchbox", {
+      name: "Search models...",
+    });
+    await user.type(search, "Model 7");
+    expect(
+      within(picker).getByRole("button", { name: "Model 7" }),
+    ).toBeInTheDocument();
+    expect(
+      within(picker).queryByRole("button", { name: "Model 3" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("gates threshold search exactly at the boundary", async () => {
+    const user = userEvent.setup();
+    const buildModels = (count: number) =>
+      Array.from({ length: count }, (_, index) => ({
+        id: `model-${index}`,
+        name: `Model ${index}`,
+      }));
+    const renderPicker = (count: number) =>
+      render(
+        <AgentModelPicker
+          agents={AGENTS}
+          selectedAgentId="goose"
+          onAgentChange={vi.fn()}
+          currentModelId="model-0"
+          currentModelName="Model 0"
+          availableModels={buildModels(count)}
+          onModelChange={vi.fn()}
+        />,
+      );
+
+    // At the threshold (8 uncurated models): no search button.
+    const atThreshold = renderPicker(8);
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    expect(
+      within(screen.getByRole("dialog")).queryByRole("button", {
+        name: "Search models...",
+      }),
+    ).not.toBeInTheDocument();
+    atThreshold.unmount();
+
+    // One past the threshold (9 uncurated models): search appears.
+    renderPicker(9);
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Search models...",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides search for a short list with nothing hidden", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="model-0"
+        currentModelName="Model 0"
+        availableModels={[
+          { id: "model-0", name: "Model 0" },
+          { id: "model-1", name: "Model 1" },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    const picker = screen.getByRole("dialog");
+    expect(
+      within(picker).queryByRole("button", { name: "Search models..." }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(picker).queryByRole("button", { name: "View more" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("disables spellcheck in the all-models search field", async () => {
     const user = userEvent.setup();
 

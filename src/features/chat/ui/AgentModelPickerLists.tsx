@@ -18,6 +18,13 @@ import {
 import type { ModelOption } from "../types";
 import { PickerItem } from "./AgentModelPickerItem";
 
+/**
+ * Long uncurated lists are where search is most needed, so the search
+ * affordance also appears when the visible list exceeds this many rows even
+ * if no models are hidden behind a recommended shortlist.
+ */
+const SEARCHABLE_LIST_THRESHOLD = 8;
+
 function getModelDisplayName(model: ModelOption) {
   return model.displayName ?? model.name;
 }
@@ -201,6 +208,8 @@ export const RecommendedModelList = forwardRef<
   );
 
   const hasMore = models.length > recommended.length;
+  const showSearchButton =
+    hasMore || recommended.length > SEARCHABLE_LIST_THRESHOLD;
   const closeSearch = useCallback(() => {
     resetScroll();
     restoreSearchButtonFocusRef.current = true;
@@ -265,7 +274,7 @@ export const RecommendedModelList = forwardRef<
         ) : (
           <span className="flex flex-1 items-center justify-between text-sm font-semibold">
             <span>{t("toolbar.model")}</span>
-            {hasMore ? (
+            {showSearchButton ? (
               <Button
                 ref={searchButtonRef}
                 variant="ghost"
