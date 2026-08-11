@@ -121,14 +121,12 @@ export async function resolveSupportedSessionModelPreference(
   }
 
   const modelCache = useProviderModelCacheStore.getState();
-  const models = modelCache.getModelsForProvider(
-    sessionModelPreference.providerId,
-  );
+  const modelProviderId = sessionModelPreference.providerId;
 
-  if (
-    modelCache.isModelInventoryAuthoritative(sessionModelPreference.providerId)
-  ) {
-    return sanitizeSessionModelPreference(sessionModelPreference, { models });
+  if (modelCache.isModelInventoryAuthoritative(modelProviderId)) {
+    return sanitizeSessionModelPreference(sessionModelPreference, {
+      models: modelCache.getProvenModelsForProvider(modelProviderId),
+    });
   }
 
   if (!(await isProviderDisconnected(sessionModelPreference.providerId))) {
@@ -138,12 +136,13 @@ export async function resolveSupportedSessionModelPreference(
   if (providerId === "goose") {
     const fallback = gooseDefaultPreference();
     if (fallback && fallback.providerId !== sessionModelPreference.providerId) {
-      const fallbackModels = useProviderModelCacheStore
-        .getState()
-        .getModelsForProvider(fallback.providerId);
-      return sanitizeSessionModelPreference(fallback, {
-        models: fallbackModels,
-      });
+      const fallbackCache = useProviderModelCacheStore.getState();
+      if (fallbackCache.isModelInventoryAuthoritative(fallback.providerId)) {
+        return sanitizeSessionModelPreference(fallback, {
+          models: fallbackCache.getProvenModelsForProvider(fallback.providerId),
+        });
+      }
+      return fallback;
     }
   }
 

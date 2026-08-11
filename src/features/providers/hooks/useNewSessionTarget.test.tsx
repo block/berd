@@ -96,6 +96,70 @@ describe("useNewSessionTarget", () => {
     });
   });
 
+  it.each([
+    {
+      name: "proof is absent",
+      provenModelIds: undefined,
+      expectedModelId: "removed-model",
+    },
+    {
+      name: "live proof is empty",
+      provenModelIds: [],
+      expectedModelId: "goose-gpt-5-5",
+    },
+    {
+      name: "live proof omits the stored model",
+      provenModelIds: ["claude-sonnet-4"],
+      expectedModelId: "goose-gpt-5-5",
+    },
+  ])("uses $name when resolving a stored model for a new chat", async ({
+    provenModelIds,
+    expectedModelId,
+  }) => {
+    useProviderModelCacheStore.setState({
+      providers: new Map([
+        [
+          "anthropic",
+          {
+            providerId: "anthropic",
+            models: [
+              {
+                id: "claude-sonnet-4",
+                name: "Claude Sonnet 4",
+                providerId: "anthropic",
+              },
+            ],
+            ...(provenModelIds !== undefined ? { provenModelIds } : {}),
+            fetchedAt: Date.now(),
+          },
+        ],
+      ]),
+      refreshingProviderIds: new Set(),
+    });
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        goose: {
+          modelId: "removed-model",
+          modelName: "Removed model",
+          providerId: "anthropic",
+        },
+      }),
+    );
+
+    const { result } = renderHook(() => useNewSessionTarget());
+    let target: Awaited<ReturnType<typeof result.current>> | undefined;
+    await act(async () => {
+      target = await result.current();
+    });
+
+    expect(target).toMatchObject({
+      status: "ready",
+      providerId: "goose",
+      modelId: expectedModelId,
+    });
+  });
+
   it("drops an unavailable stored model before resolving the new chat", async () => {
     window.localStorage.setItem(
       "goose:preferredModelsByAgent",

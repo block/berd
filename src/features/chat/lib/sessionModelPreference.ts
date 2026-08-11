@@ -67,10 +67,6 @@ export function sanitizeSessionModelPreference(
     return preference;
   }
 
-  if (providerModels.models.length === 0) {
-    return preference;
-  }
-
   if (providerModels.models.some((model) => model.id === preference.modelId)) {
     return preference;
   }

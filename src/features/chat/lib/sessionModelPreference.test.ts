@@ -95,6 +95,19 @@ describe("resolveSessionModelPreference", () => {
     });
   });
 
+  it("drops a stored model when an authoritative inventory is empty", () => {
+    expect(
+      sanitizeSessionModelPreference(
+        {
+          providerId: "openai",
+          modelId: "gpt-5.4",
+          modelName: "GPT-5.4",
+        },
+        { models: [] },
+      ),
+    ).toEqual({ providerId: "openai" });
+  });
+
   it("drops a stored model when the provider model list no longer contains it", () => {
     expect(
       sanitizeSessionModelPreference(
