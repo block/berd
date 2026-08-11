@@ -158,6 +158,8 @@ fn built_arg(field: &Field) -> Arg {
         .help(field.description.clone());
     if field.kind == "boolean" {
         arg = arg.action(ArgAction::SetTrue).value_name(None::<&str>);
+    } else if field.kind == "string_array" {
+        arg = arg.action(ArgAction::Append);
     } else if field.kind == "number" {
         // Bounds come from the zod schema via api-surface.json; clap only
         // mirrors them for fast local errors.

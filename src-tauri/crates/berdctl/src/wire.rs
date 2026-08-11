@@ -83,6 +83,9 @@ fn built_body(
             "string" => matches
                 .get_one::<String>(&field.name)
                 .map(|value| Value::String(value.clone())),
+            "string_array" => matches
+                .get_many::<String>(&field.name)
+                .map(|values| Value::Array(values.cloned().map(Value::String).collect())),
             "number" => matches
                 .get_one::<u32>(&field.name)
                 .map(|value| Value::from(*value)),

@@ -3227,7 +3227,7 @@ describe("projects", () => {
         action: "create",
         name: "My Project",
         instructions: "Be careful",
-        working_dir: "/work",
+        working_dir: ["/work", "/docs"],
       },
       ctx,
     );
@@ -3238,7 +3238,7 @@ describe("projects", () => {
       "Be careful",
       DEFAULT_PROJECT_ICON,
       DEFAULT_PROJECT_COLOR,
-      ["/work"],
+      ["/work", "/docs"],
       false,
       undefined,
     );

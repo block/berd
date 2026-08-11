@@ -51,8 +51,8 @@ pub struct Field {
     /// snake_case wire name; the flag is its kebab-case spelling.
     pub name: String,
     pub required: bool,
-    /// "string" | "number" | "boolean"; anything else fails validation
-    /// until the generated CLI learns that shape.
+    /// "string" | "string_array" | "number" | "boolean"; anything else
+    /// fails validation until the generated CLI learns that shape.
     pub kind: String,
     /// Allowed values for enum-backed string fields.
     pub values: Option<Vec<String>>,

@@ -29,14 +29,14 @@ import type { AppCommand, ToolGroup } from "./types";
  *  Mirror of `PROTOCOL_VERSION` in both discovery.rs copies (a berdctl
  *  crate test pins the CLI copy, and a plugin crate test pins the broker
  *  copy); bump all copies together. */
-const WIRE_PROTOCOL_VERSION = 3;
+const WIRE_PROTOCOL_VERSION = 4;
 
 type FieldSpec = {
   /** snake_case wire field name. */
   name: string;
   /** Must be present on the wire — a zod .default() field is NOT required. */
   required: boolean;
-  kind: "string" | "number" | "boolean";
+  kind: "string" | "string_array" | "number" | "boolean";
   /** Allowed string values for z.enum fields. */
   values?: string[];
   /** Field documentation, from the zod .describe(); the CLI renders it as
@@ -164,6 +164,15 @@ function describeField(
     if (current.minLength !== null) base.min = current.minLength;
     if (current.maxLength !== null) base.max = current.maxLength;
     return base;
+  }
+  if (current instanceof z.ZodArray) {
+    if (!(current.element instanceof z.ZodString)) {
+      throw new Error(
+        `${group}.${action}.${name}: only arrays of strings are supported; ` +
+          "use z.array(z.string()) or teach the generated CLI a new array type",
+      );
+    }
+    return { ...base, kind: "string_array" };
   }
   if (current instanceof z.ZodEnum) {
     const values = [...current.options];

@@ -100,7 +100,7 @@
         "create": {
           "action": "create",
           "about": "Create a new project",
-          "afterHelp": "Example:\n  berdctl project create --name \"Code reviews\" \\\n    --instructions \"Prefer small diffs\" --working-dir /Users/me/src/repo\n\nResult:\n  {\"project_id\": \"...\"} — the project appears immediately in the app's\n  project list."
+          "afterHelp": "Example:\n  berdctl project create --name \"Code reviews\" \\\n    --instructions \"Prefer small diffs\" \\\n    --working-dir /Users/me/src/api --working-dir /Users/me/src/web\n\nResult:\n  {\"project_id\": \"...\"} — the project appears immediately in the app's\n  project list with both directories attached."
         },
         "list": {
           "action": "list",

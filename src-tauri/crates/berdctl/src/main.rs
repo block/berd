@@ -399,6 +399,30 @@ mod tests {
     }
 
     #[test]
+    fn project_create_collects_repeated_working_dirs() {
+        let (command, args) = wire_of(&[
+            "berdctl",
+            "project",
+            "create",
+            "--name",
+            "Buzz",
+            "--working-dir",
+            "/src/buzz",
+            "--working-dir",
+            "/src/buzz-moderation",
+        ]);
+        assert_eq!(command, "projects");
+        assert_eq!(
+            Value::Object(args),
+            serde_json::json!({
+                "action": "create",
+                "name": "Buzz",
+                "working_dir": ["/src/buzz", "/src/buzz-moderation"],
+            })
+        );
+    }
+
+    #[test]
     fn session_send_maps_every_flag_onto_the_wire() {
         let (command, args) = wire_of(&[
             "berdctl",

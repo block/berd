@@ -166,7 +166,10 @@ fn validate_field(group: &str, action: &str, field: &Field, errors: &mut Vec<Str
             }
         }
     }
-    if !matches!(field.kind.as_str(), "string" | "number" | "boolean") {
+    if !matches!(
+        field.kind.as_str(),
+        "string" | "string_array" | "number" | "boolean"
+    ) {
         errors.push(format!(
             "`{group}.{action}.{name}` has wire kind `{}`, which the generated \
              CLI cannot express yet",
@@ -189,7 +192,7 @@ mod tests {
     use crate::contract::Contract;
 
     const MINIMAL_API: &str = r#"{
-        "protocolVersion": 3,
+        "protocolVersion": 4,
         "groups": {
             "sessions": {
                 "description": "Manage the user's chat sessions.",
@@ -371,7 +374,7 @@ mod tests {
 
     #[test]
     fn mismatched_protocol_version_is_reported() {
-        let api = MINIMAL_API.replace("\"protocolVersion\": 3", "\"protocolVersion\": 999");
+        let api = MINIMAL_API.replace("\"protocolVersion\": 4", "\"protocolVersion\": 999");
         let errors = errors_for(&api, MINIMAL_SURFACE);
         assert_one_error_containing(&errors, "protocolVersion 999 does not match");
     }
