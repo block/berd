@@ -13,8 +13,9 @@ const mockCheckAllProviderStatus = vi.mocked(checkAllProviderStatus);
 function setCachedModels(
   providerId: string,
   models: string[],
-  fetchedAt = Date.now(),
+  options: { fetchedAt?: number; proven?: boolean } = {},
 ) {
+  const { fetchedAt = Date.now(), proven = true } = options;
   useProviderModelCacheStore.setState({
     providers: new Map([
       [
@@ -22,6 +23,7 @@ function setCachedModels(
         {
           providerId,
           models: models.map((id) => ({ id, name: id, providerId })),
+          ...(proven ? { provenModelIds: models } : {}),
           fetchedAt,
         },
       ],
@@ -227,7 +229,7 @@ describe("resolveSupportedSessionModelPreference", () => {
   });
 
   it("preserves a selected model while a populated cache is provisional", async () => {
-    setCachedModels("openai", ["gpt-5.3"], 0);
+    setCachedModels("openai", ["gpt-5.3"], { proven: false });
 
     await expect(
       resolveSupportedSessionModelPreference("openai", "gpt-5.4"),

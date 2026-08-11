@@ -60,6 +60,7 @@ describe("useNewSessionTarget", () => {
                 providerId: "anthropic",
               },
             ],
+            provenModelIds: ["claude-sonnet-4"],
             fetchedAt: Date.now(),
           },
         ],
