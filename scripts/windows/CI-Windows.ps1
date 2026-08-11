@@ -19,7 +19,7 @@ Assert-MsvcEnvironment
 Set-Location (Join-Path (Get-BerdRepoRoot) "src-tauri")
 
 $env:CARGO_TARGET_DIR = Get-TauriCargoTargetDir
-$env:TAURI_CONFIG = '{"bundle":{"externalBin":[]}}'
+$env:TAURI_CONFIG = '{"bundle":{"externalBin":[],"resources":[]}}'
 # Opt the managed-Node native gates in: they download and execute the real
 # pinned Node ZIP and launch a managed bridge, which only a native Windows host
 # can do. Off this variable the gates skip.

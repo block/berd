@@ -11,7 +11,7 @@ import { buildApiSurfaceContract } from "@/features/berdctl/commands/contract";
  * introspection this test calls (contract.ts). The berdctl crate builds its
  * clap flags and wire mapping from the embedded file at startup, so a stale
  * artifact means a published surface that lies about the wire contract. CI
- * holds the same property byte-exactly (scripts/buildkite/js-checks.sh).
+ * holds the same property byte-exactly with `just berdctl-contract-check`.
  */
 describe("berdctl API surface contract", () => {
   it("checked-in api-surface.json is fresh (run `pnpm generate:berdctl-contract`)", () => {

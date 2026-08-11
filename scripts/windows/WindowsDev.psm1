@@ -638,16 +638,6 @@ function Get-TauriCargoTargetDir {
     return (Join-Path (Get-LocalAppDataRoot) "berd-tauri\cargo-target")
 }
 
-# Checkout-relative directory the Windows bundle lane copies the verified NSIS
-# installer into. The Tauri target dir lives outside the checkout
-# (LOCALAPPDATA\berd-tauri\cargo-target by default), so Buildkite's
-# checkout-relative `artifact_paths` cannot see the installer where it is built.
-# Copying it here — and pointing artifact_paths at this dir — gives the lane a
-# stable, in-checkout artifact location to export.
-function Get-WindowsBundleArtifactDir {
-    return (Join-Path (Get-BerdRepoRoot) "artifacts\windows-bundle")
-}
-
 function Read-JsonFile {
     param([Parameter(Mandatory = $true)][string]$Path)
     return (Get-Content -Raw -Path $Path | ConvertFrom-Json)

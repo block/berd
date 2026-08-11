@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Build the Berd macOS Tauri bundle for release. Leaves an unsigned
-# .app at release/macos/ for the squareup/apple-codesign plugin to sign,
-# notarize, staple, and package in its post-command hook.
+# .app at release/macos/ for the caller's signing and packaging flow.
 #
 # Inputs (uppercase environment variables supplied by the CI adapter):
 #   - version:        semver for the release (e.g. 0.2.0)
@@ -76,8 +75,8 @@ if [[ -n "${BERD_RELEASE_CHANNELS_FILE:-}" ]] && jq -e '.channels[] | select(.id
 fi
 
 # Build kind controls product customization; updater channel is an independent,
-# explicit trust contract. The internal Buildkite pipeline selects `internal`,
-# the public GitHub workflow selects `public`, and custom/local builds select
+# explicit trust contract. Distribution orchestration selects `internal`, the
+# public GitHub workflow selects `public`, and custom/local builds select
 # `disabled`. Never infer an enabled channel from the CI system or silently fall
 # back between public and internal keys/endpoints.
 BERD_RELEASE_CHANNEL="$(trim_whitespace "${BERD_RELEASE_CHANNEL:-}")"
@@ -92,11 +91,6 @@ if [[ "$BUILD_KIND" == "custom" && "$BERD_RELEASE_CHANNEL" != "disabled" ]]; the
   exit 1
 fi
 export BERD_RELEASE_CHANNEL
-# Keep the existing internal Buildkite secret usable while the secret name is
-# migrated; all downstream code sees only the BERD_* contract.
-if [[ -z "${BERD_RELEASE_CHANNELS_FILE:-}" && "$BERD_RELEASE_CHANNEL" == "internal" && -z "${BERD_UPDATER_PUBLIC_KEY:-}" && -n "${GOOSE2_UPDATER_PUBLIC_KEY:-}" ]]; then
-  export BERD_UPDATER_PUBLIC_KEY="$GOOSE2_UPDATER_PUBLIC_KEY"
-fi
 
 # Cargo feature list + VITE_* env applied to the build below. Keep official
 # build defaults encoded here; custom_vite_env may override only non-release-

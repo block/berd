@@ -36,11 +36,7 @@ Requirements:
 Official and custom release builds bundle `builderbot` by default. Block-only
 agents are supplied by the private distribution rather than this public catalog.
 Either build kind can override its default by setting `CUSTOM_BUNDLED_AGENTS`.
-In the custom pipeline, put it in
-the **Custom build env overrides** JSON field in
-`.buildkite/custom-release.yml`. Provide a comma-separated list of basenames
-without the `.md` extension. For local runs, set the environment variable
-directly.
+Provide a comma-separated list of basenames without the `.md` extension.
 
 ```json
 {"CUSTOM_BUNDLED_AGENTS":"support-bot,oncall-captain"}

@@ -64,8 +64,7 @@ sync-schema:
 # Install dependencies and build workspace packages.
 [unix]
 _setup-dev-deps:
-    # Buildkite release jobs call `just setup` directly rather than pnpm_install.
-    . ./scripts/npm-registry.sh && configure_buildkite_npm_registry && pnpm install
+    pnpm install
     cd sdk && pnpm build
 
 [unix]
@@ -162,7 +161,7 @@ tauri-fmt-check:
 
 [unix]
 _tauri-cargo-unix *ARGS:
-    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && cd src-tauri && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo {{ ARGS }}
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && cd src-tauri && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" TAURI_CONFIG='{"bundle":{"externalBin":[],"resources":[]}}' cargo {{ ARGS }}
 
 [windows]
 _tauri-cargo-windows *ARGS:
@@ -174,7 +173,7 @@ _tauri-cargo-windows *ARGS:
     Assert-MsvcEnvironment
     Set-Location (Join-Path (Get-BerdRepoRoot) "src-tauri")
     $env:CARGO_TARGET_DIR = Get-TauriCargoTargetDir
-    $env:TAURI_CONFIG = '{"bundle":{"externalBin":[]}}'
+    $env:TAURI_CONFIG = '{"bundle":{"externalBin":[],"resources":[]}}'
     cargo {{ ARGS }}
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

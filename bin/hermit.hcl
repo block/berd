@@ -1,2 +1,1 @@
-github-token-auth {
-}
+manage-git = true

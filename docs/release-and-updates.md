@@ -52,6 +52,18 @@ gh workflow run public-release.yml \
 
 Change `--repo` to `block/berd` after the repository transfer. Recovery verifies the selected tag and fills only missing assets whose existing counterparts are byte-identical; it cannot overwrite different immutable bytes.
 
+## Downstream distributions
+
+Berd keeps build and bundle mechanics CI-neutral. A downstream distribution
+checks out a reviewed Berd revision, supplies its updater and runtime
+configuration, invokes the normal builders, then owns signing and publication.
+
+Custom macOS builds use `BUILD_KIND=custom` with
+`BERD_RELEASE_CHANNEL=disabled`. `scripts/release/build-macos.sh` validates their
+configuration, stamps the suffixed version, stages resources, and builds the
+unsigned app; distribution-specific orchestration and artifact destinations do
+not live in this repository.
+
 ## Repository transfer
 
 When the repository moves from `squareup/berd` to `block/berd`:

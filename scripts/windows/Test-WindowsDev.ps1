@@ -516,22 +516,6 @@ try {
     Assert-Equal "stage-sidecar wrapper has no stale LASTEXITCODE guard" `
         ($stageWrapper -match '\$LASTEXITCODE -ne 0') $false
 
-    # ── Buildkite lane uses the public bundle recipe ─────────────
-    # CI owns orchestration and artifact export, but bundling must enter through
-    # the same just recipe developers run. A direct Bundle-Windows.ps1 call
-    # would create a second blessed entry point and permit silent drift.
-    $bkLane = Get-Content -Raw (Join-Path (Get-BerdRepoRoot) "scripts/buildkite/windows-bundle.ps1")
-    Assert-Equal "lane runs Test helper via native child process" `
-        ($bkLane -match "Invoke-WindowsChildScript[^\r\n]*Test-WindowsDev\.ps1") $true
-    Assert-Equal "lane runs Setup via native child process" `
-        ($bkLane -match "Invoke-WindowsChildScript[^\r\n]*Setup-Windows\.ps1") $true
-    Assert-Equal "lane bundles through the public just recipe" `
-        ($bkLane -match 'Invoke-CheckedCommand[^\r\n]*@\("bundle-windows"\)') $true
-    Assert-Equal "lane does not call Bundle-Windows.ps1 directly" `
-        ($bkLane -match "Invoke-WindowsChildScript[^\r\n]*Bundle-Windows\.ps1") $false
-    Assert-Equal "lane no longer guards on stale LASTEXITCODE" `
-        ($bkLane -match '\$LASTEXITCODE -ne 0') $false
-
     # Invoke-WindowsChildScript reaches past a successful child and throws on a
     # failing one, using the current PowerShell host to run each child natively.
     $childDir = Join-Path $temp "child-scripts"
@@ -594,27 +578,6 @@ try {
     # policy, so the flag is conditioned on the powershell.exe host name.
     Assert-Equal "child driver conditions ExecutionPolicy Bypass on powershell.exe host" `
         ($moduleSource -match "(?s)GetFileNameWithoutExtension\(\`$shell\)\s*-ieq\s*`"powershell`".*?-ExecutionPolicy`",\s*`"Bypass`"") $true
-
-    # ── Artifact contract: installer is exported to a checkout-relative dir ──
-    # The Tauri target dir is outside the checkout, so the lane must copy the
-    # verified installer into Get-WindowsBundleArtifactDir and the pipeline must
-    # export that same path; otherwise artifact upload matches nothing.
-    $artifactDir = Get-WindowsBundleArtifactDir
-    Assert-Equal "bundle artifact dir is under the checkout" `
-        ($artifactDir.StartsWith((Get-BerdRepoRoot))) $true
-    $bundleScript = Get-Content -Raw (Join-Path (Get-BerdRepoRoot) "scripts/buildkite/windows-bundle.ps1")
-    Assert-Equal "bundle script copies the installer into the artifact dir" `
-        ($bundleScript -match "Get-WindowsBundleArtifactDir" -and $bundleScript -match "Copy-Item") $true
-    Assert-Equal "bundle script asserts the exported installer exists" `
-        ($bundleScript -match 'Test-Path \$exportedInstaller') $true
-    # The wrapper prepares a checkout-relative artifact for a future Windows
-    # Buildkite step. The pipeline intentionally does not schedule that step
-    # until the Windows agent and release lane are added as the final phase.
-    $pipeline = Get-Content -Raw (Join-Path (Get-BerdRepoRoot) ".buildkite/pipeline.yml")
-    Assert-Equal "pipeline does not schedule the deferred Windows bundle lane" `
-        ($pipeline -match 'key:\s*"windows-bundle"') $false
-    Assert-Equal "pipeline no longer uses the unmatched target-dir glob" `
-        ($pipeline -match 'release/bundle/nsis/\*\.exe') $false
 
     # ── Cleanup containment rules (Assert-SafeCleanupPath / Normalize-FullPath) ──
     # These guard Remove-Item -Recurse in Cleanup-Windows.ps1; run them against

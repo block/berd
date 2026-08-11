@@ -11,7 +11,7 @@
 //
 //   pnpm generate:berdctl-contract
 //
-// CI regenerates and fails on any diff (scripts/buildkite/js-checks.sh); the
+// CI regenerates and fails on any diff (`just berdctl-contract-check`); the
 // vitest freshness tests (apiSurface.test.ts / cliSurface.test.ts) hold the
 // same property locally. All introspection logic lives in
 // src/features/berdctl/commands/contract.ts — shared with those tests so the

@@ -45,17 +45,20 @@ used by `sq`'s cached `--describe-commands` discovery path. Review and clean up
 
 ## Automated Workflows
 
-This repo uses Buildkite for CI and GitHub Actions for the tag-driven Homebrew
-update:
+bb-cli checks are excluded from the root GitHub Actions workflow ahead of
+removing the bundled CLI. Run them manually before release:
 
-1. Buildkite `BuilderBot CLI lint`
-   Runs `cd bb-cli && TEST_RUNNER=lint script/ci`.
-2. Buildkite `BuilderBot CLI tests`
-   Runs `cd bb-cli && TEST_RUNNER=test script/ci`.
-3. GitHub Actions `Bump Formula`
-   Runs on bare semver tags and `workflow_dispatch` from the root workflow.
-   Validates that the tag still matches `bb-cli/Cargo.toml`, then dispatches
-   `bump_formula` to `squareup/homebrew-formulas`.
+```bash
+cd bb-cli
+source ./bin/activate-hermit
+just ci-lint
+just ci-test
+```
+
+GitHub Actions `Bump Formula` runs on bare semver tags and `workflow_dispatch`
+from the root workflow. It validates that the tag still matches
+`bb-cli/Cargo.toml`, then dispatches `bump_formula` to
+`squareup/homebrew-formulas`.
 
 ## One-Time GitHub Setup
 

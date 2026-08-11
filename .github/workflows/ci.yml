@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "true"
+  FORCE_COLOR: "1"
+
+jobs:
+  frontend:
+    name: Frontend checks and unit tests
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build vendored SDK
+        run: pnpm --filter @aaif/goose-sdk build
+
+      - name: Run frontend checks
+        run: just check
+
+      - name: Run unit tests
+        run: just test
+
+      - name: Run release script tests
+        run: just release-scripts-test
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-test-results
+          path: |
+            coverage/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  rust:
+    name: Tauri Rust checks
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+
+      - name: Check Rust formatting
+        run: just tauri-fmt-check
+
+      - name: Check Tauri and Rust crates
+        run: just tauri-check
+
+      - name: Run Rust tests
+        run: just tauri-test
+
+      - name: Run clippy
+        run: just clippy
+
+  transcript-virtualization:
+    name: Transcript virtualization
+    needs: frontend
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build vendored SDK
+        run: pnpm --filter @aaif/goose-sdk build
+
+      - name: Install Playwright browser
+        run: pnpm exec playwright install chromium
+
+      - name: Run transcript virtualization tests
+        run: pnpm test:transcript-virtualization:ci
+
+      - name: Upload Playwright results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: transcript-virtualization-results
+          path: |
+            tests/transcript-virtualization/transcript-playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  build:
+    name: Frontend build smoke
+    needs: frontend
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build vendored SDK
+        run: pnpm --filter @aaif/goose-sdk build
+
+      - name: Build frontend
+        run: just build
+
+      - name: Upload frontend build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: frontend-build
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7

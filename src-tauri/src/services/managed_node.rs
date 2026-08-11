@@ -1895,7 +1895,7 @@ mod tests {
     // These tests download and execute the real pinned Node runtime. They
     // compile on every host (so the mac/Linux CI lanes type-check them) but
     // only execute on native Windows when opted in via `BERD_WS2_NATIVE_GATE=1`
-    // — the Buildkite `windows-native` lane sets that variable. Off Windows, or
+    // — the native Windows CI gate sets that variable. Off Windows, or
     // without the variable, they skip immediately. They cover the audit's
     // minimum native matrix items 2-3: exact `node.exe --version`, npm
     // execution through the layout's npm command, the fast path, and repair

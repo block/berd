@@ -2022,7 +2022,7 @@ mod tests {
     // GOOSE_SEARCH_PATHS shim directory goosed prepends. This compiles on every
     // host (so the mac/Linux CI lanes type-check it) but only executes on
     // native Windows when opted in via `BERD_WS2_NATIVE_GATE=1` (set by the
-    // Buildkite `windows-native` lane). `node.exe` and the `.cmd` launcher are
+    // native Windows CI gate). `node.exe` and the `.cmd` launcher are
     // not runnable on the Unix host, so off Windows it skips immediately.
     // Covers the audit's native matrix item 5: bridge install, Windows launcher
     // generation, and bare-name launch through goosed's search path.

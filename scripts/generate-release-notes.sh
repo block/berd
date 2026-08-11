@@ -104,10 +104,9 @@ fi
 
 echo "Publishing release notes for ${TO_REF}..." >&2
 
-# The release body created by our automation (publish-release.sh) carries
-# build metadata (Buildkite build URL, app commit, pinned backend commit).
-# Editing the release replaces the whole body, so preserve the existing body
-# by appending it after the new notes.
+# The release body may carry provenance from release automation. Editing the
+# release replaces the whole body, so preserve the existing body by appending it
+# after the new notes.
 EXISTING_BODY="$(gh release view "$TO_REF" --repo "$RELEASE_REPOSITORY" --json body -q .body 2>/dev/null || true)"
 if [[ -n "$EXISTING_BODY" ]]; then
   NOTES="${NOTES}
@@ -132,8 +131,7 @@ Use the \`gh\` CLI to set the notes on the GitHub release for tag \`${TO_REF}\`:
 3. Confirm the update succeeded and print the release URL.
 
 Use the release notes below verbatim — do not edit, reformat, or summarize
-them. They already include the build metadata from the existing release body
-(Buildkite build, app commit, pinned backend commit) at the end; keep it.
+them. They already include any existing release provenance at the end; keep it.
 
 ---BEGIN RELEASE NOTES---
 ${NOTES}

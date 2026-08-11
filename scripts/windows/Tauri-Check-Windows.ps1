@@ -12,7 +12,7 @@ Assert-MsvcEnvironment
 Set-Location (Join-Path (Get-BerdRepoRoot) "src-tauri")
 
 $env:CARGO_TARGET_DIR = Get-TauriCargoTargetDir
-$env:TAURI_CONFIG = '{"bundle":{"externalBin":[]}}'
+$env:TAURI_CONFIG = '{"bundle":{"externalBin":[],"resources":[]}}'
 Write-WindowsDevInfo "Using Tauri Cargo target dir: $env:CARGO_TARGET_DIR"
 
 Invoke-CheckedCommand -FilePath "cargo" -ArgumentList @("check") -Label "cargo check"

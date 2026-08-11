@@ -35,56 +35,6 @@ afterEach(async () => {
   );
 });
 
-describe("Buildkite registry setup", () => {
-  const registry =
-    "https://global.block-artifacts.com/artifactory/api/npm/square-npm/";
-
-  async function runSetupDeps(buildkite, registryEnv = {}) {
-    const dir = await tempDir();
-    const bin = join(dir, "bin");
-    const capture = join(dir, "pnpm-env");
-    await mkdir(bin);
-    const pnpm = join(bin, "pnpm");
-    const dollar = "$";
-    await writeFile(
-      pnpm,
-      `#!/bin/sh\nprintf '%s|%s|%s|%s\\n' "${dollar}1" "${dollar}{npm_config_registry-}" "${dollar}{COREPACK_NPM_REGISTRY-}" "${dollar}{COREPACK_INTEGRITY_KEYS-}" >> "${dollar}PNPM_CAPTURE"\n`,
-    );
-    await chmod(pnpm, 0o755);
-    const result = run("just", ["--shell", "/bin/sh", "_setup-dev-deps"], {
-      BUILDKITE: buildkite ? "1" : "",
-      PNPM_CAPTURE: capture,
-      ...registryEnv,
-      PATH: `${bin}:${process.env.PATH}`,
-    });
-    return { result, capture };
-  }
-
-  it("uses the real just setup dependency path under POSIX sh before every Buildkite install", async () => {
-    const { result, capture } = await runSetupDeps(true);
-    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-    expect(result.stderr).not.toContain("[[: not found");
-    expect((await readFile(capture, "utf8")).trim().split("\n")).toContain(
-      `install|${registry}|${registry}|0`,
-    );
-  });
-
-  it("leaves public-clone registry defaults untouched outside Buildkite", async () => {
-    const inheritedRegistry = "https://public.example.test/npm/";
-    const inheritedCorepackRegistry = "https://public.example.test/corepack/";
-    const { result, capture } = await runSetupDeps(false, {
-      npm_config_registry: inheritedRegistry,
-      COREPACK_NPM_REGISTRY: inheritedCorepackRegistry,
-      COREPACK_INTEGRITY_KEYS: "inherited-keys",
-    });
-    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
-    expect(result.stderr).not.toContain("[[: not found");
-    expect((await readFile(capture, "utf8")).trim().split("\n")).toContain(
-      `install|${inheritedRegistry}|${inheritedCorepackRegistry}|inherited-keys`,
-    );
-  });
-});
-
 describe("Docker Linux registry setup", () => {
   it("forwards the host npm registry when Docker replaces HOME", async () => {
     const dir = await tempDir();
@@ -408,9 +358,6 @@ describe("build-macos release resource staging", () => {
     expect(script).toContain('select(.id == "beta")');
     expect(script).toContain(
       "beta_linear_label_id must be a Linear label UUID when the release catalog contains Beta",
-    );
-    expect(script).toContain(
-      `if [[ -z "\${BERD_RELEASE_CHANNELS_FILE:-}" && "$BERD_RELEASE_CHANNEL" == "internal"`,
     );
     expect(script).toContain(
       'VITE_BETA_LINEAR_LABEL_ID="$VITE_BETA_LINEAR_LABEL_ID_VALUE"',
