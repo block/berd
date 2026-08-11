@@ -3518,6 +3518,8 @@ export function AppShell({
       sessionId: string,
       cleanupPolicy: ArchiveCleanupPolicy,
       deadlineMs?: number,
+      fallbackSession?: ChatSession,
+      revalidateBeforeMutation?: () => Promise<boolean>,
     ) => {
       let releaseArchiveQueue!: () => void;
       const previousArchive = sessionArchiveQueueRef.current;
@@ -3528,8 +3530,8 @@ export function AppShell({
 
       try {
         const sessionStore = useChatSessionStore.getState();
-        const session = sessionStore.getSession(sessionId);
-        if (!session) {
+        const session = sessionStore.getSession(sessionId) ?? fallbackSession;
+        if (!session || session.id !== sessionId) {
           return { ok: false as const, reason: "session_not_found" as const };
         }
 
@@ -3592,9 +3594,17 @@ export function AppShell({
         if (preArchiveInterruption) {
           return { ok: false as const, reason: preArchiveInterruption };
         }
+        if (revalidateBeforeMutation && !(await revalidateBeforeMutation())) {
+          return {
+            ok: false as const,
+            reason: "blocked_unsaved_changes" as const,
+          };
+        }
 
         try {
-          await useChatSessionStore.getState().archiveSession(sessionId);
+          await useChatSessionStore
+            .getState()
+            .archiveSession(sessionId, fallbackSession);
           const homeWidgetState = useHomeWidgetStore.getState();
           const pinnedWidget = homeWidgetState.instances.find(
             (instance) =>
@@ -3679,7 +3689,8 @@ export function AppShell({
   );
 
   const handleAutoArchiveChat = useCallback(
-    (sessionId: string) => archiveChat(sessionId, "reject"),
+    (session: ChatSession, revalidate: () => Promise<boolean>) =>
+      archiveChat(session.id, "reject", undefined, session, revalidate),
     [archiveChat],
   );
   useAutoArchiveSessions(handleAutoArchiveChat);

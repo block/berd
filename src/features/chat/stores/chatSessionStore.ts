@@ -229,7 +229,7 @@ interface ChatSessionStoreActions {
    * rethrown. App-owned cleanup/navigation belongs in AppShell.
    * Throws {@link SessionNotFoundError} when the id matches no session.
    */
-  archiveSession: (id: string) => Promise<void>;
+  archiveSession: (id: string, fallbackSession?: ChatSession) => Promise<void>;
   /**
    * Unarchive a session optimistically (clears `archivedAt`), then awaits the
    * backend call. On backend failure `archivedAt` rolls back and the error is
@@ -348,7 +348,12 @@ function recordArchiveMutationSuccess(
 
   if (!currentMutation) {
     if (!state.sessions.some((candidate) => candidate.id === sessionId)) {
-      return state;
+      return {
+        archiveMutationBySessionId: {
+          ...state.archiveMutationBySessionId,
+          [sessionId]: completedSucceededMutation,
+        },
+      };
     }
 
     return {
@@ -971,9 +976,12 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     releaseWindowedSession(id);
   },
 
-  archiveSession: async (id) => {
-    const session = get().sessions.find((candidate) => candidate.id === id);
-    if (!session) {
+  archiveSession: async (id, fallbackSession) => {
+    const storedSession = get().sessions.find(
+      (candidate) => candidate.id === id,
+    );
+    const session = storedSession ?? fallbackSession;
+    if (!session || session.id !== id) {
       throw new SessionNotFoundError(id);
     }
     const optimisticArchivedAt = new Date().toISOString();

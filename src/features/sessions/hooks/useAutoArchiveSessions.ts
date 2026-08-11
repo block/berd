@@ -1,16 +1,23 @@
 import { useEffect } from "react";
-import {
-  AUTO_ARCHIVE_CHANGED_EVENT,
-  getAutoArchiveAfterMs,
-} from "@/features/settings/lib/autoArchivePreference";
-import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
-import { getLayout, HOME_LAYOUT_ID } from "@/features/layout/api/layout";
+import { acpSessionToChatSession } from "@/features/chat/lib/acpSessionMapping";
+import { useChatStore } from "@/features/chat/stores/chatStore";
+import { sessionActivityAt } from "@/features/chat/lib/sessionActivity";
 import { loadAllSessionsForWorkspaceCleanup } from "@/features/chat/lib/sessionWorkspaceCleanup";
+import { acpGetSessionInfo } from "@/shared/api/acp";
 import {
   type ChatSession,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
-import { getAutoArchiveSessionCandidates } from "../lib/autoArchiveSessions";
+import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
+import { getLayout, HOME_LAYOUT_ID } from "@/features/layout/api/layout";
+import {
+  AUTO_ARCHIVE_CHANGED_EVENT,
+  getAutoArchiveAfterMs,
+} from "@/features/settings/lib/autoArchivePreference";
+import {
+  getAutoArchiveSessionCandidates,
+  getPinnedChatSessionIds,
+} from "../lib/autoArchiveSessions";
 
 const AUTO_ARCHIVE_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -18,12 +25,97 @@ interface AutoArchiveResult {
   ok: boolean;
 }
 
+type RevalidateAutoArchive = () => Promise<boolean>;
+
 interface RunAutoArchiveSweepOptions {
-  archiveSession: (sessionId: string) => Promise<AutoArchiveResult>;
+  archiveSession: (
+    session: ChatSession,
+    revalidate: RevalidateAutoArchive,
+  ) => Promise<AutoArchiveResult>;
   nowMs?: number;
 }
 
+interface PersistedChatPin {
+  type: "chatPin";
+  state: { sessionId: string };
+}
+
 let sweepPromise: Promise<void> | null = null;
+
+function persistedChatPins(
+  items: Awaited<ReturnType<typeof getLayout>>["items"],
+): PersistedChatPin[] {
+  return items
+    .filter((item) => item.kind === "session")
+    .map((item) => ({ type: "chatPin", state: { sessionId: item.targetId } }));
+}
+
+function hasUnsentSessionInput(sessionId: string): boolean {
+  const chatState = useChatStore.getState();
+  return (
+    chatState.nonEmptyDraftSessionIds.has(sessionId) ||
+    (chatState.queuedMessageBySession[sessionId]?.length ?? 0) > 0 ||
+    (chatState.skillDraftsBySession[sessionId]?.length ?? 0) > 0 ||
+    (chatState.draftAttachmentsBySession[sessionId]?.length ?? 0) > 0
+  );
+}
+
+async function revalidateAutoArchiveCandidate(
+  originalSession: ChatSession,
+): Promise<ChatSession | null> {
+  const afterMs = getAutoArchiveAfterMs();
+  if (afterMs === null) return null;
+
+  const sessionStore = useChatSessionStore.getState();
+  if (sessionStore.activeSessionId === originalSession.id) return null;
+  if (hasUnsentSessionInput(originalSession.id)) return null;
+
+  const sessionInfo = await acpGetSessionInfo(originalSession.id);
+  const refreshedSession = sessionInfo
+    ? acpSessionToChatSession(sessionInfo)
+    : undefined;
+  const localSession = sessionStore.getSession(originalSession.id);
+  const latestSession = localSession
+    ? ({ ...refreshedSession, ...localSession } satisfies ChatSession)
+    : refreshedSession;
+  if (!latestSession || latestSession.archivedAt) return null;
+
+  const activityMs = Math.max(
+    ...[refreshedSession, localSession]
+      .filter((session): session is ChatSession => session !== undefined)
+      .map((session) => Date.parse(sessionActivityAt(session)))
+      .filter(Number.isFinite),
+  );
+  if (
+    !Number.isFinite(activityMs) ||
+    activityMs > Date.now() - afterMs ||
+    getAutoArchiveAfterMs() === null
+  ) {
+    return null;
+  }
+
+  // Re-read both durable and optimistic pin state immediately before the
+  // mutation. This closes the window where a user pins a later candidate while
+  // an earlier archive transaction is still running.
+  const latestHomeLayout = await getLayout(HOME_LAYOUT_ID);
+  if (getAutoArchiveAfterMs() === null) return null;
+  const pinnedSessionIds = getPinnedChatSessionIds([
+    ...persistedChatPins(latestHomeLayout.items),
+    ...useHomeWidgetStore.getState().instances,
+  ]);
+  if (pinnedSessionIds.has(originalSession.id)) return null;
+
+  const latestSessionStore = useChatSessionStore.getState();
+  if (
+    latestSessionStore.activeSessionId === originalSession.id ||
+    hasUnsentSessionInput(originalSession.id) ||
+    getAutoArchiveAfterMs() === null
+  ) {
+    return null;
+  }
+
+  return latestSessionStore.getSession(originalSession.id) ?? latestSession;
+}
 
 export async function runAutoArchiveSweep({
   archiveSession,
@@ -39,15 +131,9 @@ export async function runAutoArchiveSweep({
     loadAllSessionsForWorkspaceCleanup(),
     getLayout(HOME_LAYOUT_ID),
   ]);
-  const persistedPinWidgets = homeLayout.items
-    .filter((item) => item.kind === "session")
-    .map((item) => ({ type: "chatPin", state: { sessionId: item.targetId } }));
-  const homeWidgets = [
-    ...persistedPinWidgets,
-    ...useHomeWidgetStore.getState().instances,
-  ];
+  if (getAutoArchiveAfterMs() === null) return;
+
   const sessionStore = useChatSessionStore.getState();
-  const activeSessionId = sessionStore.activeSessionId;
   const localSessionsById = new Map(
     sessionStore.sessions.map((session) => [session.id, session]),
   );
@@ -58,27 +144,32 @@ export async function runAutoArchiveSweep({
         ? ({ ...session, ...localSession } satisfies ChatSession)
         : session;
     }),
-    homeWidgets,
+    homeWidgets: [
+      ...persistedChatPins(homeLayout.items),
+      ...useHomeWidgetStore.getState().instances,
+    ],
     afterMs,
     nowMs,
-  }).filter((session) => session.id !== activeSessionId);
+  });
 
-  // Use the same serialized archive transaction as manual actions. The
-  // noninteractive policy safely skips running chats and workspaces that would
-  // require confirmation rather than interrupting work or discarding files.
-  for (const session of candidates) {
-    // The complete ACP list can include a paged-out session that is not yet in
-    // the renderer store. Add its metadata so the shared archive transaction
-    // can inspect and mutate it exactly like a currently visible chat.
-    if (!useChatSessionStore.getState().getSession(session.id)) {
-      useChatSessionStore.getState().addSession(session);
-    }
-    await archiveSession(session.id);
+  // Use the same serialized archive transaction as manual actions. Revalidate
+  // every safety invariant at each turn because earlier candidates can spend
+  // time in Git inspection and cleanup while the user keeps interacting.
+  for (const candidate of candidates) {
+    const currentSession = await revalidateAutoArchiveCandidate(candidate);
+    if (!currentSession) continue;
+    await archiveSession(currentSession, async () => {
+      const revalidated = await revalidateAutoArchiveCandidate(currentSession);
+      return revalidated !== null;
+    });
   }
 }
 
 export function useAutoArchiveSessions(
-  archiveSession: (sessionId: string) => Promise<AutoArchiveResult>,
+  archiveSession: (
+    session: ChatSession,
+    revalidate: RevalidateAutoArchive,
+  ) => Promise<AutoArchiveResult>,
 ): void {
   useEffect(() => {
     let cancelled = false;
