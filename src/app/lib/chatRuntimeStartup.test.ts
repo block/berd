@@ -11,7 +11,10 @@ const mockAgentState = vi.hoisted(() => ({
   providers: [] as Array<{ id: string; label?: string }>,
 }));
 const mockModelCacheState = vi.hoisted(() => ({
-  providers: new Map<string, { models: Array<Record<string, unknown>> }>(),
+  providers: new Map<
+    string,
+    { models: Array<Record<string, unknown>>; provenModelIds?: string[] }
+  >(),
   runtimeManagedProviderIds: new Set<string>(),
 }));
 
@@ -255,7 +258,9 @@ describe("runChatRuntimeStartup", () => {
       },
     ];
     mockModelCacheState.runtimeManagedProviderIds = new Set(["claude-acp"]);
-    mockModelCacheState.providers = new Map([["claude-acp", { models: [] }]]);
+    mockModelCacheState.providers = new Map([
+      ["claude-acp", { models: [], provenModelIds: [] }],
+    ]);
 
     const { runChatRuntimeStartup } = await import("./chatRuntimeStartup");
     await runChatRuntimeStartup();

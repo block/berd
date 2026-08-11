@@ -454,6 +454,7 @@ export function GlobalComposerPill({
     pickerAgents,
     availableModels,
     getModelsForAgent,
+    getProvenModelsForAgent,
     isModelInventoryAuthoritative,
     modelsLoading,
     modelStatusMessage,
@@ -503,12 +504,14 @@ export function GlobalComposerPill({
         providers,
         models: getModelsForAgent("goose"),
         getModelsForHarness: getModelsForAgent,
+        getProvenModelsForHarness: getProvenModelsForAgent,
         isModelInventoryAuthoritative,
         catalogEntries,
       }),
     [
       catalogEntries,
       getModelsForAgent,
+      getProvenModelsForAgent,
       isModelInventoryAuthoritative,
       providers,
       selectedPersona,
@@ -667,11 +670,26 @@ export function GlobalComposerPill({
   }, [currentExecutionTarget]);
   const hasLocalExecutionOverride =
     providerOverride !== null || modelOverride !== null;
+  const personaSelectionOverridden =
+    personaOverrideUserOverrideForRef.current === selectedPersonaId;
+  // A persona target is the configuration sent to the runtime. Materialize the
+  // picker from that exact target: a provider-only target deliberately has no
+  // model selection and must not borrow a default model for display.
+  const personaModelSelection =
+    !personaSelectionOverridden && personaTarget?.modelId
+      ? {
+          modelProviderId: personaTarget.modelProviderId,
+          modelId: personaTarget.modelId,
+          modelName: personaTarget.modelName,
+        }
+      : null;
   const effectiveModelSelection =
-    modelOverride ??
-    (!hasLocalExecutionOverride && currentExecutionTarget !== undefined
-      ? controlledModelSelection
-      : defaultModelSelection);
+    !personaSelectionOverridden && personaTarget
+      ? personaModelSelection
+      : (modelOverride ??
+        (!hasLocalExecutionOverride && currentExecutionTarget !== undefined
+          ? controlledModelSelection
+          : defaultModelSelection));
   const localExecutionTarget = useMemo(
     () =>
       hasLocalExecutionOverride || currentExecutionTarget === undefined
@@ -689,8 +707,6 @@ export function GlobalComposerPill({
       selectedProviderForPicker,
     ],
   );
-  const personaSelectionOverridden =
-    personaOverrideUserOverrideForRef.current === selectedPersonaId;
   const effectiveExecutionTarget =
     !personaSelectionOverridden && personaTarget
       ? personaTarget
@@ -1512,6 +1528,9 @@ export function GlobalComposerPill({
             availableModels={availableModels}
             modelsLoading={modelsLoading}
             modelStatusMessage={modelStatusMessage}
+            showDefaultModelInTrigger={
+              personaSelectionOverridden || !personaTarget
+            }
             onModelChange={handleModelChange}
             onOpen={handlePickerOpen}
             onOpenChange={setModelPickerOpen}

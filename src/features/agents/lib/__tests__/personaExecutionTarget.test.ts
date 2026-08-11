@@ -20,12 +20,14 @@ const catalog = (id: string, category: "agent" | "model", aliases?: string[]) =>
 const context = (
   models: Array<{ id: string; providerId?: string; displayName?: string }> = [],
   authoritativeProviderIds: readonly string[] = [],
+  provenModels = models,
 ) => ({
   providers: [
     { id: "goose", label: "Goose" },
     { id: "claude-acp", label: "Claude Code" },
   ],
   models,
+  getProvenModelsForHarness: () => provenModels,
   isModelInventoryAuthoritative: (providerId: string) =>
     authoritativeProviderIds.includes(providerId),
   catalogEntries: [
@@ -53,6 +55,29 @@ describe("personaExecutionTarget", () => {
       modelProviderId: "openai",
       modelId: "gpt-5",
       modelName: "gpt-5",
+    });
+  });
+
+  it("does not treat an advisory-only display candidate as live proof", () => {
+    const persona = {
+      provider: "goose",
+      modelProviderId: "openai",
+      model: "advisory-only",
+    };
+    const targetContext = context(
+      [{ id: "advisory-only", providerId: "openai" }],
+      ["openai"],
+      [],
+    );
+
+    expect(personaExecutionTarget(persona, targetContext)).toEqual({
+      harnessId: "goose",
+      modelProviderId: "openai",
+    });
+    expect(personaTargetMigration(persona, targetContext)).toEqual({
+      provider: "goose",
+      modelProviderId: "openai",
+      model: null,
     });
   });
 

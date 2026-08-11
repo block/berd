@@ -259,10 +259,12 @@ async function startChatRuntime(
     const cachedModels = [...modelState.providers].flatMap(
       ([providerId, entry]) =>
         authoritativeProviderIds.has(providerId)
-          ? entry.models.map((model) => ({
-              ...model,
-              providerId: model.providerId ?? providerId,
-            }))
+          ? entry.models
+              .filter((model) => entry.provenModelIds?.includes(model.id))
+              .map((model) => ({
+                ...model,
+                providerId: model.providerId ?? providerId,
+              }))
           : [],
     );
     const targetContext = {

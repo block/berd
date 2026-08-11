@@ -206,6 +206,12 @@ describe("providerModelCacheStore", () => {
     expect(models.find((model) => model.id === "goose-gpt-5-6-sol")).toEqual(
       expect.objectContaining(configuredModel),
     );
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .getProvenModelsForProvider("databricks_v2")
+        .map((model) => model.id),
+    ).toEqual(["goose-gpt-5-5"]);
   });
 
   it("keeps configured models after a failed refresh and retry", async () => {

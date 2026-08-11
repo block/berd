@@ -28,6 +28,8 @@ export interface PersonaTargetContext {
   providers: readonly AvailableHarness[];
   models: readonly AvailableModel[];
   getModelsForHarness?: (harnessId: string) => readonly AvailableModel[];
+  /** Live inventory models, separate from display/advisory candidates. */
+  getProvenModelsForHarness?: (harnessId: string) => readonly AvailableModel[];
   /** Whether the model inventory for a provider/harness is authoritative. */
   isModelInventoryAuthoritative?: (providerId: string) => boolean;
   catalogEntries: ProviderCatalogEntry[];
@@ -132,6 +134,7 @@ export function personaExecutionTarget(
     providers,
     models,
     getModelsForHarness,
+    getProvenModelsForHarness,
     isModelInventoryAuthoritative,
     catalogEntries,
   }: PersonaTargetContext,
@@ -144,6 +147,8 @@ export function personaExecutionTarget(
   if (!harnessId) return undefined;
 
   const availableModels = getModelsForHarness?.(harnessId) ?? models;
+  const provenModels =
+    getProvenModelsForHarness?.(harnessId) ?? availableModels;
   const modelId = normalizeConcreteModelId(persona?.model);
   let modelProviderId = persistedModelProviderId(
     persona ?? {},
@@ -154,7 +159,7 @@ export function personaExecutionTarget(
   // Compatibility read until the migration write completes.
   if (modelId && !modelProviderId && harnessId === "goose") {
     const matches = new Set(
-      availableModels.flatMap((model) =>
+      provenModels.flatMap((model) =>
         model.id === modelId && model.providerId
           ? [canonicalModelProviderId(model.providerId, catalogEntries)]
           : [],
@@ -174,10 +179,17 @@ export function personaExecutionTarget(
         canonicalModelProviderId(model.providerId, catalogEntries) ===
           modelProviderId),
   );
+  const provenModel = provenModels.find(
+    (model) =>
+      model.id === modelId &&
+      (!model.providerId ||
+        canonicalModelProviderId(model.providerId, catalogEntries) ===
+          modelProviderId),
+  );
   const inventoryIsAuthoritative =
     isModelInventoryAuthoritative?.(modelProviderId ?? harnessId) ?? false;
 
-  if (modelId && !matchingModel && inventoryIsAuthoritative) {
+  if (modelId && !provenModel && inventoryIsAuthoritative) {
     return normalizeSessionExecutionTarget({ harnessId, modelProviderId });
   }
 

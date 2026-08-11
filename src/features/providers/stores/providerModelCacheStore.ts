@@ -13,7 +13,10 @@ const providerRefreshVersions = new Map<string, number>();
 
 export interface CachedProviderModels {
   providerId: string;
+  /** Display candidates: live models plus configured recommendations. */
   models: ModelOption[];
+  /** IDs returned by a successful live inventory response; the only proof. */
+  provenModelIds?: string[];
   fetchedAt: number;
   runtimeManaged?: boolean;
   configuredModels?: ModelOption[];
@@ -33,6 +36,7 @@ interface ProviderModelCacheActions {
     options?: { fresh?: boolean; runtimeManagedProviderIds?: Set<string> },
   ) => void;
   getModelsForProvider: (providerId: string) => ModelOption[];
+  getProvenModelsForProvider: (providerId: string) => ModelOption[];
   isModelInventoryAuthoritative: (providerId: string) => boolean;
   getError: (providerId: string) => string | null;
   refreshProviderModels: (
@@ -124,7 +128,7 @@ async function fetchProviderSupportedModels(
 export function isCachedModelInventoryAuthoritative(
   entry: CachedProviderModels | undefined,
 ): boolean {
-  return entry != null && (entry.runtimeManaged || entry.fetchedAt > 0);
+  return entry != null && Array.isArray(entry.provenModelIds);
 }
 
 function isStale(entry: CachedProviderModels | undefined): boolean {
@@ -173,7 +177,10 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
             models,
             fetchedAt: runtimeManaged || options.fresh ? Date.now() : 0,
             ...(runtimeManaged
-              ? { runtimeManaged }
+              ? {
+                  runtimeManaged,
+                  provenModelIds: models.map((model) => model.id),
+                }
               : { configuredModels: models }),
           });
           if (runtimeManaged) {
@@ -201,6 +208,13 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
 
     getModelsForProvider: (providerId) =>
       get().providers.get(providerId)?.models ?? [],
+
+    getProvenModelsForProvider: (providerId) => {
+      const entry = get().providers.get(providerId);
+      if (!entry?.provenModelIds) return [];
+      const provenIds = new Set(entry.provenModelIds);
+      return entry.models.filter((model) => provenIds.has(model.id));
+    },
 
     isModelInventoryAuthoritative: (providerId) =>
       isCachedModelInventoryAuthoritative(get().providers.get(providerId)),
@@ -283,6 +297,7 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
             providerId,
             models,
             fetchedAt: Date.now(),
+            provenModelIds: ids,
             ...(configuredModels.length > 0 ? { configuredModels } : {}),
           };
           if (versionAtStart !== refreshVersion(providerId)) {

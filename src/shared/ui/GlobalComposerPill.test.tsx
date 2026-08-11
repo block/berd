@@ -89,6 +89,8 @@ vi.mock("@/features/providers/hooks/useProviderModels", () => ({
     configuredModelProviderIds: ["openai", "anthropic"],
     modelCacheRefreshProviderIds: ["openai", "anthropic"],
     getModelsForAgent: (agentId: string) => mockGetModelsForAgent(agentId),
+    getProvenModelsForAgent: (agentId: string) =>
+      mockGetModelsForAgent(agentId),
     isModelInventoryAuthoritative: () =>
       mockProviderModelsState.inventoryAuthoritative,
     refreshAllModelProviders: (...args: unknown[]) =>
@@ -1161,6 +1163,8 @@ describe("GlobalComposerPill", () => {
 
     // `goose-default` is absent from the authoritative mock inventory, so the
     // selected harness/provider is retained but the model cannot be dispatched.
+    expect(screen.queryByText("GPT-5.5")).not.toBeInTheDocument();
+    expect(screen.getByText("Goose")).toBeInTheDocument();
     expectSent(onSend, "Hello", {
       executionTarget: {
         harnessId: "goose",

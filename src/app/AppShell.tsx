@@ -2700,10 +2700,16 @@ export function AppShell({
         const persona = agentState.personas.find(
           (candidate) => candidate.id === agentId,
         );
-        const cachedModels = [
-          ...useProviderModelCacheStore.getState().providers,
-        ].flatMap(([providerId, entry]) =>
-          entry.models.map((model) => ({
+        const modelCache = useProviderModelCacheStore.getState();
+        const cachedModels = [...modelCache.providers].flatMap(
+          ([providerId, entry]) =>
+            entry.models.map((model) => ({
+              ...model,
+              providerId: model.providerId ?? providerId,
+            })),
+        );
+        const provenModels = [...modelCache.providers].flatMap(([providerId]) =>
+          modelCache.getProvenModelsForProvider(providerId).map((model) => ({
             ...model,
             providerId: model.providerId ?? providerId,
           })),
@@ -2711,6 +2717,7 @@ export function AppShell({
         const executionTarget = personaExecutionTarget(persona, {
           providers: agentState.providers,
           models: cachedModels,
+          getProvenModelsForHarness: () => provenModels,
           isModelInventoryAuthoritative: (providerId) =>
             useProviderModelCacheStore
               .getState()
