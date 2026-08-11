@@ -315,13 +315,14 @@ async function startChatRuntime(
     );
     await modelCacheStore.refreshAllModelProviders(refreshProviderIds);
     const modelState = useProviderModelCacheStore.getState();
-    return new Set([
-      ...modelState.runtimeManagedProviderIds,
-      ...refreshProviderIds.filter((providerId) => {
+    return new Set(
+      refreshProviderIds.filter((providerId) => {
         const entry = modelState.providers.get(providerId);
-        return entry != null && !entry.error;
+        return (
+          entry != null && !entry.error && entry.provenModelIds !== undefined
+        );
       }),
-    ]);
+    );
   };
 
   const loadSessionState = async () => {

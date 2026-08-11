@@ -164,16 +164,16 @@ function modelInventoryMode(
 }
 
 export function runtimeManagedModelProviderIds(
-  runtimeConfig: RuntimeConfig,
+  runtimeConfig: RuntimeConfig | null | undefined,
   defaultMode: RuntimeModelInventoryMode = DEFAULT_MODEL_INVENTORY_MODE,
 ): Set<string> {
   return new Set(
-    runtimeConfig.goose.modelProviders
+    runtimeConfig?.goose.modelProviders
       .filter(
         (provider) =>
           modelInventoryMode(provider, defaultMode) === "authoritative",
       )
-      .map((provider) => provider.id),
+      .map((provider) => provider.id) ?? [],
   );
 }
 

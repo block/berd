@@ -11,7 +11,10 @@ import {
   getModelProviders,
   getModelProvidersFromEntries,
 } from "./providerCatalog";
-import { runtimeRefreshableModelProviderIds } from "./runtimeProviderConfig";
+import {
+  runtimeManagedModelProviderIds,
+  runtimeRefreshableModelProviderIds,
+} from "./runtimeProviderConfig";
 
 export function getModelCacheRefreshProviderIds(
   runtimeConfig: RuntimeConfig | null | undefined,
@@ -33,10 +36,13 @@ export function getModelCacheRefreshProviderIds(
     ? new Set(configuredProviderIds)
     : null;
 
-  for (const providerId of runtimeRefreshableModelProviderIds(
-    runtimeConfig,
-    defaultModelInventoryMode,
-  )) {
+  for (const providerId of [
+    ...runtimeManagedModelProviderIds(runtimeConfig, defaultModelInventoryMode),
+    ...runtimeRefreshableModelProviderIds(
+      runtimeConfig,
+      defaultModelInventoryMode,
+    ),
+  ]) {
     ids.add(providerId);
   }
 

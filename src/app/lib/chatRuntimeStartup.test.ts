@@ -61,7 +61,7 @@ vi.mock("@/features/providers/runtimeProviderConstraints", () => ({
 }));
 
 vi.mock("@/features/providers/modelCacheRefresh", () => ({
-  getModelCacheRefreshProviderIds: () => [],
+  getModelCacheRefreshProviderIds: () => ["claude-acp"],
 }));
 
 vi.mock("@/features/providers/providerCatalog", () => ({
@@ -243,6 +243,36 @@ describe("runChatRuntimeStartup", () => {
     inventoryRefresh.resolve();
   });
 
+  it("does not migrate a runtime-managed configuration seed before live discovery", async () => {
+    mockAgentState.providers = [{ id: "claude-acp", label: "Claude Code" }];
+    mockAgentState.personas = [
+      {
+        id: "persona-1",
+        displayName: "Configured Claude",
+        systemPrompt: "Help.",
+        provider: "claude-acp",
+        modelProviderId: "claude-acp",
+        model: "configured-model",
+        isBuiltin: false,
+        writable: true,
+      },
+    ];
+    mockModelCacheState.runtimeManagedProviderIds = new Set(["claude-acp"]);
+    mockModelCacheState.providers = new Map([
+      [
+        "claude-acp",
+        {
+          models: [{ id: "configured-model", providerId: "claude-acp" }],
+        },
+      ],
+    ]);
+
+    const { runChatRuntimeStartup } = await import("./chatRuntimeStartup");
+    await runChatRuntimeStartup();
+
+    expect(mockMigratePersonaTargetIfUnchanged).not.toHaveBeenCalled();
+  });
+
   it("migrates an authoritative unsupported persona model without losing its harness", async () => {
     mockAgentState.providers = [{ id: "claude-acp", label: "Claude Code" }];
     mockAgentState.personas = [
@@ -257,10 +287,14 @@ describe("runChatRuntimeStartup", () => {
         writable: true,
       },
     ];
-    mockModelCacheState.runtimeManagedProviderIds = new Set(["claude-acp"]);
     mockModelCacheState.providers = new Map([
       ["claude-acp", { models: [], provenModelIds: [] }],
     ]);
+    mockRefreshAllModelProviders.mockImplementation(async () => {
+      mockModelCacheState.providers = new Map([
+        ["claude-acp", { models: [], provenModelIds: [] }],
+      ]);
+    });
 
     const { runChatRuntimeStartup } = await import("./chatRuntimeStartup");
     await runChatRuntimeStartup();

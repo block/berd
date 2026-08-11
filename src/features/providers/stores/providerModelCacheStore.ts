@@ -18,6 +18,7 @@ export interface CachedProviderModels {
   /** IDs returned by a successful live inventory response; the only proof. */
   provenModelIds?: string[];
   fetchedAt: number;
+  /** Runtime configuration policy; it does not establish model proof. */
   runtimeManaged?: boolean;
   configuredModels?: ModelOption[];
   error?: string;
@@ -125,6 +126,35 @@ async function fetchProviderSupportedModels(
   return response.models;
 }
 
+function mergeDisplayModels(
+  discoveredModels: ModelOption[],
+  configuredModels: ModelOption[],
+): ModelOption[] {
+  const configuredModelsById = new Map(
+    configuredModels.map((model) => [model.id, model]),
+  );
+  const hasConfiguredFeaturedModel = configuredModels.some(
+    (model) => model.featured,
+  );
+  const discoveredModelIds = new Set(discoveredModels.map((model) => model.id));
+  return [
+    ...discoveredModels.map((model) => ({
+      ...model,
+      ...(hasConfiguredFeaturedModel ? { featured: false } : {}),
+      ...configuredModelsById.get(model.id),
+    })),
+    ...configuredModels.filter((model) => !discoveredModelIds.has(model.id)),
+  ];
+}
+
+function getProvenModels(
+  entry: CachedProviderModels | undefined,
+): ModelOption[] {
+  if (!entry?.provenModelIds) return [];
+  const provenIds = new Set(entry.provenModelIds);
+  return entry.models.filter((model) => provenIds.has(model.id));
+}
+
 export function isCachedModelInventoryAuthoritative(
   entry: CachedProviderModels | undefined,
 ): boolean {
@@ -135,9 +165,7 @@ function isStale(entry: CachedProviderModels | undefined): boolean {
   if (!entry || !isCachedModelInventoryAuthoritative(entry)) {
     return true;
   }
-  return (
-    !entry.runtimeManaged && Date.now() - entry.fetchedAt > MODEL_CACHE_TTL_MS
-  );
+  return Date.now() - entry.fetchedAt > MODEL_CACHE_TTL_MS;
 }
 
 function refreshVersion(providerId: string): number {
@@ -170,18 +198,22 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
 
         for (const providerId of runtimeProviderIds) {
           bumpRefreshVersion(providerId);
-          const models = modelsByProviderId.get(providerId) ?? [];
+          const configuredModels = modelsByProviderId.get(providerId) ?? [];
           const runtimeManaged = runtimeManagedProviderIds.has(providerId);
+          const existing = providers.get(providerId);
+          const provenModels = getProvenModels(existing);
+          const provenModelIds = existing?.provenModelIds;
+          const hasLiveProof = Array.isArray(provenModelIds);
           providers.set(providerId, {
             providerId,
-            models,
-            fetchedAt: runtimeManaged || options.fresh ? Date.now() : 0,
-            ...(runtimeManaged
-              ? {
-                  runtimeManaged,
-                  provenModelIds: models.map((model) => model.id),
-                }
-              : { configuredModels: models }),
+            // Every runtime seed is advisory, including providers whose
+            // connection policy is runtime-managed. A prior successful live
+            // response stays proof, but the seed can neither create nor renew it.
+            models: mergeDisplayModels(provenModels, configuredModels),
+            fetchedAt: existing?.fetchedAt ?? 0,
+            configuredModels,
+            ...(hasLiveProof ? { provenModelIds } : {}),
+            ...(runtimeManaged ? { runtimeManaged } : {}),
           });
           if (runtimeManaged) {
             nextRuntimeManagedProviderIds.add(providerId);
@@ -224,12 +256,6 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
     refreshProviderModels: async (providerId, options = {}) => {
       const current = get();
       const existing = current.providers.get(providerId);
-      if (
-        existing?.runtimeManaged ||
-        current.runtimeManagedProviderIds.has(providerId)
-      ) {
-        return;
-      }
       if (!options.force && !isStale(existing)) {
         return;
       }
@@ -274,30 +300,13 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
           const ids = await fetchProviderSupportedModels(providerId);
           const discoveredModels = providerModelOptionsFromIds(providerId, ids);
           const configuredModels = existing?.configuredModels ?? [];
-          const configuredModelsById = new Map(
-            configuredModels.map((model) => [model.id, model]),
-          );
-          const hasConfiguredFeaturedModel = configuredModels.some(
-            (model) => model.featured,
-          );
-          const discoveredModelIds = new Set(
-            discoveredModels.map((model) => model.id),
-          );
-          const models = [
-            ...discoveredModels.map((model) => ({
-              ...model,
-              ...(hasConfiguredFeaturedModel ? { featured: false } : {}),
-              ...configuredModelsById.get(model.id),
-            })),
-            ...configuredModels.filter(
-              (model) => !discoveredModelIds.has(model.id),
-            ),
-          ];
+          const models = mergeDisplayModels(discoveredModels, configuredModels);
           const entry: CachedProviderModels = {
             providerId,
             models,
             fetchedAt: Date.now(),
             provenModelIds: ids,
+            ...(existing?.runtimeManaged ? { runtimeManaged: true } : {}),
             ...(configuredModels.length > 0 ? { configuredModels } : {}),
           };
           if (versionAtStart !== refreshVersion(providerId)) {
@@ -356,13 +365,17 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
     invalidateProvider: (providerId) => {
       bumpRefreshVersion(providerId);
       set((state) => {
-        if (state.runtimeManagedProviderIds.has(providerId)) {
-          const existing = state.providers.get(providerId);
-          if (!existing || existing.runtimeManaged) {
-            return {};
-          }
+        const existing = state.providers.get(providerId);
+        if (state.runtimeManagedProviderIds.has(providerId) && existing) {
           const providers = new Map(state.providers);
-          providers.set(providerId, { ...existing, runtimeManaged: true });
+          // Keep the configured display seed but remove proof: an invalidation
+          // means the old live response can no longer justify compatibility.
+          providers.set(providerId, {
+            ...existing,
+            models: existing.configuredModels ?? existing.models,
+            fetchedAt: 0,
+            provenModelIds: undefined,
+          });
           persistModels(providers);
           return { providers };
         }

@@ -104,6 +104,7 @@ describe("useProviderModels", () => {
             {
               providerId: "databricks_v2",
               models,
+              provenModelIds: models.map((model) => model.id),
               fetchedAt: Date.now(),
             },
           ],
