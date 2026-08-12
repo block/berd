@@ -795,8 +795,10 @@ mod tests {
             "https://compose-ctrl.app.builderlab.xyz",
             "https://compose-ctrl.test.blockstaging.build:443",
         ] {
-            ControlPlaneClient::new(trusted, "1.0.0", style)
-                .unwrap_or_else(|error| panic!("trusted URL {trusted} was rejected: {error}"));
+            assert!(
+                ControlPlaneClient::new(trusted, "1.0.0", style).is_ok(),
+                "allowlisted control-plane origin should be accepted"
+            );
         }
 
         for untrusted in [
