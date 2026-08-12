@@ -54,10 +54,10 @@
             "type": "object",
             "properties": {
               "prompt": {
-                "description": "The message to send in the new session (1-50000 chars).",
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 50000
+                "maxLength": 50000,
+                "description": "The message to send in the new session (1-50000 chars)."
               },
               "harness_id": {
                 "description": "Agent harness to run the session on (from `berdctl info harnesses`, e.g. \"goose\", \"claude-acp\", \"codex-acp\"). Defaults to the app default.",
@@ -124,14 +124,14 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the existing session to send the prompt into.",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the existing session to send the prompt into."
               },
               "prompt": {
-                "description": "The message to send in the existing session (1-50000 chars).",
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 50000
+                "maxLength": 50000,
+                "description": "The message to send in the existing session (1-50000 chars)."
               },
               "startup_name": {
                 "description": "Branch/worktree name when this is the first send.",
@@ -140,8 +140,8 @@
                 "maxLength": 200
               },
               "if_running": {
-                "description": "What to do if the target session is running: refuse, steer, or queue.",
                 "default": "refuse",
+                "description": "What to do if the target session is running: refuse, steer, or queue.",
                 "type": "string",
                 "enum": ["refuse", "steer", "queue"]
               }
@@ -165,8 +165,8 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the session to open in the app.",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the session to open in the app."
               }
             },
             "required": ["session_id"],
@@ -210,8 +210,8 @@
                 "type": "string"
               },
               "limit": {
-                "description": "Maximum number of sessions to return (1-100). Defaults to 20.",
                 "default": 20,
+                "description": "Maximum number of sessions to return (1-100). Defaults to 20.",
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 100
@@ -243,12 +243,12 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the session to read.",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the session to read."
               },
               "messages": {
-                "description": "How many of the session's most recent messages to include (0-50). Defaults to 0 (metadata only).",
                 "default": 0,
+                "description": "How many of the session's most recent messages to include (0-50). Defaults to 0 (metadata only).",
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 50
@@ -280,13 +280,13 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the session to rename.",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the session to rename."
               },
               "title": {
-                "description": "The new session title.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "The new session title."
               }
             },
             "required": ["session_id", "title"],
@@ -314,12 +314,12 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the session to move.",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the session to move."
               },
               "project_id": {
-                "description": "Id of the destination project.",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the destination project."
               }
             },
             "required": ["session_id", "project_id"],
@@ -347,12 +347,12 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the session to move.",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the session to move."
               },
               "group_id": {
-                "description": "Id of the destination chat group, from `berdctl project get`.",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the destination chat group, from `berdctl project get`."
               }
             },
             "required": ["session_id", "group_id"],
@@ -374,8 +374,8 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the session to move out of its project.",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the session to move out of its project."
               }
             },
             "required": ["session_id"],
@@ -404,8 +404,8 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the session to fork (duplicate).",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the session to fork (duplicate)."
               },
               "title": {
                 "description": "Optional title for the forked session. Defaults to the source title.",
@@ -438,8 +438,8 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the session to archive.",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the session to archive."
               },
               "discard_changes": {
                 "description": "Discard local files and changes when removing managed worktrees or branches.",
@@ -478,14 +478,14 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the session to attach to.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Id of the session to attach to."
               },
               "path": {
-                "description": "Existing absolute folder, repository, or worktree path; ~ is expanded.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Existing absolute folder, repository, or worktree path; ~ is expanded."
               }
             },
             "required": ["session_id", "path"],
@@ -515,14 +515,14 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the session to detach from.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Id of the session to detach from."
               },
               "path": {
-                "description": "Existing attached folder, repository, or worktree path; ~ is expanded.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Existing attached folder, repository, or worktree path; ~ is expanded."
               }
             },
             "required": ["session_id", "path"],
@@ -559,19 +559,19 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the session to update.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Id of the session to update."
               },
               "old_path": {
-                "description": "Existing attached folder path to detach; ~ is expanded.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Existing attached folder path to detach; ~ is expanded."
               },
               "new_path": {
-                "description": "Existing replacement folder path to attach; ~ is expanded.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Existing replacement folder path to attach; ~ is expanded."
               }
             },
             "required": ["session_id", "old_path", "new_path"],
@@ -601,14 +601,14 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the session to update.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Id of the session to update."
               },
               "path": {
-                "description": "Existing authorized folder to use as cwd; implicitly attached if needed.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Existing authorized folder to use as cwd; implicitly attached if needed."
               }
             },
             "required": ["session_id", "path"],
@@ -631,9 +631,9 @@
             "type": "object",
             "properties": {
               "session_id": {
-                "description": "Id of the session to inspect.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Id of the session to inspect."
               }
             },
             "required": ["session_id"],
@@ -673,9 +673,9 @@
             "type": "object",
             "properties": {
               "name": {
-                "description": "Name of the new project.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Name of the new project."
               },
               "instructions": {
                 "description": "Instructions given to agents working in the project.",
@@ -719,8 +719,8 @@
             "type": "object",
             "properties": {
               "project_id": {
-                "description": "Id of the project to read.",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the project to read."
               }
             },
             "required": ["project_id"],
@@ -749,13 +749,13 @@
             "type": "object",
             "properties": {
               "project_id": {
-                "description": "Id of the project to update.",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the project to update."
               },
               "mode": {
-                "description": "How new chats start from the project's Git workspaces: use them as-is, create a branch, or create an isolated worktree.",
                 "type": "string",
-                "enum": ["none", "branch", "worktree"]
+                "enum": ["none", "branch", "worktree"],
+                "description": "How new chats start from the project's Git workspaces: use them as-is, create a branch, or create an isolated worktree."
               }
             },
             "required": ["project_id", "mode"],
@@ -777,8 +777,8 @@
             "type": "object",
             "properties": {
               "project_id": {
-                "description": "Id of the project to archive.",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the project to archive."
               }
             },
             "required": ["project_id"],
@@ -825,14 +825,14 @@
             "type": "object",
             "properties": {
               "name": {
-                "description": "Name of the new agent (persona).",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Name of the new agent (persona)."
               },
               "system_prompt": {
-                "description": "System prompt that defines the agent's behavior.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "System prompt that defines the agent's behavior."
               },
               "model": {
                 "description": "Model the agent should use.",
@@ -892,19 +892,19 @@
             "type": "object",
             "properties": {
               "name": {
-                "description": "Name of the new skill.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "Name of the new skill."
               },
               "description": {
-                "description": "One-line description of what the skill does and when to use it.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "One-line description of what the skill does and when to use it."
               },
               "content": {
-                "description": "The SKILL.md body content.",
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "description": "The SKILL.md body content."
               }
             },
             "required": ["name", "description", "content"],
@@ -948,8 +948,8 @@
             "type": "object",
             "properties": {
               "skill_id": {
-                "description": "Id of the skill to read (from list).",
-                "type": "string"
+                "type": "string",
+                "description": "Id of the skill to read (from list)."
               }
             },
             "required": ["skill_id"],
@@ -992,20 +992,20 @@
             "type": "object",
             "properties": {
               "title": {
-                "description": "Report title to prefill in the feedback form (1-200 chars).",
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 200
+                "maxLength": 200,
+                "description": "Report title to prefill in the feedback form (1-200 chars)."
               },
               "description": {
-                "description": "Report description to prefill in the feedback form (1-50000 chars).",
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 50000
+                "maxLength": 50000,
+                "description": "Report description to prefill in the feedback form (1-50000 chars)."
               },
               "include_logs": {
-                "description": "Prefill the explicit opt-in to attach sanitized logs and Doctor diagnostics; omitted means false.",
                 "default": false,
+                "description": "Prefill the explicit opt-in to attach sanitized logs and Doctor diagnostics; omitted means false.",
                 "type": "boolean"
               }
             },
@@ -1044,20 +1044,20 @@
             "type": "object",
             "properties": {
               "title": {
-                "description": "Approved report title to submit (1-200 chars).",
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 200
+                "maxLength": 200,
+                "description": "Approved report title to submit (1-200 chars)."
               },
               "description": {
-                "description": "Approved report description to submit (1-50000 chars).",
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 50000
+                "maxLength": 50000,
+                "description": "Approved report description to submit (1-50000 chars)."
               },
               "include_logs": {
-                "description": "Explicitly opt in to attach sanitized logs and Doctor diagnostics; omitted means false.",
                 "default": false,
+                "description": "Explicitly opt in to attach sanitized logs and Doctor diagnostics; omitted means false.",
                 "type": "boolean"
               }
             },
