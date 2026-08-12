@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-set-timeouts"
+description = "Enables the set_timeouts command without any pre-configured scope."
+commands.allow = ["set_timeouts"]
+
+[[permission]]
+identifier = "deny-set-timeouts"
+description = "Denies the set_timeouts command without any pre-configured scope."
+commands.deny = ["set_timeouts"]

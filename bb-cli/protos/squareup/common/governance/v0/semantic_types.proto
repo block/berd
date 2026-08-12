@@ -1,0 +1,25 @@
+syntax = "proto2";
+package squareup.governance.v0;
+
+option java_package = "com.squareup.protos.common.governance.v0";
+
+import "google/protobuf/descriptor.proto";
+import "squareup/common/governance/v0/common.proto";
+import "squareup/common/governance/v0/consumer_personal_data.proto";
+import "squareup/common/governance/v0/merchant_data.proto";
+import "squareup/common/governance/v0/payment_card_data.proto";
+import "squareup/common/governance/v0/employee_personal_data.proto";
+
+extend google.protobuf.FieldOptions {
+  // Common DSL Rubric
+  repeated Common.SemanticType common  = 13000;
+  // Consumer Personal Data
+  repeated ConsumerPersonalData.SemanticType consumer = 13001;
+  // Merchant Data
+  repeated MerchantData.SemanticType merchant  = 13002;
+  // Payment Card Data
+  repeated PaymentCardData.SemanticType pci  = 13003;
+  // Employee Personal Data
+  repeated EmployeePersonalData.SemanticType employee = 13004;
+  // reserved 13005 to 13999
+}

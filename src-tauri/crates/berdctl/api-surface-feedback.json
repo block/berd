@@ -1,0 +1,1118 @@
+{
+  "$comment": "GENERATED FILE — do not hand-edit; run `pnpm generate:berdctl-contract`. Client-neutral wire surface of the Berd desktop app's control API: POST /v1/call {\"command\": \"<group>\", \"args\": {\"action\": \"<action>\", ...fields}} against the loopback endpoint in the berdctl discovery file. protocolVersion mirrors PROTOCOL_VERSION in both discovery.rs copies (berdctl and plugin crate tests pin them equal). Per action: description, fields (flat wire model: name, required, kind, values, description, bounds), and schema (JSON Schema 2020-12 of the args object, minus the action discriminator). Derived from the authoritative zod schemas in the colocated command modules (src/features/berdctl/commands/impl/*.ts); the renderer registry's strict zod parse — not this file — is the trust boundary. vitest asserts freshness (src/features/berdctl/__tests__/apiSurface.test.ts).",
+  "protocolVersion": 4,
+  "groups": {
+    "sessions": {
+      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, move to group, clear project, fork, archive.",
+      "actions": {
+        "create": {
+          "description": "Create a new chat session on any installed agent harness and send the prompt in it. Fire-and-forget: returns the session id immediately and the session runs in the background without changing what the user sees; the user can open it themselves. Only check on it later (action \"get\") if the user asks.",
+          "fields": [
+            {
+              "name": "prompt",
+              "required": true,
+              "kind": "string",
+              "description": "The message to send in the new session (1-50000 chars).",
+              "min": 1,
+              "max": 50000
+            },
+            {
+              "name": "harness_id",
+              "required": false,
+              "kind": "string",
+              "description": "Agent harness to run the session on (from `berdctl info harnesses`, e.g. \"goose\", \"claude-acp\", \"codex-acp\"). Defaults to the app default."
+            },
+            {
+              "name": "model_id",
+              "required": false,
+              "kind": "string",
+              "description": "Id of the model to use (from `berdctl info models`)."
+            },
+            {
+              "name": "agent_id",
+              "required": false,
+              "kind": "string",
+              "description": "Id of the agent (persona) to use (from `berdctl agent list`)."
+            },
+            {
+              "name": "project_id",
+              "required": false,
+              "kind": "string",
+              "description": "Id of the project to create the session in."
+            },
+            {
+              "name": "startup_name",
+              "required": false,
+              "kind": "string",
+              "description": "Branch/worktree name when the project's startup mode is branch or worktree; required for those modes.",
+              "min": 1,
+              "max": 200
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "prompt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50000,
+                "description": "The message to send in the new session (1-50000 chars)."
+              },
+              "harness_id": {
+                "description": "Agent harness to run the session on (from `berdctl info harnesses`, e.g. \"goose\", \"claude-acp\", \"codex-acp\"). Defaults to the app default.",
+                "type": "string"
+              },
+              "model_id": {
+                "description": "Id of the model to use (from `berdctl info models`).",
+                "type": "string"
+              },
+              "agent_id": {
+                "description": "Id of the agent (persona) to use (from `berdctl agent list`).",
+                "type": "string"
+              },
+              "project_id": {
+                "description": "Id of the project to create the session in.",
+                "type": "string"
+              },
+              "startup_name": {
+                "description": "Branch/worktree name when the project's startup mode is branch or worktree; required for those modes.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "required": ["prompt"],
+            "additionalProperties": false
+          }
+        },
+        "send": {
+          "description": "Send a prompt into an existing chat session without opening or focusing it. Idle sends are fire-and-forget and visibly add a user message marked as sent by Berd from another session. Running sessions are refused by default; use --if-running steer to add context to the active run, or --if-running queue to send one follow-up after the current run finishes.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the existing session to send the prompt into."
+            },
+            {
+              "name": "prompt",
+              "required": true,
+              "kind": "string",
+              "description": "The message to send in the existing session (1-50000 chars).",
+              "min": 1,
+              "max": 50000
+            },
+            {
+              "name": "startup_name",
+              "required": false,
+              "kind": "string",
+              "description": "Branch/worktree name when this is the first send.",
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "if_running",
+              "required": false,
+              "kind": "string",
+              "description": "What to do if the target session is running: refuse, steer, or queue.",
+              "values": ["refuse", "steer", "queue"]
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "description": "Id of the existing session to send the prompt into."
+              },
+              "prompt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50000,
+                "description": "The message to send in the existing session (1-50000 chars)."
+              },
+              "startup_name": {
+                "description": "Branch/worktree name when this is the first send.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "if_running": {
+                "default": "refuse",
+                "description": "What to do if the target session is running: refuse, steer, or queue.",
+                "type": "string",
+                "enum": ["refuse", "steer", "queue"]
+              }
+            },
+            "required": ["session_id", "prompt"],
+            "additionalProperties": false
+          }
+        },
+        "open": {
+          "description": "Open an existing chat session in the app window the user is looking at.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to open in the app."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "description": "Id of the session to open in the app."
+              }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+          }
+        },
+        "list": {
+          "description": "List the user's chat sessions visible in the app (most recent first); does not change anything on screen.",
+          "fields": [
+            {
+              "name": "project_id",
+              "required": false,
+              "kind": "string",
+              "description": "Only list sessions belonging to this project."
+            },
+            {
+              "name": "query",
+              "required": false,
+              "kind": "string",
+              "description": "Case-insensitive substring to match against session titles."
+            },
+            {
+              "name": "limit",
+              "required": false,
+              "kind": "number",
+              "description": "Maximum number of sessions to return (1-100). Defaults to 20.",
+              "min": 1,
+              "max": 100
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "project_id": {
+                "description": "Only list sessions belonging to this project.",
+                "type": "string"
+              },
+              "query": {
+                "description": "Case-insensitive substring to match against session titles.",
+                "type": "string"
+              },
+              "limit": {
+                "default": 20,
+                "description": "Maximum number of sessions to return (1-100). Defaults to 20.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "get": {
+          "description": "Read one session's metadata and optionally its most recent messages; does not change anything on screen. Use only when the user asks about a session's status or content.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to read."
+            },
+            {
+              "name": "messages",
+              "required": false,
+              "kind": "number",
+              "description": "How many of the session's most recent messages to include (0-50). Defaults to 0 (metadata only).",
+              "min": 0,
+              "max": 50
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "description": "Id of the session to read."
+              },
+              "messages": {
+                "default": 0,
+                "description": "How many of the session's most recent messages to include (0-50). Defaults to 0 (metadata only).",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 50
+              }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+          }
+        },
+        "rename": {
+          "description": "Rename a chat session; the new title appears immediately in the app's session list.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to rename."
+            },
+            {
+              "name": "title",
+              "required": true,
+              "kind": "string",
+              "description": "The new session title.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "description": "Id of the session to rename."
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The new session title."
+              }
+            },
+            "required": ["session_id", "title"],
+            "additionalProperties": false
+          }
+        },
+        "move": {
+          "description": "Move a chat session into a project; the session list in the app regroups immediately.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to move."
+            },
+            {
+              "name": "project_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the destination project."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "description": "Id of the session to move."
+              },
+              "project_id": {
+                "type": "string",
+                "description": "Id of the destination project."
+              }
+            },
+            "required": ["session_id", "project_id"],
+            "additionalProperties": false
+          }
+        },
+        "move_to_group": {
+          "description": "Move a chat session into an existing group in its current project; the project chat list regroups immediately.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to move."
+            },
+            {
+              "name": "group_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the destination chat group, from `berdctl project get`."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "description": "Id of the session to move."
+              },
+              "group_id": {
+                "type": "string",
+                "description": "Id of the destination chat group, from `berdctl project get`."
+              }
+            },
+            "required": ["session_id", "group_id"],
+            "additionalProperties": false
+          }
+        },
+        "clear_project": {
+          "description": "Move a chat session out of any project; the session list in the app regroups immediately.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to move out of its project."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "description": "Id of the session to move out of its project."
+              }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+          }
+        },
+        "fork": {
+          "description": "Duplicate an existing chat session, copying its full conversation history into a new session the user can continue down an independent path. The fork appears in the app's session list; the user's current view does not change.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to fork (duplicate)."
+            },
+            {
+              "name": "title",
+              "required": false,
+              "kind": "string",
+              "description": "Optional title for the forked session. Defaults to the source title.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "description": "Id of the session to fork (duplicate)."
+              },
+              "title": {
+                "description": "Optional title for the forked session. Defaults to the source title.",
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+          }
+        },
+        "archive": {
+          "description": "Archive a chat session, then remove eligible Goose-managed worktrees and branches. Refuses cleanup that would discard local files or changes unless --discard-changes is set.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to archive."
+            },
+            {
+              "name": "discard_changes",
+              "required": false,
+              "kind": "boolean",
+              "description": "Discard local files and changes when removing managed worktrees or branches."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "description": "Id of the session to archive."
+              },
+              "discard_changes": {
+                "description": "Discard local files and changes when removing managed worktrees or branches.",
+                "type": "boolean"
+              }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "folders": {
+      "description": "Manage folders attached to chat sessions: attach, detach, replace, set cwd, list.",
+      "actions": {
+        "attach": {
+          "description": "Register an existing folder as chat context. If the chat still uses Berd's implicit default cwd, the folder becomes cwd safely after the current turn; otherwise cwd stays unchanged. Repeating the command is safe and refreshes Git identity.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to attach to.",
+              "min": 1
+            },
+            {
+              "name": "path",
+              "required": true,
+              "kind": "string",
+              "description": "Existing absolute folder, repository, or worktree path; ~ is expanded.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the session to attach to."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Existing absolute folder, repository, or worktree path; ~ is expanded."
+              }
+            },
+            "required": ["session_id", "path"],
+            "additionalProperties": false
+          }
+        },
+        "detach": {
+          "description": "Remove an existing folder from chat context without deleting anything. If it is cwd, the chat safely falls back to the first remaining attachment or Berd's default cwd.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to detach from.",
+              "min": 1
+            },
+            {
+              "name": "path",
+              "required": true,
+              "kind": "string",
+              "description": "Existing attached folder, repository, or worktree path; ~ is expanded.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the session to detach from."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Existing attached folder, repository, or worktree path; ~ is expanded."
+              }
+            },
+            "required": ["session_id", "path"],
+            "additionalProperties": false
+          }
+        },
+        "replace": {
+          "description": "Use this for requests to switch or move the chat to a new worktree/folder. Validate first, then replace the old attachment in place without deleting anything. Replacing cwd safely moves cwd to the replacement.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to update.",
+              "min": 1
+            },
+            {
+              "name": "old_path",
+              "required": true,
+              "kind": "string",
+              "description": "Existing attached folder path to detach; ~ is expanded.",
+              "min": 1
+            },
+            {
+              "name": "new_path",
+              "required": true,
+              "kind": "string",
+              "description": "Existing replacement folder path to attach; ~ is expanded.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the session to update."
+              },
+              "old_path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Existing attached folder path to detach; ~ is expanded."
+              },
+              "new_path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Existing replacement folder path to attach; ~ is expanded."
+              }
+            },
+            "required": ["session_id", "old_path", "new_path"],
+            "additionalProperties": false
+          }
+        },
+        "set_cwd": {
+          "description": "Use this to select an already attached folder, or when the previous folder should remain additional context. It implicitly attaches the target and changes cwd immediately when idle or safely after the current turn.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to update.",
+              "min": 1
+            },
+            {
+              "name": "path",
+              "required": true,
+              "kind": "string",
+              "description": "Existing authorized folder to use as cwd; implicitly attached if needed.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the session to update."
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Existing authorized folder to use as cwd; implicitly attached if needed."
+              }
+            },
+            "required": ["session_id", "path"],
+            "additionalProperties": false
+          }
+        },
+        "list": {
+          "description": "List every attached folder with its Git identity and whether it is the chat's current working directory.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to inspect.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Id of the session to inspect."
+              }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "projects": {
+      "description": "Manage the user's projects: create, list, get, set startup mode, archive.",
+      "actions": {
+        "create": {
+          "description": "Create a new project; it appears immediately in the app's project list.",
+          "fields": [
+            {
+              "name": "name",
+              "required": true,
+              "kind": "string",
+              "description": "Name of the new project.",
+              "min": 1
+            },
+            {
+              "name": "instructions",
+              "required": false,
+              "kind": "string",
+              "description": "Instructions given to agents working in the project."
+            },
+            {
+              "name": "working_dir",
+              "required": false,
+              "kind": "string_array",
+              "description": "Working directory to attach to the project; repeat for multiple directories."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Name of the new project."
+              },
+              "instructions": {
+                "description": "Instructions given to agents working in the project.",
+                "type": "string"
+              },
+              "working_dir": {
+                "description": "Working directory to attach to the project; repeat for multiple directories.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": ["name"],
+            "additionalProperties": false
+          }
+        },
+        "list": {
+          "description": "List the user's projects; does not change anything on screen.",
+          "fields": [],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        },
+        "get": {
+          "description": "Read one project's details (instructions, working directories, per-workspace startup modes, chat groups, session count); does not change anything on screen.",
+          "fields": [
+            {
+              "name": "project_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the project to read."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "project_id": {
+                "type": "string",
+                "description": "Id of the project to read."
+              }
+            },
+            "required": ["project_id"],
+            "additionalProperties": false
+          }
+        },
+        "set_startup_mode": {
+          "description": "Set the startup behavior for new chats in a project. `worktree` creates an isolated Git worktree per chat, `branch` creates a branch, and `none` uses the configured folders as-is. Existing chats and project folder paths are not changed.",
+          "fields": [
+            {
+              "name": "project_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the project to update."
+            },
+            {
+              "name": "mode",
+              "required": true,
+              "kind": "string",
+              "description": "How new chats start from the project's Git workspaces: use them as-is, create a branch, or create an isolated worktree.",
+              "values": ["none", "branch", "worktree"]
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "project_id": {
+                "type": "string",
+                "description": "Id of the project to update."
+              },
+              "mode": {
+                "type": "string",
+                "enum": ["none", "branch", "worktree"],
+                "description": "How new chats start from the project's Git workspaces: use them as-is, create a branch, or create an isolated worktree."
+              }
+            },
+            "required": ["project_id", "mode"],
+            "additionalProperties": false
+          }
+        },
+        "archive": {
+          "description": "Archive a project; it disappears from the app's project list (reversible from the archive). Sessions in the project are not archived and keep their project assignment.",
+          "fields": [
+            {
+              "name": "project_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the project to archive."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "project_id": {
+                "type": "string",
+                "description": "Id of the project to archive."
+              }
+            },
+            "required": ["project_id"],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "agents": {
+      "description": "Manage the user's agents (personas): create, list.",
+      "actions": {
+        "create": {
+          "description": "Create a new agent (persona); it is saved and becomes available in future chats.",
+          "fields": [
+            {
+              "name": "name",
+              "required": true,
+              "kind": "string",
+              "description": "Name of the new agent (persona).",
+              "min": 1
+            },
+            {
+              "name": "system_prompt",
+              "required": true,
+              "kind": "string",
+              "description": "System prompt that defines the agent's behavior.",
+              "min": 1
+            },
+            {
+              "name": "model",
+              "required": false,
+              "kind": "string",
+              "description": "Model the agent should use."
+            },
+            {
+              "name": "provider",
+              "required": false,
+              "kind": "string",
+              "description": "Provider of the model the agent should use."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Name of the new agent (persona)."
+              },
+              "system_prompt": {
+                "type": "string",
+                "minLength": 1,
+                "description": "System prompt that defines the agent's behavior."
+              },
+              "model": {
+                "description": "Model the agent should use.",
+                "type": "string"
+              },
+              "provider": {
+                "description": "Provider of the model the agent should use.",
+                "type": "string"
+              }
+            },
+            "required": ["name", "system_prompt"],
+            "additionalProperties": false
+          }
+        },
+        "list": {
+          "description": "List the user's agents (personas) usable as agent_id when creating a session; does not change anything on screen.",
+          "fields": [],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "skills": {
+      "description": "Manage the user's skills: create, list, get.",
+      "actions": {
+        "create": {
+          "description": "Create a new skill; it is saved as a SKILL.md and auto-loads into future sessions.",
+          "fields": [
+            {
+              "name": "name",
+              "required": true,
+              "kind": "string",
+              "description": "Name of the new skill.",
+              "min": 1
+            },
+            {
+              "name": "description",
+              "required": true,
+              "kind": "string",
+              "description": "One-line description of what the skill does and when to use it.",
+              "min": 1
+            },
+            {
+              "name": "content",
+              "required": true,
+              "kind": "string",
+              "description": "The SKILL.md body content.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Name of the new skill."
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "description": "One-line description of what the skill does and when to use it."
+              },
+              "content": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The SKILL.md body content."
+              }
+            },
+            "required": ["name", "description", "content"],
+            "additionalProperties": false
+          }
+        },
+        "list": {
+          "description": "List the user's skills (name and description only); does not change anything on screen. Read a skill's content with action \"get\".",
+          "fields": [
+            {
+              "name": "project_id",
+              "required": false,
+              "kind": "string",
+              "description": "Also include skills from this project's working directories."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "project_id": {
+                "description": "Also include skills from this project's working directories.",
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "get": {
+          "description": "Read one skill including its SKILL.md instructions; does not change anything on screen.",
+          "fields": [
+            {
+              "name": "skill_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the skill to read (from list)."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "skill_id": {
+                "type": "string",
+                "description": "Id of the skill to read (from list)."
+              }
+            },
+            "required": ["skill_id"],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "feedback": {
+      "description": "Open an approved report in Berd's feedback form or submit it directly after explicit user approval.",
+      "actions": {
+        "open": {
+          "description": "Open Berd's existing feedback form with the supplied title and description ready for optional hand editing. Nothing is submitted. Logs and Doctor diagnostics are selected only when --include-logs is explicitly passed.",
+          "fields": [
+            {
+              "name": "title",
+              "required": true,
+              "kind": "string",
+              "description": "Report title to prefill in the feedback form (1-200 chars).",
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "description",
+              "required": true,
+              "kind": "string",
+              "description": "Report description to prefill in the feedback form (1-50000 chars).",
+              "min": 1,
+              "max": 50000
+            },
+            {
+              "name": "include_logs",
+              "required": false,
+              "kind": "boolean",
+              "description": "Prefill the explicit opt-in to attach sanitized logs and Doctor diagnostics; omitted means false."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "Report title to prefill in the feedback form (1-200 chars)."
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50000,
+                "description": "Report description to prefill in the feedback form (1-50000 chars)."
+              },
+              "include_logs": {
+                "default": false,
+                "description": "Prefill the explicit opt-in to attach sanitized logs and Doctor diagnostics; omitted means false.",
+                "type": "boolean"
+              }
+            },
+            "required": ["title", "description"],
+            "additionalProperties": false
+          }
+        },
+        "submit": {
+          "description": "Submit the supplied approved report without opening the feedback form. Use this only after the user explicitly asks to file, send, or submit it. Berd immediately shows success or failure in the app. Logs and Doctor diagnostics are attached only when --include-logs is explicitly passed.",
+          "fields": [
+            {
+              "name": "title",
+              "required": true,
+              "kind": "string",
+              "description": "Approved report title to submit (1-200 chars).",
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "description",
+              "required": true,
+              "kind": "string",
+              "description": "Approved report description to submit (1-50000 chars).",
+              "min": 1,
+              "max": 50000
+            },
+            {
+              "name": "include_logs",
+              "required": false,
+              "kind": "boolean",
+              "description": "Explicitly opt in to attach sanitized logs and Doctor diagnostics; omitted means false."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "Approved report title to submit (1-200 chars)."
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50000,
+                "description": "Approved report description to submit (1-50000 chars)."
+              },
+              "include_logs": {
+                "default": false,
+                "description": "Explicitly opt in to attach sanitized logs and Doctor diagnostics; omitted means false.",
+                "type": "boolean"
+              }
+            },
+            "required": ["title", "description"],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
+    "info": {
+      "description": "Read-only app information: installed agent harnesses, available models, and the current app context.",
+      "actions": {
+        "list_harnesses": {
+          "description": "List the agent harnesses sessions can run on (goose, Claude Code, Codex, ...) with their readiness; only \"ready\" harnesses accept new sessions.",
+          "fields": [],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        },
+        "list_models": {
+          "description": "List the models available per agent harness (same source as the app's model picker); omit harness_id to cover every ready harness in one call. Use a model_id (and its harness_id) when creating a session.",
+          "fields": [
+            {
+              "name": "harness_id",
+              "required": false,
+              "kind": "string",
+              "description": "Agent harness to list models for (from list_harnesses). Omit to list models for every ready harness in one call."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "harness_id": {
+                "description": "Agent harness to list models for (from list_harnesses). Omit to list models for every ready harness in one call.",
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "get_context": {
+          "description": "Read the app's current context: which view and session the user is looking at, the active session's project, and the app version; does not change anything on screen.",
+          "fields": [],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,24 @@
+#!/bin/bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+source ./bin/activate-hermit
+
+if [[ -z "${TEST_RUNNER:-}" ]]; then
+  echo "TEST_RUNNER is not set" >&2
+  exit 1
+fi
+
+case "${TEST_RUNNER}" in
+  lint)
+    just ci-lint
+    ;;
+  test)
+    just ci-test
+    ;;
+  *)
+    echo "Unknown TEST_RUNNER: ${TEST_RUNNER}" >&2
+    exit 1
+    ;;
+esac

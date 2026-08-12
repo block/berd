@@ -1,0 +1,137 @@
+syntax = "proto2";
+package squareup.governance.v0;
+
+// DO NOT EDIT!!!
+// This file was auto-generated from https://github.com/squareup/dsl-framework/blob/ac75c6fa1371fe4950a4ec1b20e9b952d6265e91/rubrics/releases/for-dsl-engine/rubrics_v0.json using /script/EngineModelGenerator.py.
+
+option java_package = "com.squareup.protos.common.governance.v0";
+
+message EmployeePersonalData {
+  enum SemanticType {
+    DO_NOT_USE = 0;
+    // Facial images used for identity verification, such as on a photo of a Government ID document. Note: This does not include facial images used on company ID badges or for employee profiles on Block systems, e.g. org charts, or photographs and videos used in other contexts. (See GENERIC_FACIAL_IMAGE instead.)
+    GOV_ID_FACIAL_IMAGE = 1;
+    // Fingerprints.
+    FINGERPRINTS = 2;
+    // Handwriting, including a handwritten signature, such as on a photo of a Government ID document.
+    HANDWRITING = 3;
+    // Personal email address (including hashed email address)
+    PERSONAL_EMAIL_ADDRESS = 4;
+    // Residential postal address.
+    RESIDENTIAL_ADDRESS = 5;
+    // Personal phone number (including hashed phone number).
+    PERSONAL_PHONE_NUMBER = 6;
+    // Usernames or social media handles.
+    PERSONAL_USERNAME = 7;
+    // Bank account number.
+    BANK_ACCOUNT_NUMBER = 8;
+    // Immigration related identification numbers including visa case numbers, Permanent Resident Card (Green Card) numbers, etc.
+    IMMIGRATION_ID_NUMBER = 9;
+    // Social Security Number (SSN).
+    SSN = 10;
+    // Passport Number.
+    PASSPORT_NUMBER = 11;
+    // Driver's License Number.
+    DRIVERS_LICENSE_NUMBER = 12;
+    // Individual Tax ID Number (ITIN).
+    ITIN = 13;
+    // Facial images used on company ID badges or for employee profiles on Block systems (e.g. org charts).
+    GENERIC_FACIAL_IMAGE = 14;
+    // Personal name (first name, last name, middle name, full name, etc.).
+    NAME = 15;
+    // Work email address.
+    WORK_EMAIL_ADDRESS = 16;
+    // Work phone number.
+    WORK_PHONE_NUMBER = 17;
+    // Username (for access to Block systems).
+    WORK_USERNAME = 18;
+    // Employee ID.
+    EMPLOYEE_ID = 19;
+    // Authentication tokens and session tokens such as Block SSO tokens.
+    AUTH_TOKEN = 20;
+    // Employee password (e.g. employee password, employee/job candidate PIN).
+    PASSWORD = 21;
+    // The street name and street number of an employee's residence, including any additional information about unit/apt/suite/etc.
+    STREET_OF_RESIDENCE = 22;
+    // Residential ZIP/postal code
+    POSTAL_CODE_OF_RESIDENCE = 23;
+    // City of residence
+    CITY_OF_RESIDENCE = 24;
+    // State/Region/Province/County of residence
+    REGION_OF_RESIDENCE = 25;
+    // Country of residence (e.g. Customer Region/Country Code).
+    COUNTRY_OF_RESIDENCE = 26;
+    // Device IDs (including unique identifiers that correspond with an individual's mobile device or computer).
+    DEVICE_ID = 27;
+    // Gender.
+    GENDER = 28;
+    // Precise Date of Birth (DOB).
+    DATE_OF_BIRTH = 29;
+    // The day of the month that an employee was born.
+    BIRTH_DAY_OF_MONTH = 30;
+    // The month an employee was born.
+    BIRTH_MONTH = 31;
+    // The year an employee was born.
+    BIRTH_YEAR = 32;
+    // An employee's age.
+    AGE = 33;
+    // Citizenship.
+    CITIZENSHIP = 34;
+    // Job Title.
+    JOB_TITLE = 35;
+    // Business Unit/Division/Department.
+    ORG_PLACEMENT = 36;
+    // Physical Work Location.
+    WORK_LOCATION = 37;
+    // Hire Date/Termination Date.
+    EMPLOYMENT_DATES = 38;
+    // Details of dependents.
+    DEPENDENTS = 39;
+    // Emergency Contact Details.
+    EMERGENCY_CONTACT = 40;
+    // Education History including licenses, certifications, and qualifications.
+    EDUCATION = 41;
+    // Employement History.
+    EMPLOYMENT_HISTORY = 42;
+    // Job candidate support data, such as: Replies to job opening, feedback sent to applicants, interview records, references and referrals.
+    CANDIDATE_DATA = 43;
+    // Medical Information (physical or mental health or condition).
+    MEDICAL_INFO = 44;
+    // Criminal History.
+    CRIMINAL_HISTORY = 45;
+    // Any commissioned offense, civil proceeding or sentencing.
+    LEGAL_HISTORY = 46;
+    // Information pertaining to background screens including OFAC screens.
+    BACKGROUND_CHECK = 47;
+    // Job Performance Information.
+    JOB_PERFORMANCE = 48;
+    // Block-sponsored or mandated Training and Development History.
+    LEARNING_AND_DEVELOPMENT = 49;
+    // Involvement in extracurricular activities including such as running clubs or Block communities.
+    EXTRACURRICULARS = 50;
+    // Bank name.
+    BANK_NAME = 51;
+    // Bank routing number.
+    BANK_ROUTING_NUMBER = 52;
+    // Bank account number (coarse): maximum of four (4) digits.
+    COARSE_BANK_ACCOUNT_NUMBER = 53;
+    // Credit scores (e.g., FICO).
+    CREDIT_SCORE = 54;
+    // Payslip dates and time deposited to bank accounts.
+    PAYSLIP_DATES = 55;
+    // Payroll information.
+    PAYROLL_INFORMATION = 56;
+    // Work Schedule and time card information.
+    TIMESHEETS = 57;
+    // Information relating to an employee's income, 401K, equities, and any other parts of an employee's compensation package.
+    COMPENSATION = 58;
+    // Tax Information such as withdrawing allowances, tax filing status, and marital status.
+    TAX_INFORMATION = 59;
+    // Last four (4) digits of Social Security Number (SSN).
+    COARSE_SSN = 60;
+    // IP Address.
+    IP_ADDRESS = 61;
+    // Device, log file and other information relating to an individual's use of Block systems, services and/or devices, and information about a user device's interaction with Block systems/services.  This includes information collected via cookies and web beacons, like web browser and device characteristics, pixel tags.
+    SYSTEM_USAGE_LOG = 62;
+  }
+}

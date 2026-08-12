@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "goose": {
+    "defaultModelProviderId": "openai",
+    "defaultModelId": "gpt-4o-mini",
+    "modelProviders": [
+      {
+        "id": "openai",
+        "displayName": "OpenAI",
+        "description": "OpenAI test models",
+        "setupMethod": "single_api_key",
+        "group": "default",
+        "aliases": ["openai"],
+        "modelInventoryMode": "refreshable",
+        "models": [
+          {
+            "id": "gpt-4o-mini",
+            "name": "GPT-4o mini",
+            "recommended": true,
+            "contextLimit": 128000
+          }
+        ]
+      }
+    ]
+  },
+  "featureToggles": {}
+}

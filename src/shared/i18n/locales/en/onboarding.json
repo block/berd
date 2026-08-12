@@ -1,0 +1,107 @@
+{
+  "shell": {
+    "goBack": "Go back"
+  },
+  "welcome": {
+    "title": "Welcome to Berd",
+    "projects": "A place to build projects",
+    "agents": "work with agents",
+    "and": "and",
+    "done": "get work done",
+    "getStarted": "Get started"
+  },
+  "workTypes": {
+    "title": "What type of work will you use Berd for?",
+    "descriptionLine1": "Pick one or more options and we’ll recommend",
+    "descriptionLine2": "some Berd agents for you to set up.",
+    "next": "Next",
+    "items": {
+      "engineering": {
+        "label": "Engineering",
+        "description": "Build and improve software."
+      },
+      "legal": {
+        "label": "Legal",
+        "description": "Research, review, and draft legal work."
+      },
+      "marketing": {
+        "label": "Marketing",
+        "description": "Plan campaigns and create marketing work."
+      },
+      "product": {
+        "label": "Product",
+        "description": "Plan and shape product experiences."
+      },
+      "design": {
+        "label": "Design",
+        "description": "Explore and review design work."
+      },
+      "writing": {
+        "label": "Writing",
+        "description": "Draft and edit clear content."
+      },
+      "not-sure": {
+        "label": "Not sure",
+        "description": "Start with a flexible team."
+      }
+    }
+  },
+  "recommendations": {
+    "title": "Your recommended agents",
+    "description": "Meet a few agents picked for your work. You can configure them later.",
+    "adopting": "Adopting…",
+    "keep": "Keep ’em",
+    "skip": "Skip for now",
+    "genericError": "Some agents could not be adopted. Try again.",
+    "adoptionError": "Couldn’t adopt {{names}}. The other agents were kept; try again for the rest.",
+    "agents": {
+      "builder": {
+        "name": "Builder",
+        "description": "A practical partner for implementing product work."
+      },
+      "debugger": {
+        "name": "Debugger",
+        "description": "A methodical investigator for curious failures."
+      },
+      "planner": {
+        "name": "Planner",
+        "description": "A structured thinker for research and technical plans."
+      },
+      "reviewer": {
+        "name": "Reviewer",
+        "description": "A careful second set of eyes for maintainable changes."
+      },
+      "automator": {
+        "name": "Automator",
+        "description": "A workflow specialist for repetitive engineering tasks."
+      },
+      "explorer": {
+        "name": "Explorer",
+        "description": "A research companion for unfamiliar systems and choices."
+      },
+      "generalist": {
+        "name": "Generalist",
+        "description": "A flexible collaborator for a little of everything."
+      }
+    },
+    "partialAdoptionWarning": "Some agents were kept, but {{names}} could not be added. You can continue and try again later."
+  },
+  "harness": {
+    "title": "Choose a provider to power Berd",
+    "description": "Start with one now, or connect a provider later in Settings.",
+    "finish": "Finish",
+    "install": "Install",
+    "skip": "Skip for now",
+    "providerGroup": "AI provider"
+  },
+  "setup": {
+    "readyTitle": "{{provider}} is ready",
+    "readyDescription": "Your provider is connected and ready to use in Berd.",
+    "finishOnboarding": "Finish onboarding",
+    "installationComplete": "Installation complete",
+    "installing": "Installing your",
+    "installingDescription": "We’ll let you know when {{provider}} is ready to use.",
+    "finish": "Finish",
+    "skip": "Skip for now"
+  }
+}

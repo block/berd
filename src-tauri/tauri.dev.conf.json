@@ -1,0 +1,7 @@
+{
+  "identifier": "xyz.block.berd.dev",
+  "productName": "Berd",
+  "bundle": {
+    "externalBin": []
+  }
+}

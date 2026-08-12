@@ -1,0 +1,117 @@
+{
+  "card": {
+    "export": "Exportar…",
+    "focusWindowFailed": "No se pudo enfocar la ventana de la sesión",
+    "open": "Abrir {{title}}",
+    "openInNewWindow": "Abrir en una ventana nueva",
+    "openWindow": "Abrir ventana",
+    "openWindowFailed": "No se pudo abrir la ventana de la sesión",
+    "optionsFor": "Opciones para {{title}}"
+  },
+  "dateGroups": {
+    "today": "Hoy",
+    "yesterday": "Ayer"
+  },
+  "history": {
+    "archivedSubtitle": "Sesiones que has archivado",
+    "archivedTitle": "Sesiones archivadas",
+    "backToActive": "Volver a activas",
+    "copyTitle": "{{title}} (copia)",
+    "emptyArchived": "No hay sesiones archivadas",
+    "emptyArchivedHint": "Las sesiones archivadas aparecerán aquí.",
+    "emptyHint": "Inicia un chat para verlo aquí.",
+    "emptyTitle": "Aún no hay sesiones",
+    "copyImportCommand": "Copiar comando de importación",
+    "forkFailed": "No se pudo duplicar la sesión",
+    "forked": "Se duplicó {{title}}",
+    "importCommandIntro": "Ejecuta:",
+    "importCommandRefresh": "Luego actualiza Historial de sesiones.",
+    "importComplete": "Importación completa",
+    "importCompleteDescription_one": "Se importó {{title}} con {{displayCount}} mensaje.",
+    "importCompleteDescription_other": "Se importó {{title}} con {{displayCount}} mensajes.",
+    "importDisconnectedError": "Berd se desconectó mientras {{phase}} ({{fileSize}}). La importación no devolvió un resultado; es posible que el backend se haya reiniciado, haya fallado o haya rechazado la carga grande. El error subyacente del servidor solo está disponible en los logs de Berd.",
+    "importFailed": "Error al importar",
+    "importFailedDescription": "{{fileName}} {{message}}",
+    "importFailedFallback": "no se pudo importar.",
+    "importingButton": "Importando...",
+    "importPhase": {
+      "importing": "Importando sesión",
+      "reading": "Leyendo archivo",
+      "refreshing": "Actualizando historial"
+    },
+    "importPhaseDescription": {
+      "importing": "se enviaba la sesión a Berd",
+      "reading": "se leía el archivo seleccionado",
+      "refreshing": "se actualizaba el historial de sesiones"
+    },
+    "importProgressDescription": "{{fileName}} ({{fileSize}}). Las importaciones de sesiones grandes pueden tardar un poco.",
+    "importSuccess": "Se importó {{title}}",
+    "importTooLarge": "es demasiado grande para importarlo desde la app.",
+    "loadMore": "Cargar más",
+    "loadingMoreSearchResults": "Cargando más resultados de búsqueda...",
+    "loadingMoreSessions": "Cargando más sesiones...",
+    "searchArchivedPlaceholder": "Buscar sesiones archivadas...",
+    "searchError": "La búsqueda de mensajes falló. Mostrando solo coincidencias por título, agente y proyecto. Inténtalo de nuevo.",
+    "searchPlaceholder": "Buscar sesiones...",
+    "searching": "Buscando sesiones...",
+    "selectedContext_one": "{{displayCount}} chat seleccionado",
+    "selectedContext_other": "{{displayCount}} chats seleccionados",
+    "subtitle": "Explora y busca sesiones anteriores",
+    "toggleArchived": "Archivadas",
+    "title": "Historial de sesiones",
+    "controls": {
+      "active": "Activas",
+      "archived": "Archivadas",
+      "archivedWithCount": "Archivadas ({{count}})",
+      "allProjects": "Todos los proyectos",
+      "projectsSelected_one": "{{count}} proyecto",
+      "projectsSelected_other": "{{count}} proyectos",
+      "noProject": "Sin proyecto",
+      "listView": "Vista de lista",
+      "gridView": "Vista de cuadrícula"
+    },
+    "searchStatus": {
+      "searching": "Buscando conversaciones… {{searched}} de {{total}}",
+      "pending": "Buscando mientras escribes…",
+      "doneWithContent_one": "{{count}} resultado · títulos, agentes, proyectos, fechas y texto de conversación",
+      "doneWithContent_other": "{{count}} resultados · títulos, agentes, proyectos, fechas y texto de conversación",
+      "donePartialContent": "{{done}} — {{note}}",
+      "unreadableNote_one": "no se pudo leer {{count}} conversación",
+      "unreadableNote_other": "no se pudieron leer {{count}} conversaciones",
+      "doneMetadataOnly_one": "{{count}} resultado · títulos, agentes, proyectos y fechas — escribe más para buscar en el texto de conversación",
+      "doneMetadataOnly_other": "{{count}} resultados · títulos, agentes, proyectos y fechas — escribe más para buscar en el texto de conversación"
+    },
+    "searchEmpty": {
+      "title": "Ninguna sesión coincide con «{{query}}»",
+      "clearFilters": "Borrar filtros",
+      "searchArchived": "Buscar en archivadas",
+      "scopeWithContent": "La búsqueda cubre títulos, agentes, proyectos, fechas y texto de conversación.",
+      "scopeWithContentAndArchivedHint": "La búsqueda cubre títulos, agentes, proyectos, fechas y texto de conversación. Las sesiones archivadas pueden tener coincidencias.",
+      "scopeMetadataOnly": "La búsqueda cubre títulos, agentes, proyectos y fechas. Escribe al menos 2 caracteres para buscar también en el texto de conversación.",
+      "scopeMetadataOnlyWithArchivedHint": "La búsqueda cubre títulos, agentes, proyectos y fechas. Escribe al menos 2 caracteres para buscar también en el texto de conversación. Las sesiones archivadas pueden tener coincidencias."
+    },
+    "timeline": {
+      "label": "Ir a la fecha",
+      "older": "Más antiguas",
+      "loadingOlder": "Cargando…"
+    },
+    "emptyFiltered": "Ninguna sesión coincide con estos filtros",
+    "emptyFilteredHint": "No hay chats activos en los proyectos seleccionados.",
+    "emptyFilteredArchivedHint": "No hay chats archivados en los proyectos seleccionados.",
+    "emptyClearFilters": "Borrar filtros"
+  },
+  "quickSwitch": {
+    "description": "Escribe para buscar títulos de sesiones y pulsa Intro para saltar.",
+    "empty": "No hay sesiones coincidentes",
+    "placeholder": "Saltar a sesión...",
+    "title": "Saltar a sesión"
+  },
+  "search": {
+    "matches_one": "{{displayCount}} coincidencia",
+    "matches_other": "{{displayCount}} coincidencias",
+    "messageMatches_one": "{{displayCount}} coincidencia en mensajes",
+    "messageMatches_other": "{{displayCount}} coincidencias en mensajes"
+  },
+  "messageCount_one": "{{displayCount}} mensaje",
+  "messageCount_other": "{{displayCount}} mensajes"
+}

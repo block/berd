@@ -1,0 +1,642 @@
+{
+  "attachments": {
+    "alt": "Attachment {{index}}",
+    "chooseFilesDialogTitle": "Choose files to attach",
+    "chooseFoldersDialogTitle": "Choose folders to attach",
+    "dropToAttach": "Drop files or folders",
+    "groupLabel_one": "1 attachment",
+    "groupLabel_other": "{{count}} attachments",
+    "imagePreviewTitle": "Image preview",
+    "open": "Open attachment {{name}}",
+    "previewAlt": "Preview of {{name}}",
+    "remove": "Remove attachment",
+    "unavailable": "Attachment {{name}} is unavailable",
+    "view": "View attachment {{index}}",
+    "viewFullSize": "View full-size attachment {{name}}"
+  },
+  "agentToolsTip": {
+    "connect": "Connect",
+    "connected": "{{tool}} is connected",
+    "disconnected_one": "{{tools}} is disconnected",
+    "disconnected_other": "{{tools}} are disconnected",
+    "dismiss": "Dismiss tip"
+  },
+  "context": {
+    "closePanel": "Close context panel",
+    "openPanel": "Open context panel",
+    "ringAria": "Context: {{percent}}% used"
+  },
+  "selectedText": {
+    "actions": {
+      "copyAsMarkdown": "Copy as Markdown"
+    }
+  },
+  "sessionWindow": {
+    "handoffPausedDescription": "The source window stopped sending live updates. Reload the session to recover the persisted conversation history.",
+    "handoffPausedTitle": "Session handoff paused",
+    "missingDescription": "We can't find this session. It may have been deleted.",
+    "missingTitle": "Session unavailable",
+    "readOnlyStatus": "Finishing current response...",
+    "reload": "Reload session"
+  },
+  "terminal": {
+    "close": "Close terminal",
+    "collapse": "Collapse terminal",
+    "confirmStopDescription": "This terminates the shell and closes the terminal panel.",
+    "confirmStopTabTitle": "Stop terminal {{path}}?",
+    "confirmStopTitle": "Stop terminal?",
+    "expand": "Expand terminal",
+    "exitedWithSignal": "Exited by {{signal}}",
+    "newTab": "New terminal tab",
+    "noWorkspace": "Assign a project or folder to open a terminal.",
+    "open": "Open terminal",
+    "restart": "Restart terminal",
+    "selectTab": "Select terminal {{path}}",
+    "startFailed": "Could not start terminal.",
+    "status": {
+      "error": "Error",
+      "exited": "Exited",
+      "running": "Running",
+      "starting": "Starting"
+    },
+    "stop": "Stop terminal",
+    "stopAndClose": "Stop and close terminal",
+    "stopAndCloseTab": "Stop and close terminal {{path}}",
+    "stopped": "Terminal stopped",
+    "tabs": "Terminal tabs",
+    "toggle": "Toggle terminal",
+    "title": "Terminal",
+    "dockToBottom": "Dock terminal to bottom",
+    "popOut": "Pop out terminal",
+    "resize": "Resize terminal"
+  },
+  "errors": {
+    "attachmentsTooLarge": "Attachments are too large to send ({{totalMb}} MB, limit {{limitMb}} MB). Remove some attachments and try again.",
+    "sessionPreparationSuperseded": "Session configuration changed while preparing. Try sending again.",
+    "steeringBackendUnavailable": "Steering is not available in this Goose backend. Restart with the steering backend branch and try again.",
+    "voiceInputFailedTitle": "Voice dictation failed",
+    "voiceInputNoMicrophoneDescription": "Connect or select a microphone, then try voice dictation again.",
+    "voiceInputNoMicrophoneTitle": "No microphone found",
+    "voiceInputPermissionDescription": "Allow microphone access for Berd in System Settings, then try voice dictation again.",
+    "voiceInputPermissionTitle": "Microphone access is blocked",
+    "voiceInputUnavailableDescription": "Another app may be using your microphone, or macOS could not start recording. Close other recording apps and try again.",
+    "voiceInputUnavailableTitle": "Microphone is unavailable"
+  },
+  "contextPanel": {
+    "actions": {
+      "fetchRemoteStatus": "Fetch remote status",
+      "openWorkspaceMenu": "Open project folder actions",
+      "openWorkspaceContextFor": "Open workspace context for {{name}}",
+      "expandWorkspaceContextFor": "Expand workspace context for {{name}}",
+      "collapseWorkspaceContextFor": "Collapse workspace context for {{name}}",
+      "openWorkspaceActionsFor": "Open actions for {{name}}",
+      "refreshLocalStatus": "Refresh local status",
+      "refreshGitStatus": "Refresh git status"
+    },
+    "createDialog": {
+      "baseBranch": "Base branch",
+      "branchDescription": "Create a new branch in this repository.",
+      "branchError": "Failed to create branch {{branch}}.",
+      "branchName": "Branch name",
+      "branchNamePlaceholder": "feature/my-branch",
+      "branchSuccess": "Created {{branch}}.",
+      "branchTitle": "New branch",
+      "branchToOpen": "Branch to open",
+      "cancel": "Cancel",
+      "chooseSourceRepo": "Choose source repository",
+      "createBranch": "Create branch",
+      "createNewBranch": "Create a new branch",
+      "createWorktree": "Create worktree",
+      "creatingBranch": "Creating branch...",
+      "creatingWorktree": "Creating worktree...",
+      "noAvailableBranches": "No branches available",
+      "sourceRepoError": "Couldn't choose the source repository.",
+      "sourceRepoRequired": "Choose a Git repository to create a worktree.",
+      "worktreeDescription": "Create a separate worktree and include it in this chat.",
+      "worktreeError": "Failed to create worktree {{worktree}}.",
+      "worktreeName": "Worktree name",
+      "worktreeNamePlaceholder": "my-worktree",
+      "worktreePath": "Folder: {{path}}",
+      "worktreeSuccess": "Created and included worktree {{worktree}}.",
+      "worktreeTitle": "New worktree"
+    },
+    "addWorkspaceDialog": {
+      "add": "Add",
+      "cancel": "Cancel",
+      "chooseDirectory": "Choose",
+      "chooseFolder": "Choose folder",
+      "chooseFolderDialogTitle": "Select folder",
+      "chooseWorkspace": "Add workspace",
+      "createWorktree": "Create worktree",
+      "createWorktreeDescription": "Create a new worktree from this repo before adding the workspace.",
+      "description": "Workspace will be associated with this chat.",
+      "projectDescription": "Folder will be associated with the project chats.",
+      "projectError": "Couldn't add the folder.",
+      "projectTitle": "Add folder",
+      "error": "Couldn't add the workspace.",
+      "folder": "Folder",
+      "folderPlaceholder": "Choose a folder",
+      "folderInRepository": "Folder in repository",
+      "folderInWorktree": "Folder in worktree",
+      "gitRepository": "Git repository",
+      "gitWorktree": "Git worktree",
+      "loadingWorktrees": "Loading worktrees",
+      "addAnotherWorkspace": "Add another workspace",
+      "localRepo": "Local repo",
+      "mainCheckout": "main checkout",
+      "noDirectorySelected": "No folder selected",
+      "pickDirectory": "Pick a folder",
+      "pickDirectoryDescription": "Choose any folder on this computer",
+      "plainFolder": "Folder",
+      "startFrom": "Start from",
+      "title": "Add workspace",
+      "worktree": "Worktree",
+      "worktreePlaceholder": "--"
+    },
+    "empty": {
+      "folderNotSet": "Folder not set",
+      "noChanges": "No uncommitted changes",
+      "noGitWorkspaces": "No git repo in this chat's workspaces",
+      "notGitRepo": "This folder isn't a git repo",
+      "noProjectAssigned": "No project assigned"
+    },
+    "errors": {
+      "gitRead": "Git status is unavailable right now.",
+      "gitChangesRead": "Git changes are unavailable right now.",
+      "folderChange": "Couldn't change the folder."
+    },
+    "artifacts": {
+      "folderLabel": "Artifact folder",
+      "workspaceLabel": "General chat"
+    },
+    "folder": {
+      "change": "Change folder",
+      "changeDialogTitle": "Choose working folder",
+      "changeSuccess": "Working folder updated.",
+      "label": "Working folder",
+      "repositoryLabel": "Repository folder",
+      "repositoryWithBranch": "Repository folder - {{branch}}"
+    },
+    "includedWorkspaces": {
+      "addWorkspaceAction": "Add a workspace",
+      "changed": "{{count}} changed",
+      "clean": "clean",
+      "copyError": "Couldn't copy workspace paths.",
+      "copyPathError": "Couldn't copy workspace path.",
+      "copyPathSuccess": "Workspace path copied.",
+      "copyPaths": "Copy paths",
+      "copySuccess": "Workspace paths copied.",
+      "description": "All listed workspaces are shared with Goose for this chat.",
+      "empty": "No workspaces included yet.",
+      "includeSuccess": "Included {{name}}.",
+      "mainCheckout": "main checkout",
+      "worktree": "worktree",
+      "kind": {
+        "detachedCheckout": "Detached checkout",
+        "directory": "Directory",
+        "linkedWorktree": "Linked worktree",
+        "mainWorktree": "Main worktree",
+        "nonGitDirectory": "Non-git directory",
+        "repository": "Repository",
+        "subdirectory": "Subdirectory"
+      },
+      "remove": "Remove from chat",
+      "cleanupResource": {
+        "branch": "branch",
+        "worktree": "worktree"
+      },
+      "removeError": "Couldn't remove workspace.",
+      "removeConfirmAction": "Remove workspace",
+      "removeConfirmBody": "This removes the workspace from the chat. Files and local changes stay on disk.",
+      "removeConfirmBodyWithChanges_one": "This workspace has {{count}} uncommitted change. Removing it from the chat will not delete files or local changes.",
+      "removeConfirmBodyWithChanges_other": "This workspace has {{count}} uncommitted changes. Removing it from the chat will not delete files or local changes.",
+      "removeConfirmCancel": "Cancel",
+      "removeConfirmTitle": "Are you sure you want to remove this workspace?",
+      "removeManagedConfirmAction": "Remove {{resource}}",
+      "removeManagedConfirmBody": "This removes the Goose-created {{resource}} and detaches the workspace from this chat.",
+      "removeManagedConfirmBodyWithChanges_one": "This {{resource}} has {{count}} uncommitted change. Removing it will discard local changes and delete the Goose-created {{resource}}.",
+      "removeManagedConfirmBodyWithChanges_other": "This {{resource}} has {{count}} uncommitted changes. Removing it will discard local changes and delete the Goose-created {{resource}}.",
+      "removeManagedConfirmTitle": "Are you sure you want to remove this {{resource}}?",
+      "removeManagedError": "Couldn't clean up {{resource}}.",
+      "removeWorktreeConfirmAction": "Remove workspace",
+      "removeWorktreeConfirmBody": "If you remove this workspace, the Goose-created worktree {{worktree}} will be deleted from disk.",
+      "removeWorktreeConfirmBodyWithChanges_one": "You have {{count}} uncommitted change on this worktree. If you remove this workspace, that change will be lost and {{worktree}} will be deleted from disk.",
+      "removeWorktreeConfirmBodyWithChanges_other": "You have {{count}} uncommitted changes on this worktree. If you remove this workspace, those changes will be lost and {{worktree}} will be deleted from disk.",
+      "removeWorktreeConfirmTitle": "Are you sure you want to remove this worktree?",
+      "removeSharedManagedConfirmBodyOtherChat": "Another active chat uses the same Goose-created {{resource}}. Only this workspace will be removed from this chat; the {{resource}} will stay on disk.",
+      "terminal": "Terminal"
+    },
+    "picker": {
+      "selectContext": "Select worktree or branch",
+      "selectWorktree": "Select worktree",
+      "selectBranch": "Select branch",
+      "search": "Search",
+      "noResults": "No matching worktrees or branches",
+      "worktrees": "Active worktree",
+      "addWorktree": "Add worktree",
+      "addBranch": "Add branch",
+      "allBranches": "All branches",
+      "availableBranches": "Available branches",
+      "branchLabel": "Branch",
+      "switchIn": "Switch in {{worktree}}",
+      "checkedOutIn": "Checked out in {{worktree}}",
+      "changeFolder": "Change folder…",
+      "changesStashed": "Your changes were stashed first — restore them with \"git stash pop\".",
+      "checkedOutBranch": "{{branch}}",
+      "currentBranch": "Current branch",
+      "noBranch": "No branch",
+      "dirtyTitle": "Uncommitted changes",
+      "dirtyDescription_one": "You have {{count}} uncommitted change. How would you like to proceed?",
+      "dirtyDescription_other": "You have {{count}} uncommitted changes. How would you like to proceed?",
+      "stashAndSwitch": "Stash & Switch",
+      "carryChanges": "Carry to Branch",
+      "cancel": "Cancel",
+      "switchError": "Failed to switch to {{branch}}. Your changes may conflict with the target branch.",
+      "stashError": "Failed to stash changes.",
+      "stashSuccess": "Changes stashed and switched to {{branch}}."
+    },
+    "git": {
+      "fetch": "Fetch",
+      "fetchError": "Failed to fetch changes.",
+      "fetchSuccess": "Fetched latest changes.",
+      "initRepo": "Initialize Git",
+      "initError": "Failed to initialize git repository.",
+      "pull": "Pull",
+      "pullCommitCount_one": "Pull {{count}} commit",
+      "pullCommitCount_other": "Pull {{count}} commits",
+      "pullWithCount": "Pull ({{count}})",
+      "pullError": "Failed to pull changes.",
+      "pullSuccess": "Pulled latest changes."
+    },
+    "labels": {
+      "project": "Project",
+      "remote": "Remote",
+      "workspace": "Project folder",
+      "workspaces": "Workspaces"
+    },
+    "states": {
+      "detached": "detached",
+      "gitLoading": "Loading git status..."
+    },
+    "summary": {
+      "changes_one": "{{count}} change",
+      "changes_other": "{{count}} changes"
+    },
+    "tabs": {
+      "details": "Context",
+      "changes": "Changes",
+      "files": "Files"
+    },
+    "widgets": {
+      "artifacts": "Artifacts",
+      "changes": "Changes",
+      "changesOnBranch": "on",
+      "includedWorkspaces": "Included workspaces",
+      "workspace": "Active worktree"
+    }
+  },
+  "files": {
+    "empty": "Files will show here after you assign a project.",
+    "folderEmpty": "Folder is empty",
+    "loadError": "Couldn't load this folder. Try again.",
+    "loading": "Loading files...",
+    "openFolder": "Open folder: {{path}}",
+    "rootLoadError": "Couldn't load this folder. Try again."
+  },
+  "image": {
+    "view": "View {{label}}",
+    "download": "Download image",
+    "downloadStarted": "Download started: {{filename}}",
+    "downloadError": "Couldn't download image.",
+    "openDownloads": "Open Downloads",
+    "openDownloadsError": "Couldn't open Downloads."
+  },
+  "input": {
+    "ariaLabel": "Chat message input",
+    "placeholder": "Chat with {{agent}}, @ for agents/files, or / for skills"
+  },
+  "loading": {
+    "compacting": "Compacting conversation...",
+    "thinking": "Thinking...",
+    "responding": "Responding..."
+  },
+  "mention": {
+    "ariaLabel": "Reference suggestions",
+    "title": "Agents",
+    "referencesTitle": "References",
+    "pathsTitle": "Paths",
+    "skillsTitle": "Skills",
+    "filesTitle": "Files",
+    "projectRoot": "Project root",
+    "homeFolder": "Home folder",
+    "filesystemRoot": "Filesystem root",
+    "loadingPaths": "Loading paths...",
+    "noMatches": "No matches",
+    "loadError": "Couldn't load paths",
+    "status": {
+      "loadingPaths": "Loading paths",
+      "referencesAvailable_one": "{{count}} reference available",
+      "referencesAvailable_other": "{{count}} references available",
+      "noMatches": "No matches",
+      "loadError": "Couldn't load paths"
+    },
+    "enterKey": "Enter",
+    "toInsert": "to insert"
+  },
+  "notifications": {
+    "compactionComplete": "Conversation compacted. Older context was summarized.",
+    "modelSwitchError": "Could not switch to {{model}}. This chat is still using {{fallbackModel}}.",
+    "modelSwitchErrorWithoutFallback": "Could not switch to {{model}}.",
+    "archiveError": "Failed to archive chat",
+    "gitInspectionError": "Couldn't inspect the worktrees or branches. The chat wasn't archived.",
+    "gitCleanupError": "Chat archived, but Git cleanup couldn't finish",
+    "moveError": "Failed to move chat",
+    "renameError": "Failed to rename chat"
+  },
+  "gitCleanup": {
+    "archiveConfirmTitle": {
+      "worktrees": "Archive chat and remove its worktrees?",
+      "branches": "Archive chat and remove its branches?",
+      "worktreesAndBranches": "Archive chat and remove its worktrees and branches?"
+    },
+    "archiveConfirmDescriptionWithFiles": {
+      "worktrees": "This will discard local files and changes, archive the chat, then remove its Goose-created worktrees.",
+      "branches": "This will discard local changes, archive the chat, then remove its Goose-created branches.",
+      "worktreesAndBranches": "This will discard local files and changes, archive the chat, then remove its Goose-created worktrees and branches."
+    },
+    "archiveConfirmAction": "Archive and remove"
+  },
+  "pinToHome": {
+    "action": "Pin chat",
+    "pinned": "Pinned chat",
+    "pinning": "Pinning...",
+    "unpin": "Unpin chat"
+  },
+  "message": {
+    "copied": "Copied",
+    "defaultImageAlt": "Attached",
+    "forkFromHere": "Fork session from here",
+    "jumpToResponseStart": "Jump to response start",
+    "jumpToFloatingResponseStart": "Jump to current response start",
+    "jumpToResponseStartHint": "For long replies, this takes you back to the top.",
+    "jumpToResponseStartHintDismiss": "Dismiss response start tip",
+    "mcpApp": "MCP App",
+    "mcpAppLoading": "Loading MCP App…",
+    "mcpAppRenderError": "Unable to render MCP App inline.",
+    "redactedThinking": "(thinking redacted)",
+    "providerError": {
+      "anthropicThinkingHistory": "This chat can't continue with a Claude model because its earlier reasoning history is no longer in a form Claude will accept. Start a new chat, or switch this chat to a non-Claude model to keep going."
+    },
+    "berdctlCrossSessionLabel": "Sent by Berd from another session",
+    "steerLabel": "Steered",
+    "viewMore": "View more",
+    "viewLess": "View less",
+    "voiceSpeechSpeakingLabel": "Speaking",
+    "voiceSpeechSpokenLabel": "Spoken",
+    "voiceSpeechInterruptedLabel": "Interrupted",
+    "voiceSpeechNotSpokenLabel": "Not spoken",
+    "voiceSpeechFailedLabel": "Failed"
+  },
+  "persona": {
+    "chooseAssistant": "Choose assistant",
+    "create": "Create agent...",
+    "clearActive": "Clear active assistant",
+    "removeSelected": "Remove {{agent}} agent",
+    "defaultDescription": "No agent selected - chat directly with Goose"
+  },
+  "skill": {
+    "clearSelected": "Remove {{skill}} skill"
+  },
+  "queue": {
+    "dismiss": "Dismiss queued message",
+    "edit": "Edit queued message",
+    "sendAnyway": "Send anyway",
+    "releasedSendFailed": "The queued message could not be sent. Retry it or edit the message.",
+    "configureWorktree": "Configure your new worktree?",
+    "configureWorkspaces": "Configure new project workspaces?",
+    "configureWorkspacePlan": "Configure {{worktreeLabel}}?",
+    "configureWorkspacePlanWithBranch": "Configure {{worktreeLabel}} and {{branchLabel}}?",
+    "worktreeCount_one": "1 new worktree",
+    "worktreeCount_other": "{{count}} new worktrees",
+    "branchCount_one": "1 new branch",
+    "branchCount_other": "{{count}} new branches",
+    "configureWorktreeYes": "Yes",
+    "configureWorktreeSkip": "Skip",
+    "nameWorktree": "Worktree name",
+    "projectFolder": "Project folder",
+    "projectFolderCurrent": "Current project",
+    "worktreeName": "Worktree name",
+    "worktreeNamePlaceholder": "Enter worktree name",
+    "cancelWorktree": "Cancel",
+    "createWorktree": "Save",
+    "preparingWorkspaceTitle": "Preparing your project workspace.",
+    "preparingWorkspaceBody": "Your messages will send when it’s ready."
+  },
+  "globalPill": {
+    "ariaLabel": "Quick compose",
+    "expand": "Expand to full chat",
+    "placeholder": "Start a conversation",
+    "setupVoiceConversation": "Set up Voice Conversation",
+    "startVoiceConversation": "Start voice conversation",
+    "voiceConversationStartFailed": "Voice Conversation could not start. Your draft is still here.",
+    "voiceConversationRequiresGoose": "Voice Conversation requires Goose"
+  },
+  "emptyState": {
+    "startAConversation": "Start a conversation"
+  },
+  "skeleton": {
+    "loadingConversation": "Loading conversation"
+  },
+  "search": {
+    "action": "Search chat",
+    "close": "Close search",
+    "inputLabel": "Search chat messages",
+    "landmark": "Search current chat",
+    "matchCount": "{{current}} / {{total}}",
+    "next": "Next result",
+    "noResults": "No results",
+    "placeholder": "Search chat",
+    "previous": "Previous result",
+    "searching": "Searching…"
+  },
+  "timeline": {
+    "ariaLabel": "Chat messages",
+    "emptyDescription": "Send a message to get started",
+    "emptyTitle": "Start a conversation",
+    "jumpToLatest": "Jump to latest",
+    "today": "Today",
+    "yesterday": "Yesterday"
+  },
+  "toolbar": {
+    "agent": "Agent",
+    "attach": "Attach",
+    "attachFile": "File",
+    "attachFolder": "Folder",
+    "chooseAgentModel": "Choose agent and model",
+    "chooseProject": "Choose a project",
+    "compactNow": "Compact",
+    "compacting": "Compacting...",
+    "chooseProvider": "Choose a provider",
+    "contextTokensBreakdown": "{{tokens}} / {{limit}} tokens used",
+    "contextUsage": "Context usage",
+    "contextUsageWithCost": "Context usage, session cost {{cost}}",
+    "contextUsageBreakdown": "{{used}} used ({{left}} left)",
+    "contextUsageTitle": "{{tokens}} / {{limit}} tokens",
+    "contextWindow": "Context window",
+    "createProject": "Create project",
+    "generalChatWithoutProject": "General chat without project context",
+    "loading": "Loading...",
+    "loadingModels": "Loading models...",
+    "install": "Install",
+    "connect": "Connect",
+    "model": "Model",
+    "allModels": "All models",
+    "searchModels": "Search models...",
+    "settings": "Settings",
+    "sessionCost": "Session cost",
+    "recommended": "Recommended",
+    "reasoningEffort": "Reasoning effort",
+    "reasoningEffortCurrent": "Reasoning effort: {{value}}",
+    "noModelsAvailable": "No models available",
+    "noSearchResults": "No matching models",
+    "showAllModels": "Browse all models",
+    "viewMore": "View more",
+    "switchAgent": "Switch agent",
+    "noProject": "No project",
+    "selectModel": "Select model",
+    "selectProject": "Select project",
+    "sendMessage": "Send message",
+    "steer": "Steer",
+    "steerQueued": "Steer queued message",
+    "agentBuilderPrepareFailed": "Couldn't prepare agent draft.",
+    "agentBuilderPreparing": "Preparing agent draft...",
+    "sessionStarting": "Starting session...",
+    "sessionStartFailed": "Session failed to start",
+    "sessionMissingProjectDir": "Can't start this session — the project folder doesn't exist: {{paths}}. Edit the project to update its folders.",
+    "sessionMissingProjectDirs": "Can't start this session — these project folders don't exist: {{paths}}. Edit the project to update its folders.",
+    "sessionLoadMissingProjectDir": "This session's project folder no longer exists: {{missingPath}}. Loaded the conversation using {{fallbackPath}} instead.",
+    "sessionLoadMissingWorkingDir": "This session's folder no longer exists: {{missingPath}}. Loaded the conversation using {{fallbackPath}} instead.",
+    "sessionLoadFailed": "Couldn't load this session.",
+    "editProjectFolders": "Edit project",
+    "changeFolder": "Change folder",
+    "stopGeneration": "Stop generation",
+    "voiceInput": "Voice dictation",
+    "voiceInputDisabled": "Set OPENAI_API_KEY to enable dictation",
+    "voiceInputRecording": "Listening...",
+    "voiceInputTranscribing": "Transcribing...",
+    "voiceInputAutoSubmitHint": "Say \"submit\" to send",
+    "voiceConversation": {
+      "start": "Start voice conversation",
+      "muteMicrophone": "Mute microphone",
+      "unmuteMicrophone": "Unmute microphone",
+      "states": {
+        "off": "Start voice conversation",
+        "starting": "Starting voice conversation…",
+        "stopping": "Stopping voice conversation…",
+        "listening": "Voice conversation is listening for session {{sessionId}}",
+        "muted": "Voice conversation microphone is muted for session {{sessionId}}",
+        "user-speaking": "Receiving voice input…",
+        "agent-working": "Agent is working…",
+        "agent-speaking": "Agent is speaking…",
+        "error": "Voice conversation error: {{error}}"
+      }
+    }
+  },
+  "tools": {
+    "content": "Content",
+    "error": "Error",
+    "input": "Input",
+    "result": "Result",
+    "fileNotFound": "File not found: {{path}}",
+    "inputSummary": {
+      "command": "Command",
+      "line": "Line",
+      "path": "Path",
+      "query": "Query",
+      "resource": "Resource",
+      "tool": "Tool",
+      "workingDirectory": "Working directory"
+    },
+    "moreOutputs": "More outputs ({{count}})",
+    "openFile": "Open file",
+    "openFolder": "Open folder",
+    "openNamed": "Open {{name}}",
+    "openPath": "Open path",
+    "viewFile": "View",
+    "pathOutsideRoots": "Path is outside allowed roots",
+    "structuredContent": "Structured content",
+    "structuredOutput": "Structured output",
+    "structuredOutputLines": "{{count}} lines",
+    "subagent": {
+      "delegating": "Delegating to a subagent",
+      "delegatingLabeled": "Delegating to a subagent · {{label}}",
+      "delegatingAgent": "Delegating to {{name}}",
+      "delegatingAgentLabeled": "Delegating to {{name}} · {{label}}",
+      "waiting": "Waiting on a subagent",
+      "waitingLabeled": "Waiting on subagent #{{label}}",
+      "waitingAgent": "Waiting on {{name}}",
+      "waitingAgentLabeled": "Waiting on {{name}} · {{label}}",
+      "checking": "Checking on a subagent",
+      "checkingLabeled": "Checking on subagent #{{label}}",
+      "checkingAgent": "Checking on {{name}}",
+      "checkingAgentLabeled": "Checking on {{name}} · {{label}}",
+      "cancelling": "Cancelling a subagent",
+      "cancellingLabeled": "Cancelling subagent #{{label}}",
+      "cancellingAgent": "Cancelling {{name}}",
+      "cancellingAgentLabeled": "Cancelling {{name}} · {{label}}"
+    }
+  },
+  "agent_work": {
+    "redactedThinking": "Thinking redacted",
+    "summary": {
+      "previousSteps_one": "{{count}} previous step",
+      "previousSteps_other": "{{count}} previous steps",
+      "steps_one": "{{count}} step",
+      "steps_other": "{{count}} steps"
+    }
+  },
+  "tool_chain": {
+    "summary": {
+      "active": "working",
+      "reviewing_files": "reviewing files",
+      "running_commands": "running commands",
+      "checking_resources": "checking resources",
+      "updating_files": "updating files",
+      "steps_one": "{{count}} step",
+      "steps_other": "{{count}} steps"
+    },
+    "internalSteps": {
+      "show": "Show internal steps ({{count}})",
+      "hide": "Hide internal steps ({{count}})"
+    },
+    "title": {
+      "active": "working through {{count}} step",
+      "active_other": "working through {{count}} steps",
+      "labeled": "{{label}} ({{count}} step)",
+      "labeled_other": "{{label}} ({{count}} steps)"
+    }
+  },
+  "rightRail": {
+    "resize": "Resize right rail",
+    "open": "Open right rail",
+    "close": "Close right rail"
+  },
+  "artifactViewer": {
+    "close": "Close viewer",
+    "resize": "Resize viewer",
+    "openExternally": "Open in editor",
+    "fileActions": "File actions",
+    "viewPreview": "Preview",
+    "viewCode": "Code",
+    "loading": "Loading file…",
+    "loadError": "Couldn't load this file.",
+    "imageAlt": "Preview of {{filename}}"
+  },
+  "artifactChips": {
+    "open": "Open {{name}} in viewer",
+    "more": "+{{count}} more"
+  },
+  "agentBuilder": {
+    "hideChat": "Hide chat"
+  }
+}

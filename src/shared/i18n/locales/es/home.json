@@ -1,0 +1,348 @@
+{
+  "greeting": {
+    "afternoon": "Buenas tardes",
+    "evening": "Buenas noches",
+    "morning": "Buenos días"
+  },
+  "onboarding": {
+    "starterTasks": {
+      "title": "Lista de tareas iniciales",
+      "dismiss": "Descartar tareas iniciales",
+      "minimize": "Minimizar tareas iniciales",
+      "expand": "Expandir tareas iniciales",
+      "connectProvider": "Conecta un proveedor de IA",
+      "startChat": "Inicia un chat",
+      "createProject": "Ponle nombre a tu primer proyecto",
+      "buildAgent": "Crea un agente",
+      "addWidget": "Añade un widget a Inicio",
+      "openTask": "Abrir tarea: {{label}}",
+      "completedTask": "Tarea completada: {{label}}",
+      "checkTask": "Marcar {{label}}",
+      "uncheckTask": "Desmarcar {{label}}",
+      "backHome": "Volver a Inicio"
+    },
+    "callout": {
+      "avatarLabel": "Berdy",
+      "avatarAlt": "Berdy, tu guía de introducción",
+      "agentUnavailable": "Berdy no pudo iniciar un chat. Inténtalo de nuevo.",
+      "dismiss": "Cerrar introducción",
+      "title": "¿No sabes cómo empezar?",
+      "body": "Soy Berdy, tu guía de introducción. Pregúntame cualquier cosa sobre Berd, desde cómo empezar hasta aprender más sobre los flujos de trabajo.",
+      "action": "Ver el recorrido",
+      "openHelp": "Preguntarle a Berdy",
+      "helpTitle": "¿Cómo puedo ayudarte?",
+      "presets": {
+        "useCases": "¿Para qué puedo usar Berd?",
+        "projects": "¿Cómo inicio un proyecto?",
+        "agentsAndSkills": "¿Cómo funcionan los agentes y las habilidades?"
+      },
+      "presetResponses": {
+        "useCases": "Berd puede ayudarte a investigar, planificar, escribir, programar, organizar proyectos y automatizar tareas repetitivas.",
+        "projects": "Los proyectos reúnen chats, archivos y carpetas de trabajo relacionados para que los agentes tengan el contexto adecuado.",
+        "agentsAndSkills": "Los agentes le dan a Berd un rol e instrucciones. Las habilidades añaden flujos de trabajo y herramientas reutilizables."
+      },
+      "followUpPlaceholder": "Haz una pregunta de seguimiento",
+      "sendFollowUp": "Enviar seguimiento",
+      "followUpContext": "{{question}}\n\nSeguimiento: {{followUp}}",
+      "askSomethingElse": "Hacer otra pregunta",
+      "back": "Atrás",
+      "helpPlaceholder": "Pregúntale cualquier cosa a Berdy",
+      "send": "Enviar mensaje",
+      "closeHelp": "Cerrar ayuda"
+    },
+    "tour": {
+      "progress": "{{current}} de {{total}}",
+      "previous": "Paso anterior del recorrido",
+      "next": "Siguiente paso del recorrido",
+      "finish": "Finalizar recorrido",
+      "close": "Cerrar recorrido",
+      "nextAction": "Siguiente",
+      "doneAction": "Listo",
+      "animateProject": "Girar el cubo del proyecto",
+      "chatPreview": {
+        "prompt": "¿Puedes ayudarme a escribir un haiku sobre aves?",
+        "responseLine1": "Las aves cosen el alba con su canto",
+        "responseLine2": "Las alas rozan de oro el cielo",
+        "responseLine3": "La mañana aprende a volar",
+        "typing": "Berd está escribiendo"
+      },
+      "projectPreview": {
+        "name": "Tu proyecto",
+        "description": "Un espacio para chats, archivos, contexto y trabajo continuo."
+      },
+      "steps": {
+        "1": {
+          "title": "Tu lienzo, tu espacio",
+          "body": "Mantén a las personas, los proyectos y el trabajo que te importan juntos en un lienzo que es tuyo.",
+          "visual": "Una vista previa del lienzo de inicio de Berd"
+        },
+        "2": {
+          "title": "Habla con Berd sobre cualquier tema",
+          "body": "Haz preguntas, explora ideas y trabaja en una tarea con un agente que tenga el contexto adecuado.",
+          "visual": "Una conversación breve con Berd"
+        },
+        "3": {
+          "title": "Conecta todos tus proveedores",
+          "body": "Reúne los modelos y proveedores que ya usas en un solo lugar y elige el adecuado para cada tarea.",
+          "visual": "Una colección de iconos de proveedores de IA"
+        },
+        "4": {
+          "title": "Da vida a tus proyectos",
+          "body": "Agrupa chats, archivos y directorios de trabajo en torno a iniciativas reales para que Berd te ayude a avanzar.",
+          "visual": "Un proyecto que cobra vida"
+        }
+      }
+    }
+  },
+  "widgetLayer": {
+    "loading": "Cargando widgets...",
+    "error": {
+      "title": "No se pudieron cargar los widgets.",
+      "retry": "Reintentar",
+      "copyDetails": "Copiar detalles"
+    },
+    "toasts": {
+      "conflict": "Inicio se actualizó en otra ventana. Actualizamos tus widgets; intenta hacer ese cambio de nuevo.",
+      "saveFailed": "No se pudo guardar el diseño de widgets.",
+      "copySuccess": "Detalles del error copiados.",
+      "copyFailed": "No se pudieron copiar los detalles del error.",
+      "cameraSaveFailed": "El lienzo inicial se restauró, pero no se pudo volver a centrar la vista."
+    }
+  },
+  "widgets": {
+    "clock": {
+      "label": "Reloj",
+      "description": "Hora",
+      "current": "Hora actual",
+      "toggleToDigital": "Cambiar a reloj digital",
+      "toggleToAnalog": "Cambiar a reloj analógico"
+    },
+    "photo": {
+      "label": "Foto",
+      "description": "Una foto fijada en inicio",
+      "addPhoto": "Agregar una foto",
+      "addHint": "Elige una imagen de tu computadora",
+      "selecting": "Eligiendo foto…",
+      "change": "Cambiar",
+      "toolbar": "Herramientas de foto",
+      "chooseDialog": "Elegir una foto",
+      "changeDialog": "Cambiar foto",
+      "fileType": "Imágenes",
+      "importFailed": "No se pudo agregar la foto.",
+      "notAFile": "Elige un archivo de imagen en lugar de una carpeta.",
+      "readFailed": "Berd no pudo leer esa foto.",
+      "tooLarge": "Elige una foto de menos de 50 MB.",
+      "unsupportedType": "Elige una imagen PNG, JPEG, WebP, GIF o AVIF.",
+      "unavailable": "Esta foto no está disponible",
+      "chooseAnother": "Elegir otra foto",
+      "imageAlt": "Foto fijada",
+      "shapeControl": "Forma de la foto: {{current}}. Activa para cambiar a {{next}}.",
+      "clickToChangeShape": "Haz clic para cambiar la forma",
+      "shapes": {
+        "original": "Original",
+        "square": "Cuadrada",
+        "circle": "Circular"
+      }
+    },
+    "agentPin": {
+      "label": "Fijar un agente",
+      "description": "Fija un agente para acceso rápido",
+      "kicker": "Agente",
+      "fallbackName": "Berd",
+      "openAria": "Iniciar chat con {{name}}"
+    },
+    "chatPin": {
+      "label": "Fijar un chat",
+      "description": "Fija una sesión de chat",
+      "kicker": "Chat",
+      "emptyTitle": "Sin chat reciente",
+      "emptyDescription": "Fija un chat para verlo aquí",
+      "loadingDescription": "Cargando chat fijado...",
+      "unavailableDescription": "Chat fijado no disponible",
+      "openAria": "Abrir chat: {{title}}"
+    },
+    "projectArtifactPin": {
+      "label": "Fijar un proyecto",
+      "description": "Fija un artefacto de proyecto",
+      "kicker": "Proyecto",
+      "openAria": "Iniciar chat en {{name}}",
+      "unavailableTitle": "Proyecto no disponible",
+      "unavailableDescription": "Desancla o restaura este proyecto",
+      "starterTitle": "Mi primer proyecto",
+      "starterAria": "Ponle nombre a tu primer proyecto"
+    },
+    "automationOutputPin": {
+      "label": "Fijar una automatización",
+      "description": "Fija el último resultado de una automatización",
+      "noOutput": "Sin resultados aún",
+      "unavailable": "No disponible",
+      "states": {
+        "completed": "Completado",
+        "failed": "Falló",
+        "running": "Ejecutando",
+        "paused": "En pausa",
+        "neverRun": "Sin ejecutar"
+      },
+      "fallbackTitle": "Automatización sin título"
+    },
+    "skillPin": {
+      "label": "Fijar una habilidad",
+      "description": "Fija una habilidad para acceso rápido",
+      "unavailable": "No disponible",
+      "openAria": "Iniciar chat con {{name}}"
+    },
+    "stickyNote": {
+      "label": "Nota adhesiva",
+      "description": "Una nota fijada en inicio",
+      "dismiss": "Descartar nota adhesiva",
+      "toolbar": "Herramientas de nota adhesiva",
+      "bold": "Negrita",
+      "italic": "Cursiva",
+      "strikethrough": "Tachado",
+      "editAria": "Editar nota adhesiva",
+      "placeholder": "Escribe una nota...",
+      "preview": "Vista previa",
+      "edit": "Editar",
+      "starterStickies": "Notas iniciales",
+      "fontSizes": {
+        "small": "Texto pequeño",
+        "medium": "Texto mediano",
+        "large": "Texto grande"
+      },
+      "tones": {
+        "neutral": "Neutro",
+        "warm": "Cálido",
+        "cool": "Frío",
+        "rose": "Rosa",
+        "blue": "Azul",
+        "lavender": "Lavanda",
+        "peach": "Durazno"
+      },
+      "notes": {
+        "welcome": {
+          "title": "Te damos la bienvenida a Berd",
+          "body": "Un espacio de trabajo de IA para todas las facetas de tu trabajo. Esto es solo el comienzo."
+        },
+        "buildAgent": {
+          "title": "Crea un agente",
+          "body": "Dale a Berd un rol, modelo e instrucciones para el trabajo que repites.",
+          "action": "Crear agente"
+        },
+        "startProject": {
+          "title": "Inicia un proyecto",
+          "body": "Agrupa chats, archivos y directorios de trabajo alrededor de un esfuerzo real.",
+          "action": "Nuevo proyecto"
+        },
+        "skills": {
+          "title": "Enséñale una habilidad a Berd",
+          "body": "Guarda instrucciones y recursos para que Berd sepa cómo aplicarlos cuando la tarea lo pida.",
+          "action": "Explorar habilidades"
+        },
+        "shapeHome": {
+          "title": "Haz tuyo Inicio",
+          "body": "Haz clic derecho en el lienzo para fijar chats, agentes, proyectos, habilidades y resultados de automatizaciones."
+        },
+        "automations": {
+          "title": "Gestiona automatizaciones",
+          "body": "Las automatizaciones de G2 ahora viven en Berd. Puedes ver, crear y gestionar trabajo programado aquí.",
+          "action": "Abrir automatizaciones"
+        }
+      }
+    },
+    "checklist": {
+      "label": "Lista de tareas",
+      "description": "Una lista de tareas fijada en inicio",
+      "dismiss": "Descartar lista de tareas",
+      "toolbar": "Herramientas de lista de tareas",
+      "titlePlaceholder": "Lista de tareas",
+      "itemPlaceholder": "Elemento de la lista",
+      "addItem": "Agregar elemento",
+      "removeItem": "Eliminar elemento",
+      "toggleItem": "Alternar elemento",
+      "fontSizes": {
+        "small": "Texto pequeño",
+        "medium": "Texto mediano",
+        "large": "Texto grande"
+      },
+      "tones": {
+        "warm": "Cálido",
+        "cool": "Frío",
+        "rose": "Rosa",
+        "blue": "Azul",
+        "lavender": "Lavanda",
+        "peach": "Durazno"
+      }
+    },
+    "unpin": {
+      "label": "Desanclar"
+    },
+    "pinToHome": {
+      "error": "No se pudo fijar en inicio.",
+      "success": "Fijado en inicio."
+    },
+    "pinBatchToHome": {
+      "allPinned": "Todos los chats seleccionados ya están fijados en inicio.",
+      "error": "No se pudieron fijar los chats en inicio.",
+      "success_one": "Se fijó 1 chat en inicio.",
+      "success_other": "Se fijaron {{displayCount}} chats en inicio.",
+      "successPartial_one": "Se fijó 1 chat en inicio. {{skipped}} ya estaban fijados.",
+      "successPartial_other": "Se fijaron {{displayCount}} chats en inicio. {{skipped}} ya estaban fijados."
+    },
+    "unpinBatchFromHome": {
+      "error": "No se pudieron desfijar los chats de inicio.",
+      "success_one": "Se desfijó 1 chat de inicio.",
+      "success_other": "Se desfijaron {{displayCount}} chats de inicio."
+    },
+    "unpinFromHome": {
+      "error": "No se pudo desfijar de inicio.",
+      "success": "Desfijado de inicio."
+    },
+    "resize": {
+      "label": "Cambiar tamaño de {{widget}}"
+    },
+    "canvasControls": {
+      "cleanUpTitle": "Ordenar pins",
+      "reloadOnboardingTourTitle": "Recargar recorrido de introducción",
+      "recenterVisibleLabel": "Recentrar",
+      "recenterTitle": "Recentrar objetos fijados",
+      "restoreTitle": "Revertir diseño"
+    },
+    "picker": {
+      "back": "Volver",
+      "loading": "Cargando...",
+      "loadFailed": "No se pudieron cargar los elementos.",
+      "loadingMoreChats": "Cargando más chats...",
+      "header": "Fijar",
+      "sections": {
+        "clock": "Widgets",
+        "agent": "Agente",
+        "chat": "Chat",
+        "automation": "Automatizaciones",
+        "project": "Proyecto",
+        "skill": "Habilidad"
+      },
+      "selectTitles": {
+        "clock": "Fijar un widget",
+        "agent": "Fijar un agente",
+        "chat": "Fijar un chat",
+        "automation": "Fijar una automatización",
+        "project": "Fijar un proyecto",
+        "skill": "Fijar una habilidad"
+      },
+      "searchPlaceholders": {
+        "agent": "Buscar",
+        "chat": "Buscar",
+        "automation": "Buscar",
+        "project": "Buscar",
+        "skill": "Buscar"
+      },
+      "empty": {
+        "agent": "Nada que fijar",
+        "chat": "Nada que fijar",
+        "automation": "Nada que fijar",
+        "project": "Nada que fijar",
+        "skill": "Nada que fijar"
+      }
+    }
+  }
+}

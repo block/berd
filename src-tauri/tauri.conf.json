@@ -1,0 +1,100 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Berd",
+  "version": "0.4.12",
+  "identifier": "xyz.block.berd",
+  "build": {
+    "beforeDevCommand": {
+      "script": "exec ./node_modules/.bin/vite",
+      "cwd": "..",
+      "wait": false
+    },
+    "devUrl": "http://localhost:1520",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Berd",
+        "width": 800,
+        "height": 600,
+        "minWidth": 608,
+        "minHeight": 600,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "dragDropEnabled": true,
+        "trafficLightPosition": {
+          "x": 14,
+          "y": 28
+        }
+      }
+    ],
+    "security": {
+      "csp": {
+        "default-src": "'self' asset:",
+        "connect-src": "'self' ipc: asset: http://asset.localhost http://ipc.localhost http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:* data: https:",
+        "font-src": "'self'",
+        "img-src": "'self' asset: http://asset.localhost blob: data: https://models.dev",
+        "media-src": "'self' asset: http://asset.localhost blob: data:",
+        "script-src": "'self' blob: 'wasm-unsafe-eval'",
+        "style-src": "'self' 'unsafe-inline'",
+        "worker-src": "'self' blob:"
+      },
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/avatars/media/**/*",
+          "$APPDATA/artifacts/media/**/*",
+          "$APPDATA/project-artifacts/media/**/*",
+          "$APPDATA/home-widget-media/**/*",
+          "$HOME/**/*",
+          "$TEMP/**/*"
+        ]
+      }
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["berd"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "deb", "rpm", "appimage"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../distro": "distro",
+      "resources/runtime-config.json": "runtime-config.json",
+      "../resources/berd-sounds-0.mp3": "berd-sounds-0.mp3",
+      "../resources/berd-sounds-1.mp3": "berd-sounds-1.mp3",
+      "../resources/berd-sounds-2.mp3": "berd-sounds-2.mp3",
+      "../resources/berd-sounds-3.mp3": "berd-sounds-3.mp3",
+      "../resources/berd-sounds-4.mp3": "berd-sounds-4.mp3",
+      "../resources/berd-sounds-5.mp3": "berd-sounds-5.mp3",
+      "../resources/berd-sounds-6.mp3": "berd-sounds-6.mp3"
+    },
+    "externalBin": ["binaries/goosed", "binaries/berdctl", "binaries/catch"],
+    "linux": {
+      "deb": {
+        "depends": ["libvulkan1"]
+      },
+      "rpm": {
+        "depends": ["vulkan-loader"]
+      }
+    },
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "hardenedRuntime": true
+    }
+  }
+}

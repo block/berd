@@ -1,0 +1,18 @@
+export {
+  createTranscriptDiagnostics,
+  createTranscriptDiagnosticsFromVirtualTimelineDiagnostics,
+  formatTranscriptDiagnosticsValidationErrors,
+  TRANSCRIPT_DIAGNOSTICS_EVENT,
+  TRANSCRIPT_DIAGNOSTIC_NUMERIC_DEFAULTS,
+  TRANSCRIPT_DIAGNOSTICS_SCHEMA_VERSION,
+  TRANSCRIPT_REQUIRED_NUMERIC_DIAGNOSTIC_KEYS,
+  validateTranscriptDiagnostics,
+  type CreateTranscriptDiagnosticsFromVirtualTimelineOptions,
+  type TranscriptDiagnostics,
+  type TranscriptDiagnosticsNumericValues,
+  type TranscriptDiagnosticsValidationError,
+  type TranscriptDiagnosticsValidationResult,
+  type TranscriptRequiredNumericDiagnosticKey,
+  type TranscriptTimingSample,
+  type TranscriptVirtualTimelineDiagnosticsInput,
+} from "./transcriptDiagnostics";

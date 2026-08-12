@@ -1,0 +1,39 @@
+{
+  "title": "Buscar",
+  "placeholderDescription": "Busca en chats, proyectos, habilidades y agentes.",
+  "actions": {
+    "openAgent": "Iniciar chat con {{name}}",
+    "openAutomation": "Abrir automatización {{name}}",
+    "openExtension": "Abrir extensión {{name}}",
+    "openSession": "Abrir chat {{name}}",
+    "openSettings": "Abrir la configuración de {{name}}",
+    "openSkill": "Iniciar chat con {{name}}",
+    "clear": "Borrar búsqueda"
+  },
+  "heading": {
+    "ariaLabel": "Búsqueda universal",
+    "placeholder": "Busca en tu mundo",
+    "filterAriaLabel": "Filtrar resultados de búsqueda"
+  },
+  "noMatches": "No hay coincidencias para \"{{query}}\"",
+  "settingsResult": {
+    "meta": "Configuración > {{name}}"
+  },
+  "sections": {
+    "agents": "Agentes",
+    "automations": "Automatizaciones",
+    "chat": "Chat",
+    "extensions": "Extensiones",
+    "skills": "Skills",
+    "recents": "Recientes",
+    "results": "Resultados",
+    "settings": "Configuración"
+  },
+  "states": {
+    "available": "Disponible",
+    "enabled": "Activada"
+  },
+  "fallbackTitles": {
+    "automation": "Automatización sin título"
+  }
+}

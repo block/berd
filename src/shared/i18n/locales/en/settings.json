@@ -1,0 +1,859 @@
+{
+  "about": {
+    "buildModes": {
+      "development": "Development",
+      "production": "Production"
+    },
+    "fields": {
+      "buildMode": "Build mode",
+      "identifier": "App identifier",
+      "license": "License",
+      "name": "App name",
+      "tauriVersion": "Tauri version",
+      "version": "App version"
+    },
+    "title": "About",
+    "unavailable": "Not available"
+  },
+  "account": {
+    "loggingOut": "Logging out...",
+    "logout": "Log out",
+    "logoutError": "Couldn't log out. Try again.",
+    "logoutSuccess": "Logged out.",
+    "organization": "Organization",
+    "signedInAs": "Signed in as",
+    "title": "Account",
+    "workspace": {
+      "description": "The BuilderBot workspace used by Berd.",
+      "label": "Workspace",
+      "loadError": "Couldn't load workspaces.",
+      "loading": "Loading...",
+      "retry": "Retry",
+      "switchError": "Couldn't switch workspace. Try again.",
+      "switchSuccess": "Switched to {{workspace}}.",
+      "unavailable": "No workspaces"
+    }
+  },
+  "appearance": {
+    "animatedAvatars": {
+      "description": "Loop video avatars in chats, agent lists, and previews.",
+      "label": "Animated avatars"
+    },
+    "homePinLabels": {
+      "description": "Always show names on pinned agents and projects, not just on hover.",
+      "label": "Always show pin labels"
+    },
+    "primary": {
+      "custom": "Custom",
+      "description": "Use the theme primary by default, or choose one primary color to keep across themes.",
+      "label": "Primary color",
+      "reset": "Use theme",
+      "theme": "Theme"
+    },
+    "theme": {
+      "darkLabel": "Dark",
+      "description": "Choose how Berd looks: light, dark, or matched to your system.",
+      "label": "Theme",
+      "lightLabel": "Light",
+      "systemDescription": "Matches your device.",
+      "systemLabel": "System"
+    },
+    "title": "Appearance",
+    "workingIndicatorAnimation": {
+      "description": "Animate the activity indicator for chats that are currently working in the sidebar.",
+      "label": "Animate sidebar working indicators"
+    }
+  },
+  "archive": {
+    "title": "Archive"
+  },
+  "chats": {
+    "empty": "Archived chats will show here.",
+    "messageCount_one": "{{displayCount}} message",
+    "messageCount_other": "{{displayCount}} messages",
+    "sectionTitle": "Archived chats",
+    "title": "Chats"
+  },
+  "compaction": {
+    "goose": {
+      "autoCompact": {
+        "helper": "Set to 100% to turn off auto-compaction.",
+        "label": "Threshold",
+        "loading": "Loading...",
+        "off": "Off",
+        "saveError": "Couldn't save your auto-compact setting. Try again."
+      },
+      "description": "Automatically compact older context and reset your token count during sessions. This only applies to chats using the Goose harness.",
+      "label": "Auto-compact (Goose harness only)"
+    },
+    "title": "Compaction"
+  },
+  "connections": {
+    "configure": "Configure",
+    "connect": "Connect",
+    "connectError": "Couldn't open the connect flow. Try again.",
+    "description": "Sign in to apps and services Berd can use on your behalf.",
+    "disconnect": "Disconnect",
+    "disconnectError": "Couldn't disconnect. Try again.",
+    "empty": {
+      "description": "Add an MCP server to connect Berd to the apps and services you use.",
+      "title": "No connections yet"
+    },
+    "expiresInDays": "Expires in {{count}} days",
+    "expiresToday": "Expires today",
+    "expiresTomorrow": "Expires tomorrow",
+    "extendAccess": "Extend access",
+    "noResults": "No connections match your search.",
+    "reconnect": "Reconnect",
+    "search": "Search connections",
+    "sections": {
+      "available": "Available",
+      "installed": "Installed"
+    },
+    "status": {
+      "active": "Active",
+      "disconnected": "Disconnected",
+      "expired": "Expired"
+    },
+    "title": "Connections"
+  },
+  "deleteProject": {
+    "description": "Removes the project and all its data. You can't undo this.",
+    "title": "Delete \"{{name}}\" permanently?"
+  },
+  "developerTools": {
+    "title": "Developer tools"
+  },
+  "doctor": {
+    "agents": "Agents",
+    "bundledPath": "Bundled with Berd",
+    "copied": "Copied",
+    "copyDetails": "Copy report",
+    "empty": "Couldn't load checks. Try again.",
+    "longRunning": "Still running after {{seconds}}s. We'll stop waiting after {{timeoutSeconds}}s if a check is stuck.",
+    "open": "Open",
+    "rerun": "Run again",
+    "rowDescription": "Run health checks on Berd, agents, and tools.",
+    "rowStatus_one": "{{count}} check needs attention",
+    "rowStatus_other": "{{count}} checks need attention",
+    "runFix": "Run fix command?",
+    "runFixDescription": "Berd will run:",
+    "running": "Running checks...",
+    "title": "Doctor",
+    "tools": "Tools",
+    "version": {
+      "bridge": "ACP bridge",
+      "line": {
+        "full": "Installed via {{source}} · {{version}}",
+        "named": "{{name}} {{version}} via {{source}}",
+        "namedSourceOnly": "{{name}} via {{source}}",
+        "namedVersionOnly": "{{name}} {{version}}",
+        "sourceOnly": "Installed via {{source}}",
+        "versionOnly": "{{version}}"
+      },
+      "source": {
+        "asdf": "asdf",
+        "brew": "Homebrew",
+        "bundled": "app bundle",
+        "cargo": "Cargo",
+        "curlPipe": "native installer",
+        "mise": "mise",
+        "npm": "npm",
+        "system": "system",
+        "unknown": "an unknown source"
+      },
+      "updateAvailable": "Update available → {{version}}",
+      "updateLabel": "Update {{name}} to {{version}}"
+    }
+  },
+  "experiments": {
+    "agentShareCard": {
+      "description": "Share agents as downloadable collectible cards from the agent gallery and detail page.",
+      "title": "Agent share cards"
+    },
+    "autoEnable": {
+      "description": "Dev builds enable experiments by default. Turn off individual experiments below when you need the stable path.",
+      "label": "Auto-enable new experiments"
+    },
+    "avatarCollectionPage": {
+      "description": "Choose agent avatars on a full-screen, pannable collection canvas instead of the inline picker in the agent builder.",
+      "title": "Avatar collection canvas"
+    },
+    "berdyOnboarding": {
+      "description": "Show Berdy's interactive onboarding guide and help bubble on Home.",
+      "resetDescription": "Restore Berdy's starter tooltip and center it on Home.",
+      "resetError": "Couldn't reset Berdy onboarding. Wait for Home to finish loading and try again.",
+      "resetLabel": "Reset",
+      "resetSuccess": "Berdy onboarding was reset.",
+      "title": "Berdy onboarding"
+    },
+    "builderbot": {
+      "description": "Show the Builderbot tasks and automations surface.",
+      "title": "Builderbot"
+    },
+    "defaultLabel": "default",
+    "description": "Opt into in-progress Berd features on this device. Experiments can change, break, or disappear.",
+    "emptyDescription": "New experiments will appear here when they are ready for opt-in testing.",
+    "firstRunOnboarding": {
+      "description": "Preview the new first-install onboarding flow. Unfinished progress resumes when the experiment is enabled again.",
+      "replay": "Replay onboarding",
+      "title": "First-run onboarding"
+    },
+    "onboarding": {
+      "cancel": "Cancel",
+      "confirm": "Reset canvas",
+      "confirmDescription": "This replaces everything on your Home canvas with the starter layout. Your projects, chats, agents, and files won’t be deleted.",
+      "confirmTitle": "Reset onboarding canvas?",
+      "confirming": "Resetting…",
+      "description": "Try and reset onboarding experiences together.",
+      "resetAll": "Reset all onboarding",
+      "resetAllError": "Couldn't reset all onboarding experiences. Try again.",
+      "resetAllSuccess": "All onboarding experiences were reset.",
+      "title": "Onboarding"
+    },
+    "resetToAuto": "Reset to auto",
+    "saveError": "Couldn't save the experiment setting. Try again.",
+    "skillDiscovery": {
+      "description": "Add a Discover tab to Skills for browsing and installing skills from the Block catalog without leaving the app. Requires the sq-agents CLI.",
+      "title": "Skill discovery"
+    },
+    "starterTasks": {
+      "description": "Show the starter-task sticky note on Home for trying the onboarding flow.",
+      "reset": "Reset",
+      "resetAria": "Reset starter tasks onboarding",
+      "resetSuccess": "Onboarding starter tasks reset.",
+      "title": "Onboarding starter tasks"
+    },
+    "title": "Experiments",
+    "transcriptVirtualRenderer": {
+      "description": "Routes chats through the virtual transcript renderer bridge for implementation testing.",
+      "title": "Transcript virtual renderer"
+    },
+    "voiceConversation": {
+      "description": "Try continuous two-way voice conversations in Goose chats.",
+      "title": "Voice conversations"
+    }
+  },
+  "extensions": {
+    "addExtension": "Add connection",
+    "alwaysOn": {
+      "label": "Always on",
+      "reset": "Reset",
+      "resetAria": "Reset {{name}} to on-demand",
+      "tooltip": "This extension is loaded into every chat. Reset to make it available on demand."
+    },
+    "cancel": "Cancel",
+    "configure": "Configure {{name}}",
+    "deleteConfirmation": {
+      "confirm": "Delete connection",
+      "deleting": "Deleting...",
+      "description": "This will permanently remove this connection and all of its settings.",
+      "title": "Delete \"{{name}}\" permanently?"
+    },
+    "deleteExtension": "Delete connection",
+    "description": "Connect Berd to apps, services, and built-in capabilities.",
+    "disabledBanner": {
+      "description": "These extensions used to be auto enabled for every session, but are now enabled when needed: {{names}}.",
+      "dismiss": "Dismiss",
+      "title": "Some extensions are now enabled on demand"
+    },
+    "editExtension": "Edit connection",
+    "emptyCustom": "No custom extensions configured.",
+    "errors": {
+      "deleteFailed": "Couldn't delete the connection. Try again.",
+      "nameConflict": "A connection named \"{{name}}\" already exists.",
+      "resetFailed": "Couldn't reset the connection. Try again.",
+      "saveFailed": "Couldn't save the connection. Try again."
+    },
+    "fields": {
+      "addEnvVar": "Add variable",
+      "arguments": "Arguments",
+      "argumentsPlaceholder": "One argument per line",
+      "command": "Command",
+      "commandPlaceholder": "npx",
+      "description": "Description",
+      "descriptionPlaceholder": "What does this connection do?",
+      "envKeyPlaceholder": "KEY",
+      "envValuePlaceholder": "value",
+      "envVars": "Environment variables",
+      "name": "Name",
+      "namePlaceholder": "my-extension",
+      "removeEnvVar": "Remove variable",
+      "timeout": "Timeout (seconds)",
+      "type": "Type",
+      "url": "URL",
+      "urlPlaceholder": "http://localhost:3000/mcp"
+    },
+    "noResults": "No extensions match your search.",
+    "save": "Save",
+    "search": "Search extensions",
+    "title": "Extensions",
+    "types": {
+      "builtin": "Built-in",
+      "stdio": "Stdio",
+      "streamable_http": "HTTP"
+    }
+  },
+  "general": {
+    "agentToolsTips": {
+      "description": "Berd will show tips in chat for relevant tools, skills, or workflows.",
+      "label": "Chat tips"
+    },
+    "artifactAutoOpen": {
+      "description": "When the agent creates or opens a viewable file (like markdown or an image), show it in the viewer automatically.",
+      "label": "Auto-open files in viewer"
+    },
+    "artifacts": {
+      "change": "Change",
+      "chooseDialogTitle": "Choose artifact folder",
+      "description": "General chats save generated files here.",
+      "label": "Artifact location",
+      "loading": "Loading...",
+      "reset": "Reset",
+      "resetSuccess": "Artifact location reset.",
+      "saveError": "Couldn't update the artifact location. Try again.",
+      "saveSuccess": "Artifact location updated."
+    },
+    "atMentionDefault": {
+      "agents": "Agents",
+      "description": "Choose which tab opens first when you type @ in chat.",
+      "files": "Files",
+      "label": "@ mention default"
+    },
+    "bbCli": {
+      "description": "Goose automatically installs or repairs the /usr/local/bin/bb link to this app's bundled command.",
+      "install": "Install",
+      "installError": "Couldn't install the bb command. Try again.",
+      "installSuccess": "bb command installed.",
+      "installing": "Installing...",
+      "label": "bb command",
+      "refresh": "Refresh",
+      "repair": "Repair",
+      "title": "Command line",
+      "version": "Bundled: {{version}}",
+      "versionUnknown": "Bundled version unavailable"
+    },
+    "followUpBehavior": {
+      "description": "Queue follow-ups while Berd responds or steer the current run. Press Cmd+Enter to do the opposite for one message.",
+      "label": "Follow-up behavior",
+      "queue": "Queue",
+      "steer": "Steer (Goose harness only)"
+    },
+    "groupChatsByProject": {
+      "description": "Show project groups in the sidebar. Turn this off for one chat list sorted by activity.",
+      "label": "Group chats by project"
+    },
+    "language": {
+      "description": "Sets the language Berd uses across menus, buttons, and messages.",
+      "english": "English",
+      "label": "Language",
+      "spanish": "Spanish",
+      "system": "System default ({{language}})"
+    },
+    "multiWorkspace": {
+      "description": "Enable multiple chat and project workspaces, project workspace startup policies, and multi-workspace agent context.",
+      "label": "Multi-workspace support"
+    },
+    "responseStartGutter": {
+      "description": "Show a floating up-arrow beside long agent responses.",
+      "label": "Show floating response-start button"
+    },
+    "sessionCost": {
+      "description": "Display estimated running cost in chat when available.",
+      "label": "Show session cost"
+    },
+    "styleGuidelines": {
+      "promptDescription": "Customize the default style guidance Goose receives for response style and behavior.",
+      "promptLabel": "Guidelines",
+      "promptPlaceholder": "Enter style guidance for Goose",
+      "reset": "Reset to default",
+      "save": "Save guidelines",
+      "saveError": "Couldn't save your style guidelines. Try again.",
+      "title": "Style guidelines"
+    },
+    "terminalFallback": {
+      "change": "Change",
+      "chooseDialogTitle": "Choose terminal fallback folder",
+      "description": "Default terminal location when there is no selected project folder.",
+      "label": "Terminal folder",
+      "loading": "Loading...",
+      "reset": "Reset",
+      "resetSuccess": "Terminal fallback folder reset.",
+      "saveError": "Couldn't update the terminal fallback folder. Try again.",
+      "saveSuccess": "Terminal fallback folder updated."
+    },
+    "title": "General"
+  },
+  "nav": {
+    "about": "About",
+    "appearance": "Appearance",
+    "archive": "Archive",
+    "behavior": "Behavior",
+    "compaction": "Compaction",
+    "connections": "Connections",
+    "doctor": "Doctor",
+    "experiments": "Experiments",
+    "extensions": "Extensions",
+    "general": "General",
+    "notifications": "Notifications",
+    "providers": "AI providers",
+    "providersUpdateAvailable": "Update available",
+    "security": "Security",
+    "shortcuts": "Keyboard shortcuts",
+    "system": "System",
+    "updates": "Updates",
+    "voice": "Voice"
+  },
+  "navigationLabel": "Settings navigation",
+  "notifications": {
+    "desktop": {
+      "description": "Send an OS notification when the app is in the background.",
+      "label": "Desktop"
+    },
+    "desktopSound": {
+      "ariaLabel": "Desktop choose sound",
+      "label": "Choose sound"
+    },
+    "enabled": {
+      "label": "Enable notifications"
+    },
+    "inApp": {
+      "description": "Show a banner when a chat finishes and you're in a different session.",
+      "label": "In-app"
+    },
+    "inAppSound": {
+      "ariaLabel": "In-app choose sound",
+      "label": "Choose sound"
+    },
+    "soundPreview": {
+      "ariaLabel": "Preview {{sound}}"
+    },
+    "sounds": {
+      "badNewsBird": "Very Excited",
+      "beakYeah": "Excited",
+      "dingDongGoose": "Ding Dong",
+      "paidInBread": "A Bit of Everything",
+      "politeHonk": "Berd",
+      "quickPeep": "Chime",
+      "silent": "Silent",
+      "youHaveGotGoose": "Twinkle"
+    },
+    "title": "Notifications"
+  },
+  "projects": {
+    "empty": "Archived projects will show here.",
+    "sectionTitle": "Archived projects",
+    "title": "Projects"
+  },
+  "providers": {
+    "agents": {
+      "applyUpdates": "Update",
+      "collapseLabel": "Collapse {{name}} details",
+      "description": "Connect a model provider to use Goose, or connect another agent harness.",
+      "errors": {
+        "genericSetupFailure": "Setup hit a snag.",
+        "installStart": "Couldn’t start installation",
+        "installVerificationFailed": "Install finished, but the CLI isn't on your PATH. Try restarting your terminal.",
+        "unknownPath": "that path",
+        "unknownPlatform": "another platform"
+      },
+      "expandLabel": "Expand {{name}} details",
+      "fix": "Fix",
+      "fixLabel": "Fix {{name}}",
+      "install": "Install",
+      "installLabel": "Install {{name}}",
+      "missingComponent": "{{name}} not installed",
+      "progress": {
+        "installedProvider": "{{name}} installed successfully.",
+        "installing": "Installing {{name}}...",
+        "installingForBerd": "Installing {{name}} for Berd…",
+        "preparingProvider": "Preparing the {{name}} installation…",
+        "preparingRuntime": "Preparing the Node.js runtime...",
+        "step": "Step {{step}} of {{total}}",
+        "verifyingInstallation": "Verifying installation..."
+      },
+      "refresh": "Refresh",
+      "signIn": "Sign in",
+      "signInLabel": "Sign in to {{name}}",
+      "status": {
+        "checking": "Checking...",
+        "inProgress": "Setup in progress",
+        "setupFailed": "Setup failed"
+      },
+      "title": "Agent harnesses",
+      "troubleshootInChat": "Troubleshoot in chat",
+      "updateLabel": "Update {{name}}"
+    },
+    "catalog": {
+      "loading": "Loading provider catalog..."
+    },
+    "connectionHints": {
+      "keyRejected": "That key was rejected — double-check it in your provider's console. ({{message}})",
+      "rateLimited": "The key works, but the provider is rate-limiting requests. Try again shortly. ({{message}})",
+      "unreachable": "Can't reach the server — check the URL and make sure it's running. ({{message}})",
+      "urlLooksWrong": "The server answered, but not at that path — check the URL (did you include /v1?). ({{message}})"
+    },
+    "custom": {
+      "actions": {
+        "addHeader": "Add header",
+        "addModel": "Add model",
+        "back": "Back",
+        "create": "Create provider",
+        "delete": "Delete",
+        "deleteProvider": "Delete {{name}}",
+        "deleting": "Deleting...",
+        "editProvider": "Edit {{name}}",
+        "hideApiKey": "Hide API key",
+        "removeHeader": "Remove header",
+        "removeModel": "Remove {{model}}",
+        "save": "Save changes",
+        "saving": "Saving...",
+        "showApiKey": "Show API key"
+      },
+      "addButton": "Add provider",
+      "addTitle": "Add model provider",
+      "confirmDelete": "This removes {{name}} and its saved API key.",
+      "confirmDeleteTitle": "Delete {{name}}?",
+      "description": "Choose a model provider to connect to Goose.",
+      "editTitle": "Edit custom provider",
+      "emptyHeaders": "No custom headers.",
+      "emptyModels": "Add at least one model.",
+      "engines": {
+        "anthropic_compatible": "Anthropic API",
+        "ollama_compatible": "Ollama (local)",
+        "openai_compatible": "OpenAI API"
+      },
+      "errors": {
+        "deleteFailed": "Couldn't delete the custom provider.",
+        "loadFailed": "Couldn't load the custom provider.",
+        "saveFailed": "Couldn't save the custom provider.",
+        "templatesFailed": "Couldn't load provider templates."
+      },
+      "fields": {
+        "apiKey": "API key",
+        "apiKeyEditPlaceholder": "Leave blank to keep the saved key",
+        "apiKeyPlaceholder": "Paste your API key",
+        "apiUrl": "API URL",
+        "apiUrlPlaceholder": "https://api.example.com/v1",
+        "basePath": "Base path",
+        "basePathPlaceholder": "/v1/chat/completions",
+        "displayName": "Display name",
+        "displayNamePlaceholder": "My provider",
+        "engine": "API type",
+        "headerKey": "Header",
+        "headerValue": "Value",
+        "headers": "Custom headers",
+        "models": "Models",
+        "modelsPlaceholder": "gpt-4.1, claude-3-5-sonnet",
+        "requiresAuth": "Requires authentication",
+        "requiresAuthDescription": "Store an API key for requests to this provider.",
+        "supportsStreaming": "Supports streaming",
+        "supportsStreamingDescription": "Stream responses as the model generates tokens."
+      },
+      "modelCount_one": "{{count}} model",
+      "modelCount_other": "{{count}} models",
+      "notConfigured": "Not configured",
+      "sections": {
+        "template": "Start from template"
+      },
+      "templates": {
+        "clear": "Clear template",
+        "compatibility": {
+          "all": "All types"
+        },
+        "empty": "No providers match your search.",
+        "loading": "Loading providers...",
+        "manual": "Add a custom provider",
+        "manualDescription": "Start from a blank provider configuration.",
+        "manualLead": "Provider not in the list?",
+        "searchPlaceholder": "Search providers",
+        "useTemplate": "Use a template",
+        "useTemplateDescription": "Start with endpoint and model defaults for a known provider."
+      },
+      "validation": {
+        "apiKeyRequired": "API key is required.",
+        "apiUrlInvalid": "Enter a valid HTTP or HTTPS URL.",
+        "apiUrlRequired": "API URL is required.",
+        "displayNameRequired": "Display name is required.",
+        "engineRequired": "Choose an API type.",
+        "headerDuplicate": "Header names must be unique.",
+        "headerNameInvalid": "Header names can only contain valid HTTP token characters.",
+        "headerNameRequired": "Header name is required.",
+        "headerValueRequired": "Header value is required.",
+        "modelsRequired": "Add at least one model."
+      }
+    },
+    "disconnect": "Disconnect",
+    "getApiKey": "Get an API key",
+    "loadingModels": "Loading models...",
+    "modelRefreshWarning": "Credentials saved. Model refresh needs attention: {{message}}",
+    "models": {
+      "active": "Active",
+      "checkingStatus": "Checking provider status...",
+      "configured": "Configured",
+      "connectPrompt": "Connect a model provider",
+      "description": "Goose requires an AI model to run.",
+      "details": {
+        "configuredUrl": "Configured URL"
+      },
+      "notSet": "Not set",
+      "setup": {
+        "configLoadFallback": "Couldn't load provider settings. You can still enter values and save.",
+        "connected": {
+          "cloudCredentials": "Connected through your cloud credentials.",
+          "local": "Running locally.",
+          "oauthBrowser": "Connected through Berd sign-in.",
+          "oauthDeviceCode": "Connected through Berd device-code sign-in."
+        },
+        "fieldDescription": {
+          "cloudCredentials": "Add your cloud credentials to use this provider.",
+          "configFields": "Fill in the required fields to use this provider.",
+          "hostWithOauthFallback": "Add your host details to use this provider.",
+          "singleApiKey": "Add your API key to use this provider."
+        },
+        "hostWithOauthFallbackTerminal": "Leave **access token** blank, save your host URL, then run `goose configure` in your terminal to sign in.",
+        "nativeConnectDescription": "Sign in with your existing account.",
+        "pending": {
+          "cloudCredentials": "Configure your cloud credentials in your terminal before using this provider.",
+          "local": "This provider runs locally and doesn't need saved settings.",
+          "oauthGuided": "Berd will guide you through sign-in.",
+          "oauthTerminal": "Run `goose configure` in your terminal to finish sign-in."
+        }
+      },
+      "summaryLabel": "Model provider",
+      "summaryLabelPlural": "Model providers",
+      "title": "Model providers"
+    },
+    "needsAttention": "Needs attention",
+    "saved": "Saved",
+    "saving": "Saving...",
+    "setupDetour": {
+      "readyDescription": "Provider connected. Return to your agent draft when you're ready.",
+      "returnToDraft": "Return to agent draft"
+    },
+    "setupOutput": {
+      "copyDeviceCode": "Copy device code",
+      "deviceCode": "Device code"
+    },
+    "setupRequired": {
+      "body": "This build does not include a preconfigured model provider. Configure one before starting a Goose chat.",
+      "openProviders": "Open AI providers",
+      "title": "Choose an AI provider to start chatting",
+      "toast": "Choose an AI provider before starting a chat."
+    },
+    "showFewer": "Show fewer",
+    "showMore": "Show {{count}} more providers",
+    "title": "Providers",
+    "waitingForSignIn": "Waiting for sign-in..."
+  },
+  "runtimeConfig": {
+    "clearError": "Couldn't clear fake endpoint response.",
+    "clearSuccess": "Fake endpoint response cleared.",
+    "clearing": "Clearing...",
+    "editorLabel": "Fake endpoint response",
+    "jsonLabel": "Fake endpoint JSON",
+    "refreshError": "Couldn't reload fake endpoint response.",
+    "refreshSuccess": "Fake endpoint response reloaded.",
+    "refreshing": "Reloading...",
+    "saveError": "Couldn't save fake endpoint response.",
+    "saveSuccess": "Fake endpoint response saved.",
+    "saving": "Saving...",
+    "status": {
+      "ready": "Loaded from {{source}}.",
+      "unavailable": "{{reason}}: {{message}}"
+    },
+    "title": "Runtime config"
+  },
+  "security": {
+    "commandClassifier": {
+      "description": "Scans tool calls for malicious content using an ML classifier, with fallback to pattern-based detection.",
+      "label": "Command injection detection"
+    },
+    "description": "Protect against prompt injection and command injection attacks.",
+    "managedByOrg": "These protections are managed by your organization and cannot be disabled.",
+    "promptInjection": {
+      "description": "Scans conversation context for prompt injection attacks. Uses ML-based classification.",
+      "label": "Prompt injection detection"
+    },
+    "status": {
+      "active": "Active"
+    },
+    "threshold": {
+      "description": "The confidence level at which a flagged action prompts you to allow or block it. Lower values are more sensitive (more prompts); higher values are less sensitive. Range 0.0–1.0.",
+      "label": "Detection sensitivity",
+      "rangeError": "Enter a value between 0.0 and 1.0.",
+      "restartHint": "Changes take effect after restarting Berd.",
+      "save": "Save",
+      "saveError": "Failed to update detection sensitivity.",
+      "saved": "Detection sensitivity updated."
+    },
+    "title": "Security",
+    "warpNotice": "ML classification requires a connection to WARP to reach the classification service."
+  },
+  "securityConfirmation": {
+    "allow": "Allow once",
+    "backgroundChat": "From chat: {{title}}",
+    "backgroundChatUnknown": "From another chat",
+    "block": "Block",
+    "commandLabel": "Flagged command",
+    "connectGoose": "Connect Goose",
+    "connectGooseDescription": "Connect Goose to get AI-generated explanations for future security alerts.",
+    "description": "This action was flagged as a potential security risk. Review the details below before deciding whether to allow it.",
+    "detectionConfidence": "Detection confidence",
+    "findingId": "Finding ID: {{id}}",
+    "inferenceFailed": "An explanation could not be generated. Review the command carefully before allowing it.",
+    "inferredLabel": "Why this may have been flagged (inferred)",
+    "inferring": "Analyzing why this was flagged…",
+    "title": "Security alert"
+  },
+  "storage": {
+    "cachedMedia": {
+      "clear": "Clear cached media",
+      "clearing": "Clearing...",
+      "confirm": "Clear cached media",
+      "confirmDescription": "This deletes downloaded avatar and project preview media from this device. Selected avatars and other settings stay the same.",
+      "confirmTitle": "Clear cached media?",
+      "description": "Delete downloaded avatar and project preview media from this device. Selected avatars and settings won't change.",
+      "error": "Couldn't clear cached media. Try again.",
+      "label": "Cached media",
+      "success": "Cached media cleared."
+    },
+    "title": "Storage",
+    "trustedDomains": {
+      "clear": "Clear all",
+      "clearSuccess": "Trusted link domains cleared.",
+      "count_one": "{{count}} domain",
+      "count_other": "{{count}} domains",
+      "description": "Domains you trusted from link safety prompts. Links to these domains open without asking.",
+      "empty": "No trusted link domains yet.",
+      "label": "Trusted link domains",
+      "listLabel": "Trusted link domains",
+      "manage": "Manage",
+      "remove": "Remove",
+      "removeAria": "Remove {{domain}} from trusted link domains",
+      "removeSuccess": "{{domain}} removed from trusted link domains."
+    }
+  },
+  "title": "Settings",
+  "updates": {
+    "actions": {
+      "cancel": "Cancel",
+      "check": "Check for updates",
+      "checking": "Checking...",
+      "downloading": "Downloading...",
+      "installing": "Installing...",
+      "restart": "Restart to update",
+      "restartToFinish": "Restart to finish switching to {{channel}}",
+      "retry": "Try again",
+      "switchTo": "Switch to {{channel}}",
+      "update": "Update Berd"
+    },
+    "betaBadge": {
+      "build": "Berd {{version}}",
+      "defaultWhatToTest": "Try the newest features and report anything that feels rough.",
+      "open": "Open Beta details",
+      "reportIssue": "Report an issue",
+      "reportIssueUnavailable": "Beta issue reporting is not configured for this build.",
+      "title": "Beta release",
+      "waitingForMain": "Beta updates are off. Berd will switch to Main when a compatible release is ready.",
+      "whatToTest": "What to test"
+    },
+    "card": {
+      "checkPrompt": "Check for a new version",
+      "currentVersion": "Version {{version}}",
+      "description": "Keep Berd up to date with the latest features and fixes.",
+      "title": "App version"
+    },
+    "channel": {
+      "description": "Choose Main for recommended releases or Beta for early features.",
+      "title": "Release channel",
+      "unknown": "Current release",
+      "waitingDescription": "Beta updates are off. Berd will return to Main when a compatible release is ready."
+    },
+    "description": "Berd checks for signed app updates in the background and waits for you to restart.",
+    "details": {
+      "available": "Update {{version}} is ready to download.",
+      "checking": "Checking for updates...",
+      "downloading": "Downloading the latest signed update.",
+      "error": "The last update attempt failed.",
+      "idle": "Berd will check automatically every few hours.",
+      "installing": "Installing the downloaded update.",
+      "ready": "Update {{version}} is installed and will apply after restart.",
+      "switchReady": "{{channel}} {{version}} is installed. Restart when you’re ready to finish switching.",
+      "unavailable": "Updates are only available in signed Tauri release builds.",
+      "upToDate": "Berd is up to date."
+    },
+    "errors": {
+      "detail": "Details: {{detail}}",
+      "generic": "Update failed. Try again.",
+      "networkAccess": "Unable to check for updates. Connect to Cloudflare WARP and try again.",
+      "switchUnavailable": "No {{channel}} release is available for this build yet."
+    },
+    "progress": {
+      "downloading": "Downloading",
+      "installing": "Installing",
+      "percent": "{{progress}}%"
+    },
+    "status": {
+      "available": "Available",
+      "checking": "Checking",
+      "downloading": "Downloading",
+      "error": "Error",
+      "idle": "Idle",
+      "installing": "Installing",
+      "ready": "Ready",
+      "unavailable": "Unavailable",
+      "upToDate": "Up to date"
+    },
+    "switchDialog": {
+      "betaDescription": "Berd will download the latest beta and restart. Betas get new features first and may have rough edges. You can switch back to Main anytime — from Settings or the Beta badge.",
+      "builds": "You’re running {{source}} {{currentVersion}}. Berd found {{target}} {{targetVersion}}.",
+      "mainDescription": "Berd will make sure everything from the beta works with Main, then download it and restart.",
+      "restartLater": "You can keep working after the download and restart when you’re ready.",
+      "title": "Switch to {{channel}}?"
+    },
+    "title": "Updates",
+    "toast": {
+      "error": {
+        "description": "{{message}}",
+        "title": "Update failed"
+      },
+      "ready": {
+        "description": "Berd {{version}} will apply after restart.",
+        "title": "Update ready"
+      }
+    }
+  },
+  "voice": {
+    "description": "Install both Pocket TTS and Parakeet STT to use Voice Conversation.",
+    "download": "Download model",
+    "downloadPhase": {
+      "complete": "Installed",
+      "downloading": "Downloading",
+      "extracting": "Preparing model",
+      "publishing": "Installing model",
+      "queued": "Queued",
+      "verifying": "Verifying model"
+    },
+    "downloadProgress": "{{downloaded}} of {{total}}",
+    "modelInstalled": "Installed",
+    "modelInstalledSize": "Installed · {{size}} on disk",
+    "modelMissingSize": "Not installed · {{size}} download",
+    "modelNotInstalled": "Not installed",
+    "notNow": "Not now",
+    "playbackSpeed": "Playback speed",
+    "playing": "Playing",
+    "preview": "Preview",
+    "previewVoice": "Preview {{voice}}",
+    "removeModel": "Remove model",
+    "removeModelDescription": "Voice Conversation will stop before {{model}} is removed. You can download the model again later.",
+    "removeModelQueued": "Queued for removal…",
+    "removeModelTitle": "Remove {{model}}?",
+    "removingModel": "Removing model…",
+    "retryDownload": "Retry model download",
+    "settingsDescription": "Install Pocket TTS, choose from 12 voices, and preview them through your selected output device.",
+    "title": "Voice conversation",
+    "useSelected": "Use selected voice",
+    "voiceLabel": "Pocket TTS voice"
+  }
+}

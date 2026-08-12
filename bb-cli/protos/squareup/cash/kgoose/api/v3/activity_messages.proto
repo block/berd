@@ -1,0 +1,79 @@
+syntax = "proto2";
+
+package squareup.cash.kgoose.api.v3;
+
+option java_package = "com.squareup.protos.cash.kgoose.api.v3";
+
+
+message Activity {
+  oneof activity_type {
+    TileCreationActivity tile_creation = 1;
+
+    // Deprecated: Use `ClientRenderingUpdateActivity` instead.
+    PlasmaFlowCompletionActivity plasma_flow_completion = 2 [deprecated = true];
+
+    // Deprecated: Use `ClientRenderingUpdateActivity` instead.
+    ClientCardUpdateActivity client_card_update = 3;
+
+    ClientRenderingUpdateActivity client_rendering_update = 4;
+
+    MemoryUpdateActivity memory_update = 5;
+    
+    // Add more activity types here in the future
+  }
+
+  optional string id = 101; // Unique ID for the activity for deduplication
+
+  optional int64 created = 102; // Timestamp of when the activity was created
+}
+
+message ClientCardUpdateActivity {
+  optional string tool_request_id = 1; // Unique identifier for the tool request
+
+  // Summary of the client card completion, e.g., "Client card $5 bitcoin purchase completes"
+  optional string summary = 2;
+
+  optional ClientCardUpdateStatus status = 3; // Status of the client card completion
+}
+
+// Updates client-rendered UI components, rendered from server-side tool responses, based on state changes.
+// If a `ClientRenderingUpdateActivity` is found for the given `tool_request_id`, the most recent
+// `client_renderable` should override the original `client_renderable` in the tool response.
+// e.g. updating a "Send $20" action card to "Sent $20" after a customer completes the payment flow.
+message ClientRenderingUpdateActivity {
+  // Required tool request id associated with the rendering being updated
+  optional string tool_request_id = 1;
+
+  // Required JSON representation of ClientRenderable proto
+    //   optional ClientRenderable client_renderable = 2;
+}
+
+enum ClientCardUpdateStatus {
+  CLIENT_CARD_UPDATE_STATUS_UNSPECIFIED = 0;
+
+  /* The client card update has been finished successfully */
+  CLIENT_CARD_UPDATE_STATUS_SUCCESS = 1;
+
+  /* The client card update has failed */
+  CLIENT_CARD_UPDATE_STATUS_FAILED = 2;
+}
+
+message TileCreationActivity {
+  optional string tile_id = 1; // ID of the tile associated with this activity
+  optional string tile_title = 2; // title of the tile
+}
+
+message PlasmaFlowCompletionActivity {
+  optional string tool_request_id = 1;
+
+  // Summary of the Plasma flow completion, e.g., "$5 bitcoin purchase completes"
+  optional string summary = 2;
+}
+
+message MemoryUpdateActivity {
+  // ID of the message associated with the memory update
+  optional string origin_message_id = 1;
+
+  // Label to describe memory action taken in UI
+  optional string label = 2;
+}

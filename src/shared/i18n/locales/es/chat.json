@@ -1,0 +1,637 @@
+{
+  "attachments": {
+    "alt": "Adjunto {{index}}",
+    "chooseFilesDialogTitle": "Elegir archivos para adjuntar",
+    "chooseFoldersDialogTitle": "Elegir carpetas para adjuntar",
+    "dropToAttach": "Suelta archivos o carpetas para adjuntarlos",
+    "groupLabel_one": "1 adjunto",
+    "groupLabel_other": "{{count}} adjuntos",
+    "open": "Abrir adjunto {{name}}",
+    "previewAlt": "Vista previa de {{name}}",
+    "remove": "Eliminar adjunto",
+    "unavailable": "El adjunto {{name}} no está disponible",
+    "view": "Ver adjunto {{index}}",
+    "viewFullSize": "Ver adjunto {{name}} en tamaño completo"
+  },
+  "agentToolsTip": {
+    "connect": "Conectar",
+    "connected": "{{tool}} está conectado",
+    "disconnected_one": "{{tools}} está desconectado",
+    "disconnected_other": "{{tools}} están desconectados",
+    "dismiss": "Descartar consejo"
+  },
+  "context": {
+    "closePanel": "Cerrar panel de contexto",
+    "openPanel": "Abrir panel de contexto",
+    "ringAria": "Contexto: {{percent}}% usado"
+  },
+  "selectedText": {
+    "actions": {
+      "copyAsMarkdown": "Copiar como Markdown"
+    }
+  },
+  "sessionWindow": {
+    "handoffPausedDescription": "La ventana de origen dejó de enviar actualizaciones en vivo. Recarga la sesión para recuperar el historial de conversación persistido.",
+    "handoffPausedTitle": "Transferencia de sesión pausada",
+    "missingDescription": "No encontramos esta sesión. Es posible que se haya eliminado.",
+    "missingTitle": "Sesión no disponible",
+    "readOnlyStatus": "Terminando la respuesta actual...",
+    "reload": "Recargar sesión"
+  },
+  "terminal": {
+    "close": "Cerrar terminal",
+    "collapse": "Contraer terminal",
+    "confirmStopDescription": "Esto finaliza el shell y cierra el panel del terminal.",
+    "confirmStopTabTitle": "¿Detener terminal {{path}}?",
+    "confirmStopTitle": "¿Detener terminal?",
+    "expand": "Expandir terminal",
+    "exitedWithSignal": "Finalizado por {{signal}}",
+    "newTab": "Nueva pestaña de terminal",
+    "noWorkspace": "Asigna un proyecto o carpeta para abrir un terminal.",
+    "open": "Abrir terminal",
+    "restart": "Reiniciar terminal",
+    "selectTab": "Seleccionar terminal {{path}}",
+    "startFailed": "No se pudo iniciar el terminal.",
+    "status": {
+      "error": "Error",
+      "exited": "Finalizado",
+      "running": "Activo",
+      "starting": "Iniciando"
+    },
+    "stop": "Detener terminal",
+    "stopAndClose": "Detener y cerrar terminal",
+    "stopAndCloseTab": "Detener y cerrar terminal {{path}}",
+    "stopped": "Terminal detenido",
+    "tabs": "Pestañas de terminal",
+    "toggle": "Alternar terminal",
+    "title": "Terminal",
+    "dockToBottom": "Acoplar terminal abajo",
+    "popOut": "Separar terminal",
+    "resize": "Redimensionar terminal"
+  },
+  "errors": {
+    "attachmentsTooLarge": "Los adjuntos son demasiado grandes para enviar ({{totalMb}} MB, límite {{limitMb}} MB). Elimina algunos adjuntos e inténtalo de nuevo.",
+    "sessionPreparationSuperseded": "La configuración de la sesión cambió durante la preparación. Intenta enviar de nuevo.",
+    "steeringBackendUnavailable": "La guía no está disponible en este backend de Goose. Reinicia con la rama del backend de guía e inténtalo de nuevo.",
+    "voiceInputFailedTitle": "Falló el dictado por voz",
+    "voiceInputNoMicrophoneDescription": "Conecta o selecciona un micrófono y vuelve a intentar el dictado por voz.",
+    "voiceInputNoMicrophoneTitle": "No se encontró ningún micrófono",
+    "voiceInputPermissionDescription": "Permite el acceso al micrófono para Berd en Configuración del Sistema y vuelve a intentar el dictado por voz.",
+    "voiceInputPermissionTitle": "El acceso al micrófono está bloqueado",
+    "voiceInputUnavailableDescription": "Otra app puede estar usando tu micrófono, o macOS no pudo iniciar la grabación. Cierra otras apps de grabación y vuelve a intentarlo.",
+    "voiceInputUnavailableTitle": "El micrófono no está disponible"
+  },
+  "contextPanel": {
+    "actions": {
+      "fetchRemoteStatus": "Actualizar estado remoto",
+      "openWorkspaceMenu": "Abrir acciones del espacio de trabajo",
+      "openWorkspaceContextFor": "Abrir contexto de espacio de trabajo para {{name}}",
+      "expandWorkspaceContextFor": "Expandir contexto de espacio de trabajo para {{name}}",
+      "collapseWorkspaceContextFor": "Contraer contexto de espacio de trabajo para {{name}}",
+      "openWorkspaceActionsFor": "Abrir acciones de {{name}}",
+      "refreshLocalStatus": "Actualizar estado local",
+      "refreshGitStatus": "Actualizar estado de git"
+    },
+    "createDialog": {
+      "baseBranch": "Rama base",
+      "branchDescription": "Crea una nueva rama en este repositorio.",
+      "branchError": "No se pudo crear la rama {{branch}}.",
+      "branchName": "Nombre de la rama",
+      "branchNamePlaceholder": "feature/mi-rama",
+      "branchSuccess": "Se creó {{branch}}.",
+      "branchTitle": "Nueva rama",
+      "branchToOpen": "Rama para abrir",
+      "cancel": "Cancelar",
+      "chooseSourceRepo": "Elegir repositorio de origen",
+      "createBranch": "Crear rama",
+      "createNewBranch": "Crear una nueva rama",
+      "createWorktree": "Crear worktree",
+      "creatingBranch": "Creando rama...",
+      "creatingWorktree": "Creando worktree...",
+      "noAvailableBranches": "No hay ramas disponibles",
+      "sourceRepoError": "No se pudo elegir el repositorio de origen.",
+      "sourceRepoRequired": "Elige un repositorio Git para crear un worktree.",
+      "worktreeDescription": "Crea un worktree separado e inclúyelo en este chat.",
+      "worktreeError": "No se pudo crear el worktree {{worktree}}.",
+      "worktreeName": "Nombre del worktree",
+      "worktreeNamePlaceholder": "mi-worktree",
+      "worktreePath": "Carpeta: {{path}}",
+      "worktreeSuccess": "Se creó e incluyó el worktree {{worktree}}.",
+      "worktreeTitle": "Nuevo worktree"
+    },
+    "addWorkspaceDialog": {
+      "add": "Agregar",
+      "cancel": "Cancelar",
+      "chooseDirectory": "Elegir",
+      "chooseFolder": "Elegir carpeta",
+      "chooseFolderDialogTitle": "Seleccionar carpeta",
+      "chooseWorkspace": "Agregar espacio de trabajo",
+      "createWorktree": "Crear worktree",
+      "createWorktreeDescription": "Crea un nuevo worktree desde este repo antes de agregar el espacio de trabajo.",
+      "description": "El espacio de trabajo se asociará con este chat.",
+      "projectDescription": "La carpeta se asociará con los chats del proyecto.",
+      "projectError": "No se pudo agregar la carpeta.",
+      "projectTitle": "Agregar carpeta",
+      "error": "No se pudo agregar el espacio de trabajo.",
+      "folder": "Carpeta",
+      "folderPlaceholder": "Elegir una carpeta",
+      "folderInRepository": "Carpeta en repositorio",
+      "folderInWorktree": "Carpeta en worktree",
+      "gitRepository": "Repositorio Git",
+      "gitWorktree": "Worktree Git",
+      "loadingWorktrees": "Cargando worktrees",
+      "addAnotherWorkspace": "Agregar otro espacio de trabajo",
+      "localRepo": "Repositorio local",
+      "mainCheckout": "checkout principal",
+      "noDirectorySelected": "Ninguna carpeta seleccionada",
+      "pickDirectory": "Elegir una carpeta",
+      "pickDirectoryDescription": "Elige cualquier carpeta en esta computadora",
+      "plainFolder": "Carpeta",
+      "startFrom": "Comenzar desde",
+      "title": "Agregar espacio de trabajo",
+      "worktree": "Worktree",
+      "worktreePlaceholder": "--"
+    },
+    "empty": {
+      "folderNotSet": "Carpeta no configurada",
+      "noChanges": "No hay cambios sin confirmar",
+      "noGitWorkspaces": "Ningún espacio de trabajo de este chat es un repositorio de git",
+      "notGitRepo": "Esta carpeta no es un repositorio de git",
+      "noProjectAssigned": "No hay proyecto asignado"
+    },
+    "errors": {
+      "gitRead": "El estado de git no está disponible en este momento.",
+      "gitChangesRead": "Los cambios de git no están disponibles en este momento.",
+      "folderChange": "No se pudo cambiar la carpeta."
+    },
+    "artifacts": {
+      "folderLabel": "Carpeta de artefactos",
+      "workspaceLabel": "Chat general"
+    },
+    "folder": {
+      "change": "Cambiar carpeta",
+      "changeDialogTitle": "Elegir carpeta de trabajo",
+      "changeSuccess": "Carpeta de trabajo actualizada.",
+      "label": "Carpeta de trabajo",
+      "repositoryLabel": "Carpeta del repositorio",
+      "repositoryWithBranch": "Carpeta del repositorio - {{branch}}"
+    },
+    "includedWorkspaces": {
+      "addWorkspaceAction": "Agregar un espacio de trabajo",
+      "changed": "{{count}} cambios",
+      "clean": "limpio",
+      "copyError": "No se pudieron copiar las rutas de los espacios de trabajo.",
+      "copyPathError": "No se pudo copiar la ruta del espacio de trabajo.",
+      "copyPathSuccess": "Ruta del espacio de trabajo copiada.",
+      "copyPaths": "Copiar rutas",
+      "copySuccess": "Rutas de espacios de trabajo copiadas.",
+      "description": "Todos los espacios de trabajo listados se comparten con Goose para este chat.",
+      "empty": "Aún no hay espacios de trabajo incluidos.",
+      "includeSuccess": "{{name}} incluido.",
+      "mainCheckout": "checkout principal",
+      "worktree": "worktree",
+      "kind": {
+        "detachedCheckout": "Checkout detached",
+        "directory": "Directorio",
+        "linkedWorktree": "Worktree vinculado",
+        "mainWorktree": "Worktree principal",
+        "nonGitDirectory": "Directorio sin git",
+        "repository": "Repositorio",
+        "subdirectory": "Subdirectorio"
+      },
+      "remove": "Quitar del chat",
+      "cleanupResource": {
+        "branch": "rama",
+        "worktree": "worktree"
+      },
+      "removeError": "No se pudo quitar el espacio de trabajo.",
+      "removeConfirmAction": "Quitar espacio de trabajo",
+      "removeConfirmBody": "Esto quita el espacio de trabajo del chat. Los archivos y cambios locales permanecen en el disco.",
+      "removeConfirmBodyWithChanges_one": "Este espacio de trabajo tiene {{count}} cambio sin confirmar. Quitarlo del chat no eliminará archivos ni cambios locales.",
+      "removeConfirmBodyWithChanges_other": "Este espacio de trabajo tiene {{count}} cambios sin confirmar. Quitarlo del chat no eliminará archivos ni cambios locales.",
+      "removeConfirmCancel": "Cancelar",
+      "removeConfirmTitle": "¿Seguro que quieres quitar este espacio de trabajo?",
+      "removeManagedConfirmAction": "Quitar {{resource}}",
+      "removeManagedConfirmBody": "Esto quita {{resource}} creado por Goose y desvincula el espacio de trabajo de este chat.",
+      "removeManagedConfirmBodyWithChanges_one": "Este {{resource}} tiene {{count}} cambio sin confirmar. Quitarlo descartará los cambios locales y eliminará {{resource}} creado por Goose.",
+      "removeManagedConfirmBodyWithChanges_other": "Este {{resource}} tiene {{count}} cambios sin confirmar. Quitarlo descartará los cambios locales y eliminará {{resource}} creado por Goose.",
+      "removeManagedConfirmTitle": "¿Seguro que quieres quitar este {{resource}}?",
+      "removeManagedError": "No se pudo limpiar {{resource}}.",
+      "removeWorktreeConfirmAction": "Quitar espacio de trabajo",
+      "removeWorktreeConfirmBody": "Si quitas este espacio de trabajo, el worktree {{worktree}} creado por Goose se eliminará del disco.",
+      "removeWorktreeConfirmBodyWithChanges_one": "Tienes {{count}} cambio sin confirmar en este worktree. Si quitas este espacio de trabajo, ese cambio se perderá y {{worktree}} se eliminará del disco.",
+      "removeWorktreeConfirmBodyWithChanges_other": "Tienes {{count}} cambios sin confirmar en este worktree. Si quitas este espacio de trabajo, esos cambios se perderán y {{worktree}} se eliminará del disco.",
+      "removeWorktreeConfirmTitle": "¿Seguro que quieres quitar este worktree?",
+      "removeSharedManagedConfirmBodyOtherChat": "Otro chat activo usa el mismo {{resource}} creado por Goose. Solo se quitará este espacio de trabajo de este chat; el {{resource}} permanecerá en el disco.",
+      "terminal": "Terminal"
+    },
+    "picker": {
+      "selectContext": "Seleccionar árbol de trabajo o rama",
+      "selectWorktree": "Seleccionar árbol de trabajo",
+      "selectBranch": "Seleccionar rama",
+      "search": "Buscar",
+      "noResults": "No hay árboles de trabajo ni ramas que coincidan",
+      "worktrees": "Árbol de trabajo activo",
+      "addWorktree": "Agregar worktree",
+      "addBranch": "Agregar rama",
+      "allBranches": "Todas las ramas",
+      "availableBranches": "Ramas disponibles",
+      "branchLabel": "Rama",
+      "switchIn": "Cambiar en {{worktree}}",
+      "checkedOutIn": "En uso en {{worktree}}",
+      "changeFolder": "Cambiar carpeta…",
+      "changesStashed": "Tus cambios se guardaron primero en el stash — restáuralos con \"git stash pop\".",
+      "checkedOutBranch": "{{branch}}",
+      "currentBranch": "Rama actual",
+      "noBranch": "Sin rama",
+      "dirtyTitle": "Cambios sin confirmar",
+      "dirtyDescription_one": "Tienes {{count}} cambio sin confirmar. ¿Cómo deseas proceder?",
+      "dirtyDescription_other": "Tienes {{count}} cambios sin confirmar. ¿Cómo deseas proceder?",
+      "stashAndSwitch": "Guardar y cambiar",
+      "carryChanges": "Llevar a la rama",
+      "cancel": "Cancelar",
+      "switchError": "Error al cambiar a {{branch}}. Tus cambios pueden entrar en conflicto con la rama destino.",
+      "stashError": "Error al guardar los cambios.",
+      "stashSuccess": "Cambios guardados y cambiado a {{branch}}."
+    },
+    "git": {
+      "fetch": "Fetch",
+      "fetchError": "No se pudieron traer los cambios.",
+      "fetchSuccess": "Se trajeron los cambios más recientes.",
+      "initRepo": "Inicializar Git",
+      "initError": "Error al inicializar el repositorio git.",
+      "pull": "Pull",
+      "pullCommitCount_one": "Pull de {{count}} commit",
+      "pullCommitCount_other": "Pull de {{count}} commits",
+      "pullWithCount": "Pull ({{count}})",
+      "pullError": "No se pudieron bajar los cambios.",
+      "pullSuccess": "Se bajaron los cambios más recientes."
+    },
+    "labels": {
+      "project": "Proyecto",
+      "remote": "Remoto",
+      "workspace": "Carpeta del proyecto",
+      "workspaces": "Espacios de trabajo"
+    },
+    "states": {
+      "detached": "detached",
+      "gitLoading": "Cargando estado de git..."
+    },
+    "summary": {
+      "changes_one": "{{count}} cambio",
+      "changes_other": "{{count}} cambios"
+    },
+    "tabs": {
+      "details": "Contexto",
+      "changes": "Cambios",
+      "files": "Archivos"
+    },
+    "widgets": {
+      "artifacts": "Artefactos",
+      "changes": "Cambios",
+      "changesOnBranch": "en",
+      "includedWorkspaces": "Espacios de trabajo incluidos",
+      "workspace": "Espacio de trabajo"
+    }
+  },
+  "files": {
+    "empty": "Los archivos aparecerán aquí después de asignar un proyecto.",
+    "folderEmpty": "La carpeta está vacía",
+    "loadError": "No se pudo cargar esta carpeta. Inténtalo de nuevo.",
+    "loading": "Cargando archivos...",
+    "openFolder": "Abrir carpeta: {{path}}",
+    "rootLoadError": "No se pudo cargar esta carpeta. Inténtalo de nuevo."
+  },
+  "image": {
+    "view": "Ver {{label}}",
+    "download": "Descargar imagen",
+    "downloadStarted": "Descarga iniciada: {{filename}}",
+    "downloadError": "No se pudo descargar la imagen.",
+    "openDownloads": "Abrir Descargas",
+    "openDownloadsError": "No se pudo abrir Descargas."
+  },
+  "input": {
+    "ariaLabel": "Entrada de mensaje del chat",
+    "placeholder": "Chatea con {{agent}}, @ para agentes/archivos o / para habilidades"
+  },
+  "loading": {
+    "compacting": "Compactando conversación...",
+    "thinking": "Pensando...",
+    "responding": "Respondiendo..."
+  },
+  "mention": {
+    "ariaLabel": "Sugerencias de referencias",
+    "title": "Agentes",
+    "referencesTitle": "Referencias",
+    "pathsTitle": "Rutas",
+    "skillsTitle": "Habilidades",
+    "filesTitle": "Archivos",
+    "projectRoot": "Raíz del proyecto",
+    "homeFolder": "Carpeta de inicio",
+    "filesystemRoot": "Raíz del sistema de archivos",
+    "loadingPaths": "Cargando rutas...",
+    "noMatches": "Sin resultados",
+    "loadError": "No se pudieron cargar las rutas",
+    "status": {
+      "loadingPaths": "Cargando rutas",
+      "referencesAvailable_one": "{{count}} referencia disponible",
+      "referencesAvailable_other": "{{count}} referencias disponibles",
+      "noMatches": "Sin resultados",
+      "loadError": "No se pudieron cargar las rutas"
+    },
+    "enterKey": "Enter",
+    "toInsert": "para insertar"
+  },
+  "notifications": {
+    "compactionComplete": "Conversacion compactada. El contexto anterior se resumio.",
+    "modelSwitchError": "No se pudo cambiar a {{model}}. Este chat sigue usando {{fallbackModel}}.",
+    "modelSwitchErrorWithoutFallback": "No se pudo cambiar a {{model}}.",
+    "archiveError": "No se pudo archivar el chat",
+    "gitInspectionError": "No se pudieron inspeccionar los worktrees o las ramas. El chat no se archivó.",
+    "gitCleanupError": "El chat se archivó, pero no se pudo completar la limpieza de Git",
+    "moveError": "No se pudo mover el chat",
+    "renameError": "No se pudo cambiar el nombre del chat"
+  },
+  "gitCleanup": {
+    "archiveConfirmTitle": {
+      "worktrees": "¿Archivar el chat y quitar sus worktrees?",
+      "branches": "¿Archivar el chat y quitar sus ramas?",
+      "worktreesAndBranches": "¿Archivar el chat y quitar sus worktrees y ramas?"
+    },
+    "archiveConfirmDescriptionWithFiles": {
+      "worktrees": "Esto descartará archivos y cambios locales, archivará el chat y luego quitará los worktrees creados por Goose.",
+      "branches": "Esto descartará cambios locales, archivará el chat y luego quitará las ramas creadas por Goose.",
+      "worktreesAndBranches": "Esto descartará archivos y cambios locales, archivará el chat y luego quitará los worktrees y las ramas creados por Goose."
+    },
+    "archiveConfirmAction": "Archivar y quitar"
+  },
+  "pinToHome": {
+    "action": "Fijar chat",
+    "pinned": "Chat fijado",
+    "pinning": "Fijando...",
+    "unpin": "Desfijar chat"
+  },
+  "message": {
+    "copied": "Copiado",
+    "defaultImageAlt": "Adjunto",
+    "forkFromHere": "Bifurcar sesión desde aquí",
+    "jumpToResponseStart": "Ir al inicio de la respuesta",
+    "jumpToFloatingResponseStart": "Ir al inicio de la respuesta actual",
+    "jumpToResponseStartHint": "En respuestas largas, esto te lleva de vuelta al inicio.",
+    "jumpToResponseStartHintDismiss": "Descartar consejo de inicio de respuesta",
+    "mcpApp": "MCP App",
+    "mcpAppLoading": "Cargando MCP App…",
+    "mcpAppRenderError": "No se pudo renderizar MCP App en línea.",
+    "redactedThinking": "(pensamiento redactado)",
+    "providerError": {
+      "anthropicThinkingHistory": "Este chat no puede continuar con un modelo Claude porque su historial de razonamiento previo ya no tiene una forma que Claude acepte. Inicia un chat nuevo o cambia este chat a un modelo que no sea Claude para continuar."
+    },
+    "berdctlCrossSessionLabel": "Enviado por Berd desde otra sesión",
+    "steerLabel": "Guiado",
+    "viewMore": "Ver más",
+    "viewLess": "Ver menos",
+    "voiceSpeechSpeakingLabel": "Hablando",
+    "voiceSpeechSpokenLabel": "Hablado",
+    "voiceSpeechInterruptedLabel": "Interrumpido",
+    "voiceSpeechNotSpokenLabel": "No hablado",
+    "voiceSpeechFailedLabel": "Fallido"
+  },
+  "persona": {
+    "chooseAssistant": "Elegir asistente",
+    "create": "Crear agente...",
+    "clearActive": "Quitar asistente activo",
+    "removeSelected": "Quitar agente {{agent}}",
+    "defaultDescription": "Sin agente seleccionado: chatea directamente con Goose"
+  },
+  "skill": {
+    "clearSelected": "Quitar habilidad {{skill}}"
+  },
+  "queue": {
+    "dismiss": "Descartar mensaje en cola",
+    "edit": "Editar mensaje en cola",
+    "sendAnyway": "Enviar de todos modos",
+    "configureWorktree": "¿Configurar un worktree nuevo?",
+    "configureWorkspaces": "¿Configurar espacios de trabajo nuevos para el proyecto?",
+    "configureWorkspacePlan": "¿Configurar {{worktreeLabel}}?",
+    "configureWorkspacePlanWithBranch": "¿Configurar {{worktreeLabel}} y {{branchLabel}}?",
+    "worktreeCount_one": "1 worktree nuevo",
+    "worktreeCount_other": "{{count}} worktrees nuevos",
+    "branchCount_one": "1 rama nueva",
+    "branchCount_other": "{{count}} ramas nuevas",
+    "configureWorktreeYes": "Sí",
+    "configureWorktreeSkip": "Omitir",
+    "nameWorktree": "Nombre del worktree",
+    "projectFolder": "Carpeta del proyecto",
+    "projectFolderCurrent": "Proyecto actual",
+    "worktreeName": "Nombre del worktree",
+    "worktreeNamePlaceholder": "Introduce el nombre del worktree",
+    "cancelWorktree": "Cancelar",
+    "createWorktree": "Guardar",
+    "preparingWorkspaceTitle": "Preparando el espacio de trabajo del proyecto.",
+    "preparingWorkspaceBody": "Tu mensaje se enviará cuando esté listo."
+  },
+  "globalPill": {
+    "ariaLabel": "Redacción rápida",
+    "expand": "Expandir a chat completo",
+    "placeholder": "Inicia una conversación",
+    "setupVoiceConversation": "Configurar conversación por voz",
+    "startVoiceConversation": "Iniciar conversación por voz",
+    "voiceConversationStartFailed": "No se pudo iniciar la conversación por voz. Tu borrador sigue aquí.",
+    "voiceConversationRequiresGoose": "La conversación por voz requiere Goose"
+  },
+  "emptyState": {
+    "startAConversation": "Inicia una conversación"
+  },
+  "skeleton": {
+    "loadingConversation": "Cargando conversación"
+  },
+  "search": {
+    "action": "Buscar chat",
+    "close": "Cerrar búsqueda",
+    "inputLabel": "Buscar mensajes del chat",
+    "landmark": "Buscar en el chat actual",
+    "matchCount": "{{current}} / {{total}}",
+    "next": "Resultado siguiente",
+    "noResults": "Sin resultados",
+    "placeholder": "Buscar chat",
+    "previous": "Resultado anterior",
+    "searching": "Buscando…"
+  },
+  "timeline": {
+    "ariaLabel": "Mensajes del chat",
+    "emptyDescription": "Envía un mensaje para comenzar",
+    "emptyTitle": "Inicia una conversación",
+    "jumpToLatest": "Ir a lo más reciente",
+    "today": "Hoy",
+    "yesterday": "Ayer"
+  },
+  "toolbar": {
+    "agent": "Agente",
+    "attach": "Adjuntar",
+    "attachFile": "Archivo",
+    "attachFolder": "Carpeta",
+    "chooseAgentModel": "Elegir agente y modelo",
+    "chooseProject": "Elegir un proyecto",
+    "compactNow": "Compactar",
+    "compacting": "Compactando...",
+    "chooseProvider": "Elegir un proveedor",
+    "contextTokensBreakdown": "{{tokens}} / {{limit}} tokens usados",
+    "contextUsage": "Uso del contexto",
+    "contextUsageWithCost": "Uso del contexto, costo de la sesión {{cost}}",
+    "contextUsageBreakdown": "{{used}} en uso ({{left}} libres)",
+    "contextUsageTitle": "{{tokens}} / {{limit}} tokens",
+    "contextWindow": "Ventana de contexto",
+    "createProject": "Crear proyecto",
+    "generalChatWithoutProject": "Chat general sin contexto de proyecto",
+    "loading": "Cargando...",
+    "loadingModels": "Cargando modelos...",
+    "model": "Modelo",
+    "allModels": "Todos los modelos",
+    "searchModels": "Buscar modelos...",
+    "settings": "Configuración",
+    "sessionCost": "Costo de la sesión",
+    "recommended": "Recomendados",
+    "reasoningEffort": "Esfuerzo de razonamiento",
+    "reasoningEffortCurrent": "Esfuerzo de razonamiento: {{value}}",
+    "noModelsAvailable": "No hay modelos disponibles",
+    "noSearchResults": "Sin resultados",
+    "showAllModels": "Ver todos los modelos",
+    "viewMore": "Ver más",
+    "switchAgent": "Cambiar de agente",
+    "noProject": "Sin proyecto",
+    "selectModel": "Seleccionar modelo",
+    "selectProject": "Seleccionar proyecto",
+    "sendMessage": "Enviar mensaje",
+    "steer": "Guiar",
+    "steerQueued": "Guiar mensaje en cola",
+    "agentBuilderPrepareFailed": "No se pudo preparar el borrador del agente.",
+    "agentBuilderPreparing": "Preparando borrador de agente...",
+    "sessionStarting": "Iniciando sesión...",
+    "sessionStartFailed": "No se pudo iniciar la sesión",
+    "sessionMissingProjectDir": "No se puede iniciar esta sesión: la carpeta del proyecto no existe: {{paths}}. Edita el proyecto para actualizar sus carpetas.",
+    "sessionMissingProjectDirs": "No se puede iniciar esta sesión: estas carpetas del proyecto no existen: {{paths}}. Edita el proyecto para actualizar sus carpetas.",
+    "sessionLoadMissingProjectDir": "La carpeta del proyecto de esta sesión ya no existe: {{missingPath}}. Se cargó la conversación usando {{fallbackPath}} en su lugar.",
+    "sessionLoadMissingWorkingDir": "La carpeta de esta sesión ya no existe: {{missingPath}}. Se cargó la conversación usando {{fallbackPath}} en su lugar.",
+    "sessionLoadFailed": "No se pudo cargar esta sesión.",
+    "editProjectFolders": "Editar proyecto",
+    "changeFolder": "Cambiar carpeta",
+    "stopGeneration": "Detener generación",
+    "voiceInput": "Dictado por voz",
+    "voiceInputDisabled": "Configura OPENAI_API_KEY para activar el dictado",
+    "voiceInputRecording": "Escuchando...",
+    "voiceInputTranscribing": "Transcribiendo...",
+    "voiceInputAutoSubmitHint": "Di \"submit\" para enviar",
+    "voiceConversation": {
+      "start": "Iniciar conversación de voz",
+      "muteMicrophone": "Silenciar micrófono",
+      "unmuteMicrophone": "Activar micrófono",
+      "states": {
+        "off": "Iniciar conversación de voz",
+        "starting": "Iniciando conversación de voz…",
+        "stopping": "Deteniendo conversación de voz…",
+        "listening": "La conversación de voz escucha la sesión {{sessionId}}",
+        "muted": "El micrófono de la conversación de voz está silenciado para la sesión {{sessionId}}",
+        "user-speaking": "Recibiendo entrada de voz…",
+        "agent-working": "El agente está trabajando…",
+        "agent-speaking": "El agente está hablando…",
+        "error": "Error de conversación de voz: {{error}}"
+      }
+    }
+  },
+  "tools": {
+    "content": "Contenido",
+    "error": "Error",
+    "input": "Entrada",
+    "result": "Resultado",
+    "fileNotFound": "Archivo no encontrado: {{path}}",
+    "inputSummary": {
+      "command": "Comando",
+      "line": "Línea",
+      "path": "Ruta",
+      "query": "Búsqueda",
+      "resource": "Recurso",
+      "tool": "Herramienta",
+      "workingDirectory": "Directorio de trabajo"
+    },
+    "moreOutputs": "Más salidas ({{count}})",
+    "openFile": "Abrir archivo",
+    "openFolder": "Abrir carpeta",
+    "openNamed": "Abrir {{name}}",
+    "openPath": "Abrir ruta",
+    "pathOutsideRoots": "La ruta está fuera de las raíces permitidas de proyecto/artefactos.",
+    "structuredContent": "Contenido estructurado",
+    "structuredOutput": "Salida estructurada",
+    "structuredOutputLines": "{{count}} líneas",
+    "subagent": {
+      "delegating": "Delegando a un subagente",
+      "delegatingLabeled": "Delegando a un subagente · {{label}}",
+      "delegatingAgent": "Delegando a {{name}}",
+      "delegatingAgentLabeled": "Delegando a {{name}} · {{label}}",
+      "waiting": "Esperando a un subagente",
+      "waitingLabeled": "Esperando al subagente n.º {{label}}",
+      "waitingAgent": "Esperando a {{name}}",
+      "waitingAgentLabeled": "Esperando a {{name}} · {{label}}",
+      "checking": "Consultando a un subagente",
+      "checkingLabeled": "Consultando al subagente n.º {{label}}",
+      "checkingAgent": "Consultando a {{name}}",
+      "checkingAgentLabeled": "Consultando a {{name}} · {{label}}",
+      "cancelling": "Cancelando un subagente",
+      "cancellingLabeled": "Cancelando al subagente n.º {{label}}",
+      "cancellingAgent": "Cancelando a {{name}}",
+      "cancellingAgentLabeled": "Cancelando a {{name}} · {{label}}"
+    }
+  },
+  "agent_work": {
+    "redactedThinking": "Pensamiento redactado",
+    "summary": {
+      "previousSteps_one": "{{count}} paso anterior",
+      "previousSteps_other": "{{count}} pasos anteriores",
+      "steps_one": "{{count}} paso",
+      "steps_other": "{{count}} pasos"
+    }
+  },
+  "tool_chain": {
+    "summary": {
+      "active": "trabajando",
+      "reviewing_files": "revisando archivos",
+      "running_commands": "ejecutando comandos",
+      "checking_resources": "consultando recursos",
+      "updating_files": "actualizando archivos",
+      "steps_one": "{{count}} paso",
+      "steps_other": "{{count}} pasos"
+    },
+    "internalSteps": {
+      "show": "Mostrar pasos internos ({{count}})",
+      "hide": "Ocultar pasos internos ({{count}})"
+    },
+    "title": {
+      "active": "trabajando en {{count}} paso",
+      "active_other": "trabajando en {{count}} pasos",
+      "labeled": "{{label}} ({{count}} paso)",
+      "labeled_other": "{{label}} ({{count}} pasos)"
+    }
+  },
+  "rightRail": {
+    "resize": "Redimensionar panel derecho",
+    "open": "Abrir panel derecho",
+    "close": "Cerrar panel derecho"
+  },
+  "artifactViewer": {
+    "close": "Cerrar visor",
+    "resize": "Redimensionar visor",
+    "openExternally": "Abrir en el editor",
+    "fileActions": "Acciones de archivo",
+    "viewPreview": "Vista previa",
+    "viewCode": "Código",
+    "loading": "Cargando archivo…",
+    "loadError": "No se pudo cargar este archivo.",
+    "imageAlt": "Vista previa de {{filename}}"
+  },
+  "artifactChips": {
+    "open": "Abrir {{name}} en el visor",
+    "more": "+{{count}} más"
+  },
+  "agentBuilder": {
+    "hideChat": "Ocultar chat"
+  }
+}

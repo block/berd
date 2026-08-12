@@ -1,0 +1,152 @@
+syntax = "proto2";
+
+package squareup.cash.kgoose.api.v3;
+
+option java_package = "com.squareup.protos.cash.kgoose.api.v3";
+
+import "squareup/cash/kgoose/api/v3/common_messages.proto";
+import "squareup/cash/kgoose/api/v3/extension_messages.proto";
+import "squareup/common/pii.proto";
+import "google/protobuf/struct.proto";
+
+message CreateProfileRequest {
+  // The description of the profile.
+  optional string description = 1;
+
+  optional ProfileConfig profile_config = 2;
+}
+
+message CreateProfileResponse {
+  optional Profile profile = 1;
+}
+
+message GetProfileRequest {
+  // Profile ID to fetch
+  required string id = 1;
+}
+
+message GetProfileResponse {
+  optional Profile profile = 1;
+}
+
+message UpdateProfileRequest {
+  // Profile ID to update
+  required string id = 1;
+
+  // The description of the profile.
+  optional string description = 2;
+
+  repeated ExtensionTools add_preferred_backend_tools = 3;
+
+  repeated ExtensionTools remove_preferred_backend_tools = 4;
+
+  optional string update_system_preamble = 5;
+}
+
+message UpdateProfileResponse {
+  optional Profile profile = 1;
+}
+
+message DeleteProfileRequest {
+  // Profile ID to delete
+  required string id = 1;
+}
+
+message DeleteProfileResponse {}
+
+message ExtensionTools {
+  required string extension_name = 1;
+  repeated string tool_names = 2;  // if tool_names are empty, the whole extension is affected
+  optional bool auto_picked = 3; // Whether the extension should be auto-picked. Defaults to false.
+}
+
+message PromptConfigurationSettings {
+  // Appends sentences describing and reinforcing the current date.
+  optional bool include_current_date = 1;
+
+  // Appends sentences describing and reinforcing the current hour of the day, in UTC.
+  optional bool include_current_hour = 2;
+
+  // Appends sentences describing the timezone in IANA Time Zone Database time zone, e.g. "America/New_York".
+  optional bool include_time_zone = 3;
+
+  // Appends a static sentence that describes how Goose uses models and tools (legacy)
+  optional bool include_goose_model_description = 4;
+
+  // Appends a default response guideline to return content in Markdown
+  optional bool include_response_guidelines = 5;
+
+  // When true, repeats the date/time information at the end of the prompt for emphasis. Defaults to true.
+  optional bool include_time_emphasis = 6;
+}
+
+message ServiceProfileConfig {
+  // This system prompt gets prepended to the core goose system prompt.
+  optional string system_preamble = 1;
+
+  // The allowlist of backend extensions. Tool-level configuration is not supported.
+  // If not specified, all possible extensions are considered
+  repeated ExtensionTools preferred_backend_tools = 2;
+
+  // The list of frontend/client tools to be used.
+  repeated ExtensionConfig client_tools = 3;
+
+  // The preferred model to be used.
+  optional Model preferred_model = 4;
+
+  // Extra args to pass to the provider completion
+  optional google.protobuf.Struct extra_args = 5;
+
+  // If true, kgoose will not use any backend tools.
+  optional bool no_backend_tools = 6;
+
+  // The list of backend tools to disable.
+  repeated ExtensionTools disabled_backend_tools = 7;
+
+  // Whether to enable tool picker feature to selectively enable extensions
+  optional bool enable_tool_picker = 8;
+
+  // The system prompt, with ONLY the required extension description addition
+  optional string system_prompt = 9;
+
+  // Configuration for prompt construction settings
+  // for backwards compatibility support, if not supplied, then all options are treated as true
+  optional PromptConfigurationSettings prompt_configuration_settings = 10;
+
+  // Overrides for backend extension instructions and tool descriptions.
+  repeated ExtensionDescriptionOverride backend_extension_overrides = 11;
+}
+
+// Contains the subset of ServiceProfileConfig that can should be able to configured by a
+// a user
+message UserProfileConfig {
+  // The list of frontend/client tools to be used.
+  repeated ExtensionConfig client_tools = 1;
+
+  // Extra args to pass to the provider completion
+  optional google.protobuf.Struct extra_args = 2;
+
+  // The preferred model to be used.
+  optional Model preferred_model = 3;
+}
+
+message ProfileConfig {
+  oneof profile_config {
+    ServiceProfileConfig service_profile = 1 [(squareup.redacted) = true];
+    UserProfileConfig user_profile = 2 [(squareup.redacted) = true];
+  }
+}
+
+message Profile {
+  // Profile ID
+  optional string id = 1;
+
+  // The description of the profile.
+  optional string description = 2;
+
+  // Profile timestamp in EpochMilli
+  optional int64 created_at = 3;
+  optional int64 updated_at = 4;
+
+  optional ProfileConfig profile_config = 5;
+}

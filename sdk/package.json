@@ -1,0 +1,58 @@
+{
+  "name": "@aaif/goose-sdk",
+  "version": "0.19.1",
+  "description": "Agent Client Protocol (ACP) SDK for Goose AI agent",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aaif-goose/goose.git"
+  },
+  "keywords": [
+    "goose",
+    "ai",
+    "agent",
+    "acp",
+    "agent-client-protocol"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/resolve-binary.d.ts",
+      "default": "./dist/resolve-binary.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npm run generate && npm run build:ts",
+    "build:ts": "tsc",
+    "build:native": "tsx scripts/build-native.ts",
+    "build:native:all": "tsx scripts/build-native.ts --all",
+    "generate": "tsx generate-schema.ts",
+    "lint": "tsc --noEmit",
+    "format": "prettier --write src/"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^0.3.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "@agentclientprotocol/sdk": "^0.19.0"
+  },
+  "devDependencies": {
+    "@agentclientprotocol/sdk": "^0.19.0",
+    "@hey-api/openapi-ts": "^0.99.0",
+    "@types/node": "^26.2.0",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.11",
+    "typescript": "~5.9.3"
+  }
+}

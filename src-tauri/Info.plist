@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>xyz.block.berd.url-handler</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>berd</string>
+      </array>
+    </dict>
+  </array>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Berd uses your microphone to capture voice input for dictation and voice conversations.</string>
+</dict>
+</plist>

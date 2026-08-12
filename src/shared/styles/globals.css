@@ -1,0 +1,2696 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@plugin "@tailwindcss/typography";
+
+/* Smooth elevation for floating surfaces without a hard border/ring edge. */
+@utility smooth-shadow-sm {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 6px 18px rgba(0, 0, 0, 0.1);
+}
+
+@source "../../../node_modules/streamdown/dist";
+
+.goose-terminal .xterm {
+  align-items: flex-start;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  /* Keep the first terminal row stable; row-fitting slack falls below the grid. */
+  justify-content: flex-start;
+  /* The scrollbar already owns the right-side gutter reserved by FitAddon. */
+  padding: 4px 0 2px 12px;
+}
+
+.goose-terminal .xterm-scrollable-element {
+  /* Stretch xterm's custom scrollbar layer to the full panel width. */
+  align-self: stretch;
+  width: 100%;
+}
+
+.goose-terminal .xterm-screen {
+  flex: 0 0 auto;
+}
+
+.goose-terminal .xterm,
+.goose-terminal .xterm-viewport,
+.goose-terminal .xterm-screen {
+  background-color: var(--card) !important;
+}
+
+.goose-terminal .xterm-scrollable-element > .scrollbar.vertical > .slider {
+  border-radius: 999px;
+  left: auto !important;
+  right: var(--scrollbar-thumb-inset) !important;
+  width: var(--terminal-scrollbar-thumb-size) !important;
+}
+
+/* Dark variant fires for either selector during the migration:
+   - [data-theme="dark"] is the Alex direction (set via JS on <html>)
+   - .dark is the legacy shadcn class still toggled by existing theme code
+   Drop the `.dark` half once the toggle migrates. */
+@custom-variant dark (&:is([data-theme="dark"] *, .dark *));
+
+/* ═══════════════════════════════════════════════════════════
+   Inter — self-hosted variable fonts (SIL OFL 1.1, see
+   src/app/assets/fonts/INTER_OFL.txt). Bundled rather than
+   CDN-loaded so the desktop app has no runtime font dependency
+   and renders identically offline. The weight axis (100–900)
+   covers every weight the design system uses, and the optical
+   size axis (opsz) automatically renders body sizes with
+   comfortable tracking and display sizes tighter — so no
+   letter-spacing compensation is needed in component code.
+   ═══════════════════════════════════════════════════════════ */
+
+@font-face {
+  font-family: "Inter";
+  src: url("../../app/assets/fonts/Inter[opsz,wght].ttf")
+    format("truetype-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Inter";
+  src: url("../../app/assets/fonts/Inter-Italic[opsz,wght].ttf")
+    format("truetype-variations");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+/* Geist Mono — self-hosted variable font (SIL OFL 1.1, see
+   src/app/assets/fonts/GEIST_MONO_OFL.txt). Backs the --font-mono
+   token (code, paths, terminal output) and the digital clock face.
+   Geist shares Inter's grotesque skeleton, so it pairs naturally
+   with Inter. Upstream ships no italic. */
+@font-face {
+  font-family: "Geist Mono";
+  src: url("../../app/assets/fonts/GeistMono[wght].ttf")
+    format("truetype-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Symbols-only Nerd Font fallback for terminal prompts that use icon glyphs. */
+@font-face {
+  font-family: "NerdFontsSymbols Nerd Font";
+  src: url("../../app/assets/fonts/nerd-font-symbols.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PRIMITIVES — theme-invariant. These are the only literal
+   color values in the file. Everything else aliases through.
+   ═══════════════════════════════════════════════════════════ */
+
+@theme {
+  --color-*: initial;
+
+  --color-white: #ffffff;
+  --color-black: #000000;
+
+  /* monochromatic gray scale */
+  --color-gray-50: #f5f5f5;
+  --color-gray-75: #f1f1f1;
+  --color-gray-100: #f0f0f0;
+  --color-gray-200: #e8e8e8;
+  --color-gray-300: #e5e5e5;
+  --color-gray-400: #cccccc;
+  --color-gray-500: #999999;
+  --color-gray-600: #666666;
+  --color-gray-700: #333333;
+  --color-gray-800: #232323;
+  --color-gray-900: #1a1a1a;
+
+  /* Utility hues — pair per hue. 100 = lighter (used on dark bg),
+     200 = denser (used on light bg). Keeps contrast consistent across themes. */
+  --color-red-100: #ff6b6b;
+  --color-red-200: #f94b4b;
+
+  --color-blue-100: #7cacff;
+  --color-blue-200: #5c98f9;
+
+  --color-green-100: #a3d795;
+  --color-green-200: #91cb80;
+  --color-green-300: #73b468;
+
+  --color-yellow-100: #ffd966;
+  --color-yellow-200: #fbcd44;
+
+  --color-orange-100: #ffb27a;
+  --color-orange-200: #ff9647;
+
+  /* Indigo — chat chip identity. Same 100/200/700 pattern as other hues. */
+  --color-indigo-100: #8b9cff;
+  --color-indigo-200: #6b7cf5;
+  --color-indigo-700: #4338ca;
+
+  /* Skill pill palette — cycled deterministically (hash-from-name) in Skills views */
+  --color-pill-pink: #eec2ea;
+  --color-pill-olive: #cdcda1;
+  --color-pill-blue: #bcc6f4;
+  --color-pill-lavender: #d6c8f0;
+  --color-pill-sage: #c4d8b8;
+  --color-pill-mint: #b8e0d2;
+  --color-pill-peach: #f6cdb2;
+  --color-pill-neutral: #ffffff;
+
+  /* Tailwind-scale compat for ai-elements + shadcn shipped components.
+     Don't reach for these in app code — use semantic tokens. */
+  --color-red-50: #fef2f2;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-red-700: #b91c1c;
+  --color-red-900: #7f1d1d;
+
+  --color-green-400: #4ade80;
+  --color-green-500: #22c55e;
+  --color-green-600: #16a34a;
+  --color-green-700: #15803d;
+  --color-green-900: #14532d;
+
+  --color-blue-400: #60a5fa;
+  --color-blue-500: #3b82f6;
+  --color-blue-600: #2563eb;
+  --color-blue-700: #1d4ed8;
+  --color-blue-900: #1e3a5f;
+
+  --color-yellow-400: #facc15;
+  --color-yellow-500: #eab308;
+  --color-yellow-600: #ca8a04;
+  --color-yellow-700: #a16207;
+  --color-yellow-900: #713f12;
+
+  --color-orange-400: #fb923c;
+  --color-orange-600: #ea580c;
+  --color-orange-700: #c2410c;
+  --color-orange-900: #7c2d12;
+
+  --color-zinc-100: #f4f4f5;
+  --color-zinc-400: #a1a1aa;
+  --color-zinc-800: #27272a;
+  --color-zinc-950: #09090b;
+
+  --color-amber-500: #f59e0b;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   SEMANTIC TOKENS — light theme defaults.
+   Components consume these. Dark theme block below redefines.
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  /* shadcn core tokens. Keep current Goose neutral values, but use the
+     standard shadcn names as the app's authoring contract. */
+  /* `background` is an alias of `card`: every remaining consumer (controls,
+     chips, shadcn primitives, line masks) means "paper", not the window
+     canvas — the window canvas is `canvas-base`. Aliasing keeps the pair
+     from drifting; dark mode diverging is exactly how black-blob controls
+     appeared on gray-800 cards. */
+  --background: var(--card);
+  --foreground: #242424;
+  --card: var(--color-white);
+  --card-foreground: var(--foreground);
+  /* Surface ladder: canvas (window backdrop) → card (opaque container) →
+     card-glass (translucent container floating over the canvas) → muted
+     (fills inside a card). card-glass derives from card so both themes keep
+     the same elevation relationships; the alpha is the only per-theme knob. */
+  --card-glass: color-mix(in srgb, var(--card) 78%, transparent);
+  --backdrop-panel: blur(18px) saturate(180%) brightness(1.02);
+  --popover: var(--color-white);
+  --popover-foreground: var(--foreground);
+  --primary: var(--color-gray-900);
+  --primary-foreground: var(--color-white);
+  --secondary: var(--color-gray-400);
+  --secondary-foreground: var(--foreground);
+  --muted: var(--color-gray-100);
+  --muted-foreground: var(--color-gray-600);
+  --accent: var(--color-gray-50);
+  --accent-hover: var(--color-gray-100);
+  --accent-foreground: var(--foreground);
+  --destructive: var(--color-red-600);
+  --destructive-foreground: var(--color-white);
+  --border: var(--color-gray-200);
+  --input: var(--color-gray-300);
+  --ring: var(--color-gray-400);
+  --text-selection-bg: color-mix(in oklab, var(--primary) 18%, transparent);
+  --text-selection-fg: var(--foreground);
+  --scrollbar-size: 12px;
+  --scrollbar-thumb-inset: 1px;
+  --scrollbar-thumb-alpha: 14%;
+  --scrollbar-thumb-hover-alpha: 22%;
+  --scrollbar-thumb: color-mix(
+    in oklab,
+    var(--foreground) var(--scrollbar-thumb-alpha),
+    transparent
+  );
+  --scrollbar-thumb-hover: color-mix(
+    in oklab,
+    var(--foreground) var(--scrollbar-thumb-hover-alpha),
+    transparent
+  );
+  --terminal-scrollbar-track-size: 14px;
+  --terminal-scrollbar-thumb-size: calc(
+    var(--scrollbar-size) -
+    (var(--scrollbar-thumb-inset) * 6)
+  );
+  --terminal-scrollbar-thumb-offset: calc(
+    (
+      var(--terminal-scrollbar-track-size) -
+      var(--terminal-scrollbar-thumb-size)
+    ) /
+    2
+  );
+
+  /* shadcn sidebar tokens. Sidebar hover/selected rows use sidebar-accent. */
+  --sidebar-nav-font-weight: 400;
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --sidebar-row-hover: color-mix(
+    in srgb,
+    var(--sidebar-foreground) 2%,
+    transparent
+  );
+  --sidebar-row-active: color-mix(
+    in srgb,
+    var(--sidebar-foreground) 3%,
+    transparent
+  );
+  --sidebar-section-action-bg: var(--muted);
+  --sidebar-section-action-fg: var(--foreground);
+  --sidebar-section-action-bg-hover: var(--foreground);
+  --sidebar-section-action-fg-hover: var(--background);
+
+  /* Goose canvas + composer extensions. */
+  --canvas-base: #f5f5f5;
+  --surface-composer: rgba(255, 255, 255, 0.2);
+  --surface-composer-hover: rgba(255, 255, 255, 0.45);
+  /* Floating chat composer — muted gray tint; keep translucent for backdrop blur. */
+  --surface-chat-composer: color-mix(in srgb, var(--muted) 72%, transparent);
+  --chat-search-match-bg: color-mix(
+    in oklab,
+    var(--color-yellow-600) 35%,
+    transparent
+  );
+  --chat-search-match-fg: var(--foreground);
+  --chat-search-match-active-bg: var(--primary);
+  --chat-search-match-active-fg: var(--primary-foreground);
+  --surface-chat-composer-hover: color-mix(
+    in srgb,
+    var(--muted) 80%,
+    transparent
+  );
+  --surface-composer-action: var(--color-gray-300);
+  --surface-composer-action-hover: var(--color-gray-400);
+  --surface-composer-action-active: var(--color-gray-400);
+  --surface-chat-responding-pill-bg: var(--foreground);
+  --surface-chat-responding-pill-fg: var(--background);
+  --surface-editor-panel-neutral: color-mix(
+    in srgb,
+    var(--color-gray-300) 52%,
+    var(--color-gray-400)
+  );
+  /* Matches the pre-retokenized agent sheet glass recipe: #d9d9d9 at 40%. */
+  --surface-editor-panel: color-mix(
+    in oklab,
+    var(--surface-editor-panel-neutral) 40%,
+    transparent
+  );
+  --surface-editor-control: var(--color-white);
+  --surface-editor-control-hover: rgba(255, 255, 255, 0.5);
+  --surface-editor-badge: rgba(255, 255, 255, 0.7);
+  --surface-color-picker-swatches: rgba(255, 255, 255, 0.95);
+  /* Create/edit project panel glass surface: --project-panel-tint is the
+     share of the selected project color mixed into the theme background to
+     form the panel hue; --project-panel-alpha is the opacity of that hue over
+     the blurred content behind the sheet. Dark mode uses a stronger tint and
+     higher opacity because pastel hues get lost over a near-black backdrop. */
+  --project-panel-tint: 35%;
+  --project-panel-alpha: 74%;
+  --text-editor-field-placeholder: color-mix(
+    in oklab,
+    var(--foreground) 30%,
+    transparent
+  );
+  --border-editor-divider: color-mix(
+    in oklab,
+    var(--foreground) 10%,
+    transparent
+  );
+  --color-picker-hue-gradient: linear-gradient(
+    90deg,
+    #eeb4b4,
+    #eeeeae,
+    #b4eed0,
+    #b4d0ee,
+    #d0b4ee,
+    #eeb4d2,
+    #eeb4b4
+  );
+  --surface-agent-profile-fg: #242424;
+  --surface-agent-profile-fg-80: rgba(36, 36, 36, 0.8);
+  --surface-agent-profile-fg-muted: rgba(36, 36, 36, 0.45);
+  --surface-agent-profile-fg-subtle: rgba(36, 36, 36, 0.4);
+  --surface-agent-profile-fg-faint: rgba(36, 36, 36, 0.35);
+  --surface-agent-profile-fg-placeholder: rgba(36, 36, 36, 0.3);
+  --surface-agent-profile-border: rgba(36, 36, 36, 0.1);
+  --surface-agent-profile-dot: rgba(36, 36, 36, 0.16);
+  --surface-agent-profile-control-bg: var(--card);
+  --surface-agent-profile-control-bg-hover: rgba(255, 255, 255, 0.9);
+  --surface-agent-profile-action-fg: rgba(245, 245, 245, 0.96);
+  --surface-agent-profile-action-bg-hover: rgba(36, 36, 36, 0.9);
+  --agent-share-card-ink: #43005c;
+  --surface-glass-subtle: rgba(255, 255, 255, 0.1);
+  --backdrop-glass-subtle: blur(6px) saturate(120%) brightness(1.01);
+  --surface-glass-strong: rgba(255, 255, 255, 0.72);
+  --surface-glass-strong-hover: rgba(255, 255, 255, 0.88);
+  --surface-glass-strong-fg: #242424;
+  /* Theme-adaptive glass for floating popovers/modals — mirrors the sidebar
+     glass (light here, dark in the .dark block) so dialogs follow the theme
+     and inherit the correct foreground, unlike the always-light tile glass. */
+  --surface-popover-glass: rgba(255, 255, 255, 0.2);
+  /* Overlay + dialog glass recipe: depth comes from two levels of defocus,
+     not darkness. In light mode the scrim tints WHITE — the page behind
+     brightens like a macOS sheet backdrop instead of graying out — while
+     dark mode dims. The overlay blur keeps the page recognizable ("paused,
+     still there"); the dialog pane blurs much harder with a thin tint so
+     content ghosts through it. Blur radii stay modest for WKWebView
+     performance (see --backdrop-composer-glass). */
+  --overlay-scrim: rgba(255, 255, 255, 0.12);
+  --overlay-search-scrim: rgba(0, 0, 0, 0.15);
+  --backdrop-overlay-glass: blur(8px) saturate(130%) brightness(1.03);
+  /* Avatar collection takeover: heavier than the dialog scrim in both tint
+     and blur — the avatars are the show, and app chrome ghosting through
+     made the field muddy (Alex). Still deliberately semi-transparent: the
+     strong blur reduces the page to soft color fields while the see-through
+     tint keeps the "temporary surface over the app" modal feel (Tulsi). */
+  --overlay-avatar-field: rgba(252, 252, 251, 0.58);
+  --backdrop-avatar-field: blur(36px) saturate(120%) brightness(1.02);
+  /* Onboarding tour scrim: heavier than the dialog scrim so the app reads
+     as a distant backdrop while the tour speaks. Pinned to literals: the
+     old bg-background/40 source became paper paint (the card alias), and a
+     modal scrim must keep tinting white in light / dimming in dark. */
+  --overlay-onboarding-scrim: rgba(255, 255, 255, 0.4);
+  --backdrop-popover-glass: blur(24px) saturate(150%);
+  --overlay-global-composer-shim: rgba(255, 255, 255, 0.28);
+  --overlay-global-composer-shim-peak: rgba(255, 255, 255, 0.96);
+  --overlay-global-composer-shim-clear: rgba(255, 255, 255, 0);
+  --surface-agent-tile-action-bg: var(--surface-glass-strong);
+  --surface-agent-tile-action-fg: var(--surface-glass-strong-fg);
+  --surface-agent-tile-action-bg-hover: var(--foreground);
+  --surface-agent-tile-action-fg-hover: var(--background);
+  --message-user-bg: var(--color-gray-75);
+
+  /* Default project cube fold lines on filled color swatches (sidebar, picker). */
+  --project-glyph-fold-stroke: rgba(255, 255, 255, 0.92);
+
+  /* Global hover composer pill — translucent glass over the canvas/dot-grid.
+     Separate from --surface-composer (which is the chat-area composer fill).
+     Deprecated: PR #6 migrates the GlobalComposerPill consumer to
+     --backdrop-composer-glass below; keep these for now so the consumer keeps
+     compiling. */
+  --surface-composer-glass: rgba(255, 255, 255, 0.15);
+  --ring-composer-glass-inner: rgba(255, 255, 255, 0.6);
+  --outline-composer-glass-outer: rgba(0, 0, 0, 0.05);
+
+  /* Shared filter recipe for the composer glass surfaces (ChatView floating
+     straddle + Global Hover Composer Pill). Consumed via inline style as
+     `var(--backdrop-composer-glass)`. Modest blur radius per the WKWebView
+     report (docs/wkwebview-backdrop-filter-report.md): WKWebView visually
+     plateaus above ~16–20px; lean on tint opacity for legibility rather than
+     chasing larger radii. */
+  --backdrop-composer-glass: blur(18px) saturate(180%) brightness(1.04);
+
+  /* Project-tint hook for the dot-grid composer below. Components in a
+     project context set this on a wrapper to tint canvas + dot color
+     together via color-mix. Unset/transparent = base canvas, no change. */
+  --project-tint: transparent;
+
+  /* Composer chip tones — file/chat/project/agent/skill/automation identity
+     colors. Each tone gets a bg + fg pair. Light values; dark block redefines. */
+  --chip-file-bg: var(--color-gray-200);
+  --chip-file-fg: var(--color-gray-700);
+  --chip-chat-bg: color-mix(in oklab, var(--color-indigo-200) 18%, transparent);
+  --chip-chat-fg: var(--color-indigo-700);
+  --chip-project-bg: color-mix(
+    in oklab,
+    var(--color-orange-200) 20%,
+    transparent
+  );
+  --chip-project-fg: var(--color-orange-700);
+  --chip-agent-bg: color-mix(in oklab, var(--color-blue-200) 18%, transparent);
+  --chip-agent-fg: var(--color-blue-700);
+  --chip-skill-bg: color-mix(
+    in oklab,
+    var(--color-yellow-200) 22%,
+    transparent
+  );
+  --chip-skill-fg: var(--color-yellow-700);
+  --chip-automation-bg: color-mix(
+    in oklab,
+    var(--color-green-200) 18%,
+    transparent
+  );
+  --chip-automation-fg: var(--color-green-700);
+
+  /* Skill name pills sit on theme-invariant pastel pill colors, so their
+     foreground is independent from the app-level foreground token. */
+  --skill-pill-fg: var(--color-gray-900);
+
+  /* Denser placeholder for the translucent composer (default placeholder
+     reads too light over surface-composer). Used on the chat input. */
+  --text-placeholder-composer: color-mix(
+    in oklab,
+    var(--color-black) 35%,
+    transparent
+  );
+
+  /* Goose status extensions. Use text-success and bg-success/10, matching
+     shadcn's destructive pattern without adding broad background-* aliases. */
+  --success: var(--color-green-600);
+  --success-foreground: var(--color-white);
+  --warning: var(--color-yellow-600);
+  --warning-foreground: var(--foreground);
+  --info: var(--color-blue-600);
+  --info-foreground: var(--color-white);
+
+  /* Widget: clock face. Light mode = warm-near-black surface with white marks.
+     Dark mode inverts both via the .dark override below so the clock doesn't
+     disappear into the canvas. Second hand stays red in both modes. */
+  --clock-face: #1c1c1c;
+  --clock-mark: var(--color-white);
+  --clock-minute-hand: #b3b3b3;
+  --clock-hand: var(--color-red-500);
+
+  --sticky-note-warm: color-mix(
+    in srgb,
+    var(--color-yellow-100) 56%,
+    var(--color-white)
+  );
+  --sticky-note-cool: color-mix(
+    in srgb,
+    var(--color-green-100) 52%,
+    var(--color-white)
+  );
+  --sticky-note-rose: color-mix(
+    in srgb,
+    var(--color-pill-pink) 56%,
+    var(--color-white)
+  );
+  --sticky-note-blue: color-mix(
+    in srgb,
+    var(--color-blue-100) 40%,
+    var(--color-white)
+  );
+  --sticky-note-lavender: color-mix(
+    in srgb,
+    var(--color-pill-lavender) 52%,
+    var(--color-white)
+  );
+  --sticky-note-peach: color-mix(
+    in srgb,
+    var(--color-pill-peach) 56%,
+    var(--color-white)
+  );
+  --sticky-note-foreground: var(--foreground);
+  --sticky-note-muted: color-mix(in srgb, var(--foreground) 68%, transparent);
+  --sticky-note-shadow: none;
+
+  /* Alpha utility (text-on-canvas overlays) */
+  --dark-04: rgba(26, 26, 26, 0.04);
+  --dark-10: rgba(26, 26, 26, 0.1);
+  --dark-40: rgba(26, 26, 26, 0.4);
+
+  /* Dot-grid (canvas signature treatment) */
+  --dot-color-base: #cbcbcb;
+  --dot-size: 1px;
+  --dot-spacing: 24px;
+
+  /* Shadows — 4-tier hierarchy. Dark block doubles intensity. */
+  --shadow-mini: 0 2px 8px rgba(76, 76, 76, 0.15);
+  --shadow-mini-inset: 0 1px 4px rgba(76, 76, 76, 0.1) inset;
+  --shadow-btn: 0 2px 8px rgba(76, 76, 76, 0.15);
+  --shadow-card: 0 2px 8px rgba(76, 76, 76, 0.15);
+  --shadow-elevated: 0 3px 12px rgba(76, 76, 76, 0.22);
+  /* Floating chat composer — the light-mode dual of the dark-mode specular rim.
+     The card is pure white, so a bright highlight can't show (nothing beats
+     #fff). Same light-from-above, opposite visible half: the shadowed underside
+     reads as a soft directional dark rim on the bottom edge (inset), which feels
+     like a lit edge rather than a stamped border. A whisper-faint uniform ring
+     contains the other edges without the harshness of a crisp full stroke. Then
+     the graduated drop cocktail (rising blur, falling opacity). Neutral
+     gray-on-light per the project shadow convention (never raw black). */
+  --shadow-chat:
+    inset 0 -1px 0 rgba(76, 76, 76, 0.05), 0 0 0 1px rgba(76, 76, 76, 0.03),
+    0 1px 2px rgba(76, 76, 76, 0.04), 0 3px 6px rgba(76, 76, 76, 0.05),
+    0 8px 16px rgba(76, 76, 76, 0.06), 0 16px 28px rgba(76, 76, 76, 0.05);
+  --shadow-popover:
+    0 1px 1px rgba(0, 0, 0, 0.03), 0 6px 18px rgba(0, 0, 0, 0.06),
+    0 16px 32px rgba(0, 0, 0, 0.03);
+  --shadow-popover-inverse: 22px 25px 24px rgba(0, 0, 0, 0.09);
+  --shadow-popover-raised: 22px 25px 24px rgba(0, 0, 0, 0.09);
+  --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.2);
+  /* Floating panel hover (sidebar). */
+  --shadow-sidebar-panel-elevated: 30px 42px 60px rgba(0, 0, 0, 0.05);
+  /* Composer pill hover — same soft sideways cast as the sidebar panel, lifted
+     closer to the pill so it remains visible at the bottom edge. */
+  --shadow-global-composer-pill-hover: 30px 24px 52px rgba(0, 0, 0, 0.07);
+  --shadow-kbd: 0 2px 8px rgba(76, 76, 76, 0.15);
+  --shadow-date-field-focus: 0 0 0 3px rgba(26, 26, 26, 0.15);
+  --shadow-agent-profile-avatar: 0 18px 28px rgba(36, 36, 36, 0.1);
+  --shadow-agent-profile-affordance: 0 1px 2px rgba(36, 36, 36, 0.18);
+  --shadow-agent-profile-input-hover: 0 1px 1px rgba(0, 0, 0, 0.18);
+  --shadow-agent-profile-input-focus: 0 1px 1px rgba(0, 0, 0, 0.24);
+  --shadow-editor-field-hover: 0 1px 1px rgba(0, 0, 0, 0.18);
+  --shadow-editor-field-focus: 0 1px 1px rgba(0, 0, 0, 0.24);
+  --shadow-editor-footer: 0 -12px 24px rgba(36, 36, 36, 0.06);
+  --shadow-color-picker-swatches: 0 10px 26px rgba(15, 23, 42, 0.12);
+
+  /* Goose inverse popover — contrast-inverted chip (tooltips, floating
+     pills). Reuses gray-900 / white so the chain stays inside the palette. */
+  --popover-inverse: var(--color-gray-900);
+  --popover-inverse-foreground: var(--color-white);
+  --popover-inverse-muted-foreground: rgba(255, 255, 255, 0.4);
+  --popover-inverse-focus: rgba(255, 255, 255, 0.1);
+
+  /* Raised popover — overflow menus (sidebar rows, session actions, card
+     tiles). Dark in both themes so menus read as dark surfaces across the
+     app (BOT-1600); matches the inverse chip on light backgrounds. */
+  --popover-raised: var(--color-gray-900);
+  --popover-raised-foreground: var(--color-white);
+  --popover-raised-muted-foreground: rgba(255, 255, 255, 0.4);
+  --popover-raised-focus: rgba(255, 255, 255, 0.1);
+
+  /* Charts */
+  --chart-1: #f6b44a;
+  --chart-2: #7585ff;
+  --chart-3: #d76a6a;
+  --chart-4: #d185e0;
+  --chart-5: #91cb80;
+
+  /* Status overlays (diff views etc.) */
+  --status-added: var(--color-green-600);
+  --status-deleted: var(--color-red-600);
+  --status-modified: var(--color-yellow-600);
+
+  /* Chat layout */
+  --chat-transcript-max-width: 768px;
+  --chat-transcript-inline-padding: 46px;
+  --chat-transcript-container-max-width: calc(
+    var(--chat-transcript-max-width) +
+    (var(--chat-transcript-inline-padding) * 2)
+  );
+  --chat-user-message-max-width: 640px;
+  --chat-composer-max-width: 768px;
+  /* The composer wrapper owns the bottom inset. */
+  --chat-surface-bottom-gap: 0px;
+
+  /* App top bar chrome — deep charcoal controls beside the breadcrumb trail. */
+  --app-top-bar-control-fg: #242424;
+  --app-top-bar-control-fg-disabled: rgba(36, 36, 36, 0.35);
+  --app-top-bar-control-hover-opacity: 0.7;
+
+  /* Motion */
+  --ease-spring: cubic-bezier(0.33, 1, 0.68, 1);
+  --duration-fast: 0.15s;
+  --duration-normal: 0.2s;
+  --duration-slow: 0.4s;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DARK THEME — semantic tokens redefined.
+   Co-located so a missing pair is physically visible above.
+   Selector supports both during the toggle migration.
+   ═══════════════════════════════════════════════════════════ */
+
+[data-theme="dark"],
+.dark {
+  /* Alias of `card`, same as light (see :root). This is what fixes dark
+     "black blob" controls: outline buttons, file chips, kbd, and every other
+     paper-intent `bg-background` consumer now tracks the card surface. */
+  --background: var(--card);
+  --foreground: var(--color-white);
+  --card: var(--color-gray-800);
+  --card-foreground: var(--foreground);
+  --card-glass: color-mix(in srgb, var(--card) 82%, transparent);
+  --backdrop-panel: blur(18px) saturate(160%) brightness(1.08);
+  /* Overflow menus and other floating popovers sit one step darker than
+     cards so they read as distinct surfaces against dark content (BOT-1600). */
+  --popover: var(--color-gray-900);
+  --popover-foreground: var(--foreground);
+  --primary: var(--color-white);
+  --primary-foreground: var(--color-black);
+  --secondary: var(--color-gray-700);
+  --secondary-foreground: var(--foreground);
+  /* Keep quiet and interactive fills one step lighter than card/popover so
+     selected tabs, hover rows, and active picker items do not disappear in dark
+     surfaces. */
+  --muted: var(--color-gray-700);
+  --muted-foreground: var(--color-gray-500);
+  --accent: var(--color-gray-700);
+  --accent-hover: var(--color-gray-600);
+  --accent-foreground: var(--foreground);
+  --destructive: var(--color-red-400);
+  --destructive-foreground: var(--color-black);
+  --border: var(--color-gray-700);
+  --input: var(--color-gray-700);
+  --ring: var(--color-gray-400);
+  --text-selection-bg: color-mix(in oklab, var(--primary) 30%, transparent);
+  --text-selection-fg: var(--foreground);
+  --scrollbar-thumb-alpha: 16%;
+  --scrollbar-thumb-hover-alpha: 26%;
+  --scrollbar-thumb: color-mix(
+    in oklab,
+    var(--foreground) var(--scrollbar-thumb-alpha),
+    transparent
+  );
+  --scrollbar-thumb-hover: color-mix(
+    in oklab,
+    var(--foreground) var(--scrollbar-thumb-hover-alpha),
+    transparent
+  );
+
+  --sidebar-nav-font-weight: 400;
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --sidebar-row-hover: color-mix(
+    in srgb,
+    var(--sidebar-foreground) 5%,
+    transparent
+  );
+  --sidebar-row-active: color-mix(
+    in srgb,
+    var(--sidebar-foreground) 7%,
+    transparent
+  );
+  --sidebar-section-action-bg: var(--muted);
+  --sidebar-section-action-fg: var(--foreground);
+  --sidebar-section-action-bg-hover: var(--foreground);
+  --sidebar-section-action-fg-hover: var(--background);
+
+  --app-top-bar-control-fg: var(--foreground);
+  --app-top-bar-control-fg-disabled: color-mix(
+    in srgb,
+    var(--app-top-bar-control-fg) 35%,
+    transparent
+  );
+
+  /* Goose canvas + composer extensions — inverted. */
+  --canvas-base: var(--color-gray-900);
+  --surface-composer: rgba(255, 255, 255, 0.06);
+  --surface-composer-hover: rgba(255, 255, 255, 0.14);
+  --surface-chat-composer: var(--color-gray-700);
+  --chat-search-match-bg: color-mix(
+    in oklab,
+    var(--color-yellow-500) 35%,
+    transparent
+  );
+  --chat-search-match-fg: var(--foreground);
+  --chat-search-match-active-bg: var(--primary);
+  --chat-search-match-active-fg: var(--primary-foreground);
+  --surface-chat-composer-hover: var(--color-gray-600);
+  --surface-composer-action: var(--color-gray-600);
+  --surface-composer-action-hover: var(--color-gray-500);
+  --surface-composer-action-active: var(--color-gray-500);
+  /* Intentionally black chrome, not paper — pinned so it doesn't follow the
+     `background` → `card` alias. */
+  --surface-chat-responding-pill-bg: var(--color-black);
+  --surface-chat-responding-pill-fg: var(--foreground);
+  --surface-editor-panel-neutral: var(--color-gray-800);
+  --surface-editor-panel: color-mix(
+    in oklab,
+    var(--surface-editor-panel-neutral) 40%,
+    transparent
+  );
+  --surface-editor-control: var(--color-gray-800);
+  --surface-editor-control-hover: rgba(255, 255, 255, 0.08);
+  --surface-editor-badge: rgba(0, 0, 0, 0.35);
+  --surface-color-picker-swatches: rgba(35, 35, 35, 0.95);
+  --project-panel-tint: 47%;
+  --project-panel-alpha: 90%;
+  --text-editor-field-placeholder: color-mix(
+    in oklab,
+    var(--foreground) 32%,
+    transparent
+  );
+  --border-editor-divider: color-mix(
+    in oklab,
+    var(--foreground) 12%,
+    transparent
+  );
+  --surface-agent-profile-fg: var(--color-gray-50);
+  --surface-agent-profile-fg-80: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 80%,
+    transparent
+  );
+  --surface-agent-profile-fg-muted: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 48%,
+    transparent
+  );
+  --surface-agent-profile-fg-subtle: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 42%,
+    transparent
+  );
+  --surface-agent-profile-fg-faint: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 34%,
+    transparent
+  );
+  --surface-agent-profile-fg-placeholder: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 32%,
+    transparent
+  );
+  --surface-agent-profile-border: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 12%,
+    transparent
+  );
+  --surface-agent-profile-dot: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 14%,
+    transparent
+  );
+  /* Pinned to the value the retired dark nav-shell token had; #1165 chose
+     this fill for profile controls. */
+  --surface-agent-profile-control-bg: rgba(0, 0, 0, 0.5);
+  --surface-agent-profile-control-bg-hover: var(--color-gray-900);
+  --surface-agent-profile-action-fg: var(--color-gray-900);
+  --surface-agent-profile-action-bg-hover: var(--color-gray-300);
+  --surface-glass-subtle: rgba(255, 255, 255, 0.04);
+  --backdrop-glass-subtle: blur(6px) saturate(120%) brightness(1.01);
+  --surface-glass-strong: rgba(255, 255, 255, 0.72);
+  --surface-glass-strong-hover: rgba(255, 255, 255, 0.88);
+  --surface-glass-strong-fg: var(--color-gray-900);
+  --surface-popover-glass: rgba(20, 20, 20, 0.35);
+  --overlay-scrim: rgba(0, 0, 0, 0.25);
+  --overlay-search-scrim: rgba(0, 0, 0, 0.15);
+  --backdrop-overlay-glass: blur(8px) saturate(130%);
+  --overlay-avatar-field: rgba(16, 16, 16, 0.58);
+  --backdrop-avatar-field: blur(36px) saturate(120%);
+  --overlay-onboarding-scrim: rgba(0, 0, 0, 0.4);
+  --backdrop-popover-glass: blur(24px) saturate(150%);
+  --overlay-global-composer-shim: rgba(255, 255, 255, 0.18);
+  --overlay-global-composer-shim-peak: rgba(255, 255, 255, 0.72);
+  --overlay-global-composer-shim-clear: rgba(255, 255, 255, 0);
+  /* Intentionally black chrome over tile artwork — pinned like the
+     responding pill above. Hover inverts to a white fill, so the hover
+     label pins black too instead of following the background alias. */
+  --surface-agent-tile-action-bg: var(--color-black);
+  --surface-agent-tile-action-fg: var(--foreground);
+  --surface-agent-tile-action-bg-hover: var(--foreground);
+  --surface-agent-tile-action-fg-hover: var(--color-black);
+  --message-user-bg: var(--color-gray-700);
+
+  --project-glyph-fold-stroke: rgba(0, 0, 0, 0.85);
+
+  /* Global hover composer pill — dark variants. Inner ring softens; outer
+     outline flips to white-alpha so it doesn't disappear over dark canvas. */
+  --surface-composer-glass: rgba(255, 255, 255, 0.06);
+  --ring-composer-glass-inner: rgba(255, 255, 255, 0.18);
+  --outline-composer-glass-outer: rgba(255, 255, 255, 0.05);
+
+  /* Composer chip tones — dark variants */
+  --chip-file-bg: var(--color-gray-700);
+  --chip-file-fg: var(--color-gray-200);
+  --chip-chat-bg: color-mix(in oklab, var(--color-indigo-100) 10%, transparent);
+  --chip-chat-fg: var(--color-indigo-100);
+  --chip-project-bg: color-mix(
+    in oklab,
+    var(--color-orange-100) 10%,
+    transparent
+  );
+  --chip-project-fg: var(--color-orange-100);
+  --chip-agent-bg: color-mix(in oklab, var(--color-blue-100) 10%, transparent);
+  --chip-agent-fg: var(--color-blue-100);
+  --chip-skill-bg: color-mix(
+    in oklab,
+    var(--color-yellow-100) 10%,
+    transparent
+  );
+  --chip-skill-fg: var(--color-yellow-100);
+  --chip-automation-bg: color-mix(
+    in oklab,
+    var(--color-green-100) 10%,
+    transparent
+  );
+  --chip-automation-fg: var(--color-green-100);
+
+  --skill-pill-fg: var(--color-gray-900);
+
+  --text-placeholder-composer: var(--color-gray-400);
+
+  --success: var(--color-green-400);
+  --success-foreground: var(--color-black);
+  --warning: var(--color-yellow-500);
+  --warning-foreground: var(--color-black);
+  --info: var(--color-blue-400);
+  --info-foreground: var(--color-black);
+
+  --dark-04: rgba(242, 242, 242, 0.04);
+  --dark-10: rgba(242, 242, 242, 0.1);
+  --dark-40: rgba(242, 242, 242, 0.4);
+
+  /* Clock — invert face + marks against the dark canvas. Mirror of the light
+     token: face is slightly warmer than gray-100, marks match the light-mode
+     face value so the contrast direction flips cleanly. Second hand stays red. */
+  --clock-face: #f5f5f5;
+  --clock-mark: #1c1c1c;
+  --clock-minute-hand: #a3a3a3;
+  --sticky-note-warm: color-mix(
+    in srgb,
+    var(--color-yellow-100) 24%,
+    var(--color-gray-800)
+  );
+  --sticky-note-cool: color-mix(
+    in srgb,
+    var(--color-green-100) 22%,
+    var(--color-gray-800)
+  );
+  --sticky-note-rose: color-mix(
+    in srgb,
+    var(--color-pill-pink) 26%,
+    var(--color-gray-800)
+  );
+  --sticky-note-blue: color-mix(
+    in srgb,
+    var(--color-blue-100) 20%,
+    var(--color-gray-800)
+  );
+  --sticky-note-lavender: color-mix(
+    in srgb,
+    var(--color-pill-lavender) 24%,
+    var(--color-gray-800)
+  );
+  --sticky-note-peach: color-mix(
+    in srgb,
+    var(--color-pill-peach) 24%,
+    var(--color-gray-800)
+  );
+  --sticky-note-foreground: var(--foreground);
+  --sticky-note-muted: color-mix(in srgb, var(--foreground) 64%, transparent);
+  --sticky-note-shadow: none;
+
+  --dot-color-base: rgba(255, 255, 255, 0.12);
+
+  /* Shadows — doubled intensity over dark surfaces */
+  --shadow-mini: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-mini-inset: 0 1px 4px rgba(0, 0, 0, 0.5) inset;
+  --shadow-btn: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-elevated: 0 3px 12px rgba(0, 0, 0, 0.5);
+  /* Floating chat composer — the island sits on a same-colored (gray-800) panel,
+     so a darker drop shadow would vanish dark-on-dark. Definition comes from
+     light instead: a directional specular rim (inset top highlight that catches
+     light from above and fades around the rounded corners, à la Apple's Liquid
+     Glass) plus a faint uniform ring for the sides + bottom. Two soft dark layers
+     darken the panel right under the island to ground it. The ring is the
+     "border", drawn via shadow so it never affects layout or gets clipped. */
+  --shadow-chat:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 0 0 1px rgba(255, 255, 255, 0.07), 0 2px 6px rgba(0, 0, 0, 0.32),
+    0 10px 28px rgba(0, 0, 0, 0.24);
+  --shadow-popover:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 8px 22px rgba(0, 0, 0, 0.36),
+    0 2px 6px rgba(0, 0, 0, 0.24);
+  --shadow-popover-inverse: 22px 25px 24px rgba(0, 0, 0, 0.45);
+  --shadow-popover-raised: 22px 25px 24px rgba(0, 0, 0, 0.45);
+  --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.6);
+  --shadow-sidebar-panel-elevated: 30px 42px 60px rgba(0, 0, 0, 0.15);
+  --shadow-global-composer-pill-hover: 30px 24px 52px rgba(0, 0, 0, 0.2);
+  --shadow-kbd: 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-date-field-focus: 0 0 0 3px rgba(244, 244, 245, 0.1);
+  --shadow-agent-profile-avatar: 0 18px 32px rgba(0, 0, 0, 0.42);
+  --shadow-agent-profile-affordance: 0 10px 24px rgba(0, 0, 0, 0.4);
+  --shadow-agent-profile-input-hover: 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --shadow-agent-profile-input-focus: 0 0 0 1px rgba(255, 255, 255, 0.18);
+  --shadow-editor-field-hover: 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --shadow-editor-field-focus: 0 0 0 1px rgba(255, 255, 255, 0.18);
+  --shadow-editor-footer: 0 -12px 24px rgba(0, 0, 0, 0.24);
+  --shadow-color-picker-swatches: 0 10px 26px rgba(0, 0, 0, 0.36);
+
+  /* Inverse popover — contrast-inverted chip (tooltips, floating pills):
+     light on dark theme. */
+  --popover-inverse: var(--color-gray-50);
+  --popover-inverse-foreground: var(--color-gray-900);
+  --popover-inverse-muted-foreground: rgba(26, 26, 26, 0.4);
+  --popover-inverse-focus: rgba(26, 26, 26, 0.1);
+
+  /* Raised popover — overflow menus stay dark in dark theme (BOT-1600),
+     one step lighter than the gray-900 default popover base so the two
+     menu tiers still separate. */
+  --popover-raised: var(--color-gray-800);
+  --popover-raised-foreground: var(--color-white);
+  --popover-raised-muted-foreground: rgba(255, 255, 255, 0.4);
+  --popover-raised-focus: rgba(255, 255, 255, 0.1);
+
+  --status-added: var(--color-green-400);
+  --status-deleted: var(--color-red-400);
+  --status-modified: var(--color-yellow-500);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   TAILWIND UTILITY BRIDGE — exposes runtime custom-props as
+   Tailwind class generators (e.g. `bg-canvas-base`, `text-muted-foreground`).
+   ═══════════════════════════════════════════════════════════ */
+
+@theme inline {
+  /* shadcn-standard mappings */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-card-glass: var(--card-glass);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Goose canvas + composer extensions */
+  --color-canvas-base: var(--canvas-base);
+  --color-surface-composer: var(--surface-composer);
+  --color-surface-composer-hover: var(--surface-composer-hover);
+  --color-surface-chat-composer: var(--surface-chat-composer);
+  --color-surface-chat-composer-hover: var(--surface-chat-composer-hover);
+  --color-surface-composer-action: var(--surface-composer-action);
+  --color-surface-composer-action-hover: var(--surface-composer-action-hover);
+  --color-surface-composer-action-active: var(--surface-composer-action-active);
+  --color-surface-chat-responding-pill-bg: var(
+    --surface-chat-responding-pill-bg
+  );
+  --color-surface-chat-responding-pill-fg: var(
+    --surface-chat-responding-pill-fg
+  );
+  --color-surface-composer-glass: var(--surface-composer-glass);
+  --color-surface-glass-subtle: var(--surface-glass-subtle);
+  --color-surface-editor-panel: var(--surface-editor-panel);
+  --color-surface-agent-profile-fg: var(--surface-agent-profile-fg);
+  --color-surface-agent-profile-fg-80: var(--surface-agent-profile-fg-80);
+  --color-surface-agent-profile-fg-muted: var(--surface-agent-profile-fg-muted);
+  --color-surface-agent-profile-fg-subtle: var(
+    --surface-agent-profile-fg-subtle
+  );
+  --color-surface-agent-profile-fg-faint: var(--surface-agent-profile-fg-faint);
+  --color-surface-agent-profile-fg-placeholder: var(
+    --surface-agent-profile-fg-placeholder
+  );
+  --color-surface-agent-profile-border: var(--surface-agent-profile-border);
+  --color-surface-agent-profile-dot: var(--surface-agent-profile-dot);
+  --color-surface-agent-profile-control-bg: var(
+    --surface-agent-profile-control-bg
+  );
+  --color-surface-agent-profile-control-bg-hover: var(
+    --surface-agent-profile-control-bg-hover
+  );
+  --color-surface-agent-profile-action-fg: var(
+    --surface-agent-profile-action-fg
+  );
+  --color-surface-agent-profile-action-bg-hover: var(
+    --surface-agent-profile-action-bg-hover
+  );
+  --color-agent-share-card-ink: var(--agent-share-card-ink);
+  --color-surface-glass-strong: var(--surface-glass-strong);
+  --color-surface-glass-strong-hover: var(--surface-glass-strong-hover);
+  --color-surface-glass-strong-fg: var(--surface-glass-strong-fg);
+  --color-surface-agent-tile-action-bg: var(--surface-agent-tile-action-bg);
+  --color-surface-agent-tile-action-fg: var(--surface-agent-tile-action-fg);
+  --color-surface-agent-tile-action-bg-hover: var(
+    --surface-agent-tile-action-bg-hover
+  );
+  --color-surface-agent-tile-action-fg-hover: var(
+    --surface-agent-tile-action-fg-hover
+  );
+  --color-app-top-bar-control-fg: var(--app-top-bar-control-fg);
+  --color-app-top-bar-control-fg-disabled: var(
+    --app-top-bar-control-fg-disabled
+  );
+  --color-message-user-bg: var(--message-user-bg);
+
+  /* Composer chip tones */
+  --color-chip-file-bg: var(--chip-file-bg);
+  --color-chip-file-fg: var(--chip-file-fg);
+  --color-chip-chat-bg: var(--chip-chat-bg);
+  --color-chip-chat-fg: var(--chip-chat-fg);
+  --color-chip-project-bg: var(--chip-project-bg);
+  --color-chip-project-fg: var(--chip-project-fg);
+  --color-chip-agent-bg: var(--chip-agent-bg);
+  --color-chip-agent-fg: var(--chip-agent-fg);
+  --color-chip-skill-bg: var(--chip-skill-bg);
+  --color-chip-skill-fg: var(--chip-skill-fg);
+  --color-chip-automation-bg: var(--chip-automation-bg);
+  --color-chip-automation-fg: var(--chip-automation-fg);
+
+  --color-skill-pill-fg: var(--skill-pill-fg);
+
+  --color-placeholder-composer: var(--text-placeholder-composer);
+
+  /* Goose status extensions */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-popover-inverse: var(--popover-inverse);
+  --color-popover-inverse-foreground: var(--popover-inverse-foreground);
+  --color-popover-inverse-muted-foreground: var(
+    --popover-inverse-muted-foreground
+  );
+  --color-popover-inverse-focus: var(--popover-inverse-focus);
+  --color-popover-raised: var(--popover-raised);
+  --color-popover-raised-foreground: var(--popover-raised-foreground);
+  --color-popover-raised-muted-foreground: var(
+    --popover-raised-muted-foreground
+  );
+  --color-popover-raised-focus: var(--popover-raised-focus);
+
+  /* Skill pills — primitives in @theme generate bg-pill-* utilities directly,
+     no bridge layer needed (would be a self-reference tautology). */
+
+  /* Widget tokens */
+  --color-clock-face: var(--clock-face);
+  --color-clock-mark: var(--clock-mark);
+  --color-clock-minute-hand: var(--clock-minute-hand);
+  --color-clock-hand: var(--clock-hand);
+  --color-sticky-note-warm: var(--sticky-note-warm);
+  --color-sticky-note-cool: var(--sticky-note-cool);
+  --color-sticky-note-rose: var(--sticky-note-rose);
+  --color-sticky-note-blue: var(--sticky-note-blue);
+  --color-sticky-note-lavender: var(--sticky-note-lavender);
+  --color-sticky-note-peach: var(--sticky-note-peach);
+  --color-sticky-note-foreground: var(--sticky-note-foreground);
+  --color-sticky-note-muted: var(--sticky-note-muted);
+
+  /* Alpha overlays */
+  --color-dark-04: var(--dark-04);
+  --color-dark-10: var(--dark-10);
+  --color-dark-40: var(--dark-40);
+
+  /* Diff/status text colors */
+  --color-status-added: var(--status-added);
+  --color-status-deleted: var(--status-deleted);
+  --color-status-modified: var(--status-modified);
+
+  /* Sidebar */
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-section-action-bg: var(--sidebar-section-action-bg);
+  --color-sidebar-section-action-fg: var(--sidebar-section-action-fg);
+  --color-sidebar-section-action-bg-hover: var(
+    --sidebar-section-action-bg-hover
+  );
+  --color-sidebar-section-action-fg-hover: var(
+    --sidebar-section-action-fg-hover
+  );
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Fonts — Inter across the board */
+  --font-sans:
+    "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-terminal-symbols: "NerdFontsSymbols Nerd Font";
+  --font-serif: serif;
+  --font-display: "Inter", system-ui, sans-serif;
+
+  /* Radii — 5-step scale: xs/sm/md/lg + rounded-full (999px).
+     Each step differs by 6px, so adjacent tokens nest concentrically
+     with 6px (p-1.5) padding between layers. */
+  --radius-xs: 6px;
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 24px;
+
+  /* Composer — deliberate one-off; the chat composer is the app's
+     signature surface and earns its own token. */
+  --radius-composer: 40px;
+
+  /* Shadow utilities */
+  --shadow-mini: var(--shadow-mini);
+  --shadow-mini-inset: var(--shadow-mini-inset);
+  --shadow-btn: var(--shadow-btn);
+  --shadow-card: var(--shadow-card);
+  --shadow-elevated: var(--shadow-elevated);
+  --shadow-chat: var(--shadow-chat);
+  --shadow-sticky-note: var(--sticky-note-shadow);
+  --shadow-popover: var(--shadow-popover);
+  --shadow-popover-inverse: var(--shadow-popover-inverse);
+  --shadow-popover-raised: var(--shadow-popover-raised);
+  --shadow-modal: var(--shadow-modal);
+  --shadow-sidebar-panel-elevated: var(--shadow-sidebar-panel-elevated);
+  --shadow-global-composer-pill-hover: var(--shadow-global-composer-pill-hover);
+  --shadow-kbd: var(--shadow-kbd);
+  --shadow-date-field-focus: var(--shadow-date-field-focus);
+  --shadow-agent-profile-avatar: var(--shadow-agent-profile-avatar);
+  --shadow-agent-profile-affordance: var(--shadow-agent-profile-affordance);
+  --shadow-agent-profile-input-hover: var(--shadow-agent-profile-input-hover);
+  --shadow-agent-profile-input-focus: var(--shadow-agent-profile-input-focus);
+  --shadow-editor-field-hover: var(--shadow-editor-field-hover);
+  --shadow-editor-field-focus: var(--shadow-editor-field-focus);
+  --shadow-editor-footer: var(--shadow-editor-footer);
+  --shadow-color-picker-swatches: var(--shadow-color-picker-swatches);
+
+  /* Spacing — app chrome dimensions */
+  --spacing-app-top-bar: 52px;
+  /* Leading inset reserves room for the macOS traffic-light cluster
+     (positioned at x=14, ~52px wide → ends at x=66). 80px gives a ~14px
+     visual gap to the first toolbar button. */
+  --spacing-app-top-bar-leading: 80px;
+  --spacing-app-top-bar-control: 24px;
+  --spacing-app-top-bar-button-gap: 4px;
+  --spacing-app-panel-gutter-top: 4px;
+  --spacing-app-panel-gutter-inline: 12px;
+  --spacing-app-panel-gutter-bottom: 12px;
+  --spacing-app-page-bottom: 6rem;
+  --toast-bottom-offset: var(--spacing-app-panel-gutter-bottom);
+  --toast-mobile-bottom-offset: 16px;
+  --spacing-input: 3.25rem;
+  --spacing-input-sm: 2.75rem;
+  --spacing-editor-field: 42px;
+  --spacing-editor-instructions-min: 215px;
+  --spacing-button: 2.75rem;
+  --spacing-button-sm: 2rem;
+
+  /* Type sizes — Alex role-named (generates text-label / text-body / etc.) */
+  --text-xxs: 10px;
+  --text-label-alex: 10px;
+  --text-body-alex: 14px;
+  --text-input-alex: 16px;
+  --text-editor-mono: 13px;
+  --text-title-alex: 24px;
+  --text-app-top-bar-title: 20px;
+  --text-app-top-bar-title-leading: 18px;
+  --text-app-top-bar-icon: 18px;
+  --text-app-top-bar-title-compact: var(--text-app-top-bar-title);
+
+  --leading-editor-field: 15px;
+
+  --breakpoint-desktop: 1440px;
+
+  /* Animation utilities */
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-collapsible-down: collapsible-down 0.2s ease-out;
+  --animate-collapsible-up: collapsible-up 0.2s ease-out;
+  --animate-accordion-content-open: accordion-content-open 0.2s
+    cubic-bezier(0.25, 1, 0.5, 1) both;
+  --animate-accordion-content-close: accordion-content-close 0.2s ease-out both;
+  --animate-caret-blink: caret-blink 1s ease-out infinite;
+  --animate-scale-in: scale-in 0.2s ease;
+  --animate-scale-out: scale-out 0.15s ease;
+  --animate-fade-in: fade-in 0.2s ease;
+  --animate-fade-out: fade-out 0.15s ease;
+  --animate-enter-from-left: enter-from-left 0.2s ease;
+  --animate-enter-from-right: enter-from-right 0.2s ease;
+  --animate-exit-to-left: exit-to-left 0.2s ease;
+  --animate-exit-to-right: exit-to-right 0.2s ease;
+  --animate-word-reveal: word-reveal 0.4s ease-out;
+  /* Clock widget: digital-face fade-in on toggle; the red colon blinks once a
+     second, mirroring the analog second hand's tick. Both disabled under
+     reduced motion. */
+  --animate-clock-face-fade: clock-face-fade 180ms ease-out;
+  --animate-clock-colon-blink: clock-colon-blink 1s linear infinite;
+  /* Canvas widgets: "set down" placement when a widget is first pinned or
+     added to the canvas — a short drop with a back-out overshoot as it lands
+     flat on the board. Transform/opacity only, so it works for any widget
+     shape (pills, cards, notes). Disabled under reduced motion. */
+  --animate-widget-settle: widget-settle 380ms cubic-bezier(0.34, 1.56, 0.64, 1)
+    both;
+
+  @keyframes widget-settle {
+    from {
+      opacity: 0;
+      transform: translateY(-10px) scale(0.9);
+    }
+    45% {
+      opacity: 1;
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes clock-face-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  /* Hard on/off blink — no fade — for an editorial digital-display feel.
+     The 0.001% window makes the toggle instant under linear timing. */
+  @keyframes clock-colon-blink {
+    0%,
+    49.999% {
+      opacity: 1;
+    }
+    50%,
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+  @keyframes collapsible-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-collapsible-content-height);
+    }
+  }
+  @keyframes collapsible-up {
+    from {
+      height: var(--radix-collapsible-content-height);
+    }
+    to {
+      height: 0;
+    }
+  }
+  @keyframes accordion-content-open {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes accordion-content-close {
+    from {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(-2px);
+    }
+  }
+  @keyframes caret-blink {
+    0%,
+    70%,
+    100% {
+      opacity: 1;
+    }
+    20%,
+    50% {
+      opacity: 0;
+    }
+  }
+  @keyframes enter-from-right {
+    from {
+      opacity: 0;
+      transform: translateX(200px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  @keyframes enter-from-left {
+    from {
+      opacity: 0;
+      transform: translateX(-200px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  @keyframes exit-to-right {
+    from {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateX(200px);
+    }
+  }
+  @keyframes exit-to-left {
+    from {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateX(-200px);
+    }
+  }
+  @keyframes scale-in {
+    from {
+      opacity: 0;
+      transform: rotateX(-10deg) scale(0.9);
+    }
+    to {
+      opacity: 1;
+      transform: rotateX(0deg) scale(1);
+    }
+  }
+  @keyframes scale-out {
+    from {
+      opacity: 1;
+      transform: rotateX(0deg) scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: rotateX(-10deg) scale(0.95);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes fade-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes word-reveal {
+    from {
+      opacity: 0;
+      filter: blur(8px);
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      filter: blur(0);
+      transform: translateY(0);
+    }
+  }
+}
+
+:root[data-global-composer-visible="true"] {
+  --toast-bottom-offset: 88px;
+  --toast-mobile-bottom-offset: 132px;
+}
+
+@keyframes active-chat-dot-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes voice-waveform {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  25% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(0.55);
+  }
+  75% {
+    transform: scaleY(0.85);
+  }
+}
+
+.voice-waveform-bar {
+  animation: voice-waveform 720ms ease-in-out infinite;
+  transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-waveform-bar {
+    animation: none;
+    transform: scaleY(0.65);
+  }
+}
+@keyframes text-shimmer {
+  0% {
+    background-position:
+      130% center,
+      0 0;
+  }
+  70%,
+  100% {
+    background-position:
+      -30% center,
+      0 0;
+  }
+}
+
+@keyframes text-shimmer-continuous {
+  0% {
+    background-position:
+      130% center,
+      0 0;
+  }
+  100% {
+    background-position:
+      -30% center,
+      0 0;
+  }
+}
+
+.shimmer-text {
+  animation: text-shimmer var(--shimmer-duration) linear var(--shimmer-delay)
+    infinite;
+}
+
+.shimmer-text-continuous {
+  animation-name: text-shimmer-continuous;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    animation: none !important;
+  }
+
+  .animate-clock-face-fade,
+  .animate-clock-colon-blink {
+    animation: none !important;
+  }
+
+  /* Widget placement: replace the drop-and-settle with a plain fade. */
+  .animate-widget-settle {
+    animation: fade-in 150ms ease-out both !important;
+  }
+}
+
+@keyframes fadeToFull {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fadeToSubtle {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 0.08;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DOT-GRID — canvas signature treatment.
+   --project-tint composes over base canvas + dot color via color-mix.
+   In project chats, set --project-tint: <hue> on a wrapper to tilt
+   both background and dots together. Default transparent = no change.
+   ═══════════════════════════════════════════════════════════ */
+
+.bg-dot-grid {
+  background-color: color-mix(
+    in oklch,
+    var(--project-tint, transparent) 25%,
+    var(--canvas-base)
+  );
+  background-image: radial-gradient(
+    circle,
+    color-mix(
+        in oklch,
+        var(--project-tint, transparent) 25%,
+        var(--dot-color-base)
+      )
+      var(--dot-size),
+    transparent var(--dot-size)
+  );
+  background-size: var(--dot-spacing) var(--dot-spacing);
+  background-position: 0 0;
+  background-attachment: fixed;
+  transition:
+    background-color 240ms ease,
+    background-image 240ms ease;
+}
+
+[data-app-shell-root="true"].bg-dot-grid {
+  /* Fixed attachment makes WKWebView repaint newly exposed resize regions late. */
+  background-attachment: scroll;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-dot-grid {
+    transition: none;
+  }
+}
+
+/* App shell lock — outside @layer so nothing can override */
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+  background-color: var(--canvas-base);
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border, currentColor);
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+    font-variation-settings: normal;
+  }
+
+  .goose-zoom-scope {
+    zoom: var(--goose-content-zoom, 1);
+  }
+
+  body {
+    @apply bg-canvas-base text-foreground;
+    font-family: var(--font-sans);
+    /* Global tracking trim for Inter — pulls body text slightly tighter
+       than the opsz axis default. Tune here, never per-component. */
+    letter-spacing: -0.01em;
+    font-feature-settings:
+      "rlig" 1,
+      "calt" 1;
+  }
+
+  /* Keep technical monospace text neutral; the Inter body tracking trim should
+     not squeeze code, paths, terminal-adjacent labels, or identifiers. */
+  code,
+  kbd,
+  pre,
+  samp,
+  .font-mono {
+    letter-spacing: normal;
+  }
+
+  /* Form controls don't inherit font-family by default — opt them into
+     the app typeface (and other body typography) so they match the rest of the UI. */
+  input,
+  textarea,
+  select,
+  button {
+    font-family: inherit;
+  }
+
+  :is(
+      a[href],
+      area[href],
+      summary,
+      label[for],
+      button:not(:disabled):not([aria-disabled="true"]),
+      select:not(:disabled),
+      [role="button"]:not([aria-disabled="true"]):not(:disabled),
+      [role="link"]:not([aria-disabled="true"]),
+      [role="menuitem"]:not([aria-disabled="true"]),
+      [role="menuitemradio"]:not([aria-disabled="true"]),
+      [role="menuitemcheckbox"]:not([aria-disabled="true"]),
+      [role="option"]:not([aria-disabled="true"]):not([data-disabled]),
+      [role="tab"]:not([aria-disabled="true"]),
+      [role="switch"]:not([aria-disabled="true"]),
+      [role="checkbox"]:not([aria-disabled="true"]),
+      [role="radio"]:not([aria-disabled="true"]),
+      input[type="button"]:not(:disabled),
+      input[type="submit"]:not(:disabled),
+      input[type="reset"]:not(:disabled),
+      input[type="checkbox"]:not(:disabled),
+      input[type="radio"]:not(:disabled)
+    ) {
+    cursor: pointer;
+  }
+
+  ::selection {
+    background: var(--text-selection-bg);
+    color: var(--text-selection-fg);
+  }
+
+  /* The queued-message pill is inverted relative to the theme (dark surface
+     in light mode), so the theme-level selection tokens would paint selected
+     text near-invisible on it. Re-scope them to the pill's own contrast
+     color. */
+  [data-slot="queued-message"] {
+    --text-selection-bg: color-mix(
+      in oklab,
+      var(--surface-chat-responding-pill-fg) 30%,
+      transparent
+    );
+    --text-selection-fg: var(--surface-chat-responding-pill-fg);
+  }
+
+  /* Chat transcript find-in-page tints, painted via the CSS Custom
+     Highlight API (see src/features/chat/lib/transcriptSearch.ts). */
+  ::highlight(chat-search-match) {
+    background-color: var(--chat-search-match-bg);
+    color: var(--chat-search-match-fg);
+  }
+
+  ::highlight(chat-search-match-active) {
+    background-color: var(--chat-search-match-active-bg);
+    color: var(--chat-search-match-active-fg);
+  }
+
+  ::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: transparent;
+    background-clip: content-box;
+    border: var(--scrollbar-thumb-inset) solid transparent;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: transparent;
+  }
+
+  [data-theme="dark"] ::-webkit-scrollbar-thumb,
+  .dark ::-webkit-scrollbar-thumb {
+    background: transparent;
+  }
+  [data-theme="dark"] ::-webkit-scrollbar-thumb:hover,
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: transparent;
+  }
+
+  .scrollbar-subtle {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+    scrollbar-width: auto;
+  }
+  .scrollbar-subtle::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+  }
+  .scrollbar-subtle::-webkit-scrollbar-thumb {
+    background: transparent;
+  }
+  .scrollbar-subtle:hover::-webkit-scrollbar-thumb,
+  .scrollbar-subtle:focus-within::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+  }
+  .scrollbar-subtle:hover::-webkit-scrollbar-thumb:hover,
+  .scrollbar-subtle:focus-within::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+  }
+  .scrollbar-subtle[data-scrollbar-passive-suppressed="true"] {
+    scrollbar-color: transparent transparent;
+  }
+  .scrollbar-subtle[data-scrollbar-passive-suppressed="true"]::-webkit-scrollbar-thumb,
+  .scrollbar-subtle[data-scrollbar-passive-suppressed="true"]:hover::-webkit-scrollbar-thumb,
+  .scrollbar-subtle[data-scrollbar-passive-suppressed="true"]:focus-within::-webkit-scrollbar-thumb {
+    background: transparent;
+  }
+
+  .scrollbar-visible {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+    scrollbar-width: auto;
+  }
+  .scrollbar-visible::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+  }
+  .scrollbar-visible::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+  }
+  .scrollbar-visible::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+  }
+
+  .scrollbar-none {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@layer components {
+  .chat-composer-shell {
+    container: chat-composer / inline-size;
+  }
+
+  @container chat-composer (max-width: 520px) {
+    .chat-composer-selector-trigger {
+      inline-size: 2.5rem;
+      min-inline-size: 2.5rem;
+      padding-inline: 0;
+    }
+
+    .chat-composer-selector-label,
+    .chat-composer-selector-trigger [data-slot="button-right-icon"] {
+      display: none;
+    }
+  }
+
+  .chat-context-dropdown-results {
+    position: relative;
+    min-height: 0;
+    max-height: calc(
+      min(28rem, var(--radix-popover-content-available-height)) -
+      3.5rem
+    );
+  }
+
+  .chat-context-dropdown-results-scroll {
+    max-height: inherit;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .chat-context-dropdown-row-list {
+    width: 100%;
+  }
+
+  .chat-context-dropdown-results-scroll[data-scrolled="true"] {
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 1.25rem);
+    mask-image: linear-gradient(to bottom, transparent, black 1.25rem);
+  }
+
+  .chat-context-search-input,
+  .chat-context-search-input:focus,
+  .chat-context-search-input:focus-visible {
+    border: 0 !important;
+    outline: 0 !important;
+    box-shadow: none !important;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  *:not(body):not(.focus-override) {
+    outline: none !important;
+  }
+
+  *:not(body):not(.focus-override) {
+    &:focus-visible {
+      @apply ring-ring ring-offset-background ring-2 ring-offset-1 outline-hidden;
+    }
+  }
+
+  /* Menu surfaces and items paint their own focus highlight (focus:bg-*),
+     so the global focus ring is suppressed for them. */
+  *:not(body):is(
+      [data-slot="dropdown-menu-content"],
+      [data-slot="popover-content"],
+      [data-slot="context-menu-content"],
+      [data-slot="dropdown-menu-item"],
+      [data-slot="dropdown-menu-checkbox-item"],
+      [data-slot="dropdown-menu-radio-item"],
+      [data-slot="dropdown-menu-sub-trigger"],
+      [data-slot="context-menu-item"],
+      [data-slot="context-menu-checkbox-item"],
+      [data-slot="context-menu-radio-item"],
+      [data-slot="context-menu-sub-trigger"],
+      [data-slot="menubar-item"],
+      [data-slot="menubar-checkbox-item"],
+      [data-slot="menubar-radio-item"],
+      [data-slot="menubar-sub-trigger"]
+    ) {
+    &:focus-visible {
+      @apply ring-0 ring-offset-0;
+    }
+  }
+
+  .link {
+    @apply hover:text-foreground/80 inline-flex items-center gap-1 rounded-xs font-medium underline underline-offset-4;
+  }
+
+  *:not(body):not(.focus-override).link {
+    &:focus-visible {
+      @apply ring-ring ring-offset-background ring-2 ring-offset-2 outline-hidden;
+    }
+  }
+}
+
+/* Streamdown (markdown rendering) — visual conformance */
+/* Heading scale is owned by the `components` override in
+ * shared/ui/ai-elements/message.tsx, not by CSS, so the app scale lands on the
+ * element itself and stays overridable per surface. */
+[data-streamdown="table-wrapper"],
+[data-streamdown="mermaid-block"] {
+  border: none;
+}
+
+[data-streamdown="table-wrapper"] > div:has(> [data-streamdown="table"]) {
+  overflow-y: hidden;
+  padding-block-end: var(--streamdown-table-scrollbar-block-size, 0px);
+}
+
+/* Streamdown paints its table scroll container with bg-background. Keep the
+ * table chrome transparent so rows match whatever container hosts them
+ * (doc viewer card, chat card); the muted header band and row borders carry
+ * the structure. */
+[data-streamdown="table-wrapper"],
+[data-streamdown="table-wrapper"] > div:has(> [data-streamdown="table"]) {
+  background: transparent;
+}
+
+/* Streamdown's mermaid blocks and their floating action pills ship their
+ * own sidebar-shell background; restate the glass treatment with the
+ * ladder token. */
+[data-streamdown="mermaid-block"] {
+  background: var(--card-glass);
+}
+
+[data-streamdown="mermaid-block-actions"] {
+  border-color: var(--border);
+  background: var(--card-glass);
+}
+
+[data-streamdown="code-block"][data-streamdown] {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 0.5rem;
+  padding: 0.125rem;
+  overflow: visible;
+  border: none;
+  background: transparent;
+  contain: none !important;
+  contain-intrinsic-size: none !important;
+  content-visibility: visible !important;
+}
+
+[data-streamdown="code-block"] > [data-streamdown="code-block-header"] {
+  grid-column: 1;
+  align-items: flex-end;
+  min-height: 1.75rem;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1rem;
+}
+
+[data-streamdown="code-block"]
+  > [data-streamdown="code-block-header"]
+  + div:has([data-streamdown="code-block-actions"]) {
+  position: static;
+  top: auto;
+  z-index: auto;
+  grid-column: 2;
+  align-items: flex-end;
+  height: auto;
+  min-height: 1.75rem;
+  margin-top: 0;
+  pointer-events: auto;
+}
+
+[data-streamdown="code-block-actions"] {
+  gap: 0.25rem;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+[data-streamdown="code-block-actions"] button {
+  padding: 0.1875rem;
+}
+
+[data-streamdown="code-block-actions"] svg {
+  width: 0.75rem;
+  height: 0.75rem;
+}
+
+[data-streamdown="mermaid"] > .size-full [role="img"] > svg {
+  display: block;
+  width: auto !important;
+  height: auto !important;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+[data-theme="dark"] [data-streamdown="mermaid"] .flowchart-link,
+.dark [data-streamdown="mermaid"] .flowchart-link {
+  stroke: color-mix(in srgb, var(--foreground) 42%, transparent) !important;
+}
+
+[data-theme="dark"] [data-streamdown="mermaid"] marker path,
+.dark [data-streamdown="mermaid"] marker path {
+  fill: color-mix(in srgb, var(--foreground) 42%, transparent) !important;
+  stroke: color-mix(in srgb, var(--foreground) 42%, transparent) !important;
+}
+
+[data-streamdown="code-block"] > [data-streamdown="code-block-body"] {
+  grid-column: 1 / -1;
+  padding: 0.75rem;
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 0.625rem;
+  background: var(--background);
+  font-size: 13px;
+  line-height: 1.25rem;
+}
+
+[data-streamdown="code-block"] > [data-streamdown="code-block-body"] pre {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+[data-streamdown="code-block"]
+  > [data-streamdown="code-block-body"]
+  code
+  > span::before {
+  width: 1rem;
+  margin-right: 0.5rem;
+  font-size: 12px;
+  text-align: left;
+}
+
+code[data-streamdown="inline-code"],
+[data-streamdown] :not(pre) > code {
+  border: 0;
+  border-radius: 0.375rem;
+  background: color-mix(in oklab, var(--muted) 82%, transparent);
+  padding: 0.05rem calc(0.22rem + 1px);
+  color: var(--foreground);
+  font-size: calc(1em - 1px);
+  font-weight: 400;
+  line-height: inherit;
+  vertical-align: baseline;
+}
+
+@keyframes terminal-floating-shadow-in {
+  from {
+    box-shadow: var(--shadow-mini);
+  }
+  to {
+    box-shadow: var(--shadow-modal);
+  }
+}
+
+.terminal-floating-shadow {
+  animation: terminal-floating-shadow-in 0.14s ease-out both;
+  box-shadow: var(--shadow-modal);
+}
+
+/* Page transition */
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.page-transition {
+  opacity: 0;
+  animation: page-enter 0.16s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  pointer-events: auto;
+  will-change: opacity, transform;
+}
+
+@keyframes content-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.content-fade-in {
+  animation: content-fade-in 0.3s ease-out forwards;
+}
+
+@keyframes global-composer-centered-enter {
+  from {
+    opacity: 0;
+    scale: 0.96;
+    translate: -50% calc(-50% + 0.75rem);
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+    translate: -50% -50%;
+  }
+}
+
+@keyframes global-composer-shim-handoff {
+  0% {
+    background: var(--overlay-global-composer-shim);
+    backdrop-filter: blur(12px) saturate(1.08);
+    opacity: 1;
+  }
+  46% {
+    background: var(--overlay-global-composer-shim-peak);
+    backdrop-filter: blur(18px) saturate(1.04);
+    opacity: 1;
+  }
+  100% {
+    background: var(--overlay-global-composer-shim-clear);
+    backdrop-filter: blur(0) saturate(1);
+    opacity: 0;
+  }
+}
+
+@keyframes global-composer-flip-handoff {
+  from {
+    height: var(--global-composer-from-height);
+    left: var(--global-composer-from-left);
+    opacity: 1;
+    top: var(--global-composer-from-top);
+    width: var(--global-composer-from-width);
+  }
+  to {
+    height: var(--global-composer-to-height);
+    left: var(--global-composer-to-left);
+    opacity: 1;
+    top: var(--global-composer-to-top);
+    width: var(--global-composer-to-width);
+  }
+}
+
+@keyframes global-composer-shell-morph-handoff {
+  from,
+  58% {
+    background: var(--card-glass);
+    border-radius: var(--radius-composer);
+    box-shadow: var(--shadow-global-composer-pill-hover);
+    padding: 0.5rem 0.625rem 0.5rem 1rem;
+  }
+  to {
+    background: var(--surface-chat-composer);
+    border-radius: var(--radius-sm);
+    box-shadow: none;
+    padding: 0;
+  }
+}
+
+@keyframes chat-response-status-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.25rem) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.global-composer-pill-centered {
+  animation: global-composer-centered-enter 0.22s cubic-bezier(0.16, 1, 0.3, 1)
+    both;
+  transform-origin: center;
+}
+
+.global-composer-shim-centered {
+  background: var(--overlay-global-composer-shim);
+  backdrop-filter: blur(12px) saturate(1.08);
+  -webkit-backdrop-filter: blur(12px) saturate(1.08);
+}
+
+.global-composer-shim-handoff {
+  animation: global-composer-shim-handoff 0.62s cubic-bezier(0.16, 1, 0.3, 1)
+    forwards;
+  -webkit-backdrop-filter: blur(12px) saturate(1.08);
+}
+
+.global-composer-pill-flip {
+  height: var(--global-composer-from-height);
+  left: var(--global-composer-from-left);
+  max-width: none;
+  top: var(--global-composer-from-top);
+  transform: none;
+  width: var(--global-composer-from-width);
+  will-change:
+    background, border-radius, box-shadow, height, left, padding, top, width;
+}
+
+.global-composer-pill-handoff {
+  animation:
+    global-composer-flip-handoff 0.62s cubic-bezier(0.16, 1, 0.3, 1) forwards,
+    global-composer-shell-morph-handoff 0.62s cubic-bezier(0.16, 1, 0.3, 1)
+    forwards;
+  transform-origin: center;
+}
+
+.global-composer-pill-handoff.global-composer-pill-handoff-pending {
+  animation: none;
+}
+
+.chat-response-status-enter {
+  animation: chat-response-status-enter 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: center;
+}
+
+.gallery-card-enter {
+  animation: gallery-card-enter 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+  filter: blur(12px);
+  opacity: 0;
+  transform: scale(0.97);
+  transform-origin: center;
+  will-change: filter, opacity, transform;
+}
+
+@keyframes gallery-card-enter {
+  from {
+    filter: blur(12px);
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.agents-gallery-card-enter {
+  animation: agents-gallery-card-enter 0.24s cubic-bezier(0.16, 1, 0.3, 1)
+    backwards;
+}
+
+@keyframes agents-gallery-card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.agent-builder-column-enter {
+  /* Horizontal settle, not a launch: each column slides in from the side it
+     lives on — chat drifts in from the left, the builder rail from the
+     right (the host sets the signed offset via the -x var). A short run
+     with a long soft ease; the original 48-72px rise from the bottom read
+     as fast and aggressive (BOT-1501). */
+  animation: agent-builder-column-enter 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: var(--agent-builder-column-enter-delay, 0ms);
+  opacity: 0;
+  transform: translate3d(var(--agent-builder-column-enter-x, 24px), 0, 0);
+  transform-origin: center;
+  will-change: opacity, transform;
+}
+
+@keyframes agent-builder-column-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(var(--agent-builder-column-enter-x, 24px), 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+/*
+ * Avatar collection canvas — playful scatter field.
+ *
+ * Each item pops in with a staggered overshoot, then sits still: the field
+ * is calm by default and motion is reserved for the item you're pointing
+ * at (hover lifts and wobbles the media itself so the pressed geometry
+ * stays put; video playback is likewise hover-gated by the host).
+ */
+.avatar-scatter-item {
+  /* Fill mode `backwards`, not `both`: the entrance must hold tiles at the
+     first keyframe (opacity 0) through its delay and the paint-gated pause,
+     but must release opacity back to the cascade when it finishes — with
+     `both`/`forwards`, the final keyframe's opacity: 1 outranks utility
+     classes forever, which silently broke the selection dim
+     (opacity-25 on non-highlighted tiles). */
+  animation: avatar-scatter-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+  animation-delay: var(--scatter-pop-delay, 0ms);
+  will-change: transform;
+}
+
+.avatar-scatter-item .avatar-scatter-media {
+  transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/*
+ * Media not painted yet: hold the entrance at its first keyframe (opacity 0)
+ * instead of playing it over an empty box. When the ready callback removes
+ * this class, the pop-in runs with pixels already in place.
+ */
+.avatar-scatter-item.avatar-scatter-waiting {
+  animation-play-state: paused;
+}
+
+/*
+ * Hover/press motion targets the button that owns the media. Two shapes
+ * exist: row tiles where .avatar-scatter-item IS the button, and scatter
+ * tiles where the item is a positioning wrapper with the tile button (and,
+ * when highlighted, a Select action) inside — hovering Select must not
+ * wobble the avatar, so the wrapper itself never triggers the scale.
+ */
+button.avatar-scatter-item:hover:not(:disabled) .avatar-scatter-media,
+button.avatar-scatter-item:focus-visible .avatar-scatter-media,
+.avatar-scatter-item > button:hover:not(:disabled) .avatar-scatter-media,
+.avatar-scatter-item > button:focus-visible .avatar-scatter-media {
+  transform: scale(1.12);
+}
+
+button.avatar-scatter-item:active:not(:disabled) .avatar-scatter-media,
+.avatar-scatter-item > button:active:not(:disabled) .avatar-scatter-media {
+  transform: scale(0.96);
+}
+
+@keyframes avatar-scatter-pop {
+  from {
+    opacity: 0;
+    scale: 0.4;
+  }
+  60% {
+    opacity: 1;
+    scale: 1.06;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+/*
+ * Pan arrival — "boop": a soft fade with a breath of scale and the faintest
+ * overshoot for tiles that pan into the viewport (applyPan applies this
+ * inline, with a base delay + backwards fill so the tile stays invisible
+ * for a beat after the pan and then appears). Deliberately not the
+ * first-load launch above.
+ *
+ * Applied to the tile's `.avatar-scatter-media`, never the scatter-item
+ * wrapper: the wrapper's inline `transform` is its wrap/pan translation,
+ * and the CSS `scale` property composes *before* `transform`, so scaling
+ * the wrapper also scales that translation — arriving tiles would start
+ * displaced toward their unwrapped positions and visibly slide into place
+ * (the "spawning from the center" bug). The media element carries no
+ * positioning transform, so it scales harmlessly in place. Targeting media
+ * also keeps reduced motion safe: `.avatar-scatter-media` sits in the
+ * `animation: none !important` reset, which outranks the inline shorthand.
+ */
+@keyframes avatar-scatter-boop {
+  from {
+    opacity: 0;
+    scale: 0.94;
+  }
+  70% {
+    opacity: 1;
+    scale: 1.02;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+
+/*
+ * Overlay exit — plays before control returns to the builder rail so leaving
+ * the takeover (select, back, or generate handoff) never feels instantaneous.
+ * Keep the duration in sync with OVERLAY_EXIT_MS in AvatarCollectionOverlay.
+ */
+.avatar-overlay-exit {
+  animation: avatar-overlay-exit 0.26s cubic-bezier(0.4, 0, 1, 1) both;
+  pointer-events: none;
+}
+
+@keyframes avatar-overlay-exit {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.03);
+  }
+}
+
+/*
+ * Funnel exit — the takeover collapses toward the builder rail's status card
+ * / avatar preview (transform-origin is set inline to that element's center),
+ * so exits that hand work back to the rail visibly point at where it went.
+ *
+ * Fast and mostly-gone-early on purpose: the surface accelerates into the
+ * target while its opacity drops in the first half, so it reads as a quick
+ * whoosh toward the card rather than a translucent ghost lingering over the
+ * form underneath. Keep the duration in sync with OVERLAY_FUNNEL_EXIT_MS in
+ * AvatarCollectionOverlay.
+ */
+.avatar-overlay-exit-funnel {
+  animation: avatar-overlay-exit-funnel 0.22s cubic-bezier(0.7, 0, 0.84, 0) both;
+  pointer-events: none;
+}
+
+@keyframes avatar-overlay-exit-funnel {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.1);
+  }
+}
+
+/*
+ * Dotted grid behind the avatar collection takeover. Same tokens as the app
+ * chrome's `.bg-dot-grid` (design feedback: the takeover grid should look
+ * like the rest of the app, not a bigger one-off), on an opaque canvas so
+ * the collection cards read as white boxes on the grid instead of washing
+ * into a frosted scrim.
+ */
+.avatar-collection-dot-grid {
+  background-color: var(--canvas-base);
+  background-image: radial-gradient(
+    circle,
+    var(--dot-color-base) var(--dot-size),
+    transparent var(--dot-size)
+  );
+  background-size: var(--dot-spacing) var(--dot-spacing);
+  background-position: 0 0;
+}
+
+/* Big fixed wordmark the avatars pan behind. */
+.avatar-collection-wordmark {
+  animation: avatar-wordmark-enter 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: 120ms;
+  text-wrap: balance;
+}
+
+@keyframes avatar-wordmark-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+.agents-profile-section-enter {
+  animation: agents-profile-section-enter 0.24s ease-out both;
+  transform-origin: center;
+  will-change: opacity, transform;
+}
+
+@keyframes agents-profile-section-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.agents-unpaired-enter {
+  animation: agents-unpaired-enter 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  filter: blur(10px);
+  opacity: 0;
+  transform: translateX(24px);
+  will-change: filter, opacity, transform;
+}
+
+@keyframes agents-unpaired-enter {
+  from {
+    filter: blur(10px);
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.agents-transition-surface {
+  view-transition-name: agents-surface;
+  contain: layout;
+}
+
+.agents-gallery-transition-surface {
+  view-transition-name: agents-gallery-surface;
+  contain: layout;
+}
+
+@keyframes agents-gallery-surface-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes agents-gallery-surface-exit {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes agents-profile-surface-enter-after-gallery {
+  from {
+    opacity: 0;
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+@keyframes agents-profile-surface-enter-side {
+  from {
+    opacity: 0;
+    filter: blur(12px);
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateX(0);
+  }
+}
+
+@keyframes agents-profile-surface-exit-side {
+  from {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    filter: blur(12px);
+    transform: translateX(-16px);
+  }
+}
+
+::view-transition-old(root),
+::view-transition-new(root),
+::view-transition-old(agents-surface),
+::view-transition-new(agents-surface) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-group(agents-gallery-surface) {
+  animation: none;
+}
+
+::view-transition-old(agents-gallery-surface) {
+  animation-name: agents-gallery-surface-exit;
+  animation-duration: 0.08s;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(agents-gallery-surface) {
+  animation-name: agents-gallery-surface-enter;
+  animation-duration: 0.18s;
+  animation-fill-mode: both;
+  animation-timing-function: ease-out;
+  mix-blend-mode: normal;
+}
+
+:root[data-agent-transition="gallery-to-profile"]::view-transition-new(
+    agents-surface
+  ) {
+  animation-name: agents-profile-surface-enter-after-gallery;
+  animation-duration: 0.22s;
+  animation-delay: 0.08s;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  mix-blend-mode: normal;
+}
+
+:root[data-agent-transition="profile-to-profile"]::view-transition-old(
+    agents-surface
+  ) {
+  animation-name: agents-profile-surface-exit-side;
+  animation-duration: 0.14s;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  mix-blend-mode: normal;
+}
+
+:root[data-agent-transition="profile-to-profile"]::view-transition-new(
+    agents-surface
+  ) {
+  animation-name: agents-profile-surface-enter-side;
+  animation-duration: 0.24s;
+  animation-delay: 0.04s;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  mix-blend-mode: normal;
+}
+
+.agent-instructions-scrollbar {
+  scrollbar-width: thin;
+}
+
+.agent-instructions-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.agent-instructions-scrollbar::-webkit-scrollbar-thumb {
+  border-block: 20px solid transparent;
+}
+
+.agent-builder-instructions-scrollbar::-webkit-scrollbar-thumb {
+  border-block: 12px solid transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .page-transition {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+
+  .agents-transition-surface,
+  .agents-gallery-transition-surface {
+    view-transition-name: none;
+  }
+
+  /* .avatar-scatter-item is intentionally not in this list: forcing
+     opacity: 1 !important would override the selection dim (opacity-25 on
+     non-highlighted tiles), which is a state cue, not motion. It gets its
+     own animation-only reset below. */
+  /* biome-ignore lint/style/noDescendingSpecificity: this rule is lower
+     specificity than `.avatar-scatter-item .avatar-scatter-media` above, but
+     every declaration here is `!important`, so it wins on cascade origin
+     rather than specificity. Reordering would mean hoisting a
+     reduced-motion-only media query above the motion it disables. */
+  .avatar-scatter-media,
+  .avatar-collection-wordmark,
+  .avatar-overlay-exit,
+  .avatar-overlay-exit-funnel,
+  .gallery-card-enter,
+  .agents-gallery-card-enter,
+  .agent-builder-column-enter,
+  .agents-profile-section-enter,
+  .agents-unpaired-enter,
+  .global-composer-pill-centered,
+  .global-composer-shim-handoff,
+  .global-composer-pill-flip,
+  .global-composer-pill-handoff,
+  .global-composer-pill-handoff-pending,
+  .chat-response-status-enter {
+    animation: none !important;
+    filter: none !important;
+    opacity: 1 !important;
+    scale: 1 !important;
+    transform: none !important;
+  }
+
+  /* Kill the scatter entrance animation but leave opacity to the cascade,
+     so the selection dim still reads under reduced motion. */
+  .avatar-scatter-item {
+    animation: none !important;
+    scale: 1 !important;
+  }
+}

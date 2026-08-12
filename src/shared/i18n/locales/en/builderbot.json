@@ -1,0 +1,159 @@
+{
+  "tabs": {
+    "tasks": "Tasks",
+    "automations": "Automations",
+    "details": "Details"
+  },
+  "states": {
+    "errorTitle": "Builderbot did not load",
+    "errorBody": "Check your connection and try again."
+  },
+  "details": {
+    "notAvailable": "Not available",
+    "notFoundTitle": "Builderbot item not found",
+    "notFoundBody": "Go back to Builderbot and choose another item.",
+    "key": "Key",
+    "description": "Description",
+    "status": "Status",
+    "author": "Author",
+    "assignee": "Assignee",
+    "latestActor": "Latest actor",
+    "labels": "Labels",
+    "created": "Created",
+    "updated": "Updated",
+    "artifacts": "Artifacts",
+    "thread": "Thread",
+    "reference": "Name",
+    "enabled": "Status",
+    "triggerType": "Trigger type",
+    "schedule": "Schedule",
+    "source": "Source",
+    "conditionCount": "Condition count",
+    "conditions": "Conditions",
+    "actionType": "Action type",
+    "runAs": "Run as",
+    "prompt": "Prompt",
+    "payload": "Prompt or payload",
+    "noPayload": "No prompt or payload",
+    "editPayload": "Edit prompt or payload",
+    "owners": "Owners",
+    "createdBy": "Created by",
+    "lastRun": "Last run",
+    "nextRun": "Next run",
+    "lastStatus": "Last status",
+    "timeZone": "Time zone",
+    "links": "Links",
+    "trigger": "Trigger",
+    "runMetadata": "Run metadata",
+    "tooltips": {
+      "referenceLabel": "Explain name",
+      "reference": "This is the automation's unique name. It can't be renamed here; ask your agent to recreate it with a new name or use BuilderBot web.",
+      "sourceLabel": "Explain source",
+      "source": "Source is the tool that sends events to this automation. It can't be changed in place; create a new triggered automation to use a different source.",
+      "triggerType": {
+        "label": "Explain trigger type",
+        "scheduled": "Scheduled automations run at a time you choose. To make this event-based instead, ask your agent to recreate it or use BuilderBot web.",
+        "routing": "Triggered automations run when something happens in another tool. To make this schedule-based instead, ask your agent to recreate it or use BuilderBot web."
+      },
+      "actionType": {
+        "label": "Explain action type",
+        "agent": "Agent automations run non-deterministically through an agent. The other option is Script. To change this, ask your agent or use BuilderBot web.",
+        "script": "Script automations run a defined command. The other option is Agent, which runs non-deterministically through an agent. To change this, ask your agent or use BuilderBot web.",
+        "routine": "This automation runs a custom routine. To change it to Agent or Script, ask your agent or use BuilderBot web.",
+        "task": "This automation creates a BuilderBot task instead of running Agent or Script. To change this, ask your agent or use BuilderBot web."
+      }
+    }
+  },
+  "edit": {
+    "payloadRequired": "Add a prompt or payload before saving.",
+    "fields": {
+      "scheduleRepeats": "Repeats",
+      "scheduleDay": "Day",
+      "scheduleTime": "Time",
+      "scheduleCustom": "Cron expression",
+      "schedulePlaceholder": "30 0 * * *",
+      "timeZoneEmpty": "No time zones found.",
+      "timeZoneSearch": "Search timezones"
+    },
+    "schedulePresets": {
+      "none": "No schedule",
+      "hourly": "Hourly",
+      "daily": "Daily",
+      "weekdays": "Weekdays",
+      "weekly": "Weekly",
+      "custom": "Custom"
+    },
+    "weekdays": {
+      "sunday": "Sunday",
+      "monday": "Monday",
+      "tuesday": "Tuesday",
+      "wednesday": "Wednesday",
+      "thursday": "Thursday",
+      "friday": "Friday",
+      "saturday": "Saturday"
+    }
+  },
+  "actions": {
+    "edit": "Edit",
+    "cancel": "Cancel",
+    "saveChanges": "Save changes",
+    "saving": "Saving"
+  },
+  "tasks": {
+    "title": "Tasks",
+    "item": "Builderbot task",
+    "openDetails": "Open {{title}} details",
+    "by": "by {{user}}",
+    "artifactsCount_one": "{{displayCount}} artifact",
+    "artifactsCount_other": "{{displayCount}} artifacts",
+    "artifactsLink_one": "Open {{displayCount}} artifact",
+    "artifactsLink_other": "Open {{displayCount}} artifacts",
+    "artifactsLinkUnknown": "Open artifacts",
+    "threadLink": "Open thread",
+    "emptyTitle": "No tasks",
+    "emptyBody": "Builderbot returned no tasks for you."
+  },
+  "automations": {
+    "title": "Automations",
+    "openDetails": "Open {{reference}} details",
+    "emptyTitle": "No automations",
+    "emptyBody": "Builderbot returned no scheduled or triggered automations owned by you.",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "nextRun": "Next {{time}}",
+    "paused": "Paused",
+    "listening": "Active",
+    "triggeredBy": "Triggered by {{source}}",
+    "conditions_one": "{{displayCount}} condition",
+    "conditions_other": "{{displayCount}} conditions",
+    "kind": {
+      "scheduled": "Scheduled",
+      "routing": "Triggered"
+    },
+    "schedule": {
+      "hourly": "Hourly",
+      "dailyAt": "Daily at {{time}}",
+      "weekdaysAt": "Weekdays at {{time}}",
+      "weekly": "Weekly",
+      "weeklyAt": "{{day}} at {{time}}",
+      "custom": "Custom schedule"
+    },
+    "action": {
+      "agent": "Agent",
+      "script": "Script",
+      "routine": "Routine",
+      "task": "Task"
+    },
+    "runAs": {
+      "me": "Run as me",
+      "builderbot": "Run as Builderbot"
+    },
+    "source": {
+      "github": "GitHub",
+      "linear": "Linear",
+      "jira": "Jira",
+      "actionable_ci": "Actionable CI",
+      "pagerduty": "PagerDuty"
+    }
+  }
+}

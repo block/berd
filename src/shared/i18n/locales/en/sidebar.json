@@ -1,0 +1,97 @@
+{
+  "appName": "Berd",
+  "actions": {
+    "backToMainNavigation": "Back",
+    "back": "Back",
+    "collapse": "Collapse sidebar",
+    "copyLink": "Copy chat link",
+    "copyLinkFailed": "Couldn't copy the local chat link.",
+    "expand": "Expand sidebar",
+    "forward": "Forward",
+    "search": "Search",
+    "newChat": "New chat",
+    "newChatInProject": "New chat in project",
+    "pinProject": "Add to Home",
+    "unpinProject": "Unpin project",
+    "newProject": "New project",
+    "projectDisplayOptions": "Project display options",
+    "chatDisplayOptions": "Chat display options",
+    "pinnedDisplayOptions": "Pinned display options",
+    "viewSessionHistory": "View session history",
+    "showChatIcons": "Show chat icons",
+    "hideChatIcons": "Hide chat icons",
+    "showTimestamp": "Show timestamp",
+    "hideTimestamp": "Hide timestamp",
+    "linkCopied": "Local chat link copied. It only works on this device.",
+    "groupChats": "Group chats by project",
+    "markRead": "Mark read",
+    "markUnread": "Mark unread",
+    "openInNewWindow": "Open in new window",
+    "openInNewWindows": "Open in new windows",
+    "openInWindow": "Open in window",
+    "editProject": "Edit {{name}} Project",
+    "editProjectFallback": "Edit Project",
+    "openWindowFailed": "Couldn't open this chat in a new window.",
+    "focusWindowFailed": "Couldn't focus this chat window.",
+    "selectChat": "Select {{title}}",
+    "deselectChat": "Deselect {{title}}",
+    "renameHint": "Double-click to rename"
+  },
+  "bulk": {
+    "selectedContext_one": "{{displayCount}} chat selected",
+    "selectedContext_other": "{{displayCount}} chats selected"
+  },
+  "menu": {
+    "optionsFor": "Options for {{label}}"
+  },
+  "empty": {
+    "chatsPinned": "Chats are pinned",
+    "createProject": "Create a project",
+    "noChats": "No chats",
+    "startChat": "Start a chat"
+  },
+  "flat": {
+    "noProject": "No project"
+  },
+  "navigation": {
+    "agents": "Agents",
+    "automations": "Automations",
+    "builderbot": "Builderbot",
+    "connections": "Connections",
+    "gooseHome": "Berd home",
+    "home": "Home",
+    "main": "Main navigation",
+    "sessionList": "Projects and chats",
+    "sessionHistory": "Session history",
+    "skills": "Skills"
+  },
+  "search": {
+    "closeJumpToChat": "Close chat search",
+    "error": "Message search failed. Showing metadata matches only. Try again.",
+    "jumpToChat": "Jump to a chat",
+    "loadingMore": "Searching more chats...",
+    "placeholder": "Search chats...",
+    "searchMore": "Search more chats",
+    "searching": "Searching chats..."
+  },
+  "sections": {
+    "pinned": "Pinned",
+    "projects": "Projects",
+    "recents": "Chats"
+  },
+  "status": {
+    "chatActive": "Chat active",
+    "pinnedChat": "Pinned chat",
+    "unreadMessages": "Unread messages"
+  },
+  "showLess": "Show less",
+  "viewMoreChats": "View more",
+  "viewAllInHistory": "View all chats",
+  "olderChatsInHistory": "View older chats in Session History",
+  "projectsInfo": {
+    "label": "About projects",
+    "tooltip": "What are projects?",
+    "title": "Projects",
+    "body": "Projects keep related chats together, and can share folders and instructions."
+  }
+}

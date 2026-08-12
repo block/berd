@@ -1,0 +1,638 @@
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
+import { toast } from "sonner";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  TopBarActionsProvider,
+  useTopBarActions,
+} from "@/app/contexts/TopBarActionsContext";
+import type { Layout } from "@/features/layout/api/layout";
+import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
+import {
+  getLayout,
+  HOME_LAYOUT_ID,
+  saveLayoutCamera,
+  saveLayoutItems,
+} from "@/features/layout/api/layout";
+import {
+  resetHomeWidgetStoreForTests,
+  useHomeWidgetStore,
+} from "../stores/homeWidgetStore";
+import { HomeView } from "./HomeView";
+import { useAgentStore } from "@/features/agents/stores/agentStore";
+import type { Persona } from "@/shared/types/agents";
+import { markStarterAgentPinsEligible } from "@/features/home/onboarding/starterAgents";
+
+const ONBOARDING_STICKIES_SEEDED_STORAGE_KEY =
+  "goose:home:onboarding-stickies-seeded";
+
+type WidgetCanvasProps = ComponentProps<
+  typeof import("./WidgetCanvas").WidgetCanvas
+>;
+
+const widgetCanvasMock = vi.hoisted(() =>
+  vi.fn((_props: WidgetCanvasProps) => <div>widget canvas</div>),
+);
+
+vi.mock("@/features/layout/api/layout", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/features/layout/api/layout")>();
+  return {
+    ...actual,
+    getLayout: vi.fn(),
+    saveLayoutCamera: vi.fn(),
+    saveLayoutItems: vi.fn(),
+  };
+});
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+    warning: vi.fn(),
+  },
+}));
+
+vi.mock("./WidgetCanvas", () => ({
+  WidgetCanvas: widgetCanvasMock,
+}));
+
+function layout(overrides: Partial<Layout> = {}): Layout {
+  return {
+    layoutId: HOME_LAYOUT_ID,
+    itemRevision: 1,
+    cameraRevision: 1,
+    camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+    constraints: {
+      minCenter: -100_000,
+      maxCenter: 100_000,
+      minSize: 1,
+      maxSize: 10_000,
+      minZoomBps: 1_000,
+      maxZoomBps: 20_000,
+      maxTitleOverrideLength: 120,
+      maxItems: 100,
+    },
+    items: [
+      {
+        id: "00000000-0000-0000-0000-000000000001",
+        kind: "clock",
+        targetId: "widget:00000000-0000-0000-0000-000000000001",
+        centerX: 240,
+        centerY: 240,
+        width: 240,
+        height: 240,
+        zIndex: 1,
+        titleOverride: null,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function TopBarActionsHost() {
+  const actions = useTopBarActions();
+  return <div data-testid="topbar-actions">{actions}</div>;
+}
+
+function renderHomeView() {
+  return render(<HomeView />);
+}
+
+function renderHomeViewWithProps(props: ComponentProps<typeof HomeView>) {
+  return render(<HomeView {...props} />);
+}
+
+function renderHomeViewWithTopBarActions() {
+  return render(
+    <TopBarActionsProvider>
+      <TopBarActionsHost />
+      <HomeView />
+    </TopBarActionsProvider>,
+  );
+}
+
+beforeEach(() => {
+  resetHomeWidgetStoreForTests();
+  widgetCanvasMock.mockClear();
+  vi.mocked(getLayout).mockReset();
+  vi.mocked(saveLayoutItems).mockReset();
+  vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+    ok: true,
+    layout: layout({ items: request.items, itemRevision: 2 }),
+  }));
+  vi.mocked(saveLayoutCamera).mockReset();
+  vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
+    ok: true,
+    layout: layout({ camera: request.camera, cameraRevision: 2 }),
+  }));
+  localStorage.clear();
+  localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "6");
+  useAgentStore.setState({ personas: [], personasLoading: false });
+  setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, false);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: vi.fn().mockResolvedValue(undefined),
+    },
+  });
+});
+
+describe("HomeView", () => {
+  it("does not add bundled starter agents to an existing customized Home", async () => {
+    vi.mocked(getLayout).mockResolvedValue(layout());
+    const bundledPersona = (displayName: string): Persona => ({
+      id: `/Users/test/.agents/agents/${displayName.toLowerCase()}.md`,
+      displayName,
+      systemPrompt: "Help.",
+      isBuiltin: false,
+      writable: true,
+      sourceProperties: { metadata: { berdBundled: true } },
+    });
+    useAgentStore.setState({
+      personas: [
+        bundledPersona("Builderbot"),
+        bundledPersona("Berdy"),
+        bundledPersona("block.md"),
+      ],
+      personasLoading: false,
+    });
+
+    renderHomeView();
+    await screen.findByText("widget canvas");
+
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.filter((instance) => instance.type === "agentPin"),
+    ).toHaveLength(0);
+    expect(
+      localStorage.getItem("goose:home:starter-agent-pins-seeded-v2"),
+    ).toBe("1");
+  });
+
+  it("adds bundled starter agents to a newly seeded Home", async () => {
+    vi.mocked(getLayout).mockResolvedValue(layout());
+    const bundledPersona = (displayName: string): Persona => ({
+      id: `/Users/test/.agents/agents/${displayName.toLowerCase()}.md`,
+      displayName,
+      systemPrompt: "Help.",
+      isBuiltin: false,
+      writable: true,
+      sourceProperties: { metadata: { berdBundled: true } },
+    });
+    const personas = [bundledPersona("block.md"), bundledPersona("Builderbot")];
+    useAgentStore.setState({ personas, personasLoading: false });
+    markStarterAgentPinsEligible();
+
+    renderHomeView();
+
+    await waitFor(() =>
+      expect(
+        useHomeWidgetStore
+          .getState()
+          .instances.filter((instance) => instance.type === "agentPin"),
+      ).toHaveLength(2),
+    );
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.filter((instance) => instance.type === "agentPin")
+        .map((instance) => instance.state?.agentId),
+    ).toEqual(personas.map((persona) => persona.id));
+  });
+
+  it("removes Berdy from the canvas when its experiment is disabled", async () => {
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, false);
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          ...layout().items,
+          {
+            id: "00000000-0000-0000-0000-000000000002",
+            kind: "stickyNote",
+            targetId: "onboarding:tour",
+            centerX: 888,
+            centerY: 378,
+            width: 448,
+            height: 180,
+            zIndex: 2,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    renderHomeView();
+    await screen.findByText("widget canvas");
+
+    expect(widgetCanvasMock.mock.calls.at(-1)?.[0].instances).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "onboardingTour" }),
+      ]),
+    );
+    await waitFor(() => {
+      expect(
+        useHomeWidgetStore
+          .getState()
+          .instances.some((instance) => instance.type === "onboardingTour"),
+      ).toBe(false);
+    });
+    expect(useHomeWidgetStore.getState().instances).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "stickyNote",
+          state: expect.objectContaining({ noteId: "onboarding:welcome" }),
+        }),
+      ]),
+    );
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
+  });
+
+  it("persists Berdy on live opt-in without moving the camera", async () => {
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, false);
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          ...layout().items,
+          {
+            id: "00000000-0000-0000-0000-000000000002",
+            kind: "stickyNote",
+            targetId: "onboarding:welcome",
+            centerX: -248,
+            centerY: -152,
+            width: 224,
+            height: 196,
+            zIndex: 2,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    renderHomeView();
+    await screen.findByText("widget canvas");
+    vi.mocked(saveLayoutItems).mockClear();
+
+    act(() => {
+      setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, true);
+    });
+
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledOnce());
+    expect(useHomeWidgetStore.getState().instances).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "onboardingTour" }),
+      ]),
+    );
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.some(
+          (instance) => instance.state?.noteId === "onboarding:welcome",
+        ),
+    ).toBe(false);
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
+  });
+
+  it("reconciles Berdy when Home mounts after opt-in", async () => {
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, true);
+    useHomeWidgetStore.setState({
+      instances: [
+        {
+          id: "clock",
+          type: "clock",
+          x: 120,
+          y: 120,
+          z: 1,
+          width: 240,
+          height: 240,
+        },
+        {
+          id: "welcome",
+          type: "stickyNote",
+          x: -360,
+          y: -240,
+          z: 2,
+          width: 224,
+          height: 196,
+          state: { noteId: "onboarding:welcome" },
+        },
+      ],
+      loadStatus: "ready",
+      itemRevision: 1,
+      camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+      cameraRevision: 1,
+      constraints: layout().constraints,
+    });
+
+    renderHomeView();
+
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledOnce());
+    expect(useHomeWidgetStore.getState().instances).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "onboardingTour" }),
+      ]),
+    );
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
+  });
+
+  it("calls initialize on mount", async () => {
+    vi.mocked(getLayout).mockResolvedValue(layout());
+
+    renderHomeView();
+
+    await screen.findByText("widget canvas");
+    expect(getLayout).toHaveBeenCalledWith(HOME_LAYOUT_ID);
+  });
+
+  it("shows loading state without inline composer", () => {
+    vi.mocked(getLayout).mockReturnValue(new Promise(() => {}));
+
+    renderHomeView();
+
+    expect(screen.getByText("Loading widgets...")).toBeInTheDocument();
+    expect(screen.queryByText("home composer")).not.toBeInTheDocument();
+  });
+
+  it("shows error actions without inline composer", async () => {
+    vi.mocked(getLayout).mockRejectedValue("raw backend error");
+
+    renderHomeView();
+
+    expect(
+      await screen.findByText("Widgets could not be loaded."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Copy details" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("home composer")).not.toBeInTheDocument();
+  });
+
+  it("copy details writes the raw error string and shows a toast", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    vi.mocked(getLayout).mockRejectedValue("raw backend error");
+
+    renderHomeView();
+    await user.click(
+      await screen.findByRole("button", { name: "Copy details" }),
+    );
+
+    expect(writeText).toHaveBeenCalledWith("raw backend error");
+    expect(toast.success).toHaveBeenCalledWith("Copied error details.");
+  });
+
+  it("retry moves from error state to ready", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getLayout)
+      .mockReturnValueOnce(new Promise(() => {}))
+      .mockResolvedValue(layout());
+
+    renderHomeView();
+
+    act(() => {
+      useHomeWidgetStore.setState({
+        loadStatus: "error",
+        error: "first failure",
+      });
+    });
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+
+    await screen.findByText("widget canvas");
+    expect(getLayout).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not rehydrate chat pins when only widget layout changes", async () => {
+    const onHydratePinnedChatSessions = vi.fn();
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          {
+            id: "00000000-0000-0000-0000-000000000003",
+            kind: "session",
+            targetId: "session-1",
+            centerX: 1094,
+            centerY: 540,
+            width: 188,
+            height: 80,
+            zIndex: 2,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    renderHomeViewWithProps({ onHydratePinnedChatSessions });
+
+    await screen.findByText("widget canvas");
+    await waitFor(() =>
+      expect(onHydratePinnedChatSessions).toHaveBeenCalledWith(["session-1"]),
+    );
+
+    act(() => {
+      useHomeWidgetStore
+        .getState()
+        .moveWidget("00000000-0000-0000-0000-000000000003", 1200, 600);
+    });
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledTimes(1));
+
+    expect(onHydratePinnedChatSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes a top-bar recenter action for the home camera", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          {
+            id: "00000000-0000-0000-0000-000000000001",
+            kind: "clock",
+            targetId: "widget:00000000-0000-0000-0000-000000000001",
+            centerX: 240,
+            centerY: 240,
+            width: 240,
+            height: 240,
+            zIndex: 1,
+            titleOverride: null,
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000002",
+            kind: "clock",
+            targetId: "widget:00000000-0000-0000-0000-000000000002",
+            centerX: 640,
+            centerY: 360,
+            width: 240,
+            height: 240,
+            zIndex: 2,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    renderHomeViewWithTopBarActions();
+    await screen.findByText("widget canvas");
+
+    expect(screen.queryByText("Recenter")).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Recenter pinned objects" }),
+    );
+
+    expect(useHomeWidgetStore.getState().camera).toEqual({
+      centerX: 440,
+      centerY: 300,
+      zoomBps: 10_000,
+    });
+  });
+
+  it("keeps the onboarding restart control hidden", async () => {
+    vi.mocked(getLayout).mockResolvedValue(layout());
+    renderHomeViewWithTopBarActions();
+    await screen.findByText("widget canvas");
+
+    expect(
+      screen.queryByRole("button", { name: "Reload onboarding tour" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("passes the recenter action through to the widget canvas", async () => {
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          {
+            id: "00000000-0000-0000-0000-000000000001",
+            kind: "clock",
+            targetId: "widget:00000000-0000-0000-0000-000000000001",
+            centerX: 240,
+            centerY: 240,
+            width: 240,
+            height: 240,
+            zIndex: 1,
+            titleOverride: null,
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000002",
+            kind: "clock",
+            targetId: "widget:00000000-0000-0000-0000-000000000002",
+            centerX: 640,
+            centerY: 360,
+            width: 240,
+            height: 240,
+            zIndex: 2,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    renderHomeViewWithProps({ viewportLeftOcclusionPx: 260 });
+    await screen.findByText("widget canvas");
+
+    const canvasProps = widgetCanvasMock.mock.calls.at(-1)?.[0];
+    if (!canvasProps) {
+      throw new Error("WidgetCanvas was not rendered");
+    }
+
+    expect(canvasProps.recenterLabel).toBe("Recenter");
+    expect(canvasProps.recenterTitle).toBe("Recenter pinned objects");
+    expect(canvasProps.recenterTarget).toEqual({ x: 440, y: 300 });
+    expect(canvasProps.viewportLeftOcclusionPx).toBe(260);
+    expect(canvasProps.onRecenter).toEqual(expect.any(Function));
+
+    await act(async () => {
+      canvasProps.onRecenter?.();
+      await vi.waitFor(() => expect(saveLayoutCamera).toHaveBeenCalled());
+    });
+
+    expect(useHomeWidgetStore.getState().camera).toEqual({
+      centerX: 440,
+      centerY: 300,
+      zoomBps: 10_000,
+    });
+  });
+
+  it("exposes a top-bar cleanup action that toggles between organized and restored layouts", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          {
+            id: "00000000-0000-0000-0000-000000000001",
+            kind: "persona",
+            targetId: "agent-1",
+            centerX: 600,
+            centerY: 610,
+            width: 200,
+            height: 220,
+            zIndex: 7,
+            titleOverride: null,
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000002",
+            kind: "clock",
+            targetId: "widget:00000000-0000-0000-0000-000000000002",
+            centerX: 120,
+            centerY: 120,
+            width: 240,
+            height: 240,
+            zIndex: 1,
+            titleOverride: null,
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000003",
+            kind: "session",
+            targetId: "session-1",
+            centerX: 1094,
+            centerY: 540,
+            width: 188,
+            height: 80,
+            zIndex: 2,
+            titleOverride: null,
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000004",
+            kind: "skill",
+            targetId: "skill-1",
+            centerX: 1120,
+            centerY: 28,
+            width: 240,
+            height: 56,
+            zIndex: 3,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    renderHomeViewWithTopBarActions();
+    await screen.findByText("widget canvas");
+
+    expect(screen.queryByText("Clean up")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clean up pins" }));
+
+    expect(useHomeWidgetStore.getState().instances).toMatchObject([
+      { id: "00000000-0000-0000-0000-000000000001", x: 384, y: 0, z: 2 },
+      { id: "00000000-0000-0000-0000-000000000002", x: 0, y: 0, z: 1 },
+      { id: "00000000-0000-0000-0000-000000000003", x: 744, y: 0, z: 3 },
+      { id: "00000000-0000-0000-0000-000000000004", x: 1080, y: 0, z: 4 },
+    ]);
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("button", { name: "Revert layout" }));
+
+    expect(useHomeWidgetStore.getState().instances).toMatchObject([
+      { id: "00000000-0000-0000-0000-000000000001", x: 500, y: 500, z: 7 },
+      { id: "00000000-0000-0000-0000-000000000002", x: 0, y: 0, z: 1 },
+      { id: "00000000-0000-0000-0000-000000000003", x: 1000, y: 500, z: 2 },
+      { id: "00000000-0000-0000-0000-000000000004", x: 1000, y: 0, z: 3 },
+    ]);
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledTimes(2));
+  });
+});

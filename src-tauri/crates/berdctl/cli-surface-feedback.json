@@ -1,0 +1,202 @@
+{
+  "$comment": "GENERATED FILE — do not hand-edit; run `pnpm generate:berdctl-contract`. CLI projection of api-surface.json: the noun/verb tree mapping onto groups/actions, plus CLI-only prose (noun about lines, verb summaries, after-help footers), derived from TOOL_GROUPS' cli metadata and each command's summary/helpFooter (src/features/berdctl/commands/registry.ts and impl/*.ts). berdctl embeds this file plus api-surface.json and builds its clap tree from them at startup (tree.rs); vitest asserts freshness (src/features/berdctl/__tests__/cliSurface.test.ts).",
+  "nouns": {
+    "session": {
+      "group": "sessions",
+      "about": "Manage chat sessions: create, send, open, list, get, rename, move, move to group, clear project, fork, archive",
+      "verbs": {
+        "create": {
+          "action": "create",
+          "about": "Create a new chat session and send a prompt in it (fire-and-forget)",
+          "afterHelp": "Examples:\n  berdctl session create --prompt \"Triage the failing nightly build\" \\\n    --harness-id claude-acp --json\n  berdctl session create --prompt \"Implement the fix\" \\\n    --project-id <project-id> --startup-name my-feature\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"send_status\": \"dispatched\"}\n  The session runs in the background; the user's view does not change. Check\n  progress later with `berdctl session get --session-id <session_id>`."
+        },
+        "send": {
+          "action": "send",
+          "about": "Send a prompt into an existing chat session",
+          "afterHelp": "Example:\n  berdctl session send --session-id <session-id> \\\n    --prompt \"Check the latest CI failure\" --if-running queue --json\n\nResult:\n  {\"session_id\": \"...\", \"send_status\": \"dispatched\"|\"steered\"|\"queued\"}\n  The user's current view does not change."
+        },
+        "open": {
+          "action": "open",
+          "about": "Open a session in the app window the user is looking at",
+          "afterHelp": "Example:\n  berdctl session open --session-id <session-id>\n\nResult:\n  {\"ok\": true} — the session is now on screen."
+        },
+        "list": {
+          "action": "list",
+          "about": "List the user's chat sessions (most recent first)",
+          "afterHelp": "Example:\n  berdctl session list --query \"review\" --limit 10 --json\n\nResult:\n  {\"sessions\": [{\"session_id\": \"...\", \"title\": \"...\",\n                 \"project_id\": \"...\"|null, \"updated_at\": \"...\",\n                 \"is_running\": false, \"chat_state\": \"idle\",\n                 \"message_count\": 12}, ...]}\n  Most recent first; archived sessions are excluded."
+        },
+        "get": {
+          "action": "get",
+          "about": "Read one session's metadata and optionally its latest messages",
+          "afterHelp": "Example:\n  berdctl session get --session-id <session-id> --messages 5 --json\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"model_id\": \"...\"|null, \"agent_id\": \"...\"|null,\n   \"project_id\": \"...\"|null, \"working_dir\": \"...\"|null,\n   \"created_at\": \"...\", \"updated_at\": \"...\", \"archived\": false,\n   \"is_running\": false, \"is_open_in_window\": false,\n   \"chat_state\": \"idle\", \"message_count\": 12,\n   \"messages\": [{\"role\": \"user\"|\"assistant\"|null, \"text\": \"...\"}, ...]}\n  \"messages\" is present only when --messages > 0; each message text is\n  truncated to 2000 chars."
+        },
+        "rename": {
+          "action": "rename",
+          "about": "Rename a chat session",
+          "afterHelp": "Example:\n  berdctl session rename --session-id <session-id> --title \"CI triage\"\n\nResult:\n  {\"ok\": true} — the new title appears immediately in the app's session list."
+        },
+        "move": {
+          "action": "move",
+          "about": "Move a chat session into a project",
+          "afterHelp": "Example:\n  berdctl session move --session-id <session-id> --project-id <project-id>\n\nResult:\n  {\"ok\": true} — the app's session list regroups immediately."
+        },
+        "move-to-group": {
+          "action": "move_to_group",
+          "about": "Move a chat session into an existing project group",
+          "afterHelp": "Find the destination group id with:\n  berdctl project get --project-id <project-id> --json\n\nExample:\n  berdctl session move-to-group --session-id <session-id> \\\n    --group-id <group-id>\n\nResult:\n  {\"ok\": true, \"project_id\": \"...\", \"group_id\": \"...\",\n   \"group_name\": \"...\"} — the project chat list regroups immediately."
+        },
+        "clear-project": {
+          "action": "clear_project",
+          "about": "Move a chat session out of any project",
+          "afterHelp": "Example:\n  berdctl session clear-project --session-id <session-id>\n\nResult:\n  {\"ok\": true} — the app's session list regroups immediately."
+        },
+        "fork": {
+          "action": "fork",
+          "about": "Fork a chat session into an independent copy with its history",
+          "afterHelp": "Example:\n  berdctl session fork --session-id <session-id> --title \"Alternate approach\"\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"source_session_id\": \"...\",\n   \"message_count\": 7}\n  The fork appears in the session list with a copy of the original history."
+        },
+        "archive": {
+          "action": "archive",
+          "about": "Archive a chat and clean up its Goose-managed Git resources",
+          "afterHelp": "By default, the command refuses to archive when Git cleanup would discard local files or changes.\nUse --discard-changes to allow that loss. The command never opens an interactive prompt.\n\nExamples:\n  berdctl session archive --session-id <session-id>\n  berdctl session archive --session-id <session-id> --discard-changes\n\nResult:\n  {\"ok\": true} — the session was archived and eligible worktrees and branches were removed."
+        }
+      }
+    },
+    "folder": {
+      "group": "folders",
+      "about": "Manage attached chat folders: attach, detach, replace, set cwd, list",
+      "verbs": {
+        "attach": {
+          "action": "attach",
+          "about": "Attach a folder, repository, or worktree to a chat",
+          "afterHelp": "Use this after creating or adopting a folder inside a workspace root already authorized for the chat. Registered Git worktrees of an authorized repository are also allowed; select a new unrelated root in Berd first.\n\nExample:\n  berdctl folder attach --session-id <session-id> --path ~/src/repo-worktrees/feature\n\nResult:\n  {\"ok\": true, \"path\": \"...\", \"kind\": \"...\", \"branch\": \"...\"|null}"
+        },
+        "detach": {
+          "action": "detach",
+          "about": "Detach a folder, repository, or worktree from a chat",
+          "afterHelp": "Detach the checked-out folder to detach its branch from chat context. This does not delete anything from disk or Git.\n\nExample:\n  berdctl folder detach --session-id <session-id> --path ~/src/repo-worktrees/feature\n\nResult:\n  {\"ok\": true, \"path\": \"...\", \"detached\": true|false}"
+        },
+        "replace": {
+          "action": "replace",
+          "about": "Replace the chat's current folder with another",
+          "afterHelp": "Prefer this over set-cwd when the user says to switch or move the chat to a new worktree/folder and does not ask to retain the old folder as context. Use set-cwd to select an already attached folder or when the old attachment should remain.\n\nThe old path must be attached. For the usual switch flow, get the current cwd from `berdctl folder list` and pass it as --old-path.\n\nExample:\n  berdctl folder replace --session-id <session-id> --old-path ~/src/repo --new-path ~/src/repo-worktrees/feature\n\nResult:\n  {\"ok\": true, \"oldPath\": \"...\", \"newPath\": \"...\", \"kind\": \"...\", \"branch\": \"...\"|null}"
+        },
+        "set-cwd": {
+          "action": "set_cwd",
+          "about": "Select a chat folder as cwd, retaining other attachments",
+          "afterHelp": "For a request to switch or move the chat to a new worktree/folder, prefer `folder replace` so the old folder leaves context. Use this command when selecting among attachments or intentionally retaining the old folder.\n\nThe path must satisfy the same authorization rules as folder attach. Files and Git state are not moved.\n\nExample:\n  berdctl folder set-cwd --session-id <session-id> --path ~/src/repo-worktrees/feature\n\nResult:\n  {\"ok\": true, \"path\": \"...\", \"kind\": \"...\", \"branch\": \"...\"|null, \"status\": \"applied\"|\"pending\"}"
+        },
+        "list": {
+          "action": "list",
+          "about": "List folders attached to a chat and identify its cwd",
+          "afterHelp": "The top-level cwd is returned even when it is Berd's implicit default and is not an attached folder.\n\nExample:\n  berdctl folder list --session-id <session-id>\n\nResult:\n  {\"ok\": true, \"cwd\": \"...\", \"folders\": [{\"path\": \"...\", \"kind\": \"...\", \"branch\": \"...\"|null, \"cwd\": true|false}]}"
+        }
+      }
+    },
+    "project": {
+      "group": "projects",
+      "about": "Manage projects: create, list, get, set startup mode, archive",
+      "verbs": {
+        "create": {
+          "action": "create",
+          "about": "Create a new project",
+          "afterHelp": "Example:\n  berdctl project create --name \"Code reviews\" \\\n    --instructions \"Prefer small diffs\" \\\n    --working-dir /Users/me/src/api --working-dir /Users/me/src/web\n\nResult:\n  {\"project_id\": \"...\"} — the project appears immediately in the app's\n  project list with both directories attached."
+        },
+        "list": {
+          "action": "list",
+          "about": "List the user's projects",
+          "afterHelp": "Example:\n  berdctl project list --json\n\nResult:\n  {\"projects\": [{\"project_id\": \"...\", \"name\": \"...\",\n                 \"description\": \"...\", \"working_dirs\": [\"...\"]}, ...]}"
+        },
+        "get": {
+          "action": "get",
+          "about": "Read one project's details",
+          "afterHelp": "Example:\n  berdctl project get --project-id <project-id> --json\n\nResult:\n  {\"project_id\": \"...\", \"name\": \"...\", \"description\": \"...\",\n   \"instructions\": \"...\", \"working_dirs\": [\"...\"], \"workspaces\": [\n     {\"path\": \"...\", \"startup_mode\": \"worktree\"}\n   ], \"archived\": false, \"session_count\": 4, \"chat_groups\": [\n     {\"group_id\": \"...\", \"name\": \"Launch\", \"session_ids\": [\"...\"]}\n   ]}"
+        },
+        "set-startup-mode": {
+          "action": "set_startup_mode",
+          "about": "Set how a project's new chats start from its Git workspaces",
+          "afterHelp": "The mode applies to every Git workspace configured on the project. Non-Git\nfolders remain in the project but use mode \"none\". Branch and worktree modes\nprompt for a startup name when the next chat is created.\n\nExamples:\n  berdctl project set-startup-mode --project-id <project-id> --mode worktree\n  berdctl project set-startup-mode --project-id <project-id> --mode none\n\nResult:\n  {\"ok\": true, \"mode\": \"worktree\", \"workspaces\": [\n    {\"path\": \"...\", \"startup_mode\": \"worktree\"}\n  ]}"
+        },
+        "archive": {
+          "action": "archive",
+          "about": "Archive a project (reversible; nothing is deleted)",
+          "afterHelp": "Archiving is reversible from the app's archive view; nothing is\ndeleted, and the project's sessions are left untouched.\n\nExample:\n  berdctl project archive --project-id <project-id>\n\nResult:\n  {\"ok\": true} — the project disappears from the app's project list."
+        }
+      }
+    },
+    "agent": {
+      "group": "agents",
+      "about": "Manage agents (personas): create, list",
+      "verbs": {
+        "create": {
+          "action": "create",
+          "about": "Create a new agent (persona)",
+          "afterHelp": "Example:\n  berdctl agent create --name \"Reviewer\" \\\n    --system-prompt \"You review diffs for correctness; be terse.\"\n\nResult:\n  {\"agent_id\": \"...\"} — the agent is saved and becomes available in\n  future chats; pass it as --agent-id to `berdctl session create`."
+        },
+        "list": {
+          "action": "list",
+          "about": "List the user's agents (personas)",
+          "afterHelp": "Example:\n  berdctl agent list --json\n\nResult:\n  {\"agents\": [{\"agent_id\": \"...\", \"name\": \"...\",\n               \"summary\": \"...\", \"builtin\": false}, ...]}\n  Use an agent_id as --agent-id when creating a session."
+        }
+      }
+    },
+    "skill": {
+      "group": "skills",
+      "about": "Manage skills: create, list, get",
+      "verbs": {
+        "create": {
+          "action": "create",
+          "about": "Create a new skill (saved as a SKILL.md)",
+          "afterHelp": "Example:\n  berdctl skill create --name \"release-notes\" \\\n    --description \"Draft release notes from merged PRs\" \\\n    --content \"$(cat SKILL.md)\"\n\nResult:\n  {\"skill_id\": \"...\"} — the skill is saved as a SKILL.md and auto-loads\n  into future sessions."
+        },
+        "list": {
+          "action": "list",
+          "about": "List the user's skills (name and description only)",
+          "afterHelp": "Example:\n  berdctl skill list --json\n\nResult:\n  {\"skills\": [{\"skill_id\": \"...\", \"name\": \"...\",\n               \"description\": \"...\",\n               \"source\": \"app\"|\"builtin\"|\"global\"|\"project\"}, ...]}\n  Read a skill's full content with `berdctl skill get`."
+        },
+        "get": {
+          "action": "get",
+          "about": "Read one skill including its SKILL.md instructions",
+          "afterHelp": "Example:\n  berdctl skill get --skill-id <skill-id> --json\n\nResult:\n  {\"skill_id\": \"...\", \"name\": \"...\", \"description\": \"...\",\n   \"source\": \"app\"|\"builtin\"|\"global\"|\"project\", \"instructions\": \"...\"}"
+        }
+      }
+    },
+    "feedback": {
+      "group": "feedback",
+      "about": "Open or submit an approved Berd feedback report",
+      "verbs": {
+        "open": {
+          "action": "open",
+          "about": "Open the feedback form with a report prefilled",
+          "afterHelp": "Example:\n  berdctl feedback open --title \"Composer loses draft\" \\\n    --description \"Steps to reproduce...\" --include-logs --json\n\nResult:\n  {\"opened\":true,\"include_logs\":true} — the existing feedback form is visible\n  for review and optional image attachments; nothing was submitted."
+        },
+        "submit": {
+          "action": "submit",
+          "about": "Submit an approved report directly to the Berd team",
+          "afterHelp": "Example:\n  berdctl feedback submit --title \"Composer loses draft\" \\\n    --description \"Steps to reproduce...\" --include-logs --json\n\nResult:\n  {\"submitted\":true,\"include_logs\":true,\"issue_url\":\"https://...\"}\n  issue_url is omitted when the feedback service does not return one."
+        }
+      }
+    },
+    "info": {
+      "group": "info",
+      "about": "Look up installed harnesses, available models, and the app context",
+      "verbs": {
+        "harnesses": {
+          "action": "list_harnesses",
+          "about": "List the agent harnesses sessions can run on, with readiness",
+          "afterHelp": "Example:\n  berdctl info harnesses --json\n\nResult:\n  {\"harnesses\": [{\"harness_id\": \"goose\", \"name\": \"...\",\n                  \"is_default\": true,\n                  \"status\": \"ready\"|\"not_installed\"|\"not_ready\"}, ...]}\n  Only \"ready\" harnesses accept new sessions; \"not_installed\" and\n  \"not_ready\" (sign-in or setup required) need the user to fix them in\n  the app first."
+        },
+        "models": {
+          "action": "list_models",
+          "about": "List the models available per agent harness",
+          "afterHelp": "Example:\n  berdctl info models --harness-id goose --json\n\nResult:\n  {\"harnesses\": [{\"harness_id\": \"...\",\n                  \"models\": [{\"model_id\": \"...\", \"name\": \"...\",\n                              \"provider\": \"...\"?}],\n                  \"warning\": \"...\"?}]}\n  Use a model_id (with its harness) as --model-id when creating a session.\n  \"warning\" appears when a stale cached list was served or when the harness\n  manages its model outside the app."
+        },
+        "context": {
+          "action": "get_context",
+          "about": "Read what the user is looking at in the app right now",
+          "afterHelp": "Example:\n  berdctl info context --json\n\nResult:\n  {\"view\": \"...\", \"active_session_id\": \"...\"|null,\n   \"active_project_id\": \"...\"|null, \"app_version\": \"...\"}"
+        }
+      }
+    }
+  }
+}

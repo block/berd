@@ -1,0 +1,42 @@
+{
+  "title": "Send feedback",
+  "direct": {
+    "submittingTitle": "Submitting feedback…",
+    "submittingBody": "Preparing and sending the approved report.",
+    "successTitle": "Feedback submitted",
+    "successBody": "Your report was sent to the Berd team.",
+    "successWithUrl": "Your report is ready to view.",
+    "failureTitle": "Feedback wasn’t submitted"
+  },
+  "dialog": {
+    "title": "Submit feedback",
+    "description": "Help us improve Berd with bugs or feedback.",
+    "titleLabel": "Title",
+    "titlePlaceholder": "Brief summary",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "Describe what happened or what could improve",
+    "attachmentsLabel": "Attachments",
+    "addImages": "Add images",
+    "attachmentsHelp": "PNG, JPG, screenshot, or paste directly into this modal",
+    "attachmentsPickerTitle": "Choose images",
+    "imageFilesFilter": "Images",
+    "removeAttachment": "Remove {{name}}",
+    "attachLogs": "Attach logs and diagnostics",
+    "attachLogsHelp": "Includes safe local metadata and sanitized logs. Prompts, responses, tool payloads, and session databases are excluded.",
+    "attachmentLimitError": "Feedback supports up to {{count}} image attachments.",
+    "imageOnlyError": "Only image files can be attached.",
+    "imageReadError": "Some images could not be attached.",
+    "submit": "Submit",
+    "submitting": "Submitting…",
+    "submitError": "Failed to submit feedback",
+    "networkAccessError": "Unable to submit feedback. Please check that you're connected to Cloudflare WARP and try again.",
+    "successTitle": "Thank you!",
+    "successBody": "Your feedback has been submitted.",
+    "viewTicket": "View ticket",
+    "submitAnother": "Submit another",
+    "discardTitle": "Discard feedback?",
+    "discardBody": "You have unsubmitted feedback. Your changes will be lost.",
+    "discardCancel": "Cancel",
+    "discardConfirm": "Discard"
+  }
+}

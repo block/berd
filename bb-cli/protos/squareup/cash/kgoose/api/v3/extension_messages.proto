@@ -1,0 +1,63 @@
+syntax = "proto2";
+
+package squareup.cash.kgoose.api.v3;
+
+option java_package = "com.squareup.protos.cash.kgoose.api.v3";
+
+// Configuration details for any extensions or tools
+message ExtensionConfig {
+  optional string name = 1;
+
+  optional string instruction = 2;
+
+  repeated ToolConfig tools = 3;
+  optional int32 version = 4;
+
+  // Whether this extension should be auto-enabled
+  // When false, the extension requires the LLM to use platform__enable_Extension
+  // Defaults to TRUE for backward compatibility, all client_tools are currently auto_picked
+  optional bool auto_picked = 5 [default = true];
+
+  // For derived extensions (e.g., synthetic extensions created from extension_group metadata),
+  // this is the name of the parent extension that provides the MCP backend.
+  // Used for routing tool calls and OAuth checks. Null for root extensions.
+  optional string parent_extension = 6;
+}
+
+message ToolConfig {
+  optional string tool = 1;
+  optional string description = 2;
+  /* JSON schema configuration for this tool. Must be a valid JSON schema object with at minimum:
+   - "type": "object" (required by JsonSchema.validate() in goosellm)
+   - "properties": {} (required by JsonSchema.validate() in goosellm)
+
+   Example minimal valid schema: {"type": "object", "properties": {}}*/
+  optional string config_json = 3;
+  /* MCP-compliant _meta field as JSON string.
+   See: https://modelcontextprotocol.io/specification/2025-11-25/basic/index#general-fields
+
+   Used for tool-level metadata like "com.squareup.kgoose/client_input_pending" to indicate
+   that a tool should block for client input. */
+  optional string meta_json = 4;
+
+  /* Indicates whether this tool performs mutation actions (e.g., creating, updating, or deleting data)
+   as opposed to read-only actions. Extracted from the tool's _meta field using the key
+   "com.squareup.kgoose/mutates_state". Defaults to false if not specified. */
+  optional bool mutates_state = 5;
+
+  // Deprecated: use ui_visibility in meta_json instead. Kept for proto compatibility.
+  optional bool direct_execution_only = 6 [deprecated = true];
+}
+
+// Overrides for tool descriptions in backend extensions.
+message ToolDescriptionOverride {
+  optional string tool_name = 1;
+  optional string description = 2;
+}
+
+// Overrides for extension instructions and tool descriptions.
+message ExtensionDescriptionOverride {
+  optional string extension_name = 1;
+  optional string instruction = 2;
+  repeated ToolDescriptionOverride tool_overrides = 3;
+}

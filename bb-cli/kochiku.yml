@@ -1,0 +1,5 @@
+test_command: script/ci
+
+targets:
+  - type: lint
+  - type: test

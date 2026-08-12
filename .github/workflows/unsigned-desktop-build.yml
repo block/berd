@@ -1,0 +1,103 @@
+name: Unsigned Desktop Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build unsigned ${{ matrix.platform }} package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS arm64
+            runner: macos-latest
+          - platform: Windows x86_64
+            runner: windows-latest
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 240
+    env:
+      JUST_UNSTABLE: "1"
+    steps:
+      - name: Check out requested revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install just on Windows
+        if: runner.os == 'Windows'
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        with:
+          tool: just@1.40.0
+
+      - name: Install pinned Node on Windows
+        if: runner.os == 'Windows'
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.10.0
+
+      - name: Install pinned pnpm on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+          if ((pnpm --version) -ne '10.33.0') { throw 'pnpm 10.33.0 was not activated' }
+
+      - name: Resolve managed Goose Cargo target on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:LOCALAPPDATA 'berd-dev\cargo-target'
+          "GOOSE_DEV_CARGO_TARGET_DIR=$target" >> $env:GITHUB_ENV
+
+      - name: Cache managed Goose Cargo target on Windows
+        if: runner.os == 'Windows'
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ env.GOOSE_DEV_CARGO_TARGET_DIR }}
+          key: goose-cargo-${{ runner.os }}-rust-1.94.1-${{ hashFiles('goose-backend.lock.json') }}
+
+      - name: Activate Hermit on macOS
+        if: runner.os == 'macOS'
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+
+      - name: Build unsigned macOS DMG
+        if: runner.os == 'macOS'
+        env:
+          VERSION: 0.0.0-unsigned
+          BUILD_KIND: official
+          BERD_RELEASE_CHANNEL: disabled
+        run: |
+          set -euo pipefail
+          scripts/release/build-macos.sh
+          scripts/package-macos-dmg.sh release/macos/Berd.app release/macos/Berd-unsigned.dmg
+
+      - name: Validate unsigned Windows packaging scripts
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: scripts/windows/Test-UnsignedWindowsPackaging.ps1
+
+      - name: Build unsigned Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          BERD_RELEASE_CHANNEL: disabled
+        run: |
+          $ErrorActionPreference = 'Stop'
+          just bundle-windows nsis
+          & "$env:GITHUB_WORKSPACE/scripts/windows/Collect-UnsignedWindowsInstaller.ps1"
+
+      - name: Upload unsigned package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: berd-unsigned-${{ runner.os }}
+          path: |
+            release/macos/Berd-unsigned.dmg
+            release/windows/Berd-unsigned-setup.exe
+          if-no-files-found: error
+          retention-days: 7

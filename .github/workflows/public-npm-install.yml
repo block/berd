@@ -1,0 +1,37 @@
+name: Public npm install
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Clean-room frozen install
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install pinned pnpm
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+          pnpm --version | grep -Fx '10.33.0'
+
+      - name: Verify public lockfile and install from a fresh store
+        env:
+          PNPM_STORE_DIR: ${{ runner.temp }}/pnpm-store
+        run: |
+          set -euo pipefail
+          if grep -Fq 'block-artifacts.com' pnpm-lock.yaml; then
+            echo 'pnpm lockfile must not reference Block Artifactory' >&2
+            exit 1
+          fi
+          pnpm install --frozen-lockfile --store-dir "$PNPM_STORE_DIR"

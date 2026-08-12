@@ -1,0 +1,159 @@
+{
+  "tabs": {
+    "tasks": "Tareas",
+    "automations": "Automatizaciones",
+    "details": "Detalles"
+  },
+  "states": {
+    "errorTitle": "Builderbot no cargó",
+    "errorBody": "Revisa tu conexión e inténtalo de nuevo."
+  },
+  "details": {
+    "notAvailable": "No disponible",
+    "notFoundTitle": "Elemento de Builderbot no encontrado",
+    "notFoundBody": "Vuelve a Builderbot y elige otro elemento.",
+    "key": "Clave",
+    "description": "Descripción",
+    "status": "Estado",
+    "author": "Autor",
+    "assignee": "Asignado a",
+    "latestActor": "Último actor",
+    "labels": "Etiquetas",
+    "created": "Creada",
+    "updated": "Actualizada",
+    "artifacts": "Artefactos",
+    "thread": "Hilo",
+    "reference": "Nombre",
+    "enabled": "Estado",
+    "triggerType": "Tipo de activador",
+    "schedule": "Programación",
+    "source": "Fuente",
+    "conditionCount": "Cantidad de condiciones",
+    "conditions": "Condiciones",
+    "actionType": "Tipo de acción",
+    "runAs": "Ejecutar como",
+    "prompt": "Prompt",
+    "payload": "Prompt o payload",
+    "noPayload": "Sin prompt ni payload",
+    "editPayload": "Editar prompt o payload",
+    "owners": "Propietarios",
+    "createdBy": "Creada por",
+    "lastRun": "Última ejecución",
+    "nextRun": "Próxima ejecución",
+    "lastStatus": "Último estado",
+    "timeZone": "Zona horaria",
+    "links": "Enlaces",
+    "trigger": "Activador",
+    "runMetadata": "Metadatos de ejecución",
+    "tooltips": {
+      "referenceLabel": "Explicar nombre",
+      "reference": "Este es el nombre único de la automatización. No se puede renombrar aquí; pídele a tu agente que la recree con otro nombre o usa BuilderBot web.",
+      "sourceLabel": "Explicar fuente",
+      "source": "La fuente es la herramienta que envía eventos a esta automatización. No se puede cambiar aquí; crea una nueva automatización activada para usar otra fuente.",
+      "triggerType": {
+        "label": "Explicar tipo de activador",
+        "scheduled": "Las automatizaciones programadas se ejecutan a la hora que elijas. Para que se active por eventos, pídele a tu agente que la recree o usa BuilderBot web.",
+        "routing": "Las automatizaciones activadas se ejecutan cuando ocurre algo en otra herramienta. Para que use una programación, pídele a tu agente que la recree o usa BuilderBot web."
+      },
+      "actionType": {
+        "label": "Explicar tipo de acción",
+        "agent": "Las automatizaciones de agente se ejecutan de forma no determinística mediante un agente. La otra opción es Script. Para cambiar esto, pídele a tu agente o usa BuilderBot web.",
+        "script": "Las automatizaciones de script ejecutan un comando definido. La otra opción es Agente, que se ejecuta de forma no determinística mediante un agente. Para cambiar esto, pídele a tu agente o usa BuilderBot web.",
+        "routine": "Esta automatización ejecuta una rutina personalizada. Para cambiarla a Agente o Script, pídele a tu agente o usa BuilderBot web.",
+        "task": "Esta automatización crea una tarea de BuilderBot en vez de ejecutar Agente o Script. Para cambiar esto, pídele a tu agente o usa BuilderBot web."
+      }
+    }
+  },
+  "edit": {
+    "payloadRequired": "Agrega un prompt o payload antes de guardar.",
+    "fields": {
+      "scheduleRepeats": "Repetición",
+      "scheduleDay": "Día",
+      "scheduleTime": "Hora",
+      "scheduleCustom": "Expresión cron",
+      "schedulePlaceholder": "30 0 * * *",
+      "timeZoneEmpty": "No se encontraron zonas horarias.",
+      "timeZoneSearch": "Buscar zonas horarias"
+    },
+    "schedulePresets": {
+      "none": "Sin programación",
+      "hourly": "Cada hora",
+      "daily": "Diaria",
+      "weekdays": "Días laborales",
+      "weekly": "Semanal",
+      "custom": "Personalizada"
+    },
+    "weekdays": {
+      "sunday": "Domingo",
+      "monday": "Lunes",
+      "tuesday": "Martes",
+      "wednesday": "Miércoles",
+      "thursday": "Jueves",
+      "friday": "Viernes",
+      "saturday": "Sábado"
+    }
+  },
+  "actions": {
+    "edit": "Editar",
+    "cancel": "Cancelar",
+    "saveChanges": "Guardar cambios",
+    "saving": "Guardando"
+  },
+  "tasks": {
+    "title": "Tareas",
+    "item": "Tarea de Builderbot",
+    "openDetails": "Abrir detalles de {{title}}",
+    "by": "por {{user}}",
+    "artifactsCount_one": "{{displayCount}} artefacto",
+    "artifactsCount_other": "{{displayCount}} artefactos",
+    "artifactsLink_one": "Abrir {{displayCount}} artefacto",
+    "artifactsLink_other": "Abrir {{displayCount}} artefactos",
+    "artifactsLinkUnknown": "Abrir artefactos",
+    "threadLink": "Abrir hilo",
+    "emptyTitle": "No hay tareas",
+    "emptyBody": "Builderbot no devolvió tareas para ti."
+  },
+  "automations": {
+    "title": "Automatizaciones",
+    "openDetails": "Abrir detalles de {{reference}}",
+    "emptyTitle": "No hay automatizaciones",
+    "emptyBody": "Builderbot no devolvió automatizaciones programadas o activadas de tu propiedad.",
+    "enabled": "Activada",
+    "disabled": "Desactivada",
+    "nextRun": "Próxima {{time}}",
+    "paused": "Pausada",
+    "listening": "Activa",
+    "triggeredBy": "Activada por {{source}}",
+    "conditions_one": "{{displayCount}} condición",
+    "conditions_other": "{{displayCount}} condiciones",
+    "kind": {
+      "scheduled": "Programada",
+      "routing": "Activada"
+    },
+    "schedule": {
+      "hourly": "Cada hora",
+      "dailyAt": "Diaria a las {{time}}",
+      "weekdaysAt": "Días laborales a las {{time}}",
+      "weekly": "Semanal",
+      "weeklyAt": "{{day}} a las {{time}}",
+      "custom": "Programación personalizada"
+    },
+    "action": {
+      "agent": "Agente",
+      "script": "Script",
+      "routine": "Rutina",
+      "task": "Tarea"
+    },
+    "runAs": {
+      "me": "Ejecutar como yo",
+      "builderbot": "Ejecutar como Builderbot"
+    },
+    "source": {
+      "github": "GitHub",
+      "linear": "Linear",
+      "jira": "Jira",
+      "actionable_ci": "Actionable CI",
+      "pagerduty": "PagerDuty"
+    }
+  }
+}

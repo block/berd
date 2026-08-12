@@ -1,0 +1,21 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "Berd",
+        "width": 1450,
+        "height": 920,
+        "minWidth": 608,
+        "minHeight": 600,
+        "visible": false,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "dragDropEnabled": true,
+        "trafficLightPosition": {
+          "x": 14,
+          "y": 28
+        }
+      }
+    ]
+  }
+}

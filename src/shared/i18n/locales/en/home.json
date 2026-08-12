@@ -1,0 +1,348 @@
+{
+  "greeting": {
+    "afternoon": "Good afternoon",
+    "evening": "Good evening",
+    "morning": "Good morning"
+  },
+  "onboarding": {
+    "starterTasks": {
+      "title": "Starter task list",
+      "dismiss": "Dismiss starter tasks",
+      "minimize": "Minimize starter tasks",
+      "expand": "Expand starter tasks",
+      "connectProvider": "Connect an AI provider",
+      "startChat": "Start a chat",
+      "createProject": "Name your first project",
+      "buildAgent": "Build an agent",
+      "addWidget": "Add a widget to Home",
+      "openTask": "Open task: {{label}}",
+      "completedTask": "Completed task: {{label}}",
+      "checkTask": "Check {{label}}",
+      "uncheckTask": "Uncheck {{label}}",
+      "backHome": "Back to Home"
+    },
+    "callout": {
+      "avatarLabel": "Berdy",
+      "avatarAlt": "Berdy, your onboarding buddy",
+      "agentUnavailable": "Berdy couldn't start a chat. Try again.",
+      "dismiss": "Dismiss onboarding",
+      "title": "Welcome to Berd!",
+      "body": "I’m Berdy – your onboarding buddy. Try getting started by taking a tour of Berd.",
+      "action": "Take a tour",
+      "openHelp": "Ask Berdy",
+      "helpTitle": "How can I help?",
+      "presets": {
+        "useCases": "What can I use Berd for?",
+        "projects": "How do I start a project?",
+        "agentsAndSkills": "How do agents and skills work?"
+      },
+      "presetResponses": {
+        "useCases": "Berd can help you research, plan, write, code, organize projects, and automate repeatable work.",
+        "projects": "Projects keep related chats, files, and working folders together so agents have the right context.",
+        "agentsAndSkills": "Agents give Berd a role and instructions. Skills add reusable workflows and tools for specific kinds of work."
+      },
+      "followUpPlaceholder": "Ask a follow-up",
+      "sendFollowUp": "Send follow-up",
+      "followUpContext": "{{question}}\n\nFollow-up: {{followUp}}",
+      "askSomethingElse": "Ask something else",
+      "back": "Back",
+      "helpPlaceholder": "Ask Berdy anything",
+      "send": "Send message",
+      "closeHelp": "Close help"
+    },
+    "tour": {
+      "progress": "{{current}} of {{total}}",
+      "previous": "Previous tour step",
+      "next": "Next tour step",
+      "finish": "Finish tour",
+      "close": "Close tour",
+      "nextAction": "Next",
+      "doneAction": "Done",
+      "animateProject": "Spin project cube",
+      "chatPreview": {
+        "prompt": "Can you help me write a haiku about birds?",
+        "responseLine1": "Birds stitch dawn with song",
+        "responseLine2": "Wings brush gold across the sky",
+        "responseLine3": "Morning learns to fly",
+        "typing": "Berd is typing"
+      },
+      "projectPreview": {
+        "name": "Your project",
+        "description": "A place for chats, files, context, and ongoing work."
+      },
+      "steps": {
+        "1": {
+          "title": "Your canvas, your home",
+          "body": "Keep the people, projects, and work you care about together on a canvas that is yours.",
+          "visual": "A preview of the Berd home canvas"
+        },
+        "2": {
+          "title": "Chat with Berd about anything",
+          "body": "Ask questions, explore ideas, and work through a task with an agent that has the right context.",
+          "visual": "A short conversation with Berd"
+        },
+        "3": {
+          "title": "Connect with all your providers",
+          "body": "Bring the models and providers you already use into one place and choose the right one for each task.",
+          "visual": "A collection of AI provider icons"
+        },
+        "4": {
+          "title": "Bring your projects to life",
+          "body": "Group chats, files, and working directories around real efforts so Berd can help you keep moving.",
+          "visual": "A project brought to life"
+        }
+      }
+    }
+  },
+  "widgetLayer": {
+    "loading": "Loading widgets...",
+    "error": {
+      "title": "Widgets could not be loaded.",
+      "retry": "Retry",
+      "copyDetails": "Copy details"
+    },
+    "toasts": {
+      "conflict": "Home was updated in another window. We refreshed your widgets; please try that change again.",
+      "saveFailed": "Widget layout could not be saved.",
+      "copySuccess": "Copied error details.",
+      "copyFailed": "Error details could not be copied.",
+      "cameraSaveFailed": "The starter canvas was restored, but its view could not be recentered."
+    }
+  },
+  "widgets": {
+    "clock": {
+      "label": "Clock",
+      "description": "Time",
+      "current": "Current time",
+      "toggleToDigital": "Switch to digital clock",
+      "toggleToAnalog": "Switch to analog clock"
+    },
+    "photo": {
+      "label": "Photo",
+      "description": "A photo pinned to home",
+      "addPhoto": "Add a photo",
+      "addHint": "Choose an image from your computer",
+      "selecting": "Choosing photo…",
+      "change": "Change",
+      "toolbar": "Photo tools",
+      "chooseDialog": "Choose a photo",
+      "changeDialog": "Change photo",
+      "fileType": "Images",
+      "importFailed": "The photo could not be added.",
+      "notAFile": "Choose an image file instead of a folder.",
+      "readFailed": "Berd could not read that photo.",
+      "tooLarge": "Choose a photo smaller than 50 MB.",
+      "unsupportedType": "Choose a PNG, JPEG, WebP, GIF, or AVIF image.",
+      "unavailable": "This photo is unavailable",
+      "chooseAnother": "Choose another photo",
+      "imageAlt": "Pinned photo",
+      "shapeControl": "Photo shape: {{current}}. Activate to change to {{next}}.",
+      "clickToChangeShape": "Click to change shape",
+      "shapes": {
+        "original": "Original",
+        "square": "Square",
+        "circle": "Circle"
+      }
+    },
+    "agentPin": {
+      "label": "Pin an agent",
+      "description": "Pin an agent for quick access",
+      "kicker": "Agent",
+      "fallbackName": "Berd",
+      "openAria": "Start chat with {{name}}"
+    },
+    "chatPin": {
+      "label": "Pin a chat",
+      "description": "Pin a chat session",
+      "kicker": "Chat",
+      "emptyTitle": "No recent chat",
+      "emptyDescription": "Pin a chat to see it here",
+      "loadingDescription": "Loading pinned chat...",
+      "unavailableDescription": "Pinned chat unavailable",
+      "openAria": "Open chat: {{title}}"
+    },
+    "projectArtifactPin": {
+      "label": "Pin a project",
+      "description": "Pin a project artifact",
+      "kicker": "Project",
+      "openAria": "Start chat in {{name}}",
+      "unavailableTitle": "Project unavailable",
+      "unavailableDescription": "Unpin or restore this project",
+      "starterTitle": "My first project",
+      "starterAria": "Name your first project"
+    },
+    "automationOutputPin": {
+      "label": "Pin an automation",
+      "description": "Pin the latest output of an automation",
+      "noOutput": "No output yet",
+      "unavailable": "Unavailable",
+      "states": {
+        "completed": "Completed",
+        "failed": "Failed",
+        "running": "Running",
+        "paused": "Paused",
+        "neverRun": "Never run"
+      },
+      "fallbackTitle": "Untitled automation"
+    },
+    "skillPin": {
+      "label": "Pin a skill",
+      "description": "Pin a skill for quick access",
+      "unavailable": "Unavailable",
+      "openAria": "Start chat with {{name}}"
+    },
+    "stickyNote": {
+      "label": "Sticky note",
+      "description": "A note pinned to home",
+      "dismiss": "Dismiss sticky note",
+      "toolbar": "Sticky note tools",
+      "bold": "Bold",
+      "italic": "Italic",
+      "strikethrough": "Strikethrough",
+      "editAria": "Edit sticky note",
+      "placeholder": "Write a note...",
+      "preview": "Preview",
+      "edit": "Edit",
+      "starterStickies": "Starter stickies",
+      "fontSizes": {
+        "small": "Small text",
+        "medium": "Medium text",
+        "large": "Large text"
+      },
+      "tones": {
+        "neutral": "Neutral",
+        "warm": "Warm",
+        "cool": "Cool",
+        "rose": "Rose",
+        "blue": "Blue",
+        "lavender": "Lavender",
+        "peach": "Peach"
+      },
+      "notes": {
+        "welcome": {
+          "title": "Welcome to Berd",
+          "body": "One AI workspace for all facets of your work. This is just the beginning."
+        },
+        "buildAgent": {
+          "title": "Build an agent",
+          "body": "Give Berd a role, model, and instructions for work you repeat.",
+          "action": "Build agent"
+        },
+        "startProject": {
+          "title": "Start a project",
+          "body": "Group chats, files, and working directories around one real effort.",
+          "action": "New project"
+        },
+        "skills": {
+          "title": "Teach Berd a skill",
+          "body": "Save how-to instructions and resources so Berd can apply them when a task calls for it.",
+          "action": "Explore skills"
+        },
+        "shapeHome": {
+          "title": "Make Home yours",
+          "body": "Right-click the canvas to pin chats, agents, projects, skills, and automation output here."
+        },
+        "automations": {
+          "title": "Manage automations",
+          "body": "G2 automations live in Berd now. View, create, and manage scheduled work here.",
+          "action": "Open automations"
+        }
+      }
+    },
+    "checklist": {
+      "label": "Checklist",
+      "description": "A checklist pinned to home",
+      "dismiss": "Dismiss checklist",
+      "toolbar": "Checklist tools",
+      "titlePlaceholder": "Checklist",
+      "itemPlaceholder": "List item",
+      "addItem": "Add item",
+      "removeItem": "Remove item",
+      "toggleItem": "Toggle item",
+      "fontSizes": {
+        "small": "Small text",
+        "medium": "Medium text",
+        "large": "Large text"
+      },
+      "tones": {
+        "warm": "Warm",
+        "cool": "Cool",
+        "rose": "Rose",
+        "blue": "Blue",
+        "lavender": "Lavender",
+        "peach": "Peach"
+      }
+    },
+    "unpin": {
+      "label": "Unpin"
+    },
+    "pinToHome": {
+      "error": "Could not pin to home.",
+      "success": "Pinned to home."
+    },
+    "pinBatchToHome": {
+      "allPinned": "All selected chats are already pinned to home.",
+      "error": "Could not pin chats to home.",
+      "success_one": "Pinned 1 chat to home.",
+      "success_other": "Pinned {{displayCount}} chats to home.",
+      "successPartial_one": "Pinned 1 chat to home. {{skipped}} already pinned.",
+      "successPartial_other": "Pinned {{displayCount}} chats to home. {{skipped}} already pinned."
+    },
+    "unpinBatchFromHome": {
+      "error": "Could not unpin chats from home.",
+      "success_one": "Unpinned 1 chat from home.",
+      "success_other": "Unpinned {{displayCount}} chats from home."
+    },
+    "unpinFromHome": {
+      "error": "Could not unpin from home.",
+      "success": "Unpinned from home."
+    },
+    "resize": {
+      "label": "Resize {{widget}}"
+    },
+    "canvasControls": {
+      "cleanUpTitle": "Clean up pins",
+      "reloadOnboardingTourTitle": "Reload onboarding tour",
+      "recenterVisibleLabel": "Recenter",
+      "recenterTitle": "Recenter pinned objects",
+      "restoreTitle": "Revert layout"
+    },
+    "picker": {
+      "back": "Back",
+      "loading": "Loading...",
+      "loadFailed": "Could not load items.",
+      "loadingMoreChats": "Loading more chats...",
+      "header": "Pin",
+      "sections": {
+        "clock": "Widgets",
+        "agent": "Agent",
+        "chat": "Chat",
+        "automation": "Automations",
+        "project": "Project",
+        "skill": "Skill"
+      },
+      "selectTitles": {
+        "clock": "Pin a Widget",
+        "agent": "Pin an Agent",
+        "chat": "Pin a Chat",
+        "automation": "Pin an Automation",
+        "project": "Pin a Project",
+        "skill": "Pin a Skill"
+      },
+      "searchPlaceholders": {
+        "agent": "Search",
+        "chat": "Search",
+        "automation": "Search",
+        "project": "Search",
+        "skill": "Search"
+      },
+      "empty": {
+        "agent": "Nothing to pin",
+        "chat": "Nothing to pin",
+        "automation": "Nothing to pin",
+        "project": "Nothing to pin",
+        "skill": "Nothing to pin"
+      }
+    }
+  }
+}

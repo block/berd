@@ -1,0 +1,338 @@
+//! Shared renderer and microphone ownership for voice features.
+
+use std::{collections::HashMap, sync::Mutex};
+
+use tauri::{State, WebviewWindow};
+
+const MAX_ID_LEN: usize = 256;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct MicrophoneOwner {
+    window_label: String,
+    renderer_id: String,
+    renderer_epoch: u64,
+    owner_id: String,
+}
+
+#[derive(Default)]
+struct CaptureState {
+    renderer_epoch: u64,
+    pending_renderers: HashMap<String, (String, u64)>,
+    current_renderers: HashMap<String, (String, u64)>,
+    microphone_owner: Option<MicrophoneOwner>,
+}
+
+#[derive(Default)]
+pub struct VoiceCaptureState {
+    state: Mutex<CaptureState>,
+}
+
+impl CaptureState {
+    fn register_renderer(
+        &mut self,
+        window_label: String,
+        renderer_id: String,
+    ) -> Result<u64, String> {
+        self.renderer_epoch = self
+            .renderer_epoch
+            .checked_add(1)
+            .ok_or_else(|| "Voice renderer epoch was exhausted".to_string())?;
+        let renderer_epoch = self.renderer_epoch;
+        self.pending_renderers
+            .insert(window_label, (renderer_id, renderer_epoch));
+        Ok(renderer_epoch)
+    }
+
+    fn activate_renderer(
+        &mut self,
+        window_label: &str,
+        renderer_id: &str,
+        renderer_epoch: u64,
+    ) -> Result<(), String> {
+        match self.current_renderers.get(window_label) {
+            Some((active_renderer, active_epoch))
+                if active_renderer == renderer_id && *active_epoch == renderer_epoch =>
+            {
+                return Ok(());
+            }
+            Some((_, active_epoch)) if *active_epoch >= renderer_epoch => {
+                return Err("Voice renderer instance is no longer active".to_string());
+            }
+            _ => {}
+        }
+
+        match self.pending_renderers.get(window_label) {
+            Some((pending_renderer, pending_epoch))
+                if pending_renderer == renderer_id && *pending_epoch == renderer_epoch => {}
+            _ => return Err("Voice renderer instance is not registered".to_string()),
+        }
+
+        self.current_renderers.insert(
+            window_label.to_string(),
+            (renderer_id.to_string(), renderer_epoch),
+        );
+        if self
+            .microphone_owner
+            .as_ref()
+            .is_some_and(|owner| owner.window_label == window_label)
+        {
+            if let Some(owner) = self
+                .microphone_owner
+                .as_mut()
+                .filter(|owner| owner.owner_id.starts_with("native-voice:"))
+            {
+                owner.renderer_id = renderer_id.to_string();
+                owner.renderer_epoch = renderer_epoch;
+            } else {
+                self.microphone_owner = None;
+            }
+        }
+        self.pending_renderers.remove(window_label);
+        Ok(())
+    }
+}
+
+impl VoiceCaptureState {
+    pub fn activate_renderer(
+        &self,
+        window_label: &str,
+        renderer_id: &str,
+        renderer_epoch: u64,
+    ) -> Result<(), String> {
+        validate_id("renderer", renderer_id)?;
+        self.state
+            .lock()
+            .map_err(|_| "Voice capture state lock was poisoned".to_string())?
+            .activate_renderer(window_label, renderer_id, renderer_epoch)
+    }
+
+    pub fn claim_microphone(
+        &self,
+        window_label: String,
+        renderer_id: String,
+        renderer_epoch: u64,
+        owner_id: String,
+    ) -> Result<bool, String> {
+        validate_id("renderer", &renderer_id)?;
+        validate_id("owner", &owner_id)?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Voice capture state lock was poisoned".to_string())?;
+        state.activate_renderer(&window_label, &renderer_id, renderer_epoch)?;
+        let requested = MicrophoneOwner {
+            window_label,
+            renderer_id,
+            renderer_epoch,
+            owner_id,
+        };
+        match state.microphone_owner.as_ref() {
+            None => {
+                state.microphone_owner = Some(requested);
+                Ok(true)
+            }
+            Some(active) if active == &requested => Ok(false),
+            Some(_) => Err("Another voice feature is already using the microphone".to_string()),
+        }
+    }
+
+    pub fn release_microphone(
+        &self,
+        window_label: &str,
+        renderer_id: &str,
+        renderer_epoch: u64,
+        owner_id: &str,
+    ) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        let matches = state.microphone_owner.as_ref().is_some_and(|active| {
+            active.window_label == window_label
+                && active.renderer_id == renderer_id
+                && active.renderer_epoch == renderer_epoch
+                && active.owner_id == owner_id
+        });
+        if matches {
+            state.microphone_owner = None;
+        }
+        matches
+    }
+
+    pub fn release_owner(&self, window_label: &str, owner_id: &str) -> bool {
+        let Ok(mut state) = self.state.lock() else {
+            return false;
+        };
+        let matches = state.microphone_owner.as_ref().is_some_and(|active| {
+            active.window_label == window_label && active.owner_id == owner_id
+        });
+        if matches {
+            state.microphone_owner = None;
+        }
+        matches
+    }
+
+    pub fn release_window(&self, window_label: &str) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        if state
+            .microphone_owner
+            .as_ref()
+            .is_some_and(|owner| owner.window_label == window_label)
+        {
+            state.microphone_owner = None;
+        }
+        state.current_renderers.remove(window_label);
+        state.pending_renderers.remove(window_label);
+    }
+}
+
+#[tauri::command]
+pub fn register_voice_renderer_instance(
+    state: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    renderer_id: String,
+) -> Result<u64, String> {
+    validate_id("renderer", &renderer_id)?;
+    state
+        .state
+        .lock()
+        .map_err(|_| "Voice capture state lock was poisoned".to_string())?
+        .register_renderer(webview_window.label().to_string(), renderer_id)
+}
+
+fn validate_id(label: &str, value: &str) -> Result<(), String> {
+    if value.is_empty() || value.len() > MAX_ID_LEN {
+        return Err(format!(
+            "Voice {label} id must be between 1 and {MAX_ID_LEN} bytes"
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renderer_ownership_is_exclusive_and_releasable() {
+        let capture = VoiceCaptureState::default();
+        let epoch = capture
+            .state
+            .lock()
+            .expect("capture lock")
+            .register_renderer("main".into(), "renderer-1".into())
+            .expect("register renderer");
+        assert!(capture
+            .claim_microphone(
+                "main".into(),
+                "renderer-1".into(),
+                epoch,
+                "dictation".into(),
+            )
+            .expect("claim microphone"));
+        assert!(!capture
+            .claim_microphone(
+                "main".into(),
+                "renderer-1".into(),
+                epoch,
+                "dictation".into(),
+            )
+            .expect("repeat microphone claim"));
+        assert!(capture
+            .claim_microphone(
+                "main".into(),
+                "renderer-1".into(),
+                epoch,
+                "native-voice".into(),
+            )
+            .is_err());
+        assert!(capture.release_microphone("main", "renderer-1", epoch, "dictation"));
+        assert!(capture
+            .claim_microphone(
+                "main".into(),
+                "renderer-1".into(),
+                epoch,
+                "native-voice".into(),
+            )
+            .expect("reclaim microphone"));
+    }
+
+    #[test]
+    fn renderer_reload_rebinds_microphone_owner_without_releasing_it() {
+        let capture = VoiceCaptureState::default();
+        let first_epoch = capture
+            .state
+            .lock()
+            .expect("capture lock")
+            .register_renderer("main".into(), "renderer-1".into())
+            .expect("register first renderer");
+        assert!(capture
+            .claim_microphone(
+                "main".into(),
+                "renderer-1".into(),
+                first_epoch,
+                "native-voice:session".into(),
+            )
+            .expect("claim microphone"));
+
+        let second_epoch = capture
+            .state
+            .lock()
+            .expect("capture lock")
+            .register_renderer("main".into(), "renderer-2".into())
+            .expect("register replacement renderer");
+        capture
+            .activate_renderer("main", "renderer-2", second_epoch)
+            .expect("activate replacement renderer");
+
+        assert!(capture
+            .claim_microphone(
+                "main".into(),
+                "renderer-2".into(),
+                second_epoch,
+                "dictation".into(),
+            )
+            .is_err());
+        assert!(capture.release_microphone(
+            "main",
+            "renderer-2",
+            second_epoch,
+            "native-voice:session",
+        ));
+    }
+
+    #[test]
+    fn renderer_reload_clears_non_resumable_microphone_owner() {
+        let capture = VoiceCaptureState::default();
+        let first_epoch = capture
+            .state
+            .lock()
+            .expect("capture lock")
+            .register_renderer("main".into(), "renderer-1".into())
+            .expect("register first renderer");
+        assert!(capture
+            .claim_microphone(
+                "main".into(),
+                "renderer-1".into(),
+                first_epoch,
+                "dictation".into(),
+            )
+            .expect("claim microphone"));
+
+        let second_epoch = capture
+            .state
+            .lock()
+            .expect("capture lock")
+            .register_renderer("main".into(), "renderer-2".into())
+            .expect("register replacement renderer");
+        assert!(capture
+            .claim_microphone(
+                "main".into(),
+                "renderer-2".into(),
+                second_epoch,
+                "dictation-reloaded".into(),
+            )
+            .expect("replacement renderer reclaims microphone"));
+    }
+}
