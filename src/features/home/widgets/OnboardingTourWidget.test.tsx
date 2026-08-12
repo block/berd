@@ -1,7 +1,14 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setHomePinLabelsAlwaysVisible } from "@/features/home/lib/homePinLabelPreference";
+import { useAgentStore } from "@/features/agents/stores/agentStore";
 import type { WidgetRenderProps } from "./types";
 import { OnboardingTourWidget } from "./OnboardingTourWidget";
 
@@ -16,6 +23,8 @@ vi.mock("@/shared/hooks/useAvatarSrc", () => ({
   }),
 }));
 
+const avatarMediaRenderMock = vi.hoisted(() => vi.fn());
+
 vi.mock("@/shared/ui/avatar-media", () => ({
   AvatarMedia: ({
     alt,
@@ -25,15 +34,18 @@ vi.mock("@/shared/ui/avatar-media", () => ({
     alt: string;
     loadingStrategy: string;
     playbackMode: string;
-  }) => (
-    <div
-      role="img"
-      aria-label={alt}
-      data-testid="animated-berdy"
-      data-loading-strategy={loadingStrategy}
-      data-playback-mode={playbackMode}
-    />
-  ),
+  }) => {
+    avatarMediaRenderMock();
+    return (
+      <div
+        role="img"
+        aria-label={alt}
+        data-testid="animated-berdy"
+        data-loading-strategy={loadingStrategy}
+        data-playback-mode={playbackMode}
+      />
+    );
+  },
 }));
 
 const baseProps: WidgetRenderProps = {
@@ -50,6 +62,20 @@ const baseProps: WidgetRenderProps = {
 describe("OnboardingTourWidget", () => {
   beforeEach(() => {
     localStorage.clear();
+    avatarMediaRenderMock.mockClear();
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "/Users/test/.agents/agents/berdy.md",
+          displayName: "Berdy",
+          avatar: "app-avatar:gloopies-14",
+          systemPrompt: "Help people use Berd.",
+          isBuiltin: false,
+          writable: true,
+          sourceProperties: { metadata: { berdBundled: true } },
+        },
+      ],
+    });
   });
 
   it("uses 14px type and grows a gloopy bubble from the avatar", () => {
@@ -85,7 +111,7 @@ describe("OnboardingTourWidget", () => {
       "translate-y-2",
     );
     const bubble = screen
-      .getByText("Welcome to Berd!")
+      .getByText("Welcome!")
       .closest("[data-onboarding-tour-bubble]");
 
     expect(bubble).toHaveClass("absolute", "bottom-24", "left-36", "text-sm");
@@ -108,18 +134,15 @@ describe("OnboardingTourWidget", () => {
       bubble?.querySelector('[data-onboarding-tour-caret-dot="large"]'),
     ).toHaveClass("-bottom-4", "left-4", "size-8", "rounded-full");
     expect(
-      bubble?.querySelector('[data-onboarding-tour-connector-fillet="top"]'),
-    ).toHaveClass("rounded-full");
-    expect(
-      bubble?.querySelector('[data-onboarding-tour-connector-fillet="bottom"]'),
-    ).toHaveClass("rounded-full");
+      bubble?.querySelectorAll("[data-onboarding-tour-liquid-shadow] circle"),
+    ).toHaveLength(0);
     expect(
       bubble?.querySelector(".onboarding-tour-bubble-content"),
     ).not.toHaveClass(
       "drop-shadow-[0_12px_18px_rgba(0,0,0,0.14)]",
       "dark:drop-shadow-[0_12px_18px_rgba(0,0,0,0.32)]",
     );
-    expect(screen.getByText("Welcome to Berd!")).toHaveClass("pr-5");
+    expect(screen.getByText("Welcome!")).toHaveClass("pr-5");
     expect(
       bubble?.querySelector(".onboarding-tour-bubble-content"),
     ).not.toHaveClass("pr-10");
@@ -147,7 +170,7 @@ describe("OnboardingTourWidget", () => {
     expect(label).not.toHaveClass("opacity-0", "group-hover:opacity-100");
   });
 
-  it("opens the tour without dismissing the welcome tooltip", async () => {
+  it("opens the tour and retires the welcome tooltip", async () => {
     const user = userEvent.setup();
     const onStartOnboardingTour = vi.fn();
     const onRemoveWidget = vi.fn();
@@ -165,14 +188,14 @@ describe("OnboardingTourWidget", () => {
     await user.click(screen.getByRole("button", { name: "Take a tour" }));
 
     expect(onStartOnboardingTour).toHaveBeenCalledOnce();
-    expect(onUpdateState).not.toHaveBeenCalled();
+    expect(onUpdateState).toHaveBeenCalledWith({ welcomeDismissed: true });
     expect(onRemoveWidget).not.toHaveBeenCalled();
-    expect(screen.getByText("Welcome to Berd!")).toBeInTheDocument();
+    expect(screen.getByText("Welcome!")).toBeInTheDocument();
   });
 
-  it("keeps Berdy and offers suggested questions after the welcome callout", async () => {
+  it("tags Berdy in the composer after the welcome callout", async () => {
     const user = userEvent.setup();
-    const onStartChatWithPrompt = vi.fn();
+    const onTagAgentInComposer = vi.fn();
 
     render(
       <OnboardingTourWidget
@@ -181,108 +204,95 @@ describe("OnboardingTourWidget", () => {
           ...baseProps.instance,
           state: { welcomeDismissed: true },
         }}
-        onStartChatWithPrompt={onStartChatWithPrompt}
+        onTagAgentInComposer={onTagAgentInComposer}
       />,
     );
 
-    expect(screen.queryByText("Welcome to Berd!")).not.toBeInTheDocument();
+    expect(screen.queryByText("Welcome!")).not.toBeInTheDocument();
     expect(screen.getByTestId("animated-berdy")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Ask Berdy" }));
-    expect(screen.getByText("How can I help?")).toBeInTheDocument();
-    const firstSuggestion = screen.getByRole("button", {
-      name: /What can I use Berd for/,
-    });
-    expect(firstSuggestion).toHaveClass(
-      "group",
-      "w-full",
-      "bg-transparent",
-      "px-0",
-      "py-1.5",
-    );
-    expect(firstSuggestion).not.toHaveClass("rounded-[10px]", "bg-muted/50");
-    expect(firstSuggestion.querySelector("span")).toHaveClass(
-      "group-hover:font-medium",
-      "group-focus-visible:font-medium",
-      "motion-reduce:transition-none",
-    );
-    expect(firstSuggestion.querySelector("svg")).toHaveClass(
-      "size-3",
-      "opacity-0",
-      "transition-opacity",
-      "duration-150",
-      "ease-out",
-      "group-hover:opacity-100",
-      "group-focus-visible:opacity-100",
-      "motion-reduce:transition-none",
-    );
-    expect(
-      screen.getByRole("button", { name: "Close help" }).parentElement,
-    ).toHaveClass("right-3");
-    expect(
-      screen.getByRole("button", { name: /How do I start a project/ }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /How do agents and skills work/ }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("button", { name: /How do I start a project/ }),
+    expect(onTagAgentInComposer).toHaveBeenCalledOnce();
+    expect(onTagAgentInComposer).toHaveBeenCalledWith(
+      expect.stringContaining("berdy.md"),
     );
-
-    expect(onStartChatWithPrompt).not.toHaveBeenCalled();
-    expect(
-      screen.queryByRole("status", { name: "Berdy is typing" }),
-    ).not.toBeInTheDocument();
     expect(screen.queryByText("How can I help?")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Back" })).toHaveAttribute(
-      "data-onboarding-tour-back",
-    );
-    expect(screen.getByRole("button", { name: "Back" })).toHaveClass(
-      "font-medium",
-      "leading-5",
-    );
-    await waitFor(() => {
-      expect(
-        screen.queryByText("How do I start a project?"),
-      ).not.toBeInTheDocument();
-    });
-    expect(
-      await screen.findByText(
-        "Projects keep related chats, files, and working folders together so agents have the right context.",
-        {},
-        { timeout: 2_000 },
-      ),
-    ).toBeInTheDocument();
-
-    const followUpInput = screen.getByRole("textbox", {
-      name: "Ask a follow-up",
-    });
-    expect(followUpInput.closest("[data-slot='input-group']")).toHaveClass(
-      "border-transparent",
-      "bg-muted/40",
-      "shadow-none",
-      "focus-within:!border-transparent",
-      "dark:bg-muted/40",
-    );
-    expect(
-      followUpInput.closest("[data-onboarding-tour-response]"),
-    ).not.toHaveClass("mr-3");
-    await user.type(followUpInput, "Can you give me an example?");
-    await user.click(screen.getByRole("button", { name: "Send follow-up" }));
-    expect(onStartChatWithPrompt).toHaveBeenCalledWith(
-      "How do I start a project?\n\nFollow-up: Can you give me an example?",
-    );
-    await waitFor(() => {
-      expect(screen.queryByText("How can I help?")).not.toBeInTheDocument();
-    });
-    expect(screen.getByTestId("animated-berdy")).toBeInTheDocument();
   });
 
-  it("reveals the composer when the user wants to ask something else", async () => {
+  it("does not rerender the avatar as its drag position changes", () => {
+    const { rerender } = render(
+      <OnboardingTourWidget
+        {...baseProps}
+        canvasDragPosition={{ x: 0, y: 0 }}
+      />,
+    );
+    expect(avatarMediaRenderMock).toHaveBeenCalledOnce();
+
+    rerender(
+      <OnboardingTourWidget
+        {...baseProps}
+        canvasDragPosition={{ x: 20, y: 12 }}
+      />,
+    );
+    rerender(
+      <OnboardingTourWidget
+        {...baseProps}
+        canvasDragPosition={{ x: 36, y: 18 }}
+      />,
+    );
+
+    expect(avatarMediaRenderMock).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Berdy disabled while personas are loading", () => {
+    useAgentStore.setState({ personas: [], personasLoading: true });
+    const { rerender } = render(
+      <OnboardingTourWidget
+        {...baseProps}
+        instance={{
+          ...baseProps.instance,
+          state: { welcomeDismissed: true },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Ask Berdy" })).toBeDisabled();
+
+    act(() => {
+      useAgentStore.setState({
+        personasLoading: false,
+        personas: [
+          {
+            id: "/Users/test/.agents/agents/berdy.md",
+            displayName: "Berdy",
+            avatar: "app-avatar:gloopies-14",
+            systemPrompt: "Help people use Berd.",
+            isBuiltin: false,
+            writable: true,
+            sourceProperties: { metadata: { berdBundled: true } },
+          },
+        ],
+      });
+    });
+    rerender(
+      <OnboardingTourWidget
+        {...baseProps}
+        instance={{
+          ...baseProps.instance,
+          state: { welcomeDismissed: true },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Ask Berdy" })).toBeEnabled();
+  });
+
+  it("repairs a missing Berdy persona before tagging it", async () => {
     const user = userEvent.setup();
-    const onStartChatWithPrompt = vi.fn();
+    const onResolveBerdyAgent = vi.fn().mockResolvedValue("repaired-berdy");
+    const onTagAgentInComposer = vi.fn();
+    useAgentStore.setState({ personas: [], personasLoading: false });
 
     render(
       <OnboardingTourWidget
@@ -291,153 +301,91 @@ describe("OnboardingTourWidget", () => {
           ...baseProps.instance,
           state: { welcomeDismissed: true },
         }}
-        onStartChatWithPrompt={onStartChatWithPrompt}
+        onResolveBerdyAgent={onResolveBerdyAgent}
+        onTagAgentInComposer={onTagAgentInComposer}
       />,
     );
 
     await user.click(screen.getByRole("button", { name: "Ask Berdy" }));
-    await user.click(
-      screen.getByRole("button", { name: "Ask something else" }),
-    );
 
-    const input = await screen.findByRole("textbox", {
-      name: "Ask Berdy anything",
-    });
-    const inputGroup = input.closest("[data-slot='input-group']");
-    const sendButton = screen.getByRole("button", { name: "Send message" });
-    expect(inputGroup).toHaveClass(
-      "border-transparent",
-      "bg-muted/40",
-      "shadow-none",
-      "focus-within:!border-transparent",
-      "dark:bg-muted/40",
-    );
-    expect(sendButton.closest("[data-align='inline-end']")).toHaveClass(
-      "ml-auto",
-    );
-    expect(sendButton.querySelector("svg")).toHaveClass("size-4");
-    expect(screen.getByRole("button", { name: "Back" })).toHaveAttribute(
-      "data-onboarding-tour-back",
-    );
-    expect(screen.getByRole("button", { name: "Back" })).toHaveClass(
-      "font-medium",
-      "leading-5",
-    );
-    expect(
-      screen.getByRole("button", { name: "Back" }).querySelector("svg"),
-    ).toHaveClass("lucide-chevron-left");
-    await user.type(input, "How do I create a project?");
-    await user.click(sendButton);
-
-    expect(onStartChatWithPrompt).toHaveBeenCalledWith(
-      "How do I create a project?",
-    );
+    expect(onResolveBerdyAgent).toHaveBeenCalledOnce();
     await waitFor(() => {
-      expect(screen.queryByText("How can I help?")).not.toBeInTheDocument();
+      expect(onTagAgentInComposer).toHaveBeenCalledWith("repaired-berdy");
     });
-    expect(screen.getByTestId("animated-berdy")).toBeInTheDocument();
   });
 
-  it("keeps the question open when the Berdy chat cannot start", async () => {
-    const user = userEvent.setup();
-    const onStartChatWithPrompt = vi.fn(async () => false);
-
-    render(
-      <OnboardingTourWidget
-        {...baseProps}
-        instance={{
-          ...baseProps.instance,
-          state: { welcomeDismissed: true },
-        }}
-        onStartChatWithPrompt={onStartChatWithPrompt}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Ask Berdy" }));
-    await user.click(
-      screen.getByRole("button", { name: "Ask something else" }),
-    );
-    const input = await screen.findByRole("textbox", {
-      name: "Ask Berdy anything",
-    });
-    await user.type(input, "How do I create a project?");
-    await user.click(screen.getByRole("button", { name: "Send message" }));
-
-    expect(onStartChatWithPrompt).toHaveBeenCalledOnce();
-    expect(input).toHaveValue("How do I create a project?");
-    expect(screen.getByText("Back")).toBeInTheDocument();
-  });
-
-  it("starts only one chat while a Berdy prompt is pending", async () => {
-    const user = userEvent.setup();
-    let resolveStart!: (didStart: boolean) => void;
-    const onStartChatWithPrompt = vi.fn(
+  it("ignores a completed Berdy repair after unmount", async () => {
+    let resolveBerdy!: (personaId: string | null) => void;
+    const onResolveBerdyAgent = vi.fn(
       () =>
-        new Promise<boolean>((resolve) => {
-          resolveStart = resolve;
+        new Promise<string | null>((resolve) => {
+          resolveBerdy = resolve;
         }),
     );
+    const onTagAgentInComposer = vi.fn();
+    useAgentStore.setState({ personas: [], personasLoading: false });
 
-    render(
+    const { unmount } = render(
       <OnboardingTourWidget
         {...baseProps}
         instance={{
           ...baseProps.instance,
           state: { welcomeDismissed: true },
         }}
-        onStartChatWithPrompt={onStartChatWithPrompt}
+        onResolveBerdyAgent={onResolveBerdyAgent}
+        onTagAgentInComposer={onTagAgentInComposer}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Ask Berdy" }));
-    await user.click(
-      screen.getByRole("button", { name: "Ask something else" }),
-    );
-    const input = await screen.findByRole("textbox", {
-      name: "Ask Berdy anything",
-    });
-    await user.type(input, "How do I create a project?");
-    const sendButton = screen.getByRole("button", { name: "Send message" });
+    fireEvent.click(screen.getByRole("button", { name: "Ask Berdy" }));
+    unmount();
+    await act(async () => resolveBerdy("late-berdy"));
 
-    await user.click(sendButton);
-    expect(sendButton).toBeDisabled();
-    await user.click(sendButton);
-    expect(onStartChatWithPrompt).toHaveBeenCalledOnce();
-
-    resolveStart(true);
-    await waitFor(() => {
-      expect(screen.queryByText("How can I help?")).not.toBeInTheDocument();
-    });
+    expect(onTagAgentInComposer).not.toHaveBeenCalled();
   });
 
-  it("collapses the help composer without removing Berdy", async () => {
-    const user = userEvent.setup();
-    const onRemoveWidget = vi.fn();
+  it("ignores a completed Berdy repair after onboarding resets", async () => {
+    let resolveBerdy!: (personaId: string | null) => void;
+    const onResolveBerdyAgent = vi.fn(
+      () =>
+        new Promise<string | null>((resolve) => {
+          resolveBerdy = resolve;
+        }),
+    );
+    const onTagAgentInComposer = vi.fn();
+    useAgentStore.setState({ personas: [], personasLoading: false });
 
-    render(
+    const { rerender } = render(
       <OnboardingTourWidget
         {...baseProps}
         instance={{
           ...baseProps.instance,
           state: { welcomeDismissed: true },
         }}
-        onRemoveWidget={onRemoveWidget}
+        onResolveBerdyAgent={onResolveBerdyAgent}
+        onTagAgentInComposer={onTagAgentInComposer}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Ask Berdy" }));
-    await user.click(screen.getByRole("button", { name: "Close help" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask Berdy" }));
+    rerender(<OnboardingTourWidget {...baseProps} />);
+    await act(async () => resolveBerdy("late-berdy"));
 
-    await waitFor(() => {
-      expect(screen.queryByText("How can I help?")).not.toBeInTheDocument();
-    });
-    expect(screen.getByTestId("animated-berdy")).toBeInTheDocument();
-    expect(onRemoveWidget).not.toHaveBeenCalled();
+    expect(onTagAgentInComposer).not.toHaveBeenCalled();
+    expect(screen.getByText("Welcome!")).toBeInTheDocument();
   });
 
-  it("toggles the help bubble when Berdy is clicked again", async () => {
+  it("contains a rejected Berdy repair and enables retry", async () => {
     const user = userEvent.setup();
-    const onRemoveWidget = vi.fn();
+    const onResolveBerdyAgent = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("repair unavailable"))
+      .mockResolvedValueOnce("repaired-berdy");
+    const onTagAgentInComposer = vi.fn();
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    useAgentStore.setState({ personas: [], personasLoading: false });
 
     render(
       <OnboardingTourWidget
@@ -446,20 +394,37 @@ describe("OnboardingTourWidget", () => {
           ...baseProps.instance,
           state: { welcomeDismissed: true },
         }}
-        onRemoveWidget={onRemoveWidget}
+        onResolveBerdyAgent={onResolveBerdyAgent}
+        onTagAgentInComposer={onTagAgentInComposer}
       />,
     );
 
-    const berdy = screen.getByRole("button", { name: "Ask Berdy" });
-    await user.click(berdy);
-    expect(screen.getByText("How can I help?")).toBeInTheDocument();
+    const berdyButton = screen.getByRole("button", { name: "Ask Berdy" });
+    await user.click(berdyButton);
+    await waitFor(() => expect(berdyButton).toBeEnabled());
+    expect(onTagAgentInComposer).not.toHaveBeenCalled();
 
-    await user.click(berdy);
+    await user.click(berdyButton);
     await waitFor(() => {
-      expect(screen.queryByText("How can I help?")).not.toBeInTheDocument();
+      expect(onTagAgentInComposer).toHaveBeenCalledWith("repaired-berdy");
     });
-    expect(screen.getByTestId("animated-berdy")).toBeInTheDocument();
-    expect(onRemoveWidget).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("disables Berdy when neither a persona nor resolver is available", () => {
+    useAgentStore.setState({ personas: [], personasLoading: false });
+
+    render(
+      <OnboardingTourWidget
+        {...baseProps}
+        instance={{
+          ...baseProps.instance,
+          state: { welcomeDismissed: true },
+        }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Ask Berdy" })).toBeDisabled();
   });
 
   it("dismisses only the welcome tooltip from its close control", async () => {
@@ -494,7 +459,7 @@ describe("OnboardingTourWidget", () => {
     );
 
     await waitFor(() => {
-      expect(screen.queryByText("Welcome to Berd!")).not.toBeInTheDocument();
+      expect(screen.queryByText("Welcome!")).not.toBeInTheDocument();
     });
     expect(screen.getByTestId("animated-berdy")).toBeInTheDocument();
   });

@@ -573,7 +573,7 @@ vi.mock("./ui/AppShellContent", () => ({
     onTagHomeComposerSkill,
     onSelectSession,
     onStartProjectChat,
-    onStartChatWithPrompt,
+    onResolveBerdyAgent,
   }) => {
     const starterTasks = useStarterTasks();
     const activeView = targetLocation.view;
@@ -625,7 +625,11 @@ vi.mock("./ui/AppShellContent", () => ({
         </button>
         <button
           type="button"
-          onClick={() => onStartChatWithPrompt?.("How do projects work?")}
+          onClick={() => {
+            void onResolveBerdyAgent?.().then((personaId) => {
+              if (personaId) onTagHomeComposerAgent?.(personaId);
+            });
+          }}
         >
           Ask Berdy from Home
         </button>
@@ -2882,7 +2886,7 @@ describe("AppShell global navigation", () => {
     });
   });
 
-  it("starts Berdy help prompts with the bundled Berdy persona", async () => {
+  it("resolves the bundled Berdy persona for Home", async () => {
     const personaId = "/Users/test/.agents/agents/berdy.md";
     useAgentStore.setState({
       personas: [
@@ -2904,24 +2908,11 @@ describe("AppShell global navigation", () => {
     );
 
     await waitFor(() => {
-      expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
-        "created-session": [
-          {
-            payload: {
-              text: "How do projects work?",
-              persona: { kind: "persona", id: personaId },
-              showInComposer: false,
-            },
-          },
-        ],
-      });
-      expect(
-        useChatSessionStore.getState().getSession("created-session"),
-      ).toMatchObject({ personaId });
+      expect(screen.getByText("Berdy")).toBeInTheDocument();
     });
   });
 
-  it("restores a missing bundled Berdy agent before starting a chat", async () => {
+  it("restores a missing bundled Berdy agent before tagging it", async () => {
     const personaId = "/Users/test/.agents/agents/berdy.md";
     mockListPersonas.mockResolvedValue([
       {
@@ -2943,15 +2934,10 @@ describe("AppShell global navigation", () => {
 
     await waitFor(() => {
       expect(mockRepairBundledAgent).toHaveBeenCalledWith("berdy.md");
-      expect(
-        useChatSessionStore.getState().getSession("created-session"),
-      ).toMatchObject({ personaId });
+      expect(screen.getByText("Berdy")).toBeInTheDocument();
     });
     expect(mockRepairBundledAgent.mock.invocationCallOrder[0]).toBeLessThan(
       mockListPersonas.mock.invocationCallOrder[0],
-    );
-    expect(mockListPersonas.mock.invocationCallOrder[0]).toBeLessThan(
-      mockAcpCreateSession.mock.invocationCallOrder[0],
     );
     expect(mockToastError).not.toHaveBeenCalledWith(
       "Berdy couldn't start a chat. Try again.",
@@ -2981,9 +2967,7 @@ describe("AppShell global navigation", () => {
 
     await waitFor(() => {
       expect(mockListPersonas).toHaveBeenCalled();
-      expect(
-        useChatSessionStore.getState().getSession("created-session"),
-      ).toMatchObject({ personaId });
+      expect(screen.getByText("Berdy")).toBeInTheDocument();
     });
   });
 

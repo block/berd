@@ -5,12 +5,13 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import tourTexture from "../assets/texture.png";
 import tourHomeImage from "../assets/tour-1.png";
 import tourHomeDarkImage from "../assets/tour-1-dark.png";
-import { ProjectArtifactPreview } from "@/features/projects/artifact/ProjectArtifactPreview";
-import type {
-  ProjectArtifactInput,
-  ProjectArtifactMotionImpulse,
-} from "@/features/projects/artifact/types";
+import tourAgentsImage from "../assets/tour-4-agents.png";
 import { Button } from "@/shared/ui/button";
+import {
+  resolveSkillPillTone,
+  skillPillToneClass,
+} from "@/features/skills/lib/resolveSkillPillTone";
+import { cn } from "@/shared/lib/cn";
 import { useTheme } from "@/shared/theme/ThemeProvider";
 import { GlassButton } from "@/shared/ui/glass-button";
 import {
@@ -28,21 +29,8 @@ import {
   OpenAIIcon,
 } from "@/shared/ui/icons/ProviderIcons";
 
-const TOUR_STEP_COUNT = 4;
+const TOUR_STEP_COUNT = 5;
 const PROVIDER_EASE = [0.16, 1, 0.3, 1] as const;
-const TOUR_PROJECT_BASE: Omit<ProjectArtifactInput, "name" | "prompt"> = {
-  projectId: "onboarding-tour-project",
-  color: "blue",
-  workingDirs: ["project"],
-  sessionCount: 6,
-  artifact: {
-    seed: 28,
-    color: "blue",
-    mood: "active",
-    moodIntensity: 0.72,
-    contentMode: "cubeStatic",
-  },
-};
 
 interface OnboardingTourDialogProps {
   open: boolean;
@@ -117,7 +105,9 @@ export function OnboardingTourDialog({
           >
             {t(`onboarding.tour.steps.${step + 1}.title`)}
           </DialogTitle>
-          <DialogDescription className="max-w-[390px] leading-5 text-foreground">
+          <DialogDescription
+            className={`leading-5 text-foreground ${step === 0 || step === 1 || step === 4 ? "max-w-none" : "max-w-[390px]"}`}
+          >
             {t(`onboarding.tour.steps.${step + 1}.body`)}
           </DialogDescription>
           <Button
@@ -164,9 +154,10 @@ function TourArtwork({ step, onBack, onAdvance }: TourArtworkProps) {
         className="pointer-events-none absolute inset-0 hidden bg-white mix-blend-difference dark:block"
       />
       {step === 0 ? <CanvasPreview /> : null}
-      {step === 1 ? <ChatPreview /> : null}
-      {step === 2 ? <ProviderPreview /> : null}
-      {step === 3 ? <ProjectPreview /> : null}
+      {step === 1 ? <ProviderPreview /> : null}
+      {step === 2 ? <ChatPreview /> : null}
+      {step === 3 ? <AgentsPreview /> : null}
+      {step === 4 ? <SkillsPreview /> : null}
       <span className="sr-only">
         {t(`onboarding.tour.steps.${step + 1}.visual`)}
       </span>
@@ -181,19 +172,17 @@ function TourArtwork({ step, onBack, onAdvance }: TourArtworkProps) {
           <ChevronLeft aria-hidden="true" />
         </GlassButton>
       ) : null}
-      <GlassButton
-        type="button"
-        size="icon-sm"
-        onClick={onAdvance}
-        aria-label={
-          step === TOUR_STEP_COUNT - 1
-            ? t("onboarding.tour.finish")
-            : t("onboarding.tour.next")
-        }
-        className="absolute right-3 top-1/2 z-20 -translate-y-1/2"
-      >
-        <ChevronRight aria-hidden="true" />
-      </GlassButton>
+      {step < TOUR_STEP_COUNT - 1 ? (
+        <GlassButton
+          type="button"
+          size="icon-sm"
+          onClick={onAdvance}
+          aria-label={t("onboarding.tour.next")}
+          className="absolute right-3 top-1/2 z-20 -translate-y-1/2"
+        >
+          <ChevronRight aria-hidden="true" />
+        </GlassButton>
+      ) : null}
     </div>
   );
 }
@@ -354,38 +343,50 @@ function ProviderPreview() {
   );
 }
 
-function ProjectPreview() {
-  const { t } = useTranslation("home");
-  const shouldReduceMotion = useReducedMotion();
-  const [motionImpulse, setMotionImpulse] =
-    useState<ProjectArtifactMotionImpulse>();
+function AgentsPreview() {
+  return (
+    <div className="absolute inset-0 z-10 flex items-center justify-center">
+      <img
+        data-onboarding-tour-agents-image=""
+        src={tourAgentsImage}
+        alt=""
+        className="max-h-[270px] max-w-[calc(100%-8rem)] object-contain"
+      />
+    </div>
+  );
+}
 
-  const animateProject = () => {
-    if (shouldReduceMotion) return;
-    setMotionImpulse((current) => ({
-      sequence: (current?.sequence ?? 0) + 1,
-      deltaX: 0.26,
-      deltaY: -0.08,
-    }));
-  };
+function SkillsPreview() {
+  const shouldReduceMotion = useReducedMotion();
+  const skills = [
+    "skill-builder",
+    "agent-builder",
+    "goose-help",
+    "code-review",
+    "weekly-update",
+  ];
 
   return (
-    <button
-      type="button"
-      onClick={animateProject}
-      aria-label={t("onboarding.tour.animateProject")}
-      className="relative z-10 mx-auto flex h-full w-[310px] cursor-pointer items-center justify-center bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-    >
-      <ProjectArtifactPreview
-        input={{
-          ...TOUR_PROJECT_BASE,
-          name: t("onboarding.tour.projectPreview.name"),
-          prompt: t("onboarding.tour.projectPreview.description"),
-        }}
-        className="scale-110"
-        motionImpulse={motionImpulse}
-        variant="tile"
-      />
-    </button>
+    <div className="absolute left-8 top-1/2 z-10 flex -translate-y-1/2 flex-col items-start gap-3">
+      {skills.map((skill, index) => (
+        <motion.div
+          key={skill}
+          data-onboarding-tour-skill=""
+          className={cn(
+            "flex w-max items-center rounded-full bg-background px-8 py-3 text-[1.625rem] font-normal text-skill-pill-fg smooth-shadow-sm",
+            skillPillToneClass(resolveSkillPillTone(skill)),
+          )}
+          initial={shouldReduceMotion ? false : { opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={
+            shouldReduceMotion
+              ? { duration: 0 }
+              : { delay: 0.06 + index * 0.1, duration: 0.28, ease: "easeOut" }
+          }
+        >
+          {skill}
+        </motion.div>
+      ))}
+    </div>
   );
 }

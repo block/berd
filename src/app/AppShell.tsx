@@ -2986,8 +2986,10 @@ export function AppShell({
     ],
   );
 
-  const handleStartChatWithBerdy = useCallback(
-    async (text: string): Promise<boolean> => {
+  const handleResolveBerdyAgent = useCallback(async (): Promise<
+    string | null
+  > => {
+    try {
       const store = useAgentStore.getState();
       let personaId = findBerdyPersonaId(store.personas);
 
@@ -3027,19 +3029,16 @@ export function AppShell({
 
       if (!personaId) {
         toast.error(t("home:onboarding.callout.agentUnavailable"));
-        return false;
+        return null;
       }
 
-      return new Promise((resolve) => {
-        handleGlobalCompose(
-          text,
-          { personaId },
-          { showQueuedHandoff: false, onSettled: resolve },
-        );
-      });
-    },
-    [handleGlobalCompose, t],
-  );
+      return personaId;
+    } catch (error) {
+      console.error("Failed to resolve the bundled Berdy agent:", error);
+      toast.error(t("home:onboarding.callout.agentUnavailable"));
+      return null;
+    }
+  }, [t]);
 
   const handleGlobalComposerExpand = useCallback(
     (payload: GlobalComposerExpandPayload): Promise<boolean> => {
@@ -5001,7 +5000,7 @@ export function AppShell({
               onStartChatFromProject={handleStartChatFromProject}
               onStartProjectChat={handleStartProjectChat}
               onStartChatWithSkill={handleStartChatWithSkill}
-              onStartChatWithPrompt={handleStartChatWithBerdy}
+              onResolveBerdyAgent={handleResolveBerdyAgent}
               onExitSearch={handleExitSearch}
               onOpenExtension={handleOpenExtensionFromSearch}
               onOpenAgent={handleStartChatWithAgent}

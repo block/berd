@@ -320,7 +320,7 @@ export function WidgetCanvas({
   onOpenSkills,
   onOpenAutomations,
   onStartOnboardingTour,
-  onStartChatWithPrompt,
+  onResolveBerdyAgent,
 }: WidgetCanvasProps) {
   const { t } = useTranslation("home");
   const resolvedRecenterLabel =
@@ -735,7 +735,7 @@ export function WidgetCanvas({
                   onOpenSkills={onOpenSkills}
                   onOpenAutomations={onOpenAutomations}
                   onStartOnboardingTour={onStartOnboardingTour}
-                  onStartChatWithPrompt={onStartChatWithPrompt}
+                  onResolveBerdyAgent={onResolveBerdyAgent}
                 />
                 {catalogEntry.hideResizeHandle ? null : (
                   <button

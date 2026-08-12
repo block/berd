@@ -69,9 +69,7 @@ export interface HomeViewProps {
   onCreateProject?: () => void;
   onOpenSkills?: () => void;
   onOpenAutomations?: () => void;
-  onStartChatWithPrompt?: (
-    prompt: string,
-  ) => boolean | undefined | Promise<boolean | undefined>;
+  onResolveBerdyAgent?: () => Promise<string | null>;
   onHydratePinnedChatSessions?: (sessionIds: string[]) => void;
   viewportLeftOcclusionPx?: number;
 }
@@ -90,7 +88,7 @@ export function HomeView({
   onCreateProject,
   onOpenSkills,
   onOpenAutomations,
-  onStartChatWithPrompt,
+  onResolveBerdyAgent,
   onHydratePinnedChatSessions,
   viewportLeftOcclusionPx = 0,
 }: HomeViewProps) {
@@ -688,7 +686,7 @@ export function HomeView({
           onOpenSkills={onOpenSkills}
           onOpenAutomations={onOpenAutomations}
           onStartOnboardingTour={handleStartTour}
-          onStartChatWithPrompt={onStartChatWithPrompt}
+          onResolveBerdyAgent={onResolveBerdyAgent}
         />
       ) : null}
       <OnboardingTourDialog
