@@ -128,6 +128,17 @@ describe("runAutoArchiveSweep", () => {
     expect(archiveSession).not.toHaveBeenCalled();
   });
 
+  it("waits for the detached-window snapshot to hydrate", async () => {
+    const stale = session("stale");
+    mocks.loadAllSessions.mockResolvedValue([stale]);
+    useSessionWindowStore.setState({ hasLoadedSnapshot: false });
+    const archiveSession = vi.fn();
+
+    await runAutoArchiveSweep({ archiveSession });
+
+    expect(archiveSession).not.toHaveBeenCalled();
+  });
+
   it("skips sessions with a pending archive-state mutation", async () => {
     const stale = session("stale");
     mocks.loadAllSessions.mockResolvedValue([stale]);
@@ -162,6 +173,33 @@ describe("runAutoArchiveSweep", () => {
     expect(archiveSession).toHaveBeenCalledTimes(1);
     expect(archiveSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: "first" }),
+      expect.any(Function),
+    );
+  });
+
+  it("continues after one candidate fails revalidation", async () => {
+    const first = session("first");
+    const second = session("second");
+    mocks.loadAllSessions.mockResolvedValue([first, second]);
+    mocks.getSessionInfo
+      .mockRejectedValueOnce(new Error("session disappeared"))
+      .mockImplementation((sessionId: string) => ({
+        sessionId,
+        title: sessionId,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        lastMessageAt: "2026-01-01T00:00:00.000Z",
+        archivedAt: null,
+        messageCount: 1,
+        userSetName: false,
+      }));
+    const archiveSession = vi.fn().mockResolvedValue({ ok: true });
+
+    await runAutoArchiveSweep({ archiveSession });
+
+    expect(archiveSession).toHaveBeenCalledTimes(1);
+    expect(archiveSession).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "second" }),
       expect.any(Function),
     );
   });

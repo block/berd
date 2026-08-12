@@ -348,12 +348,7 @@ function recordArchiveMutationSuccess(
 
   if (!currentMutation) {
     if (!state.sessions.some((candidate) => candidate.id === sessionId)) {
-      return {
-        archiveMutationBySessionId: {
-          ...state.archiveMutationBySessionId,
-          [sessionId]: completedSucceededMutation,
-        },
-      };
+      return state;
     }
 
     return {
@@ -374,6 +369,11 @@ function recordArchiveMutationSuccess(
   }
 
   if (currentMutation.operationId === completedMutation.operationId) {
+    if (!state.sessions.some((candidate) => candidate.id === sessionId)) {
+      const { [sessionId]: _completed, ...archiveMutationBySessionId } =
+        state.archiveMutationBySessionId;
+      return { archiveMutationBySessionId };
+    }
     return {
       archiveMutationBySessionId: {
         ...state.archiveMutationBySessionId,

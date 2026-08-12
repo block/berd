@@ -297,10 +297,7 @@ describe("chatSessionStore", () => {
       const state = useChatSessionStore.getState();
       expect(mocks.archiveSession).toHaveBeenCalledWith("paged-out");
       expect(state.getSession("paged-out")).toBeUndefined();
-      expect(state.archiveMutationBySessionId["paged-out"]).toMatchObject({
-        desiredState: "archived",
-        status: "succeeded",
-      });
+      expect(state.archiveMutationBySessionId["paged-out"]).toBeUndefined();
     });
 
     it("leaves no store state when a paged-out archive fails", async () => {

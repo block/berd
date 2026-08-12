@@ -56,9 +56,11 @@ function persistedChatPins(
 
 function hasLocalAutoArchiveBlocker(sessionId: string): boolean {
   const chatState = useChatStore.getState();
+  const windowState = useSessionWindowStore.getState();
   const runtime = chatState.getSessionRuntime(sessionId);
   return (
-    useSessionWindowStore.getState().isOpenInWindow(sessionId) ||
+    !windowState.hasLoadedSnapshot ||
+    windowState.isOpenInWindow(sessionId) ||
     isSessionRunning(runtime.chatState) ||
     runtime.isRunCancellationPending ||
     chatState.nonEmptyDraftSessionIds.has(sessionId) ||
@@ -167,12 +169,20 @@ export async function runAutoArchiveSweep({
   // every safety invariant at each turn because earlier candidates can spend
   // time in Git inspection and cleanup while the user keeps interacting.
   for (const candidate of candidates) {
-    const currentSession = await revalidateAutoArchiveCandidate(candidate);
-    if (!currentSession) continue;
-    await archiveSession(currentSession, async () => {
-      const revalidated = await revalidateAutoArchiveCandidate(currentSession);
-      return revalidated !== null;
-    });
+    try {
+      const currentSession = await revalidateAutoArchiveCandidate(candidate);
+      if (!currentSession) continue;
+      await archiveSession(currentSession, async () => {
+        const revalidated =
+          await revalidateAutoArchiveCandidate(currentSession);
+        return revalidated !== null;
+      });
+    } catch (error) {
+      console.error(
+        `Failed to automatically archive chat ${candidate.id}:`,
+        error,
+      );
+    }
   }
 }
 
