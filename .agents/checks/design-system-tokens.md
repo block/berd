@@ -13,9 +13,10 @@ be chosen. The short version:
 - Shared UI should use shadcn semantic tokens first: `background`,
   `foreground`, `card`, `popover`, `muted`, `accent`, `primary`,
   `secondary`, `destructive`, `border`, `input`, and `ring`.
-- Sidebar and app chrome should use the shadcn sidebar token family:
-  `sidebar`, `sidebar-foreground`, `sidebar-accent`, `sidebar-border`, and
-  `sidebar-ring`.
+- Sidebar rows and text should use the shadcn sidebar state tokens:
+  `sidebar-foreground`, `sidebar-accent`, `sidebar-border`, and
+  `sidebar-ring`. Floating chrome shells (nav panes, right rail, top bar)
+  paint `card-glass`; the bare `sidebar` shell token is retired.
 - Berd-specific tokens are allowed only for product-specific surfaces that do
   not map cleanly to shadcn, such as `canvas-*`, `surface-composer`,
   `surface-editor-panel`, `message-user-bg`, `chip-*-bg`, `chip-*-fg`,
@@ -30,8 +31,10 @@ be chosen. The short version:
 - **Deleted broad Berd token families** such as `background-default`,
   `background-hover`, `text-default`, `text-muted`, `border-default`,
   `border-focus`, `surface-card`, `surface-overlay`, `surface-chrome`,
-  `sidebar-nav-bg-hover`, or `sidebar-nav-fg`. Suggest the mapping in
-  `docs/color-token-mapping.md`.
+  `sidebar-nav-bg-hover`, or `sidebar-nav-fg` — and the retired shell tokens
+  `bg-sidebar`/`--sidebar`, `sidebar-navigation-panel-bg`,
+  `canvas-project-tint`, and `surface-agent-profile-bg`. Suggest the mapping
+  in `docs/color-token-mapping.md`.
 - **New broad custom color tokens** that duplicate shadcn concepts. For
   example, do not introduce a new token that means "normal page background",
   "hover gray", "secondary text", "card surface", "popover surface",
@@ -50,9 +53,10 @@ be chosen. The short version:
   `bg-card`, `bg-popover`, `bg-muted`, `bg-accent`, `bg-primary`,
   `bg-secondary`, `bg-destructive`, `border-border`, `border-input`, or
   `ring-ring`.
-- Approved sidebar utilities such as `bg-sidebar`, `text-sidebar-foreground`,
+- Approved sidebar state utilities such as `text-sidebar-foreground`,
   `hover:bg-sidebar-accent`, `border-sidebar-border`, and
-  `ring-sidebar-ring`.
+  `ring-sidebar-ring`. The pane shell itself is `bg-card-glass`, not
+  `bg-sidebar`.
 - Approved narrow Berd extension utilities documented in
   `docs/color-token-mapping.md`, such as `bg-canvas-base`,
   `bg-surface-composer`, `bg-message-user-bg`, chip tokens, status tokens, and

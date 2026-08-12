@@ -112,7 +112,7 @@ export function AgentProfileLayout({
       {bottomBar ? (
         <div
           data-agent-layout-slot="bottom-bar-shell"
-          className="shrink-0 bg-surface-agent-profile-bg/95 px-6 backdrop-blur-xl"
+          className="shrink-0 bg-canvas-base/95 px-6 backdrop-blur-xl"
         >
           <div className="mx-auto grid w-full max-w-[1180px] items-center gap-8 md:grid-cols-[220px_minmax(0,1fr)] lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,760px)]">
             <div className="hidden md:block" aria-hidden="true" />

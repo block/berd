@@ -91,8 +91,8 @@ Component source should use the shadcn semantic token contract first:
 
 Use Goose extension tokens only for product-specific surfaces and identities,
 such as `bg-surface-composer`, `bg-canvas-base`, chip colors, status colors,
-and composer placeholder color. Use shadcn's `bg-sidebar` token for the app
-chrome/sidebar/context-panel glass.
+and composer placeholder color. Use `bg-card-glass` for floating chrome glass
+(nav panes, right rail, the global composer pill).
 
 Do not use raw palette utilities like `bg-gray-100`, direct hex colors, or
 component-specific one-off color tokens without first adding them to the design

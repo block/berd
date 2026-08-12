@@ -9,7 +9,7 @@ Use Tailwind utilities backed by the shadcn token contract first. Use Berd token
 In practice:
 
 1. Shared UI should use shadcn names: `background`, `foreground`, `card`, `popover`, `muted`, `accent`, `primary`, `destructive`, `border`, `input`, and `ring`.
-2. Sidebar UI should use shadcn sidebar names: `sidebar`, `sidebar-foreground`, `sidebar-accent`, `sidebar-border`, and `sidebar-ring`.
+2. Sidebar UI should use shadcn sidebar names: `sidebar-foreground`, `sidebar-accent`, `sidebar-border`, and `sidebar-ring`. The pane shell itself paints `card-glass` like every other floating container.
 3. Berd-specific surfaces keep product-specific names only when shadcn has no matching role: `canvas-*`, `surface-composer`, composer chips, status colors, project tint, and dot-grid variables.
 
 This follows the shadcn theming model: core tokens describe component anatomy and state, while Tailwind classes are the authoring API.
@@ -35,21 +35,17 @@ This follows the shadcn theming model: core tokens describe component anatomy an
 
 | Need | Use | Tailwind examples |
 | --- | --- | --- |
-| Sidebar shell | `sidebar` | `bg-sidebar text-sidebar-foreground` |
-| Navigation panel shell | `sidebar-navigation-panel-bg` | `bg-sidebar-navigation-panel-bg` |
+| Sidebar shell | `card-glass` | `bg-card-glass text-sidebar-foreground` |
 | Sidebar hover or selected row | `sidebar-accent` | `hover:bg-sidebar-accent` |
 | Sidebar selected/hover text | `sidebar-accent-foreground` | `text-sidebar-accent-foreground` |
 | Sidebar divider | `sidebar-border` | `border-sidebar-border` |
 | Sidebar focus ring | `sidebar-ring` | `ring-sidebar-ring` |
 
-The current sidebar value is intentionally slightly off-white/translucent, not pure white.
-
 ## Berd Extensions We Keep
 
 | Token family | Why it exists | Tailwind examples |
 | --- | --- | --- |
-| `canvas-base`, `canvas-project-tint` | Berd's dot-grid app canvas and project tinting are product-specific. | `bg-canvas-base` |
-| `sidebar` | Frosted app chrome/sidebar/context-panel shell treatment. | `bg-sidebar` |
+| `canvas-base` | Berd's dot-grid app canvas is product-specific. | `bg-canvas-base` |
 | `surface-composer`, `surface-composer-glass`, `surface-composer-hover` | Composer-specific translucent surfaces and their hover counterpart. | `bg-surface-composer` |
 | `surface-chat-composer`, `surface-chat-composer-hover` | Floating chat composer shell over the transcript; muted translucent gray. | `bg-surface-chat-composer` |
 | `surface-composer-action`, `surface-composer-action-hover`, `surface-composer-action-active` | Chat composer toolbar control fills (agent/model pickers, branch selector). | `bg-surface-composer-action`, `hover:bg-surface-composer-action-hover` |
@@ -59,7 +55,7 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 | `surface-glass-strong`, `surface-glass-strong-hover`, `surface-glass-strong-fg` | Stronger glass controls that sit over artwork or other visually busy media where ordinary foreground-on-glass can lose contrast. | `bg-surface-glass-strong text-surface-glass-strong-fg` |
 | `surface-agent-tile-action-*` | Agent tile View/Chat/⋯ controls: glass white + charcoal text in light theme, inverted surface in dark theme; hover/active/open invert foreground/background in both themes. | `bg-surface-agent-tile-action-bg text-surface-agent-tile-action-fg`, `hover:bg-surface-agent-tile-action-bg-hover` |
 | `surface-editor-panel` | Large slide-out editor panels use a translucent glass surface over the canvas. | `bg-surface-editor-panel` |
-| `surface-agent-profile-*` | Agent profile and avatar-editing surfaces are product-specific and theme-aware; their light and dark values do not perfectly match shared shadcn tokens. | `bg-surface-agent-profile-bg text-surface-agent-profile-fg` |
+| `surface-agent-profile-*` | Agent profile and avatar-editing foregrounds/controls are product-specific and theme-aware; their light and dark values do not perfectly match shared shadcn tokens. The page itself sits on `canvas-base`; controls use `surface-agent-profile-control-bg` (card-backed in light, translucent charcoal in dark). | `text-surface-agent-profile-fg bg-surface-agent-profile-control-bg` |
 | `agent-share-card-ink` | Collectible agent-card artwork uses a fixed brand ink independent of the app theme. | `text-agent-share-card-ink` |
 | `message-user-bg` | User message bubble fill is a chat-specific surface that should not become a broad card or muted token. | `bg-message-user-bg` |
 | `text-placeholder-composer` | Composer placeholder needs a denser value than normal muted text. | `placeholder:text-placeholder-composer` |
@@ -93,6 +89,9 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 | `border-focus`, `ring-focus` | `ring` | shadcn focus token. |
 | `sidebar-nav-bg-hover`, `sidebar-nav-bg-selected`, `sidebar-nav-fg` | `sidebar-accent`, `sidebar-accent-foreground`, `sidebar-foreground` | shadcn already has sidebar state tokens. |
 | `sidebar-nav-font-weight-light` | `--sidebar-nav-font-weight` (400), `font-normal`, `SIDEBAR_NAV_TEXT_CLASS` | Sidebar navigation labels use regular weight, not light. |
+| `sidebar` (shell), `sidebar-navigation-panel-bg` | `card-glass` | Floating chrome shells share the ladder's glass surface; sidebar row states keep their `sidebar-*` tokens. |
+| `canvas-project-tint` | `canvas-base` + runtime `--project-tint` | Project tinting is applied at runtime over the shared canvas token. |
+| `surface-agent-profile-bg` | `canvas-base` | The profile shell already resolved to the canvas value. |
 
 ## Button State Mapping
 

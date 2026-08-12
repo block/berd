@@ -50,7 +50,24 @@ const deletedTokenFamilies = [
     "sidebar-nav-font-weight-light",
     "font-normal or --sidebar-nav-font-weight (400)",
   ],
-  ["surface-chrome", "bg-sidebar or --sidebar"],
+  ["surface-chrome", "bg-card-glass or --card-glass"],
+  // The bare `sidebar` shell name collides with ordinary identifiers, so the
+  // retired token is matched through its usage forms instead: every color
+  // utility prefix the palette guard covers, plus the raw variable.
+  ["bg-sidebar", "bg-card-glass"],
+  ["text-sidebar", "text-sidebar-foreground"],
+  ["border-sidebar", "border-sidebar-border"],
+  ["ring-sidebar", "ring-sidebar-ring"],
+  ["fill-sidebar", "fill-card-glass"],
+  ["stroke-sidebar", "stroke-card-glass"],
+  ["--sidebar", "--card-glass"],
+  ["--backdrop-sidebar-panel", "--backdrop-panel"],
+  ["sidebar-navigation-panel-bg", "bg-card-glass or --card-glass"],
+  [
+    "canvas-project-tint",
+    "bg-canvas-base with the runtime --project-tint hook",
+  ],
+  ["surface-agent-profile-bg", "bg-canvas-base or --canvas-base"],
   ["surface-tile", "bg-accent or --accent"],
   ["surface-button", "bg-accent or --accent"],
   ["surface-install", "bg-canvas-base or --canvas-base"],
@@ -91,7 +108,6 @@ const allowedBridgeNames = new Set([
   "ring",
   "secondary",
   "secondary-foreground",
-  "sidebar",
   "sidebar-accent",
   "sidebar-accent-foreground",
   "sidebar-border",
@@ -102,12 +118,11 @@ const allowedBridgeNames = new Set([
 ]);
 
 const allowedBridgePatterns = [
-  /^canvas-(?:base|project-tint)$/,
+  /^canvas-base$/,
   /^app-top-bar-control-fg(?:-disabled)?$/,
-  /^sidebar-navigation-panel-bg$/,
   /^sidebar-section-action-(?:bg|fg)(?:-hover)?$/,
   /^surface-(?:composer(?:-(?:glass|hover|action(?:-(?:hover|active))?)?)?|chat-(?:composer(?:-hover)?|responding-pill-(?:bg|fg))|editor-panel|glass-(?:subtle|strong(?:-(?:hover|fg))?)|agent-tile-action-(?:bg|fg)(?:-hover)?)$/,
-  /^surface-agent-profile-(?:bg|fg(?:-(?:80|muted|subtle|faint|placeholder))?|border|dot|control-bg(?:-hover)?|action-(?:fg|bg-hover))$/,
+  /^surface-agent-profile-(?:fg(?:-(?:80|muted|subtle|faint|placeholder))?|border|dot|control-bg(?:-hover)?|action-(?:fg|bg-hover))$/,
   /^agent-share-card-ink$/,
   /^message-user-bg$/,
   /^chip-(?:file|chat|project|agent|skill|automation)-(?:bg|fg)$/,
@@ -244,8 +259,12 @@ function isAllowedBridgeName(name) {
 
 function findDeletedTokenMatches(sourceText, relativePath) {
   return deletedTokenFamilies.flatMap(([tokenFamily, replacement]) => {
+    // A preceding hyphen is allowed so utility and CSS-variable usage forms
+    // (`bg-<family>`, `var(--<family>)`) fail the check, not just the bare
+    // name; the lookahead still rejects longer live tokens that merely start
+    // with a deleted family name.
     const pattern = new RegExp(
-      `(?<![A-Za-z0-9-])${tokenFamily}(?![A-Za-z0-9-])`,
+      `(?<![A-Za-z0-9])${tokenFamily}(?![A-Za-z0-9-])`,
       "g",
     );
     return Array.from(sourceText.matchAll(pattern)).map((match) => ({

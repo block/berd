@@ -5419,7 +5419,7 @@ function isColorTokenName(token: string) {
     token.startsWith("--canvas-") ||
     token.startsWith("--chip-") ||
     token.startsWith("--chart-") ||
-    token.startsWith("--sidebar") ||
+    token.startsWith("--sidebar-") ||
     token.startsWith("--status") ||
     token.startsWith("--warning") ||
     token.startsWith("--clock") ||

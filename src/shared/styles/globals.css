@@ -270,9 +270,6 @@
   );
 
   /* shadcn sidebar tokens. Sidebar hover/selected rows use sidebar-accent. */
-  --sidebar: rgba(255, 255, 255, 0.8);
-  --sidebar-navigation-panel-bg: rgba(255, 255, 255, 0.8);
-  --backdrop-sidebar-panel: blur(18px) saturate(180%) brightness(1.02);
   --sidebar-nav-font-weight: 400;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
@@ -298,7 +295,6 @@
 
   /* Goose canvas + composer extensions. */
   --canvas-base: #f5f5f5;
-  --canvas-project-tint: #d6dde7; /* slight cool tilt for project chats */
   --surface-composer: rgba(255, 255, 255, 0.2);
   --surface-composer-hover: rgba(255, 255, 255, 0.45);
   /* Floating chat composer — muted gray tint; keep translucent for backdrop blur. */
@@ -356,7 +352,6 @@
     #eeb4d2,
     #eeb4b4
   );
-  --surface-agent-profile-bg: var(--canvas-base);
   --surface-agent-profile-fg: #242424;
   --surface-agent-profile-fg-80: rgba(36, 36, 36, 0.8);
   --surface-agent-profile-fg-muted: rgba(36, 36, 36, 0.45);
@@ -365,7 +360,7 @@
   --surface-agent-profile-fg-placeholder: rgba(36, 36, 36, 0.3);
   --surface-agent-profile-border: rgba(36, 36, 36, 0.1);
   --surface-agent-profile-dot: rgba(36, 36, 36, 0.16);
-  --surface-agent-profile-control-bg: var(--color-white);
+  --surface-agent-profile-control-bg: var(--card);
   --surface-agent-profile-control-bg-hover: rgba(255, 255, 255, 0.9);
   --surface-agent-profile-action-fg: rgba(245, 245, 245, 0.96);
   --surface-agent-profile-action-bg-hover: rgba(36, 36, 36, 0.9);
@@ -680,9 +675,6 @@
     transparent
   );
 
-  --sidebar: rgba(0, 0, 0, 0.62);
-  --sidebar-navigation-panel-bg: rgba(0, 0, 0, 0.5);
-  --backdrop-sidebar-panel: blur(18px) saturate(160%) brightness(1.08);
   --sidebar-nav-font-weight: 400;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
@@ -715,7 +707,6 @@
 
   /* Goose canvas + composer extensions — inverted. */
   --canvas-base: var(--color-gray-900);
-  --canvas-project-tint: #1a1d22;
   --surface-composer: rgba(255, 255, 255, 0.06);
   --surface-composer-hover: rgba(255, 255, 255, 0.14);
   --surface-chat-composer: var(--color-gray-700);
@@ -755,7 +746,6 @@
     var(--foreground) 12%,
     transparent
   );
-  --surface-agent-profile-bg: var(--canvas-base);
   --surface-agent-profile-fg: var(--color-gray-50);
   --surface-agent-profile-fg-80: color-mix(
     in srgb,
@@ -792,7 +782,9 @@
     var(--surface-agent-profile-fg) 14%,
     transparent
   );
-  --surface-agent-profile-control-bg: var(--sidebar-navigation-panel-bg);
+  /* Pinned to the value the retired dark nav-shell token had; #1165 chose
+     this fill for profile controls. */
+  --surface-agent-profile-control-bg: rgba(0, 0, 0, 0.5);
   --surface-agent-profile-control-bg-hover: var(--color-gray-900);
   --surface-agent-profile-action-fg: var(--color-gray-900);
   --surface-agent-profile-action-bg-hover: var(--color-gray-300);
@@ -999,7 +991,6 @@
 
   /* Goose canvas + composer extensions */
   --color-canvas-base: var(--canvas-base);
-  --color-canvas-project-tint: var(--canvas-project-tint);
   --color-surface-composer: var(--surface-composer);
   --color-surface-composer-hover: var(--surface-composer-hover);
   --color-surface-chat-composer: var(--surface-chat-composer);
@@ -1016,7 +1007,6 @@
   --color-surface-composer-glass: var(--surface-composer-glass);
   --color-surface-glass-subtle: var(--surface-glass-subtle);
   --color-surface-editor-panel: var(--surface-editor-panel);
-  --color-surface-agent-profile-bg: var(--surface-agent-profile-bg);
   --color-surface-agent-profile-fg: var(--surface-agent-profile-fg);
   --color-surface-agent-profile-fg-80: var(--surface-agent-profile-fg-80);
   --color-surface-agent-profile-fg-muted: var(--surface-agent-profile-fg-muted);
@@ -1125,8 +1115,6 @@
   --color-status-modified: var(--status-modified);
 
   /* Sidebar */
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-navigation-panel-bg: var(--sidebar-navigation-panel-bg);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
@@ -1898,8 +1886,9 @@ body,
   background: transparent;
 }
 
-/* Streamdown's mermaid blocks and their floating action pills paint
- * bg-sidebar; restate the glass treatment with the ladder token. */
+/* Streamdown's mermaid blocks and their floating action pills ship their
+ * own sidebar-shell background; restate the glass treatment with the
+ * ladder token. */
 [data-streamdown="mermaid-block"] {
   background: var(--card-glass);
 }

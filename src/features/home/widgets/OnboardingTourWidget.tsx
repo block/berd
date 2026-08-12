@@ -343,7 +343,7 @@ export function OnboardingTourWidget({
                   </filter>
                 </defs>
                 <path
-                  className="fill-card dark:fill-sidebar-navigation-panel-bg"
+                  className="fill-card dark:fill-card-glass"
                   d={SETTLED_BUBBLE_PATH}
                   filter={`url(#${bubbleShadowId})`}
                 />
@@ -367,13 +367,13 @@ export function OnboardingTourWidget({
                 onAnimationComplete={() => setIsBubbleSettled(true)}
               >
                 <path
-                  className="fill-card dark:fill-sidebar-navigation-panel-bg"
+                  className="fill-card dark:fill-card-glass"
                   d={SETTLED_BUBBLE_PATH}
                 />
               </motion.svg>
               <motion.div
                 data-onboarding-tour-caret-dot="small"
-                className="absolute -bottom-9 left-1 size-3 origin-top rounded-full bg-card dark:bg-sidebar-navigation-panel-bg"
+                className="absolute -bottom-9 left-1 size-3 origin-top rounded-full bg-card dark:bg-card-glass"
                 initial={
                   shouldReduceMotion
                     ? false
@@ -393,7 +393,7 @@ export function OnboardingTourWidget({
               />
               <motion.div
                 data-onboarding-tour-caret-dot="large"
-                className="absolute -bottom-4 left-4 size-8 origin-top rounded-full bg-card dark:bg-sidebar-navigation-panel-bg"
+                className="absolute -bottom-4 left-4 size-8 origin-top rounded-full bg-card dark:bg-card-glass"
                 initial={
                   shouldReduceMotion ? false : { opacity: 0, scale: 0, x: -5 }
                 }
@@ -411,11 +411,11 @@ export function OnboardingTourWidget({
               >
                 <span
                   data-onboarding-tour-connector-fillet="top"
-                  className="absolute top-2 -left-0.5 size-2 rounded-full bg-card dark:bg-sidebar-navigation-panel-bg"
+                  className="absolute top-2 -left-0.5 size-2 rounded-full bg-card dark:bg-card-glass"
                 />
                 <span
                   data-onboarding-tour-connector-fillet="bottom"
-                  className="absolute top-2 -right-0.5 size-2 rounded-full bg-card dark:bg-sidebar-navigation-panel-bg"
+                  className="absolute top-2 -right-0.5 size-2 rounded-full bg-card dark:bg-card-glass"
                 />
               </motion.div>
             </div>

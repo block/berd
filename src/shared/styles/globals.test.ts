@@ -49,21 +49,6 @@ describe("card-glass surface", () => {
   });
 });
 
-describe("dark navigation surface", () => {
-  it("keeps the shared surface dark while navigation uses its paired token", () => {
-    const lightTheme = declarationsFor(":root {");
-    const darkTheme = declarationsFor('[data-theme="dark"],');
-
-    expect(lightTheme).toContain(
-      "--sidebar-navigation-panel-bg: rgba(255, 255, 255, 0.8);",
-    );
-    expect(darkTheme).toContain("--sidebar: rgba(0, 0, 0, 0.62);");
-    expect(darkTheme).toContain(
-      "--sidebar-navigation-panel-bg: rgba(0, 0, 0, 0.5);",
-    );
-  });
-});
-
 describe("background token", () => {
   it("aliases card in both themes so paper-intent controls track the card surface", () => {
     // `bg-background` consumers (outline buttons, file chips, kbd, line
