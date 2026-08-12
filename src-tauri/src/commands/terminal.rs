@@ -440,7 +440,10 @@ fn normalize_path(path: &Path) -> PathBuf {
 
 fn resolve_shell(shell_env: &HashMap<String, String>) -> String {
     if cfg!(target_os = "windows") {
-        return std::env::var("ComSpec").unwrap_or_else(|_| "cmd.exe".to_string());
+        // Windows PowerShell 5.1 is present on supported Windows versions.
+        // Use the explicit executable name rather than `%ComSpec%`, which
+        // intentionally points at cmd.exe.
+        return "powershell.exe".to_string();
     }
 
     shell_env
@@ -465,7 +468,7 @@ fn add_fallback_env_vars(env: &mut HashMap<String, String>) {
 /// a cleared child environment must have restored.
 ///
 /// On Windows these are the process/user variables (`SystemRoot`, `ComSpec`,
-/// `PATHEXT`, and the user profile locations) that `cmd.exe` and native tools
+/// `PATHEXT`, and the user profile locations) that PowerShell and native tools
 /// require; on POSIX they are the login-shell essentials.
 #[cfg(windows)]
 const FALLBACK_ENV_KEYS: &[&str] = &[
@@ -497,14 +500,31 @@ const FALLBACK_ENV_KEYS: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_terminal_cwd;
     #[cfg(unix)]
     use super::{process_group_exists, stop_unix_process_group};
+    use super::{resolve_shell, resolve_terminal_cwd};
+    use std::collections::HashMap;
     #[cfg(unix)]
     use std::os::unix::process::CommandExt;
     #[cfg(unix)]
     use std::process::{Command, Stdio};
     use tempfile::{tempdir, NamedTempFile};
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_terminal_defaults_to_powershell_instead_of_comspec() {
+        let shell_env = HashMap::from([("SHELL".to_string(), "ignored.exe".to_string())]);
+
+        assert_eq!(resolve_shell(&shell_env), "powershell.exe");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_terminal_prefers_captured_shell() {
+        let shell_env = HashMap::from([("SHELL".to_string(), "/bin/test-shell".to_string())]);
+
+        assert_eq!(resolve_shell(&shell_env), "/bin/test-shell");
+    }
 
     #[cfg(unix)]
     #[test]

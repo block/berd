@@ -21,9 +21,13 @@ use crate::services::goose_config;
 use crate::services::log_redaction::redact_log_line;
 use crate::services::managed_acp_tools;
 use crate::services::path_env;
-use crate::services::process::{
-    kill_process, pid_t_from_u32, process_is_alive, terminate_process, ProcessId,
-};
+#[cfg(unix)]
+use crate::services::process::ProcessId;
+#[cfg(unix)]
+use crate::services::process::{kill_process, terminate_process};
+use crate::services::process::{pid_t_from_u32, process_is_alive};
+#[cfg(windows)]
+use crate::services::process::{IdentityProbe, ProcessIdentity};
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::{Child, Command};
@@ -86,6 +90,7 @@ impl GooseServeProcess {
     /// Kill the child process. Called from the app exit handler to ensure
     /// the child doesn't outlive the Tauri process.
     pub fn kill(&self) {
+        #[cfg(unix)]
         if let Some(child_pid) = self._child.id() {
             match pid_t_from_u32(child_pid) {
                 Some(pid) => {
@@ -99,8 +104,36 @@ impl GooseServeProcess {
                 }
             }
         }
-        // Clean up this app instance's stale-process record.
-        let _ = std::fs::remove_file(process_record_path(&self.process_record_dir));
+
+        #[cfg(windows)]
+        let remove_process_record = if let Some(handle) = self._child.raw_handle() {
+            log::info!("Killing goose serve child through its retained process handle");
+            // SAFETY: Tokio owns this process handle for the lifetime of `_child`.
+            match unsafe {
+                crate::services::process::terminate_process_handle(handle, Duration::from_secs(5))
+            } {
+                Ok(()) => true,
+                Err(error) => {
+                    log::warn!(
+                        "Failed to stop goose serve child: {error}; keeping process record for recovery"
+                    );
+                    false
+                }
+            }
+        } else {
+            log::warn!(
+                "Cannot stop goose serve child through its retained handle; keeping process record for recovery"
+            );
+            false
+        };
+
+        #[cfg(unix)]
+        let remove_process_record = true;
+
+        // Keep recovery evidence until child exit has been confirmed on Windows.
+        if remove_process_record {
+            let _ = std::fs::remove_file(process_record_path(&self.process_record_dir));
+        }
     }
 
     /// Kill the singleton goose serve process if it exists. Called from the
@@ -257,6 +290,27 @@ impl GooseServeProcess {
             diagnostic_log::fields([("pid", optional_u32_value(pid)), ("port", port.into())]),
         );
 
+        #[cfg(windows)]
+        if let Err(error) = write_process_record(&process_record_dir, &child) {
+            log::warn!(
+                "Failed to publish goose serve recovery record: {error}; stopping child and failing startup"
+            );
+            if let Some(handle) = child.raw_handle() {
+                // SAFETY: Tokio owns this process handle for the lifetime of `child`.
+                if let Err(stop_error) = unsafe {
+                    crate::services::process::terminate_process_handle(
+                        handle,
+                        Duration::from_secs(5),
+                    )
+                } {
+                    log::warn!("Failed to stop recordless goose serve child: {stop_error}");
+                }
+            }
+            return Err(format!(
+                "Failed to publish goose serve recovery record: {error}"
+            ));
+        }
+
         spawn_log_reader(child.stdout.take(), "stdout");
         spawn_log_reader(child.stderr.take(), "stderr");
 
@@ -292,6 +346,7 @@ impl GooseServeProcess {
 
         log::info!("Goose serve is ready on port {port}");
 
+        #[cfg(unix)]
         if let Some(pid) = pid {
             write_pid_file(&process_record_dir, pid);
         }
@@ -361,6 +416,12 @@ const PROCESS_RECORD_EXTENSION: &str = "json";
 struct ServeProcessRecord {
     owner_pid: u32,
     serve_pid: u32,
+    #[cfg(windows)]
+    #[serde(default)]
+    owner_identity: Option<ProcessIdentity>,
+    #[cfg(windows)]
+    #[serde(default)]
+    serve_identity: Option<ProcessIdentity>,
 }
 
 fn process_record_path(dir: &Path) -> PathBuf {
@@ -393,6 +454,7 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     hash
 }
 
+#[cfg(unix)]
 fn write_pid_file(dir: &Path, serve_pid: u32) {
     if let Err(error) = std::fs::create_dir_all(dir) {
         log::warn!(
@@ -429,6 +491,75 @@ fn write_pid_file(dir: &Path, serve_pid: u32) {
             );
         }
     }
+}
+
+#[cfg(windows)]
+fn write_process_record(dir: &Path, child: &Child) -> Result<(), String> {
+    let handle = child
+        .raw_handle()
+        .ok_or_else(|| "child has no process handle".to_string())?;
+    let owner_identity = crate::services::process::capture_process_identity(std::process::id())
+        .map_err(|error| format!("failed to identify owner: {error}"))?;
+    // SAFETY: Tokio owns this process handle for the lifetime of `child`.
+    let serve_identity = unsafe { crate::services::process::process_identity_from_handle(handle) }
+        .map_err(|error| format!("failed to identify child: {error}"))?;
+    std::fs::create_dir_all(dir).map_err(|error| {
+        format!(
+            "failed to create process record dir {}: {error}",
+            dir.display()
+        )
+    })?;
+    let path = process_record_path(dir);
+    let record = ServeProcessRecord {
+        owner_pid: owner_identity.pid,
+        serve_pid: serve_identity.pid,
+        owner_identity: Some(owner_identity),
+        serve_identity: Some(serve_identity),
+    };
+    let serialized = serde_json::to_vec(&record).map_err(|error| {
+        format!(
+            "failed to serialize process record {}: {error}",
+            path.display()
+        )
+    })?;
+    let temp_path = path.with_extension(format!("{PROCESS_RECORD_EXTENSION}.tmp"));
+    let _ = std::fs::remove_file(&temp_path);
+    let write_result = (|| {
+        let mut file = std::fs::File::create(&temp_path).map_err(|error| {
+            format!(
+                "failed to create temporary process record {}: {error}",
+                temp_path.display()
+            )
+        })?;
+        file.write_all(&serialized).map_err(|error| {
+            format!(
+                "failed to write temporary process record {}: {error}",
+                temp_path.display()
+            )
+        })?;
+        file.write_all(b"\n").map_err(|error| {
+            format!(
+                "failed to finish temporary process record {}: {error}",
+                temp_path.display()
+            )
+        })?;
+        file.sync_all().map_err(|error| {
+            format!(
+                "failed to sync temporary process record {}: {error}",
+                temp_path.display()
+            )
+        })?;
+        std::fs::rename(&temp_path, &path).map_err(|error| {
+            format!(
+                "failed to publish process record {}: {error}",
+                path.display()
+            )
+        })
+    })();
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&temp_path);
+    }
+    write_result
 }
 
 /// Scan records left by previous runs and kill only true orphans: backend
@@ -490,6 +621,31 @@ async fn cleanup_process_record(path: &Path) {
         }
     };
 
+    #[cfg(windows)]
+    if let Some(owner_identity) = &record.owner_identity {
+        match crate::services::process::probe_process_identity(owner_identity) {
+            IdentityProbe::Matches => {
+                log::debug!(
+                    "Goose serve process record {} is still owned by live process {}; leaving it alone",
+                    path.display(),
+                    record.owner_pid
+                );
+                return;
+            }
+            IdentityProbe::Unverifiable => {
+                log::warn!(
+                    "Cannot verify owner of goose serve process record {}; keeping it",
+                    path.display()
+                );
+                return;
+            }
+            IdentityProbe::Gone | IdentityProbe::Mismatch => {
+                cleanup_orphaned_serve_process(path, &record).await;
+                return;
+            }
+        }
+    }
+
     let Some(owner_pid) = pid_t_from_u32(record.owner_pid) else {
         log::warn!(
             "Goose serve process record {} has invalid owner pid {}; removing",
@@ -509,6 +665,7 @@ async fn cleanup_process_record(path: &Path) {
         return;
     }
 
+    #[cfg(unix)]
     let Some(serve_pid) = pid_t_from_u32(record.serve_pid) else {
         log::warn!(
             "Goose serve process record {} has invalid serve pid {}; removing",
@@ -519,7 +676,10 @@ async fn cleanup_process_record(path: &Path) {
         return;
     };
 
+    #[cfg(unix)]
     cleanup_orphaned_serve_process(path, serve_pid).await;
+    #[cfg(windows)]
+    cleanup_orphaned_serve_process(path, &record).await;
 }
 
 fn read_process_record(path: &Path) -> Result<ServeProcessRecord, String> {
@@ -527,6 +687,51 @@ fn read_process_record(path: &Path) -> Result<ServeProcessRecord, String> {
     serde_json::from_str(&contents).map_err(|error| error.to_string())
 }
 
+#[cfg(windows)]
+async fn cleanup_orphaned_serve_process(path: &Path, record: &ServeProcessRecord) {
+    let Some(identity) = &record.serve_identity else {
+        log::warn!(
+            "Goose serve process record {} has no Windows process identity; removing without killing PID {}",
+            path.display(),
+            record.serve_pid
+        );
+        let _ = std::fs::remove_file(path);
+        return;
+    };
+    let identity = identity.clone();
+
+    log::info!(
+        "Killing orphaned goose serve process (pid {})",
+        identity.pid
+    );
+    diagnostic_log::record_event(
+        DiagnosticLevel::Warn,
+        DiagnosticCategory::GooseServe,
+        "stale_process_kill",
+        None,
+        diagnostic_log::fields([("pid", (identity.pid as i64).into())]),
+    );
+    match crate::services::process::kill_process_if_identity_matches(
+        &identity,
+        Duration::from_secs(5),
+    ) {
+        Ok(outcome) if outcome.exit_confirmed() => {
+            let _ = std::fs::remove_file(path);
+        }
+        Ok(_) => log::warn!(
+            "Goose serve process {} did not confirm exit; keeping process record {}",
+            identity.pid,
+            path.display()
+        ),
+        Err(error) => log::warn!(
+            "Failed to kill orphaned goose serve process {}: {error}; keeping process record {}",
+            identity.pid,
+            path.display()
+        ),
+    }
+}
+
+#[cfg(unix)]
 async fn cleanup_orphaned_serve_process(path: &Path, pid: ProcessId) {
     if !process_is_alive(pid) {
         log::info!(
@@ -574,6 +779,7 @@ async fn cleanup_orphaned_serve_process(path: &Path, pid: ProcessId) {
     let _ = std::fs::remove_file(path);
 }
 
+#[cfg(unix)]
 /// Check whether the given PID belongs to a goose binary. Uses
 /// `proc_pidpath` on macOS and `/proc/{pid}/exe` on Linux.
 fn is_goose_process(pid: ProcessId) -> bool {
@@ -604,21 +810,6 @@ fn process_executable_name(pid: ProcessId) -> Option<String> {
     let exe_link = format!("/proc/{pid}/exe");
     let path = std::fs::read_link(exe_link).ok()?;
     path.file_name()?.to_str().map(String::from)
-}
-
-#[cfg(windows)]
-fn process_executable_name(pid: ProcessId) -> Option<String> {
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-
-    let mut system = System::new();
-    let pid = Pid::from_u32(pid);
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[pid]),
-        true,
-        ProcessRefreshKind::nothing(),
-    );
-    let process = system.process(pid)?;
-    Some(process.name().to_string_lossy().into_owned())
 }
 
 /// Paths resolved by `resolve_berdctl_spawn_paths`, consumed by

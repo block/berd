@@ -53,6 +53,53 @@ pub(crate) fn process_is_alive(pid: ProcessId) -> bool {
 }
 
 #[cfg(windows)]
+mod windows_identity;
+
+#[cfg(windows)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct ProcessIdentity {
+    pub pid: u32,
+    pub created_at: u64,
+    pub exe: String,
+}
+
+#[cfg(windows)]
+impl ProcessIdentity {
+    fn matches(&self, other: &Self) -> bool {
+        self.pid == other.pid
+            && self.created_at == other.created_at
+            && windows_identity::executable_paths_match(&self.exe, &other.exe)
+    }
+}
+
+#[cfg(windows)]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum IdentityProbe {
+    Matches,
+    Mismatch,
+    Gone,
+    Unverifiable,
+}
+
+#[cfg(windows)]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum IdentifiedKillOutcome {
+    KilledAndExited,
+    AlreadyGone,
+    IdentityMismatch,
+}
+
+#[cfg(windows)]
+impl IdentifiedKillOutcome {
+    pub(crate) fn exit_confirmed(&self) -> bool {
+        matches!(
+            self,
+            Self::KilledAndExited | Self::AlreadyGone | Self::IdentityMismatch
+        )
+    }
+}
+
+#[cfg(windows)]
 pub(crate) fn process_is_alive(pid: ProcessId) -> bool {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
@@ -79,22 +126,49 @@ pub(crate) fn kill_process(pid: ProcessId) -> bool {
 }
 
 #[cfg(windows)]
-pub(crate) fn terminate_process(pid: ProcessId) -> bool {
-    kill_process(pid)
+pub(crate) fn capture_process_identity(pid: u32) -> std::io::Result<ProcessIdentity> {
+    windows_identity::capture(pid)
 }
 
 #[cfg(windows)]
-pub(crate) fn kill_process(pid: ProcessId) -> bool {
-    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+pub(crate) fn probe_process_identity(identity: &ProcessIdentity) -> IdentityProbe {
+    use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
 
-    let mut system = System::new();
-    let pid = Pid::from_u32(pid);
-    system.refresh_processes_specifics(
-        ProcessesToUpdate::Some(&[pid]),
-        true,
-        ProcessRefreshKind::nothing(),
-    );
-    system.process(pid).is_some_and(|process| process.kill())
+    match capture_process_identity(identity.pid) {
+        Ok(current) if current.matches(identity) => IdentityProbe::Matches,
+        Ok(_) => IdentityProbe::Mismatch,
+        Err(error) if error.raw_os_error() == Some(ERROR_INVALID_PARAMETER as i32) => {
+            IdentityProbe::Gone
+        }
+        Err(_) => IdentityProbe::Unverifiable,
+    }
+}
+
+/// # Safety
+/// `handle` must remain a valid process handle with query-limited-information access.
+#[cfg(windows)]
+pub(crate) unsafe fn process_identity_from_handle(
+    handle: *mut std::ffi::c_void,
+) -> std::io::Result<ProcessIdentity> {
+    unsafe { windows_identity::identity_from_handle(handle as _) }
+}
+
+/// # Safety
+/// `handle` must remain a valid process handle with terminate and synchronize access.
+#[cfg(windows)]
+pub(crate) unsafe fn terminate_process_handle(
+    handle: *mut std::ffi::c_void,
+    wait: std::time::Duration,
+) -> std::io::Result<()> {
+    unsafe { windows_identity::terminate_handle(handle as _, wait) }
+}
+
+#[cfg(windows)]
+pub(crate) fn kill_process_if_identity_matches(
+    identity: &ProcessIdentity,
+    wait: std::time::Duration,
+) -> std::io::Result<IdentifiedKillOutcome> {
+    windows_identity::kill_if_identity_matches(identity, wait)
 }
 
 #[cfg(test)]
@@ -169,5 +243,27 @@ mod tests {
     #[test]
     fn pid_t_from_u32_accepts_windows_process_ids() {
         assert_eq!(pid_t_from_u32(u32::MAX), Some(u32::MAX));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn current_process_identity_is_stable_and_probeable() {
+        let identity =
+            capture_process_identity(std::process::id()).expect("capture current process identity");
+
+        assert_eq!(identity.pid, std::process::id());
+        assert_ne!(identity.created_at, 0);
+        assert!(!identity.exe.is_empty());
+        assert_eq!(probe_process_identity(&identity), IdentityProbe::Matches);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn changed_creation_time_does_not_match_current_process() {
+        let mut identity =
+            capture_process_identity(std::process::id()).expect("capture current process identity");
+        identity.created_at = identity.created_at.wrapping_add(1);
+
+        assert_eq!(probe_process_identity(&identity), IdentityProbe::Mismatch);
     }
 }
