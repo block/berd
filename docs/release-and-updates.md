@@ -1,56 +1,66 @@
 # Release and Auto-Update
 
-Berd uses [Tauri's updater plugin](https://v2.tauri.app/plugin/updater/). Public release builds use a GitHub release feed and an Ed25519 verification key. Local and custom builds disable updates unless their distributor supplies a complete, trusted updater profile.
+Berd uses [Tauri's updater plugin](https://v2.tauri.app/plugin/updater/). Release builds use a GitHub release feed and an Ed25519 verification key. Local and custom builds disable updates unless their distributor supplies a complete, trusted updater profile.
 
 The endpoint and verification key form one trust contract. `scripts/release/build-tauri-release-config.mjs` requires an explicit `BERD_RELEASE_CHANNEL`; enabled profiles require both `BERD_UPDATER_ENDPOINT` and `BERD_UPDATER_PUBLIC_KEY`, enforce credential-free HTTPS, and never fall back to another channel. Disabled builds carry no updater endpoint, key, or plugin registration.
 
-## Public feed and assets
+## Feed and assets
 
-The public release boundary is centralized in `scripts/release/public-channel.json`. While the repository remains at `squareup/berd`, its rolling release endpoint is:
+The release boundary is centralized in `scripts/release/release-channel.json`. While the repository remains at `squareup/berd`, its rolling release endpoint is:
 
 `https://github.com/squareup/berd/releases/download/berd-desktop-latest/latest.json`
 
 The repository is expected to move to `block/berd`. Update the repository value and derived URLs only as part of that transfer so documentation and shipped clients continue to match the active release location.
 
-A version `X.Y.Z` publishes architecture-qualified assets:
+A version `X.Y.Z` publishes architecture-qualified assets for macOS, Windows, and Linux:
 
 - `Berd_X.Y.Z_darwin-aarch64.app.zip`
 - `Berd_X.Y.Z_darwin-aarch64.dmg`
 - `Berd_X.Y.Z_darwin-aarch64.app.tar.gz`
 - `Berd_X.Y.Z_darwin-aarch64.app.tar.gz.sig`
 - `Berd_X.Y.Z_darwin-aarch64.app.tar.gz.sha256`
+- `Berd_X.Y.Z_windows-x86_64-setup.exe`
+- `Berd_X.Y.Z_windows-x86_64-setup.nsis.zip`
+- `Berd_X.Y.Z_windows-x86_64-setup.nsis.zip.sig`
+- `Berd_X.Y.Z_windows-x86_64-setup.nsis.zip.sha256`
+- `Berd_X.Y.Z_linux-x86_64.AppImage`
+- `Berd_X.Y.Z_linux-x86_64.deb`
+- `Berd_X.Y.Z_linux-x86_64.rpm`
+- `Berd_X.Y.Z_linux-x86_64.AppImage.tar.gz`
+- `Berd_X.Y.Z_linux-x86_64.AppImage.tar.gz.sig`
+- `Berd_X.Y.Z_linux-x86_64.AppImage.tar.gz.sha256`
 
-Only Apple Silicon is supported by this workflow. Adding x86_64, Windows, or Linux is separate release work.
+The updater manifest contains `darwin-aarch64`, `windows-x86_64`, and `linux-x86_64`. Promotion cannot run until all three platform payloads are staged and reverified.
 
-## Public release flow
+## Release flow
 
-Public release tags use canonical SemVer without build metadata, such as `v1.2.3` or `v1.2.3-rc.1`.
+Release tags use canonical SemVer without build metadata, such as `v1.2.3` or `v1.2.3-rc.1`.
 
 1. An authorized maintainer creates and pushes a protected `v<semver>` tag.
 2. The workflow verifies that the checkout, local tag, and canonical remote tag resolve to the same commit.
 3. It creates or safely resumes an immutable versioned GitHub release.
-4. The macOS build stages Berd's pinned backend and CLI resources and produces the unsigned app.
-5. The pinned signing action signs, notarizes, and staples the app and disk image.
-6. The packaging scripts verify the signed app, create and sign the updater archive, and record its SHA-256 digest.
-7. Promotion waits for approval in the GitHub `public-release` environment, then re-downloads and verifies the immutable staged artifacts.
-8. The promotion script uploads version-qualified payloads to the rolling release and uploads `latest.json` last.
+4. The platform jobs produce the macOS app/DMG, Windows NSIS installer, and Linux AppImage/deb/rpm packages.
+5. The macOS signing action signs, notarizes, and staples its artifacts. The Windows NSIS installer and Linux packages are published without platform-native code signatures.
+6. Each platform produces a minisign-signed updater archive, SHA-256 digest, and attested source-bound provenance receipt. Minisign authenticates the Windows and Linux updater archives even though their enclosed payloads lack platform-native code signatures.
+7. Promotion waits for all three platform jobs and approval in the GitHub `release` environment, then re-downloads and verifies every immutable staged artifact. It rejects version downgrades, rejects changed same-version manifests, and rechecks the rolling manifest immediately before publication.
+8. The promotion script uploads all three platform payloads and uploads a three-platform `latest.json` last.
 
 Uploading the manifest last keeps installed clients on the previous release if staging or verification fails. Rollback is a new, higher patch release containing reverted code rather than a lower manifest version.
 
-The rolling feed must be anonymously downloadable before the first public promotion. This is not possible while the release repository is private.
+The rolling feed must be anonymously downloadable before the first promotion. This is not possible while the release repository is private.
 
 ### Manual recovery
 
 Recovery is limited to the same immutable tag and source:
 
 ```bash
-gh workflow run public-release.yml \
+gh workflow run release.yml \
   --repo squareup/berd \
   --ref v1.2.3 \
   -f tag=v1.2.3
 ```
 
-Change `--repo` to `block/berd` after the repository transfer. Recovery verifies the selected tag and fills only missing assets whose existing counterparts are byte-identical; it cannot overwrite different immutable bytes.
+Change `--repo` to `block/berd` after the repository transfer. Recovery verifies the selected tag. A complete platform payload is reused only after its attested receipt is checked during promotion; an incomplete platform payload is deleted as a unit and rebuilt before promotion.
 
 ## Downstream distributions
 
@@ -68,8 +78,8 @@ not live in this repository.
 
 When the repository moves from `squareup/berd` to `block/berd`:
 
-1. Update `repository` in `scripts/release/public-channel.json`.
-2. Recreate the public release environment, signing configuration, and protected tag rules at the destination.
+1. Update `repository` in `scripts/release/release-channel.json`.
+2. Recreate the release environment, updater and macOS signing configuration, and protected tag rules at the destination.
 3. Preserve updater feed and signing-key continuity for already-installed builds. If release-asset URLs do not redirect after transfer, publish a bridge release or retain the old rolling feed.
 4. Run a non-promoting tagged rehearsal, approve promotion, and verify anonymous archive and manifest access before announcing the new feed.
 
@@ -77,9 +87,9 @@ When the repository moves from `squareup/berd` to `block/berd`:
 
 - Run `just ci` and the release script tests.
 - Verify that tag, checkout SHA, release target, and staged asset digest agree.
-- Confirm the updater archive contains the signed `Berd.app`.
-- Verify code signing, Gatekeeper, stapling, entitlements, and anonymous download.
-- Exercise an update from a prior public test build.
+- Confirm the updater archives contain `Berd.app`, the Windows NSIS installer, and the Linux AppImage respectively.
+- Verify macOS code signing, Gatekeeper, stapling, entitlements, updater signatures for all platforms, and anonymous download. Confirm the expected unsigned-publisher warning for the Windows installer.
+- Exercise an update from a prior test build.
 - Confirm disabled builds do not register or invoke the updater.
 - Exercise recovery and failed promotion; the previous manifest must remain active after failure.
 
@@ -87,14 +97,17 @@ When the repository moves from `squareup/berd` to `block/berd`:
 
 | File | Role |
 |---|---|
-| `scripts/release/public-channel.json` | Repository, rolling tag, and platform boundary |
+| `scripts/release/release-channel.json` | Repository, rolling tag, and platform boundary |
 | `scripts/release/lib.sh` | Release validation, naming, paths, and explicit inputs |
 | `scripts/release/build-macos.sh` | Version, resources, sidecar, and macOS build |
 | `scripts/release/build-tauri-release-config.mjs` | Fail-closed updater profile overlay |
-| `scripts/release/package-signed-updater.sh` | Signed-app verification, archive, signature, and digest |
+| `scripts/release/package-signed-updater.sh` | macOS signed-app verification, archive, signature, and digest |
+| `scripts/release/package-signed-updater-windows.sh` | Windows updater archive, signature, and digest |
+| `scripts/release/package-signed-updater-linux.sh` | Linux updater archive, signature, and digest |
 | `scripts/release/verify-updater-signature.sh` | Verifies updater signatures against the embedded key |
-| `scripts/release/generate-latest-json.sh` | Validates and creates the public manifest |
+| `scripts/release/generate-latest-json.sh` | Validates and creates the updater manifest |
+| `scripts/release/validate-manifest-promotion.mjs` | Enforces monotonic, idempotent rolling-manifest publication |
 | `scripts/release/github/` | GitHub release verification, immutable upload, and promotion adapters |
-| `.github/workflows/public-release.yml` | Tag/recovery staging and approval-gated promotion |
+| `.github/workflows/release.yml` | Tag/recovery staging and approval-gated promotion |
 | `src/features/updates/hooks/UpdaterProvider.tsx` | Update check, download, install, and restart state |
 | `src-tauri/src/lib.rs` | Registers the updater only when configured |

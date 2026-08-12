@@ -122,6 +122,8 @@ pub struct PendingInstall {
     pub target_version: String,
     pub target_artifact_sha256: String,
     pub target_compatibility: CompatibilityDescriptor,
+    #[serde(default)]
+    pub installer_started: bool,
     pub installed: bool,
 }
 
@@ -506,8 +508,10 @@ fn reconcile_persisted_state(
                 && build.version == pending.target_version
                 && build.compatibility == pending.target_compatibility
         });
-        let old_source_is_still_running =
-            running_build.is_some_and(|build| build.channel_id == pending.source_channel_id);
+        let old_source_is_still_running = running_build.is_some_and(|build| {
+            build.channel_id == pending.source_channel_id
+                && (!pending.installer_started || pending.installed)
+        });
         if installed_target_is_running || old_source_is_still_running {
             state.pending_install = None;
         }
@@ -628,28 +632,46 @@ fn decode_tauri_minisign(value: &str, kind: &str) -> Result<String, String> {
     String::from_utf8(bytes).map_err(|error| format!("Invalid {kind} text: {error}"))
 }
 
+fn current_updater_platform() -> &'static str {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    return "darwin-aarch64";
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    return "darwin-x86_64";
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    return "windows-x86_64";
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    return "linux-x86_64";
+    #[allow(unreachable_code)]
+    "unsupported"
+}
+
+fn signed_compatibility_for_current_platform(raw_json: &Value) -> Option<&Value> {
+    raw_json
+        .get("signedCompatibilityPlatforms")
+        .and_then(|platforms| platforms.get(current_updater_platform()))
+        .or_else(|| raw_json.get("signedCompatibility"))
+}
+
 fn verify_target_descriptor(
     raw_json: &Value,
     channel: &ReleaseChannel,
     version: &str,
 ) -> Result<VerifiedTarget, String> {
-    let envelope: SignedCompatibilityEnvelope = serde_json::from_value(
-        raw_json
-            .get("signedCompatibility")
-            .cloned()
-            .ok_or_else(|| {
-                format!(
-                    "{} update is missing signed compatibility metadata",
-                    channel.label
-                )
-            })?,
-    )
-    .map_err(|error| {
-        format!(
-            "Invalid {} signed compatibility metadata: {error}",
-            channel.label
-        )
-    })?;
+    let signed = signed_compatibility_for_current_platform(raw_json)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "{} update is missing signed compatibility metadata",
+                channel.label
+            )
+        })?;
+    let envelope: SignedCompatibilityEnvelope =
+        serde_json::from_value(signed).map_err(|error| {
+            format!(
+                "Invalid {} signed compatibility metadata: {error}",
+                channel.label
+            )
+        })?;
     if envelope.schema_version != 1
         || envelope.channel_id != channel.id
         || envelope.version != version
@@ -795,6 +817,7 @@ pub async fn check_release_update<R: Runtime>(
         target_version: update.version.clone(),
         target_artifact_sha256: verified.artifact_sha256.clone(),
         target_compatibility: verified.compatibility.clone(),
+        installer_started: false,
         installed: false,
     });
     if waiting {
@@ -880,6 +903,7 @@ pub async fn confirm_channel_switch(
         target_version: request.version,
         target_artifact_sha256: verified.artifact_sha256,
         target_compatibility: verified.compatibility,
+        installer_started: false,
         installed: false,
     });
     state.persist(&persisted)?;
@@ -924,6 +948,17 @@ pub async fn download_and_install_release<R: Runtime>(
         return Err(
             "The downloaded update does not match its signed compatibility descriptor".to_string(),
         );
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let mut persisted = state.0.persisted.lock().await;
+        let pending = persisted
+            .pending_install
+            .as_mut()
+            .filter(|pending| pending.transition_id == expected_transition_id)
+            .ok_or_else(|| "The checked update no longer matches this download".to_string())?;
+        pending.installer_started = true;
+        state.persist(&persisted)?;
     }
     update.install(&bytes).map_err(|error| error.to_string())?;
     let mut persisted = state.0.persisted.lock().await;
@@ -1080,6 +1115,32 @@ mod tests {
     }
 
     #[test]
+    fn platform_compatibility_metadata_precedes_legacy_metadata() {
+        let manifest = serde_json::json!({
+            "signedCompatibilityPlatforms": {
+                (current_updater_platform()): { "signature": "platform" }
+            },
+            "signedCompatibility": { "signature": "legacy" }
+        });
+
+        let selected = signed_compatibility_for_current_platform(&manifest).unwrap();
+        assert_eq!(selected["signature"], "platform");
+    }
+
+    #[test]
+    fn platform_compatibility_metadata_falls_back_to_legacy_metadata() {
+        let manifest = serde_json::json!({
+            "signedCompatibilityPlatforms": {
+                "another-platform": { "signature": "other" }
+            },
+            "signedCompatibility": { "signature": "legacy" }
+        });
+
+        let selected = signed_compatibility_for_current_platform(&manifest).unwrap();
+        assert_eq!(selected["signature"], "legacy");
+    }
+
+    #[test]
     fn store_marker_advances_before_beta_writes_and_blocks_old_main() {
         let dir = tempdir().unwrap();
         let path = dir.path().join(STORE_MARKER_FILE_NAME);
@@ -1115,36 +1176,84 @@ mod tests {
         assert_eq!(read_persisted_state(&path).unwrap(), Some(state));
     }
 
-    #[test]
-    fn reconciliation_never_presents_pending_target_as_running() {
-        let catalog = catalog();
-        let running = RunningBuildInfo {
-            channel_id: "main".to_string(),
-            version: "1.0.0".to_string(),
-            compatibility: compatibility(1, 1, 2),
-            what_to_test: None,
-        };
-        let pending = PendingInstall {
+    fn pending_install(installer_started: bool, installed: bool) -> PendingInstall {
+        PendingInstall {
             transition_id: "transition".to_string(),
             source_channel_id: "main".to_string(),
             target_channel_id: "beta".to_string(),
             target_version: "1.1.0".to_string(),
             target_artifact_sha256: "a".repeat(64),
             target_compatibility: compatibility(2, 1, 2),
-            installed: true,
-        };
+            installer_started,
+            installed,
+        }
+    }
+
+    fn running_main() -> RunningBuildInfo {
+        RunningBuildInfo {
+            channel_id: "main".to_string(),
+            version: "1.0.0".to_string(),
+            compatibility: compatibility(1, 1, 2),
+            what_to_test: None,
+        }
+    }
+
+    #[test]
+    fn reconciliation_clears_an_install_completed_on_the_source_platform() {
+        let catalog = catalog();
+        let running = running_main();
         let (state, _) = reconcile_persisted_state(
             Some(&catalog),
             Some(&running),
             Some(PersistedReleaseState {
                 schema_version: 1,
                 selected_feed: "beta".to_string(),
-                pending_install: Some(pending),
+                pending_install: Some(pending_install(false, true)),
                 waiting_for_main: None,
             }),
         );
         assert!(state.pending_install.is_none());
         assert_eq!(state.selected_feed, "beta");
         assert_eq!(running.channel_id, "main");
+    }
+
+    #[test]
+    fn reconciliation_completes_a_windows_install_handoff_when_the_target_opens() {
+        let catalog = catalog();
+        let target = RunningBuildInfo {
+            channel_id: "beta".to_string(),
+            version: "1.1.0".to_string(),
+            compatibility: compatibility(2, 1, 2),
+            what_to_test: None,
+        };
+        let (state, _) = reconcile_persisted_state(
+            Some(&catalog),
+            Some(&target),
+            Some(PersistedReleaseState {
+                schema_version: 1,
+                selected_feed: "beta".to_string(),
+                pending_install: Some(pending_install(true, false)),
+                waiting_for_main: None,
+            }),
+        );
+        assert!(state.pending_install.is_none());
+        assert_eq!(state.selected_feed, "beta");
+    }
+
+    #[test]
+    fn reconciliation_retains_a_windows_install_handoff_when_the_source_reopens() {
+        let catalog = catalog();
+        let running = running_main();
+        let (state, _) = reconcile_persisted_state(
+            Some(&catalog),
+            Some(&running),
+            Some(PersistedReleaseState {
+                schema_version: 1,
+                selected_feed: "beta".to_string(),
+                pending_install: Some(pending_install(true, false)),
+                waiting_for_main: None,
+            }),
+        );
+        assert_eq!(state.pending_install, Some(pending_install(true, false)));
     }
 }

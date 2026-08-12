@@ -121,10 +121,28 @@ try {
     Assert-Equal "bundle-windows does not interpolate bundle into source" ($justfile -notmatch '(?m)^\s+.*Bundle-Windows\.ps1.*\{\{\s*bundle\s*\}\}') $true
 
     $bundleScript = Get-Content -Raw (Join-Path (Get-BerdRepoRoot) "scripts\windows\Bundle-Windows.ps1")
-    Assert-Equal "bundle exports the resolved version to Rust" ($bundleScript -match '\$env:BERD_APP_VERSION\s*=\s*\$resolvedVersion\.Version') $true
+    Assert-Equal "bundle exports full SemVer to Rust" `
+        ($bundleScript -match '\$env:BERD_APP_VERSION\s*=\s*\$resolvedVersion\.RichVersion') $true
+    Assert-Equal "enabled release bundles compile the updater renderer on" `
+        ($bundleScript -match '(?s)\$releaseUpdaterEnabled\s*=.*?BERD_RELEASE_CHANNEL.*?\$env:VITE_UPDATER_ENABLED\s*=\s*if \(\$releaseUpdaterEnabled\) \{ "true" \} else \{ "false" \}') $true
+    Assert-Equal "bundle exports full release SemVer to the renderer" `
+        ($bundleScript -match '\$env:VITE_APP_VERSION\s*=\s*\$resolvedVersion\.RichVersion') $true
     Assert-Equal "bundle verifies the application PE version" ($bundleScript -match '\.VersionInfo\.ProductVersion') $true
-    Assert-Equal "bundle verifies the versioned installer path" ($bundleScript -match 'Berd_\$\{ExpectedVersion\}_x64-setup\.exe') $true
+    Assert-Equal "bundle verifies the full-SemVer installer path" `
+        ($bundleScript -match 'Berd_\$\{ExpectedVersion\}_x64-setup\.exe') $true
     Assert-Equal "bundle reports the verified installer path" ($bundleScript -match 'Windows bundle ready: \$bundlePath') $true
+
+    $prereleaseVersion = Resolve-AppVersion "1.2.3-rc.1"
+    Assert-Equal "prerelease override uses numeric core for Windows ProductVersion" $prereleaseVersion.Version "1.2.3"
+    Assert-Equal "prerelease override preserves full SemVer for updater metadata" $prereleaseVersion.RichVersion "1.2.3-rc.1"
+    Assert-Equal "Tauri config uses full SemVer for native updater ordering" `
+        ($bundleScript -notmatch 'NotePropertyName version -NotePropertyValue \$resolvedVersion\.Version') $true
+    Assert-Equal "Tauri config preserves prerelease package identity" `
+        ($bundleScript -match 'NotePropertyName version -NotePropertyValue \$resolvedVersion\.RichVersion') $true
+    Assert-Equal "native updater orders rc.2 after rc.1" `
+        ([semver]"1.2.3-rc.2" -gt [semver]"1.2.3-rc.1") $true
+    Assert-Equal "native updater orders stable after prerelease" `
+        ([semver]"1.2.3" -gt [semver]"1.2.3-rc.2") $true
 
     $buildScript = Get-Content -Raw (Join-Path (Get-BerdRepoRoot) "src-tauri\build.rs")
     Assert-Equal "Rust rebuilds when the resolved app version changes" ($buildScript -match 'cargo:rerun-if-env-changed=BERD_APP_VERSION') $true

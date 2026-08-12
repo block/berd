@@ -1,5 +1,35 @@
 {
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "title": "Berd",
+        "width": 800,
+        "height": 600,
+        "minWidth": 608,
+        "minHeight": 600,
+        "visible": false,
+        "titleBarStyle": "Visible",
+        "hiddenTitle": false,
+        "dragDropEnabled": true
+      }
+    ]
+  },
   "bundle": {
-    "externalBin": ["binaries/goosed", "binaries/berdctl"]
+    "targets": ["nsis"],
+    "externalBin": ["binaries/goosed", "binaries/berdctl"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "installerIcon": "icons/icon.ico",
+        "languages": ["English"],
+        "displayLanguageSelector": false
+      }
+    },
+    "fileAssociations": []
   }
 }

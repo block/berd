@@ -98,16 +98,10 @@ ARCHIVE_LIST="$WORK_DIR/archive-contents.txt"
 tar -tzf "$ARCHIVE" > "$ARCHIVE_LIST"
 grep -Fxq "${APP_BUNDLE_NAME}.app/" "$ARCHIVE_LIST"
 
-TAURI_CLI_VERSION="${TAURI_CLI_VERSION:-$(node -p "JSON.parse(require('fs').readFileSync('$REPO_ROOT/package.json', 'utf8')).devDependencies['@tauri-apps/cli'].replace(/^[^0-9]*/, '')")}"
-case "$(uname -m)" in
-  arm64|aarch64) TAURI_CLI_NATIVE_PACKAGE="@tauri-apps/cli-darwin-arm64@$TAURI_CLI_VERSION" ;;
-  x86_64) TAURI_CLI_NATIVE_PACKAGE="@tauri-apps/cli-darwin-x64@$TAURI_CLI_VERSION" ;;
-  *) echo "unsupported host architecture for Tauri CLI: $(uname -m)" >&2; exit 1 ;;
-esac
-
-pnpm --package "@tauri-apps/cli@$TAURI_CLI_VERSION" \
-  --package "$TAURI_CLI_NATIVE_PACKAGE" \
-  dlx tauri signer sign "$ARCHIVE"
+(
+  cd "$REPO_ROOT"
+  pnpm exec tauri signer sign "$ARCHIVE"
+)
 
 SIGNATURE="$ARCHIVE.sig"
 [[ -s "$SIGNATURE" ]] || { echo "tauri signer produced no $SIGNATURE" >&2; exit 1; }

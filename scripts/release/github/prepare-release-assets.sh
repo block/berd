@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Validate signed outputs from the GitHub OIDC signing action and prepare the
-# complete immutable public-release asset set.
+# complete immutable release asset set.
 set -euo pipefail
 [[ $# -eq 6 ]] || {
   echo "Usage: $0 <signed-app.zip> <signed.dmg> <version> <platform> <output-dir> <github-env>" >&2

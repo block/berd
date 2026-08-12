@@ -79,7 +79,14 @@ $resolvedVersion = Resolve-AppVersion $Version
 Write-WindowsDevInfo "Building Berd $($resolvedVersion.Version) ($($resolvedVersion.RichVersion))."
 
 $env:CARGO_TARGET_DIR = $targetDir
-$env:BERD_APP_VERSION = $resolvedVersion.Version
+$env:BERD_APP_VERSION = $resolvedVersion.RichVersion
+$releaseUpdaterEnabled = -not $Debug -and `
+    -not [string]::IsNullOrWhiteSpace($env:BERD_RELEASE_CHANNEL) -and `
+    $env:BERD_RELEASE_CHANNEL -ne "disabled"
+# The native updater config and renderer gate are independent contracts. Keep
+# them driven by the same release-channel decision so a packaged updater cannot
+# compile a renderer that permanently reports updates unavailable.
+$env:VITE_UPDATER_ENABLED = if ($releaseUpdaterEnabled) { "true" } else { "false" }
 $env:VITE_AUTH_GATE = if ($env:VITE_BUILDERBOT -eq "1") { "1" } else { "0" }
 $env:VITE_APP_VERSION = $resolvedVersion.RichVersion
 
@@ -105,17 +112,28 @@ if ($Debug) {
     # the Windows overlay's catch-free array — re-breaking the Windows contract.
     # So pin externalBin to the Windows contract in the same overlay.
     $baseConfig = Read-JsonFile (Join-Path (Join-Path (Get-BerdRepoRoot) "src-tauri") "tauri.conf.json")
-    $baseConfig.version = $resolvedVersion.Version
+    $baseConfig.version = $resolvedVersion.RichVersion
     $baseConfig.app.windows[0] | Add-Member -NotePropertyName devtools -NotePropertyValue $true -Force
     $windowsConf = Read-JsonFile (Join-Path (Join-Path (Get-BerdRepoRoot) "src-tauri") "tauri.windows.conf.json")
     $baseConfig.bundle.externalBin = (Get-ObjectValue (Get-ObjectValue $windowsConf "bundle") "externalBin")
     $configJson = $baseConfig | ConvertTo-Json -Depth 32
 } else {
-    $configJson = ([pscustomobject]@{
-        version = $resolvedVersion.Version
-        bundle = @{ targets = @($Bundle) }
-        plugins = @{ updater = @{ active = $false } }
-    } | ConvertTo-Json -Depth 5)
+    if (-not [string]::IsNullOrWhiteSpace($env:BERD_RELEASE_CHANNEL) -and $env:BERD_RELEASE_CHANNEL -ne "disabled") {
+        $releaseConfigPath = Join-Path $repoRoot "src-tauri/tauri.release.conf.json"
+        if (-not (Test-Path -LiteralPath $releaseConfigPath -PathType Leaf)) {
+            throw "Enabled release builds require $releaseConfigPath. Run pnpm tauri:release:config first."
+        }
+        $releaseConfig = Read-JsonFile $releaseConfigPath
+        $releaseConfig | Add-Member -NotePropertyName version -NotePropertyValue $resolvedVersion.RichVersion -Force
+        $releaseConfig.bundle | Add-Member -NotePropertyName targets -NotePropertyValue @($Bundle) -Force
+        $configJson = $releaseConfig | ConvertTo-Json -Depth 32
+    } else {
+        $configJson = ([pscustomobject]@{
+            version = $resolvedVersion.RichVersion
+            bundle = @{ targets = @($Bundle) }
+            plugins = @{ updater = @{ active = $false } }
+        } | ConvertTo-Json -Depth 5)
+    }
 }
 [System.IO.File]::WriteAllText($configPath, $configJson, [System.Text.UTF8Encoding]::new($false))
 
@@ -175,6 +193,11 @@ function Assert-WindowsBundleVersion {
 }
 
 $bundleDir = Join-Path $targetDir "$targetTriple\release\bundle\$Bundle"
-$bundlePath = Assert-WindowsBundleVersion -BundleDir $bundleDir -TargetDir $targetDir -TargetTriple $targetTriple -ExpectedVersion $resolvedVersion.Version -BundleType $Bundle
+$bundlePath = Assert-WindowsBundleVersion `
+    -BundleDir $bundleDir `
+    -TargetDir $targetDir `
+    -TargetTriple $targetTriple `
+    -ExpectedVersion $resolvedVersion.RichVersion `
+    -BundleType $Bundle
 Write-Host ""
 Write-Host "Windows bundle ready: $bundlePath" -ForegroundColor Green

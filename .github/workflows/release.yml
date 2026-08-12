@@ -1,0 +1,681 @@
+name: Berd Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing immutable v<semver> tag to recover; select this same tag as the run ref
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Serialize the entire staging lifecycle for a tag. Recovery may delete an
+# incomplete platform payload before rebuilding it, so concurrent runs for the
+# same immutable tag would otherwise race against each other's uploads.
+concurrency:
+  group: berd-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_CHANNEL_CONFIG: scripts/release/release-channel.json
+
+jobs:
+  setup:
+    name: Verify immutable release source
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      repository: ${{ steps.channel.outputs.repository }}
+      rolling_tag: ${{ steps.channel.outputs.rolling_tag }}
+      macos_platform: ${{ steps.channel.outputs.macos_platform }}
+      windows_platform: ${{ steps.channel.outputs.windows_platform }}
+      linux_platform: ${{ steps.channel.outputs.linux_platform }}
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      staged_macos_assets_ready: ${{ steps.assets.outputs.macos_ready }}
+      staged_windows_assets_ready: ${{ steps.assets.outputs.windows_ready }}
+      staged_linux_assets_ready: ${{ steps.assets.outputs.linux_ready }}
+    steps:
+      - name: Check out requested immutable ref
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate requested tag
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_TAG: ${{ github.ref_name }}
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            TAG="$PUSH_TAG"
+          else
+            TAG="$DISPATCH_TAG"
+          fi
+          # shellcheck source=scripts/release/lib.sh
+          source scripts/release/lib.sh
+          validate_release_tag "$TAG" || {
+            echo "::error::Expected an existing v<semver> tag without build metadata; got '$TAG'"
+            exit 1
+          }
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "${GITHUB_REF:-}" != "refs/tags/$TAG" ]]; then
+            echo "::error::Recovery dispatch must run from refs/tags/$TAG; got '${GITHUB_REF:-<unset>}'"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag-bound source on origin
+        id: source
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          scripts/release/github/verify-release-ref.sh "$TAG"
+          echo "source_sha=$(git rev-parse 'HEAD^{commit}')" >> "$GITHUB_OUTPUT"
+
+      - name: Load release channel boundary
+        id: channel
+        env:
+          ACTUAL_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/release/lib.sh
+          source scripts/release/lib.sh
+          load_release_channel "$RELEASE_CHANNEL_CONFIG"
+          REPOSITORY="$RELEASE_REPOSITORY"
+          ROLLING_TAG="$RELEASE_ROLLING_TAG"
+          [[ "${#RELEASE_PLATFORMS[@]}" -eq 3 && "${RELEASE_PLATFORMS[0]}" == "darwin-aarch64" && "${RELEASE_PLATFORMS[1]}" == "windows-x86_64" && "${RELEASE_PLATFORMS[2]}" == "linux-x86_64" ]] || {
+            echo "::error::Release platforms must be darwin-aarch64, windows-x86_64, and linux-x86_64"
+            exit 1
+          }
+          [[ "$ACTUAL_REPOSITORY" == "$REPOSITORY" ]] || {
+            echo "::error::Workflow repository $ACTUAL_REPOSITORY does not match configured release repository $REPOSITORY"
+            exit 1
+          }
+          echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
+          echo "rolling_tag=$ROLLING_TAG" >> "$GITHUB_OUTPUT"
+          echo "macos_platform=${RELEASE_PLATFORMS[0]}" >> "$GITHUB_OUTPUT"
+          echo "windows_platform=${RELEASE_PLATFORMS[1]}" >> "$GITHUB_OUTPUT"
+          echo "linux_platform=${RELEASE_PLATFORMS[2]}" >> "$GITHUB_OUTPUT"
+
+      - name: Create immutable versioned release if missing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ steps.channel.outputs.repository }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            EXISTING_TAG=$(gh release view "$TAG" --repo "$REPOSITORY" --json tagName --jq .tagName)
+            [[ "$EXISTING_TAG" == "$TAG" ]] || {
+              echo "::error::Existing release tag mismatch: $EXISTING_TAG"
+              exit 1
+            }
+            echo "Using existing versioned release $TAG"
+          else
+            PRERELEASE=()
+            if [[ "$VERSION" == *-* ]]; then
+              PRERELEASE=(--prerelease --latest=false)
+            fi
+            gh release create "$TAG" \
+              --repo "$REPOSITORY" \
+              --verify-tag \
+              --target "$SOURCE_SHA" \
+              --title "Berd v$VERSION" \
+              --notes "$(printf 'Berd v%s\n\nSource commit: `%s`\n\nThe Windows NSIS installer and Linux packages lack platform-native code signatures; their updater archives remain minisign-authenticated.\n' "$VERSION" "$SOURCE_SHA")" \
+              "${PRERELEASE[@]}"
+          fi
+
+          RELEASE_TAG_REF=$(gh api "repos/$REPOSITORY/git/ref/tags/$TAG" --jq .object.sha)
+          RELEASE_TAG_TYPE=$(gh api "repos/$REPOSITORY/git/ref/tags/$TAG" --jq .object.type)
+          if [[ "$RELEASE_TAG_TYPE" == "tag" ]]; then
+            RELEASE_TAG_REF=$(gh api "repos/$REPOSITORY/git/tags/$RELEASE_TAG_REF" --jq .object.sha)
+          fi
+          [[ "$RELEASE_TAG_REF" == "$SOURCE_SHA" ]] || {
+            echo "::error::Versioned release $TAG resolves to $RELEASE_TAG_REF, expected $SOURCE_SHA"
+            exit 1
+          }
+
+      - name: Check for complete staged platform payloads
+        id: assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ steps.channel.outputs.repository }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          MACOS_PLATFORM: ${{ steps.channel.outputs.macos_platform }}
+          WINDOWS_PLATFORM: ${{ steps.channel.outputs.windows_platform }}
+          LINUX_PLATFORM: ${{ steps.channel.outputs.linux_platform }}
+        run: |
+          set -euo pipefail
+          RELEASE_ASSETS=$(gh release view "$TAG" --repo "$REPOSITORY" --json assets --jq '.assets[].name')
+          check_assets() {
+            local output="$1"
+            shift
+            local ready=true name present=0
+            for name in "$@"; do
+              if grep -Fxq "$name" <<< "$RELEASE_ASSETS"; then
+                present=$((present + 1))
+              else
+                ready=false
+              fi
+            done
+            if [[ "$ready" != true && "$present" -gt 0 ]]; then
+              echo "Removing incomplete $output payload before a clean recovery rebuild"
+              for name in "$@"; do
+                if grep -Fxq "$name" <<< "$RELEASE_ASSETS"; then
+                  gh release delete-asset "$TAG" "$name" --repo "$REPOSITORY" --yes
+                fi
+              done
+            fi
+            echo "$output=$ready" >> "$GITHUB_OUTPUT"
+          }
+          MACOS_ARCHIVE="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$MACOS_PLATFORM")"
+          WINDOWS_ARCHIVE="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$WINDOWS_PLATFORM")"
+          LINUX_ARCHIVE="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$LINUX_PLATFORM")"
+          WINDOWS_INSTALLER="$(source scripts/release/lib.sh; release_installer_name "$VERSION" "$WINDOWS_PLATFORM")"
+          MACOS_PROVENANCE="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$MACOS_PLATFORM")"
+          WINDOWS_PROVENANCE="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$WINDOWS_PLATFORM")"
+          LINUX_PROVENANCE="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$LINUX_PLATFORM")"
+          check_assets macos_ready \
+            "Berd_${VERSION}_${MACOS_PLATFORM}.app.zip" "Berd_${VERSION}_${MACOS_PLATFORM}.dmg" \
+            "$MACOS_ARCHIVE" "$MACOS_ARCHIVE.sig" "$MACOS_ARCHIVE.sha256" "$MACOS_PROVENANCE"
+          check_assets windows_ready \
+            "$WINDOWS_INSTALLER" "$WINDOWS_ARCHIVE" "$WINDOWS_ARCHIVE.sig" "$WINDOWS_ARCHIVE.sha256" "$WINDOWS_PROVENANCE"
+          check_assets linux_ready \
+            "Berd_${VERSION}_${LINUX_PLATFORM}.AppImage" "Berd_${VERSION}_${LINUX_PLATFORM}.deb" \
+            "Berd_${VERSION}_${LINUX_PLATFORM}.rpm" "$LINUX_ARCHIVE" "$LINUX_ARCHIVE.sig" \
+            "$LINUX_ARCHIVE.sha256" "$LINUX_PROVENANCE"
+
+  stage-macos:
+    name: Build, sign, and stage macOS arm64
+    needs: setup
+    if: needs.setup.outputs.staged_macos_assets_ready != 'true'
+    runs-on: macos-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.setup.outputs.version }}
+      TAG: ${{ needs.setup.outputs.tag }}
+      SOURCE_SHA: ${{ needs.setup.outputs.source_sha }}
+      REPOSITORY: ${{ needs.setup.outputs.repository }}
+      PLATFORM: ${{ needs.setup.outputs.macos_platform }}
+      BERD_RELEASE_CHANNEL: public
+      BERD_UPDATER_ENDPOINT: https://github.com/${{ needs.setup.outputs.repository }}/releases/download/${{ needs.setup.outputs.rolling_tag }}/latest.json
+      BERD_UPDATER_PUBLIC_KEY: ${{ vars.BERD_UPDATER_PUBLIC_KEY }}
+    steps:
+      - name: Check out verified source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.setup.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag-bound source again
+        run: scripts/release/github/verify-release-ref.sh "$TAG"
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+
+      - name: Require updater public key
+        run: |
+          : "${BERD_UPDATER_PUBLIC_KEY:?BERD_UPDATER_PUBLIC_KEY repository variable is required}"
+
+      - name: Install locked signer tooling
+        run: pnpm install --frozen-lockfile
+
+      - name: Build existing macOS arm64 product unsigned
+        env:
+          BUILD_KIND: official
+        run: |
+          set -euo pipefail
+          scripts/release/build-macos.sh
+          scripts/package-macos-dmg.sh release/macos/Berd.app release/macos/Berd.dmg
+
+      - name: Sign, notarize, and staple the app through OIDC
+        id: codesign
+        uses: block/apple-codesign-action@679535d1ab7c5a7c18e6f9afcba3464512cc3dde # v1.1.0
+        with:
+          osx-codesign-role: ${{ secrets.OSX_CODESIGN_ROLE }}
+          codesign-s3-bucket: ${{ secrets.CODESIGN_S3_BUCKET }}
+          unsigned-artifact-path: release/macos/Berd.dmg
+          entitlements-plist-path: release/macos/entitlements.plist
+          artifact-name: berd-${{ needs.setup.outputs.source_sha }}-${{ github.run_id }}-arm64
+
+      - name: Package and reverify signed release assets
+        env:
+          SIGNED_APP_ZIP: ${{ steps.codesign.outputs.signed-artifact-path }}
+          SIGNED_DMG: ${{ steps.codesign.outputs.signed-dmg-path }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${SIGNED_APP_ZIP:?apple-codesign-action returned no signed app zip}"
+          : "${SIGNED_DMG:?apple-codesign-action returned no signed DMG}"
+          scripts/release/github/prepare-release-assets.sh \
+            "$SIGNED_APP_ZIP" "$SIGNED_DMG" "$VERSION" "$PLATFORM" \
+            "$RUNNER_TEMP/release-assets" "$GITHUB_ENV"
+
+          asset_dir="$RUNNER_TEMP/release-assets"
+          app_zip_name="Berd_${VERSION}_${PLATFORM}.app.zip"
+          dmg_name="Berd_${VERSION}_${PLATFORM}.dmg"
+          ARCHIVE_NAME="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$PLATFORM")"
+          PROVENANCE_NAME="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$PLATFORM")"
+          jq -n \
+            --arg sourceSha "$SOURCE_SHA" \
+            --arg version "$VERSION" \
+            --arg platform "$PLATFORM" \
+            --arg archive "$ARCHIVE_NAME" \
+            --arg archiveSha256 "$(awk 'NR == 1 {print $1}' "$asset_dir/$ARCHIVE_NAME.sha256")" \
+            --arg archiveSignature "$ARCHIVE_NAME.sig" \
+            --arg archiveSignatureSha256 "$(shasum -a 256 "$asset_dir/$ARCHIVE_NAME.sig" | awk '{print $1}')" \
+            --arg archiveDigest "$ARCHIVE_NAME.sha256" \
+            --arg archiveDigestSha256 "$(shasum -a 256 "$asset_dir/$ARCHIVE_NAME.sha256" | awk '{print $1}')" \
+            --arg appZip "$app_zip_name" \
+            --arg appZipSha256 "$(shasum -a 256 "$asset_dir/$app_zip_name" | awk '{print $1}')" \
+            --arg dmg "$dmg_name" \
+            --arg dmgSha256 "$(shasum -a 256 "$asset_dir/$dmg_name" | awk '{print $1}')" \
+            '{schemaVersion: 1, sourceSha: $sourceSha, version: $version, platform: $platform, artifacts: {($archive): $archiveSha256, ($archiveSignature): $archiveSignatureSha256, ($archiveDigest): $archiveDigestSha256, ($appZip): $appZipSha256, ($dmg): $dmgSha256}}' \
+            > "$asset_dir/$PROVENANCE_NAME"
+
+      - name: Attest staged macOS payload
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release-assets/Berd_${{ env.VERSION }}_${{ env.PLATFORM }}.provenance.json
+
+      - name: Upload immutable versioned assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ARCHIVE_NAME="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$PLATFORM")"
+          scripts/release/github/upload-immutable-assets.sh "$REPOSITORY" "$TAG" \
+            "$asset_dir/$app_zip_name" \
+            "$asset_dir/$dmg_name" \
+            "$asset_dir/$ARCHIVE_NAME" \
+            "$asset_dir/$ARCHIVE_NAME.sig" \
+            "$asset_dir/$ARCHIVE_NAME.sha256" \
+            "$asset_dir/$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$PLATFORM")"
+
+      - name: Record staged release
+        run: |
+          ARCHIVE_NAME="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$PLATFORM")"
+          DIGEST=$(awk 'NR == 1 {print $1}' "$asset_dir/$ARCHIVE_NAME.sha256")
+          cat >> "$GITHUB_STEP_SUMMARY" <<SUMMARY
+          ## Release staged
+
+          - Version: \`$VERSION\`
+          - Tag: \`$TAG\`
+          - Source: \`$SOURCE_SHA\`
+          - Platform: \`$PLATFORM\`
+          - Updater SHA-256: \`$DIGEST\`
+          - Versioned release: https://github.com/$REPOSITORY/releases/tag/$TAG
+
+          Promotion re-downloads these assets and requires approval; it does not rebuild.
+          SUMMARY
+
+  stage-windows:
+    name: Build and stage Windows x86_64
+    needs: setup
+    if: needs.setup.outputs.staged_windows_assets_ready != 'true'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.setup.outputs.version }}
+      TAG: ${{ needs.setup.outputs.tag }}
+      SOURCE_SHA: ${{ needs.setup.outputs.source_sha }}
+      REPOSITORY: ${{ needs.setup.outputs.repository }}
+      PLATFORM: ${{ needs.setup.outputs.windows_platform }}
+      BERD_RELEASE_CHANNEL: public
+      BERD_UPDATER_ENDPOINT: https://github.com/${{ needs.setup.outputs.repository }}/releases/download/${{ needs.setup.outputs.rolling_tag }}/latest.json
+      BERD_UPDATER_PUBLIC_KEY: ${{ vars.BERD_UPDATER_PUBLIC_KEY }}
+    steps:
+      - name: Check out verified source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.setup.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag-bound source again
+        shell: bash
+        run: scripts/release/github/verify-release-ref.sh "$TAG"
+
+      - name: Install just
+        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        with:
+          tool: just@1.40.0
+
+      - name: Require updater public key
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:BERD_UPDATER_PUBLIC_KEY)) { throw 'BERD_UPDATER_PUBLIC_KEY repository variable is required' }
+
+      - name: Set up Windows build dependencies
+        shell: pwsh
+        run: just setup-windows
+
+      - name: Generate updater-enabled Tauri configuration
+        shell: pwsh
+        run: pnpm tauri:release:config
+
+      - name: Build Windows NSIS installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Tauri package identity keeps the full SemVer so native updater
+          # ordering can advance prereleases. tauri-build derives the numeric
+          # Windows file-version tuple from that SemVer's numeric components.
+          $env:BERD_APP_VERSION_OVERRIDE = $env:VERSION
+          just bundle-windows nsis
+          Import-Module "$env:GITHUB_WORKSPACE/scripts/windows/WindowsDev.psm1" -Force -DisableNameChecking
+          $targetDir = Get-TauriCargoTargetDir
+          $nsisDir = Join-Path $targetDir 'x86_64-pc-windows-msvc/release/bundle/nsis'
+          $installer = Get-ChildItem -LiteralPath $nsisDir -Filter '*-setup.exe' | Select-Object -First 1
+          if (-not $installer) { throw "Windows bundle produced no NSIS installer under $nsisDir" }
+          "BUILT_INSTALLER=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Package and sign Windows updater archive
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          INSTALLER_NAME="$(source scripts/release/lib.sh; release_installer_name "$VERSION" "$PLATFORM")"
+          : "${BUILT_INSTALLER:?Windows build did not export BUILT_INSTALLER}"
+          mkdir -p "$RUNNER_TEMP/release-assets"
+          cp "$BUILT_INSTALLER" "$RUNNER_TEMP/release-assets/$INSTALLER_NAME"
+          scripts/release/package-signed-updater-windows.sh \
+            --installer "$RUNNER_TEMP/release-assets/$INSTALLER_NAME" \
+            --version "$VERSION" \
+            --output-dir "$RUNNER_TEMP/release-assets"
+          echo "asset_dir=$RUNNER_TEMP/release-assets" >> "$GITHUB_ENV"
+          echo "installer_name=$INSTALLER_NAME" >> "$GITHUB_ENV"
+          ARCHIVE_NAME="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$PLATFORM")"
+          echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_ENV"
+          PROVENANCE_NAME="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$PLATFORM")"
+          jq -n \
+            --arg sourceSha "$SOURCE_SHA" \
+            --arg version "$VERSION" \
+            --arg platform "$PLATFORM" \
+            --arg installer "$INSTALLER_NAME" \
+            --arg installerSha256 "$(sha256sum "$RUNNER_TEMP/release-assets/$INSTALLER_NAME" | awk '{print $1}')" \
+            --arg archive "$ARCHIVE_NAME" \
+            --arg archiveSha256 "$(awk 'NR == 1 {print $1}' "$RUNNER_TEMP/release-assets/$ARCHIVE_NAME.sha256")" \
+            --arg archiveSignature "$ARCHIVE_NAME.sig" \
+            --arg archiveSignatureSha256 "$(sha256sum "$RUNNER_TEMP/release-assets/$ARCHIVE_NAME.sig" | awk '{print $1}')" \
+            --arg archiveDigest "$ARCHIVE_NAME.sha256" \
+            --arg archiveDigestSha256 "$(sha256sum "$RUNNER_TEMP/release-assets/$ARCHIVE_NAME.sha256" | awk '{print $1}')" \
+            '{schemaVersion: 1, sourceSha: $sourceSha, version: $version, platform: $platform, artifacts: {($installer): $installerSha256, ($archive): $archiveSha256, ($archiveSignature): $archiveSignatureSha256, ($archiveDigest): $archiveDigestSha256}}' \
+            > "$RUNNER_TEMP/release-assets/$PROVENANCE_NAME"
+
+      - name: Attest staged Windows payload
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release-assets/Berd_${{ env.VERSION }}_${{ env.PLATFORM }}.provenance.json
+
+      - name: Upload immutable versioned assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ARCHIVE_NAME="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$PLATFORM")"
+          INSTALLER_NAME="$(source scripts/release/lib.sh; release_installer_name "$VERSION" "$PLATFORM")"
+          PROVENANCE_NAME="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$PLATFORM")"
+          scripts/release/github/upload-immutable-assets.sh "$REPOSITORY" "$TAG" \
+            "$asset_dir/$INSTALLER_NAME" "$asset_dir/$ARCHIVE_NAME" \
+            "$asset_dir/$ARCHIVE_NAME.sig" "$asset_dir/$ARCHIVE_NAME.sha256" \
+            "$asset_dir/$PROVENANCE_NAME"
+
+
+  stage-linux:
+    name: Build and stage Linux x86_64
+    needs: setup
+    if: needs.setup.outputs.staged_linux_assets_ready != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.setup.outputs.version }}
+      TAG: ${{ needs.setup.outputs.tag }}
+      SOURCE_SHA: ${{ needs.setup.outputs.source_sha }}
+      REPOSITORY: ${{ needs.setup.outputs.repository }}
+      PLATFORM: ${{ needs.setup.outputs.linux_platform }}
+      BERD_RELEASE_CHANNEL: public
+      BERD_UPDATER_ENDPOINT: https://github.com/${{ needs.setup.outputs.repository }}/releases/download/${{ needs.setup.outputs.rolling_tag }}/latest.json
+      BERD_UPDATER_PUBLIC_KEY: ${{ vars.BERD_UPDATER_PUBLIC_KEY }}
+      BERD_TAURI_CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
+    steps:
+      - name: Check out verified source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.setup.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag-bound source again
+        run: scripts/release/github/verify-release-ref.sh "$TAG"
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+
+      - name: Install Linux Tauri packaging dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            rpm
+
+      - name: Require updater public key
+        run: |
+          : "${BERD_UPDATER_PUBLIC_KEY:?BERD_UPDATER_PUBLIC_KEY repository variable is required}"
+
+      - name: Set up Linux release dependencies and locked signer tooling
+        run: |
+          pnpm install --frozen-lockfile
+          just setup
+
+      - name: Build Linux packages
+        run: |
+          set -euo pipefail
+          pnpm tauri:release:config
+          tmp=$(mktemp)
+          jq --arg version "$VERSION" \
+            '.version = $version | del(.bundle.createUpdaterArtifacts)' \
+            src-tauri/tauri.release.conf.json > "$tmp"
+          mv "$tmp" src-tauri/tauri.release.conf.json
+          scripts/prepare-goose-sidecar.sh
+          CARGO_TARGET_DIR="$BERD_TAURI_CARGO_TARGET_DIR" scripts/prepare-berdctl-sidecar.sh x86_64-unknown-linux-gnu
+          scripts/prepare-catch-sidecar.sh x86_64-unknown-linux-gnu
+          BERD_APP_VERSION="$VERSION" \
+          VITE_APP_VERSION="$VERSION" \
+          VITE_ENVIRONMENT=production \
+          VITE_UPDATER_ENABLED=true \
+          pnpm tauri build --bundles appimage,deb,rpm --features berdctl \
+            --config src-tauri/tauri.release.conf.json
+
+      - name: Package and sign Linux updater archive
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          bundle_dir="$BERD_TAURI_CARGO_TARGET_DIR/release/bundle"
+          built_appimage=$(find "$bundle_dir/appimage" -maxdepth 1 -type f -name '*.AppImage' -print -quit)
+          built_deb=$(find "$bundle_dir/deb" -maxdepth 1 -type f -name '*.deb' -print -quit)
+          built_rpm=$(find "$bundle_dir/rpm" -maxdepth 1 -type f -name '*.rpm' -print -quit)
+          : "${built_appimage:?Linux build produced no AppImage}"
+          : "${built_deb:?Linux build produced no deb}"
+          : "${built_rpm:?Linux build produced no rpm}"
+          asset_dir="$RUNNER_TEMP/release-assets"
+          mkdir -p "$asset_dir"
+          appimage_name="Berd_${VERSION}_${PLATFORM}.AppImage"
+          deb_name="Berd_${VERSION}_${PLATFORM}.deb"
+          rpm_name="Berd_${VERSION}_${PLATFORM}.rpm"
+          cp "$built_deb" "$asset_dir/$deb_name"
+          cp "$built_rpm" "$asset_dir/$rpm_name"
+          scripts/release/package-signed-updater-linux.sh \
+            --appimage "$built_appimage" \
+            --version "$VERSION" \
+            --output-dir "$asset_dir"
+          archive_name="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$PLATFORM")"
+          provenance_name="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$PLATFORM")"
+          jq -n \
+            --arg sourceSha "$SOURCE_SHA" \
+            --arg version "$VERSION" \
+            --arg platform "$PLATFORM" \
+            --arg appimage "$appimage_name" \
+            --arg appimageSha256 "$(shasum -a 256 "$asset_dir/$appimage_name" | awk '{print $1}')" \
+            --arg deb "$deb_name" \
+            --arg debSha256 "$(shasum -a 256 "$asset_dir/$deb_name" | awk '{print $1}')" \
+            --arg rpm "$rpm_name" \
+            --arg rpmSha256 "$(shasum -a 256 "$asset_dir/$rpm_name" | awk '{print $1}')" \
+            --arg archive "$archive_name" \
+            --arg archiveSha256 "$(awk 'NR == 1 {print $1}' "$asset_dir/$archive_name.sha256")" \
+            --arg signature "$archive_name.sig" \
+            --arg signatureSha256 "$(shasum -a 256 "$asset_dir/$archive_name.sig" | awk '{print $1}')" \
+            --arg digest "$archive_name.sha256" \
+            --arg digestSha256 "$(shasum -a 256 "$asset_dir/$archive_name.sha256" | awk '{print $1}')" \
+            '{schemaVersion: 1, sourceSha: $sourceSha, version: $version, platform: $platform, artifacts: {($appimage): $appimageSha256, ($deb): $debSha256, ($rpm): $rpmSha256, ($archive): $archiveSha256, ($signature): $signatureSha256, ($digest): $digestSha256}}' \
+            > "$asset_dir/$provenance_name"
+          echo "asset_dir=$asset_dir" >> "$GITHUB_ENV"
+
+      - name: Attest staged Linux payload
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release-assets/Berd_${{ env.VERSION }}_${{ env.PLATFORM }}.provenance.json
+
+      - name: Upload immutable versioned assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          archive_name="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$PLATFORM")"
+          provenance_name="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$PLATFORM")"
+          scripts/release/github/upload-immutable-assets.sh "$REPOSITORY" "$TAG" \
+            "$asset_dir/Berd_${VERSION}_${PLATFORM}.AppImage" \
+            "$asset_dir/Berd_${VERSION}_${PLATFORM}.deb" \
+            "$asset_dir/Berd_${VERSION}_${PLATFORM}.rpm" \
+            "$asset_dir/$archive_name" "$asset_dir/$archive_name.sig" \
+            "$asset_dir/$archive_name.sha256" "$asset_dir/$provenance_name"
+
+  promote:
+    name: Approve and promote updater feed
+    needs: [setup, stage-macos, stage-windows, stage-linux]
+    if: always() && needs.setup.result == 'success' && (needs.stage-macos.result == 'success' || needs.stage-macos.result == 'skipped') && (needs.stage-windows.result == 'success' || needs.stage-windows.result == 'skipped') && (needs.stage-linux.result == 'success' || needs.stage-linux.result == 'skipped')
+    runs-on: macos-latest
+    timeout-minutes: 30
+    environment: release
+    concurrency:
+      group: berd-release
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      deployments: read
+      actions: read
+      attestations: read
+    env:
+      TAG: ${{ needs.setup.outputs.tag }}
+      SOURCE_SHA: ${{ needs.setup.outputs.source_sha }}
+      BERD_RELEASE_CHANNEL_ID: "main"
+      BERD_STORE_CONTRACT_VERSION: "1"
+      BERD_WRITES_DATA_EPOCH: "1"
+      BERD_MIN_READABLE_DATA_EPOCH: "1"
+      BERD_MAX_READABLE_DATA_EPOCH: "1"
+      BERD_UPDATER_PUBLIC_KEY: ${{ vars.BERD_UPDATER_PUBLIC_KEY }}
+    steps:
+      - name: Check out verified source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.setup.outputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify tag-bound source again
+        run: scripts/release/github/verify-release-ref.sh "$TAG"
+
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+
+      - name: Preflight environment approval record access
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          APPROVER=$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/approvals" \
+            --jq '[.[] | select(.state == "approved") | .user.login] | unique | join(", ")')
+          [[ -n "$APPROVER" ]] || {
+            echo "::error::GitHub returned no approved reviewer for this environment-gated run"
+            exit 1
+          }
+          echo "environment_approver=$APPROVER" >> "$GITHUB_ENV"
+
+      - name: Verify staged immutable assets for all platforms
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ needs.setup.outputs.repository }}
+          VERSION: ${{ needs.setup.outputs.version }}
+          EXPECTED_TAG: ${{ needs.setup.outputs.tag }}
+          EXPECTED_SOURCE_SHA: ${{ needs.setup.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          for PLATFORM in darwin-aarch64 windows-x86_64 linux-x86_64; do
+            export PLATFORM
+            scripts/release/github/verify-versioned-release.sh "$EXPECTED_TAG" "$EXPECTED_SOURCE_SHA"
+          done
+
+      - name: Install locked signer tooling
+        run: pnpm install --frozen-lockfile
+
+      - name: Download, validate, and promote staged updater
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          scripts/release/github/promote-updater.sh "$TAG" "$SOURCE_SHA" "$RUNNER_TEMP/promotion-summary.md"
+          cat "$RUNNER_TEMP/promotion-summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record workflow and environment approval
+        env:
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" <<SUMMARY
+          - Workflow run: https://github.com/$REPOSITORY/actions/runs/$RUN_ID
+          - Environment approval: $environment_approver
+          SUMMARY

@@ -15,8 +15,8 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROMPT_FILE="$REPO_ROOT/scripts/release-notes-prompt.md"
 RELEASE_REPOSITORY="${BERD_REPO:-${GITHUB_REPOSITORY:-}}"
-if [[ -z "$RELEASE_REPOSITORY" && -f "$REPO_ROOT/scripts/release/public-channel.json" ]]; then
-  RELEASE_REPOSITORY="$(jq -er .repository "$REPO_ROOT/scripts/release/public-channel.json")"
+if [[ -z "$RELEASE_REPOSITORY" && -f "$REPO_ROOT/scripts/release/release-channel.json" ]]; then
+  RELEASE_REPOSITORY="$(jq -er .repository "$REPO_ROOT/scripts/release/release-channel.json")"
 fi
 if [[ -z "$RELEASE_REPOSITORY" ]]; then
   echo "BERD_REPO must be configured for release-note publishing." >&2

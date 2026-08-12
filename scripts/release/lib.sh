@@ -19,8 +19,8 @@ APP_NAME="berd"
 APP_BUNDLE_NAME="Berd"
 
 BERD_REPO="${BERD_REPO:-${GITHUB_REPOSITORY:-}}"
-if [[ -z "$BERD_REPO" && -f "$REPO_ROOT/scripts/release/public-channel.json" ]]; then
-  BERD_REPO="$(jq -er .repository "$REPO_ROOT/scripts/release/public-channel.json")"
+if [[ -z "$BERD_REPO" && -f "$REPO_ROOT/scripts/release/release-channel.json" ]]; then
+  BERD_REPO="$(jq -er .repository "$REPO_ROOT/scripts/release/release-channel.json")"
 fi
 if [[ -z "$BERD_REPO" ]]; then
   echo "BERD_REPO must be configured for release publishing" >&2
@@ -45,7 +45,7 @@ activate_hermit() {
 }
 
 SEMVER_PATTERN='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$'
-RELEASE_PLATFORM_PATTERN='^darwin-(aarch64|x86_64)$'
+RELEASE_PLATFORM_PATTERN='^(darwin-(aarch64|x86_64)|windows-x86_64|linux-x86_64)$'
 REPOSITORY_PATTERN='^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
 ROLLING_TAG_PATTERN='^[A-Za-z0-9_.-]+$'
 SOURCE_SHA_PATTERN='^[0-9a-f]{40}$'
@@ -117,18 +117,81 @@ release_archive_name() {
   local platform="$2"
   validate_release_version "$version" || return 1
   validate_release_platform "$platform" || return 1
-  printf '%s_%s_%s.app.tar.gz' "$APP_BUNDLE_NAME" "$version" "$platform"
+  case "$platform" in
+    darwin-*)
+      printf '%s_%s_%s.app.tar.gz' "$APP_BUNDLE_NAME" "$version" "$platform"
+      ;;
+    windows-*)
+      printf '%s_%s_%s-setup.nsis.zip' "$APP_BUNDLE_NAME" "$version" "$platform"
+      ;;
+    linux-*)
+      printf '%s_%s_%s.AppImage.tar.gz' "$APP_BUNDLE_NAME" "$version" "$platform"
+      ;;
+    *)
+      release_error "no updater archive naming for platform: $platform"
+      ;;
+  esac
 }
 
-load_public_channel() {
+release_provenance_name() {
+  local version="$1"
+  local platform="$2"
+  validate_release_version "$version" || return 1
+  validate_release_platform "$platform" || return 1
+  printf '%s_%s_%s.provenance.json' "$APP_BUNDLE_NAME" "$version" "$platform"
+}
+
+release_installer_name() {
+  local version="$1"
+  local platform="$2"
+  validate_release_version "$version" || return 1
+  validate_release_platform "$platform" || return 1
+  case "$platform" in
+    windows-*)
+      printf '%s_%s_%s-setup.exe' "$APP_BUNDLE_NAME" "$version" "$platform"
+      ;;
+    linux-*)
+      printf '%s_%s_%s.AppImage' "$APP_BUNDLE_NAME" "$version" "$platform"
+      ;;
+    *)
+      release_error "no installer naming for platform: $platform"
+      ;;
+  esac
+}
+
+load_release_channel() {
   local config="${1:-}"
-  [[ -n "$config" ]] || config="$REPO_ROOT/scripts/release/public-channel.json"
-  PUBLIC_REPOSITORY="$(jq -er '.repository' "$config")"
-  PUBLIC_ROLLING_TAG="$(jq -er '.rollingTag' "$config")"
-  PUBLIC_PLATFORM="$(jq -er '.platform' "$config")"
-  validate_repository "$PUBLIC_REPOSITORY"
-  validate_rolling_tag "$PUBLIC_ROLLING_TAG"
-  validate_release_platform "$PUBLIC_PLATFORM"
+  if [[ -z "$config" ]]; then
+    config="$REPO_ROOT/scripts/release/release-channel.json"
+  fi
+  RELEASE_REPOSITORY="$(jq -er '.repository' "$config")"
+  RELEASE_ROLLING_TAG="$(jq -er '.rollingTag' "$config")"
+  RELEASE_PLATFORMS=()
+  while IFS= read -r platform; do
+    [[ -n "$platform" ]] && RELEASE_PLATFORMS+=("$platform")
+  done < <(
+    jq -er \
+      '
+        .platforms
+        | if type == "array" and length > 0 then
+            .[]
+          else
+            error("platforms must be a non-empty array")
+          end
+      ' \
+      "$config"
+  )
+  validate_repository "$RELEASE_REPOSITORY"
+  validate_rolling_tag "$RELEASE_ROLLING_TAG"
+  local platform seen_platforms='|'
+  for platform in "${RELEASE_PLATFORMS[@]}"; do
+    validate_release_platform "$platform" || return 1
+    [[ "$seen_platforms" != *"|$platform|"* ]] || {
+      release_error "duplicate release platform: $platform"
+      return 1
+    }
+    seen_platforms="${seen_platforms}${platform}|"
+  done
 }
 
 release_input_version() {

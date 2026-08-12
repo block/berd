@@ -31,11 +31,10 @@ jq -cn \
   --argjson minReadableDataEpoch "$BERD_MIN_READABLE_DATA_EPOCH" \
   --argjson maxReadableDataEpoch "$BERD_MAX_READABLE_DATA_EPOCH" \
   '{schemaVersion:1,channelId:$channelId,version:$version,artifactSha256:$artifactSha256,compatibility:{storeContractVersion:$storeContractVersion,writesDataEpoch:$writesDataEpoch,minReadableDataEpoch:$minReadableDataEpoch,maxReadableDataEpoch:$maxReadableDataEpoch}}' > "$PAYLOAD"
-TAURI_CLI_VERSION="${TAURI_CLI_VERSION:-$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).devDependencies['@tauri-apps/cli'].replace(/^[^0-9]*/, '')")}"
-case "$(uname -m)" in
-  arm64|aarch64) native="@tauri-apps/cli-darwin-arm64@$TAURI_CLI_VERSION" ;;
-  x86_64) native="@tauri-apps/cli-darwin-x64@$TAURI_CLI_VERSION" ;;
-  *) echo "unsupported host architecture" >&2; exit 1 ;;
-esac
-pnpm --package "@tauri-apps/cli@$TAURI_CLI_VERSION" --package "$native" dlx tauri signer sign "$PAYLOAD" >/dev/null
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+(
+  cd "$REPO_ROOT"
+  pnpm exec tauri signer sign "$PAYLOAD" >/dev/null
+)
 tr -d '\r\n' < "$PAYLOAD.sig"

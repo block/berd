@@ -11,6 +11,8 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { parse as parseYaml } from "yaml";
 
 const repo = resolve(import.meta.dirname, "../../..");
 const tempDirs = [];
@@ -476,67 +478,231 @@ describe("build-macos release resource staging", () => {
 });
 
 describe("generate-latest-json", () => {
-  it("generates an architecture-qualified manifest", async () => {
+  it("generates one manifest for macOS, Windows, and Linux", async () => {
     const dir = await tempDir();
-    const signature = join(dir, "archive.sig");
-    await writeFile(signature, "signed-value\n");
+    const macSignature = join(dir, "mac.sig");
+    const windowsSignature = join(dir, "windows.sig");
+    const linuxSignature = join(dir, "linux.sig");
+    await writeFile(macSignature, "mac-signature\n");
+    await writeFile(windowsSignature, "windows-signature\n");
+    await writeFile(linuxSignature, "linux-signature\n");
     const result = run("scripts/release/generate-latest-json.sh", [
       "1.2.3",
+      "Berd v1.2.3",
       "darwin-aarch64",
-      signature,
-      "https://github.com/squareup/berd/releases/download/berd-desktop-latest/Berd_1.2.3_darwin-aarch64.app.tar.gz",
+      macSignature,
+      "https://updates.example.test/Berd_1.2.3_darwin-aarch64.app.tar.gz",
+      "windows-x86_64",
+      windowsSignature,
+      "https://updates.example.test/Berd_1.2.3_windows-x86_64-setup.nsis.zip",
+      "linux-x86_64",
+      linuxSignature,
+      "https://updates.example.test/Berd_1.2.3_linux-x86_64.AppImage.tar.gz",
     ]);
     expect(result.status, result.stderr).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
       version: "1.2.3",
       platforms: {
-        "darwin-aarch64": {
-          signature: "signed-value",
-          url: "https://github.com/squareup/berd/releases/download/berd-desktop-latest/Berd_1.2.3_darwin-aarch64.app.tar.gz",
-        },
+        "darwin-aarch64": { signature: "mac-signature" },
+        "windows-x86_64": { signature: "windows-signature" },
+        "linux-x86_64": { signature: "linux-signature" },
       },
     });
-    expect(JSON.parse(result.stdout)).not.toHaveProperty("compatibility");
   });
 
-  it("adds complete compatibility metadata for a channel feed", async () => {
+  it("adds per-platform compatibility metadata without corrupting JSON env values", async () => {
     const dir = await tempDir();
-    const signature = join(dir, "archive.sig");
-    await writeFile(signature, "signed-value\n");
+    const macSignature = join(dir, "mac.sig");
+    const windowsSignature = join(dir, "windows.sig");
+    await writeFile(macSignature, "mac-signature\n");
+    await writeFile(windowsSignature, "windows-signature\n");
     const result = run(
       "scripts/release/generate-latest-json.sh",
       [
         "1.2.3",
+        "Berd v1.2.3",
         "darwin-aarch64",
-        signature,
-        "https://updates.example.test/beta/Berd_1.2.3_darwin-aarch64.app.tar.gz",
+        macSignature,
+        "https://updates.example.test/Berd_1.2.3_darwin-aarch64.app.tar.gz",
+        "windows-x86_64",
+        windowsSignature,
+        "https://updates.example.test/Berd_1.2.3_windows-x86_64-setup.nsis.zip",
       ],
       {
-        BERD_RELEASE_CHANNEL_ID: "beta",
-        BERD_ARTIFACT_SHA256: "a".repeat(64),
-        BERD_COMPATIBILITY_SIGNATURE: "signed-descriptor",
+        BERD_RELEASE_CHANNEL_ID: "main",
         BERD_STORE_CONTRACT_VERSION: "1",
-        BERD_WRITES_DATA_EPOCH: "2",
+        BERD_WRITES_DATA_EPOCH: "1",
         BERD_MIN_READABLE_DATA_EPOCH: "1",
-        BERD_MAX_READABLE_DATA_EPOCH: "2",
+        BERD_MAX_READABLE_DATA_EPOCH: "1",
+        BERD_ARTIFACT_SHA256_BY_PLATFORM: JSON.stringify({
+          "darwin-aarch64": "a".repeat(64),
+          "windows-x86_64": "b".repeat(64),
+        }),
+        BERD_COMPATIBILITY_SIGNATURES_BY_PLATFORM: JSON.stringify({
+          "darwin-aarch64": "mac-compatibility",
+          "windows-x86_64": "windows-compatibility",
+        }),
       },
     );
     expect(result.status, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
+    const manifest = JSON.parse(result.stdout);
+    expect(manifest).toMatchObject({
       signedCompatibility: {
-        schemaVersion: 1,
-        channelId: "beta",
-        version: "1.2.3",
         artifactSha256: "a".repeat(64),
-        compatibility: {
-          storeContractVersion: 1,
-          writesDataEpoch: 2,
-          minReadableDataEpoch: 1,
-          maxReadableDataEpoch: 2,
+        signature: "mac-compatibility",
+      },
+      signedCompatibilityPlatforms: {
+        "darwin-aarch64": {
+          artifactSha256: "a".repeat(64),
+          signature: "mac-compatibility",
         },
-        signature: "signed-descriptor",
+        "windows-x86_64": {
+          artifactSha256: "b".repeat(64),
+          signature: "windows-compatibility",
+        },
       },
     });
+    // This is the metadata lookup contract used by already-installed macOS
+    // builds before signedCompatibilityPlatforms existed.
+    expect(manifest.signedCompatibility).toEqual(
+      manifest.signedCompatibilityPlatforms["darwin-aarch64"],
+    );
+  });
+
+  it("rejects ambiguous or malformed archive URLs", async () => {
+    const dir = await tempDir();
+    const signature = join(dir, "archive.sig");
+    await writeFile(signature, "signed-value\n");
+    const archive = "Berd_1.2.3_darwin-aarch64.app.tar.gz";
+    const invalidUrls = [
+      `https://user@example.test/${archive}`,
+      `https://example.test/${archive}?download=1`,
+      `https://example.test/${archive}#fragment`,
+      `https:///${archive}`,
+      `https://example.test/ ${archive}`,
+      `https://example.test/prefix-${archive}`,
+    ];
+    for (const url of invalidUrls) {
+      const result = run("scripts/release/generate-latest-json.sh", [
+        "1.2.3",
+        "Berd v1.2.3",
+        "darwin-aarch64",
+        signature,
+        url,
+      ]);
+      expect(result.status, url).not.toBe(0);
+      expect(result.stderr).toContain("canonical HTTPS");
+    }
+  });
+
+  it("rejects duplicate updater platforms", async () => {
+    const dir = await tempDir();
+    const signature = join(dir, "archive.sig");
+    await writeFile(signature, "signed-value\n");
+    const args = [
+      "1.2.3",
+      "Berd v1.2.3",
+      "darwin-aarch64",
+      signature,
+      "https://updates.example.test/Berd_1.2.3_darwin-aarch64.app.tar.gz",
+    ];
+    const result = run("scripts/release/generate-latest-json.sh", [
+      ...args,
+      ...args.slice(2),
+    ]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("duplicate updater platform");
+  });
+});
+
+describe("desktop release workflow platform gate", () => {
+  it("does not interpolate GitHub expressions into executable shell", async () => {
+    const workflow = parseYaml(
+      await readFile(join(repo, ".github/workflows/release.yml"), "utf8"),
+    );
+    const runSteps = Object.entries(workflow.jobs).flatMap(([jobName, job]) =>
+      (job.steps ?? [])
+        .filter((step) => typeof step.run === "string")
+        .map((step) => ({ jobName, stepName: step.name, run: step.run })),
+    );
+    const interpolatedSteps = runSteps.filter(({ run }) => run.includes("${{"));
+
+    expect(interpolatedSteps).toEqual([]);
+  });
+
+  it("requires macOS, Windows, and Linux staging before promotion", async () => {
+    const workflow = await readFile(
+      join(repo, ".github/workflows/release.yml"),
+      "utf8",
+    );
+    expect(workflow).toContain(
+      "needs: [setup, stage-macos, stage-windows, stage-linux]",
+    );
+    expect(workflow).toContain("needs.stage-windows.result == 'success'");
+    expect(workflow).toContain("needs.stage-linux.result == 'success'");
+    expect(workflow).toContain(
+      "for PLATFORM in darwin-aarch64 windows-x86_64 linux-x86_64",
+    );
+    expect(workflow).toContain("Package and sign Windows updater archive");
+    expect(workflow).toContain("Package and sign Linux updater archive");
+    expect(workflow).toContain("actions/attest-build-provenance@");
+    const parsedWorkflow = parseYaml(workflow);
+    const attestationSteps = Object.values(parsedWorkflow.jobs).flatMap((job) =>
+      (job.steps ?? []).filter((step) =>
+        step.uses?.startsWith("actions/attest-build-provenance@"),
+      ),
+    );
+    expect(attestationSteps).toHaveLength(3);
+    const expressionStart = "$" + "{{";
+    const expectedSubjectPath =
+      `${expressionStart} runner.temp }}/release-assets/Berd_` +
+      `${expressionStart} env.VERSION }}_${expressionStart} env.PLATFORM }}.provenance.json`;
+    expect(attestationSteps.map((step) => step.with["subject-path"])).toEqual(
+      Array(3).fill(expectedSubjectPath),
+    );
+    expect(workflow).not.toContain(`${expressionStart} env.asset_dir }}`);
+    expect(workflow).toContain("release delete-asset");
+    expect(workflow).toContain("group: berd-release-$" + "{{ github.ref }}");
+    expect(workflow).toContain("pnpm install --frozen-lockfile");
+    expect(workflow).toContain("release_provenance_name");
+    expect(workflow.indexOf("pnpm install --frozen-lockfile")).toBeLessThan(
+      workflow.indexOf(
+        "TAURI_SIGNING_PRIVATE_KEY: $" +
+          "{{ secrets.TAURI_SIGNING_PRIVATE_KEY }}",
+      ),
+    );
+    expect(workflow).toContain("$env:BERD_APP_VERSION_OVERRIDE = $env:VERSION");
+    expect(workflow).toContain("TAURI_SIGNING_PRIVATE_KEY");
+    expect(workflow).not.toContain("Sign-WindowsReleaseArtifact.ps1");
+    expect(workflow).not.toContain("BERD_WIN_");
+    expect(workflow).not.toContain("Authenticode-sign Windows installer");
+    const promotion = await readFile(
+      join(repo, "scripts/release/github/promote-updater.sh"),
+      "utf8",
+    );
+    expect(promotion).toContain(
+      "Windows and Linux payloads lack native code signatures",
+    );
+    expect(promotion).toContain(
+      "Windows Authenticode posture: installer unsigned",
+    );
+  });
+
+  it("keeps unsigned desktop build artifacts out of releases", async () => {
+    const workflow = await readFile(
+      join(repo, ".github/workflows/unsigned-desktop-build.yml"),
+      "utf8",
+    );
+    expect(workflow).toContain("workflow_dispatch:");
+    expect(workflow).toContain("actions/upload-artifact@");
+    expect(workflow).toContain("Import-Module");
+    expect(workflow).toContain("Get-TauriCargoTargetDir");
+    expect(workflow).toContain("Get-ChildItem -LiteralPath $nsisDir");
+    expect(workflow).not.toContain(
+      "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis",
+    );
+    expect(workflow).not.toContain("gh release");
+    expect(workflow).not.toContain("latest.json");
   });
 });
 
@@ -599,6 +765,186 @@ set -euo pipefail
     expect(await readFile(`${archive}.sha256`, "utf8")).toContain(
       "Berd_1.2.3_darwin-aarch64.app.tar.gz",
     );
+  });
+  it("packages the Linux AppImage as a signed single-entry updater archive", async () => {
+    const dir = await tempDir();
+    const appimage = join(dir, "built.AppImage");
+    const output = join(dir, "output");
+    const fakeBin = join(dir, "bin");
+    await writeFile(appimage, "appimage-bytes", { mode: 0o755 });
+    await mkdir(fakeBin);
+    await writeFile(
+      join(fakeBin, "pnpm"),
+      `#!/usr/bin/env bash
+set -euo pipefail
+archive="\${@: -1}"
+cat > "$archive.sig" <<'SIG'
+untrusted comment: signature from minisign secret key
+fake-signature
+SIG
+`,
+      { mode: 0o755 },
+    );
+    await writeFile(
+      join(fakeBin, "cargo"),
+      `#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == *"updater-signature-verifier"* ]]
+`,
+      { mode: 0o755 },
+    );
+
+    const result = run(
+      "scripts/release/package-signed-updater-linux.sh",
+      ["--appimage", appimage, "--version", "1.2.3", "--output-dir", output],
+      {
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        TAURI_SIGNING_PRIVATE_KEY: "test-key",
+        TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "test-password",
+        BERD_UPDATER_PUBLIC_KEY: "test-public-key",
+      },
+    );
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    const archive = join(output, "Berd_1.2.3_linux-x86_64.AppImage.tar.gz");
+    expect(run("tar", ["-tzf", archive]).stdout.trim()).toBe(
+      "Berd_1.2.3_linux-x86_64.AppImage",
+    );
+    expect(await readFile(`${archive}.sig`, "utf8")).toContain(
+      "signature from minisign secret key",
+    );
+    expect(await readFile(`${archive}.sha256`, "utf8")).toContain(
+      "Berd_1.2.3_linux-x86_64.AppImage.tar.gz",
+    );
+  });
+
+  it("uses only the frozen repository-local Tauri signer", async () => {
+    for (const name of [
+      "package-signed-updater.sh",
+      "package-signed-updater-windows.sh",
+      "package-signed-updater-linux.sh",
+      "sign-compatibility-descriptor.sh",
+    ]) {
+      const script = await readFile(
+        join(repo, "scripts/release", name),
+        "utf8",
+      );
+      expect(script, name).toContain("pnpm exec tauri signer sign");
+      expect(script, name).not.toMatch(/\bpnpm\b[^\n]*\bdlx\b/);
+      expect(script, name).not.toContain("pnpm --package");
+    }
+  });
+});
+
+describe("validate-manifest-promotion", () => {
+  async function manifests(
+    candidateVersion,
+    currentVersion,
+    mutateCandidate = {},
+  ) {
+    const dir = await tempDir();
+    const base = {
+      notes: "release",
+      pub_date: "2026-01-01T00:00:00Z",
+      platforms: {
+        "darwin-aarch64": {
+          url: "https://example.test/archive",
+          signature: "sig",
+        },
+      },
+    };
+    const candidate = join(dir, "candidate.json");
+    const current = join(dir, "current.json");
+    await writeFile(
+      candidate,
+      `${JSON.stringify({ ...base, version: candidateVersion, ...mutateCandidate }, null, 2)}\n`,
+    );
+    await writeFile(
+      current,
+      `${JSON.stringify({ ...base, version: currentVersion }, null, 2)}\n`,
+    );
+    return { candidate, current };
+  }
+
+  it("accepts a newer SemVer including prerelease ordering", async () => {
+    const f = await manifests("1.2.3", "1.2.3-rc.2");
+    expect(
+      run("node", [
+        "scripts/release/validate-manifest-promotion.mjs",
+        f.candidate,
+        f.current,
+      ]).status,
+    ).toBe(0);
+  });
+
+  it("rejects a rolling-feed downgrade", async () => {
+    const f = await manifests("1.2.2", "1.2.3");
+    const result = run("node", [
+      "scripts/release/validate-manifest-promotion.mjs",
+      f.candidate,
+      f.current,
+    ]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("refusing updater downgrade");
+  });
+
+  it("orders SemVer without numeric precision or locale dependence", async () => {
+    const hugeCore = await manifests(
+      "9007199254740993.0.0",
+      "9007199254740992.0.0",
+    );
+    expect(
+      run("node", [
+        "scripts/release/validate-manifest-promotion.mjs",
+        hugeCore.candidate,
+        hugeCore.current,
+      ]).status,
+    ).toBe(0);
+
+    const hugePrerelease = await manifests(
+      "1.2.3-9007199254740992",
+      "1.2.3-9007199254740993",
+    );
+    expect(
+      run("node", [
+        "scripts/release/validate-manifest-promotion.mjs",
+        hugePrerelease.candidate,
+        hugePrerelease.current,
+      ]).status,
+    ).not.toBe(0);
+
+    const asciiOrder = await manifests("1.2.3-a", "1.2.3-B");
+    expect(
+      run("node", [
+        "scripts/release/validate-manifest-promotion.mjs",
+        asciiOrder.candidate,
+        asciiOrder.current,
+      ]).status,
+    ).toBe(0);
+  });
+
+  it("accepts the same version only with identical release data", async () => {
+    const idempotent = await manifests("1.2.3", "1.2.3", {
+      pub_date: "2026-02-01T00:00:00Z",
+    });
+    expect(
+      run("node", [
+        "scripts/release/validate-manifest-promotion.mjs",
+        idempotent.candidate,
+        idempotent.current,
+      ]).status,
+    ).toBe(0);
+    expect(await readFile(idempotent.candidate, "utf8")).toBe(
+      await readFile(idempotent.current, "utf8"),
+    );
+
+    const changed = await manifests("1.2.3", "1.2.3", { notes: "changed" });
+    const result = run("node", [
+      "scripts/release/validate-manifest-promotion.mjs",
+      changed.candidate,
+      changed.current,
+    ]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("non-idempotent replacement");
   });
 });
 
@@ -766,7 +1112,31 @@ describe("verify-versioned-release", () => {
       "Berd_1.2.3_darwin-aarch64.app.tar.gz",
       "Berd_1.2.3_darwin-aarch64.app.tar.gz.sig",
       "Berd_1.2.3_darwin-aarch64.app.tar.gz.sha256",
+      "Berd_1.2.3_darwin-aarch64.provenance.json",
     ].filter((name) => name !== missing);
+    const artifactContents = Object.fromEntries(
+      names
+        .filter((name) => !name.endsWith(".provenance.json"))
+        .map((name) => [name, `artifact:${name}`]),
+    );
+    const provenance = JSON.stringify({
+      schemaVersion: 1,
+      sourceSha: tagSha,
+      version: "1.2.3",
+      platform: "darwin-aarch64",
+      artifacts: Object.fromEntries(
+        Object.entries(artifactContents).map(([name, contents]) => [
+          name,
+          createHash("sha256").update(contents).digest("hex"),
+        ]),
+      ),
+    });
+    const artifactContentsBase64 = Buffer.from(
+      JSON.stringify({
+        ...artifactContents,
+        "Berd_1.2.3_darwin-aarch64.provenance.json": provenance,
+      }),
+    ).toString("base64");
     const release = join(dir, "release.json");
     await writeFile(release, "placeholder");
     const releaseJson = JSON.stringify({
@@ -783,6 +1153,20 @@ set -euo pipefail
 printf '%s\\n' "$*" >> "$GH_CALLS"
 if [[ "$1 $2" == "release view" ]]; then
   printf %s "$RELEASE_JSON_BASE64" | base64 --decode
+elif [[ "$1 $2" == "release download" ]]; then
+  output=""
+  pattern=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --output) output="$2"; shift 2 ;;
+      --pattern) pattern="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  printf %s "$ARTIFACT_CONTENTS_BASE64" | base64 --decode | jq -jr --arg name "$pattern" '.[$name]' > "$output"
+elif [[ "$1 $2" == "attestation verify" ]]; then
+  [[ "$*" == *"--source-digest $TAG_SHA"* ]]
+  [[ "$*" == *"--source-ref refs/tags/v1.2.3"* ]]
 elif [[ "$1" == "api" && "$2" == */git/ref/tags/* ]]; then
   case "$*" in
     *object.type*) printf commit ;;
@@ -794,7 +1178,14 @@ fi
 `,
       { mode: 0o755 },
     );
-    return { bin, release, releaseJsonBase64, tagSha, calls };
+    return {
+      bin,
+      release,
+      releaseJsonBase64,
+      artifactContentsBase64,
+      tagSha,
+      calls,
+    };
   }
 
   function verify(f) {
@@ -805,6 +1196,7 @@ fi
         PATH: `${f.bin}:${process.env.PATH}`,
         RELEASE_JSON: f.release,
         RELEASE_JSON_BASE64: f.releaseJsonBase64,
+        ARTIFACT_CONTENTS_BASE64: f.artifactContentsBase64,
         TAG_SHA: f.tagSha,
         GH_CALLS: f.calls,
         GH_PAGER: "/bin/cat",
@@ -834,6 +1226,21 @@ fi
     expect(result.stderr).toContain("exactly one non-empty asset");
   });
 
+  it("rejects old release bytes renamed under the requested version", async () => {
+    const f = await fixture();
+    const contents = JSON.parse(
+      Buffer.from(f.artifactContentsBase64, "base64").toString("utf8"),
+    );
+    contents["Berd_1.2.3_darwin-aarch64.app.tar.gz"] =
+      "validly-signed-archive-from-1.2.2";
+    f.artifactContentsBase64 = Buffer.from(JSON.stringify(contents)).toString(
+      "base64",
+    );
+    const result = verify(f);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("provenance digest mismatch");
+  });
+
   it("rejects a release whose remote tag moved", async () => {
     const result = verify(await fixture({ tagSha: "b".repeat(40) }));
     expect(result.status).not.toBe(0);
@@ -841,10 +1248,14 @@ fi
   });
 });
 
-describe("promote-public-updater", () => {
+describe("promote-updater", () => {
   async function fixture({
-    publicDigestMatches = true,
+    publishedDigestMatches = true,
     signatureValid = true,
+    currentVersion = null,
+    recheckedVersion = currentVersion,
+    preflightStatus = currentVersion ? 200 : 404,
+    recheckStatus = recheckedVersion ? 200 : 404,
   } = {}) {
     const dir = await tempDir();
     const bin = join(dir, "bin");
@@ -895,31 +1306,56 @@ set -euo pipefail
 `,
       { mode: 0o755 },
     );
+    const currentManifest = join(dir, "current-manifest.json");
+    const recheckedManifest = join(dir, "rechecked-manifest.json");
+    if (currentVersion) {
+      await writeFile(
+        currentManifest,
+        JSON.stringify({ version: currentVersion }),
+      );
+      await writeFile(
+        recheckedManifest,
+        JSON.stringify({ version: recheckedVersion }),
+      );
+    }
     await writeFile(
       join(bin, "curl"),
       `#!/usr/bin/env bash
 set -euo pipefail
 output=""
+write_out=false
 while [[ $# -gt 0 ]]; do
-  case "$1" in -o) output="$2"; shift 2 ;; *) shift ;; esac
+  case "$1" in
+    -o) output="$2"; shift 2 ;;
+    --write-out) write_out=true; shift 2 ;;
+    *) shift ;;
+  esac
 done
-if [[ "$output" == *published-latest.json ]]; then
+status=200
+if [[ "$output" == *current-latest.json ]]; then
+  status="$PREFLIGHT_STATUS"
+  if [[ "$status" == 200 ]]; then cp "$REMOTE_CURRENT_MANIFEST" "$output"; fi
+elif [[ "$output" == *rechecked-latest.json ]]; then
+  status="$RECHECK_STATUS"
+  if [[ "$status" == 200 ]]; then cp "$REMOTE_RECHECKED_MANIFEST" "$output"; fi
+elif [[ "$output" == *published-latest.json ]]; then
   cp "$PUBLISHED_MANIFEST" "$output"
-elif [[ "$PUBLIC_DIGEST_MATCHES" == true ]]; then
+elif [[ "$PUBLISHED_DIGEST_MATCHES" == true ]]; then
   cp "$STAGED_ARCHIVE" "$output"
 else
   printf tampered > "$output"
 fi
+[[ "$write_out" == false ]] || printf %s "$status"
 `,
       { mode: 0o755 },
     );
-    const channelConfig = join(dir, "public-channel.json");
+    const channelConfig = join(dir, "release-channel.json");
     await writeFile(
       channelConfig,
       JSON.stringify({
         repository: "squareup/berd",
         rollingTag: "berd-desktop-latest",
-        platform: "darwin-aarch64",
+        platforms: ["darwin-aarch64"],
       }),
     );
     return {
@@ -928,33 +1364,41 @@ fi
       archive,
       calls,
       channelConfig,
-      publicDigestMatches,
+      publishedDigestMatches,
       signatureValid,
+      preflightStatus,
+      recheckStatus,
       publishedManifest: join(dir, "published-latest.json"),
+      currentManifest,
+      recheckedManifest,
     };
   }
 
   function promote(f) {
     return run(
-      "scripts/release/github/promote-public-updater.sh",
+      "scripts/release/github/promote-updater.sh",
       ["v1.2.3", "a".repeat(40), join(f.dir, "summary.md")],
       {
         PATH: `${f.bin}:${process.env.PATH}`,
         GH_TOKEN: "test-token",
-        BERD_PUBLIC_UPDATER_PUBLIC_KEY: "test-public-key",
+        BERD_UPDATER_PUBLIC_KEY: "test-public-key",
         GITHUB_REPOSITORY: "squareup/berd",
         STAGED_ARCHIVE: f.archive,
         CALLS: f.calls,
         PUBLISHED_MANIFEST: f.publishedManifest,
-        PUBLIC_DIGEST_MATCHES: String(f.publicDigestMatches),
+        REMOTE_CURRENT_MANIFEST: f.currentManifest,
+        REMOTE_RECHECKED_MANIFEST: f.recheckedManifest,
+        PUBLISHED_DIGEST_MATCHES: String(f.publishedDigestMatches),
         SIGNATURE_VALID: String(f.signatureValid),
+        PREFLIGHT_STATUS: String(f.preflightStatus),
+        RECHECK_STATUS: String(f.recheckStatus),
         BERD_PROMOTION_RETRY_DELAY_SECONDS: "0",
-        BERD_PUBLIC_CHANNEL_CONFIG: f.channelConfig,
+        BERD_RELEASE_CHANNEL_CONFIG: f.channelConfig,
       },
     );
   }
 
-  it("uploads latest.json only after public archive verification", async () => {
+  it("uploads latest.json only after published archive verification", async () => {
     const f = await fixture();
     const result = promote(f);
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -963,6 +1407,47 @@ fi
     expect(
       JSON.parse(await readFile(f.publishedManifest, "utf8")).version,
     ).toBe("1.2.3");
+  });
+
+  it("rejects downgrade and stale rolling-manifest state", async () => {
+    const downgrade = await fixture({ currentVersion: "1.2.4" });
+    const downgradeResult = promote(downgrade);
+    expect(downgradeResult.status).not.toBe(0);
+    expect(downgradeResult.stderr).toContain("refusing updater downgrade");
+    expect(await readFile(downgrade.calls, "utf8")).not.toContain(
+      "release upload",
+    );
+
+    const stale = await fixture({
+      currentVersion: "1.2.2",
+      recheckedVersion: "1.2.2-hotfix.1",
+    });
+    const staleResult = promote(stale);
+    expect(staleResult.status).not.toBe(0);
+    expect(staleResult.stderr).toContain(
+      "updater manifest changed during promotion",
+    );
+    const staleCalls = (await readFile(stale.calls, "utf8")).split("\n");
+    expect(
+      staleCalls.filter((call) => call.includes("latest.json")),
+    ).toHaveLength(0);
+  });
+
+  it("fails closed on manifest server errors before the final feed upload", async () => {
+    const preflightFailure = await fixture({ preflightStatus: 503 });
+    const preflightResult = promote(preflightFailure);
+    expect(preflightResult.status).not.toBe(0);
+    expect(preflightResult.stderr).toContain("HTTP 503 during preflight");
+    expect(await readFile(preflightFailure.calls, "utf8")).not.toContain(
+      "latest.json",
+    );
+
+    const recheckFailure = await fixture({ recheckStatus: 503 });
+    const recheckResult = promote(recheckFailure);
+    expect(recheckResult.status).not.toBe(0);
+    expect(recheckResult.stderr).toContain("HTTP 503 during recheck");
+    const calls = await readFile(recheckFailure.calls, "utf8");
+    expect(calls).not.toContain("latest.json");
   });
 
   it("rejects an invalid updater signature before mutating the rolling release", async () => {
@@ -974,7 +1459,7 @@ fi
   });
 
   it("leaves latest.json untouched when anonymous bytes do not match", async () => {
-    const f = await fixture({ publicDigestMatches: false });
+    const f = await fixture({ publishedDigestMatches: false });
     const result = promote(f);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("not publicly accessible");
@@ -984,7 +1469,7 @@ fi
 });
 
 describe("Block feature gate propagation", () => {
-  it("maps every public-off default to the fail-closed Cargo posture", () => {
+  it("maps every updater-off default to the fail-closed Cargo posture", () => {
     const result = run("bash", ["scripts/block-feature-gates.sh", "berdctl"]);
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe("berdctl,no-voice-dictation");
