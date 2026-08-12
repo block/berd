@@ -303,15 +303,6 @@ export function AvatarCollectionOverlay({
     return () => observer.disconnect();
   }, []);
 
-  // Ensure assets for the open collection are cached (download on demand).
-  const openCollectionRef = useRef(library.openCollection);
-  openCollectionRef.current = library.openCollection;
-  useEffect(() => {
-    if (collection) {
-      void openCollectionRef.current(collection);
-    }
-  }, [collection]);
-
   // Item size tracks window width at the Figma reference's upper proportion
   // (~15%, "nice and big"), clamped so small windows stay readable and huge
   // ones stay calm. The pan margin extends the layout canvas beyond the
@@ -344,46 +335,6 @@ export function AvatarCollectionOverlay({
       },
     );
   }, [collection, itemSize, panMargin, tileSize]);
-
-  // The collections level shows each collection's cover avatar, but covers
-  // only exist locally once their collection has been ensured — on a fresh
-  // cache nothing ever kicked that off, so the cards spun forever. Ensure
-  // every collection while the level is actually visible. openCollection
-  // dedupes (cached / already-downloading collections return immediately), and
-  // covers fill in as each collection's assets land.
-  //
-  // Deliberate tradeoff: this ensures each collection's full asset set, not
-  // just the cover — a cold cache downloads the whole library while the user
-  // looks at the cards. Collections are small enough that instant drill-in
-  // afterward is worth the up-front bandwidth; if the library outgrows that,
-  // switch to a cover-only warm (the backend's warm_avatar_refs already
-  // takes specific refs) and keep full ensures on drill-in.
-  //
-  // Two guards keep the warm honest:
-  // - Wait for the disk-cache restore (`cacheChecking`) so already-cached
-  //   collections are visible to openCollection's short-circuit; warming
-  //   during the check would re-ensure collections that are already on disk.
-  // - Skip collections that already failed: openCollection deliberately
-  //   bypasses its cached short-circuit for those (so the explicit Retry
-  //   works), which here would silently re-download on every visit to the
-  //   level. Failures wait for the user's Retry.
-  useEffect(() => {
-    if (collection || !hasCollectionsLevel || library.cacheChecking) {
-      return;
-    }
-    for (const entry of library.catalog?.collections ?? []) {
-      if (library.failedCollectionIds.has(entry.id)) {
-        continue;
-      }
-      void openCollectionRef.current(entry);
-    }
-  }, [
-    collection,
-    hasCollectionsLevel,
-    library.cacheChecking,
-    library.catalog,
-    library.failedCollectionIds,
-  ]);
 
   // Empty-canvas clicks (anything that is not a tile, the collections row,
   // or a chrome control) are handled in onCanvasClick: light-dismiss on the
@@ -470,9 +421,6 @@ export function AvatarCollectionOverlay({
         catalogVersion,
         entry.id,
       );
-      const downloading = library.downloadingCollectionIds.has(
-        entry.collectionId,
-      );
       return (
         <div
           className={cn(
@@ -525,8 +473,6 @@ export function AvatarCollectionOverlay({
                 onError={() => {}}
                 onReady={() => markReady(entry.id)}
               />
-            ) : downloading ? (
-              <Spinner className="size-5 text-muted-foreground" />
             ) : (
               <span className="max-w-full truncate px-2 text-xs text-muted-foreground">
                 {entry.label}
@@ -558,7 +504,6 @@ export function AvatarCollectionOverlay({
       hoveredAvatarId,
       hoverHandlers,
       library.cachedAvatarMediaById,
-      library.downloadingCollectionIds,
       markReady,
       onConfirmSelect,
       pendingAvatarId,
@@ -641,14 +586,7 @@ export function AvatarCollectionOverlay({
       ? t("editor.avatarBackToCollections")
       : t("common:actions.close");
 
-  // On the collections level the cover downloads (kicked off by the batch
-  // ensure above) can fail per-collection; without folding those in, failed
-  // covers spin forever with no error or retry affordance. The retry pill's
-  // retryCatalog() path reloads the catalog, which clears the failed set and
-  // re-triggers the batch ensure.
-  const collectionFailed = collection
-    ? library.failedCollectionIds.has(collection.id)
-    : library.error || library.failedCollectionIds.size > 0;
+  const collectionFailed = library.error || library.mediaError;
 
   return createPortal(
     // FocusScope gives this hand-rolled takeover the same focus containment
@@ -786,7 +724,8 @@ export function AvatarCollectionOverlay({
           {collectionFailed ? (
             <div className="absolute bottom-6 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-full bg-surface-glass-strong px-4 py-2 text-sm text-surface-glass-strong-fg shadow-[var(--shadow-chat)] backdrop-blur-md">
               <span>
-                {library.errorCode === "networkAccess"
+                {library.errorCode === "networkAccess" ||
+                library.mediaErrorCode === "networkAccess"
                   ? t("editor.avatarCollectionNetworkAccess")
                   : t("avatar.loadFailed")}
               </span>
@@ -795,10 +734,10 @@ export function AvatarCollectionOverlay({
                 variant="ghost"
                 size="xs"
                 onClick={() => {
-                  if (collection) {
-                    void library.openCollection(collection);
-                  } else {
+                  if (library.error) {
                     library.retryCatalog();
+                  } else {
+                    library.retryMedia();
                   }
                 }}
               >

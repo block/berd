@@ -267,14 +267,8 @@ pub fn run() {
 
             services::berdctl_discovery::sweep_stale_discovery_files(&app_data_dir);
 
-            // Seed the bundled skills/agents from the distro bundle registered
+            // Seed bundled skills and agents from the distro bundle registered
             // above. This touches the filesystem, so it runs after the prompt.
-            //
-            // The avatar refs the seed reports come from the bundle's source
-            // files, which can differ from the installed copies when a user has
-            // edited a bundled agent's avatar; warming them keeps the bundled
-            // avatar available regardless.
-            let mut bundled_avatar_refs: Vec<String> = Vec::new();
             let e2e_agents_dir = app
                 .try_state::<services::e2e_mode::E2eMode>()
                 .map(|mode| mode.goose_agents_dir());
@@ -308,7 +302,6 @@ pub fn run() {
                             if result.seeded_count > 0 {
                                 log::info!("Seeded {} bundled agent(s)", result.seeded_count);
                             }
-                            bundled_avatar_refs = result.avatar_refs_to_warm;
                         }
                         Err(error) => log::warn!("Failed to seed bundled agents: {error}"),
                     }
@@ -318,38 +311,10 @@ pub fn run() {
             }
             app.manage(commands::global_shortcut::GlobalShortcutHandlerState::default());
 
-            // Collect avatar refs from ALL agents (bundled + user-created) so
-            // that startup warming recovers any missing avatar media, e.g. after
-            // a data migration or cache clear. This runs independently of the
-            // bundled-seed outcome above so that user-created agents' avatars are
-            // still recovered when no distro bundle is present or seeding failed.
-            {
-                let mut all_avatar_refs = bundled_avatar_refs;
-                for user_ref in
-                    bundled_agents::collect_all_agent_avatar_refs(e2e_agents_dir.as_deref())
-                {
-                    if !all_avatar_refs.contains(&user_ref) {
-                        all_avatar_refs.push(user_ref);
-                    }
-                }
-
-                if !all_avatar_refs.is_empty() {
-                    let avatars_app = app.handle().clone();
-                    tauri::async_runtime::spawn(async move {
-                        match commands::avatars::warm_avatar_refs(avatars_app, all_avatar_refs)
-                            .await
-                        {
-                            Ok(count) if count > 0 => {
-                                log::info!("Warmed {count} agent avatar(s)");
-                            }
-                            Ok(_) => {}
-                            Err(error) => {
-                                log::warn!("Failed to warm agent avatar cache: {error}");
-                            }
-                        }
-                    });
-                }
-            }
+            // Refresh the complete avatar catalog immediately, then every 12
+            // hours. Asset verification is content-addressed, so unchanged
+            // files remain local while newly published assets are downloaded.
+            commands::avatars::spawn_avatar_cache_refresh(app.handle().clone());
 
             let artifacts_app = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -455,11 +420,11 @@ pub fn run() {
             #[cfg(feature = "block-builderbot")]
             commands::auth::switch_auth_workspace,
             commands::avatars::get_avatar_library_snapshot,
+            commands::avatars::refresh_avatar_cache,
             commands::avatars::get_cached_avatar_for_ref,
             commands::avatars::get_cached_avatars_for_refs,
             commands::avatars::import_user_avatar_data_url,
             commands::avatars::delete_user_avatar,
-            commands::avatars::ensure_avatar_collection,
             commands::cache::clear_local_media_caches,
             #[cfg(feature = "block-agent-tools")]
             commands::cli::get_bb_cli_status,

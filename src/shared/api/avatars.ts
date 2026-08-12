@@ -12,10 +12,9 @@ import {
 export interface AvatarLibrarySnapshot {
   catalog: AvatarCatalog;
   cachedCollections: CachedAvatarCollection[];
-}
-
-export interface EnsuredAvatarCollection extends CachedAvatarCollection {
-  failedAssetIds: string[];
+  mediaRefreshing: boolean;
+  mediaRefreshCompleted: boolean;
+  mediaErrorCode?: AvatarLibraryErrorCode | null;
 }
 
 export type AvatarLibraryErrorCode = "networkAccess" | "unavailable";
@@ -33,6 +32,9 @@ export class AvatarLibraryError extends Error {
 interface RawAvatarLibrarySnapshot {
   catalog: unknown;
   cachedCollections: CachedAvatarCollection[];
+  mediaRefreshing: boolean;
+  mediaRefreshCompleted: boolean;
+  mediaErrorCode?: AvatarLibraryErrorCode | null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -96,6 +98,9 @@ export async function getAvatarLibrarySnapshot(): Promise<AvatarLibrarySnapshot>
   return {
     catalog: parseAvatarCatalog(snapshot.catalog),
     cachedCollections: snapshot.cachedCollections,
+    mediaRefreshing: snapshot.mediaRefreshing,
+    mediaRefreshCompleted: snapshot.mediaRefreshCompleted,
+    mediaErrorCode: snapshot.mediaErrorCode,
   };
 }
 
@@ -103,30 +108,18 @@ export async function getAvatarCatalog(): Promise<AvatarCatalog> {
   return (await getAvatarLibrarySnapshot()).catalog;
 }
 
+export async function refreshAvatarCache(): Promise<void> {
+  try {
+    await invoke("refresh_avatar_cache");
+  } catch (error) {
+    throw normalizeAvatarLibraryError(error);
+  }
+}
+
 export async function getCachedAvatarCollections(_options?: {
   catalog?: AvatarCatalog;
 }): Promise<CachedAvatarCollection[]> {
   return (await getAvatarLibrarySnapshot()).cachedCollections;
-}
-
-export async function ensureAvatarCollection({
-  catalogVersion,
-  collectionId,
-}: {
-  catalogVersion?: string;
-  collectionId: string;
-}): Promise<EnsuredAvatarCollection> {
-  const resolvedCatalogVersion =
-    catalogVersion ?? (await getAvatarLibrarySnapshot()).catalog.catalogVersion;
-
-  try {
-    return await invoke("ensure_avatar_collection", {
-      catalogVersion: resolvedCatalogVersion,
-      collectionId,
-    });
-  } catch (error) {
-    throw normalizeAvatarLibraryError(error);
-  }
 }
 
 type CachedAvatarBatchResult = Record<string, CachedAvatar | null | undefined>;

@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, Download, RefreshCw } from "lucide-react";
+import { ArrowLeft, Check, RefreshCw } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -78,12 +78,8 @@ export function AvatarLibraryPicker({
     library.errorCode === "networkAccess"
       ? t("editor.avatarCatalogNetworkAccess")
       : t("editor.avatarCatalogUnavailable");
-  const collectionErrorText =
-    library.errorCode === "networkAccess"
-      ? t("editor.avatarCollectionNetworkAccess")
-      : t("avatar.loadFailed");
   const catalogVersion = library.catalog?.catalogVersion;
-  const { cachedAvatarMediaById, downloadingCollectionIds } = library;
+  const { cachedAvatarMediaById } = library;
 
   const renderAvatarTile = useCallback(
     (entry: AvatarCatalogEntry) => {
@@ -98,9 +94,6 @@ export function AvatarLibraryPicker({
       const fallbackMediaType = fallbackVariant
         ? mediaTypeFromMimeType(fallbackVariant.mimeType)
         : "image";
-      const collectionDownloading = downloadingCollectionIds.has(
-        entry.collectionId,
-      );
       const selectable = Boolean(cachedMedia) && !disabled;
 
       return (
@@ -130,11 +123,6 @@ export function AvatarLibraryPicker({
               className="max-h-full max-w-full object-contain"
               onError={onPreviewError}
             />
-          ) : collectionDownloading ? (
-            <span className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
-              <Spinner className="size-4" />
-              {t("editor.avatarDownloading")}
-            </span>
           ) : (
             <span
               className={cn(
@@ -156,12 +144,10 @@ export function AvatarLibraryPicker({
     [
       cachedAvatarMediaById,
       catalogVersion,
-      downloadingCollectionIds,
       disabled,
       onPreviewError,
       onSelectAvatar,
       selectedAvatarRef,
-      t,
     ],
   );
 
@@ -179,27 +165,6 @@ export function AvatarLibraryPicker({
         catalogVersion,
         cover.id,
       );
-      const collectionCached = library.isCollectionCached(collection);
-      const collectionDownloading = library.downloadingCollectionIds.has(
-        collection.id,
-      );
-      const collectionFailed = library.failedCollectionIds.has(collection.id);
-      const statusText = collectionDownloading
-        ? t("editor.avatarDownloading")
-        : collectionFailed
-          ? t("editor.avatarRetry")
-          : collectionCached
-            ? t("editor.avatarDownloaded")
-            : library.cacheChecking
-              ? t("editor.avatarLoading")
-              : t("editor.avatarDownloadCollection", {
-                  count: collection.avatarIds.length,
-                });
-      const StatusIcon = collectionFailed
-        ? RefreshCw
-        : collectionCached
-          ? Check
-          : Download;
 
       return (
         <button
@@ -212,10 +177,7 @@ export function AvatarLibraryPicker({
             disabled && "cursor-not-allowed opacity-60",
           )}
           disabled={disabled}
-          onClick={() => {
-            setSelectedCollectionId(collection.id);
-            void library.openCollection(collection);
-          }}
+          onClick={() => setSelectedCollectionId(collection.id)}
         >
           <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/40">
             {cachedCoverMedia ? (
@@ -236,17 +198,12 @@ export function AvatarLibraryPicker({
             <span className="truncate text-base text-foreground">
               {collection.label}
             </span>
-            {collectionCached ? null : (
-              <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground">
-                {collectionDownloading || library.cacheChecking ? (
-                  <Spinner className="size-4" />
-                ) : (
-                  <StatusIcon className="size-4" />
-                )}
-                {(collectionDownloading || collectionFailed) && (
-                  <span className="text-xs">{statusText}</span>
-                )}
-              </span>
+            {cachedCoverMedia ? (
+              <Check className="size-4 shrink-0 text-muted-foreground" />
+            ) : library.mediaError ? (
+              <RefreshCw className="size-4 shrink-0 text-muted-foreground" />
+            ) : (
+              <Spinner className="size-4 shrink-0 text-muted-foreground" />
             )}
           </span>
         </button>
@@ -259,7 +216,6 @@ export function AvatarLibraryPicker({
       library,
       onPreviewError,
       setSelectedCollectionId,
-      t,
     ],
   );
 
@@ -297,6 +253,20 @@ export function AvatarLibraryPicker({
             {t("editor.avatarRetry")}
           </Button>
         </div>
+      ) : library.mediaError ? (
+        <div className="flex items-center justify-between gap-2 rounded-sm bg-popover px-3 py-2 text-[11px] text-muted-foreground">
+          <span>{t("avatar.loadFailed")}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            disabled={library.cacheChecking}
+            onClick={library.retryMedia}
+          >
+            <RefreshCw className="size-3" />
+            {t("editor.avatarRetry")}
+          </Button>
+        </div>
       ) : null}
       {selectedCollection ? (
         <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -316,20 +286,6 @@ export function AvatarLibraryPicker({
               </p>
             </div>
           )}
-          {library.failedCollectionIds.has(selectedCollection.id) ? (
-            <div className="flex items-center justify-between gap-2 rounded-sm bg-popover px-3 py-2 text-[11px] text-muted-foreground">
-              <span>{collectionErrorText}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={() => void library.openCollection(selectedCollection)}
-              >
-                <RefreshCw className="size-3" />
-                {t("editor.avatarRetry")}
-              </Button>
-            </div>
-          ) : null}
           <div className="grid min-h-0 flex-1 grid-cols-3 gap-2 overflow-y-auto pr-1">
             {selectedCollection.avatarIds.map((avatarId) => {
               const entry = getAvatarCatalogEntry(library.catalog, avatarId);

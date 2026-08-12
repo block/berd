@@ -109,11 +109,10 @@ vi.mock("@/features/agents/hooks/useAvatarLibrary", () => ({
     cacheChecking: false,
     error: false,
     errorCode: null,
-    downloadingCollectionIds: new Set(),
-    failedCollectionIds: new Set(),
+    mediaError: false,
+    mediaErrorCode: null,
     retryCatalog: () => {},
-    openCollection: async () => {},
-    isCollectionCached: () => false,
+    retryMedia: () => {},
   }),
 }));
 

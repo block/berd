@@ -4,11 +4,12 @@ use reqwest::{StatusCode, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::future::Future;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
@@ -23,12 +24,13 @@ const USER_AVATAR_COLLECTION_ID: &str = "generated-gloopies";
 const AVATAR_CACHE_WARMED_EVENT: &str = "berd:avatar-cache-warmed";
 const LATEST_PATH: &str = "latest.json";
 const MANIFEST_FILE: &str = "manifest.json";
-const CATALOG_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+const AVATAR_REFRESH_INTERVAL: Duration = Duration::from_secs(12 * 60 * 60);
+const AVATAR_REFRESH_RETRY_BASE: Duration = Duration::from_secs(30);
+const AVATAR_REFRESH_RETRY_MAX: Duration = Duration::from_secs(30 * 60);
 const METADATA_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const METADATA_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const ASSET_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const ASSET_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
-const AVATAR_WARM_RETRY_DELAY: Duration = Duration::from_secs(5);
 const DEFAULT_DOWNLOAD_CONCURRENCY: usize = 8;
 const MAX_IMPORTED_AVATAR_BYTES: usize = 5 * 1024 * 1024;
 const MAX_IMPORTED_POSTER_BYTES: usize = 5 * 1024 * 1024;
@@ -98,6 +100,10 @@ pub struct AvatarVariant {
 pub struct AvatarLibrarySnapshot {
     pub catalog: AvatarCatalog,
     pub cached_collections: Vec<CachedAvatarCollection>,
+    pub media_refreshing: bool,
+    pub media_refresh_completed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_error_code: Option<AvatarErrorCode>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -137,6 +143,35 @@ struct AvatarCacheWarmedPayload {
     avatar_refs: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct AvatarRefreshStatus {
+    active_refreshes: usize,
+    completed: bool,
+    error_code: Option<AvatarErrorCode>,
+}
+
+impl AvatarRefreshStatus {
+    fn snapshot(self) -> (bool, bool, Option<AvatarErrorCode>) {
+        (self.active_refreshes > 0, self.completed, self.error_code)
+    }
+
+    fn complete(&mut self, result: &AvatarCommandResult<AvatarRefreshResult>) {
+        self.active_refreshes = self.active_refreshes.saturating_sub(1);
+        self.completed = true;
+        self.error_code = match result {
+            Ok(result) => result.error_code,
+            Err(error) => Some(error.code),
+        };
+    }
+}
+
+struct AvatarRefreshResult {
+    cached: usize,
+    failed: usize,
+    error_code: Option<AvatarErrorCode>,
+    avatar_refs: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AvatarCommandError {
@@ -149,6 +184,21 @@ pub struct AvatarCommandError {
 pub enum AvatarErrorCode {
     NetworkAccess,
     Unavailable,
+}
+
+fn dominant_avatar_error_code(
+    current: Option<AvatarErrorCode>,
+    candidate: Option<AvatarErrorCode>,
+) -> Option<AvatarErrorCode> {
+    match (current, candidate) {
+        (Some(AvatarErrorCode::NetworkAccess), _) | (_, Some(AvatarErrorCode::NetworkAccess)) => {
+            Some(AvatarErrorCode::NetworkAccess)
+        }
+        (Some(AvatarErrorCode::Unavailable), _) | (_, Some(AvatarErrorCode::Unavailable)) => {
+            Some(AvatarErrorCode::Unavailable)
+        }
+        (None, None) => None,
+    }
 }
 
 type AvatarCommandResult<T> = Result<T, AvatarCommandError>;
@@ -168,6 +218,13 @@ impl AvatarCommandError {
         Self {
             code: AvatarErrorCode::Unavailable,
             message: "Avatar library unavailable. Try again.".to_string(),
+        }
+    }
+
+    fn classified(code: AvatarErrorCode, raw: impl AsRef<str>) -> Self {
+        match code {
+            AvatarErrorCode::NetworkAccess => Self::network_access(raw),
+            AvatarErrorCode::Unavailable => Self::unavailable(raw),
         }
     }
 }
@@ -270,35 +327,40 @@ pub async fn get_avatar_library_snapshot(
     let catalog = {
         let _catalog_guard = catalog_lock().lock().await;
         clean_part_files(&paths)?;
-
-        match read_cached_catalog(&paths)? {
-            Some(catalog) => {
-                prune_obsolete_versions(&paths, &catalog.catalog_version)?;
-                if is_catalog_cache_stale(&paths) {
-                    let refresh_paths = paths.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let _catalog_guard = catalog_lock().lock().await;
-                        if let Err(error) = refresh_cached_catalog(&refresh_paths).await {
-                            log::warn!("Failed to refresh avatar catalog cache: {error}");
-                        }
-                    });
+        read_cached_catalog(&paths)?
+    };
+    let catalog = match catalog {
+        Some(catalog) => catalog,
+        None => {
+            // The scheduler owns stale refreshes. Snapshot reads must not launch
+            // metadata-only generations that can race a clear or full refresh.
+            // A cold-cache fetch is still required to render the library, so it
+            // joins the same whole-generation coordinator and rechecks after
+            // waiting in case another refresh populated the catalog.
+            coordinate_avatar_cache_operation(async {
+                let _catalog_guard = catalog_lock().lock().await;
+                if let Some(catalog) = read_cached_catalog(&paths)? {
+                    return Ok::<AvatarCatalog, AvatarCommandError>(catalog);
                 }
-                catalog
-            }
-            None => {
                 let catalog = refresh_cached_catalog(&paths).await?;
                 prune_obsolete_versions(&paths, &catalog.catalog_version)?;
-                catalog
-            }
+                Ok(catalog)
+            })
+            .await?
         }
     };
 
     // Reading cached collections only inspects atomically-placed files, so it
     // does not need the catalog lock.
     let cached_collections = cached_collections_for_catalog(&paths, &catalog)?;
+    let (media_refreshing, media_refresh_completed, media_error_code) =
+        avatar_refresh_status().lock().unwrap().snapshot();
     Ok(AvatarLibrarySnapshot {
         catalog,
         cached_collections,
+        media_refreshing,
+        media_refresh_completed,
+        media_error_code,
     })
 }
 
@@ -612,251 +674,186 @@ fn cached_poster_asset(
     valid_cached_asset(entry, poster, &target)
 }
 
-#[tauri::command]
-pub async fn ensure_avatar_collection(
-    app: AppHandle,
-    catalog_version: String,
-    collection_id: String,
-) -> AvatarCommandResult<CachedAvatarCollection> {
-    validate_safe_segment(&catalog_version)?;
-    let paths = avatar_cache_paths(&app)?;
+pub fn spawn_avatar_cache_refresh(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mut consecutive_failures = 0;
+        loop {
+            let delay = match tracked_avatar_cache_refresh(app.clone()).await {
+                Ok(AvatarRefreshResult {
+                    cached, failed: 0, ..
+                }) => {
+                    consecutive_failures = 0;
+                    log::info!("Avatar asset refresh completed: {cached} cached");
+                    AVATAR_REFRESH_INTERVAL
+                }
+                Ok(AvatarRefreshResult { cached, failed, .. }) => {
+                    consecutive_failures += 1;
+                    let delay = avatar_refresh_retry_delay(consecutive_failures);
+                    log::warn!(
+                        "Avatar asset refresh degraded: {cached} cached, {failed} failed; retrying in {delay:?}"
+                    );
+                    delay
+                }
+                Err(error) => {
+                    consecutive_failures += 1;
+                    let delay = avatar_refresh_retry_delay(consecutive_failures);
+                    log::warn!(
+                        "Failed to refresh avatar asset cache: {error}; retrying in {delay:?}"
+                    );
+                    delay
+                }
+            };
 
-    // Hold catalog lock only for metadata operations.
+            tokio::time::sleep(delay).await;
+        }
+    });
+}
+
+fn avatar_refresh_retry_delay(consecutive_failures: u32) -> Duration {
+    let exponent = consecutive_failures.saturating_sub(1).min(6);
+    AVATAR_REFRESH_RETRY_BASE
+        .saturating_mul(1 << exponent)
+        .min(AVATAR_REFRESH_RETRY_MAX)
+}
+
+#[tauri::command]
+pub async fn refresh_avatar_cache(app: AppHandle) -> AvatarCommandResult<()> {
+    let result = tracked_avatar_cache_refresh(app).await?;
+    if result.failed == 0 {
+        Ok(())
+    } else {
+        Err(AvatarCommandError::classified(
+            result.error_code.unwrap_or(AvatarErrorCode::Unavailable),
+            format!("{} avatar assets failed to cache", result.failed),
+        ))
+    }
+}
+
+fn avatar_refresh_status() -> &'static Mutex<AvatarRefreshStatus> {
+    static STATUS: OnceLock<Mutex<AvatarRefreshStatus>> = OnceLock::new();
+    STATUS.get_or_init(|| Mutex::new(AvatarRefreshStatus::default()))
+}
+
+/// Serializes complete cache refresh generations and cache clears.
+///
+/// The narrower catalog and download locks protect individual filesystem
+/// operations. They cannot prevent one refresh from resuming between another
+/// refresh's collections or after a clear. This coordinator owns that lifecycle
+/// boundary: a refresh holds it from metadata fetch through final pruning, and
+/// a clear holds it until both cache roots are gone.
+fn avatar_refresh_coordinator() -> &'static tokio::sync::Mutex<()> {
+    static COORDINATOR: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    COORDINATOR.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+async fn coordinate_avatar_cache_operation<T>(operation: impl Future<Output = T>) -> T {
+    let _refresh_guard = avatar_refresh_coordinator().lock().await;
+    operation.await
+}
+
+async fn tracked_avatar_cache_refresh(app: AppHandle) -> AvatarCommandResult<AvatarRefreshResult> {
+    {
+        let mut status = avatar_refresh_status().lock().unwrap();
+        status.active_refreshes += 1;
+    }
+
+    let result = coordinate_avatar_cache_operation(refresh_all_avatar_assets(&app)).await;
+    {
+        avatar_refresh_status().lock().unwrap().complete(&result);
+    }
+
+    let avatar_refs = result
+        .as_ref()
+        .map(|result| result.avatar_refs.clone())
+        .unwrap_or_default();
+    if let Err(error) = app.emit(
+        AVATAR_CACHE_WARMED_EVENT,
+        AvatarCacheWarmedPayload { avatar_refs },
+    ) {
+        log::warn!("Failed to emit avatar cache refresh event: {error}");
+    }
+    result
+}
+
+async fn refresh_all_avatar_assets(app: &AppHandle) -> AvatarCommandResult<AvatarRefreshResult> {
+    let paths = avatar_cache_paths(app)?;
     let catalog = {
         let _catalog_guard = catalog_lock().lock().await;
         clean_part_files(&paths)?;
-
-        let catalog = catalog_for_requested_version(&paths, &catalog_version).await?;
-        if catalog.catalog_version != catalog_version {
-            return Err(format!(
-                "Avatar catalog version conflict: requested {}, current {}",
-                catalog_version, catalog.catalog_version
-            )
-            .into());
-        }
-
-        // Migrate verified legacy media before deciding which assets need downloads.
+        let catalog = refresh_cached_catalog(&paths).await?;
         prepare_legacy_media(&paths, &catalog.catalog_version)?;
-        find_collection(&catalog, &collection_id)?;
         catalog
     };
 
-    // Downloads happen outside the catalog lock, using per-asset dedup.
-    let collection = find_collection(&catalog, &collection_id)?;
-    let (assets, failed_asset_ids, error_code) =
-        ensure_collection_assets(&paths, &catalog, collection, platform_avatar_format()).await?;
+    let mut downloaded = 0;
+    let mut failed = 0;
+    let mut error_code = None;
+    for collection in &catalog.collections {
+        let (assets, failed_asset_ids, collection_error_code) =
+            ensure_collection_assets(&paths, &catalog, collection, platform_avatar_format())
+                .await?;
+        downloaded += assets.len();
+        failed += failed_asset_ids.len();
+        error_code = dominant_avatar_error_code(error_code, collection_error_code);
+    }
 
-    // Brief lock for pruning.
     {
         let _catalog_guard = catalog_lock().lock().await;
         prune_obsolete_versions(&paths, &catalog.catalog_version)?;
     }
 
-    Ok(CachedAvatarCollection {
-        catalog_version: catalog.catalog_version,
-        collection_id,
-        assets,
-        failed_asset_ids,
+    let avatar_refs = catalog
+        .assets
+        .iter()
+        .map(|entry| format!("{APP_AVATAR_REF_PREFIX}{}", entry.id))
+        .collect();
+    Ok(AvatarRefreshResult {
+        cached: downloaded,
+        failed,
         error_code,
+        avatar_refs,
     })
 }
 
 pub async fn clear_avatar_cache(app: AppHandle) -> Result<(), String> {
-    // The catalog lock serializes against metadata writes and pruning. The
-    // exclusive download guard is what makes the clear wait for in-flight
-    // downloads to finish — and blocks new ones from starting — since downloads
-    // no longer hold the catalog lock. Without it, a download could place its
-    // media blob right after we wiped the cache dirs, leaving an orphan behind
-    // while the clear reported success.
-    let _catalog_guard = catalog_lock().lock().await;
-    let _download_guard = download_guard().write().await;
     let paths = avatar_cache_paths(&app)?;
-    clear_avatar_cache_paths(&paths).await
-}
-
-pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Result<usize, String> {
-    let avatar_ids = avatar_refs
-        .iter()
-        .filter_map(|avatar_ref| parse_app_avatar_ref(avatar_ref).ok())
-        .collect::<BTreeSet<_>>();
-    if avatar_ids.is_empty() {
-        return Ok(0);
-    }
-
-    let paths = avatar_cache_paths(&app)?;
-
-    // Hold catalog lock only for metadata resolution.
-    let catalog = {
-        let _catalog_guard = catalog_lock().lock().await;
-        clean_part_files(&paths)?;
-        let mut catalog = current_catalog(&paths)
-            .await
-            .map_err(|error| error.to_string())?;
-        if catalog_needs_refresh_for_avatar_ids(&catalog, &avatar_ids) {
-            match refresh_cached_catalog(&paths).await {
-                Ok(refreshed) => catalog = refreshed,
-                Err(error) => {
-                    log::warn!(
-                        "Failed to refresh avatar catalog for agent avatar warm-up: {error}"
-                    );
-                }
-            }
-        }
-        // Reuse verified legacy bytes before any network-backed warm-up.
-        prepare_legacy_media(&paths, &catalog.catalog_version)?;
-        catalog
-    };
-
-    // Downloads happen outside the catalog lock, using per-asset dedup.
-    let client = asset_http_client()?;
-    let format = platform_avatar_format();
-    let mut warmed = 0usize;
-    let mut warmed_avatar_refs = Vec::new();
-    let mut incomplete_avatar_refs = Vec::new();
-
-    for avatar_id in avatar_ids {
-        let Some(entry) = catalog.assets.iter().find(|entry| entry.id == avatar_id) else {
-            log::warn!("Agent avatar '{avatar_id}' was not found in the avatar catalog");
-            continue;
-        };
-        match ensure_avatar_media(&client, &paths, &catalog, entry, format).await {
-            Ok((_, partial_error_code)) => {
-                let avatar_ref = format!("app-avatar:{avatar_id}");
-                warmed += 1;
-                warmed_avatar_refs.push(avatar_ref.clone());
-                if partial_error_code.is_some() || entry.variants.poster.is_none() {
-                    incomplete_avatar_refs.push(avatar_ref);
-                }
-            }
-            Err(error) => log::warn!("Failed to warm agent avatar '{avatar_id}': {error}"),
-        }
-    }
-
-    if !warmed_avatar_refs.is_empty() {
-        let payload = AvatarCacheWarmedPayload {
-            avatar_refs: warmed_avatar_refs,
-        };
-        if let Err(error) = app.emit(AVATAR_CACHE_WARMED_EVENT, payload) {
-            log::warn!("Failed to emit avatar cache warm event: {error}");
-        }
-    }
-
-    if !incomplete_avatar_refs.is_empty() {
-        let retry_app = app.clone();
+    clear_avatar_cache_and_then(&paths, move || {
+        // Clearing is an explicit request to rebuild from a clean state. Do not
+        // leave recovery to the scheduler's current (potentially 12-hour) sleep.
         tauri::async_runtime::spawn(async move {
-            tokio::time::sleep(AVATAR_WARM_RETRY_DELAY).await;
-            if let Err(error) =
-                retry_incomplete_avatar_refs(retry_app, incomplete_avatar_refs).await
-            {
-                log::warn!("Failed to retry incomplete agent avatar warm-up: {error}");
+            if let Err(error) = tracked_avatar_cache_refresh(app).await {
+                log::warn!("Failed to refresh avatar asset cache after clear: {error}");
             }
         });
-    }
-
-    // Brief lock for pruning.
-    {
-        let _catalog_guard = catalog_lock().lock().await;
-        prune_obsolete_versions(&paths, &catalog.catalog_version)?;
-    }
-
-    Ok(warmed)
+    })
+    .await
 }
 
-async fn retry_incomplete_avatar_refs(
-    app: AppHandle,
-    avatar_refs: Vec<String>,
+async fn clear_avatar_cache_and_then(
+    paths: &AvatarCachePaths,
+    after_clear: impl FnOnce(),
 ) -> Result<(), String> {
-    let avatar_ids = avatar_refs
-        .iter()
-        .filter_map(|avatar_ref| parse_app_avatar_ref(avatar_ref).ok())
-        .collect::<BTreeSet<_>>();
-    if avatar_ids.is_empty() {
-        return Ok(());
-    }
-
-    let paths = avatar_cache_paths(&app)?;
-    let catalog = {
-        let _catalog_guard = catalog_lock().lock().await;
-        current_catalog(&paths)
-            .await
-            .map_err(|error| error.to_string())?
-    };
-    let client = asset_http_client()?;
-    let format = platform_avatar_format();
-    let mut warmed_avatar_refs = Vec::new();
-
-    for avatar_id in avatar_ids {
-        let Some(entry) = catalog.assets.iter().find(|entry| entry.id == avatar_id) else {
-            continue;
-        };
-        if let Ok((_, partial_error_code)) =
-            ensure_avatar_media(&client, &paths, &catalog, entry, format).await
-        {
-            if partial_error_code.is_none() && entry.variants.poster.is_some() {
-                warmed_avatar_refs.push(format!("app-avatar:{avatar_id}"));
-            }
-        }
-    }
-
-    if !warmed_avatar_refs.is_empty() {
-        let payload = AvatarCacheWarmedPayload {
-            avatar_refs: warmed_avatar_refs,
-        };
-        if let Err(error) = app.emit(AVATAR_CACHE_WARMED_EVENT, payload) {
-            log::warn!("Failed to emit avatar cache retry event: {error}");
-        }
-    }
-
+    clear_avatar_cache_paths_coordinated(paths).await?;
+    after_clear();
     Ok(())
 }
 
-fn catalog_needs_refresh_for_avatar_ids(
-    catalog: &AvatarCatalog,
-    avatar_ids: &BTreeSet<String>,
-) -> bool {
-    avatar_ids.iter().any(|avatar_id| {
-        catalog
-            .assets
-            .iter()
-            .find(|entry| &entry.id == avatar_id)
-            .is_none_or(|entry| entry.variants.poster.is_none())
+async fn clear_avatar_cache_paths_coordinated(paths: &AvatarCachePaths) -> Result<(), String> {
+    // Lock order is refresh coordinator -> catalog -> downloads everywhere.
+    // The outer guard waits for the current generation to finish and prevents
+    // queued refreshes from starting until the clear has fully removed both
+    // roots. The narrower guards preserve safety for non-refresh cache users.
+    coordinate_avatar_cache_operation(async {
+        let _catalog_guard = catalog_lock().lock().await;
+        let _download_guard = download_guard().write().await;
+        clear_avatar_cache_paths(paths).await
     })
+    .await
 }
 
 async fn clear_avatar_cache_paths(paths: &AvatarCachePaths) -> Result<(), String> {
     remove_dir_all_if_exists(&paths.meta, "avatar metadata").await?;
     remove_dir_all_if_exists(&paths.media, "avatar media").await
-}
-
-async fn current_catalog(paths: &AvatarCachePaths) -> AvatarCommandResult<AvatarCatalog> {
-    if let Some(catalog) = read_cached_catalog(paths)? {
-        if !is_catalog_cache_stale(paths) {
-            return Ok(catalog);
-        }
-    }
-
-    refresh_cached_catalog(paths).await
-}
-
-async fn catalog_for_requested_version(
-    paths: &AvatarCachePaths,
-    catalog_version: &str,
-) -> AvatarCommandResult<AvatarCatalog> {
-    match read_cached_catalog(paths)? {
-        Some(catalog) if catalog.catalog_version == catalog_version => Ok(catalog),
-        _ => current_catalog(paths).await,
-    }
-}
-
-fn find_collection<'a>(
-    catalog: &'a AvatarCatalog,
-    collection_id: &str,
-) -> Result<&'a AvatarCollection, String> {
-    catalog
-        .collections
-        .iter()
-        .find(|collection| collection.id == collection_id)
-        .ok_or_else(|| "Avatar collection not found".to_string())
 }
 
 async fn refresh_cached_catalog(paths: &AvatarCachePaths) -> AvatarCommandResult<AvatarCatalog> {
@@ -1301,18 +1298,6 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     })
 }
 
-fn is_catalog_cache_stale(paths: &AvatarCachePaths) -> bool {
-    let Ok(metadata) = fs::metadata(paths.meta.join(LATEST_PATH)) else {
-        return true;
-    };
-    let Ok(modified_at) = metadata.modified() else {
-        return true;
-    };
-    SystemTime::now()
-        .duration_since(modified_at)
-        .map_or(true, |age| age >= CATALOG_TTL)
-}
-
 async fn download_asset(
     client: &reqwest::Client,
     url: Url,
@@ -1481,23 +1466,15 @@ async fn ensure_collection_assets(
     for result in results {
         match result {
             Ok((asset, poster_error_code)) => {
-                if let Some(code) = poster_error_code {
+                if poster_error_code.is_some() {
                     failed_asset_ids.push(asset.id.clone());
-                    if code == AvatarErrorCode::NetworkAccess {
-                        error_code = Some(AvatarErrorCode::NetworkAccess);
-                    } else if error_code.is_none() {
-                        error_code = Some(AvatarErrorCode::Unavailable);
-                    }
+                    error_code = dominant_avatar_error_code(error_code, poster_error_code);
                 }
                 assets.push(asset);
             }
             Err((id, code)) => {
                 failed_asset_ids.push(id);
-                if code == AvatarErrorCode::NetworkAccess {
-                    error_code = Some(AvatarErrorCode::NetworkAccess);
-                } else if error_code.is_none() {
-                    error_code = Some(AvatarErrorCode::Unavailable);
-                }
+                error_code = dominant_avatar_error_code(error_code, Some(code));
             }
         }
     }
@@ -1528,16 +1505,24 @@ fn cached_collections_for_catalog(
     paths: &AvatarCachePaths,
     catalog: &AvatarCatalog,
 ) -> Result<Vec<CachedAvatarCollection>, String> {
+    cached_collections_for_catalog_with_format(paths, catalog, platform_avatar_format())
+}
+
+fn cached_collections_for_catalog_with_format(
+    paths: &AvatarCachePaths,
+    catalog: &AvatarCatalog,
+    format: &str,
+) -> Result<Vec<CachedAvatarCollection>, String> {
     let mut cached_collections = Vec::new();
     for collection in &catalog.collections {
-        if let Some(assets) =
-            cached_collection_assets(paths, catalog, collection, platform_avatar_format())?
-        {
+        let (assets, failed_asset_ids) =
+            cached_collection_assets(paths, catalog, collection, format)?;
+        if !assets.is_empty() {
             cached_collections.push(CachedAvatarCollection {
                 catalog_version: catalog.catalog_version.clone(),
                 collection_id: collection.id.clone(),
                 assets,
-                failed_asset_ids: Vec::new(),
+                failed_asset_ids,
                 error_code: None,
             });
         }
@@ -1550,8 +1535,9 @@ fn cached_collection_assets(
     catalog: &AvatarCatalog,
     collection: &AvatarCollection,
     format: &str,
-) -> Result<Option<Vec<CachedAvatarAsset>>, String> {
+) -> Result<(Vec<CachedAvatarAsset>, Vec<String>), String> {
     let mut assets = Vec::new();
+    let mut failed_asset_ids = Vec::new();
 
     for avatar_id in &collection.avatar_ids {
         let entry = catalog
@@ -1559,25 +1545,35 @@ fn cached_collection_assets(
             .iter()
             .find(|entry| &entry.id == avatar_id)
             .ok_or_else(|| format!("Avatar asset not found: {avatar_id}"))?;
-        let variant = variant_for_format(entry, format)?;
-        let target = media_blob_path(paths, variant)?;
-        // This runs on the lock-free snapshot read path, concurrently with
-        // downloads that hold no catalog lock. A poster-only avatar remains
-        // usable as a fallback, but does not make the collection fully cached:
-        // reopening the collection must retry its missing animation.
-        let Some(mut asset) = valid_cached_asset(entry, variant, &target)? else {
-            return Ok(None);
+        let Some(asset) = cached_avatar_asset_for_entry(paths, entry, format)? else {
+            failed_asset_ids.push(avatar_id.clone());
+            continue;
         };
-        if entry.variants.poster.is_some() {
-            let Some(poster) = cached_poster_asset(paths, entry)? else {
-                return Ok(None);
-            };
-            asset.poster_path = Some(poster.path);
-        }
         assets.push(asset);
     }
 
-    Ok(Some(assets))
+    Ok((assets, failed_asset_ids))
+}
+
+fn cached_avatar_asset_for_entry(
+    paths: &AvatarCachePaths,
+    entry: &AvatarCatalogEntry,
+    format: &str,
+) -> Result<Option<CachedAvatarAsset>, String> {
+    let poster = cached_poster_asset(paths, entry)?;
+    let variant = variant_for_format(entry, format)?;
+    let target = media_blob_path(paths, variant)?;
+    // This runs on the lock-free snapshot read path, concurrently with
+    // downloads that hold no catalog lock. Preserve whichever presentation is
+    // already valid: a video without its poster and a poster without its video
+    // are both usable while the missing counterpart retries.
+    match valid_cached_asset(entry, variant, &target)? {
+        Some(mut asset) => {
+            asset.poster_path = poster.as_ref().map(|poster| poster.path.clone());
+            Ok(Some(asset))
+        }
+        None => Ok(poster),
+    }
 }
 
 fn valid_cached_asset(
@@ -2877,19 +2873,6 @@ mod tests {
     }
 
     #[test]
-    fn refreshes_cached_catalogs_missing_requested_avatars_or_posters() {
-        let mut catalog = valid_catalog(b"avatar-bytes");
-        let requested = BTreeSet::from(["gloopy-1".to_string()]);
-        assert!(catalog_needs_refresh_for_avatar_ids(&catalog, &requested));
-
-        add_poster(&mut catalog, b"poster-bytes");
-        assert!(!catalog_needs_refresh_for_avatar_ids(&catalog, &requested));
-
-        let requested = BTreeSet::from(["gloopy-1".to_string(), "gloopy-2".to_string()]);
-        assert!(catalog_needs_refresh_for_avatar_ids(&catalog, &requested));
-    }
-
-    #[test]
     fn corrupt_cached_latest_or_manifest_is_deleted() {
         let (_dir, paths) = temp_paths();
         fs::create_dir_all(&paths.meta).unwrap();
@@ -2924,17 +2907,16 @@ mod tests {
         let (_dir, paths) = temp_paths();
         // Wrong-sized bytes at the hash-derived path are not treated as cached.
         let target = write_cached_webm(&paths, &catalog, b"avatar-bytes-plus");
-        assert!(
-            cached_collection_assets(&paths, &catalog, collection, "webm")
-                .unwrap()
-                .is_none()
-        );
+        let (assets, failed) =
+            cached_collection_assets(&paths, &catalog, collection, "webm").unwrap();
+        assert!(assets.is_empty());
+        assert_eq!(failed, vec!["gloopy-1"]);
         assert!(target.exists());
 
         let target = write_cached_webm(&paths, &catalog, bytes);
-        let assets = cached_collection_assets(&paths, &catalog, collection, "webm")
-            .unwrap()
-            .unwrap();
+        let (assets, failed) =
+            cached_collection_assets(&paths, &catalog, collection, "webm").unwrap();
+        assert!(failed.is_empty());
         assert_eq!(assets[0].path, target.to_string_lossy());
         assert!(Path::new(&assets[0].path).starts_with(&paths.media));
     }
@@ -2949,21 +2931,20 @@ mod tests {
         let (_dir, paths) = temp_paths();
         write_cached_webm(&paths, &catalog, video_bytes);
 
-        assert!(
-            cached_collection_assets(&paths, &catalog, collection, "webm")
-                .unwrap()
-                .is_none(),
-            "a video-only legacy cache must reopen the collection to fetch its poster",
-        );
+        let (assets, failed) =
+            cached_collection_assets(&paths, &catalog, collection, "webm").unwrap();
+        assert!(failed.is_empty());
+        assert_eq!(assets.len(), 1);
+        assert!(assets[0].poster_path.is_none());
 
         let poster = catalog.assets[0].variants.poster.as_ref().unwrap();
         let poster_target = media_blob_path(&paths, poster).unwrap();
         fs::create_dir_all(poster_target.parent().unwrap()).unwrap();
         fs::write(&poster_target, poster_bytes).unwrap();
 
-        let assets = cached_collection_assets(&paths, &catalog, collection, "webm")
-            .unwrap()
-            .unwrap();
+        let (assets, failed) =
+            cached_collection_assets(&paths, &catalog, collection, "webm").unwrap();
+        assert!(failed.is_empty());
         assert_eq!(
             assets[0].poster_path.as_deref(),
             Some(poster_target.to_string_lossy().as_ref()),
@@ -3139,6 +3120,47 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_keeps_cached_assets_from_an_incomplete_collection() {
+        let bytes = b"avatar-bytes";
+        let mut catalog = valid_catalog(bytes);
+        add_second_avatar(
+            &mut catalog,
+            variant("webm/gloopies/gloopy-2.webm", b"other"),
+        );
+        let (_dir, paths) = temp_paths();
+        write_cached_webm(&paths, &catalog, bytes);
+
+        let collections =
+            cached_collections_for_catalog_with_format(&paths, &catalog, "webm").unwrap();
+
+        assert_eq!(collections.len(), 1);
+        assert_eq!(collections[0].assets.len(), 1);
+        assert_eq!(collections[0].assets[0].id, "gloopy-1");
+        assert_eq!(collections[0].failed_asset_ids, vec!["gloopy-2"]);
+    }
+
+    #[test]
+    fn refresh_status_preserves_partial_network_failure_classification() {
+        let result = Ok(AvatarRefreshResult {
+            cached: 1,
+            failed: 1,
+            error_code: Some(AvatarErrorCode::NetworkAccess),
+            avatar_refs: Vec::new(),
+        });
+        let mut status = AvatarRefreshStatus {
+            active_refreshes: 1,
+            ..AvatarRefreshStatus::default()
+        };
+
+        status.complete(&result);
+
+        assert_eq!(
+            status.snapshot(),
+            (false, true, Some(AvatarErrorCode::NetworkAccess)),
+        );
+    }
+
+    #[test]
     fn single_cached_avatar_does_not_require_whole_collection() {
         let bytes = b"avatar-bytes";
         let mut catalog = valid_catalog(bytes);
@@ -3159,11 +3181,10 @@ mod tests {
                 .id,
             "gloopy-1"
         );
-        assert!(
-            cached_collection_assets(&paths, &catalog, &catalog.collections[0], "webm")
-                .unwrap()
-                .is_none()
-        );
+        let (assets, failed) =
+            cached_collection_assets(&paths, &catalog, &catalog.collections[0], "webm").unwrap();
+        assert_eq!(assets.len(), 1);
+        assert_eq!(failed, vec!["gloopy-2"]);
         assert_eq!(
             valid_cached_asset(entry, variant, &target)
                 .unwrap()
@@ -3296,17 +3317,6 @@ mod tests {
             "gloopy-1"
         );
         assert!(cached.get("app-avatar:../gloopy-1").unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn requested_version_prefers_matching_cached_catalog() {
-        let catalog = valid_catalog(b"avatar-bytes");
-        let (_dir, paths) = temp_paths();
-        write_valid_catalog(&paths, &catalog);
-
-        let resolved = catalog_for_requested_version(&paths, "v1").await.unwrap();
-
-        assert_eq!(resolved.catalog_version, "v1");
     }
 
     #[tokio::test]
@@ -3504,6 +3514,18 @@ mod tests {
     }
 
     #[test]
+    fn avatar_refresh_retry_uses_bounded_exponential_backoff() {
+        assert_eq!(avatar_refresh_retry_delay(1), Duration::from_secs(30));
+        assert_eq!(avatar_refresh_retry_delay(2), Duration::from_secs(60));
+        assert_eq!(avatar_refresh_retry_delay(6), Duration::from_secs(16 * 60));
+        assert_eq!(avatar_refresh_retry_delay(7), AVATAR_REFRESH_RETRY_MAX);
+        assert_eq!(
+            avatar_refresh_retry_delay(u32::MAX),
+            AVATAR_REFRESH_RETRY_MAX
+        );
+    }
+
+    #[test]
     fn metadata_timeout_constants_are_short_and_assets_keep_long_timeout() {
         assert_eq!(METADATA_CONNECT_TIMEOUT, Duration::from_secs(3));
         assert_eq!(METADATA_REQUEST_TIMEOUT, Duration::from_secs(10));
@@ -3605,6 +3627,94 @@ mod tests {
 
         assert!(!paths.meta.exists());
         assert!(!paths.media.exists());
+    }
+
+    #[tokio::test]
+    async fn clear_waits_for_refresh_generation_and_recovery_starts_afterward() {
+        let (_dir, paths) = temp_paths();
+        let stale_paths = paths.clone();
+        let (paused_tx, paused_rx) = tokio::sync::oneshot::channel();
+        let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+
+        let stale_refresh = tokio::spawn(coordinate_avatar_cache_operation(async move {
+            fs::create_dir_all(&stale_paths.meta).unwrap();
+            fs::write(stale_paths.meta.join("before-clear"), b"stale").unwrap();
+            paused_tx.send(()).unwrap();
+            resume_rx.await.unwrap();
+            fs::create_dir_all(&stale_paths.media).unwrap();
+            fs::write(stale_paths.media.join("after-pause"), b"stale").unwrap();
+        }));
+        paused_rx.await.unwrap();
+
+        let recovery_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let recovery_started_by_clear = recovery_started.clone();
+        let clear_paths = paths.clone();
+        let clear = tokio::spawn(async move {
+            clear_avatar_cache_and_then(&clear_paths, move || {
+                recovery_started_by_clear.store(true, std::sync::atomic::Ordering::SeqCst);
+            })
+            .await
+        });
+        tokio::task::yield_now().await;
+        assert!(
+            !clear.is_finished(),
+            "clear must wait for the whole refresh"
+        );
+
+        resume_tx.send(()).unwrap();
+        stale_refresh.await.unwrap();
+        clear.await.unwrap().unwrap();
+        assert!(!paths.meta.exists());
+        assert!(!paths.media.exists());
+        assert!(
+            recovery_started.load(std::sync::atomic::Ordering::SeqCst),
+            "a successful clear must start recovery immediately"
+        );
+
+        let recovery_path = paths.meta.join("recovered");
+        coordinate_avatar_cache_operation(async {
+            fs::create_dir_all(&paths.meta).unwrap();
+            fs::write(&recovery_path, b"fresh").unwrap();
+        })
+        .await;
+        assert_eq!(fs::read(recovery_path).unwrap(), b"fresh");
+    }
+
+    #[tokio::test]
+    async fn concurrent_refresh_generations_are_serialized() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+
+        let first_active = active.clone();
+        let first_maximum = maximum.clone();
+        let first = tokio::spawn(coordinate_avatar_cache_operation(async move {
+            let current = first_active.fetch_add(1, Ordering::SeqCst) + 1;
+            first_maximum.fetch_max(current, Ordering::SeqCst);
+            started_tx.send(()).unwrap();
+            resume_rx.await.unwrap();
+            first_active.fetch_sub(1, Ordering::SeqCst);
+        }));
+        started_rx.await.unwrap();
+
+        let second_active = active.clone();
+        let second_maximum = maximum.clone();
+        let second = tokio::spawn(coordinate_avatar_cache_operation(async move {
+            let current = second_active.fetch_add(1, Ordering::SeqCst) + 1;
+            second_maximum.fetch_max(current, Ordering::SeqCst);
+            second_active.fetch_sub(1, Ordering::SeqCst);
+        }));
+        tokio::task::yield_now().await;
+        assert!(!second.is_finished(), "a second refresh must wait");
+
+        resume_tx.send(()).unwrap();
+        first.await.unwrap();
+        second.await.unwrap();
+        assert_eq!(maximum.load(Ordering::SeqCst), 1);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]

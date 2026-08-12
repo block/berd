@@ -2,19 +2,22 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AvatarCatalog,
-  AvatarCollection,
   CachedAvatarCollection,
 } from "@/shared/avatars/catalog";
 
+const listeners: Array<() => void> = [];
 vi.mock("@/shared/api/avatars", async () => {
   const actual = await vi.importActual<typeof import("@/shared/api/avatars")>(
     "@/shared/api/avatars",
   );
   return {
     ...actual,
-    getAvatarCatalog: vi.fn(),
-    getCachedAvatarCollections: vi.fn(),
-    ensureAvatarCollection: vi.fn(),
+    getAvatarLibrarySnapshot: vi.fn(),
+    refreshAvatarCache: vi.fn(),
+    listenAvatarCacheWarmed: vi.fn(async (handler: () => void) => {
+      listeners.push(handler);
+      return vi.fn();
+    }),
     cachedAssetToMedia: (asset: { path: string; mimeType: string }) => ({
       src: asset.path,
       mediaType: asset.mimeType.startsWith("video/")
@@ -25,250 +28,166 @@ vi.mock("@/shared/api/avatars", async () => {
 });
 
 import {
-  ensureAvatarCollection,
-  getAvatarCatalog,
-  getCachedAvatarCollections,
+  getAvatarLibrarySnapshot,
+  refreshAvatarCache,
 } from "@/shared/api/avatars";
 import { useAvatarLibrary } from "../useAvatarLibrary";
 
-const CATALOG_VERSION = "v1";
-
-function collection(id: string): AvatarCollection {
-  return {
-    id,
-    label: id,
-    coverAvatarId: `${id}-1`,
-    avatarIds: [`${id}-1`, `${id}-2`],
-  };
-}
-
-function catalogWithCollections(
-  collections: AvatarCollection[],
-): AvatarCatalog {
-  return {
-    schemaVersion: 1,
-    catalogVersion: CATALOG_VERSION,
-    collections,
-    assets: collections.flatMap((entry) =>
-      entry.avatarIds.map((avatarId) => ({
-        id: avatarId,
-        label: avatarId,
-        collectionId: entry.id,
-        variants: {
-          webm: {
-            path: `${avatarId}.webm`,
-            mimeType: "video/webm",
-            byteSize: 1,
-            sha256: "0".repeat(64),
-          },
-          hevc: {
-            path: `${avatarId}.mov`,
-            mimeType: "video/quicktime",
-            byteSize: 1,
-            sha256: "0".repeat(64),
-          },
+const catalog: AvatarCatalog = {
+  schemaVersion: 1,
+  catalogVersion: "v1",
+  collections: [
+    { id: "a", label: "a", coverAvatarId: "a-1", avatarIds: ["a-1"] },
+  ],
+  assets: [
+    {
+      id: "a-1",
+      label: "a-1",
+      collectionId: "a",
+      variants: {
+        webm: {
+          path: "a-1.webm",
+          mimeType: "video/webm",
+          byteSize: 1,
+          sha256: "0".repeat(64),
         },
-      })),
-    ),
-  };
-}
+        hevc: {
+          path: "a-1.mov",
+          mimeType: "video/quicktime",
+          byteSize: 1,
+          sha256: "0".repeat(64),
+        },
+      },
+    },
+  ],
+};
 
-function cachedCollection(id: string): CachedAvatarCollection {
+function cachedCollection(path: string): CachedAvatarCollection {
   return {
-    catalogVersion: CATALOG_VERSION,
-    collectionId: id,
-    assets: [`${id}-1`, `${id}-2`].map((avatarId) => ({
-      id: avatarId,
-      path: `/cache/${avatarId}.webm`,
-      mimeType: "video/webm",
-    })),
+    catalogVersion: "v1",
+    collectionId: "a",
+    assets: [{ id: "a-1", path, mimeType: "video/webm" }],
+    failedAssetIds: [],
   };
 }
-
-const collectionA = collection("a");
-const collectionB = collection("b");
 
 describe("useAvatarLibrary", () => {
   beforeEach(() => {
+    listeners.length = 0;
     vi.clearAllMocks();
-    vi.mocked(ensureAvatarCollection).mockReset();
-    vi.mocked(getAvatarCatalog).mockResolvedValue(
-      catalogWithCollections([collectionA, collectionB]),
-    );
-    vi.mocked(getCachedAvatarCollections).mockResolvedValue([]);
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValue({
+      catalog,
+      cachedCollections: [cachedCollection("/cache/a-1.webm")],
+      mediaRefreshing: false,
+      mediaRefreshCompleted: true,
+    });
+    vi.mocked(refreshAvatarCache).mockResolvedValue();
   });
 
-  it("tracks concurrent collection downloads independently", async () => {
-    const pending = new Map<string, (value: CachedAvatarCollection) => void>();
-    vi.mocked(ensureAvatarCollection).mockImplementation(
-      ({ collectionId }) =>
-        new Promise((resolve) => {
-          pending.set(collectionId, (value) =>
-            resolve({ ...value, failedAssetIds: [] }),
-          );
-        }),
-    );
-
+  it("loads the catalog and startup-cached assets without downloading", async () => {
     const { result } = renderHook(() => useAvatarLibrary(true));
-    await waitFor(() => expect(result.current.catalog).not.toBeNull());
 
-    // Start download A, then B — both should stay marked as downloading.
-    act(() => {
-      void result.current.openCollection(collectionA);
-    });
-    act(() => {
-      void result.current.openCollection(collectionB);
-    });
-
-    expect(result.current.downloadingCollectionIds.has("a")).toBe(true);
-    expect(result.current.downloadingCollectionIds.has("b")).toBe(true);
-
-    // Finish A: only B remains downloading.
-    await act(async () => {
-      pending.get("a")?.(cachedCollection("a"));
-    });
-    expect(result.current.downloadingCollectionIds.has("a")).toBe(false);
-    expect(result.current.downloadingCollectionIds.has("b")).toBe(true);
-    expect(result.current.isCollectionCached(collectionA)).toBe(true);
-
-    // Finish B: nothing downloading, both cached.
-    await act(async () => {
-      pending.get("b")?.(cachedCollection("b"));
-    });
-    expect(result.current.downloadingCollectionIds.size).toBe(0);
-    expect(result.current.isCollectionCached(collectionB)).toBe(true);
-    expect(result.current.failedCollectionIds.size).toBe(0);
+    await waitFor(() => expect(result.current.catalog).toEqual(catalog));
+    expect(result.current.cachedAvatarMediaById["a-1"].media.src).toBe(
+      "/cache/a-1.webm",
+    );
+    expect(result.current.error).toBe(false);
   });
 
-  it("does not start a second download for a collection already in flight", async () => {
-    const pending = new Map<string, (value: CachedAvatarCollection) => void>();
-    vi.mocked(ensureAvatarCollection).mockImplementation(
-      ({ collectionId }) =>
-        new Promise((resolve) => {
-          pending.set(collectionId, (value) =>
-            resolve({ ...value, failedAssetIds: [] }),
-          );
-        }),
-    );
-
+  it("keeps missing first-run media in progress while the initial refresh runs", async () => {
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValueOnce({
+      catalog,
+      cachedCollections: [],
+      mediaRefreshing: true,
+      mediaRefreshCompleted: false,
+    });
     const { result } = renderHook(() => useAvatarLibrary(true));
-    await waitFor(() => expect(result.current.catalog).not.toBeNull());
 
-    act(() => {
-      void result.current.openCollection(collectionA);
-    });
-    // Re-opening the same collection while downloading is a no-op.
-    await act(async () => {
-      await result.current.openCollection(collectionA);
-    });
-
-    expect(vi.mocked(ensureAvatarCollection)).toHaveBeenCalledTimes(1);
-    expect(result.current.downloadingCollectionIds.has("a")).toBe(true);
-
-    await act(async () => {
-      pending.get("a")?.(cachedCollection("a"));
-    });
-    expect(result.current.downloadingCollectionIds.size).toBe(0);
+    await waitFor(() => expect(result.current.catalog).toEqual(catalog));
+    expect(result.current.mediaError).toBe(false);
+    expect(result.current.cacheChecking).toBe(true);
   });
 
-  it("keeps a poster-only collection retryable after video download failures", async () => {
-    const posterOnly = cachedCollection("a");
-    posterOnly.assets = posterOnly.assets.map((asset) => ({
-      ...asset,
-      path: asset.path.replace(".webm", ".png"),
-      mimeType: "image/png",
-    }));
-    vi.mocked(ensureAvatarCollection)
-      .mockResolvedValueOnce({
-        ...posterOnly,
-        failedAssetIds: ["a-1", "a-2"],
-        errorCode: "unavailable",
-      })
-      .mockResolvedValueOnce({
-        ...cachedCollection("a"),
-        failedAssetIds: [],
-      });
-
+  it("surfaces missing media after a failed refresh and retries", async () => {
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValueOnce({
+      catalog,
+      cachedCollections: [],
+      mediaRefreshing: false,
+      mediaRefreshCompleted: true,
+      mediaErrorCode: "unavailable",
+    });
     const { result } = renderHook(() => useAvatarLibrary(true));
-    await waitFor(() => expect(result.current.catalog).not.toBeNull());
 
-    await act(async () => {
-      await result.current.openCollection(collectionA);
+    await waitFor(() => expect(result.current.mediaError).toBe(true));
+    act(() => result.current.retryMedia());
+
+    await waitFor(() => expect(refreshAvatarCache).toHaveBeenCalledOnce());
+    await waitFor(() => expect(result.current.mediaError).toBe(false));
+  });
+
+  it("surfaces an incomplete poster fallback after a failed refresh", async () => {
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValueOnce({
+      catalog,
+      cachedCollections: [
+        {
+          ...cachedCollection("/cache/a-1.png"),
+          assets: [
+            { id: "a-1", path: "/cache/a-1.png", mimeType: "image/png" },
+          ],
+          failedAssetIds: ["a-1"],
+        },
+      ],
+      mediaRefreshing: false,
+      mediaRefreshCompleted: true,
+      mediaErrorCode: "networkAccess",
     });
+    const { result } = renderHook(() => useAvatarLibrary(true));
 
-    expect(result.current.failedCollectionIds.has("a")).toBe(true);
-    expect(result.current.isCollectionCached(collectionA)).toBe(true);
+    await waitFor(() => expect(result.current.mediaError).toBe(true));
+    expect(result.current.cachedAvatarMediaById["a-1"].media.src).toBe(
+      "/cache/a-1.png",
+    );
+    expect(result.current.mediaErrorCode).toBe("networkAccess");
+  });
 
-    await act(async () => {
-      await result.current.openCollection(collectionA);
+  it("surfaces a failed manual media refresh", async () => {
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValueOnce({
+      catalog,
+      cachedCollections: [],
+      mediaRefreshing: false,
+      mediaRefreshCompleted: true,
+      mediaErrorCode: "unavailable",
     });
+    vi.mocked(refreshAvatarCache).mockRejectedValueOnce({
+      code: "networkAccess",
+      message: "offline",
+    });
+    const { result } = renderHook(() => useAvatarLibrary(true));
 
-    expect(ensureAvatarCollection).toHaveBeenCalledTimes(2);
-    expect(result.current.failedCollectionIds.has("a")).toBe(false);
-    expect(result.current.cachedAvatarMediaById["a-1"].media.mediaType).toBe(
-      "video",
+    await waitFor(() => expect(result.current.mediaError).toBe(true));
+    act(() => result.current.retryMedia());
+
+    await waitFor(() =>
+      expect(result.current.mediaErrorCode).toBe("networkAccess"),
     );
   });
 
-  it("keeps a failed collection's error reason after another succeeds", async () => {
-    // Concurrent ensures (the collections level warms every collection at
-    // once) resolve independently — a later success must not erase the
-    // reason an earlier collection failed, or the retry pill degrades to
-    // generic copy instead of the actionable network guidance.
-    const pending = new Map<
-      string,
-      { resolve: (value: CachedAvatarCollection) => void; reject: () => void }
-    >();
-    vi.mocked(ensureAvatarCollection).mockImplementation(
-      ({ collectionId }) =>
-        new Promise((resolve, reject) => {
-          pending.set(collectionId, {
-            resolve: (value) => resolve({ ...value, failedAssetIds: [] }),
-            reject: () =>
-              reject(
-                Object.assign(new Error("network access denied"), {
-                  code: "networkAccess",
-                }),
-              ),
-          });
-        }),
-    );
-
+  it("reloads cached assets after the backend refresh event", async () => {
     const { result } = renderHook(() => useAvatarLibrary(true));
-    await waitFor(() => expect(result.current.catalog).not.toBeNull());
+    await waitFor(() => expect(result.current.catalog).toEqual(catalog));
 
-    act(() => {
-      void result.current.openCollection(collectionA);
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValue({
+      catalog,
+      cachedCollections: [cachedCollection("/cache/refreshed.webm")],
+      mediaRefreshing: false,
+      mediaRefreshCompleted: true,
     });
-    act(() => {
-      void result.current.openCollection(collectionB);
-    });
+    act(() => listeners[0]?.());
 
-    // A fails with a network reason, then B succeeds afterward.
-    await act(async () => {
-      pending.get("a")?.reject();
-    });
-    await act(async () => {
-      pending.get("b")?.resolve(cachedCollection("b"));
-    });
-
-    expect(result.current.failedCollectionIds.has("a")).toBe(true);
-    expect(result.current.errorCode).toBe("networkAccess");
-  });
-
-  it("clears the downloading flag when a download fails", async () => {
-    vi.mocked(ensureAvatarCollection).mockRejectedValue(
-      new Error("network down"),
+    await waitFor(() =>
+      expect(result.current.cachedAvatarMediaById["a-1"].media.src).toBe(
+        "/cache/refreshed.webm",
+      ),
     );
-
-    const { result } = renderHook(() => useAvatarLibrary(true));
-    await waitFor(() => expect(result.current.catalog).not.toBeNull());
-
-    await act(async () => {
-      await result.current.openCollection(collectionA);
-    });
-
-    expect(result.current.downloadingCollectionIds.size).toBe(0);
-    expect(result.current.failedCollectionIds.has("a")).toBe(true);
   });
 });

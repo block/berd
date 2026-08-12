@@ -4,7 +4,6 @@ import {
   AVATAR_CACHE_WARMED_EVENT,
   AvatarLibraryError,
   deleteUserAvatar,
-  ensureAvatarCollection,
   getAvatarCatalog,
   getAvatarLibrarySnapshot,
   getCachedAvatarCollections,
@@ -13,6 +12,7 @@ import {
   getCachedAvatarsForRefs,
   listenAvatarCacheWarmed,
   normalizeAvatarLibraryError,
+  refreshAvatarCache,
 } from "./avatars";
 import type { AvatarCatalog } from "@/shared/avatars/catalog";
 
@@ -69,6 +69,7 @@ const cachedCollections = [
         mimeType: "video/webm",
       },
     ],
+    failedAssetIds: [],
   },
 ];
 
@@ -92,14 +93,31 @@ describe("avatars api", () => {
   });
 
   it("loads the library snapshot from Rust and parses the catalog", async () => {
-    invokeMock.mockResolvedValueOnce({ catalog, cachedCollections });
+    invokeMock.mockResolvedValueOnce({
+      catalog,
+      cachedCollections,
+      mediaRefreshing: true,
+      mediaRefreshCompleted: false,
+      mediaErrorCode: null,
+    });
 
     await expect(getAvatarLibrarySnapshot()).resolves.toEqual({
       catalog,
       cachedCollections,
+      mediaRefreshing: true,
+      mediaRefreshCompleted: false,
+      mediaErrorCode: null,
     });
 
     expect(invokeMock).toHaveBeenCalledWith("get_avatar_library_snapshot");
+  });
+
+  it("refreshes avatar media through the native command", async () => {
+    invokeMock.mockResolvedValueOnce(undefined);
+
+    await expect(refreshAvatarCache()).resolves.toBeUndefined();
+
+    expect(invokeMock).toHaveBeenCalledWith("refresh_avatar_cache");
   });
 
   it("normalizes avatar library command errors", async () => {
@@ -145,31 +163,6 @@ describe("avatars api", () => {
       expect.any(String),
       expect.objectContaining({ catalog }),
     );
-  });
-
-  it("ensures collections by catalog version and collection id", async () => {
-    invokeMock.mockResolvedValueOnce({
-      catalogVersion: "v1",
-      collectionId: "gloopies",
-      assets: [],
-      failedAssetIds: ["gloopy-2"],
-      errorCode: "networkAccess",
-    });
-
-    await expect(
-      ensureAvatarCollection({
-        catalogVersion: "v1",
-        collectionId: "gloopies",
-      }),
-    ).resolves.toMatchObject({
-      catalogVersion: "v1",
-      errorCode: "networkAccess",
-    });
-
-    expect(invokeMock).toHaveBeenCalledWith("ensure_avatar_collection", {
-      catalogVersion: "v1",
-      collectionId: "gloopies",
-    });
   });
 
   it("deletes generated avatar media through the native command", async () => {

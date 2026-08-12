@@ -32,11 +32,10 @@ vi.mock("@/features/agents/hooks/useAvatarLibrary", () => ({
     cacheChecking: false,
     error: false,
     errorCode: null,
-    downloadingCollectionIds: new Set<string>(),
-    failedCollectionIds: new Set<string>(),
+    mediaError: false,
+    mediaErrorCode: null,
     retryCatalog: vi.fn(),
-    openCollection: vi.fn(),
-    isCollectionCached: () => false,
+    retryMedia: vi.fn(),
   })),
 }));
 
@@ -128,11 +127,10 @@ describe("AgentBuilderRail", () => {
       cacheChecking: false,
       error: false,
       errorCode: null,
-      downloadingCollectionIds: new Set<string>(),
-      failedCollectionIds: new Set<string>(),
+      mediaError: false,
+      mediaErrorCode: null,
       retryCatalog: vi.fn(),
-      openCollection: vi.fn(),
-      isCollectionCached: () => false,
+      retryMedia: vi.fn(),
     });
   });
 
@@ -308,11 +306,10 @@ describe("AgentBuilderRail", () => {
       cacheChecking: false,
       error: false,
       errorCode: null,
-      downloadingCollectionIds: new Set<string>(),
-      failedCollectionIds: new Set<string>(),
+      mediaError: false,
+      mediaErrorCode: null,
       retryCatalog: vi.fn(),
-      openCollection: vi.fn(),
-      isCollectionCached: () => true,
+      retryMedia: vi.fn(),
     });
 
     renderWithProviders(

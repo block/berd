@@ -189,55 +189,6 @@ fn fallback_file_name(file_name: &str) -> Result<String, String> {
         .ok_or_else(|| "Bundled agent filename must end in .md".to_string())
 }
 
-/// Collects `app-avatar:*` refs from all agent files in the user's agents
-/// directory. This includes both bundled and user-created agents â€” any `.md`
-/// file with a YAML frontmatter `avatar` field pointing to an app-avatar ref.
-///
-/// Used at startup to warm avatar caches for all agents the user has configured,
-/// not just the bundled ones. This ensures that if avatar media was lost (e.g.
-/// after a data migration or cache clear), the home screen recovers without
-/// requiring the user to manually re-download each pack.
-pub fn collect_all_agent_avatar_refs(agents_dir: Option<&Path>) -> Vec<String> {
-    let agents_dir = match agents_dir {
-        Some(agents_dir) => agents_dir.to_path_buf(),
-        None => {
-            let Some(home_dir) = dirs::home_dir() else {
-                return Vec::new();
-            };
-            home_dir.join(GLOBAL_AGENTS_DIR_NAME).join(AGENTS_DIR_NAME)
-        }
-    };
-    collect_avatar_refs_from_dir(&agents_dir)
-}
-
-fn collect_avatar_refs_from_dir(dir: &Path) -> Vec<String> {
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut refs = BTreeSet::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
-            continue;
-        }
-        if let Some(avatar_ref) = agent_file_avatar_ref(&path) {
-            refs.insert(avatar_ref);
-        }
-    }
-    refs.into_iter().collect()
-}
-
-/// Reads an agent file and returns its `app-avatar:*` ref if present.
-/// Unlike `source_agent_avatar_ref`, this does not require the agent to be
-/// bundled â€” it works on any agent `.md` file. A read failure yields `None`
-/// so one unreadable agent file doesn't abort the whole scan.
-fn agent_file_avatar_ref(agent_file: &Path) -> Option<String> {
-    let contents = fs::read_to_string(agent_file).ok()?;
-    avatar_ref_from_contents(&contents)
-}
-
 /// Extracts an agent file's `app-avatar:*` ref from its raw contents, if the
 /// YAML frontmatter declares one. Keeps the `frontmatter -> yaml -> avatar ->
 /// app-avatar:` prefix contract in a single place; callers layer their own
@@ -878,44 +829,5 @@ mod tests {
         let err = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap_err();
 
         assert!(err.contains("must not be a symbolic link"));
-    }
-
-    #[test]
-    fn collect_avatar_refs_from_dir_finds_all_agent_avatars() {
-        let dir = tempdir().unwrap();
-        write_agent(
-            dir.path(),
-            "builderbot.md",
-            "---\nname: Builderbot\ndescription: Agent\navatar: app-avatar:gloopies-20\nmetadata:\n  berdBundled: true\n---\nBundled.",
-        );
-        write_agent(
-            dir.path(),
-            "my-agent.md",
-            "---\nname: My Agent\ndescription: Custom\navatar: app-avatar:pollies-5\n---\nCustom agent.",
-        );
-        // Agent without an avatar should be skipped.
-        write_agent(
-            dir.path(),
-            "no-avatar.md",
-            "---\nname: Plain\ndescription: No avatar\n---\nPlain agent.",
-        );
-        // Agent with a non-app-avatar ref should be skipped.
-        write_agent(
-            dir.path(),
-            "url-avatar.md",
-            "---\nname: URL\ndescription: URL avatar\navatar: https://example.com/pic.png\n---\nURL.",
-        );
-        // Non-.md files should be skipped.
-        fs::write(dir.path().join("notes.txt"), "not an agent").unwrap();
-
-        let refs = collect_avatar_refs_from_dir(dir.path());
-
-        assert_eq!(refs, vec!["app-avatar:gloopies-20", "app-avatar:pollies-5"]);
-    }
-
-    #[test]
-    fn collect_avatar_refs_from_dir_returns_empty_for_missing_dir() {
-        let refs = collect_avatar_refs_from_dir(Path::new("/nonexistent/path/agents"));
-        assert!(refs.is_empty());
     }
 }
