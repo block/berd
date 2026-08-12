@@ -35,12 +35,17 @@ describe("text shimmer motion", () => {
   });
 });
 
-describe("chat context panel surface", () => {
-  it("uses light-on-dark danger colors in both app themes", () => {
-    const panelSurface = declarationsFor(".chat-context-panel-surface {");
+describe("card-glass surface", () => {
+  it("derives the glass panel fill from the card token in both themes", () => {
+    const lightTheme = declarationsFor(":root {");
+    const darkTheme = declarationsFor('[data-theme="dark"],');
 
-    expect(panelSurface).toContain("--destructive: var(--color-red-400);");
-    expect(panelSurface).toContain("--status-deleted: var(--color-red-100);");
+    expect(lightTheme).toContain(
+      "--card-glass: color-mix(in srgb, var(--card) 78%, transparent);",
+    );
+    expect(darkTheme).toContain(
+      "--card-glass: color-mix(in srgb, var(--card) 82%, transparent);",
+    );
   });
 });
 

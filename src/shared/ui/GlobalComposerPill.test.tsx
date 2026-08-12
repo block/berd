@@ -225,6 +225,20 @@ describe("GlobalComposerPill", () => {
     expect(screen.getByRole("region")).toHaveClass("shadow-elevated");
   });
 
+  it("pairs the card-glass surface with the shared panel backdrop", () => {
+    renderGlobalComposer(vi.fn(), { placement: "docked" });
+
+    // card-glass floating chrome shares --backdrop-panel so the pill blurs
+    // and saturates like the nav panes instead of a plain 12px blur.
+    const region = screen.getByRole("region");
+    expect(region).toHaveClass("bg-card-glass");
+    expect(region).toHaveClass("[backdrop-filter:var(--backdrop-panel)]");
+    expect(region).toHaveClass(
+      "[-webkit-backdrop-filter:var(--backdrop-panel)]",
+    );
+    expect(region).not.toHaveClass("backdrop-blur-md");
+  });
+
   beforeEach(() => {
     resetVoiceDictationShortcutControllerForTests();
     mockOpenDialog.mockReset();

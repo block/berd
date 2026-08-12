@@ -1683,10 +1683,10 @@ export const designSystemComponentManifest = [
     tokenClasses: [
       "active:bg-destructive/16",
       "active:text-destructive",
+      "bg-card-glass",
       "bg-card/60",
       "bg-destructive/12",
       "bg-secondary",
-      "bg-sidebar",
       "border-border/80",
       "group-focus-within:placeholder:text-foreground",
       "group-hover:placeholder:text-foreground",
@@ -1718,10 +1718,10 @@ export const designSystemComponentManifest = [
     sourceTokenClasses: [
       "active:bg-destructive/16",
       "active:text-destructive",
+      "bg-card-glass",
       "bg-card/60",
       "bg-destructive/12",
       "bg-secondary",
-      "bg-sidebar",
       "border-border/80",
       "group-focus-within:placeholder:text-foreground",
       "group-hover:placeholder:text-foreground",

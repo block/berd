@@ -359,7 +359,7 @@ export function WorkingContextPicker({
           <PopoverContent
             align="start"
             sideOffset={8}
-            className="chat-context-dropdown-surface flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] min-w-72 flex-col overflow-hidden rounded-sm p-2 text-sm font-normal"
+            className="flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] min-w-72 flex-col overflow-hidden rounded-sm p-2 text-sm font-normal"
           >
             <div className="mb-2 flex h-10 items-center gap-2 rounded-xs border border-transparent bg-muted/60 px-3 text-muted-foreground focus-within:border-transparent focus-within:ring-0">
               <IconSearch className="size-4 shrink-0" />
@@ -473,7 +473,7 @@ export function WorkingContextPicker({
           <PopoverContent
             align="start"
             sideOffset={8}
-            className="chat-context-dropdown-surface flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] min-w-72 flex-col overflow-hidden rounded-sm p-2 text-sm font-normal"
+            className="flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] min-w-72 flex-col overflow-hidden rounded-sm p-2 text-sm font-normal"
           >
             <div className="mb-2 flex h-10 items-center gap-2 rounded-xs border border-transparent bg-muted/60 px-3 text-muted-foreground focus-within:border-transparent focus-within:ring-0">
               <IconSearch className="size-4 shrink-0" />

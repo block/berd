@@ -228,7 +228,7 @@ export function WorkspaceContextPicker({
             <PopoverContent
               align="start"
               sideOffset={6}
-              className="chat-context-dropdown-surface w-[var(--radix-popover-trigger-width)] rounded-sm p-2"
+              className="w-[var(--radix-popover-trigger-width)] rounded-sm p-2"
             >
               <div className="mb-2 flex h-9 items-center gap-2 rounded-xs bg-muted/60 px-2.5 text-muted-foreground">
                 <Search className="size-3.5" />
@@ -327,7 +327,7 @@ export function WorkspaceContextPicker({
             <PopoverContent
               align="start"
               sideOffset={6}
-              className="chat-context-dropdown-surface w-[var(--radix-popover-trigger-width)] rounded-sm p-2"
+              className="w-[var(--radix-popover-trigger-width)] rounded-sm p-2"
             >
               <div className="mb-2 flex h-9 items-center gap-2 rounded-xs bg-muted/60 px-2.5 text-muted-foreground">
                 <Search className="size-3.5" />

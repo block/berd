@@ -30,17 +30,15 @@ export const PaneSurface = forwardRef<
       data-testid={testId}
       className={cn(
         "relative flex flex-shrink-0 flex-col overflow-hidden rounded-md",
-        glass
-          ? "bg-sidebar-navigation-panel-bg backdrop-blur-md"
-          : "bg-transparent",
+        glass ? "bg-card-glass backdrop-blur-md" : "bg-transparent",
         fullHeight && "h-full",
         className,
       )}
       style={{
         ...(glass
           ? {
-              backdropFilter: "var(--backdrop-sidebar-panel)",
-              WebkitBackdropFilter: "var(--backdrop-sidebar-panel)",
+              backdropFilter: "var(--backdrop-panel)",
+              WebkitBackdropFilter: "var(--backdrop-panel)",
             }
           : null),
         width,

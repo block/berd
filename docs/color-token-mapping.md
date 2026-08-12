@@ -54,7 +54,7 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 | `surface-chat-composer`, `surface-chat-composer-hover` | Floating chat composer shell over the transcript; muted translucent gray. | `bg-surface-chat-composer` |
 | `surface-composer-action`, `surface-composer-action-hover`, `surface-composer-action-active` | Chat composer toolbar control fills (agent/model pickers, branch selector). | `bg-surface-composer-action`, `hover:bg-surface-composer-action-hover` |
 | `surface-chat-responding-pill-bg`, `surface-chat-responding-pill-fg` | “Responding” status pill beside the composer; inverts with theme. | `bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg` |
-| `chat-context-panel-*` | Scoped palette for the glass chat context panel aside (background, foreground, accent). Applied via `.chat-context-panel-surface`. | `bg-background text-foreground` (scoped) |
+| `card-glass` | Translucent container over the canvas (nav panes, right rail). Replaced the scoped `chat-context-panel-*` palette; the rail now follows the app theme like every other container. | `bg-card-glass` |
 | `surface-glass-subtle` | Quiet translucent glass surface for temporary overlays where the content behind should stay readable. Pair with `--backdrop-glass-subtle` when a blur filter is needed. | `bg-surface-glass-subtle` |
 | `surface-glass-strong`, `surface-glass-strong-hover`, `surface-glass-strong-fg` | Stronger glass controls that sit over artwork or other visually busy media where ordinary foreground-on-glass can lose contrast. | `bg-surface-glass-strong text-surface-glass-strong-fg` |
 | `surface-agent-tile-action-*` | Agent tile View/Chat/⋯ controls: glass white + charcoal text in light theme, inverted surface in dark theme; hover/active/open invert foreground/background in both themes. | `bg-surface-agent-tile-action-bg text-surface-agent-tile-action-fg`, `hover:bg-surface-agent-tile-action-bg-hover` |
@@ -163,19 +163,6 @@ The authoritative list of raw-CSS color tokens (kept in sync with the script):
 --chat-search-match-fg
 --chat-search-match-active-bg
 --chat-search-match-active-fg
-# .chat-context-panel-surface scoped block
---chat-context-panel-bg
---chat-context-panel-fg
---chat-context-panel-muted-fg
---chat-context-panel-border
---chat-context-panel-accent
---chat-context-panel-accent-fg
---chat-context-panel-hover
-# .chat-context-dropdown scoped block
---chat-context-dropdown-bg
---chat-context-dropdown-hover
---chat-context-dropdown-fg
---chat-context-dropdown-muted-fg
 # Editor field surfaces (color-mix bases + arbitrary-value utilities)
 --surface-editor-panel-neutral
 --surface-editor-control
@@ -215,7 +202,6 @@ exact machine-checked contract.
 | `scrollbar-thumb`, `scrollbar-thumb-hover` | `::-webkit-scrollbar-thumb` | Scrollbar pseudo-element. |
 | `filter-chat-responding-goose` | `filter` property | Non-color CSS property, not a color utility. |
 | `app-top-bar-control-hover-opacity` | `opacity` via `hover:opacity-[var(...)]` | Opacity value, consumed through an arbitrary-value utility. |
-| `chat-context-panel-*` | `.chat-context-panel-surface` scoped block | Scoped palette applied through a class, not per-element color utilities. |
 | `overlay-search-scrim` | Global search dialog overlay | Search intentionally uses a lighter, blur-free scrim than standard dialogs while retaining a theme-governed semantic color. |
 | `overlay-global-composer-shim`, `overlay-global-composer-shim-peak`, `overlay-global-composer-shim-clear` | `.global-composer-shim` and `@keyframes global-composer-shim-*` | Main-canvas glass shim and white midpoint cross-fade are authored in raw CSS during the global composer handoff, not through per-element color utilities. |
 

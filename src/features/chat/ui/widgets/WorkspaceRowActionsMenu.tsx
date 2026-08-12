@@ -290,7 +290,7 @@ export function WorkspaceRowActionsMenu({
         <DropdownMenuContent
           align="end"
           sideOffset={8}
-          className="chat-context-dropdown-surface w-64 rounded-sm px-3 pb-[6px] pt-3"
+          className="w-64 rounded-sm px-3 pb-[6px] pt-3"
         >
           {onOpenTerminalAtPath ? (
             <DropdownMenuItem

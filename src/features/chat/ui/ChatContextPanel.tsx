@@ -122,8 +122,8 @@ export const ChatContextPanel = memo(function ChatContextPanel({
       >
         <aside
           className={cn(
-            "chat-context-panel-surface flex h-auto max-h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-background text-foreground",
-            "[backdrop-filter:var(--backdrop-chat-context-panel)] [-webkit-backdrop-filter:var(--backdrop-chat-context-panel)]",
+            "chat-context-panel-surface flex h-auto max-h-full min-h-0 min-w-0 flex-1 overflow-hidden bg-card-glass text-foreground",
+            "[backdrop-filter:var(--backdrop-panel)] [-webkit-backdrop-filter:var(--backdrop-panel)]",
           )}
         >
           <ContextPanel

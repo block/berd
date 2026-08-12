@@ -326,7 +326,7 @@ function WorkspaceSectionActionsMenu({
       <DropdownMenuContent
         align="end"
         sideOffset={8}
-        className="chat-context-dropdown-surface w-56 rounded-sm px-1 pb-[6px] pt-1"
+        className="w-56 rounded-sm px-1 pb-[6px] pt-1"
       >
         <DropdownMenuItem
           disabled={!onAddWorkspace}

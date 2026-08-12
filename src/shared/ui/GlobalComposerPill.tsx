@@ -1234,7 +1234,7 @@ export function GlobalComposerPill({
       }}
       style={composerStyle}
       className={cn(
-        "global-composer-pill group relative fixed z-40 isolate flex flex-col rounded-composer bg-sidebar py-2 pl-4 pr-2.5 backdrop-blur-md transition-[box-shadow,opacity,transform] duration-300 ease-out hover:shadow-global-composer-pill-hover",
+        "global-composer-pill group relative fixed z-40 isolate flex flex-col rounded-composer bg-card-glass py-2 pl-4 pr-2.5 [backdrop-filter:var(--backdrop-panel)] [-webkit-backdrop-filter:var(--backdrop-panel)] transition-[box-shadow,opacity,transform] duration-300 ease-out hover:shadow-global-composer-pill-hover",
         placementClassName,
         elevated && placement === "docked" && "shadow-elevated",
         placement === "centered" && "global-composer-pill-centered",

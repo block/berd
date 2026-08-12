@@ -169,19 +169,6 @@ const rawCssColorAllowlist = new Set([
   "chat-search-match-fg",
   "chat-search-match-active-bg",
   "chat-search-match-active-fg",
-  // .chat-context-panel-surface scoped palette block
-  "chat-context-panel-bg",
-  "chat-context-panel-fg",
-  "chat-context-panel-muted-fg",
-  "chat-context-panel-border",
-  "chat-context-panel-accent",
-  "chat-context-panel-accent-fg",
-  "chat-context-panel-hover",
-  // .chat-context-dropdown scoped block that remaps shadcn tokens
-  "chat-context-dropdown-bg",
-  "chat-context-dropdown-hover",
-  "chat-context-dropdown-fg",
-  "chat-context-dropdown-muted-fg",
   // Editor field surfaces (color-mix bases + arbitrary-value utilities)
   "surface-editor-panel-neutral",
   "surface-editor-control",

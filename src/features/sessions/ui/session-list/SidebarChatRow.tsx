@@ -795,7 +795,7 @@ export function SidebarChatRow({
                 <div
                   aria-hidden="true"
                   data-sidebar-chat-drag-preview
-                  className="pointer-events-none fixed z-50 flex max-w-72 items-center gap-2 rounded-sm border border-sidebar-border bg-sidebar px-3 py-2 text-sm text-sidebar-foreground shadow-lg"
+                  className="pointer-events-none fixed z-50 flex max-w-72 items-center gap-2 rounded-sm border border-sidebar-border bg-card-glass px-3 py-2 text-sm text-sidebar-foreground shadow-lg [backdrop-filter:var(--backdrop-panel)] [-webkit-backdrop-filter:var(--backdrop-panel)]"
                   style={{
                     left: dragPreviewPosition.x + 12,
                     top: dragPreviewPosition.y + 12,

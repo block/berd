@@ -3137,7 +3137,7 @@ const chromeButtonEntries: ChromeButtonEntry[] = [
     manifestName: "Top Bar Icon Button",
     base: "ghost",
     useWhen: "Icon actions in the app top bar / window chrome.",
-    surfaceClassName: "bg-sidebar",
+    surfaceClassName: "bg-card-glass",
     surfaceLabel: "top bar",
     preview: (
       <TopBarIconButton aria-label="Search">

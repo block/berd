@@ -321,51 +321,6 @@
   --surface-composer-action-active: var(--color-gray-400);
   --surface-chat-responding-pill-bg: var(--foreground);
   --surface-chat-responding-pill-fg: var(--background);
-  --chat-context-panel-bg: color-mix(
-    in srgb,
-    var(--color-gray-900) 66%,
-    transparent
-  );
-  --chat-context-panel-fg: var(--color-gray-50);
-  --chat-context-panel-muted-fg: color-mix(
-    in srgb,
-    var(--color-gray-50) 68%,
-    transparent
-  );
-  --chat-context-panel-border: color-mix(
-    in srgb,
-    var(--color-gray-50) 16%,
-    transparent
-  );
-  --chat-context-panel-accent: color-mix(
-    in srgb,
-    var(--color-gray-50) 12%,
-    transparent
-  );
-  --chat-context-panel-accent-fg: var(--color-gray-50);
-  --chat-context-panel-hover: color-mix(
-    in srgb,
-    var(--color-gray-50) 26%,
-    transparent
-  );
-  --chat-context-dropdown-bg: color-mix(
-    in srgb,
-    var(--color-gray-800) 88%,
-    transparent
-  );
-  --chat-context-dropdown-hover: color-mix(
-    in srgb,
-    var(--color-gray-50) 12%,
-    transparent
-  );
-  --chat-context-dropdown-fg: var(--color-gray-50);
-  --chat-context-dropdown-muted-fg: color-mix(
-    in srgb,
-    var(--color-gray-50) 52%,
-    transparent
-  );
-  --backdrop-chat-context-dropdown: blur(18px) saturate(170%) brightness(1.02);
-  --backdrop-chat-context-panel: blur(28px) saturate(180%) brightness(1.02);
   --surface-editor-panel-neutral: color-mix(
     in srgb,
     var(--color-gray-300) 52%,
@@ -780,50 +735,6 @@
      `background` → `card` alias. */
   --surface-chat-responding-pill-bg: var(--color-black);
   --surface-chat-responding-pill-fg: var(--foreground);
-  --chat-context-panel-bg: color-mix(
-    in srgb,
-    var(--color-gray-900) 72%,
-    transparent
-  );
-  --chat-context-panel-fg: var(--color-gray-50);
-  --chat-context-panel-muted-fg: color-mix(
-    in srgb,
-    var(--color-gray-50) 68%,
-    transparent
-  );
-  --chat-context-panel-border: color-mix(
-    in srgb,
-    var(--color-gray-50) 16%,
-    transparent
-  );
-  --chat-context-panel-accent: color-mix(
-    in srgb,
-    var(--color-gray-50) 12%,
-    transparent
-  );
-  --chat-context-panel-accent-fg: var(--color-gray-50);
-  --chat-context-panel-hover: color-mix(
-    in srgb,
-    var(--color-gray-50) 26%,
-    transparent
-  );
-  --chat-context-dropdown-bg: color-mix(
-    in srgb,
-    var(--color-gray-800) 92%,
-    transparent
-  );
-  --chat-context-dropdown-hover: color-mix(
-    in srgb,
-    var(--color-gray-50) 12%,
-    transparent
-  );
-  --chat-context-dropdown-fg: var(--color-gray-50);
-  --chat-context-dropdown-muted-fg: color-mix(
-    in srgb,
-    var(--color-gray-50) 52%,
-    transparent
-  );
-  --backdrop-chat-context-dropdown: blur(18px) saturate(170%) brightness(1.02);
   --surface-editor-panel-neutral: var(--color-gray-800);
   --surface-editor-panel: color-mix(
     in oklab,
@@ -1884,44 +1795,6 @@ body,
     }
   }
 
-  /* Chat context panel — scoped palette for glass aside over the transcript. */
-  .chat-context-panel-surface {
-    --background: var(--chat-context-panel-bg);
-    --foreground: var(--chat-context-panel-fg);
-    --muted: var(--chat-context-panel-hover);
-    --muted-foreground: var(--chat-context-panel-muted-fg);
-    --border: var(--chat-context-panel-border);
-    --accent: var(--chat-context-panel-accent);
-    --accent-hover: var(--chat-context-panel-hover);
-    --accent-foreground: var(--chat-context-panel-accent-fg);
-    --sidebar-accent: var(--chat-context-panel-hover);
-    --sidebar-foreground: var(--chat-context-panel-fg);
-    --sidebar-accent-foreground: var(--chat-context-panel-fg);
-    /* The rail is dark in both app themes, so danger and deletion text need
-       light-on-dark tones rather than the light-theme destructive red. */
-    --destructive: var(--color-red-400);
-    --status-deleted: var(--color-red-100);
-  }
-
-  .chat-context-dropdown-surface {
-    --background: var(--chat-context-dropdown-bg);
-    --foreground: var(--chat-context-dropdown-fg);
-    --popover: var(--chat-context-dropdown-bg);
-    --popover-foreground: var(--chat-context-dropdown-fg);
-    --muted: var(--chat-context-dropdown-hover);
-    --muted-foreground: var(--chat-context-dropdown-muted-fg);
-    --accent: var(--chat-context-dropdown-hover);
-    --accent-hover: var(--chat-context-dropdown-hover);
-    --accent-foreground: var(--chat-context-dropdown-fg);
-    --sidebar-accent: var(--chat-context-dropdown-hover);
-    --sidebar-foreground: var(--chat-context-dropdown-fg);
-    --sidebar-accent-foreground: var(--chat-context-dropdown-fg);
-    color: var(--chat-context-dropdown-fg);
-    background: var(--chat-context-dropdown-bg);
-    backdrop-filter: var(--backdrop-chat-context-dropdown);
-    -webkit-backdrop-filter: var(--backdrop-chat-context-dropdown);
-  }
-
   .chat-context-dropdown-results {
     position: relative;
     min-height: 0;
@@ -1947,9 +1820,9 @@ body,
     mask-image: linear-gradient(to bottom, transparent, black 1.25rem);
   }
 
-  .chat-context-dropdown-surface .chat-context-search-input,
-  .chat-context-dropdown-surface .chat-context-search-input:focus,
-  .chat-context-dropdown-surface .chat-context-search-input:focus-visible {
+  .chat-context-search-input,
+  .chat-context-search-input:focus,
+  .chat-context-search-input:focus-visible {
     border: 0 !important;
     outline: 0 !important;
     box-shadow: none !important;
@@ -2023,6 +1896,17 @@ body,
 [data-streamdown="table-wrapper"],
 [data-streamdown="table-wrapper"] > div:has(> [data-streamdown="table"]) {
   background: transparent;
+}
+
+/* Streamdown's mermaid blocks and their floating action pills paint
+ * bg-sidebar; restate the glass treatment with the ladder token. */
+[data-streamdown="mermaid-block"] {
+  background: var(--card-glass);
+}
+
+[data-streamdown="mermaid-block-actions"] {
+  border-color: var(--border);
+  background: var(--card-glass);
 }
 
 [data-streamdown="code-block"][data-streamdown] {
@@ -2231,7 +2115,7 @@ code[data-streamdown="inline-code"],
 @keyframes global-composer-shell-morph-handoff {
   from,
   58% {
-    background: var(--sidebar);
+    background: var(--card-glass);
     border-radius: var(--radius-composer);
     box-shadow: var(--shadow-global-composer-pill-hover);
     padding: 0.5rem 0.625rem 0.5rem 1rem;
