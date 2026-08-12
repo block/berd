@@ -273,7 +273,7 @@ describe("CreateProjectDialog", () => {
       );
 
       const textarea = screen.getByPlaceholderText(
-        "Describe your project, goals, subject etc",
+        "Goals, context, instructions, links to docs…",
       );
       expect(textarea).toHaveValue("Goal of this project");
       await waitFor(() => expect(gitMocks.getGitState).toHaveBeenCalled());
@@ -359,7 +359,7 @@ describe("CreateProjectDialog", () => {
       expect(nameInput).toHaveValue("Project Beta");
 
       const textarea = screen.getByPlaceholderText(
-        "Describe your project, goals, subject etc",
+        "Goals, context, instructions, links to docs…",
       );
       expect(textarea).toHaveValue("Beta goal");
       await waitFor(() => expect(gitMocks.getGitState).toHaveBeenCalled());
@@ -412,7 +412,7 @@ describe("CreateProjectDialog", () => {
       await user.type(screen.getByPlaceholderText("Project Alpha"), "Launch");
       await user.type(
         screen.getByPlaceholderText(
-          "Describe your project, goals, subject etc",
+          "Goals, context, instructions, links to docs…",
         ),
         "Help me ship the launch work.",
       );
@@ -1184,7 +1184,7 @@ describe("CreateProjectDialog", () => {
       );
 
       const textarea = screen.getByPlaceholderText(
-        "Describe your project, goals, subject etc",
+        "Goals, context, instructions, links to docs…",
       );
       await user.clear(textarea);
       await user.type(textarea, "Updated prompt");

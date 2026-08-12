@@ -201,6 +201,7 @@ exact machine-checked contract.
 | `scrollbar-thumb`, `scrollbar-thumb-hover` | `::-webkit-scrollbar-thumb` | Scrollbar pseudo-element. |
 | `filter-chat-responding-goose` | `filter` property | Non-color CSS property, not a color utility. |
 | `app-top-bar-control-hover-opacity` | `opacity` via `hover:opacity-[var(...)]` | Opacity value, consumed through an arbitrary-value utility. |
+| `project-panel-tint`, `project-panel-alpha` | Create/edit project panel glass surface via an inline `color-mix(...)` | Percentage mix shares, not colors: the tint is the share of the runtime-selected project color mixed over `background` to form the panel hue, and the alpha is that hue's opacity over the backdrop blur. Dark mode raises both because pastel hues get lost over a near-black backdrop. |
 | `overlay-search-scrim` | Global search dialog overlay | Search intentionally uses a lighter, blur-free scrim than standard dialogs while retaining a theme-governed semantic color. |
 | `overlay-global-composer-shim`, `overlay-global-composer-shim-peak`, `overlay-global-composer-shim-clear` | `.global-composer-shim` and `@keyframes global-composer-shim-*` | Main-canvas glass shim and white midpoint cross-fade are authored in raw CSS during the global composer handoff, not through per-element color utilities. |
 

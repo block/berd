@@ -57,6 +57,7 @@ import { DEFAULT_PROJECT_ICON } from "../lib/projectIcons";
 import { DEFAULT_PROJECT_COLOR } from "../lib/projectDefaults";
 import { pillCssColor } from "../lib/pillTones";
 import { ProjectColorPicker } from "./ProjectColorPicker";
+import { panelLabelClass } from "./panelStyles";
 import { ProjectIconPicker } from "./ProjectIconPicker";
 import { ProjectArtifactPreview } from "../artifact/ProjectArtifactPreview";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
@@ -938,11 +939,17 @@ export function CreateProjectDialog({
     <>
       <Sheet open={isOpen} onOpenChange={(open) => !open && handleClose()}>
         <SheetContent
-          className="top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] bg-[rgba(196,226,246,0.26)] p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl transition-colors duration-500 ease-out sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none"
+          className="top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl transition-colors duration-500 ease-out sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none"
           closeButtonClassName="top-5 right-5 rounded-sm bg-transparent opacity-80 hover:bg-card/50"
           overlayClassName="bg-transparent"
           style={{
-            backgroundColor: `color-mix(in oklab, ${selectedPanelColor} 26%, transparent)`,
+            // Two deliberate knobs, both theme-aware tokens: the inner mix
+            // forms an opaque panel hue (--project-panel-tint share of the
+            // project color over the theme background) so label contrast no
+            // longer depends on what sits behind the sheet; the outer mix
+            // applies --project-panel-alpha so the backdrop blur keeps a
+            // controlled amount of glassiness.
+            backgroundColor: `color-mix(in oklab, color-mix(in oklab, ${selectedPanelColor} var(--project-panel-tint), var(--background)) var(--project-panel-alpha), transparent)`,
           }}
           aria-describedby={undefined}
         >
@@ -958,24 +965,26 @@ export function CreateProjectDialog({
               </SheetTitle>
             </div>
 
-            {/* Hero stays transparent so the glass panel reveals whatever sits
- underneath instead of painting a fake backdrop. */}
-            <div className="relative h-[300px] shrink-0 overflow-hidden px-8 pb-4">
-              <ProjectArtifactPreview
-                input={previewInput}
-                className="h-full w-full"
-              />
-              <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
-                <ProjectColorPicker
-                  value={color}
-                  onChange={setColor}
-                  variant="swatches"
+            {/* Scrollable form body. The hero (cube + color picker) scrolls
+                with the form so the swatch pill's shadow is never clipped by a
+                fixed hero container and the area below scrolls naturally. */}
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-transparent px-6 pt-0 pb-5 sm:px-8">
+              {/* Hero stays transparent so the glass panel reveals whatever
+                  sits underneath instead of painting a fake backdrop. */}
+              <div className="relative h-[300px] pb-4">
+                <ProjectArtifactPreview
+                  input={previewInput}
+                  className="h-full w-full"
                 />
+                <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
+                  <ProjectColorPicker
+                    value={color}
+                    onChange={setColor}
+                    variant="swatches"
+                  />
+                </div>
               </div>
-            </div>
 
-            {/* Scrollable form body. */}
-            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-transparent px-6 py-5 sm:px-8">
               <ProjectIconPicker
                 icon={icon}
                 color={color}
@@ -986,7 +995,7 @@ export function CreateProjectDialog({
               />
 
               <div className="group/field space-y-2">
-                <Label className="text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+                <Label className={panelLabelClass}>
                   {t("dialog.nameLabel")}{" "}
                   <span className="text-destructive">*</span>
                 </Label>
@@ -1004,7 +1013,7 @@ export function CreateProjectDialog({
               {!isMultiWorkspaceMode ? (
                 <div className="group/field space-y-2">
                   <div className="flex items-center gap-1.5">
-                    <Label className="text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+                    <Label className={panelLabelClass}>
                       {t("dialog.folderLabel")}
                     </Label>
                     {missingDirs.length > 0 ? (
@@ -1066,7 +1075,7 @@ export function CreateProjectDialog({
               ) : (
                 <div className="group/field space-y-2">
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <Label className="text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+                    <Label className={panelLabelClass}>
                       {t("dialog.workspacesLabel")}
                     </Label>
                     {missingDirs.length > 0 ? (
@@ -1212,7 +1221,7 @@ export function CreateProjectDialog({
               )}
 
               <div className="group/field space-y-2">
-                <Label className="text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+                <Label className={panelLabelClass}>
                   {t("dialog.describeLabel")}
                 </Label>
                 <textarea

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import type { ProjectIconCandidate } from "../api/projects";
 import { DEFAULT_PROJECT_ICON, isImageProjectIcon } from "../lib/projectIcons";
+import { panelLabelClass } from "./panelStyles";
 import { DefaultProjectGlyphIcon } from "./DefaultProjectGlyphIcon";
 import { ProjectIcon } from "./ProjectIcon";
 
@@ -53,9 +54,7 @@ export function ProjectIconPicker({
 
   return (
     <div className="group/field space-y-2">
-      <span className="block text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
-        {t("dialog.icon")}
-      </span>
+      <span className={cn("block", panelLabelClass)}>{t("dialog.icon")}</span>
       <div className="max-h-36 overflow-y-auto">
         <div className="flex items-start">
           <div

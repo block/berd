@@ -332,6 +332,13 @@
   --surface-editor-control-hover: rgba(255, 255, 255, 0.5);
   --surface-editor-badge: rgba(255, 255, 255, 0.7);
   --surface-color-picker-swatches: rgba(255, 255, 255, 0.95);
+  /* Create/edit project panel glass surface: --project-panel-tint is the
+     share of the selected project color mixed into the theme background to
+     form the panel hue; --project-panel-alpha is the opacity of that hue over
+     the blurred content behind the sheet. Dark mode uses a stronger tint and
+     higher opacity because pastel hues get lost over a near-black backdrop. */
+  --project-panel-tint: 35%;
+  --project-panel-alpha: 74%;
   --text-editor-field-placeholder: color-mix(
     in oklab,
     var(--foreground) 30%,
@@ -736,6 +743,8 @@
   --surface-editor-control-hover: rgba(255, 255, 255, 0.08);
   --surface-editor-badge: rgba(0, 0, 0, 0.35);
   --surface-color-picker-swatches: rgba(35, 35, 35, 0.95);
+  --project-panel-tint: 47%;
+  --project-panel-alpha: 90%;
   --text-editor-field-placeholder: color-mix(
     in oklab,
     var(--foreground) 32%,
