@@ -50,6 +50,68 @@ pub fn run_browser_login(
     config: &SkillsConfig,
     storage: &dyn SessionCredentialStorage,
 ) -> Result<BrowserLoginSummary> {
+    run_browser_login_with_output(config, storage, BrowserLoginOutput::Standalone)
+}
+
+pub fn ensure_browser_login(
+    config: &SkillsConfig,
+    storage: &dyn SessionCredentialStorage,
+) -> Result<()> {
+    run_browser_login_with_output(config, storage, BrowserLoginOutput::Embedded).map(|_| ())
+}
+
+#[derive(Clone, Copy)]
+enum BrowserLoginOutput {
+    Standalone,
+    Embedded,
+}
+
+impl BrowserLoginOutput {
+    fn info(self, config: &SkillsConfig, message: &str) {
+        match self {
+            Self::Standalone => auth_info(config, message),
+            Self::Embedded => config.style.verbose(message),
+        }
+    }
+
+    fn login_url(self, config: &SkillsConfig, login_url: &Url) {
+        if config.json {
+            return;
+        }
+        match self {
+            Self::Standalone => {
+                println!("Opening BuilderBot auth login in your browser:");
+                println!("{login_url}");
+            }
+            Self::Embedded => {
+                eprintln!("Opening BuilderBot auth login in your browser:");
+                eprintln!("{login_url}");
+            }
+        }
+    }
+
+    fn browser_fallback(self) {
+        match self {
+            Self::Standalone => {
+                println!("Could not open a browser automatically. Open the URL above manually.")
+            }
+            Self::Embedded => {
+                eprintln!("Could not open a browser automatically. Open the URL above manually.")
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn writes_command_stdout(self) -> bool {
+        matches!(self, Self::Standalone)
+    }
+}
+
+fn run_browser_login_with_output(
+    config: &SkillsConfig,
+    storage: &dyn SessionCredentialStorage,
+    output: BrowserLoginOutput,
+) -> Result<BrowserLoginSummary> {
     let service_url = kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path);
     let client = build_auth_http_client(Duration::from_secs(30))?;
     let storage_key = session_storage_key_from_config(config);
@@ -62,7 +124,7 @@ pub fn run_browser_login(
                 &service_url,
                 &stored,
             )? {
-                auth_info(
+                output.info(
                     config,
                     &format!(
                         "Found valid BuilderBot CLI auth session in {} storage",
@@ -81,7 +143,7 @@ pub fn run_browser_login(
                     credential_sha256_prefix: None,
                 });
             }
-            auth_info(
+            output.info(
                 config,
                 &format!(
                     "Stored BuilderBot CLI auth session in {} storage is invalid",
@@ -90,7 +152,7 @@ pub fn run_browser_login(
             );
         }
         None => {
-            auth_info(
+            output.info(
                 config,
                 &format!(
                     "No BuilderBot CLI auth session found in {} storage",
@@ -111,17 +173,14 @@ pub fn run_browser_login(
         let _ = tx.send(result);
     });
 
-    if !config.json {
-        println!("Opening BuilderBot auth login in your browser:");
-        println!("{login_url}");
-    }
+    output.login_url(config, &login_url);
     if let Err(error) = webbrowser::open(login_url.as_str()) {
         if config.json {
             return Err(anyhow!(
                 "failed to open browser for BuilderBot auth login: {error}"
             ));
         }
-        println!("Could not open a browser automatically. Open the URL above manually.");
+        output.browser_fallback();
     }
 
     let code = rx
@@ -133,7 +192,7 @@ pub fn run_browser_login(
     let me = verified.me;
     let workspace_name = me.active_workspace_name()?.to_string();
     storage.set(&storage_key, &stored)?;
-    auth_info(
+    output.info(
         config,
         &format!(
             "Stored BuilderBot CLI auth session in {} storage",
@@ -308,7 +367,13 @@ fn auth_info(config: &SkillsConfig, message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{auth_callback_page, AuthCallbackPage};
+    use super::{auth_callback_page, AuthCallbackPage, BrowserLoginOutput};
+
+    #[test]
+    fn embedded_login_never_writes_command_stdout() {
+        assert!(!BrowserLoginOutput::Embedded.writes_command_stdout());
+        assert!(BrowserLoginOutput::Standalone.writes_command_stdout());
+    }
 
     #[test]
     fn callback_pages_are_self_contained_and_themed() {

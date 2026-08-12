@@ -84,12 +84,10 @@ pub fn exchange_login_code(
     }
     let response = request.send().context("exchange login code")?;
     let status = response.status();
-    let body = response.text().context("read login exchange response")?;
     if !status.is_success() {
-        return Err(anyhow!(
-            "/v1/auth/login/exchange failed with {status}: {body}"
-        ));
+        return Err(anyhow!("/v1/auth/login/exchange failed with {status}"));
     }
+    let body = response.text().context("read login exchange response")?;
     serde_json::from_str(&body).context("parse login exchange response")
 }
 
@@ -133,13 +131,13 @@ pub fn verify_session_credential(
         .send()
         .context("verify stored BuilderBot CLI auth session")?;
     let status = response.status();
-    let body = response.text().context("read /v1/auth/me response")?;
     if status == HttpStatusCode::UNAUTHORIZED || status == HttpStatusCode::FORBIDDEN {
         return Ok(None);
     }
     if !status.is_success() {
-        return Err(anyhow!("/v1/auth/me failed with {status}: {body}"));
+        return Err(anyhow!("/v1/auth/me failed with {status}"));
     }
+    let body = response.text().context("read /v1/auth/me response")?;
     let me: AuthMeResponse = serde_json::from_str(&body).context("parse /v1/auth/me response")?;
     Ok(Some(me))
 }
@@ -166,12 +164,11 @@ pub fn logout_session_credential(
         .send()
         .context("destroy stored BuilderBot CLI auth session")?;
     let status = response.status();
-    let body = response.text().context("read /v1/auth/logout response")?;
     if status == HttpStatusCode::UNAUTHORIZED || status == HttpStatusCode::FORBIDDEN {
         return Ok(false);
     }
     if !status.is_success() {
-        return Err(anyhow!("/v1/auth/logout failed with {status}: {body}"));
+        return Err(anyhow!("/v1/auth/logout failed with {status}"));
     }
     Ok(true)
 }
@@ -230,6 +227,26 @@ mod tests {
             request.bb_session_credential.as_deref(),
             Some("expired-session")
         );
+    }
+
+    #[test]
+    fn verify_session_credential_does_not_echo_failure_body() {
+        let secret = "reflected_session_credential_123456";
+        let server = SingleResponseServer::start(500, secret);
+        let client = build_auth_http_client(Duration::from_secs(5)).expect("client");
+        let credential = StoredSessionCredential {
+            session_credential: secret.to_string(),
+            expires_at: None,
+        };
+
+        let error = verify_session_credential(&client, None, &server.base_url, &credential)
+            .expect_err("reject failed session check");
+        let request = server.finish();
+        let message = format!("{error:#}");
+
+        assert!(message.contains("/v1/auth/me failed with 500"));
+        assert!(!message.contains(secret));
+        assert_eq!(request.path, "/v1/auth/me");
     }
 
     #[test]

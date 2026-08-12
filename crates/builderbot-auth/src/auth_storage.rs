@@ -1,10 +1,8 @@
 use std::collections::BTreeMap;
 #[cfg(any(debug_assertions, test))]
 use std::collections::HashMap;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(any(debug_assertions, test))]
 use std::sync::Mutex;
 
@@ -16,11 +14,8 @@ use crate::config::kgoose_service_url;
 
 #[cfg(target_os = "macos")]
 const KEYRING_SERVICE: &str = "com.squareup.builderbot.cli-auth";
-#[cfg(target_os = "macos")]
-const PURPOSE_TOKEN_KEYRING_SERVICE: &str = "com.squareup.builderbot.cli-auth-purpose-token";
 pub const BB_AUTH_STORAGE_ENV_VAR: &str = "BB_AUTH_STORAGE";
 pub const BB_AUTH_STORAGE_FILE_ENV_VAR: &str = "BB_AUTH_STORAGE_FILE";
-static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
 pub struct SessionStorageKey {
@@ -65,40 +60,6 @@ impl SessionStorageKey {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct PurposeTokenStorageKey {
-    session: SessionStorageKey,
-    purpose: String,
-}
-
-impl PurposeTokenStorageKey {
-    pub fn new(session: &SessionStorageKey, purpose: impl Into<String>) -> Self {
-        Self {
-            session: session.clone(),
-            purpose: purpose.into(),
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    fn account(&self) -> String {
-        format!("{}@{}", self.purpose, self.session.account())
-    }
-
-    fn hashed_id(&self) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(b"purpose-token");
-        hasher.update([0]);
-        hasher.update(self.purpose.as_bytes());
-        hasher.update([0]);
-        hasher.update(self.session.hashed_id().as_bytes());
-        hasher
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect()
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredSessionCredential {
@@ -118,31 +79,11 @@ impl StoredSessionCredential {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StoredPurposeTokenCredential {
-    pub access_token: String,
-    pub token_type: String,
-    pub issued_at_unix_seconds: u64,
-    pub expires_at_unix_seconds: u64,
-    pub session_credential_sha256: String,
-}
-
 pub trait SessionCredentialStorage {
     fn kind(&self) -> &'static str;
     fn get(&self, key: &SessionStorageKey) -> Result<Option<StoredSessionCredential>>;
     fn set(&self, key: &SessionStorageKey, credential: &StoredSessionCredential) -> Result<()>;
     fn delete(&self, key: &SessionStorageKey) -> Result<bool>;
-    fn get_purpose_token(
-        &self,
-        key: &PurposeTokenStorageKey,
-    ) -> Result<Option<StoredPurposeTokenCredential>>;
-    fn set_purpose_token(
-        &self,
-        key: &PurposeTokenStorageKey,
-        credential: &StoredPurposeTokenCredential,
-    ) -> Result<()>;
-    fn delete_purpose_token(&self, key: &PurposeTokenStorageKey) -> Result<bool>;
 }
 
 pub fn default_session_storage_for_bb_home(
@@ -249,7 +190,6 @@ fn file_storage_from_env(bb_home: &std::path::Path) -> Result<Box<dyn SessionCre
 #[derive(Debug, Default)]
 pub struct InMemorySessionCredentialStorage {
     entries: Mutex<HashMap<String, StoredSessionCredential>>,
-    purpose_tokens: Mutex<HashMap<String, StoredPurposeTokenCredential>>,
 }
 
 #[cfg(any(debug_assertions, test))]
@@ -283,39 +223,6 @@ impl SessionCredentialStorage for InMemorySessionCredentialStorage {
             .remove(&key.hashed_id())
             .is_some())
     }
-
-    fn get_purpose_token(
-        &self,
-        key: &PurposeTokenStorageKey,
-    ) -> Result<Option<StoredPurposeTokenCredential>> {
-        Ok(self
-            .purpose_tokens
-            .lock()
-            .expect("purpose token storage mutex poisoned")
-            .get(&key.hashed_id())
-            .cloned())
-    }
-
-    fn set_purpose_token(
-        &self,
-        key: &PurposeTokenStorageKey,
-        credential: &StoredPurposeTokenCredential,
-    ) -> Result<()> {
-        self.purpose_tokens
-            .lock()
-            .expect("purpose token storage mutex poisoned")
-            .insert(key.hashed_id(), credential.clone());
-        Ok(())
-    }
-
-    fn delete_purpose_token(&self, key: &PurposeTokenStorageKey) -> Result<bool> {
-        Ok(self
-            .purpose_tokens
-            .lock()
-            .expect("purpose token storage mutex poisoned")
-            .remove(&key.hashed_id())
-            .is_some())
-    }
 }
 
 #[derive(Debug)]
@@ -345,30 +252,6 @@ impl FileSessionCredentialStorage {
         fs::write(&self.path, json).with_context(|| format!("write {}", self.path.display()))?;
         restrict_permissions(&self.path)
     }
-
-    fn purpose_tokens_path(&self) -> PathBuf {
-        let mut path = self.path.as_os_str().to_os_string();
-        path.push(".purpose-tokens");
-        PathBuf::from(path)
-    }
-
-    fn read_purpose_tokens(&self) -> Result<BTreeMap<String, StoredPurposeTokenCredential>> {
-        let path = self.purpose_tokens_path();
-        if !path.exists() {
-            return Ok(BTreeMap::new());
-        }
-        let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-        serde_json::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))
-    }
-
-    fn write_purpose_tokens(
-        &self,
-        entries: &BTreeMap<String, StoredPurposeTokenCredential>,
-    ) -> Result<()> {
-        let path = self.purpose_tokens_path();
-        let json = serde_json::to_vec_pretty(entries).context("serialize purpose token storage")?;
-        write_private_file_atomically(&path, &json)
-    }
 }
 
 impl SessionCredentialStorage for FileSessionCredentialStorage {
@@ -394,32 +277,6 @@ impl SessionCredentialStorage for FileSessionCredentialStorage {
         }
         Ok(removed)
     }
-
-    fn get_purpose_token(
-        &self,
-        key: &PurposeTokenStorageKey,
-    ) -> Result<Option<StoredPurposeTokenCredential>> {
-        Ok(self.read_purpose_tokens()?.get(&key.hashed_id()).cloned())
-    }
-
-    fn set_purpose_token(
-        &self,
-        key: &PurposeTokenStorageKey,
-        credential: &StoredPurposeTokenCredential,
-    ) -> Result<()> {
-        let mut entries = self.read_purpose_tokens()?;
-        entries.insert(key.hashed_id(), credential.clone());
-        self.write_purpose_tokens(&entries)
-    }
-
-    fn delete_purpose_token(&self, key: &PurposeTokenStorageKey) -> Result<bool> {
-        let mut entries = self.read_purpose_tokens()?;
-        let removed = entries.remove(&key.hashed_id()).is_some();
-        if removed {
-            self.write_purpose_tokens(&entries)?;
-        }
-        Ok(removed)
-    }
 }
 
 #[derive(Debug)]
@@ -440,25 +297,6 @@ impl SessionCredentialStorage for KeyringSessionCredentialStorage {
 
     fn delete(&self, key: &SessionStorageKey) -> Result<bool> {
         keyring_delete(key)
-    }
-
-    fn get_purpose_token(
-        &self,
-        key: &PurposeTokenStorageKey,
-    ) -> Result<Option<StoredPurposeTokenCredential>> {
-        keyring_get_purpose_token(key)
-    }
-
-    fn set_purpose_token(
-        &self,
-        key: &PurposeTokenStorageKey,
-        credential: &StoredPurposeTokenCredential,
-    ) -> Result<()> {
-        keyring_set_purpose_token(key, credential)
-    }
-
-    fn delete_purpose_token(&self, key: &PurposeTokenStorageKey) -> Result<bool> {
-        keyring_delete_purpose_token(key)
     }
 }
 
@@ -496,42 +334,6 @@ fn keyring_delete(key: &SessionStorageKey) -> Result<bool> {
         .context("delete BuilderBot auth session from keyring")
 }
 
-#[cfg(target_os = "macos")]
-fn keyring_get_purpose_token(
-    key: &PurposeTokenStorageKey,
-) -> Result<Option<StoredPurposeTokenCredential>> {
-    use crate::keychain;
-
-    let value =
-        keychain::get_generic_password_unscoped(PURPOSE_TOKEN_KEYRING_SERVICE, &key.account())
-            .context("read BuilderBot purpose token from keyring")?;
-    value
-        .map(|value| {
-            serde_json::from_slice(&value).context("parse BuilderBot purpose token from keyring")
-        })
-        .transpose()
-}
-
-#[cfg(target_os = "macos")]
-fn keyring_set_purpose_token(
-    key: &PurposeTokenStorageKey,
-    credential: &StoredPurposeTokenCredential,
-) -> Result<()> {
-    use crate::keychain;
-
-    let value = serde_json::to_vec(credential).context("serialize BuilderBot purpose token")?;
-    keychain::set_generic_password_unscoped(PURPOSE_TOKEN_KEYRING_SERVICE, &key.account(), &value)
-        .context("write BuilderBot purpose token to keyring")
-}
-
-#[cfg(target_os = "macos")]
-fn keyring_delete_purpose_token(key: &PurposeTokenStorageKey) -> Result<bool> {
-    use crate::keychain;
-
-    keychain::delete_generic_password_unscoped(PURPOSE_TOKEN_KEYRING_SERVICE, &key.account())
-        .context("delete BuilderBot purpose token from keyring")
-}
-
 #[cfg(not(target_os = "macos"))]
 fn keyring_get(_key: &SessionStorageKey) -> Result<Option<StoredSessionCredential>> {
     unsupported_keyring_storage()
@@ -544,26 +346,6 @@ fn keyring_set(_key: &SessionStorageKey, _credential: &StoredSessionCredential) 
 
 #[cfg(not(target_os = "macos"))]
 fn keyring_delete(_key: &SessionStorageKey) -> Result<bool> {
-    unsupported_keyring_storage()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn keyring_get_purpose_token(
-    _key: &PurposeTokenStorageKey,
-) -> Result<Option<StoredPurposeTokenCredential>> {
-    unsupported_keyring_storage()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn keyring_set_purpose_token(
-    _key: &PurposeTokenStorageKey,
-    _credential: &StoredPurposeTokenCredential,
-) -> Result<()> {
-    unsupported_keyring_storage()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn keyring_delete_purpose_token(_key: &PurposeTokenStorageKey) -> Result<bool> {
     unsupported_keyring_storage()
 }
 
@@ -594,46 +376,6 @@ fn restrict_permissions(path: &PathBuf) -> Result<()> {
             .with_context(|| format!("chmod 600 {}", path.display()))?;
     }
     Ok(())
-}
-
-fn write_private_file_atomically(path: &PathBuf, bytes: &[u8]) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        let existed = parent.exists();
-        fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-        #[cfg(unix)]
-        if !existed {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
-                .with_context(|| format!("chmod 700 {}", parent.display()))?;
-        }
-    }
-
-    let sequence = TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-    let mut temporary_path = path.as_os_str().to_os_string();
-    temporary_path.push(format!(".{}.{}.tmp", std::process::id(), sequence));
-    let temporary_path = PathBuf::from(temporary_path);
-    let result = (|| {
-        let mut options = OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options
-            .open(&temporary_path)
-            .with_context(|| format!("create {}", temporary_path.display()))?;
-        file.write_all(bytes)
-            .with_context(|| format!("write {}", temporary_path.display()))?;
-        file.sync_all()
-            .with_context(|| format!("sync {}", temporary_path.display()))?;
-        fs::rename(&temporary_path, path).with_context(|| format!("replace {}", path.display()))?;
-        restrict_permissions(path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary_path);
-    }
-    result
 }
 
 #[cfg(test)]
@@ -715,73 +457,6 @@ mod tests {
     }
 
     #[test]
-    fn file_storage_scopes_and_protects_purpose_tokens() {
-        let directory = std::env::temp_dir().join(format!(
-            "bb-purpose-token-storage-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
-        let storage = FileSessionCredentialStorage::new(directory.join("sessions.json"));
-        let local_session = SessionStorageKey::new("default", "http://localhost:5173");
-        let staging_session = SessionStorageKey::new("default", "https://staging.example");
-        let local_compose = PurposeTokenStorageKey::new(&local_session, "compose");
-        let staging_compose = PurposeTokenStorageKey::new(&staging_session, "compose");
-        let local_other = PurposeTokenStorageKey::new(&local_session, "other");
-        let credential = StoredPurposeTokenCredential {
-            access_token: "purpose-token".to_string(),
-            token_type: "Bearer".to_string(),
-            issued_at_unix_seconds: 100,
-            expires_at_unix_seconds: 400,
-            session_credential_sha256: "session-fingerprint".to_string(),
-        };
-
-        storage
-            .set_purpose_token(&local_compose, &credential)
-            .expect("store purpose token");
-
-        assert_eq!(
-            storage
-                .get_purpose_token(&local_compose)
-                .expect("read purpose token")
-                .expect("purpose token")
-                .access_token,
-            "purpose-token"
-        );
-        assert!(storage
-            .get_purpose_token(&staging_compose)
-            .expect("read staging purpose token")
-            .is_none());
-        assert!(storage
-            .get_purpose_token(&local_other)
-            .expect("read other purpose token")
-            .is_none());
-
-        let purpose_tokens_path = storage.purpose_tokens_path();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            assert_eq!(
-                fs::metadata(&purpose_tokens_path)
-                    .expect("purpose token metadata")
-                    .permissions()
-                    .mode()
-                    & 0o777,
-                0o600
-            );
-        }
-        assert!(storage
-            .delete_purpose_token(&local_compose)
-            .expect("delete purpose token"));
-        assert!(!storage
-            .delete_purpose_token(&local_compose)
-            .expect("delete purpose token again"));
-
-        let _ = fs::remove_dir_all(directory);
-    }
-
-    #[test]
     fn parse_stored_session_accepts_legacy_raw_credential() {
         let stored = parse_stored_session("raw-session").expect("parse raw credential");
 
@@ -817,16 +492,6 @@ mod tests {
         assert_eq!(
             key.account(),
             "default@https://kgoose.stage.sqprod.co/cash-app/goose"
-        );
-
-        let purpose_key = PurposeTokenStorageKey::new(&key, "compose");
-        assert_eq!(
-            PURPOSE_TOKEN_KEYRING_SERVICE,
-            "com.squareup.builderbot.cli-auth-purpose-token"
-        );
-        assert_eq!(
-            purpose_key.account(),
-            "compose@default@https://kgoose.stage.sqprod.co/cash-app/goose"
         );
     }
 }

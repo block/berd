@@ -6,55 +6,41 @@
 //! `bb tools appkit`, and it does not migrate the separate internal Compose
 //! workflow. Both internal paths remain unchanged.
 //!
-//! The CLI exchanges its stored bbidentity session for a short-lived
-//! Compose-purpose bearer token. Public ingress validates that token online
-//! through kgoose `ext_authz`, removes it, and forwards only verified identity
-//! headers to Compose. Compose never receives the bearer token.
+//! The CLI sends its stored bbidentity session only to the allowlisted Compose
+//! control-plane origins. Public ingress authorizes that session through kgoose
+//! `ext_authz` and removes it before forwarding the request internally. Compose
+//! never receives the session credential.
 
-use std::fs::{self, File, OpenOptions};
+use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use anyhow::{Context, Result};
-use builderbot_auth::auth_login::{auth_url, build_auth_http_client, playpen_baggage};
+use builderbot_auth::auth_login::{auth_url, build_auth_http_client};
 use clap::{Arg, ArgMatches, Command};
-use fs2::FileExt;
 use reqwest::blocking::{multipart, Client, RequestBuilder, Response};
 use reqwest::header::{HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
 use reqwest::StatusCode;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{json, Map, Value};
-use sha2::{Digest, Sha256};
 
-use super::auth::SESSION_CREDENTIAL_HEADER;
-use super::auth_storage::{
-    default_session_storage, session_storage_key_from_config, PurposeTokenStorageKey,
-    SessionCredentialStorage, StoredPurposeTokenCredential,
-};
+use super::auth_login::ensure_browser_login;
+use super::auth_storage::{default_session_storage, session_storage_key_from_config};
 use super::display::{print_json, terminal_safe_text, Style};
 use super::runner;
 use super::skills_api::{exit_codes, failure};
-use super::skills_config::{kgoose_service_url, SkillsConfig};
+use super::skills_config::SkillsConfig;
 
 const APPS_BASE_URL_ENV_VAR: &str = "BB_APPS_CONTROL_PLANE_URL";
 const APPS_CLIENT_VERSION_ENV_VAR: &str = "BB_APPS_CLIENT_VERSION";
 const APPS_CONTRACT_PATH: &str = "/v1/agent/contract";
 const APPS_PLAN_PATH: &str = "/v1/agent/apps/plan";
-const COMPOSE_TOKEN_EXCHANGE_PATH: &str = "/v1/auth/token/compose";
 const HOTPOD_AGENT_CLIENT_VERSION_HEADER: &str = "X-Hotpod-Agent-Client-Version";
-const TOKEN_EXCHANGE_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 // Compose may synchronously wait up to two minutes for an initialize or
-// deploy rollout. Leave enough headroom for the response to traverse ingress
-// without weakening the tighter credential-exchange bound above.
+// deploy rollout. Leave enough headroom for the response to traverse ingress.
 const CONTROL_PLANE_REQUEST_TIMEOUT: Duration = Duration::from_secs(3 * 60);
-const TOKEN_EXCHANGE_RESPONSE_MAX_BYTES: usize = 32 * 1024;
 const CONTROL_PLANE_RESPONSE_MAX_BYTES: usize = 2 * 1024 * 1024;
-const COMPOSE_TOKEN_PURPOSE: &str = "compose";
-const PURPOSE_TOKEN_REFRESH_SKEW: Duration = Duration::from_secs(60);
-const PURPOSE_TOKEN_REPLACEMENT_INTERVAL: Duration = Duration::from_secs(60);
-const PURPOSE_TOKEN_LOCK_FILE: &str = "apps-purpose-token.lock";
 const TRUSTED_CONTROL_PLANE_HOSTS: &[&str] = &[
     "compose-ctrl.test.blockstaging.build",
     "compose-ctrl.app.builderlab.xyz",
@@ -206,13 +192,13 @@ fn run_contract(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         .context("expected Apps Platform client version")?;
 
     let client = ControlPlaneClient::new(base_url, client_version, config.style)?;
-    let token_provider = KgoosePurposeTokenProvider::from_config(config)?;
-    let contract = client.contract(&token_provider)?;
+    let credential = ComposeSessionCredential::from_config(config)?;
+    let contract = client.contract(&credential)?;
     print_json(&contract)
 }
 
 fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
-    let (client, token_provider) = control_plane_context(config, matches)?;
+    let (client, credential) = control_plane_context(config, matches)?;
     let request = PlanRequest {
         app_id: matches.get_one::<String>("app-id").map(String::as_str),
         name: matches.get_one::<String>("name").map(String::as_str),
@@ -223,7 +209,7 @@ fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         persistence: matches.get_one::<String>("persistence").map(String::as_str),
         client_version: client.client_version_text(),
     };
-    let plan = client.plan(&token_provider, &request)?;
+    let plan = client.plan(&credential, &request)?;
     let app_id = required_response_string(&plan, "app_id", "Apps Platform plan")?.to_string();
     let initialize_required = plan
         .pointer("/initialize/required")
@@ -240,7 +226,7 @@ fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         initialize_required.unwrap_or(false) || initialize_recommended.unwrap_or(false);
     let initialize = if should_initialize {
         let request = initialize_request_from_plan(&plan);
-        Some(client.initialize(&token_provider, &app_id, &request)?)
+        Some(client.initialize(&credential, &app_id, &request)?)
     } else {
         None
     };
@@ -280,15 +266,15 @@ fn run_deploy(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         version_id: matches.get_one::<String>("version-id").cloned(),
         deployment_id: matches.get_one::<String>("deployment-id").cloned(),
     };
-    let (client, token_provider) = control_plane_context(config, matches)?;
-    let response = client.deploy(&token_provider, app_id, artifact, &options)?;
+    let (client, credential) = control_plane_context(config, matches)?;
+    let response = client.deploy(&credential, app_id, artifact, &options)?;
     print_json(&response)
 }
 
 fn control_plane_context(
     config: &SkillsConfig,
     matches: &ArgMatches,
-) -> Result<(ControlPlaneClient, KgoosePurposeTokenProvider)> {
+) -> Result<(ControlPlaneClient, ComposeSessionCredential)> {
     let base_url = matches
         .get_one::<String>("apps-base-url")
         .context("expected Apps Platform control-plane URL")?;
@@ -296,8 +282,8 @@ fn control_plane_context(
         .get_one::<String>("apps-client-version")
         .context("expected Apps Platform client version")?;
     let client = ControlPlaneClient::new(base_url, client_version, config.style)?;
-    let token_provider = KgoosePurposeTokenProvider::from_config(config)?;
-    Ok((client, token_provider))
+    let credential = ComposeSessionCredential::from_config(config)?;
+    Ok((client, credential))
 }
 
 #[derive(Serialize)]
@@ -363,263 +349,60 @@ fn validate_artifact_path(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Supplies the short-lived Compose bearer accepted by public ingress. Keeping
-/// exchange and request construction separate makes the credential lifecycle
-/// independently testable. The provider shares a session-bound token across
-/// CLI processes so kgoose's one-active-token contract is respected.
-trait ComposeCredentialProvider {
-    fn authorization_header(&self) -> Result<HeaderValue>;
-
-    /// Returns a replacement credential after ingress rejects `rejected`, or
-    /// `None` when retrying cannot help yet. Implementations must not return
-    /// the rejected value, which keeps the control-plane retry bounded.
-    fn authorization_header_after_rejection(
-        &self,
-        _rejected: &HeaderValue,
-    ) -> Result<Option<HeaderValue>> {
-        Ok(None)
-    }
+struct ComposeSessionCredential {
+    authorization: HeaderValue,
+    secret: String,
 }
 
-struct KgoosePurposeTokenProvider {
-    client: Client,
-    exchange_url: url::Url,
-    session_credential: HeaderValue,
-    session_credential_sha256: String,
-    baggage: Option<HeaderValue>,
-    style: Style,
-    storage: Box<dyn SessionCredentialStorage>,
-    storage_key: PurposeTokenStorageKey,
-    refresh_lock_path: PathBuf,
-    refresh_mutex: Mutex<()>,
-}
-
-impl KgoosePurposeTokenProvider {
+impl ComposeSessionCredential {
     fn from_config(config: &SkillsConfig) -> Result<Self> {
         let storage = default_session_storage(config)?;
         let session_storage_key = session_storage_key_from_config(config);
-        let credential = storage
-            .get(&session_storage_key)?
-            .ok_or_else(auth_required_error)?;
-        let session_credential = credential
-            .session_credential_header_value()
-            .ok_or_else(auth_required_error)?;
-        let session_credential_sha256 = sha256(&session_credential);
-        let session_credential = HeaderValue::from_str(&session_credential)
-            .context("stored BuilderBot CLI auth session is invalid; run `bb auth login`")?;
-        let server_url = kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path);
-        let exchange_url = auth_url(&server_url, COMPOSE_TOKEN_EXCHANGE_PATH)
-            .context("build Compose credential exchange URL")?;
-        let baggage = playpen_baggage(config.playpen.as_deref())
-            .map(|value| HeaderValue::from_str(&value).context("build kgoose playpen header"))
-            .transpose()?;
-
-        Ok(Self {
-            client: build_auth_http_client(TOKEN_EXCHANGE_REQUEST_TIMEOUT)?,
-            exchange_url,
-            session_credential,
-            session_credential_sha256,
-            baggage,
-            style: config.style,
-            storage,
-            storage_key: PurposeTokenStorageKey::new(&session_storage_key, COMPOSE_TOKEN_PURPOSE),
-            refresh_lock_path: config.bb_home.join(PURPOSE_TOKEN_LOCK_FILE),
-            refresh_mutex: Mutex::new(()),
+        Self::after_login(storage.as_ref(), &session_storage_key, || {
+            ensure_browser_login(config, storage.as_ref())
         })
     }
 
-    fn exchange_purpose_token(&self) -> Result<PurposeTokenExchangeOutcome> {
-        self.style
-            .verbose(&format!("POST {COMPOSE_TOKEN_EXCHANGE_PATH}"));
-        let mut request = self
-            .client
-            .post(self.exchange_url.clone())
-            .header(USER_AGENT, apps_user_agent())
-            .header(ACCEPT, "application/json")
-            .header(SESSION_CREDENTIAL_HEADER, self.session_credential.clone());
-        if let Some(baggage) = &self.baggage {
-            request = request.header("Baggage", baggage.clone());
-        }
-        let response = request
-            .send()
-            .map_err(|error| network_failure("POST", COMPOSE_TOKEN_EXCHANGE_PATH, error))?;
-        let status = response.status();
-        if status == StatusCode::TOO_MANY_REQUESTS {
-            self.style
-                .verbose(&format!("POST {COMPOSE_TOKEN_EXCHANGE_PATH} -> {status}"));
-            return Ok(PurposeTokenExchangeOutcome::RateLimited);
-        }
-        if !status.is_success() {
-            self.style
-                .verbose(&format!("POST {COMPOSE_TOKEN_EXCHANGE_PATH} -> {status}"));
-            return Err(exchange_http_failure(status));
-        }
-        let body = read_limited_response_body(
-            response,
-            TOKEN_EXCHANGE_RESPONSE_MAX_BYTES,
-            "Compose credential exchange",
-        )?;
-        self.style.verbose(&format!(
-            "POST {COMPOSE_TOKEN_EXCHANGE_PATH} -> {status} ({} bytes)",
-            body.len()
-        ));
-        let exchange: PurposeTokenExchangeResponse =
-            serde_json::from_str(&body).context("parse Compose credential exchange response")?;
-        if exchange.token_type.as_deref() != Some("Bearer") {
-            anyhow::bail!("Compose credential exchange returned an unsupported token type");
-        }
-        let access_token = exchange
-            .access_token
-            .filter(|token| !token.trim().is_empty())
-            .context("Compose credential exchange returned no access token")?;
-        purpose_token_authorization_header(&access_token)
-            .context("Compose credential exchange returned an invalid access token")?;
-        let expires_in_seconds = exchange
-            .expires_in_seconds
-            .filter(|seconds| *seconds > 0)
-            .context("Compose credential exchange returned no positive expiry")?;
-        let issued_at_unix_seconds = unix_time_seconds()?;
-        let expires_at_unix_seconds = issued_at_unix_seconds
-            .checked_add(expires_in_seconds)
-            .context("Compose credential exchange returned an invalid expiry")?;
-        Ok(PurposeTokenExchangeOutcome::Issued(
-            StoredPurposeTokenCredential {
-                access_token,
-                token_type: "Bearer".to_string(),
-                issued_at_unix_seconds,
-                expires_at_unix_seconds,
-                session_credential_sha256: self.session_credential_sha256.clone(),
-            },
-        ))
+    fn after_login<F>(
+        storage: &dyn super::auth_storage::SessionCredentialStorage,
+        session_storage_key: &super::auth_storage::SessionStorageKey,
+        login: F,
+    ) -> Result<Self>
+    where
+        F: FnOnce() -> Result<()>,
+    {
+        login()?;
+        let credential = storage
+            .get(session_storage_key)?
+            .ok_or_else(auth_required_error)?;
+        let secret = credential
+            .session_credential_header_value()
+            .ok_or_else(auth_required_error)?;
+        Self::new(secret)
     }
 
-    fn cached_authorization_header(
-        &self,
-        credential: &StoredPurposeTokenCredential,
-    ) -> Result<Option<HeaderValue>> {
-        if credential.session_credential_sha256 != self.session_credential_sha256
-            || credential.token_type != "Bearer"
-            || credential.access_token.trim().is_empty()
+    fn new(secret: String) -> Result<Self> {
+        if !(32..=512).contains(&secret.len())
+            || !secret
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
         {
-            return Ok(None);
+            anyhow::bail!("stored BuilderBot CLI auth session is invalid; run `bb auth login`");
         }
-        let refresh_after = unix_time_seconds()?
-            .checked_add(PURPOSE_TOKEN_REFRESH_SKEW.as_secs())
-            .context("system time overflow while checking Compose credential")?;
-        if credential.expires_at_unix_seconds <= refresh_after {
-            return Ok(None);
-        }
-        purpose_token_authorization_header(&credential.access_token)
-            .map(Some)
-            .context("cached Compose credential is invalid")
+        let authorization = HeaderValue::from_str(&format!("BBIdentity {secret}"))
+            .context("stored BuilderBot CLI auth session is invalid; run `bb auth login`")?;
+        Ok(Self {
+            authorization,
+            secret,
+        })
     }
 
-    fn read_cached_authorization_header(
-        &self,
-    ) -> Result<Option<(StoredPurposeTokenCredential, HeaderValue)>> {
-        let Some(credential) = self.storage.get_purpose_token(&self.storage_key)? else {
-            return Ok(None);
-        };
-        let Some(header) = self.cached_authorization_header(&credential)? else {
-            return Ok(None);
-        };
-        Ok(Some((credential, header)))
+    fn authorization_header(&self) -> HeaderValue {
+        self.authorization.clone()
     }
 
-    fn refresh_lock(&self) -> Result<File> {
-        if let Some(parent) = self.refresh_lock_path.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-        }
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&self.refresh_lock_path)
-            .with_context(|| format!("open {}", self.refresh_lock_path.display()))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&self.refresh_lock_path, fs::Permissions::from_mode(0o600))
-                .with_context(|| format!("chmod 600 {}", self.refresh_lock_path.display()))?;
-        }
-        FileExt::lock_exclusive(&file)
-            .with_context(|| format!("lock {}", self.refresh_lock_path.display()))?;
-        Ok(file)
-    }
-
-    fn refresh_or_adopt(&self, rejected: Option<&HeaderValue>) -> Result<Option<HeaderValue>> {
-        let _process_guard = self
-            .refresh_mutex
-            .lock()
-            .map_err(|_| anyhow::anyhow!("Compose credential cache lock was poisoned"))?;
-        let _file_guard = self.refresh_lock()?;
-
-        let cached = self.read_cached_authorization_header()?;
-        if let Some((credential, header)) = cached {
-            if rejected.is_none() || rejected != Some(&header) {
-                return Ok(Some(header));
-            }
-
-            let replacement_allowed_at = credential
-                .issued_at_unix_seconds
-                .saturating_add(PURPOSE_TOKEN_REPLACEMENT_INTERVAL.as_secs());
-            if unix_time_seconds()? < replacement_allowed_at {
-                return Ok(None);
-            }
-        }
-
-        match self.exchange_purpose_token()? {
-            PurposeTokenExchangeOutcome::Issued(credential) => {
-                let header = self.cached_authorization_header(&credential)?.context(
-                    "Compose credential exchange returned a credential too close to expiry",
-                )?;
-                self.storage
-                    .set_purpose_token(&self.storage_key, &credential)
-                    .context("store Compose purpose token")?;
-                if rejected == Some(&header) {
-                    return Ok(None);
-                }
-                Ok(Some(header))
-            }
-            PurposeTokenExchangeOutcome::RateLimited => {
-                if let Some((_credential, header)) = self.read_cached_authorization_header()? {
-                    if rejected != Some(&header) {
-                        return Ok(Some(header));
-                    }
-                }
-                Err(exchange_http_failure(StatusCode::TOO_MANY_REQUESTS))
-            }
-        }
-    }
-}
-
-#[derive(Deserialize)]
-struct PurposeTokenExchangeResponse {
-    access_token: Option<String>,
-    token_type: Option<String>,
-    expires_in_seconds: Option<u64>,
-}
-
-enum PurposeTokenExchangeOutcome {
-    Issued(StoredPurposeTokenCredential),
-    RateLimited,
-}
-
-impl ComposeCredentialProvider for KgoosePurposeTokenProvider {
-    fn authorization_header(&self) -> Result<HeaderValue> {
-        if let Some((_credential, header)) = self.read_cached_authorization_header()? {
-            return Ok(header);
-        }
-        self.refresh_or_adopt(None)?
-            .context("Compose credential exchange did not return a usable credential")
-    }
-
-    fn authorization_header_after_rejection(
-        &self,
-        rejected: &HeaderValue,
-    ) -> Result<Option<HeaderValue>> {
-        self.refresh_or_adopt(Some(rejected))
+    fn redact(&self, value: &str) -> String {
+        value.replace(&self.secret, "[REDACTED]")
     }
 }
 
@@ -649,19 +432,20 @@ impl ControlPlaneClient {
     ) -> Result<Self> {
         let contract_url = auth_url(base_url, APPS_CONTRACT_PATH)
             .context("build Apps Platform control-plane contract URL")?;
-        if !matches!(contract_url.scheme(), "http" | "https") {
-            anyhow::bail!("Apps Platform control-plane URL must use http or https");
-        }
-        if contract_url.scheme() == "http" && !is_loopback_url(&contract_url) {
-            anyhow::bail!(
-                "Apps Platform control-plane URL must use https unless it targets loopback local development"
-            );
-        }
         if !is_trusted_control_plane_url(&contract_url) {
             anyhow::bail!(
-                "Apps Platform control-plane URL must target an approved Builderlab ingress host or loopback local development"
+                "Apps Platform control-plane URL must use HTTPS and target an approved Builderlab ingress host"
             );
         }
+        Self::build(base_url, client_version, style, request_timeout)
+    }
+
+    fn build(
+        base_url: &str,
+        client_version: &str,
+        style: Style,
+        request_timeout: Duration,
+    ) -> Result<Self> {
         let client_version_text = client_version.to_string();
         let client_version = HeaderValue::from_str(client_version)
             .context("Apps Platform client version is not a valid HTTP header value")?;
@@ -674,52 +458,52 @@ impl ControlPlaneClient {
         })
     }
 
+    #[cfg(test)]
+    fn new_for_test(
+        base_url: &str,
+        client_version: &str,
+        style: Style,
+        request_timeout: Duration,
+    ) -> Result<Self> {
+        Self::build(base_url, client_version, style, request_timeout)
+    }
+
     fn client_version_text(&self) -> &str {
         &self.client_version_text
     }
 
-    fn contract(&self, credential_provider: &dyn ComposeCredentialProvider) -> Result<Value> {
+    fn contract(&self, credential: &ComposeSessionCredential) -> Result<Value> {
         let url = self.endpoint(APPS_CONTRACT_PATH)?;
-        self.authorized_json_request(
-            credential_provider,
-            "GET",
-            APPS_CONTRACT_PATH,
-            |authorization| {
-                self.standard_request(self.client.get(url.clone()), authorization)
-                    .send()
-                    .map_err(|error| network_failure("GET", APPS_CONTRACT_PATH, error))
-            },
-        )
+        self.authorized_json_request(credential, "GET", APPS_CONTRACT_PATH, |authorization| {
+            self.standard_request(self.client.get(url.clone()), authorization)
+                .send()
+                .map_err(|error| network_failure("GET", APPS_CONTRACT_PATH, error))
+        })
     }
 
     fn plan(
         &self,
-        credential_provider: &dyn ComposeCredentialProvider,
+        credential: &ComposeSessionCredential,
         request: &PlanRequest<'_>,
     ) -> Result<Value> {
         let url = self.endpoint(APPS_PLAN_PATH)?;
-        self.authorized_json_request(
-            credential_provider,
-            "POST",
-            APPS_PLAN_PATH,
-            |authorization| {
-                self.standard_request(self.client.post(url.clone()), authorization)
-                    .json(request)
-                    .send()
-                    .map_err(|error| network_failure("POST", APPS_PLAN_PATH, error))
-            },
-        )
+        self.authorized_json_request(credential, "POST", APPS_PLAN_PATH, |authorization| {
+            self.standard_request(self.client.post(url.clone()), authorization)
+                .json(request)
+                .send()
+                .map_err(|error| network_failure("POST", APPS_PLAN_PATH, error))
+        })
     }
 
     fn initialize(
         &self,
-        credential_provider: &dyn ComposeCredentialProvider,
+        credential: &ComposeSessionCredential,
         app_id: &str,
         request: &Value,
     ) -> Result<Value> {
         let url = self.app_action_url(app_id, "initialize")?;
         let path = url.path().to_string();
-        self.authorized_json_request(credential_provider, "POST", &path, |authorization| {
+        self.authorized_json_request(credential, "POST", &path, |authorization| {
             self.standard_request(self.client.post(url.clone()), authorization)
                 .json(request)
                 .send()
@@ -729,14 +513,14 @@ impl ControlPlaneClient {
 
     fn deploy(
         &self,
-        credential_provider: &dyn ComposeCredentialProvider,
+        credential: &ComposeSessionCredential,
         app_id: &str,
         artifact: &Path,
         options: &DeployOptions,
     ) -> Result<Value> {
         let url = self.app_action_url(app_id, "deploy")?;
         let path = url.path().to_string();
-        self.authorized_json_request(credential_provider, "POST", &path, |authorization| {
+        self.authorized_json_request(credential, "POST", &path, |authorization| {
             let form = deploy_form(artifact, options)?;
             self.standard_request(self.client.post(url.clone()), authorization)
                 .multipart(form)
@@ -778,7 +562,7 @@ impl ControlPlaneClient {
 
     fn authorized_json_request<F>(
         &self,
-        credential_provider: &dyn ComposeCredentialProvider,
+        credential: &ComposeSessionCredential,
         method: &str,
         path: &str,
         send: F,
@@ -786,18 +570,12 @@ impl ControlPlaneClient {
     where
         F: Fn(HeaderValue) -> Result<Response>,
     {
-        let authorization = credential_provider.authorization_header()?;
-        let (mut status, mut body) =
-            self.request_response(method, path, &send, authorization.clone())?;
-        if status == StatusCode::UNAUTHORIZED {
-            if let Some(replacement) =
-                credential_provider.authorization_header_after_rejection(&authorization)?
-            {
-                (status, body) = self.request_response(method, path, &send, replacement)?;
-            }
-        }
+        let authorization = credential.authorization_header();
+        let (status, body) = self.request_response(method, path, &send, authorization)?;
         if !status.is_success() {
-            return Err(control_plane_http_failure(method, path, status, &body));
+            return Err(control_plane_http_failure(
+                method, path, status, &body, credential,
+            ));
         }
         serde_json::from_str(&body)
             .with_context(|| format!("parse Apps Platform {method} {path} response"))
@@ -849,10 +627,11 @@ fn deploy_form(artifact: &Path, options: &DeployOptions) -> Result<multipart::Fo
 }
 
 fn is_trusted_control_plane_url(url: &url::Url) -> bool {
-    if is_loopback_url(url) {
-        return true;
-    }
-    if url.scheme() != "https" || url.port_or_known_default() != Some(443) {
+    if url.scheme() != "https"
+        || url.port_or_known_default() != Some(443)
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
         return false;
     }
     let Some(url::Host::Domain(host)) = url.host() else {
@@ -861,15 +640,6 @@ fn is_trusted_control_plane_url(url: &url::Url) -> bool {
     TRUSTED_CONTROL_PLANE_HOSTS
         .iter()
         .any(|trusted| host.eq_ignore_ascii_case(trusted))
-}
-
-fn is_loopback_url(url: &url::Url) -> bool {
-    match url.host() {
-        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
-        Some(url::Host::Ipv4(address)) => address.is_loopback(),
-        Some(url::Host::Ipv6(address)) => address.is_loopback(),
-        None => false,
-    }
 }
 
 fn read_limited_response_body(
@@ -886,25 +656,6 @@ fn read_limited_response_body(
         anyhow::bail!("{description} response exceeded {max_bytes} bytes");
     }
     String::from_utf8(bytes).with_context(|| format!("decode {description} response as UTF-8"))
-}
-
-fn purpose_token_authorization_header(access_token: &str) -> Result<HeaderValue> {
-    HeaderValue::from_str(&format!("Bearer {access_token}"))
-        .context("build Compose authorization header")
-}
-
-fn unix_time_seconds() -> Result<u64> {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .context("system clock is before the Unix epoch")
-        .map(|duration| duration.as_secs())
-}
-
-fn sha256(value: &str) -> String {
-    Sha256::digest(value.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 fn apps_user_agent() -> String {
@@ -927,38 +678,12 @@ fn network_failure(method: &str, path: &str, error: reqwest::Error) -> anyhow::E
     )
 }
 
-fn exchange_http_failure(status: StatusCode) -> anyhow::Error {
-    let (exit_code, code, hint) = match status.as_u16() {
-        401 => (
-            exit_codes::AUTH_REQUIRED,
-            "auth_required",
-            "; run `bb auth login` to refresh your session",
-        ),
-        403 => (
-            exit_codes::FORBIDDEN,
-            "forbidden",
-            "; the current account does not have Builderlab access",
-        ),
-        429 => (
-            exit_codes::GENERAL,
-            "credential_exchange_rate_limited",
-            "; retry later",
-        ),
-        value if value >= 500 => (exit_codes::NETWORK, "credential_exchange_unavailable", ""),
-        _ => (exit_codes::GENERAL, "credential_exchange_failed", ""),
-    };
-    failure(
-        exit_code,
-        code,
-        format!("Compose credential exchange failed with {status}{hint}"),
-    )
-}
-
 fn control_plane_http_failure(
     method: &str,
     path: &str,
     status: StatusCode,
     body: &str,
+    credential: &ComposeSessionCredential,
 ) -> anyhow::Error {
     let parsed = serde_json::from_str::<Value>(body).ok();
     let code = parsed
@@ -966,18 +691,25 @@ fn control_plane_http_failure(
         .and_then(|value| value.pointer("/error/code"))
         .and_then(Value::as_str)
         .unwrap_or("control_plane_request_failed");
-    let next_action = parsed
-        .as_ref()
-        .and_then(|value| {
-            value
-                .get("next_action")
-                .or_else(|| value.pointer("/error/next_action"))
-        })
-        .and_then(Value::as_str);
+    let code = credential.redact(&terminal_safe_text(code));
+    let next_action = if status == StatusCode::UNAUTHORIZED {
+        Some("Run `bb auth login` to refresh your session.".to_string())
+    } else {
+        parsed
+            .as_ref()
+            .and_then(|value| {
+                value
+                    .get("next_action")
+                    .or_else(|| value.pointer("/error/next_action"))
+            })
+            .and_then(Value::as_str)
+            .map(terminal_safe_text)
+            .map(|value| credential.redact(&value))
+    };
     let mut message = format!("{method} {path} failed with {status}");
     if let Some(next_action) = next_action {
         message.push_str("\nnext_action: ");
-        message.push_str(&terminal_safe_text(next_action));
+        message.push_str(&next_action);
     }
     let exit_code = match status.as_u16() {
         401 => exit_codes::AUTH_REQUIRED,
@@ -985,112 +717,90 @@ fn control_plane_http_failure(
         value if value >= 500 => exit_codes::NETWORK,
         _ => exit_codes::GENERAL,
     };
-    failure(exit_code, code, message)
+    failure(exit_code, &code, message)
 }
 
 #[cfg(test)]
 mod tests {
     use std::thread;
 
-    use builderbot_auth::auth_storage::{FileSessionCredentialStorage, SessionStorageKey};
+    use builderbot_auth::auth_storage::{
+        InMemorySessionCredentialStorage, SessionCredentialStorage, SessionStorageKey,
+        StoredSessionCredential,
+    };
     use tiny_http::{Header, Response, Server};
 
     use super::*;
 
-    fn test_provider(
-        exchange_url: url::Url,
-        temporary_directory: &tempfile::TempDir,
-    ) -> KgoosePurposeTokenProvider {
-        let session_credential = "test-bbidentity-session";
-        let session_storage_key = SessionStorageKey::new("test", exchange_url.as_str());
-        KgoosePurposeTokenProvider {
-            client: build_auth_http_client(TOKEN_EXCHANGE_REQUEST_TIMEOUT)
-                .expect("build HTTP client"),
-            exchange_url,
-            session_credential: HeaderValue::from_static(session_credential),
-            session_credential_sha256: sha256(session_credential),
-            baggage: None,
-            style: Style::new(true, false, false),
-            storage: Box::new(FileSessionCredentialStorage::new(
-                temporary_directory.path().join("sessions.json"),
-            )),
-            storage_key: PurposeTokenStorageKey::new(&session_storage_key, COMPOSE_TOKEN_PURPOSE),
-            refresh_lock_path: temporary_directory.path().join(PURPOSE_TOKEN_LOCK_FILE),
-            refresh_mutex: Mutex::new(()),
+    fn test_credential(secret: &str) -> ComposeSessionCredential {
+        ComposeSessionCredential::new(secret.to_string()).expect("build test credential")
+    }
+
+    #[test]
+    fn compose_session_header_matches_kgoose_contract() {
+        let secret = "abcdefghijklmnopqrstuvwxyz_ABCDE-1234";
+        let credential = test_credential(secret);
+
+        assert_eq!(
+            credential
+                .authorization_header()
+                .to_str()
+                .expect("authorization text"),
+            format!("BBIdentity {secret}")
+        );
+        for invalid in [
+            "too-short",
+            "credential with spaces that is long enough",
+            "credential.with.punctuation.that.is.long",
+        ] {
+            let error = ComposeSessionCredential::new(invalid.to_string())
+                .err()
+                .expect("reject invalid session credential");
+            assert!(!error.to_string().contains(invalid));
         }
     }
 
     #[test]
-    fn purpose_token_provider_reuses_token_across_provider_instances() {
-        let temporary_directory = tempfile::tempdir().expect("create temporary directory");
-        let server = Server::http("127.0.0.1:0").expect("bind token exchange server");
-        let exchange_url = url::Url::parse(&format!(
-            "http://{}{COMPOSE_TOKEN_EXCHANGE_PATH}",
-            server.server_addr()
-        ))
-        .expect("parse exchange URL");
-        let server_thread = thread::spawn(move || {
-            let request = server.recv().expect("receive token exchange");
-            assert_eq!(request.method().as_str(), "POST");
-            assert_eq!(request.url(), COMPOSE_TOKEN_EXCHANGE_PATH);
-            request
-                .respond(
-                    Response::from_string(
-                        r#"{"access_token":"cached-compose-token","token_type":"Bearer","expires_in_seconds":300}"#,
-                    )
-                    .with_header(
-                        Header::from_bytes("Content-Type", "application/json")
-                            .expect("build content type"),
-                    ),
-                )
-                .expect("respond to token exchange");
-        });
-        let provider = test_provider(exchange_url.clone(), &temporary_directory);
+    fn compose_session_continues_with_the_session_stored_by_login() {
+        let storage = InMemorySessionCredentialStorage::default();
+        let storage_key = SessionStorageKey::new("default", "https://kgoose.example");
+        let secret = "session_stored_after_browser_login_12345";
 
-        let first = provider
-            .authorization_header()
-            .expect("first authorization header");
-        drop(provider);
-        let second = test_provider(exchange_url, &temporary_directory)
-            .authorization_header()
-            .expect("persisted authorization header");
+        let credential = ComposeSessionCredential::after_login(&storage, &storage_key, || {
+            storage.set(
+                &storage_key,
+                &StoredSessionCredential {
+                    session_credential: secret.to_string(),
+                    expires_at: Some("2099-01-01T00:00:00Z".to_string()),
+                },
+            )
+        })
+        .expect("continue after login");
 
         assert_eq!(
-            first,
-            HeaderValue::from_static("Bearer cached-compose-token")
+            credential
+                .authorization_header()
+                .to_str()
+                .expect("authorization text"),
+            format!("BBIdentity {secret}")
         );
-        assert_eq!(second, first);
-        server_thread.join().expect("join token exchange server");
     }
 
     #[test]
-    fn control_plane_restricts_token_recipients() {
+    fn control_plane_allowlist_is_exact_and_https_only() {
         let style = Style::new(true, false, false);
 
-        assert!(ControlPlaneClient::new(
+        for trusted in [
             "https://compose-ctrl.test.blockstaging.build",
-            "1.0.0",
-            style
-        )
-        .is_ok());
-        assert!(
-            ControlPlaneClient::new("https://compose-ctrl.app.builderlab.xyz", "1.0.0", style,)
-                .is_ok()
-        );
-        assert!(ControlPlaneClient::new("http://localhost:8080", "1.0.0", style).is_ok());
-        assert!(ControlPlaneClient::new("http://127.0.0.1:8080", "1.0.0", style).is_ok());
-        assert!(ControlPlaneClient::new("http://[::1]:8080", "1.0.0", style).is_ok());
-
-        let error = ControlPlaneClient::new(
-            "http://compose-ctrl.test.blockstaging.build",
-            "1.0.0",
-            style,
-        )
-        .err()
-        .expect("reject cleartext external URL");
-        assert!(error.to_string().contains("must use https"));
+            "https://compose-ctrl.app.builderlab.xyz",
+            "https://compose-ctrl.test.blockstaging.build:443",
+        ] {
+            ControlPlaneClient::new(trusted, "1.0.0", style)
+                .unwrap_or_else(|error| panic!("trusted URL {trusted} was rejected: {error}"));
+        }
 
         for untrusted in [
+            "http://compose-ctrl.test.blockstaging.build",
             "https://attacker.example",
             "https://test.blockstaging.build",
             "https://app.builderlab.xyz",
@@ -1098,8 +808,13 @@ mod tests {
             "https://compose-ctrl.test.blockstaging.build:444",
             "https://compose-ctrl.app.builderlab.xyz.attacker.example",
             "https://compose-ctrl.app.builderlab.xyz:444",
-            "https://test.blockstaging.build.attacker.example",
-            "https://test.blockstaging.build:444",
+            "https://user@compose-ctrl.test.blockstaging.build",
+            "http://localhost:8080",
+            "https://localhost:8080",
+            "http://127.0.0.1:8080",
+            "https://127.0.0.1:8443",
+            "http://[::1]:8080",
+            "https://[::1]:8443",
         ] {
             let error = ControlPlaneClient::new(untrusted, "1.0.0", style)
                 .err()
@@ -1109,198 +824,164 @@ mod tests {
     }
 
     #[test]
-    fn cached_token_requires_current_session_and_safe_expiry() {
-        let temporary_directory = tempfile::tempdir().expect("create temporary directory");
-        let provider = test_provider(
-            url::Url::parse("http://127.0.0.1:9/v1/auth/token/compose")
-                .expect("parse exchange URL"),
-            &temporary_directory,
-        );
-        let now = unix_time_seconds().expect("read system time");
-        let mut credential = StoredPurposeTokenCredential {
-            access_token: "cached-token".to_string(),
-            token_type: "Bearer".to_string(),
-            issued_at_unix_seconds: now,
-            expires_at_unix_seconds: now + 300,
-            session_credential_sha256: "different-session".to_string(),
-        };
-
-        assert!(provider
-            .cached_authorization_header(&credential)
-            .expect("validate different session")
-            .is_none());
-
-        credential.session_credential_sha256 = provider.session_credential_sha256.clone();
-        credential.expires_at_unix_seconds = now + PURPOSE_TOKEN_REFRESH_SKEW.as_secs();
-        assert!(provider
-            .cached_authorization_header(&credential)
-            .expect("validate near-expiry token")
-            .is_none());
-
-        credential.expires_at_unix_seconds = now + 300;
-        assert_eq!(
-            provider
-                .cached_authorization_header(&credential)
-                .expect("validate reusable token"),
-            Some(HeaderValue::from_static("Bearer cached-token"))
-        );
-    }
-
-    #[test]
-    fn control_plane_retries_once_with_rotated_cached_token() {
-        struct RotatingCredentialProvider;
-
-        impl ComposeCredentialProvider for RotatingCredentialProvider {
-            fn authorization_header(&self) -> Result<HeaderValue> {
-                Ok(HeaderValue::from_static("Bearer rejected-token"))
-            }
-
-            fn authorization_header_after_rejection(
-                &self,
-                rejected: &HeaderValue,
-            ) -> Result<Option<HeaderValue>> {
-                assert_eq!(rejected, HeaderValue::from_static("Bearer rejected-token"));
-                Ok(Some(HeaderValue::from_static("Bearer rotated-token")))
-            }
-        }
-
+    fn control_plane_uses_bbidentity_authorization_without_identity_headers() {
+        let secret = "opaque_session_credential_1234567890";
         let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
         let base_url = format!("http://{}", server.server_addr());
         let server_thread = thread::spawn(move || {
-            let first = server.recv().expect("receive first contract request");
+            let request = server.recv().expect("receive contract request");
+            assert_eq!(request.method().as_str(), "GET");
+            assert_eq!(request.url(), APPS_CONTRACT_PATH);
             assert_eq!(
-                first
+                request
                     .headers()
                     .iter()
                     .find(|header| header.field.equiv("Authorization"))
                     .map(|header| header.value.as_str()),
-                Some("Bearer rejected-token")
+                Some("BBIdentity opaque_session_credential_1234567890")
             );
-            first
-                .respond(Response::from_string("unauthorized").with_status_code(401))
-                .expect("reject first contract request");
-
-            let second = server.recv().expect("receive retried contract request");
-            assert_eq!(
-                second
+            for forbidden in [
+                "X-BB-Session-Credential",
+                "X-Forwarded-User",
+                "X-Forwarded-Workspace-Id",
+            ] {
+                assert!(!request
                     .headers()
                     .iter()
-                    .find(|header| header.field.equiv("Authorization"))
-                    .map(|header| header.value.as_str()),
-                Some("Bearer rotated-token")
-            );
-            second
+                    .any(|header| header.field.equiv(forbidden)));
+            }
+            request
                 .respond(
                     Response::from_string(r#"{"contract_version":"test"}"#).with_header(
                         Header::from_bytes("Content-Type", "application/json")
                             .expect("build content type"),
                     ),
                 )
-                .expect("respond to retried contract request");
+                .expect("respond to contract request");
         });
-        let client = ControlPlaneClient::new(&base_url, "1.0.0", Style::new(true, false, false))
-            .expect("build control-plane client");
+        let client = ControlPlaneClient::new_for_test(
+            &base_url,
+            "1.0.0",
+            Style::new(true, false, false),
+            Duration::from_secs(2),
+        )
+        .expect("build test control-plane client");
 
         let contract = client
-            .contract(&RotatingCredentialProvider)
-            .expect("retry contract request");
+            .contract(&test_credential(secret))
+            .expect("read contract");
 
         assert_eq!(contract["contract_version"], "test");
-        server_thread.join().expect("join control-plane server");
+        server_thread.join().expect("join request server");
     }
 
     #[test]
-    fn deploy_retries_once_and_reopens_the_artifact() {
-        struct RotatingCredentialProvider;
+    fn control_plane_does_not_follow_redirects_or_forward_the_session() {
+        let target = Server::http("127.0.0.1:0").expect("bind redirect target");
+        let target_url = format!("http://{}/stolen", target.server_addr());
+        let redirector = Server::http("127.0.0.1:0").expect("bind redirector");
+        let base_url = format!("http://{}", redirector.server_addr());
+        let redirect_thread = thread::spawn(move || {
+            let request = redirector.recv().expect("receive original request");
+            request
+                .respond(Response::empty(302).with_header(
+                    Header::from_bytes("Location", target_url).expect("build redirect header"),
+                ))
+                .expect("send redirect");
+        });
+        let client = ControlPlaneClient::new_for_test(
+            &base_url,
+            "1.0.0",
+            Style::new(true, false, false),
+            Duration::from_secs(2),
+        )
+        .expect("build test control-plane client");
+        let secret = "redirect_session_credential_123456";
 
-        impl ComposeCredentialProvider for RotatingCredentialProvider {
-            fn authorization_header(&self) -> Result<HeaderValue> {
-                Ok(HeaderValue::from_static("Bearer rejected-token"))
-            }
+        let error = client
+            .contract(&test_credential(secret))
+            .expect_err("reject redirect response");
 
-            fn authorization_header_after_rejection(
-                &self,
-                rejected: &HeaderValue,
-            ) -> Result<Option<HeaderValue>> {
-                assert_eq!(rejected, HeaderValue::from_static("Bearer rejected-token"));
-                Ok(Some(HeaderValue::from_static("Bearer rotated-token")))
-            }
-        }
+        assert!(error.to_string().contains("302"));
+        assert!(!error.to_string().contains(secret));
+        assert!(target
+            .recv_timeout(Duration::from_millis(250))
+            .expect("wait for redirect target")
+            .is_none());
+        redirect_thread.join().expect("join redirect server");
+    }
 
-        let temporary_directory = tempfile::tempdir().expect("create temporary directory");
-        let artifact_path = temporary_directory.path().join("artifact.tar.gz");
-        fs::write(&artifact_path, b"retryable-artifact-marker").expect("write artifact");
+    #[test]
+    fn expired_session_is_not_retried_and_returns_login_guidance() {
         let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
         let base_url = format!("http://{}", server.server_addr());
         let server_thread = thread::spawn(move || {
-            for (index, expected_token) in ["Bearer rejected-token", "Bearer rotated-token"]
-                .into_iter()
-                .enumerate()
-            {
-                let mut request = server.recv().expect("receive deploy request");
-                assert_eq!(request.method().as_str(), "POST");
-                assert_eq!(request.url(), "/v1/agent/apps/retry-app/deploy");
-                assert_eq!(
-                    request
-                        .headers()
-                        .iter()
-                        .find(|header| header.field.equiv("Authorization"))
-                        .map(|header| header.value.as_str()),
-                    Some(expected_token)
-                );
-                let mut body = Vec::new();
-                request
-                    .as_reader()
-                    .read_to_end(&mut body)
-                    .expect("read deploy body");
-                assert!(body
-                    .windows(b"retryable-artifact-marker".len())
-                    .any(|window| window == b"retryable-artifact-marker"));
-                if index == 0 {
-                    request
-                        .respond(Response::from_string("unauthorized").with_status_code(401))
-                        .expect("reject first deploy request");
-                } else {
-                    request
-                        .respond(
-                            Response::from_string(r#"{"ok":true,"version_id":"ver-test"}"#)
-                                .with_header(
-                                    Header::from_bytes("Content-Type", "application/json")
-                                        .expect("build content type"),
-                                ),
-                        )
-                        .expect("respond to retried deploy request");
-                }
-            }
+            let request = server.recv().expect("receive expired session request");
+            request
+                .respond(Response::from_string("expired").with_status_code(401))
+                .expect("reject expired session");
+            assert!(server
+                .recv_timeout(Duration::from_millis(250))
+                .expect("wait for unexpected retry")
+                .is_none());
         });
-        let client = ControlPlaneClient::new(&base_url, "1.0.0", Style::new(true, false, false))
-            .expect("build control-plane client");
+        let client = ControlPlaneClient::new_for_test(
+            &base_url,
+            "1.0.0",
+            Style::new(true, false, false),
+            Duration::from_secs(2),
+        )
+        .expect("build test control-plane client");
+        let secret = "expired_session_credential_1234567";
 
-        let response = client
-            .deploy(
-                &RotatingCredentialProvider,
-                "retry-app",
-                &artifact_path,
-                &DeployOptions::default(),
-            )
-            .expect("retry deploy request");
+        let error = client
+            .contract(&test_credential(secret))
+            .expect_err("reject expired session");
+        let message = error.to_string();
 
-        assert_eq!(response["version_id"], "ver-test");
-        server_thread.join().expect("join control-plane server");
+        assert!(message.contains("401"));
+        assert!(message.contains("bb auth login"));
+        assert!(!message.contains(secret));
+        server_thread.join().expect("join request server");
+    }
+
+    #[test]
+    fn control_plane_errors_redact_the_session_credential() {
+        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
+        let base_url = format!("http://{}", server.server_addr());
+        let secret = "reflected_session_credential_123456";
+        let response_body = json!({
+            "error": {"code": secret},
+            "next_action": format!("remove {secret} from the request")
+        })
+        .to_string();
+        let server_thread = thread::spawn(move || {
+            let request = server.recv().expect("receive request");
+            request
+                .respond(Response::from_string(response_body).with_status_code(400))
+                .expect("send reflected error");
+        });
+        let client = ControlPlaneClient::new_for_test(
+            &base_url,
+            "1.0.0",
+            Style::new(true, false, false),
+            Duration::from_secs(2),
+        )
+        .expect("build test control-plane client");
+
+        let error = client
+            .contract(&test_credential(secret))
+            .expect_err("reject failed request");
+        let message = format!("{error:#}");
+
+        assert!(!message.contains(secret));
+        assert!(message.contains("[REDACTED]"));
+        server_thread.join().expect("join request server");
     }
 
     #[test]
     fn initialize_and_deploy_allow_delayed_rollout_responses() {
-        struct StaticCredentialProvider;
-
-        impl ComposeCredentialProvider for StaticCredentialProvider {
-            fn authorization_header(&self) -> Result<HeaderValue> {
-                Ok(HeaderValue::from_static("Bearer test-token"))
-            }
-        }
-
         assert!(CONTROL_PLANE_REQUEST_TIMEOUT > Duration::from_secs(2 * 60));
-        assert_eq!(TOKEN_EXCHANGE_REQUEST_TIMEOUT, Duration::from_secs(30));
 
         let temporary_directory = tempfile::tempdir().expect("create temporary directory");
         let artifact_path = temporary_directory.path().join("artifact.tar.gz");
@@ -1343,7 +1024,7 @@ mod tests {
                 )
                 .expect("respond to deploy request");
         });
-        let client = ControlPlaneClient::new_with_timeout(
+        let client = ControlPlaneClient::new_for_test(
             &base_url,
             "1.0.0",
             Style::new(true, false, false),
@@ -1353,14 +1034,14 @@ mod tests {
 
         let initialized = client
             .initialize(
-                &StaticCredentialProvider,
+                &test_credential("delayed_session_credential_123456"),
                 "delayed-app",
                 &json!({"environment": "staging"}),
             )
             .expect("wait for delayed initialize response");
         let deployed = client
             .deploy(
-                &StaticCredentialProvider,
+                &test_credential("delayed_session_credential_123456"),
                 "delayed-app",
                 &artifact_path,
                 &DeployOptions::default(),
@@ -1374,14 +1055,6 @@ mod tests {
 
     #[test]
     fn control_plane_bounds_plan_responses() {
-        struct StaticCredentialProvider;
-
-        impl ComposeCredentialProvider for StaticCredentialProvider {
-            fn authorization_header(&self) -> Result<HeaderValue> {
-                Ok(HeaderValue::from_static("Bearer test-token"))
-            }
-        }
-
         let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
         let base_url = format!("http://{}", server.server_addr());
         let server_thread = thread::spawn(move || {
@@ -1394,8 +1067,13 @@ mod tests {
                 ]))
                 .expect("respond with oversized plan response");
         });
-        let client = ControlPlaneClient::new(&base_url, "1.0.0", Style::new(true, false, false))
-            .expect("build control-plane client");
+        let client = ControlPlaneClient::new_for_test(
+            &base_url,
+            "1.0.0",
+            Style::new(true, false, false),
+            Duration::from_secs(2),
+        )
+        .expect("build test control-plane client");
         let request = PlanRequest {
             app_id: Some("bounded-app"),
             name: None,
@@ -1406,20 +1084,26 @@ mod tests {
         };
 
         let error = client
-            .plan(&StaticCredentialProvider, &request)
+            .plan(
+                &test_credential("bounded_session_credential_123456"),
+                &request,
+            )
             .expect_err("reject oversized plan response");
 
         assert!(error.to_string().contains("exceeded 2097152 bytes"));
-        assert!(!error.to_string().contains("test-token"));
+        assert!(!error
+            .to_string()
+            .contains("bounded_session_credential_123456"));
         server_thread.join().expect("join control-plane server");
     }
 
     #[test]
     fn app_ids_are_encoded_as_single_path_segments() {
-        let client = ControlPlaneClient::new(
+        let client = ControlPlaneClient::new_for_test(
             "http://127.0.0.1:9",
             "1.0.0",
             Style::new(true, false, false),
+            Duration::from_secs(2),
         )
         .expect("build control-plane client");
 
@@ -1428,35 +1112,5 @@ mod tests {
             .expect("build app deploy URL");
 
         assert_eq!(url.path(), "/v1/agent/apps/app%2F..%2F..%2Fidentity/deploy");
-    }
-
-    #[test]
-    fn purpose_token_provider_rejects_oversized_exchange_response() {
-        let temporary_directory = tempfile::tempdir().expect("create temporary directory");
-        let server = Server::http("127.0.0.1:0").expect("bind token exchange server");
-        let exchange_url = url::Url::parse(&format!(
-            "http://{}{COMPOSE_TOKEN_EXCHANGE_PATH}",
-            server.server_addr()
-        ))
-        .expect("parse exchange URL");
-        let server_thread = thread::spawn(move || {
-            let request = server.recv().expect("receive token exchange");
-            request
-                .respond(Response::from_data(vec![
-                    b'x';
-                    TOKEN_EXCHANGE_RESPONSE_MAX_BYTES
-                        + 1
-                ]))
-                .expect("respond to token exchange");
-        });
-        let provider = test_provider(exchange_url, &temporary_directory);
-
-        let error = provider
-            .authorization_header()
-            .expect_err("reject oversized exchange response");
-
-        assert!(error.to_string().contains("exceeded 32768 bytes"));
-        assert!(!error.to_string().contains("test-bbidentity-session"));
-        server_thread.join().expect("join token exchange server");
     }
 }
