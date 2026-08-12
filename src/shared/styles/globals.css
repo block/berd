@@ -714,7 +714,7 @@
   );
 
   /* Goose canvas + composer extensions — inverted. */
-  --canvas-base: #1f1f1f;
+  --canvas-base: var(--color-gray-900);
   --canvas-project-tint: #1a1d22;
   --surface-composer: rgba(255, 255, 255, 0.06);
   --surface-composer-hover: rgba(255, 255, 255, 0.14);
