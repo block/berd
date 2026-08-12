@@ -68,49 +68,6 @@ in dev builds and off in production builds. Use
 `.agents/skills/experimental-features/SKILL.md` for the current workflow,
 registry contract, storage rules, Tauri guardrails, and test coverage.
 
-## Preparing avatar assets
-
-Avatar source files use this layout:
-
-```text
-/path/to/avatars/
-  webm/<collection>/<avatar-id>.webm
-  hevc/<collection>/<avatar-id>.mp4
-```
-
-Each avatar needs matching WebM and HEVC basenames. The basename becomes the
-`app-avatar:<avatar-id>` ref and does not need a legacy prefix such as `fuzzy-*`.
-Generate a local manifest without uploading:
-
-```bash
-just avatars-manifest /path/to/avatars 20260521T121530123Z
-```
-
-Publishing is distribution-owned: public or enterprise distributors should
-connect the generated immutable catalog to storage and promotion infrastructure
-outside this repository.
-
-## Preparing startup artifacts
-
-Startup-artifact source files use this layout:
-
-```text
-/path/to/assets/
-  hdri/<environment>.exr
-  project-images/<image>.webp
-  images/<collection>/<image>.png
-```
-
-Generate a local manifest without uploading:
-
-```bash
-ASSET_ROOT=/path/to/berd-assets
-just artifacts-manifest "$ASSET_ROOT/assets" 20260521T121530123Z
-```
-
-As with avatar catalogs, publication and promotion belong to the distribution
-that hosts the assets rather than to the public Berd repository.
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution setup and expectations.
