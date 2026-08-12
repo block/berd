@@ -522,6 +522,7 @@ export function ChatInput({
   // message lives in the composer, not the queue.
   const canSteerQueuedMessageWithShortcut =
     !hasDraftContent &&
+    !attachmentWorkPending &&
     !disabled &&
     !sendDisabled &&
     isStreaming &&
