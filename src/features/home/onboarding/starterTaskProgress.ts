@@ -23,7 +23,6 @@ export const EMPTY_STARTER_TASK_COMPLETION: StarterTaskCompletionState = {
   "connect-provider": false,
   "start-chat": false,
   "create-project": false,
-  "build-agent": false,
   "add-widget": false,
 };
 

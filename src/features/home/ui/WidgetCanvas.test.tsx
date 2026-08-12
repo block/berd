@@ -268,6 +268,8 @@ type RenderCanvasOptions = WidgetNavigationHandlers & {
   viewportLeftOcclusionPx?: number;
   onCreatePersona?: () => void;
   onCreateProject?: () => void;
+  starterTasksAvailable?: boolean;
+  onRestoreStarterTasks?: () => void;
 };
 
 function PickerTestProvider({ children }: { children: ReactNode }) {
@@ -1040,6 +1042,57 @@ describe("WidgetCanvas", () => {
     expect(clockNode?.style.zIndex).toBe("1");
   });
 
+  it("keeps the widget picker open while panning the canvas background", async () => {
+    const user = userEvent.setup();
+    const { container } = renderCanvas();
+    const canvas = container.firstElementChild as HTMLElement;
+
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(canvasRect());
+    fireEvent.contextMenu(canvas, { clientX: 100, clientY: 120 });
+    expect(
+      screen.getByRole("button", { name: PANEL_LABELS.widgets }),
+    ).toBeInTheDocument();
+
+    await user.pointer([
+      {
+        keys: "[MouseLeft>]",
+        target: canvas,
+        coords: { clientX: 200, clientY: 220 },
+      },
+      {
+        target: canvas,
+        coords: { clientX: 224, clientY: 196 },
+      },
+      {
+        keys: "[/MouseLeft]",
+        target: canvas,
+        coords: { clientX: 224, clientY: 196 },
+      },
+    ]);
+
+    expect(
+      screen.getByRole("button", { name: PANEL_LABELS.widgets }),
+    ).toBeInTheDocument();
+  });
+
+  it("closes the widget picker when empty canvas is clicked", async () => {
+    const user = userEvent.setup();
+    const { container } = renderCanvas();
+    const canvas = container.firstElementChild as HTMLElement;
+
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(canvasRect());
+    fireEvent.contextMenu(canvas, { clientX: 100, clientY: 120 });
+    expect(
+      screen.getByRole("button", { name: PANEL_LABELS.widgets }),
+    ).toBeInTheDocument();
+
+    await user.click(canvas);
+
+    expect(
+      screen.queryByRole("button", { name: PANEL_LABELS.widgets }),
+    ).not.toBeInTheDocument();
+  });
+
   it("saves the camera after panning the canvas background", async () => {
     const user = userEvent.setup();
     const { container } = renderCanvas();
@@ -1204,97 +1257,20 @@ describe("WidgetCanvas", () => {
     );
   });
 
-  it("offers Starter stickies and restores only missing onboarding notes", async () => {
+  it("restores the starter task list from the widget picker", async () => {
     const user = userEvent.setup();
-    const addWidget = vi.fn();
-    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
-
+    const onRestoreStarterTasks = vi.fn();
     const { container } = renderCanvas({
-      instances: [
-        widget({
-          id: "onboarding-tour",
-          type: "onboardingTour",
-          state: { noteId: "onboarding:tour" },
-        }),
-        stickyNoteWidget({
-          id: "build-agent-sticky",
-          state: { noteId: "onboarding:build-agent" },
-        }),
-        stickyNoteWidget({
-          id: "project-sticky",
-          state: { noteId: "onboarding:start-project" },
-        }),
-        stickyNoteWidget({
-          id: "home-sticky",
-          state: { noteId: "onboarding:shape-home" },
-        }),
-        stickyNoteWidget({
-          id: "automation-sticky",
-          state: { noteId: "onboarding:manage-automations" },
-        }),
-      ],
-      mutations: { addWidget },
+      starterTasksAvailable: true,
+      onRestoreStarterTasks,
     });
 
     await openPickerPanel(user, container, "widgets");
     await user.click(
-      screen.getByRole("button", { name: /^starter stickies$/i }),
+      screen.getByRole("button", { name: /^starter task list$/i }),
     );
 
-    expect(addWidget).toHaveBeenCalledTimes(1);
-    expect(addWidget).toHaveBeenCalledWith(
-      "stickyNote",
-      100,
-      120,
-      { noteId: "onboarding:reuse-workflows" },
-      CANVAS_CONSTRAINTS,
-    );
-  });
-
-  it("disables Starter stickies when all onboarding notes are pinned", async () => {
-    const user = userEvent.setup();
-    const addWidget = vi.fn();
-
-    const { container } = renderCanvas({
-      instances: [
-        widget({
-          id: "onboarding-tour",
-          type: "onboardingTour",
-          state: { noteId: "onboarding:tour" },
-        }),
-        stickyNoteWidget({
-          id: "build-agent-sticky",
-          state: { noteId: "onboarding:build-agent" },
-        }),
-        stickyNoteWidget({
-          id: "project-sticky",
-          state: { noteId: "onboarding:start-project" },
-        }),
-        stickyNoteWidget({
-          id: "skills-sticky",
-          state: { noteId: "onboarding:reuse-workflows" },
-        }),
-        stickyNoteWidget({
-          id: "home-sticky",
-          state: { noteId: "onboarding:shape-home" },
-        }),
-        stickyNoteWidget({
-          id: "automation-sticky",
-          state: { noteId: "onboarding:manage-automations" },
-        }),
-      ],
-      mutations: { addWidget },
-    });
-
-    await openPickerPanel(user, container, "widgets");
-
-    const starterStickiesRow = screen.getByRole("button", {
-      name: /^starter stickies$/i,
-    });
-    expect(starterStickiesRow).toBeDisabled();
-    await user.click(starterStickiesRow);
-
-    expect(addWidget).not.toHaveBeenCalled();
+    expect(onRestoreStarterTasks).toHaveBeenCalledOnce();
   });
 
   it("disables the Clock row when a clock is already pinned", async () => {

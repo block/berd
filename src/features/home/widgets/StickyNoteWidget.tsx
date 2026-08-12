@@ -429,16 +429,29 @@ export function StickyNoteWidget({
         mode="canvas"
         completionState={starterTasks.completionState}
         omittedTaskIds={starterTasks.omittedTaskIds}
+        selectedTaskId={starterTasks.selectedTaskId}
         labels={{
           title: t("onboarding.starterTasks.title"),
           backHome: t("onboarding.starterTasks.backHome"),
+          backToList: t("onboarding.starterTasks.backToList"),
+          markDone: t("onboarding.starterTasks.markDone"),
           dismiss: t("onboarding.starterTasks.dismiss"),
+          closeTaskDetails: t("onboarding.starterTasks.closeTaskDetails"),
           tasks: {
             "connect-provider": t("onboarding.starterTasks.connectProvider"),
             "start-chat": t("onboarding.starterTasks.startChat"),
             "create-project": t("onboarding.starterTasks.createProject"),
-            "build-agent": t("onboarding.starterTasks.buildAgent"),
             "add-widget": t("onboarding.starterTasks.addWidget"),
+          },
+          taskDetails: {
+            "connect-provider": t(
+              "onboarding.starterTasks.taskDetails.connectProvider",
+            ),
+            "start-chat": t("onboarding.starterTasks.taskDetails.startChat"),
+            "create-project": t(
+              "onboarding.starterTasks.taskDetails.createProject",
+            ),
+            "add-widget": t("onboarding.starterTasks.taskDetails.addWidget"),
           },
           openTask: (label) => t("onboarding.starterTasks.openTask", { label }),
           completedTask: (label) =>
@@ -451,6 +464,7 @@ export function StickyNoteWidget({
         onTaskSelect={starterTasks.onTaskSelect}
         onTaskToggle={starterTasks.onTaskToggle}
         onBackHome={starterTasks.onBackHome}
+        onCloseSecondary={starterTasks.onCloseSecondary}
         onDismiss={() => {
           starterTasks.onDismiss();
           onRemoveWidget?.();

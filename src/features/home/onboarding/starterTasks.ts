@@ -15,10 +15,6 @@ export const STARTER_TASKS = [
     labelKey: "onboarding.starterTasks.createProject",
   },
   {
-    id: "build-agent",
-    labelKey: "onboarding.starterTasks.buildAgent",
-  },
-  {
     id: "add-widget",
     labelKey: "onboarding.starterTasks.addWidget",
   },

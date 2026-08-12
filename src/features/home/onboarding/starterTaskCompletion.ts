@@ -1,6 +1,5 @@
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { ProjectInfo } from "@/features/projects/api/projects";
-import type { Persona } from "@/shared/types/agents";
 import type { Message } from "@/shared/types/messages";
 import type { StarterTaskCompletionState } from "./starterTasks";
 
@@ -11,24 +10,6 @@ export interface StarterTaskCompletionInput {
   messagesBySession: Record<string, Message[]>;
   projectsFetched: boolean;
   projects: ProjectInfo[];
-  personasLoaded: boolean;
-  personas: Persona[];
-}
-
-function isUserCreatedPersona(persona: Persona): boolean {
-  const metadata = persona.sourceProperties?.metadata;
-  const metadataRecord =
-    metadata && typeof metadata === "object"
-      ? (metadata as Record<string, unknown>)
-      : undefined;
-
-  return (
-    persona.writable &&
-    persona.sourceProperties?.berdBundled !== true &&
-    persona.sourceProperties?.gooseInternalBundled !== true &&
-    metadataRecord?.berdBundled !== true &&
-    metadataRecord?.gooseInternalBundled !== true
-  );
 }
 
 export function deriveStarterTaskCompletion({
@@ -38,8 +19,6 @@ export function deriveStarterTaskCompletion({
   messagesBySession,
   projectsFetched,
   projects,
-  personasLoaded,
-  personas,
 }: StarterTaskCompletionInput): StarterTaskCompletionState {
   const startedChat =
     sessionsHydrated &&
@@ -61,7 +40,6 @@ export function deriveStarterTaskCompletion({
     "start-chat": startedChat,
     "create-project":
       projectsFetched && projects.some((project) => !project.archivedAt),
-    "build-agent": personasLoaded && personas.some(isUserCreatedPersona),
     "add-widget": false,
   };
 }

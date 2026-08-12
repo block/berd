@@ -100,7 +100,8 @@ interface UseHomeCanvasViewportOptions {
   camera: LayoutCamera;
   constraints: LayoutConstraints;
   saveCamera: (camera: LayoutCamera) => void;
-  onViewportGestureStart?: () => void;
+  onViewportGestureStart?: (kind: "pan" | "widget" | "resize" | "zoom") => void;
+  onViewportPanEnd?: (moved: boolean) => void;
   onWidgetDragStart?: (instance: WidgetInstance) => void;
   onWidgetDragEnd?: (drag: WidgetDragEnd) => void;
   onWidgetResizeStart?: (instance: WidgetInstance) => void;
@@ -218,6 +219,7 @@ export function useHomeCanvasViewport({
   constraints,
   saveCamera,
   onViewportGestureStart,
+  onViewportPanEnd,
   onWidgetDragStart,
   onWidgetDragEnd,
   onWidgetResizeStart,
@@ -402,7 +404,7 @@ export function useHomeCanvasViewport({
     (event: React.PointerEvent<HTMLElement>) => {
       lockDocumentSelection();
       event.currentTarget.setPointerCapture(event.pointerId);
-      onViewportGestureStart?.();
+      onViewportGestureStart?.("pan");
       activePointerRef.current = {
         kind: "pan",
         pointerId: event.pointerId,
@@ -420,7 +422,7 @@ export function useHomeCanvasViewport({
         return;
       }
 
-      onViewportGestureStart?.();
+      onViewportGestureStart?.("widget");
       activePointerRef.current = {
         kind: "widget",
         pointerId: event.pointerId,
@@ -445,7 +447,7 @@ export function useHomeCanvasViewport({
 
       lockDocumentSelection();
       event.currentTarget.setPointerCapture?.(event.pointerId);
-      onViewportGestureStart?.();
+      onViewportGestureStart?.("resize");
       onWidgetResizeStart?.(instance);
       activePointerRef.current = {
         kind: "resize",
@@ -552,7 +554,9 @@ export function useHomeCanvasViewport({
       const offset = offsetBetween(eventClient, activePointer.startClient);
 
       if (activePointer.kind === "pan") {
-        if (offset.x === 0 && offset.y === 0) {
+        const moved = offset.x !== 0 || offset.y !== 0;
+        onViewportPanEnd?.(moved);
+        if (!moved) {
           return;
         }
 
@@ -612,6 +616,7 @@ export function useHomeCanvasViewport({
       clearWidgetResizePreview,
       commitCamera,
       constraints,
+      onViewportPanEnd,
       onWidgetDragEnd,
       onWidgetDragStart,
       onWidgetResizeCancel,
@@ -629,7 +634,7 @@ export function useHomeCanvasViewport({
         return;
       }
 
-      onViewportGestureStart?.();
+      onViewportGestureStart?.(event.ctrlKey || event.metaKey ? "zoom" : "pan");
 
       setViewport((currentViewport) => {
         const nextViewport =
@@ -664,7 +669,7 @@ export function useHomeCanvasViewport({
     const handleGestureStart = (event: WebkitGestureEvent) => {
       event.preventDefault();
       gestureScaleRef.current = event.scale ?? 1;
-      onViewportGestureStart?.();
+      onViewportGestureStart?.("zoom");
     };
 
     const handleGestureChange = (event: WebkitGestureEvent) => {

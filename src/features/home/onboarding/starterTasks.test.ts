@@ -9,7 +9,6 @@ const incomplete = {
   "connect-provider": false,
   "start-chat": false,
   "create-project": false,
-  "build-agent": false,
   "add-widget": false,
 };
 
@@ -19,17 +18,16 @@ describe("starter task model", () => {
       "connect-provider",
       "start-chat",
       "create-project",
-      "build-agent",
       "add-widget",
     ]);
   });
 
   it("reads completion from the derived state", () => {
-    expect(isStarterTaskComplete(incomplete, "build-agent")).toBe(false);
+    expect(isStarterTaskComplete(incomplete, "start-chat")).toBe(false);
     expect(
       isStarterTaskComplete(
-        { ...incomplete, "build-agent": true },
-        "build-agent",
+        { ...incomplete, "start-chat": true },
+        "start-chat",
       ),
     ).toBe(true);
   });

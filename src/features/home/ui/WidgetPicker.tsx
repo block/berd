@@ -31,11 +31,8 @@ import {
 } from "@/features/skills/lib/resolveSkillPillTone";
 import type { Persona } from "@/shared/types/agents";
 import { cn } from "@/shared/lib/cn";
-import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { Input } from "@/shared/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/shared/ui/popover";
-import { missingDefaultStickyNoteWidgets } from "../lib/homeLayoutMapper";
 import { HOME_WIDGET_CATEGORIES } from "../widgets/catalog";
 import {
   SKILL_LIST_QUERY_KEY,
@@ -65,9 +62,10 @@ interface WidgetPickerProps {
   /** Moves focus into stage one when opened from a keyboard-driven action. */
   focusOnOpen?: boolean;
   instances: WidgetInstance[];
+  starterTasksAvailable?: boolean;
   onClose: () => void;
   onSelect: (type: string, state?: Record<string, unknown>) => void;
-  onSelectStarterStickies: (widgets: WidgetInstance[]) => void;
+  onRestoreStarterTasks: () => void;
 }
 
 type EntityCategory = "agent" | "chat" | "automation" | "project" | "skill";
@@ -360,13 +358,11 @@ export function WidgetPicker({
   side = "right",
   focusOnOpen = false,
   instances,
+  starterTasksAvailable = false,
   onClose,
   onSelect,
-  onSelectStarterStickies,
+  onRestoreStarterTasks,
 }: WidgetPickerProps) {
-  const berdyOnboardingEnabled = Boolean(
-    useExperiment(BERDY_ONBOARDING_EXPERIMENT_ID)?.enabled,
-  );
   const { t } = useTranslation("home");
   const automationsEnabled = useProfileCapability("automations");
   const visibleWidgetCategories = useMemo(
@@ -424,10 +420,6 @@ export function WidgetPicker({
     skills: skills ?? [],
     automationFallbackTitle: t("widgets.automationOutputPin.fallbackTitle"),
   });
-  const missingStarterStickies = useMemo(
-    () => missingDefaultStickyNoteWidgets(instances, berdyOnboardingEnabled),
-    [berdyOnboardingEnabled, instances],
-  );
 
   const [previousOpen, setPreviousOpen] = useState(open);
   if (previousOpen !== open) {
@@ -537,6 +529,14 @@ export function WidgetPicker({
         align="start"
         side={side}
         sideOffset={WIDGET_PICKER_SIDE_OFFSET}
+        onPointerDownOutside={(event) => {
+          if (
+            event.target instanceof Element &&
+            event.target.closest('[data-home-widget-canvas="true"]')
+          ) {
+            event.preventDefault();
+          }
+        }}
         onPointerDownCapture={(event) => event.stopPropagation()}
         onDoubleClickCapture={(event) => event.stopPropagation()}
         onWheelCapture={(event) => event.stopPropagation()}
@@ -570,9 +570,7 @@ export function WidgetPicker({
             onSelectStickyNote={() => onSelect("stickyNote")}
             onSelectChecklist={() => onSelect("checklist")}
             onSelectPhoto={() => onSelect("photo")}
-            onSelectStarterStickies={() =>
-              onSelectStarterStickies(missingStarterStickies)
-            }
+            onRestoreStarterTasks={onRestoreStarterTasks}
             clockLabel={t("widgets.clock.label")}
             clockPinned={instances.some(
               (instance) => instance.type === "clock",
@@ -580,8 +578,8 @@ export function WidgetPicker({
             stickyNoteLabel={t("widgets.stickyNote.label")}
             checklistLabel={t("widgets.checklist.label")}
             photoLabel={t("widgets.photo.label")}
-            starterStickiesLabel={t("widgets.stickyNote.starterStickies")}
-            starterStickiesPinned={missingStarterStickies.length === 0}
+            starterTasksLabel={t("widgets.stickyNote.starterTasks")}
+            starterTasksAvailable={starterTasksAvailable}
             backLabel={t("widgets.picker.back")}
             title={t(`widgets.picker.selectTitles.${activePanel}`)}
             isLoadingMoreSessions={isLoadingMoreSessions}
@@ -658,14 +656,14 @@ interface PanelStageTwoProps {
   onSelectStickyNote: () => void;
   onSelectChecklist: () => void;
   onSelectPhoto: () => void;
-  onSelectStarterStickies: () => void;
+  onRestoreStarterTasks: () => void;
   clockLabel: string;
   clockPinned: boolean;
   stickyNoteLabel: string;
   checklistLabel: string;
   photoLabel: string;
-  starterStickiesLabel: string;
-  starterStickiesPinned: boolean;
+  starterTasksLabel: string;
+  starterTasksAvailable: boolean;
   backLabel: string;
   title: string;
   isLoadingMoreSessions: boolean;
@@ -687,14 +685,14 @@ function PanelStageTwo({
   onSelectStickyNote,
   onSelectChecklist,
   onSelectPhoto,
-  onSelectStarterStickies,
+  onRestoreStarterTasks,
   clockLabel,
   clockPinned,
   stickyNoteLabel,
   checklistLabel,
   photoLabel,
-  starterStickiesLabel,
-  starterStickiesPinned,
+  starterTasksLabel,
+  starterTasksAvailable,
   backLabel,
   title,
   isLoadingMoreSessions,
@@ -738,9 +736,9 @@ function PanelStageTwo({
               onSelect={onSelectPhoto}
             />
             <WidgetOptionRow
-              label={starterStickiesLabel}
-              pinned={starterStickiesPinned}
-              onSelect={onSelectStarterStickies}
+              label={starterTasksLabel}
+              pinned={!starterTasksAvailable}
+              onSelect={onRestoreStarterTasks}
             />
           </div>
         ) : (

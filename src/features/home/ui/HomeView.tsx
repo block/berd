@@ -406,18 +406,14 @@ export function HomeView({
   const contentInstances = useMemo(
     () =>
       experimentVisibleInstances.filter((instance) => {
-        if (
-          !starterTasks?.visible &&
-          instance.type === "onboardingProjectArtifact" &&
-          instance.state?.projectId === STARTER_PROJECT_ID
-        ) {
-          return false;
-        }
-        return !RETIRED_EDUCATIONAL_STICKY_IDS.has(
+        const noteId =
           typeof instance.state?.noteId === "string"
             ? instance.state.noteId
-            : "",
-        );
+            : "";
+        if (!starterTasks?.visible && noteId === STARTER_TASKS_NOTE_ID) {
+          return false;
+        }
+        return !RETIRED_EDUCATIONAL_STICKY_IDS.has(noteId);
       }),
     [experimentVisibleInstances, starterTasks?.visible],
   );
@@ -695,6 +691,10 @@ export function HomeView({
           onOpenAutomations={onOpenAutomations}
           onStartOnboardingTour={handleStartTour}
           onResolveBerdyAgent={onResolveBerdyAgent}
+          starterTasksAvailable={Boolean(
+            starterTasks?.enabled && !starterTasks.visible,
+          )}
+          onRestoreStarterTasks={starterTasks?.onRestore}
         />
       ) : null}
       <OnboardingTourDialog

@@ -24,6 +24,8 @@ import { HomeView } from "./HomeView";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import type { Persona } from "@/shared/types/agents";
 import { markStarterAgentPinsEligible } from "@/features/home/onboarding/starterAgents";
+import { StarterTasksProvider } from "@/features/home/onboarding/StarterTasksContext";
+import { EMPTY_STARTER_TASK_COMPLETION } from "@/features/home/onboarding/starterTaskProgress";
 
 const ONBOARDING_STICKIES_SEEDED_STORAGE_KEY =
   "goose:home:onboarding-stickies-seeded";
@@ -141,6 +143,138 @@ beforeEach(() => {
 });
 
 describe("HomeView", () => {
+  it("removes the starter task widget hit area after it is dismissed", async () => {
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          {
+            id: "00000000-0000-0000-0000-000000000098",
+            kind: "stickyNote",
+            targetId: "onboarding:starter-tasks",
+            centerX: 100,
+            centerY: 100,
+            width: 256,
+            height: 196,
+            zIndex: 2,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    render(
+      <StarterTasksProvider
+        value={{
+          completionState: EMPTY_STARTER_TASK_COMPLETION,
+          enabled: true,
+          visible: false,
+          docked: false,
+          selectedTaskId: null,
+          starterProjectId: null,
+          omittedTaskIds: new Set(),
+          onTaskSelect: vi.fn(),
+          onTaskToggle: vi.fn(),
+          onBackHome: vi.fn(),
+          onCloseSecondary: vi.fn(),
+          onDismiss: vi.fn(),
+          onRestore: vi.fn(),
+        }}
+      >
+        <HomeView />
+      </StarterTasksProvider>,
+    );
+    await screen.findByText("widget canvas");
+
+    expect(widgetCanvasMock.mock.lastCall?.[0].instances).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          state: expect.objectContaining({
+            noteId: "onboarding:starter-tasks",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("does not offer starter tasks when the experiment is disabled", async () => {
+    vi.mocked(getLayout).mockResolvedValue(layout());
+    render(
+      <StarterTasksProvider
+        value={{
+          completionState: EMPTY_STARTER_TASK_COMPLETION,
+          enabled: false,
+          visible: false,
+          docked: false,
+          selectedTaskId: null,
+          starterProjectId: null,
+          omittedTaskIds: new Set(),
+          onTaskSelect: vi.fn(),
+          onTaskToggle: vi.fn(),
+          onBackHome: vi.fn(),
+          onCloseSecondary: vi.fn(),
+          onDismiss: vi.fn(),
+          onRestore: vi.fn(),
+        }}
+      >
+        <HomeView />
+      </StarterTasksProvider>,
+    );
+    await screen.findByText("widget canvas");
+
+    expect(widgetCanvasMock.mock.lastCall?.[0].starterTasksAvailable).toBe(
+      false,
+    );
+  });
+
+  it("keeps the starter project cube after starter tasks are dismissed", async () => {
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          {
+            id: "00000000-0000-0000-0000-000000000099",
+            kind: "stickyNote",
+            targetId: "onboarding:starter-project",
+            centerX: 500,
+            centerY: 200,
+            width: 400,
+            height: 400,
+            zIndex: 2,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    render(
+      <StarterTasksProvider
+        value={{
+          completionState: EMPTY_STARTER_TASK_COMPLETION,
+          enabled: true,
+          visible: false,
+          docked: false,
+          selectedTaskId: null,
+          starterProjectId: null,
+          omittedTaskIds: new Set(),
+          onTaskSelect: vi.fn(),
+          onTaskToggle: vi.fn(),
+          onBackHome: vi.fn(),
+          onCloseSecondary: vi.fn(),
+          onDismiss: vi.fn(),
+          onRestore: vi.fn(),
+        }}
+      >
+        <HomeView />
+      </StarterTasksProvider>,
+    );
+    await screen.findByText("widget canvas");
+
+    expect(widgetCanvasMock.mock.lastCall?.[0].instances).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "onboardingProjectArtifact" }),
+      ]),
+    );
+  });
+
   it("does not add bundled starter agents to an existing customized Home", async () => {
     vi.mocked(getLayout).mockResolvedValue(layout());
     const bundledPersona = (displayName: string): Persona => ({

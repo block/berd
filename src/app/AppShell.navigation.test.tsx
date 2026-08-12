@@ -48,6 +48,7 @@ import { useProviderModelCacheStore } from "@/features/providers/stores/provider
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
+import { ASSISTIVE_UX_STORAGE_KEY } from "@/shared/assistive-ux/registry";
 
 import {
   DEFAULT_RUNTIME_CONFIG,
@@ -611,11 +612,38 @@ vi.mock("./ui/AppShellContent", () => ({
         <div data-testid="builderbot-route">
           {JSON.stringify(activeBuilderbotRoute)}
         </div>
+        <div data-testid="starter-tasks-visible">
+          {String(starterTasks?.visible)}
+        </div>
+        <div data-testid="starter-tasks-docked">
+          {String(starterTasks?.docked)}
+        </div>
+        <div data-testid="starter-task-selection">
+          {starterTasks?.selectedTaskId ?? "none"}
+        </div>
+        <button
+          type="button"
+          onClick={() => starterTasks?.onTaskSelect("connect-provider")}
+        >
+          Select provider starter task
+        </button>
         <button
           type="button"
           onClick={() => starterTasks?.onTaskSelect("add-widget")}
         >
           Select add widget starter task
+        </button>
+        <button
+          type="button"
+          onClick={() => starterTasks?.onTaskSelect("create-project")}
+        >
+          Select project starter task
+        </button>
+        <button type="button" onClick={() => starterTasks?.onDismiss()}>
+          Dismiss starter tasks
+        </button>
+        <button type="button" onClick={() => starterTasks?.onRestore()}>
+          Restore starter tasks
         </button>
         <button
           type="button"
@@ -4154,6 +4182,75 @@ describe("AppShell global navigation", () => {
     expect(useChatSessionStore.getState().isRightRailOpen).toBe(false);
   });
 
+  it("navigates a starter task to its relevant settings page", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Select provider starter task" }),
+    );
+
+    expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    expect(screen.getByTestId("settings-section")).toHaveTextContent(
+      "providers",
+    );
+  });
+
+  it("keeps background content inert and clears project selection after exit", async () => {
+    const user = userEvent.setup();
+    const appRoot = document.createElement("div");
+    appRoot.id = "root";
+    document.body.append(appRoot);
+    render(appShellWithTheme(), { container: appRoot });
+
+    await user.click(
+      screen.getByRole("button", { name: "Select project starter task" }),
+    );
+    expect(screen.getByTestId("starter-task-selection")).toHaveTextContent(
+      "create-project",
+    );
+    expect(appRoot.inert).toBe(true);
+    await user.click(await screen.findByRole("button", { name: "Close" }));
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("starter-task-selection")).toHaveTextContent(
+          "none",
+        );
+      },
+      { timeout: 1000 },
+    );
+    expect(screen.getByTestId("starter-tasks-docked")).toHaveTextContent(
+      "false",
+    );
+    expect(appRoot.inert).toBeFalsy();
+  });
+
+  it("persists restoring dismissed starter tasks", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Dismiss starter tasks" }),
+    );
+    expect(screen.getByTestId("starter-tasks-visible")).toHaveTextContent(
+      "false",
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Restore starter tasks" }),
+    );
+    expect(screen.getByTestId("starter-tasks-visible")).toHaveTextContent(
+      "true",
+    );
+    const persisted = JSON.parse(
+      window.localStorage.getItem(ASSISTIVE_UX_STORAGE_KEY) ?? "{}",
+    );
+    expect(persisted.moments?.["home.starterTasks"]).not.toMatchObject({
+      retiredReason: "dismissed",
+    });
+  });
+
   it("guards the add-widget starter task against unsaved automation changes", async () => {
     const user = userEvent.setup();
     renderAppShell();
@@ -4179,6 +4276,12 @@ describe("AppShell global navigation", () => {
 
     await user.click(screen.getByRole("button", { name: "Keep editing" }));
     expect(screen.getByTestId("active-view")).toHaveTextContent("automations");
+    expect(screen.getByTestId("starter-tasks-docked")).toHaveTextContent(
+      "false",
+    );
+    expect(screen.getByTestId("starter-task-selection")).toHaveTextContent(
+      "none",
+    );
     expect(hasStarterWidgetPickerRequest()).toBe(false);
   });
 
