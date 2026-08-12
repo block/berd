@@ -515,6 +515,38 @@ describe("ChatView MCP app messaging", () => {
     expect(timelineProps.onForkFromMessage).toBeUndefined();
   });
 
+  it("wires the change-folder handler through to the message timeline", () => {
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+      />,
+    );
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      onChangeFolder?: unknown;
+    };
+    // Without this wiring, the missing-folder notice's "Change folder"
+    // action silently falls back to only revealing the context panel
+    // (BOT-1471).
+    expect(timelineProps.onChangeFolder).toBeTypeOf("function");
+  });
+
+  it("does not pass change-folder in read-only mode", () => {
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={chatSessionWithWorkingDir("/tmp/project")}
+        readOnlyStatus="Finishing current response..."
+      />,
+    );
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      onChangeFolder?: unknown;
+    };
+    expect(timelineProps.onChangeFolder).toBeUndefined();
+  });
+
   it("passes handleSend through to MessageTimeline for MCP app messages", () => {
     render(<ChatView sessionId="session-1" />);
 

@@ -7,7 +7,6 @@ import { useChangedFiles } from "@/shared/hooks/useChangedFiles";
 import { useHomeDir } from "@/shared/hooks/useHomeDir";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
-import { ensureDirectory } from "@/shared/api/system";
 import {
   createBranch,
   createWorktree,
@@ -49,7 +48,6 @@ import {
   useWorkspaceGitRuntimes,
 } from "./hooks/useWorkspaceGitRuntimes";
 import { openPath } from "@tauri-apps/plugin-opener";
-import { updateWorkingDir } from "@/shared/api/acpApi";
 import { toast } from "sonner";
 import { INITIAL_SESSION_CHAT_RUNTIME } from "@/shared/types/chat";
 import {
@@ -67,6 +65,7 @@ import {
   releaseWorkspaceSendAfterUserEdit,
 } from "@/features/chat/lib/firstWorkspaceSend";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
+import { useChangeSessionFolder } from "@/features/chat/hooks/useChangeSessionFolder";
 import { supersedePendingSessionWorkspaceActivation } from "@/features/chat/lib/sessionWorkspaceActivation";
 import { useChatStore } from "../stores/chatStore";
 import type { CreatedWorkspaceWorktreeContext } from "./widgets/WorkspaceCreateDialog";
@@ -267,7 +266,6 @@ export function ContextPanel({
   const { t } = useTranslation("chat");
   const workspaceRepository = useWorkspaceRepository();
   const [activeTab, setActiveTab] = useState<ContextPanelTab>("details");
-  const [isChangingFolder, setIsChangingFolder] = useState(false);
   const [isAddWorkspaceOpen, setIsAddWorkspaceOpen] = useState(false);
   const [sectionVisibility, setSectionVisibility] = usePersistedState(
     SECTION_VISIBILITY_STORAGE_KEY,
@@ -561,58 +559,11 @@ export function ContextPanel({
     [refetchAll],
   );
 
-  // Re-points the current chat only. The default folder for new general
-  // chats lives in Settings and is intentionally not touched here.
-  const handleChangeFolder = useCallback(async () => {
-    setIsChangingFolder(true);
-
-    try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
-      const selected = await open({
-        defaultPath: gitTargetPath ?? undefined,
-        directory: true,
-        multiple: false,
-        title: t("contextPanel.folder.changeDialogTitle"),
-      });
-
-      if (typeof selected !== "string") {
-        return;
-      }
-
-      await ensureDirectory(selected);
-      await supersedePendingSessionWorkspaceActivation(sessionId);
-      await updateWorkingDir(sessionId, selected);
-      patchSession(sessionId, { workingDir: selected });
-      setActiveWorkspace(sessionId, { path: selected, branch: null });
-      if (isMultiWorkspaceMode && projectName) {
-        attachWorkspace(sessionId, {
-          path: selected,
-          branch: null,
-          kind: "directory",
-          source: "selected",
-        });
-      }
-      releaseHeldSend();
-      await refetchAll();
-      toast.success(t("contextPanel.folder.changeSuccess"));
-    } catch (error) {
-      console.warn("Failed to change working folder:", error);
-      toast.error(t("contextPanel.errors.folderChange"));
-    } finally {
-      setIsChangingFolder(false);
-    }
-  }, [
-    gitTargetPath,
-    attachWorkspace,
-    isMultiWorkspaceMode,
-    patchSession,
-    projectName,
-    refetchAll,
-    releaseHeldSend,
-    sessionId,
-    setActiveWorkspace,
-    t,
-  ]);
+  const { changeFolder: handleChangeFolder, isChangingFolder } =
+    useChangeSessionFolder(sessionId, {
+      defaultPath: gitTargetPath,
+      attachWorkspace: isMultiWorkspaceMode && Boolean(projectName),
+    });
 
   const handleIncludeWorkspaceCandidate = useCallback(
     (candidate: WorkspaceAddCandidate) => {

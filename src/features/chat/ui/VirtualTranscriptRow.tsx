@@ -186,6 +186,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     onMcpAppAutoScroll,
     onRunShellCommand,
     onEditProject,
+    onChangeFolder,
     onOpenContextPanel,
   } = bubbleCallbacks ?? EMPTY_MESSAGE_BUBBLE_CALLBACKS;
   const responseStartMessageId = row.responseStartMessageId ?? row.messageId;
@@ -325,6 +326,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           onMcpAppAutoScroll={onMcpAppAutoScroll}
           onRunShellCommand={onRunShellCommand}
           onEditProject={onEditProject}
+          onChangeFolder={onChangeFolder}
           onOpenContextPanel={onOpenContextPanel}
         />
       </div>
@@ -403,6 +405,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           onMcpAppAutoScroll={onMcpAppAutoScroll}
           onRunShellCommand={onRunShellCommand}
           onEditProject={onEditProject}
+          onChangeFolder={onChangeFolder}
           onOpenContextPanel={onOpenContextPanel}
         />
       </div>

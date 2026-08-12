@@ -41,6 +41,7 @@ import {
 } from "../hooks/useChatSessionController";
 import { useResizableAgentBuilderRail } from "../hooks/useResizableAgentBuilderRail";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
+import { useChangeSessionFolder } from "../hooks/useChangeSessionFolder";
 import {
   useChatSessionStore,
   type ChatSession,
@@ -552,6 +553,22 @@ export function ChatView({
     setRightRailOpen,
   ]);
 
+  // Missing-folder recovery notices carry a "Change folder" action; opening
+  // the folder picker directly resolves them, so route the action straight
+  // to the picker instead of just revealing the context panel (BOT-1471).
+  const changeFolderSessionId = effectiveSession?.id ?? sessionId;
+  const { changeFolder: handleChangeFolder } = useChangeSessionFolder(
+    changeFolderSessionId,
+    {
+      defaultPath: terminalWorkspacePath ?? effectiveSession?.workingDir,
+      attachWorkspace:
+        workspaceRepository.mode === "multi" &&
+        Boolean(controller.project?.name),
+    },
+  );
+  const onTimelineChangeFolder =
+    !isReadOnly && changeFolderSessionId ? handleChangeFolder : undefined;
+
   const showIndicator =
     controller.chatState === "thinking" ||
     controller.chatState === "streaming" ||
@@ -925,6 +942,7 @@ export function ChatView({
         !isReadOnly && terminalAvailable ? handleRunShellCommand : undefined
       }
       onEditProject={onOpenProjectSettings}
+      onChangeFolder={onTimelineChangeFolder}
       onOpenContextPanel={handleOpenContextPanel}
       onForkFromMessage={
         !isReadOnly && onForkChat ? handleForkFromMessage : undefined

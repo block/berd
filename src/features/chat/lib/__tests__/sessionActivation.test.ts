@@ -721,6 +721,42 @@ describe("loadSessionMessages", () => {
     expect(warning.action).toEqual({ type: "openContextPanel" });
   });
 
+  it("surfaces the missing-folder warning on activation when the transcript is cached", async () => {
+    seedSession(
+      { id: "s-cached", workingDir: "/missing/session" },
+      { missingDir: "/resolved/missing/session", replay: false },
+    );
+    // A cached transcript makes loadSessionMessages skip the replay path.
+    useChatStore.getState().addMessage("s-cached", replayUserMessage("m-old"));
+
+    await expect(loadSessionMessagesAndPrepare("s-cached")).resolves.toBe(true);
+
+    expect(acpLoadSession).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("s-cached")?.workingDir,
+    ).toBe("~/goose artifacts");
+    const warning = notificationFromLastMessage("s-cached");
+    expect(warning.notificationType).toBe("warning");
+    expect(warning.text).toContain("/resolved/missing/session");
+    expect(warning.action).toEqual({ type: "openContextPanel" });
+  });
+
+  it("does not stack duplicate warnings across repeated activations", async () => {
+    seedSession(
+      { id: "s-repeat", workingDir: "/missing/session" },
+      { missingDir: "/resolved/missing/session", replay: false },
+    );
+    useChatStore.getState().addMessage("s-repeat", replayUserMessage("m-old"));
+
+    await expect(loadSessionMessagesAndPrepare("s-repeat")).resolves.toBe(true);
+    await expect(loadSessionMessagesAndPrepare("s-repeat")).resolves.toBe(true);
+
+    const warnings = messagesFor("s-repeat").filter(
+      (message) => message.role === "system",
+    );
+    expect(warnings).toHaveLength(1);
+  });
+
   it("skips the warning when the missing dir is the artifact root the fallback recreates", async () => {
     resolvePath.mockImplementation(({ parts }: { parts: string[] }) =>
       Promise.resolve({ path: parts[0] }),

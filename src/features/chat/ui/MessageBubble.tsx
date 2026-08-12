@@ -357,6 +357,7 @@ interface MessageBubbleProps {
   onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
   onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
   onEditProject?: (projectId: string) => void;
+  onChangeFolder?: () => void;
   onOpenContextPanel?: () => void;
 }
 
@@ -464,6 +465,7 @@ function resolveNotificationAction(
   action: SystemNotificationContent["action"],
   options: {
     onEditProject?: (projectId: string) => void;
+    onChangeFolder?: () => void;
     onOpenContextPanel?: () => void;
     editProjectLabel?: string;
     changeFolderLabel?: string;
@@ -472,7 +474,7 @@ function resolveNotificationAction(
   if (!action) {
     return null;
   }
-  const { onEditProject, onOpenContextPanel } = options;
+  const { onEditProject, onChangeFolder, onOpenContextPanel } = options;
   if (action.type === "editProject" && onEditProject) {
     return {
       label: options.editProjectLabel,
@@ -481,14 +483,16 @@ function resolveNotificationAction(
   }
   // editProject falls back to the folder picker when no project-settings
   // surface exists (popped-out session windows pass no onEditProject).
-  if (
-    (action.type === "openContextPanel" || action.type === "editProject") &&
-    onOpenContextPanel
-  ) {
-    return {
-      label: options.changeFolderLabel,
-      onClick: onOpenContextPanel,
-    };
+  // Prefer opening the folder picker directly (onChangeFolder); showing the
+  // context panel is only a legacy fallback for hosts without the picker.
+  if (action.type === "openContextPanel" || action.type === "editProject") {
+    const onClick = onChangeFolder ?? onOpenContextPanel;
+    if (onClick) {
+      return {
+        label: options.changeFolderLabel,
+        onClick,
+      };
+    }
   }
   return null;
 }
@@ -510,6 +514,7 @@ function renderContentBlock(
     onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
     runItCodeRenderers?: CustomRenderer[];
     onEditProject?: (projectId: string) => void;
+    onChangeFolder?: () => void;
     onOpenContextPanel?: () => void;
     editProjectLabel?: string;
     changeFolderLabel?: string;
@@ -645,6 +650,7 @@ function renderContentBlock(
     case "systemNotification": {
       const sn = content as SystemNotificationContent;
       const isError = sn.notificationType === "error";
+      const isWarning = sn.notificationType === "warning";
       const isCompaction = sn.notificationType === "compaction";
       const notificationAction = resolveNotificationAction(sn.action, options);
       return (
@@ -654,9 +660,11 @@ function renderContentBlock(
             "rounded-md border p-2 text-xs",
             isError
               ? "border-destructive/30 bg-destructive/10 text-destructive"
-              : isCompaction
-                ? "inline-flex items-center justify-center gap-2 border-success/30 bg-success/10 font-medium text-success"
-                : "border-border bg-accent text-muted-foreground",
+              : isWarning
+                ? "border-warning/40 bg-warning/10 text-warning"
+                : isCompaction
+                  ? "inline-flex items-center justify-center gap-2 border-success/30 bg-success/10 font-medium text-success"
+                  : "border-border bg-accent text-muted-foreground",
           )}
         >
           {isCompaction ? <Check className="size-3.5 shrink-0" /> : null}
@@ -701,6 +709,7 @@ export const MessageBubble = memo(function MessageBubble({
   onMcpAppAutoScroll,
   onRunShellCommand,
   onEditProject,
+  onChangeFolder,
   onOpenContextPanel,
 }: MessageBubbleProps) {
   const { t } = useTranslation(["chat", "common"]);
@@ -837,6 +846,7 @@ export const MessageBubble = memo(function MessageBubble({
               voiceSpeechFailedLabel: t("message.voiceSpeechFailedLabel"),
               contentBlocks: renderingContext,
               onEditProject,
+              onChangeFolder,
               onOpenContextPanel,
               editProjectLabel: t("toolbar.editProjectFolders"),
               changeFolderLabel: t("toolbar.changeFolder"),

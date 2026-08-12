@@ -161,6 +161,51 @@ function loaderNoticeMessageId(
 }
 
 /**
+ * Surfaces a missing-folder fallback to the user and repairs local session
+ * state so the dead path stops winning cwd resolution. Shared by the fresh
+ * replay path and cache-hit activations, so the recovery notice appears
+ * whenever the user lands in the chat — not only on a cold transcript load.
+ */
+function applyMissingCwdRecovery(
+  sessionId: string,
+  missingCwdWarning: { source: ExplicitCwdSource; missingPath: string },
+  workingDir: string,
+): void {
+  const chatStore = useChatStore.getState();
+  const sessionStore = useChatSessionStore.getState();
+  chatStore.removeMessage(
+    sessionId,
+    loaderNoticeMessageId(sessionId, "warning"),
+  );
+  chatStore.addMessage(sessionId, {
+    ...buildMissingCwdWarning(
+      missingCwdWarning.source,
+      missingCwdWarning.missingPath,
+      workingDir,
+    ),
+    id: loaderNoticeMessageId(sessionId, "warning"),
+  });
+  if (missingCwdWarning.source.type === "workspace") {
+    // The dead workspace path would otherwise keep winning cwd resolution
+    // (loads, compaction, model changes) over the patched workingDir,
+    // re-triggering the same fallback on every pass.
+    sessionStore.clearActiveWorkspace(sessionId);
+  }
+  sessionStore.patchSession(sessionId, { workingDir });
+}
+
+/**
+ * Removes the loader's missing-folder recovery notice. Called when the user
+ * re-points the chat at a folder they just picked, which resolves the
+ * condition the warning reported.
+ */
+export function clearSessionLoadWarningNotice(sessionId: string): void {
+  useChatStore
+    .getState()
+    .removeMessage(sessionId, loaderNoticeMessageId(sessionId, "warning"));
+}
+
+/**
  * True when the session holds replayed conversation history. Loader-added
  * system notifications don't count: treating them as "loaded" would make a
  * single failed load (whose error notification is the only message)
@@ -192,6 +237,13 @@ export async function loadSessionMessagesAndPrepare(
       : null;
     const { workingDir, missingCwdWarning } =
       await resolveWorkingDirForSessionLoad(session, project);
+    if (missingCwdWarning) {
+      // Reaching here with a warning means the load itself was skipped (the
+      // transcript was still cached), so the replay path never surfaced the
+      // fallback. Activation is the user landing in the chat — tell them now
+      // instead of waiting for a cold reload.
+      applyMissingCwdRecovery(sessionId, missingCwdWarning, workingDir);
+    }
     try {
       await transitionSessionTarget({
         sessionId,
@@ -386,25 +438,9 @@ async function performSessionMessagesLoad(
       loaderNoticeMessageId(sessionId, "warning"),
     );
     if (missingCwdWarning) {
-      chatStore.addMessage(sessionId, {
-        ...buildMissingCwdWarning(
-          missingCwdWarning.source,
-          missingCwdWarning.missingPath,
-          workingDir,
-        ),
-        id: loaderNoticeMessageId(sessionId, "warning"),
-      });
-      if (missingCwdWarning.source.type === "workspace") {
-        // The dead workspace path would otherwise keep winning cwd
-        // resolution (loads, compaction, model changes) over the patched
-        // workingDir, re-triggering the same fallback on every pass.
-        sessionStore.clearActiveWorkspace(sessionId);
-      }
+      applyMissingCwdRecovery(sessionId, missingCwdWarning, workingDir);
     }
-    sessionStore.patchSession(sessionId, {
-      pinnedLoadState: undefined,
-      ...(missingCwdWarning ? { workingDir } : {}),
-    });
+    sessionStore.patchSession(sessionId, { pinnedLoadState: undefined });
     // Publish replay completion before an idle/error transition can wake a queued-message subscriber and route its prompt notifications into the consumed replay buffer.
     chatStore.setSessionLoading(sessionId, false);
     chatStore.setError(sessionId, null);

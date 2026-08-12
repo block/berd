@@ -1664,6 +1664,41 @@ describe("MessageBubble", () => {
     expect(onOpenContextPanel).toHaveBeenCalledTimes(1);
   });
 
+  it("prefers the direct folder picker over revealing the context panel", async () => {
+    const user = userEvent.setup();
+    const onChangeFolder = vi.fn();
+    const onOpenContextPanel = vi.fn();
+
+    render(
+      <MessageBubble
+        message={notificationMessage({ type: "openContextPanel" })}
+        onChangeFolder={onChangeFolder}
+        onOpenContextPanel={onOpenContextPanel}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Change folder" }));
+
+    expect(onChangeFolder).toHaveBeenCalledTimes(1);
+    expect(onOpenContextPanel).not.toHaveBeenCalled();
+  });
+
+  it("uses the direct folder picker for edit-project notifications without a project-settings surface", async () => {
+    const user = userEvent.setup();
+    const onChangeFolder = vi.fn();
+
+    render(
+      <MessageBubble
+        message={notificationMessage(editProjectAction)}
+        onChangeFolder={onChangeFolder}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Change folder" }));
+
+    expect(onChangeFolder).toHaveBeenCalledTimes(1);
+  });
+
   it("omits the open-context-panel action when no handler is provided", () => {
     render(
       <MessageBubble
