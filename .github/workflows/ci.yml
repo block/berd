@@ -115,6 +115,8 @@ jobs:
     timeout-minutes: 60
     env:
       BERD_TAURI_CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
       JUST_UNSTABLE: "1"
     steps:
       - name: Check out repository

@@ -232,8 +232,8 @@ ci: check tauri-fmt-check tauri-check tauri-test clippy test release-scripts-tes
 
 # Native x64 MSVC CI gate for the managed Node runtime + ACP bridge.
 # Runs the managed_node / managed_acp_tools module tests (including the
-# BERD_WS2_NATIVE_GATE real-ZIP + bridge-launch gates), tauri check, and
-# Windows-only native CI-equivalent gate. Kept for local and release validation.
+# BERD_WS2_NATIVE_GATE real-ZIP gate) and Windows clippy in both feature
+# configurations. Kept for local and release validation.
 ci-windows:
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/CI-Windows.ps1
 

@@ -1,11 +1,10 @@
 # Native x64 MSVC CI gate for the managed Node runtime + npm ACP bridge.
 #
 # Runs the Rust checks that only a real Windows host can exercise: the
-# `managed_node` / `managed_acp_tools` module tests (which include the
-# `BERD_WS2_NATIVE_GATE` gates that download and execute the real pinned Node
-# ZIP and launch a managed bridge by bare name), plus `just tauri-check-windows`
-# and Windows clippy. Invoked through `just ci-windows` for local and release
-# validation.
+# `managed_node` / `managed_acp_tools` module tests (including the native gate
+# that downloads and executes the real pinned Node ZIP), plus Windows clippy in
+# the default and app-feature configurations. Invoked through `just ci-windows`
+# for local and release validation.
 $ErrorActionPreference = "Stop"
 trap {
     Write-Host $_.Exception.Message -ForegroundColor Red
@@ -20,9 +19,8 @@ Set-Location (Join-Path (Get-BerdRepoRoot) "src-tauri")
 
 $env:CARGO_TARGET_DIR = Get-TauriCargoTargetDir
 $env:TAURI_CONFIG = '{"bundle":{"externalBin":[],"resources":[]}}'
-# Opt the managed-Node native gates in: they download and execute the real
-# pinned Node ZIP and launch a managed bridge, which only a native Windows host
-# can do. Off this variable the gates skip.
+# Opt the managed-Node native gate in: it downloads and executes the real pinned
+# Node ZIP, which only a native Windows host can do. Off this variable it skips.
 $env:BERD_WS2_NATIVE_GATE = "1"
 Write-WindowsDevInfo "Using Tauri Cargo target dir: $env:CARGO_TARGET_DIR"
 
@@ -44,20 +42,16 @@ function Invoke-CargoCheck {
 
 Invoke-CargoCheck -ArgumentList @("fmt", "--check") -Label "cargo fmt --check"
 
-# The two managed-Node modules, including the native gates. Run them as the
-# primary crate so a compile break on Windows fails here rather than silently.
+# Both managed-Node modules share this test-name prefix. Run them in one process
+# so the Windows test binary is linked once. The live ACP bridge install has no
+# equivalent macOS/Linux CI coverage, so leave it for targeted manual runs.
 Invoke-CargoCheck -ArgumentList @(
-    "test", "--lib", "services::managed_node"
-) -Label "cargo test managed_node (native gate)"
-Invoke-CargoCheck -ArgumentList @(
-    "test", "--lib", "services::managed_acp_tools"
-) -Label "cargo test managed_acp_tools (native gate)"
+    "test", "--lib", "services::managed_", "--", "--skip",
+    "native_gate_installs_and_launches_a_bridge_by_bare_name"
+) -Label "cargo test managed services"
 
-# Feature-off check plus Windows clippy, mirroring the justfile Windows gates.
-Invoke-CargoCheck -ArgumentList @("check") -Label "cargo check"
-Invoke-CargoCheck -ArgumentList @(
-    "check", "--features", (Get-BerdAppFeatures)
-) -Label "cargo check app features"
+# Clippy compiles both configurations, so separate `cargo check` calls only
+# repeat the same compile coverage.
 Invoke-CargoCheck -ArgumentList @(
     "clippy", "--", "-D", "warnings"
 ) -Label "cargo clippy"
