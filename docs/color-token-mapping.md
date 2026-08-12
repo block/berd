@@ -18,7 +18,7 @@ This follows the shadcn theming model: core tokens describe component anatomy an
 
 | Need | Use | Tailwind examples | Mental model |
 | --- | --- | --- | --- |
-| App/page background | `background` + `foreground` | `bg-background text-foreground` | The ordinary app canvas or page body. |
+| Paper-colored control or blend-with-card paint | `background` + `foreground` | `bg-background text-foreground` | Alias of `card` in both themes. For controls, chips, and masks that should read as paper (outline buttons, `kbd`, file chips, timeline-line masks). Not a container surface — containers use `card`/`card-glass` — and not the window backdrop, which is `canvas-base`. |
 | Contained surface | `card` + `card-foreground` | `bg-card text-card-foreground` | Cards and stable panels. |
 | Translucent contained surface | `card-glass` (+ `--backdrop-panel` blur) | `bg-card-glass` | Containers that float over the canvas and let the dot grid through (nav panes, right rail). Derived from `card` via `color-mix`, so both themes keep the same elevation ladder; the mix alpha is the only per-theme knob. |
 | Floating overlay | `popover` + `popover-foreground` | `bg-popover text-popover-foreground` | Menus, popovers, dropdowns, inspectors. |
@@ -76,7 +76,7 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 
 | Old token/class family | Replacement | Why |
 | --- | --- | --- |
-| `background-default`, `text-default` | `background`, `foreground` | Same job as shadcn's app surface pair. |
+| `background-default`, `text-default` | `background`, `foreground` | Historical rename. `background` is now paper paint aliased to `card`; the app canvas is `canvas-base`. |
 | `background-alt`, `background-hover`, `text-hover` | `accent`, `accent-foreground` | shadcn uses accent for hover, active, and highlighted low-emphasis states. |
 | `background-muted`, `text-muted` | `muted`, `muted-foreground` | Same job as shadcn's muted pair. |
 | `background-primary`, `text-on-primary` | `primary`, `primary-foreground` | Same job as shadcn primary. |
@@ -189,6 +189,7 @@ The authoritative list of raw-CSS color tokens (kept in sync with the script):
 --overlay-scrim
 --overlay-search-scrim
 --overlay-avatar-field
+--overlay-onboarding-scrim
 --overlay-global-composer-shim
 --overlay-global-composer-shim-peak
 --overlay-global-composer-shim-clear
@@ -222,7 +223,9 @@ exact machine-checked contract.
 
 | Question | Token choice |
 | --- | --- |
-| Is this normal app text or page background? | `foreground` / `background` |
+| Is this normal app text? | `foreground` |
+| Is this the window or page backdrop? | `canvas-base` |
+| Is this a paper control or blend-with-card paint? | `background` / `foreground` |
 | Is this a card or stable panel? | `card` / `card-foreground` |
 | Is this floating above the page? | `popover` / `popover-foreground` |
 | Is this a hover, active, selected, or highlighted row? | `accent` / `accent-foreground` |

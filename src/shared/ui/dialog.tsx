@@ -107,7 +107,7 @@ function DialogContent({
             "group/dialog pointer-events-auto relative grid max-h-[calc(100dvh-2rem)] w-full gap-4 overflow-y-auto rounded-md p-6 shadow-[var(--shadow-modal)] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
             surface === "glass"
               ? "bg-[var(--surface-popover-glass)] [backdrop-filter:var(--backdrop-popover-glass)] [-webkit-backdrop-filter:var(--backdrop-popover-glass)]"
-              : "bg-background text-foreground backdrop-filter-none [-webkit-backdrop-filter:none]",
+              : "bg-popover text-popover-foreground backdrop-filter-none [-webkit-backdrop-filter:none]",
             // Zoned mode: a DialogBody child switches the content to a pinned
             // header / scrollable body / pinned footer column. Padding moves
             // from the surface to the zones (see DialogHeader/Body/Footer).

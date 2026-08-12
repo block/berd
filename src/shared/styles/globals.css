@@ -209,7 +209,12 @@
 :root {
   /* shadcn core tokens. Keep current Goose neutral values, but use the
      standard shadcn names as the app's authoring contract. */
-  --background: var(--color-white);
+  /* `background` is an alias of `card`: every remaining consumer (controls,
+     chips, shadcn primitives, line masks) means "paper", not the window
+     canvas — the window canvas is `canvas-base`. Aliasing keeps the pair
+     from drifting; dark mode diverging is exactly how black-blob controls
+     appeared on gray-800 cards. */
+  --background: var(--card);
   --foreground: #242424;
   --card: var(--color-white);
   --card-foreground: var(--foreground);
@@ -436,6 +441,11 @@
      tint keeps the "temporary surface over the app" modal feel (Tulsi). */
   --overlay-avatar-field: rgba(252, 252, 251, 0.58);
   --backdrop-avatar-field: blur(36px) saturate(120%) brightness(1.02);
+  /* Onboarding tour scrim: heavier than the dialog scrim so the app reads
+     as a distant backdrop while the tour speaks. Pinned to literals: the
+     old bg-background/40 source became paper paint (the card alias), and a
+     modal scrim must keep tinting white in light / dimming in dark. */
+  --overlay-onboarding-scrim: rgba(255, 255, 255, 0.4);
   --backdrop-popover-glass: blur(24px) saturate(150%);
   --overlay-global-composer-shim: rgba(255, 255, 255, 0.28);
   --overlay-global-composer-shim-peak: rgba(255, 255, 255, 0.96);
@@ -670,7 +680,10 @@
 
 [data-theme="dark"],
 .dark {
-  --background: var(--color-black);
+  /* Alias of `card`, same as light (see :root). This is what fixes dark
+     "black blob" controls: outline buttons, file chips, kbd, and every other
+     paper-intent `bg-background` consumer now tracks the card surface. */
+  --background: var(--card);
   --foreground: var(--color-white);
   --card: var(--color-gray-800);
   --card-foreground: var(--foreground);
@@ -763,7 +776,9 @@
   --surface-composer-action: var(--color-gray-600);
   --surface-composer-action-hover: var(--color-gray-500);
   --surface-composer-action-active: var(--color-gray-500);
-  --surface-chat-responding-pill-bg: var(--background);
+  /* Intentionally black chrome, not paper — pinned so it doesn't follow the
+     `background` → `card` alias. */
+  --surface-chat-responding-pill-bg: var(--color-black);
   --surface-chat-responding-pill-fg: var(--foreground);
   --chat-context-panel-bg: color-mix(
     in srgb,
@@ -881,14 +896,18 @@
   --backdrop-overlay-glass: blur(8px) saturate(130%);
   --overlay-avatar-field: rgba(16, 16, 16, 0.58);
   --backdrop-avatar-field: blur(36px) saturate(120%);
+  --overlay-onboarding-scrim: rgba(0, 0, 0, 0.4);
   --backdrop-popover-glass: blur(24px) saturate(150%);
   --overlay-global-composer-shim: rgba(255, 255, 255, 0.18);
   --overlay-global-composer-shim-peak: rgba(255, 255, 255, 0.72);
   --overlay-global-composer-shim-clear: rgba(255, 255, 255, 0);
-  --surface-agent-tile-action-bg: var(--background);
+  /* Intentionally black chrome over tile artwork — pinned like the
+     responding pill above. Hover inverts to a white fill, so the hover
+     label pins black too instead of following the background alias. */
+  --surface-agent-tile-action-bg: var(--color-black);
   --surface-agent-tile-action-fg: var(--foreground);
   --surface-agent-tile-action-bg-hover: var(--foreground);
-  --surface-agent-tile-action-fg-hover: var(--background);
+  --surface-agent-tile-action-fg-hover: var(--color-black);
   --message-user-bg: var(--color-gray-700);
 
   --project-glyph-fold-stroke: rgba(0, 0, 0, 0.85);
@@ -1995,6 +2014,15 @@ body,
 [data-streamdown="table-wrapper"] > div:has(> [data-streamdown="table"]) {
   overflow-y: hidden;
   padding-block-end: var(--streamdown-table-scrollbar-block-size, 0px);
+}
+
+/* Streamdown paints its table scroll container with bg-background. Keep the
+ * table chrome transparent so rows match whatever container hosts them
+ * (doc viewer card, chat card); the muted header band and row borders carry
+ * the structure. */
+[data-streamdown="table-wrapper"],
+[data-streamdown="table-wrapper"] > div:has(> [data-streamdown="table"]) {
+  background: transparent;
 }
 
 [data-streamdown="code-block"][data-streamdown] {

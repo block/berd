@@ -82,7 +82,7 @@ export function AppearanceSettings() {
                     <button
                       aria-pressed={selected}
                       className={cn(
-                        "flex min-w-0 items-center gap-3 rounded-md border border-border/70 bg-background/70 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        "flex min-w-0 items-center gap-3 rounded-md border border-border/70 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         selected
                           ? "border-primary/30 bg-primary/10 text-foreground"
                           : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",

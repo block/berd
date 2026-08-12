@@ -717,14 +717,14 @@ export function HomeView({
               <div className="flex gap-2">
                 <button
                   type="button"
-                  className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground shadow-sm hover:bg-muted"
+                  className="rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground shadow-sm hover:bg-muted"
                   onClick={() => void retryInitialize()}
                 >
                   {t("widgetLayer.error.retry")}
                 </button>
                 <button
                   type="button"
-                  className="rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground shadow-sm hover:bg-muted"
+                  className="rounded-md border border-border bg-card px-3 py-1.5 text-sm text-foreground shadow-sm hover:bg-muted"
                   onClick={() => void copyErrorDetails()}
                 >
                   {t("widgetLayer.error.copyDetails")}

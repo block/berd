@@ -161,6 +161,47 @@ describe("SearchView", () => {
     });
   });
 
+  it("derives both dialog scroll masks from the popover surface", async () => {
+    // The dialog paints bg-popover, which no longer matches background/card
+    // in dark mode; a fade ending anywhere else reads as a lighter band.
+    mockListExtensions.mockResolvedValue([
+      {
+        config_key: "glean-stdio",
+        type: "stdio",
+        name: "Glean",
+        description: "Search and read internal documents with Glean",
+        cmd: "glean",
+        args: [],
+        enabled: false,
+      },
+    ]);
+
+    const user = userEvent.setup();
+    const { container } = render(
+      <SearchView
+        variant="dialog"
+        onExit={vi.fn()}
+        onSelectSearchResult={vi.fn()}
+        onOpenExtension={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenAutomation={vi.fn()}
+        onOpenSkill={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole("textbox", { name: "Universal search" });
+    await user.type(input, "glean");
+    await screen.findAllByRole("button", { name: /Open extension/i });
+
+    expect(
+      container.querySelector('[class*="after:from-popover"]'),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector('[class*="to-popover"]'),
+    ).toBeInTheDocument();
+    expect(container.querySelector('[class*="to-background"]')).toBeNull();
+  });
+
   it("keeps punctuation-distinct and symbol-only extensions reachable", async () => {
     mockListExtensions.mockResolvedValue([
       {

@@ -43,7 +43,7 @@ export function StartupDiagnosticView({
 
   return (
     <div
-      className="flex h-screen w-screen items-center justify-center bg-background px-6 text-foreground"
+      className="flex h-screen w-screen items-center justify-center bg-canvas-base px-6 text-foreground"
       data-tauri-drag-region
     >
       <div className="flex w-full max-w-xl flex-col items-center gap-4 text-center">

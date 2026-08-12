@@ -12,7 +12,7 @@ import { APP_CHROME_NAV_TEXT_IMPORTANT_CLASS } from "@/shared/ui/sidebar-tokens"
  * Composes Button. Base semantic variant: `subtle`.
  *
  * Extra styling on top of subtle:
- * - fill is `background` (white/black) instead of `accent` — the pill
+ * - fill is `background` (paper — the `card` alias) instead of `accent` — the pill
  *   self-defends over the tinted canvas chrome, where an accent fill
  *   would look dirty
  * - label rests at `muted-foreground` and raises to `foreground` on

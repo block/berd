@@ -380,7 +380,7 @@ export function SessionWindowApp({
   let content: ReactNode;
   if (phase === "missing") {
     content = (
-      <div className="flex h-screen min-w-0 flex-col bg-background text-foreground">
+      <div className="flex h-screen min-w-0 flex-col bg-canvas-base text-foreground">
         <SessionWindowTopBar title={t("sessionWindow.missingTitle")} />
         <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
           {t("sessionWindow.missingDescription")}
@@ -389,7 +389,7 @@ export function SessionWindowApp({
     );
   } else if (phase === "recoverable" && session) {
     content = (
-      <div className="flex h-screen min-w-0 flex-col bg-background text-foreground">
+      <div className="flex h-screen min-w-0 flex-col bg-canvas-base text-foreground">
         <SessionWindowTopBar title={session.title} />
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
           <div className="max-w-md space-y-2">
@@ -408,7 +408,7 @@ export function SessionWindowApp({
     );
   } else {
     content = (
-      <div className="flex h-screen min-w-0 flex-col bg-background text-foreground">
+      <div className="flex h-screen min-w-0 flex-col bg-canvas-base text-foreground">
         <SessionWindowTopBar
           title={session?.title ?? "Berd"}
           rightRailLabel={rightRailLabel}

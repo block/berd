@@ -15,7 +15,7 @@ export type ArtifactProps = HTMLAttributes<HTMLDivElement>;
 export const Artifact = ({ className, ...props }: ArtifactProps) => (
   <div
     className={cn(
-      "flex flex-col overflow-hidden rounded-md border bg-background shadow-sm",
+      "flex flex-col overflow-hidden rounded-md border bg-card shadow-sm",
       className,
     )}
     {...props}
@@ -28,7 +28,7 @@ export type ArtifactHeaderProps = HTMLAttributes<HTMLDivElement>;
  * Header strip for an artifact surface.
  *
  * Deliberately unfilled: it inherits the surface it is mounted on (`Artifact`'s
- * `bg-background`) and separates from the content with a hairline rule,
+ * `bg-card`) and separates from the content with a hairline rule,
  * matching the app's other panel headers. An earlier `bg-muted/50` fill read
  * as a grey band that blended into the window chrome instead of looking like
  * part of the panel. Per DESIGN.md's Flat First Rule, the separation is

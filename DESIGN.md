@@ -9,6 +9,7 @@ colors:
   bg-card: "#ffffff"
   bg-sidebar-accent: "#f5f5f5"
   bg-muted: "#f0f0f0"
+  bg-surface-chat-composer: "color-mix(in srgb, #f0f0f0 72%, transparent)"
   text-muted-foreground: "#7f7f7f"
   text-placeholder: "#cccccc"
   border-border: "#e8e8e8"
@@ -91,7 +92,7 @@ components:
     height: "2.25rem"
     padding: "0 0.75rem"
   chat-composer:
-    backgroundColor: "{colors.bg-background}"
+    backgroundColor: "{colors.bg-surface-chat-composer}"
     textColor: "{colors.text-foreground}"
     rounded: "{rounded.rounded-composer}"
     padding: "1rem"
@@ -118,7 +119,7 @@ components:
 
 **Creative North Star: "The Grounded Workbench"**
 
-This file documents the actual Berd design-system source in [globals.css](src/shared/styles/globals.css), especially the `:root` semantic tokens and the Tailwind `@theme inline` aliases. The frontmatter lists the Tailwind-facing tokens agents should use in component code, such as `text-foreground`, `bg-background`, `border-border`, and `text-muted-foreground`. The prose explains the lower-level CSS variable chain behind them.
+This file documents the actual Berd design-system source in [globals.css](src/shared/styles/globals.css), especially the `:root` semantic tokens and the Tailwind `@theme inline` aliases. The frontmatter lists the Tailwind-facing tokens agents should use in component code, such as `text-foreground`, `bg-card`, `border-border`, and `text-muted-foreground`. The prose explains the lower-level CSS variable chain behind them.
 
 The current implementation provides useful product bones: semantic color tokens, shared UI primitives, a persistent sidebar, compact top bar, and a strong chat composer pattern. This document is not a blanket endorsement of every current surface. The Automations feature UI is explicitly excluded as design precedent because it did not receive the same craft pass.
 
@@ -145,7 +146,7 @@ The source palette is a semantic token system backed by a gray scale and small s
 
 ### Secondary
 
-- **`--background`**: Default app surface.
+- **`--background`**: Paper paint for controls and blend-with-card fills; an alias of `--card` in both themes. Not a container surface and not the window backdrop — containers use `--card`/`--card-glass`, and the backdrop is `--canvas-base`.
 - **`--card`**: Card and panel surface.
 - **`--muted`**: Muted surface for badges, tabs, queued rows, and low-emphasis controls.
 - **`--secondary`**: Stronger neutral fill used sparingly.
@@ -169,7 +170,7 @@ The source palette is a semantic token system backed by a gray scale and small s
 
 ### Named Rules
 
-**The Token Contract Rule.** Use the existing CSS variables and Tailwind aliases. In feature code, prefer classes like `text-foreground`, `text-muted-foreground`, `bg-background`, and `border-border`; in token work, understand that these map back to variables such as `--foreground`, `--muted-foreground`, `--background`, and `--border`, which in turn resolve to semantic values like `--foreground`.
+**The Token Contract Rule.** Use the existing CSS variables and Tailwind aliases. In feature code, prefer classes like `text-foreground`, `text-muted-foreground`, `bg-card`, and `border-border`; in token work, understand that these map back to variables such as `--foreground`, `--muted-foreground`, `--card`, and `--border`, which in turn resolve to semantic values like `--foreground`.
 
 **The Theme Provider Rule.** `ThemeProvider` may apply light/dark mode, density, and the explicit primary color override. It should not generate or overwrite the full shadcn token palette at runtime.
 
@@ -303,7 +304,7 @@ Use the shared sidebar and nav item patterns as the baseline.
 
 The composer is the signature component and should receive the most craft.
 
-- **Surface:** `bg-background`, `border-border`, and `rounded-2xl` in the current implementation.
+- **Surface:** `bg-surface-chat-composer` translucent glass with the `--backdrop-composer-glass` blur, and `rounded-composer`, in the current implementation.
 - **Layout:** Max width `max-w-3xl`, centered, with internal structure for attachments, selected persona/skills, text entry, toolbar controls, voice, send, stop, and context usage.
 - **Behavior:** File drop state uses tokenized muted surfaces and dashed border. Queued messages stay inline above the text area.
 - **Rule:** The composer should show active agent, model, project, skills, attachments, voice state, send state, and context usage without feeling like a control panel.
@@ -313,7 +314,7 @@ The composer is the signature component and should receive the most craft.
 Use Radix-backed shared primitives for dialogs, sheets, drawers, dropdowns, popovers, and tooltips.
 
 - **Shape:** `rounded-overlay` for popovers and dropdowns, `rounded-modal` for dialogs.
-- **Color:** `bg-popover text-popover-foreground` or `bg-background text-foreground`.
+- **Color:** `bg-popover text-popover-foreground`.
 - **Motion:** Use existing open/close animations and durations (`--duration-fast`, `--duration-normal`, `--duration-slow`).
 - **Modal Use:** Dialogs are for blocking decisions, destructive confirmation, or workflows that cannot remain inline.
 

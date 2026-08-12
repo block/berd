@@ -253,7 +253,7 @@ export function SecuritySettings() {
               {trustedDomains.map((domain) => (
                 <li
                   key={domain}
-                  className="flex items-center justify-between gap-3 rounded-md bg-background px-3 py-2"
+                  className="flex items-center justify-between gap-3 rounded-md bg-muted px-3 py-2"
                 >
                   <span className="min-w-0 truncate text-sm" title={domain}>
                     {domain}
@@ -274,7 +274,7 @@ export function SecuritySettings() {
               ))}
             </ul>
           ) : (
-            <p className="rounded-md bg-background px-3 py-3 text-sm text-muted-foreground">
+            <p className="rounded-md bg-muted px-3 py-3 text-sm text-muted-foreground">
               {t("storage.trustedDomains.empty")}
             </p>
           )}

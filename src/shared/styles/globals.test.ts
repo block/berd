@@ -58,3 +58,48 @@ describe("dark navigation surface", () => {
     );
   });
 });
+
+describe("background token", () => {
+  it("aliases card in both themes so paper-intent controls track the card surface", () => {
+    // `bg-background` consumers (outline buttons, file chips, kbd, line
+    // masks) all mean "paper". Light mode always had background == card ==
+    // white; dark mode drifting to black is how controls turned into black
+    // blobs on gray-800 cards.
+    const lightTheme = declarationsFor(":root {");
+    const darkTheme = declarationsFor('[data-theme="dark"],');
+
+    expect(lightTheme).toContain("--background: var(--card);");
+    expect(darkTheme).toContain("--background: var(--card);");
+  });
+
+  it("keeps intentionally black dark chrome pinned to the palette, not the alias", () => {
+    const darkTheme = declarationsFor('[data-theme="dark"],');
+
+    expect(darkTheme).toContain(
+      "--surface-chat-responding-pill-bg: var(--color-black);",
+    );
+    expect(darkTheme).toContain(
+      "--surface-agent-tile-action-bg: var(--color-black);",
+    );
+    // The hover state inverts onto a white fill, so its label stays black
+    // rather than following the background→card alias.
+    expect(darkTheme).toContain(
+      "--surface-agent-tile-action-fg-hover: var(--color-black);",
+    );
+  });
+
+  it("keeps the onboarding tour scrim pinned to literals, not the alias", () => {
+    // The tour overlay used bg-background/40 when background meant
+    // white/black; as a modal scrim it must keep tinting white in light
+    // and dimming in dark instead of following the paper alias to card.
+    const lightTheme = declarationsFor(":root {");
+    const darkTheme = declarationsFor('[data-theme="dark"],');
+
+    expect(lightTheme).toContain(
+      "--overlay-onboarding-scrim: rgba(255, 255, 255, 0.4);",
+    );
+    expect(darkTheme).toContain(
+      "--overlay-onboarding-scrim: rgba(0, 0, 0, 0.4);",
+    );
+  });
+});

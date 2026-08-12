@@ -86,7 +86,7 @@ export function OnboardingTourDialog({
         surface="solid"
         showCloseButton={false}
         className="gap-0 overflow-hidden rounded-2xl p-0 dark:bg-card"
-        overlayClassName="bg-background/40 [backdrop-filter:blur(18px)_saturate(90%)] [-webkit-backdrop-filter:blur(18px)_saturate(90%)]"
+        overlayClassName="bg-[var(--overlay-onboarding-scrim)] [backdrop-filter:blur(18px)_saturate(90%)] [-webkit-backdrop-filter:blur(18px)_saturate(90%)]"
       >
         <DialogClose asChild>
           <GlassButton

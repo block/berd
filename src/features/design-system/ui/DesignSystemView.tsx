@@ -5808,8 +5808,8 @@ export function DesignSystemView({
   }, [onClose]);
 
   return (
-    <MainPanelLayout backgroundColor="bg-background">
-      <div className="flex min-h-0 flex-1 overflow-hidden bg-background">
+    <MainPanelLayout backgroundColor="bg-canvas-base">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <aside className="flex w-56 flex-shrink-0 flex-col border-r border-border">
           <div className="flex items-center gap-2 px-3 pb-2 pt-4">
             {onClose ? (

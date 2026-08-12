@@ -45,7 +45,7 @@ function ExpandableCard({
       })}
       data-slot="expandable-card"
       className={cn(
-        "flex flex-col rounded-md bg-background p-3 text-foreground",
+        "flex flex-col rounded-md bg-muted p-3 text-foreground",
         interactive && "cursor-pointer",
         className,
       )}

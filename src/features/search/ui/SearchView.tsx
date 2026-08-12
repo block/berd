@@ -739,7 +739,7 @@ export function SearchView({
           >
             <div
               className={cn(
-                "sticky top-0 z-20 mb-2 flex h-8 min-w-0 max-w-full items-center bg-background after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-6 after:bg-gradient-to-b after:from-background after:to-transparent after:transition-opacity after:duration-150",
+                "sticky top-0 z-20 mb-2 flex h-8 min-w-0 max-w-full items-center bg-popover after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-6 after:bg-gradient-to-b after:from-popover after:to-transparent after:transition-opacity after:duration-150",
                 showDialogTopFade ? "after:opacity-100" : "after:opacity-0",
               )}
             >
@@ -788,7 +788,7 @@ export function SearchView({
           <div
             aria-hidden="true"
             className={cn(
-              "pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-background transition-opacity duration-150",
+              "pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-b from-transparent to-popover transition-opacity duration-150",
               showDialogBottomFade ? "opacity-100" : "opacity-0",
             )}
           />

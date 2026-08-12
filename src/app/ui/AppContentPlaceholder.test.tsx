@@ -28,4 +28,18 @@ describe("AppContentPlaceholder", () => {
       container.querySelector('[class*="border-border/60"]'),
     ).not.toBeInTheDocument();
   });
+
+  it("keeps the home placeholder on the canvas surface, not paper", () => {
+    // The home placeholder covers the content canvas while navigation
+    // settles; painting bg-background (the paper alias of card) would
+    // flash a raised-card rectangle over the darker canvas in dark mode.
+    const { container } = render(
+      <I18nProvider>
+        <AppContentPlaceholder location={{ view: "home" }} />
+      </I18nProvider>,
+    );
+
+    expect(container.querySelector(".bg-canvas-base")).toBeInTheDocument();
+    expect(container.querySelector('[class*="bg-background"]')).toBeNull();
+  });
 });

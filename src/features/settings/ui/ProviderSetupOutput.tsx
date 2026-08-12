@@ -51,7 +51,7 @@ export function ProviderSetupOutput({
   return (
     <div className="space-y-2">
       {deviceCode ? (
-        <div className="rounded-sm border border-border bg-background px-3 py-2 text-foreground">
+        <div className="rounded-sm border border-border bg-muted px-3 py-2 text-foreground">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs font-medium text-muted-foreground">

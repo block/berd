@@ -230,7 +230,7 @@ function HomePromptPlaceholder() {
 
 function HomeCanvasPlaceholder() {
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden bg-background">
+    <div className="relative min-h-0 flex-1 overflow-hidden bg-canvas-base">
       <Skeleton className="absolute left-[7%] top-[12%] h-44 w-72 rounded-md" />
       <Skeleton className="absolute left-[42%] top-[9%] h-32 w-60 rounded-md" />
       <Skeleton className="absolute right-[9%] top-[22%] hidden h-64 w-80 rounded-md lg:block" />

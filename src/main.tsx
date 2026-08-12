@@ -76,7 +76,7 @@ function decodeSessionKey(sessionKey: string): string {
 function renderBootError(message: string) {
   reactRoot.render(
     <React.StrictMode>
-      <div className="flex h-screen min-w-0 flex-col items-center justify-center gap-3 bg-background px-6 text-center text-foreground">
+      <div className="flex h-screen min-w-0 flex-col items-center justify-center gap-3 bg-canvas-base px-6 text-center text-foreground">
         <h1 className="font-medium text-lg">Session window failed to load</h1>
         <p className="max-w-md text-muted-foreground text-sm">{message}</p>
         <button

@@ -848,8 +848,8 @@ export const designSystemComponentManifest = [
     ],
     cva: [],
     tokenClasses: [
-      "bg-background",
       "bg-card",
+      "bg-muted",
       "border-border",
       "text-card-foreground",
       "text-foreground",
@@ -857,8 +857,8 @@ export const designSystemComponentManifest = [
     ],
     stateClasses: [],
     sourceTokenClasses: [
-      "bg-background",
       "bg-card",
+      "bg-muted",
       "border-border",
       "text-card-foreground",
       "text-foreground",
@@ -1358,7 +1358,7 @@ export const designSystemComponentManifest = [
       'className="focus-visible:ring-ring/50',
       "data-[state=open]:bg-muted",
       "data-[state=open]:text-muted-foreground",
-      "text-foreground",
+      "text-popover-foreground",
     ],
     stateClasses: [
       "data-[state=closed]:animate-out",
@@ -1386,7 +1386,7 @@ export const designSystemComponentManifest = [
       'className="focus-visible:ring-ring/50',
       "data-[state=open]:bg-muted",
       "data-[state=open]:text-muted-foreground",
-      "text-foreground",
+      "text-popover-foreground",
     ],
   },
   {
@@ -2247,7 +2247,7 @@ export const designSystemComponentManifest = [
     name: "Page Header Button",
     source: "src/shared/ui/page-header-button.tsx",
     description:
-      'Chrome button for view-header actions on the app canvas (the pills\nrendered into the top strip via setTopBarActions: "New agent",\n"Search chat", "Unpin chat", ...).\n\nComposes Button. Base semantic variant: `subtle`.\n\nExtra styling on top of subtle:\n- fill is `background` (white/black) instead of `accent` — the pill\n  self-defends over the tinted canvas chrome, where an accent fill\n  would look dirty\n- label rests at `muted-foreground` and raises to `foreground` on\n  hover/active/focus; the fill never changes (label-raise recipe,\n  like ghost flush but on a filled pill)\n- compact chrome geometry: 30px height, tighter gap/padding, and the\n  app chrome nav text scale instead of the xs button scale\n\nUse only for actions rendered into the app top strip / view headers.\nInside page content, use `Button variant="subtle"`.\n\nIntent: the recipe owns every interactive state so header chrome can\nnever drift when the base variant changes. The base `subtle` contributes\nrole, focus behavior, and icon sizing; the wrapper owns geometry (30px\nchrome height) and all colors. No flag props are used or accepted.',
+      'Chrome button for view-header actions on the app canvas (the pills\nrendered into the top strip via setTopBarActions: "New agent",\n"Search chat", "Unpin chat", ...).\n\nComposes Button. Base semantic variant: `subtle`.\n\nExtra styling on top of subtle:\n- fill is `background` (paper — the `card` alias) instead of `accent` — the pill\n  self-defends over the tinted canvas chrome, where an accent fill\n  would look dirty\n- label rests at `muted-foreground` and raises to `foreground` on\n  hover/active/focus; the fill never changes (label-raise recipe,\n  like ghost flush but on a filled pill)\n- compact chrome geometry: 30px height, tighter gap/padding, and the\n  app chrome nav text scale instead of the xs button scale\n\nUse only for actions rendered into the app top strip / view headers.\nInside page content, use `Button variant="subtle"`.\n\nIntent: the recipe owns every interactive state so header chrome can\nnever drift when the base variant changes. The base `subtle` contributes\nrole, focus behavior, and icon sizing; the wrapper owns geometry (30px\nchrome height) and all colors. No flag props are used or accepted.',
     exports: ["PageHeaderButton", "PageHeaderButtonProps"],
     slots: [],
     cva: [],
