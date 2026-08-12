@@ -72,21 +72,17 @@ What changed and why.
 </details>
 ```
 
-## Step 5: Resolve And Link Linear
+## Step 5: Resolve And Link A GitHub Issue
 
-Keep Linear tracking lightweight and automatic. Do this workflow outside the generated PR body. Complete the Linear decision before pushing or creating the PR; a user request to create a PR is not permission to skip Linear resolution.
+Keep issue tracking lightweight and automatic. Complete the issue decision before pushing or creating the PR; a user request to create a PR is not permission to skip issue resolution.
 
 Before creating the PR:
 
-1. Look for an explicit Linear key, such as `BOT-361`, in the current conversation, branch name, commit messages, PR title, or PR body.
-2. If no key is explicit, search active Goose Internal issues using the branch name, commit subjects, changed-file intent, and PR title. Prefer team `BOT`, project `Goose [Internal]`, and `backlog`, `unstarted`, or `started` issues.
-3. If one issue clearly matches the same user need or implementation intent, use it. If a few issues could match, pause and ask the user which one to attach.
+1. Look for an explicit GitHub issue reference in the current conversation, branch name, commit messages, PR title, or PR body.
+2. If no issue is explicit, search the repository's open GitHub issues using the branch name, commit subjects, changed-file intent, and PR title.
+3. If one issue clearly matches the same user need or implementation intent, use it. If a few issues could match, pause and ask the user which one to link. If none match, continue without creating an issue unless the user asks for one.
 
-After the GitHub PR exists:
-
-1. If an issue was resolved, attach the PR to it with `attachmentLinkGitHubPR` so Linear shows PR number and live status.
-2. Verify the issue attachment points at the new PR and has GitHub metadata.
-3. If Linear tooling is unavailable, do not block PR creation. Tell the user the PR was created but Linear linking was skipped.
+When an issue is resolved, include `Closes #<number>` in the PR body so GitHub links the work and closes the issue when the PR merges. Use `Refs #<number>` instead when the PR contributes to the issue without completing it. Verify the rendered PR shows the intended issue relationship.
 
 ## Step 6: Push and Create PR
 

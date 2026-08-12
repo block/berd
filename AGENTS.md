@@ -106,12 +106,6 @@ client-neutral wire surface, with JSON Schema per action) +
 whose `tree.rs` builds the clap tree at runtime (`validate.rs` gates
 consistency via the crate's tests). Never hand-edit the contract JSONs.
 
-## Linear
-
-For repo work, default Linear issues to project `Goose [Internal]`
-(`babe53a5-3fba-4ae3-97e5-3bc49f20ab51`) on team `BOT`.
-Write issue descriptions around the user need/story; avoid prescribing the implementation unless asked.
-
 ## Sidecar rule
 
 Release builds should use the Goose backend pinned in `goose-backend.lock.json`:
