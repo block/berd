@@ -54,6 +54,24 @@ try {
     $env:GOOSE_DEV_CARGO_TARGET_DIR = ""
     $env:GOOSE_DEV_STAMP_FILE = ""
 
+    Assert-Equal "temporary file helper uses the framework temp-file primitive" `
+        ((Get-Command New-BerdTemporaryFile -CommandType Function).Definition -match 'GetTempFileName') $true
+    Assert-Equal "checksum helper uses framework cryptography instead of PowerShell.Utility" `
+        (((Get-Command Get-FileSha256 -CommandType Function).Definition -match 'System.Security.Cryptography.SHA256') -and `
+         ((Get-Command Get-FileSha256 -CommandType Function).Definition -notmatch 'Get-FileHash')) $true
+    $checksumFixture = Join-Path $temp "sha256-fixture.txt"
+    [System.IO.File]::WriteAllText($checksumFixture, "abc", [System.Text.UTF8Encoding]::new($false))
+    Assert-Equal "checksum helper returns canonical lowercase SHA-256" `
+        (Get-FileSha256 -Path $checksumFixture) `
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    $temporaryFile = New-BerdTemporaryFile
+    try {
+        Assert-Equal "temporary file helper creates a filesystem file" `
+            (Test-Path -LiteralPath $temporaryFile.FullName -PathType Leaf) $true
+    } finally {
+        Remove-Item -LiteralPath $temporaryFile.FullName -Force -ErrorAction SilentlyContinue
+    }
+
     Assert-Equal "process args: plain arg unquoted" (Join-WindowsProcessArguments -Arguments @("--wait")) "--wait"
     Assert-Equal "process args: spaces quoted" (Join-WindowsProcessArguments -Arguments @("C:\Program Files\x")) '"C:\Program Files\x"'
     Assert-Equal "process args: trailing backslash doubled inside quotes" (Join-WindowsProcessArguments -Arguments @("C:\Program Files\")) '"C:\Program Files\\"'

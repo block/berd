@@ -865,9 +865,24 @@ describe("desktop release workflow platform gate", () => {
     );
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("actions/upload-artifact@");
-    expect(workflow).toContain("Import-Module");
-    expect(workflow).toContain("Get-TauriCargoTargetDir");
-    expect(workflow).toContain("Get-ChildItem -LiteralPath $nsisDir");
+    expect(workflow).toMatch(/env:\r?\n\s+JUST_UNSTABLE: ["']1["']/);
+    expect(workflow).toContain("node-version: 24.10.0");
+    expect(workflow).toContain("corepack prepare pnpm@10.33.0 --activate");
+    expect(workflow).toContain("just bundle-windows nsis");
+    expect(workflow).not.toContain("just setup-windows");
+    expect(workflow).toContain(
+      "scripts/windows/Test-UnsignedWindowsPackaging.ps1",
+    );
+    expect(workflow).toContain(
+      "scripts/windows/Collect-UnsignedWindowsInstaller.ps1",
+    );
+    const collector = await readFile(
+      join(repo, "scripts/windows/Collect-UnsignedWindowsInstaller.ps1"),
+      "utf8",
+    );
+    expect(collector).toContain("Import-Module");
+    expect(collector).toContain("Get-TauriCargoTargetDir");
+    expect(collector).toContain("Get-ChildItem -LiteralPath $nsisDir");
     expect(workflow).not.toContain(
       "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis",
     );

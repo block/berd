@@ -216,6 +216,13 @@ function Test-CodexRuntimePath {
     return $Path -match "\\\.cache\\codex-runtimes\\"
 }
 
+function New-BerdTemporaryFile {
+    # Avoid PowerShell module autoloading here. GitHub-hosted Windows runners can
+    # launch nested Windows PowerShell with Microsoft.PowerShell.Utility absent
+    # from PSModulePath, which makes the New-TemporaryFile cmdlet unavailable.
+    return Get-Item -LiteralPath ([System.IO.Path]::GetTempFileName())
+}
+
 function Invoke-CaptureCommand {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
@@ -223,8 +230,8 @@ function Invoke-CaptureCommand {
         [string]$WorkingDirectory = (Get-Location).Path
     )
 
-    $stdout = New-TemporaryFile
-    $stderr = New-TemporaryFile
+    $stdout = New-BerdTemporaryFile
+    $stderr = New-BerdTemporaryFile
     try {
         $arguments = Join-WindowsProcessArguments $ArgumentList
         $process = Start-Process -FilePath $FilePath -ArgumentList $arguments -WorkingDirectory $WorkingDirectory -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout.FullName -RedirectStandardError $stderr.FullName
@@ -1080,10 +1087,21 @@ function Assert-WindowsSidecarBinary {
     }
 }
 
-# Compute the SHA-256 of a file as a lowercase hex string.
+# Compute the SHA-256 of a file as a lowercase hex string without relying on
+# Microsoft.PowerShell.Utility. GitHub-hosted runners can launch nested shells
+# with that module absent from PSModulePath.
 function Get-FileSha256 {
     param([Parameter(Mandatory = $true)][string]$Path)
-    return (Get-FileHash -Path $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha256.ComputeHash($stream)
+        return ([System.BitConverter]::ToString($hash)).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $sha256.Dispose()
+        $stream.Dispose()
+    }
 }
 
 # Remove stale staged sidecars for a stem before writing the current one so a
@@ -1711,7 +1729,7 @@ function Initialize-MsvcEnvironment {
     }
 
     $arch = Get-MsvcArch
-    $environmentFile = New-TemporaryFile
+    $environmentFile = New-BerdTemporaryFile
     try {
         # Capturing `cmd.exe` output directly through Windows PowerShell can
         # return no pipeline records for batch files on some hosts. Have cmd
@@ -1961,7 +1979,7 @@ req.on("error", (error) => {
 req.end();
 '@
 
-    $scriptFile = New-TemporaryFile
+    $scriptFile = New-BerdTemporaryFile
     try {
         Set-Content -Path $scriptFile -Value $script -Encoding UTF8
         $result = Invoke-CaptureCommand -FilePath "node" -ArgumentList @($scriptFile.FullName, $script:BlockNpmRegistry)
@@ -2006,8 +2024,8 @@ function Initialize-FnmEnvironment {
         return $false
     }
 
-    $stdout = New-TemporaryFile
-    $stderr = New-TemporaryFile
+    $stdout = New-BerdTemporaryFile
+    $stderr = New-BerdTemporaryFile
     try {
         $process = Start-Process $fnm -ArgumentList "env --shell powershell" -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout.FullName -RedirectStandardError $stderr.FullName
         if ($process.ExitCode -ne 0) {
