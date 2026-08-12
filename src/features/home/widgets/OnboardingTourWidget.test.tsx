@@ -188,9 +188,13 @@ describe("OnboardingTourWidget", () => {
     await user.click(screen.getByRole("button", { name: "Take a tour" }));
 
     expect(onStartOnboardingTour).toHaveBeenCalledOnce();
-    expect(onUpdateState).toHaveBeenCalledWith({ welcomeDismissed: true });
+    expect(onUpdateState).not.toHaveBeenCalled();
     expect(onRemoveWidget).not.toHaveBeenCalled();
     expect(screen.getByText("Welcome!")).toBeInTheDocument();
+
+    const completeTour = onStartOnboardingTour.mock.calls[0]?.[0];
+    act(() => completeTour?.());
+    expect(onUpdateState).toHaveBeenCalledWith({ welcomeDismissed: true });
   });
 
   it("tags Berdy in the composer after the welcome callout", async () => {

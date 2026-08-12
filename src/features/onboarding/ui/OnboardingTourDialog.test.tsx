@@ -29,8 +29,15 @@ describe("OnboardingTourDialog", () => {
   it("advances through five steps and finishes", async () => {
     const user = userEvent.setup();
     const onOpenChange = vi.fn();
+    const onComplete = vi.fn();
 
-    render(<OnboardingTourDialog open={true} onOpenChange={onOpenChange} />);
+    render(
+      <OnboardingTourDialog
+        open={true}
+        onOpenChange={onOpenChange}
+        onComplete={onComplete}
+      />,
+    );
 
     expect(screen.getByRole("dialog")).toHaveClass("dark:bg-card");
     expect(document.querySelector("[data-onboarding-tour-copy]")).toHaveClass(
@@ -157,14 +164,22 @@ describe("OnboardingTourDialog", () => {
     const doneButton = screen.getByRole("button", { name: "Done" });
     expect(doneButton).toHaveClass("bg-accent", "rounded-[10px]", "text-sm");
     await user.click(doneButton);
+    expect(onComplete).toHaveBeenCalledOnce();
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("provides a close button", async () => {
+  it("does not complete the tour from its close button", async () => {
     const user = userEvent.setup();
     const onOpenChange = vi.fn();
+    const onComplete = vi.fn();
 
-    render(<OnboardingTourDialog open={true} onOpenChange={onOpenChange} />);
+    render(
+      <OnboardingTourDialog
+        open={true}
+        onOpenChange={onOpenChange}
+        onComplete={onComplete}
+      />,
+    );
 
     const closeButton = screen.getByRole("button", { name: "Close tour" });
     expect(closeButton).toHaveAttribute("data-slot", "dialog-close");
@@ -175,5 +190,6 @@ describe("OnboardingTourDialog", () => {
 
     await user.click(closeButton);
     expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onComplete).not.toHaveBeenCalled();
   });
 });

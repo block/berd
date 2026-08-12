@@ -35,11 +35,13 @@ const PROVIDER_EASE = [0.16, 1, 0.3, 1] as const;
 interface OnboardingTourDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onComplete?: () => void;
 }
 
 export function OnboardingTourDialog({
   open,
   onOpenChange,
+  onComplete,
 }: OnboardingTourDialogProps) {
   const { t } = useTranslation("home");
   const [step, setStep] = useState(0);
@@ -57,6 +59,7 @@ export function OnboardingTourDialog({
 
   const advance = () => {
     if (step === TOUR_STEP_COUNT - 1) {
+      onComplete?.();
       onOpenChange(false);
       return;
     }

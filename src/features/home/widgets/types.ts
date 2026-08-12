@@ -69,7 +69,7 @@ export interface WidgetRenderProps {
   onCreateProject?: () => void;
   onOpenSkills?: () => void;
   onOpenAutomations?: () => void;
-  onStartOnboardingTour?: () => void;
+  onStartOnboardingTour?: (onComplete?: () => void) => void;
   onResolveBerdyAgent?: () => Promise<string | null>;
   onRemoveWidget?: () => void;
   /** True while this widget is being dragged or resized on the home canvas. */
@@ -107,7 +107,7 @@ export interface WidgetCatalogEntry {
 }
 
 export interface WidgetNavigationHandlers {
-  onStartOnboardingTour?: () => void;
+  onStartOnboardingTour?: (onComplete?: () => void) => void;
   onResolveBerdyAgent?: () => Promise<string | null>;
   onOpenProject?: (projectId: string) => void;
   onOpenSkill?: (skill: SkillInfo) => void;

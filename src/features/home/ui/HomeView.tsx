@@ -110,6 +110,7 @@ export function HomeView({
   const starterLayoutArrangementAttemptedRef = useRef(false);
 
   const [tourOpen, setTourOpen] = useState(false);
+  const tourCompleteRef = useRef<(() => void) | null>(null);
   const berdyOnboardingExperiment = useExperiment(
     BERDY_ONBOARDING_EXPERIMENT_ID,
   );
@@ -563,12 +564,19 @@ export function HomeView({
     return () => window.removeEventListener("keydown", handleReloadOnboarding);
   }, [reloadOnboardingTourForDev]);
 
-  const handleStartTour = useCallback(() => {
+  const handleStartTour = useCallback((onComplete?: () => void) => {
+    tourCompleteRef.current = onComplete ?? null;
     setTourOpen(true);
   }, []);
 
   const handleTourOpenChange = useCallback((open: boolean) => {
     setTourOpen(open);
+    if (!open) tourCompleteRef.current = null;
+  }, []);
+
+  const handleTourComplete = useCallback(() => {
+    tourCompleteRef.current?.();
+    tourCompleteRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -692,6 +700,7 @@ export function HomeView({
       <OnboardingTourDialog
         open={berdyOnboardingEnabled && tourOpen}
         onOpenChange={handleTourOpenChange}
+        onComplete={handleTourComplete}
       />
       {loadStatus === "loading" ? (
         <div className="relative h-full w-full bg-dot-grid">

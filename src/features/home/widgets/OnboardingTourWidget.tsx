@@ -180,8 +180,9 @@ const BerdyContent = memo(function BerdyContent({
   });
   const gloopyMedia = useAvatarMedia("app-avatar:gloopies-14");
   const start = useWidgetActivationGuard(shouldIgnoreActivation, () => {
-    onUpdateState({ welcomeDismissed: true });
-    onStartOnboardingTour?.();
+    onStartOnboardingTour?.(() => {
+      onUpdateState({ welcomeDismissed: true });
+    });
   });
   const activateBerdy = useWidgetActivationGuard(shouldIgnoreActivation, () => {
     if (!welcomeDismissed || isResolvingBerdy) return;
