@@ -1,0 +1,97 @@
+{
+  "appName": "Berd",
+  "actions": {
+    "backToMainNavigation": "Atrás",
+    "back": "Atrás",
+    "collapse": "Contraer barra lateral",
+    "copyLink": "Copiar enlace del chat",
+    "copyLinkFailed": "No se pudo copiar el enlace local del chat.",
+    "expand": "Expandir barra lateral",
+    "forward": "Adelante",
+    "search": "Buscar",
+    "newChat": "Nuevo chat",
+    "newChatInProject": "Nuevo chat en el proyecto",
+    "pinProject": "Añadir a Inicio",
+    "unpinProject": "Desfijar proyecto",
+    "newProject": "Nuevo proyecto",
+    "projectDisplayOptions": "Opciones de visualización de proyectos",
+    "chatDisplayOptions": "Opciones de visualización de chats",
+    "viewSessionHistory": "Ver historial de sesiones",
+    "showChatIcons": "Mostrar iconos de chat",
+    "hideChatIcons": "Ocultar iconos de chat",
+    "showTimestamp": "Mostrar marca de tiempo",
+    "hideTimestamp": "Ocultar marca de tiempo",
+    "linkCopied": "Enlace local del chat copiado. Solo funciona en este dispositivo.",
+    "groupChats": "Agrupar chats por proyecto",
+    "markRead": "Marcar como leído",
+    "markUnread": "Marcar como no leído",
+    "openInNewWindow": "Abrir en ventana nueva",
+    "openInNewWindows": "Abrir en ventanas nuevas",
+    "openInWindow": "Abrir ventana",
+    "editProject": "Editar proyecto {{name}}",
+    "editProjectFallback": "Editar proyecto",
+    "openWindowFailed": "No se pudo abrir este chat en una ventana nueva.",
+    "focusWindowFailed": "No se pudo enfocar esta ventana de chat.",
+    "selectChat": "Seleccionar {{title}}",
+    "deselectChat": "Deseleccionar {{title}}",
+    "renameHint": "Haz doble clic para renombrar",
+    "pinnedDisplayOptions": "Opciones de visualización de elementos fijados"
+  },
+  "bulk": {
+    "selectedContext_one": "{{displayCount}} chat seleccionado",
+    "selectedContext_other": "{{displayCount}} chats seleccionados"
+  },
+  "menu": {
+    "optionsFor": "Opciones para {{label}}"
+  },
+  "empty": {
+    "chatsPinned": "Los chats están fijados",
+    "createProject": "Crear un proyecto",
+    "noChats": "No hay chats",
+    "startChat": "Iniciar un chat"
+  },
+  "flat": {
+    "noProject": "Sin proyecto"
+  },
+  "navigation": {
+    "agents": "Agentes",
+    "automations": "Automatizaciones",
+    "builderbot": "Builderbot",
+    "connections": "Conexiones",
+    "gooseHome": "Inicio de Berd",
+    "home": "Inicio",
+    "main": "Navegación principal",
+    "sessionList": "Proyectos y chats",
+    "sessionHistory": "Historial de sesiones",
+    "skills": "Habilidades"
+  },
+  "search": {
+    "error": "La búsqueda de mensajes falló. Mostrando solo coincidencias de metadatos. Inténtalo de nuevo.",
+    "loadingMore": "Buscando más chats...",
+    "placeholder": "Buscar chats...",
+    "searchMore": "Buscar más chats",
+    "searching": "Buscando chats...",
+    "closeJumpToChat": "Cerrar búsqueda de chats",
+    "jumpToChat": "Ir a un chat"
+  },
+  "sections": {
+    "projects": "Proyectos",
+    "recents": "Chats",
+    "pinned": "Fijados"
+  },
+  "status": {
+    "chatActive": "Chat activo",
+    "pinnedChat": "Chat fijado",
+    "unreadMessages": "Mensajes no leídos"
+  },
+  "showLess": "Mostrar menos",
+  "viewMoreChats": "Ver más",
+  "viewAllInHistory": "Ver todo",
+  "olderChatsInHistory": "Ver chats antiguos en Historial de sesiones",
+  "projectsInfo": {
+    "label": "Acerca de los proyectos",
+    "tooltip": "¿Qué son los proyectos?",
+    "title": "Proyectos",
+    "body": "Los proyectos agrupan chats relacionados y pueden compartir carpetas e instrucciones."
+  }
+}

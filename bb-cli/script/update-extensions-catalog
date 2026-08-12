@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+OUTPUT_PATH="${1:-$ROOT_DIR/extensions-new.yaml}"
+BACKUP_PATH="${OUTPUT_PATH}.bak"
+TEMP_OUTPUT="$(mktemp "${TMPDIR:-/tmp}/agent-tools-extensions.XXXXXX.yaml")"
+G2_DIR="${G2_DIR:-$HOME/Development/g2}"
+G2_CONFIG_PATH="${G2_CONFIG_PATH:-$G2_DIR/web/src/features/settings/utils/config.ts}"
+G2_OAUTH_DESCRIPTIONS_PATH="${G2_OAUTH_DESCRIPTIONS_PATH:-$G2_DIR/web/src/shared/constants/oauthDescriptions.ts}"
+
+cleanup() {
+  rm -f "$TEMP_OUTPUT"
+}
+trap cleanup EXIT
+
+cargo run -- --write-extensions "$TEMP_OUTPUT"
+
+if [[ -f "$OUTPUT_PATH" ]]; then
+  cp -f "$OUTPUT_PATH" "$BACKUP_PATH"
+fi
+
+if [[ ! -f "$G2_CONFIG_PATH" ]]; then
+  echo "WARNING: g2 repo not found at $G2_DIR" >&2
+  echo "Extensions catalog will be generated without g2 OAuth provider data." >&2
+  echo "" >&2
+  echo "To include g2 providers, clone the repo:" >&2
+  echo "  git clone https://github.com/squareup/g2 $G2_DIR" >&2
+  echo "  cd $G2_DIR && git checkout origin/main" >&2
+  echo "" >&2
+  echo "Or set G2_DIR to point to an existing clone." >&2
+  mv "$TEMP_OUTPUT" "$OUTPUT_PATH"
+  exit 0
+fi
+
+uv run "$ROOT_DIR/script/update_extensions_catalog.py" \
+  "$TEMP_OUTPUT" \
+  "$OUTPUT_PATH" \
+  "$G2_CONFIG_PATH" \
+  "$G2_OAUTH_DESCRIPTIONS_PATH"

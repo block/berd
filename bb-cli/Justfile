@@ -1,0 +1,123 @@
+BIN_NAME := "agent-tools"
+
+_help:
+  @just -l
+
+build:
+  cargo build --locked
+
+build-release:
+  cargo build --locked --release
+
+build-sq: build-release
+  mkdir -p sqbin
+  cp target/release/{{BIN_NAME}} sqbin/{{BIN_NAME}}.exoskeleton
+
+build-bb-release:
+  cargo build --locked --release --bin bb
+
+# Download protos from schema-registry and generate Rust code
+protos:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  echo "📥 Downloading proto files..."
+  rm -rf protos
+  mkdir -p protos
+
+  # Download all protos without transitive deps (-i) to avoid pulling in
+  # ~250 arcade/UI/franklin protos via client_renderable.proto
+  bin/schema-registry get --save-to=protos -i \
+    google/api/annotations.proto \
+    google/api/http.proto \
+    squareup/cash/kgoose/api/v3/tool_endpoint_service.proto \
+    squareup/cash/kgoose/api/v3/tool_endpoint_messages.proto \
+    squareup/cash/kgoose/api/v3/agent_config_messages.proto \
+    squareup/cash/kgoose/api/v3/extension_selection_config.proto \
+    squareup/cash/kgoose/api/v3/extension_messages.proto \
+    squareup/cash/kgoose/api/v3/chat_messages.proto \
+    squareup/cash/kgoose/api/v3/activity_messages.proto \
+    squareup/cash/kgoose/api/v3/profile_messages.proto \
+    squareup/cash/kgoose/api/v3/common_messages.proto \
+    squareup/cash/kgoosememorystore/api/v1beta1/memory.proto \
+    squareup/common/pii.proto \
+    squareup/common/governance/v0/semantic_types.proto \
+    squareup/common/governance/v0/common.proto \
+    squareup/common/governance/v0/consumer_personal_data.proto \
+    squareup/common/governance/v0/merchant_data.proto \
+    squareup/common/governance/v0/payment_card_data.proto \
+    squareup/common/governance/v0/employee_personal_data.proto
+
+  # Remove imports and messages we don't need to avoid lots of proto imports
+  echo "🔧 Cleaning up proto files..."
+
+  PROTO_FILES_TO_CLEAN=(
+    "protos/squareup/cash/kgoose/api/v3/chat_messages.proto"
+    "protos/squareup/cash/kgoose/api/v3/activity_messages.proto"
+  )
+
+  cleanup_proto_file() {
+    local proto_file="$1"
+
+    if [[ -f "$proto_file" ]]; then
+      echo "  🔧 Cleaning up $(basename "$proto_file")..."
+
+      # Remove specific imports
+      sed -i '' '/import "squareup\/cash\/kgoose\/api\/v3\/client_renderable.proto";/d' "$proto_file"
+      sed -i '' '/import "squareup\/cash\/kgoose\/api\/v3\/customer_context.proto";/d' "$proto_file"
+
+      # Comment out ClientRenderable lines (optional or required, any field number)
+      sed -i '' -E 's/^[[:space:]]*(optional )?(squareup\.cash\.kgoose\.api\.v3\.)?ClientRenderable.*=.*[0-9]*.*;/    \/\/ &/' "$proto_file"
+
+      # Comment out CustomerContext lines (optional or required, any field number)
+      sed -i '' -E 's/^[[:space:]]*(optional )?(squareup\.cash\.kgoose\.api\.v3\.)?CustomerContext.*=.*[0-9]*.*;/    \/\/ &/' "$proto_file"
+
+      echo "    ✅ Successfully cleaned up $(basename "$proto_file")"
+    else
+      echo "    ⚠️  $(basename "$proto_file") not found, skipping cleanup"
+    fi
+  }
+
+  for proto_file in "${PROTO_FILES_TO_CLEAN[@]}"; do
+    cleanup_proto_file "$proto_file"
+  done
+
+  echo "✅ Proto cleanup complete"
+  cargo build --locked
+
+run *args:
+  cargo run -- {{args}}
+
+describe-commands:
+  cargo run -- --describe-commands
+
+update-extensions-catalog: build-sq
+  bash script/update-extensions-catalog
+
+fmt:
+  cargo fmt --all
+
+fmt-check:
+  cargo fmt --all -- --check
+
+lint: fmt-check
+  cargo clippy --locked --all-targets --all-features -- -D warnings
+
+test:
+  cargo test --locked
+
+package-smoke: build-sq
+  ./sqbin/{{BIN_NAME}}.exoskeleton --version
+
+check: fmt-check lint test
+
+ci-lint: fmt-check lint
+
+ci-test: test package-smoke
+
+ci: ci-lint ci-test
+
+setup: install-hooks
+
+install-hooks:
+  lefthook install

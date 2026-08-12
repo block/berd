@@ -1,0 +1,147 @@
+[package]
+name = "Berd"
+version = "0.4.12"
+description = "Berd desktop app"
+authors = ["Block, Inc."]
+edition = "2021"
+default-run = "Berd"
+
+[lib]
+name = "berd_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# Explicit workspace so the berdctl plugin is a member: `cargo test -p
+# <plugin> --features ...` only works for workspace members. app-test-driver
+# stays excluded (a plain path dependency, as before this workspace existed).
+[workspace]
+members = ["crates/berdctl", "plugins/berdctl"]
+exclude = ["plugins/app-test-driver"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+builderbot-auth = { path = "../crates/builderbot-auth", features = ["blocking-client"] }
+bytes = "1"
+bzip2 = "0.6"
+buzz-voice = { git = "https://github.com/block/buzz", rev = "b1426cac2dcc24cfd1f62abe4652ff414c3dbf14", features = ["static"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "6.0.0"
+dunce = "1"
+doctor = { git = "https://github.com/block/builderbot", rev = "73ff9a0521dcc784c9514911a655187e5dd3b6ca" }
+etcetera = "0.11.0"
+flate2 = "1"
+hex = "0.4"
+ignore = "0.4.25"
+infer = "0.19.0"
+libc = "0.2"
+log = "0.4.29"
+mime_guess = "2"
+futures-util = "0.3"
+nucleo-matcher = "0.3"
+percent-encoding = "2"
+minisign-verify = "0.2.5"
+plist = "1"
+portable-pty = "0.9.0"
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "multipart", "rustls", "stream"] }
+rodio = { version = "0.22", default-features = false }
+audioadapter-buffers = "3.0"
+earshot = "1.0"
+rubato = "3.0"
+tar = "0.4"
+sherpa-onnx = "1.12"
+ssstretch = "0.1.0"
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+yaml_serde = "0.10.4"
+sha2 = "0.10"
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "migrate", "macros"] }
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-berdctl = { path = "plugins/berdctl" }
+tauri-plugin-app-test-driver = { path = "plugins/app-test-driver" }
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-window-state = "2"
+time = { version = "0.3", features = ["formatting"] }
+tokio = { version = "1.50.0", features = ["full"] }
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_System_Threading",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSImage", "NSMenu", "NSMenuItem", "NSAlert", "NSButton", "NSControl", "NSCell", "NSResponder", "NSView"] }
+objc2-foundation = { version = "0.3.2", features = ["NSDictionary", "NSError", "NSFileManager", "NSObject", "NSProcessInfo", "NSString", "NSURL"] }
+objc2-user-notifications = "0.3.2"
+rodio = { version = "0.22", default-features = false, features = ["playback"] }
+
+
+[features]
+default = []
+berdctl = ["tauri-plugin-berdctl/server"]
+app-test-driver = []
+devtools = ["tauri/devtools"]
+# Additive "disable" features. Cargo features are purely additive, so a
+# restricted build is expressed by ADDING these (never with
+# --no-default-features + re-listing everything you want to keep).
+#
+# no-voice-dictation: the realtime client secret is never requested
+# (`get_openai_realtime_status` reports `configured: false`).
+no-voice-dictation = []
+# no-bb-cli-install: the app never auto-installs or offers to symlink the
+# bundled berdctl into /usr/local/bin/bb. The bundled binary still ships for
+# direct `berdctl` use (gated separately by the `berdctl` protocol-server
+# feature); only the PATH install is suppressed.
+no-bb-cli-install = []
+# no-block-npm-registry: lets npm-backed doctor installs use the upstream npm
+# registry instead of Block's internal Artifactory proxy.
+no-block-npm-registry = []
+# no-block-doctor-checks: omits Block-only Square Agent Tools and internal
+# service access checks from the doctor report. Custom builds only.
+no-block-doctor-checks = []
+# no-managed-acp-tools: ships no Berd-managed ACP bridges. The startup
+# reconciler and the managed installer treat the managed set as empty, so
+# nothing installs at runtime and the related doctor checks stay silent — the
+# analogue of the old empty-`acp-tools.lock.json` restricted-build lever.
+no-managed-acp-tools = []
+# Positive product-family gates. Public builds enable none; a distribution
+# opts into each Block-service-backed family independently.
+block-agent-tools = []
+block-automations = []
+block-builderbot = []
+block-feedback = []
+block-managed-connections = []
+block-voice-dictation = []
+# Admin runtime-config endpoint fetch. Default-OFF: a normal build never
+# compiles the kgoose-backed fetch/cache path and instead loads the bundled
+# src-tauri/resources/runtime-config.json as the source of truth (falling back
+# to the compiled-in default_runtime_config() only when that file is missing or
+# invalid). Enable it (e.g. --features admin-runtime-config) once the endpoint
+# ships to fetch config live with no schema change.
+admin-runtime-config = []
+
+[dev-dependencies]
+tempfile = "3"
+# Mirrors goose's bare-name command resolver (crates/goose Cargo.toml): the
+# native Windows gate resolves the bridge launcher through the exact
+# `which_in_global` path goosed uses, so PATHEXT resolution is under test.
+which = { version = "8", default-features = false, features = ["real-sys"] }

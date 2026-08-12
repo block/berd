@@ -1,0 +1,261 @@
+syntax = "proto2";
+// package suffix v*beta* means these protos are not checked for backwards compatibility.
+// When the interface is ready to be consumed, rename the package to v1, and the backwards
+// compatibility checks will ensure there are no breaking changes.
+// For more information, see: https://github.com/squareup/cash-proto-tools#backwards-compatibility-check
+package squareup.cash.kgoosememorystore.api.v1beta1;
+
+option java_package = "com.squareup.protos.cash.kgoosememorystore.api.v1";
+
+// Import the standard timestamp definition
+import "google/protobuf/timestamp.proto";
+
+/** A memory item extracted from a conversation. */
+message Memory {
+  // Unique identifier for this memory
+  optional string id = 1;
+
+  // The creator (customer token) this memory belongs to
+  optional string creator = 2;
+
+  // The type of memory
+  optional MemoryType type = 3;
+
+  // Text content/description for freeform memories or nuance for structured facts
+  optional string content = 4;
+
+  // Confidence score from 0.0 to 1.0 indicating how explicit the information was
+  optional float confidence = 5;
+
+  // The session ID(s) where this memory was extracted from
+  repeated string source_session_ids = 6;
+
+  // Relevant tags/topics assigned to the memory
+  repeated MemoryTopicTag topic_tags = 9;
+
+  // The session ID(s) where memory extraction was triggered
+  repeated string memory_extraction_session_ids = 10;
+
+  // When this memory was created
+  optional google.protobuf.Timestamp created_at = 7;
+
+  // When this memory was updated
+  optional google.protobuf.Timestamp updated_at = 8;
+
+  // Lifecycle status of the memory
+  optional MemoryStatus status = 11;
+
+  // IDs of memories this memory replaces (if any)
+  repeated string replaces_ids = 12;
+
+  // ID of the memory that replaced this one (if applicable)
+  optional string replaced_by_id = 13;
+
+  // Origin of the memory's creation
+  optional MemoryOrigin origin = 14;
+
+  // Machine-readable identifier for core Financial Profile fields
+  optional FinancialKey financial_key = 15;
+
+  // Numeric value if available for financial profile fields
+  optional double amount = 16;
+
+  // Optional hard TTL for time-bound facts (e.g., "I'll be in NYC until March 15").
+  // Memory auto-transitions to EXPIRED after this date.
+  optional google.protobuf.Timestamp expires_at = 17;
+
+  // Resets when memory extraction detects a conversation that corroborates an existing memory,
+  // or when external data confirms the fact still holds. Distinct from updated_at which fires
+  // on any edit. Injected so the model can distinguish recently confirmed facts from stale ones.
+  optional google.protobuf.Timestamp last_reinforced_at = 18;
+
+  // Increments each time memory extraction detects corroboration (or external confirmation).
+  // A memory reinforced 12 times carries more weight than one reinforced once, even at the same
+  // last_reinforced_at.
+  optional uint32 reinforcement_count = 19;
+
+  // Distinguishes CURRENT vs PLANNED vs HISTORICAL vs RECURRING.
+  optional TemporalQualifier temporal_qualifier = 20;
+
+  // next tag: 21
+}
+
+/** The input parameters needed to create or update a Memory. */
+message InputMemory {
+  // Unique identifier for this memory
+  optional string id = 1;
+
+  // The creator (customer token) this memory belongs to
+  optional string creator = 2;
+
+  // The type of memory
+  optional MemoryType type = 3;
+
+  // Text content/description for freeform memories or nuance for structured facts
+  optional string content = 4;
+
+  // Confidence score from 0.0 to 1.0 indicating how explicit the information was
+  optional float confidence = 5;
+
+  // The session ID(s) where this memory was extracted from
+  repeated string source_session_ids = 6;
+
+  // Relevant tags/topics assigned to the memory
+  repeated MemoryTopicTag topic_tags = 7;
+
+  // The session ID(s) where memory extraction was triggered
+  repeated string memory_extraction_session_ids = 8;
+
+  // Lifecycle status of the memory
+  optional MemoryStatus status = 9;
+
+  // IDs of memories this input memory replaces
+  repeated string replaces_ids = 10;
+
+  // ID of the memory that replaced this one
+  optional string replaced_by_id = 11;
+
+  // Origin of the memory's creation
+  optional MemoryOrigin origin = 12;
+
+  // Machine-readable identifier for core Financial Profile fields
+  optional FinancialKey financial_key = 13;
+
+  // Numeric value if available for financial profile fields
+  optional double amount = 14;
+
+  // Optional hard TTL for time-bound facts.
+  optional google.protobuf.Timestamp expires_at = 15;
+
+  // See Memory.last_reinforced_at.
+  optional google.protobuf.Timestamp last_reinforced_at = 16;
+
+  // See Memory.reinforcement_count.
+  optional uint32 reinforcement_count = 17;
+
+  // See Memory.temporal_qualifier.
+  optional TemporalQualifier temporal_qualifier = 18;
+
+  // next tag: 19
+}
+
+enum MemoryType {
+  // Protobuf enums must start with a 0 value, usually reserved for 'unspecified'.
+  MEMORY_TYPE_UNSPECIFIED = 0;
+
+  // User likes/dislikes, communication style preferences
+  MEMORY_TYPE_USER_PREFERENCE = 1;
+
+  // Facts about the user (location, business details, etc.)
+  MEMORY_TYPE_FACTUAL_INFO = 2;
+
+  // High-level summary of conversation
+  MEMORY_TYPE_CONVERSATION_SUMMARY = 3;
+
+  // Repeated requests, common workflows
+  MEMORY_TYPE_BEHAVIORAL_PATTERN = 4;
+
+  // User intentions and future goals using Moneybot/Cash App
+  MEMORY_TYPE_OPEN_LOOP = 5;
+}
+
+/** Enum representing structured memory topics. */
+enum MemoryTopicTag {
+  MEMORY_TOPIC_TAG_UNSPECIFIED = 0;
+
+  // Living situation, family context, or personal background that affects decisions
+  MEMORY_TOPIC_TAG_HOUSEHOLD_AND_CONTEXT = 1;
+
+  // Stated objectives, milestones, or time-bound plans the user is working toward
+  MEMORY_TOPIC_TAG_GOALS_AND_TIMELINES = 2;
+
+  // Comfort level with uncertainty, tradeoffs, or potential downside
+  MEMORY_TOPIC_TAG_RISK_TOLERANCE = 3;
+
+  // Spending habits, budgeting behavior, or cashflow-related patterns
+  MEMORY_TOPIC_TAG_CASHFLOW_AND_SPENDING = 4;
+
+  // How the user prefers information to be communicated or delivered
+  MEMORY_TOPIC_TAG_COMMUNICATION_PREFERENCES = 5;
+
+  // Longer-term planning related to finances, savings, or financial strategy
+  MEMORY_TOPIC_TAG_FINANCIAL_PLANNING = 6;
+
+  // Relevant persistent information that does not clearly fit another topic
+  MEMORY_TOPIC_TAG_OTHER = 7;
+}
+
+enum MemoryStatus {
+  MEMORY_STATUS_UNSPECIFIED = 0;
+
+  MEMORY_STATUS_ACTIVE = 1;
+
+  MEMORY_STATUS_REPLACED = 2;
+
+  // Memory is no longer valid due to expires_at passing.
+  MEMORY_STATUS_EXPIRED = 3;
+}
+
+enum MemoryOrigin {
+  MEMORY_ORIGIN_UNSPECIFIED = 0;
+
+  // Extracted by kgoose from conversation via async memory extraction flow
+  MEMORY_ORIGIN_SESSION_EXTRACTION = 1;
+
+  // MCP upsert tool was called by LLM
+  MEMORY_ORIGIN_MCP = 2;
+
+  // Memory was manually added/edited by employee in toolbox
+  MEMORY_ORIGIN_TOOLBOX = 3;
+
+  // Memory was manually added by user in UI
+  MEMORY_ORIGIN_USER_EDIT = 4;
+}
+
+enum TemporalQualifier {
+  TEMPORAL_QUALIFIER_UNSPECIFIED = 0;
+  TEMPORAL_QUALIFIER_CURRENT = 1;
+  TEMPORAL_QUALIFIER_PLANNED = 2;
+  TEMPORAL_QUALIFIER_HISTORICAL = 3;
+  TEMPORAL_QUALIFIER_RECURRING = 4;
+}
+
+/** Financial Fields from
+* https://docs.google.com/document/d/1YstNHxM4ErKx_u0B1bczukp64HGNMA8UquObMtEO-DI/edit?tab=t.px3kai2le2bk#heading=h.sjkwvcd3rsyc
+**/
+enum FinancialKey {
+  FINANCIAL_KEY_UNSPECIFIED = 0;
+
+  // Identity Context
+  FINANCIAL_KEY_HOUSEHOLD_SIZE = 1;
+
+  // Income Reality
+  FINANCIAL_KEY_MONTHLY_INCOME = 2;
+  FINANCIAL_KEY_INCOME_STABILITY = 3; // High-level classification
+
+  // Spending Patterns
+  FINANCIAL_KEY_MONTHLY_EXPENSES = 4;
+  FINANCIAL_KEY_HOUSING_PAYMENT = 5; // Rent or Mortgage
+
+  // Liquidity Position
+  FINANCIAL_KEY_CHECKING_BALANCE = 6;
+  FINANCIAL_KEY_SAVINGS_BALANCE = 7;
+
+  // Long-Term Position
+  FINANCIAL_KEY_RETIREMENT_BALANCE = 8;
+  FINANCIAL_KEY_BROKERAGE_BALANCE = 9;
+
+  // Debt Reality
+  FINANCIAL_KEY_CREDIT_CARD_DEBT = 10;
+  FINANCIAL_KEY_STUDENT_LOAN_DEBT = 11;
+  FINANCIAL_KEY_AUTO_LOAN_DEBT = 12;
+  FINANCIAL_KEY_MORTGAGE_DEBT = 13;
+
+  // Intent
+  FINANCIAL_KEY_PRIMARY_GOAL = 14;
+
+  FINANCIAL_KEY_RISK_TOLERANCE = 15;
+  FINANCIAL_KEY_EMPLOYMENT_STATUS = 16;
+  FINANCIAL_KEY_NUMBER_DEPENDENTS = 17;
+  FINANCIAL_KEY_EMPLOYMENT_TYPE = 18;
+}

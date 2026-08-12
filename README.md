@@ -1,36 +1,83 @@
-# berd README
+# Berd
 
-Congrats, project leads! You got a new project to grow!
+Berd is an open-source desktop app for working with AI agents. It is built with
+Tauri 2 and React 19 and talks to the upstream Goose backend through the ACP
+WebSocket served by a `goose serve` sidecar.
 
-This stub is meant to help you form a strong community around your work. It's yours to adapt, and may 
-diverge from this initial structure. Just keep the files seeded in this repo, and the rest is yours to evolve! 
+The repository builds a general-purpose public distribution. Organizations can
+also create enterprise distributions by supplying managed provider settings,
+private resources, and release infrastructure through the repository's
+distribution seams without adding private material to the public source tree.
 
-## Introduction
+## Getting started
 
-Orient users to the project here. This is a good place to start with an assumption
-that the user knows very little - so start with the Big Picture and show how this
-project fits into it.
+```bash
+just setup
+just dev
+```
 
-Then maybe a dive into what this project does.
+`just setup` installs pnpm dependencies, builds the vendored `@aaif/goose-sdk`,
+and prepares the Goose backend pinned by `goose-backend.lock.json` in your
+platform cache directory. `just dev` reuses that stamped pinned binary and fails
+if the lockfile commit no longer matches the cached build.
 
-Diagrams and other visuals are helpful here. Perhaps code snippets showing usage.
+If you already have an upstream Goose binary you want to test, set
+`GOOSE_BIN=/path/to/goose` before running `just dev`; that is an explicit local
+override and bypasses the managed pinned checkout.
 
-Project leads should complete, alongside this `README`:
+To bump the default Goose backend, update the lockfile in a PR:
 
-* [CODEOWNERS](./CODEOWNERS) - set project lead(s)
-* [CONTRIBUTING.md](./CONTRIBUTING.md) - Fill out how to: install prereqs, build, test, run, access CI, chat, discuss, file issues
-* [Bug-report.md](.github/ISSUE_TEMPLATE/bug-report.md) - Fill out `Assignees` add codeowners @names
-* [config.yml](.github/ISSUE_TEMPLATE/config.yml) - remove "(/add your discord channel..)" and replace the url with your Discord channel if applicable
+```bash
+scripts/update-goose-backend-lock.sh main # or a tag/branch/sha
+just goose-sync                          # fetch/build the new pinned commit
+```
 
-The other files in this template repo may be used as-is:
+## Bundling and distributions
 
-* [GOVERNANCE.md](./GOVERNANCE.md)
-* [LICENSE](./LICENSE)
+Tauri bundles the Goose backend as an external sidecar. By default, `just bundle`
+stages the pinned managed Goose binary from `goose-backend.lock.json` and then
+runs `pnpm tauri build`:
 
-## Project Resources
+```bash
+just bundle
+```
 
-| Resource                                   | Description                                                                    |
-| ------------------------------------------ | ------------------------------------------------------------------------------ |
-| [CODEOWNERS](./CODEOWNERS)                 | Outlines the project lead(s)                                                   |
-| [GOVERNANCE.md](./GOVERNANCE.md)           | Project governance                                                             |
-| [LICENSE](./LICENSE)                       | Apache License, Version 2.0                                                    |
+You can stage an explicit local binary with
+`GOOSE_BIN=/path/to/goose just stage-sidecar`. Staging creates
+`src-tauri/binaries/goosed-<rust-host-triple>`, matching the
+`"externalBin": ["binaries/goosed"]` entry in `src-tauri/tauri.conf.json`.
+
+The public build is self-contained and does not require private package
+registries or enterprise credentials. Enterprise distributors may overlay
+private agents, runtime configuration, optional companion tools, update
+channels, and signing or publishing infrastructure in their own private build
+orchestration.
+
+## Optional companion CLI
+
+Berd includes a distribution seam for bundling an optional companion CLI as an
+app resource. The public app does not require a private CLI package; enterprise
+distributors can provide and package their own implementation while retaining
+the normal Berd build and validation flow.
+
+## Adding an experiment
+
+Experiments are user-local preferences for unstable UI or workflow behavior.
+Untouched experiments follow the global auto-enable setting, which defaults on
+in dev builds and off in production builds. Use
+`.agents/skills/experimental-features/SKILL.md` for the current workflow,
+registry contract, storage rules, Tauri guardrails, and test coverage.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution setup and expectations.
+Please also review the [Code of Conduct](CODE_OF_CONDUCT.md) and
+[Security Policy](SECURITY.md).
+
+## Useful commands
+
+- `just check` — Biome, design-system, i18n, contract, and type checks
+- `just test` — unit and component tests
+- `just tauri-check` — Rust type check with sidecars disabled
+- `just clippy` — Rust lint with warnings denied
+- `just bundle` — stage the pinned Goose backend and run `pnpm tauri build`

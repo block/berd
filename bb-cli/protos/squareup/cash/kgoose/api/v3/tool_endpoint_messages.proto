@@ -1,0 +1,121 @@
+syntax = "proto2";
+
+package squareup.cash.kgoose.api.v3;
+
+option java_package = "com.squareup.protos.cash.kgoose.api.v3";
+
+import "squareup/cash/kgoose/api/v3/common_messages.proto";
+import "squareup/cash/kgoose/api/v3/extension_messages.proto";
+import "squareup/cash/kgoose/api/v3/chat_messages.proto";
+
+// ── ListExtensions ──
+
+message ListExtensionsRequest {}
+
+message ExtensionInfo {
+  // Name identifier of the extension
+  optional string name = 1;
+  // Human-readable description of the extension
+  optional string description = 2;
+  // DEPRECATED: use auth_satisfied_for_caller instead.
+  // True if the caller currently lacks the credentials needed to invoke this extension.
+  // Despite the name, this also covers service-credential gating for service callers, not only OAuth.
+  // Reflects current caller auth state, not the extension's intrinsic requirements — once OAuth is
+  // connected, this flips to false.
+  optional bool requires_oauth = 3 [deprecated = true];
+  // DEPRECATED: use auth_satisfied_for_caller instead.
+  // The name is misleading — this is true for any
+  // extension the caller currently has access to, including extensions with a static_bearer_token,
+  // extensions that are not auth-gated at all, and service callers with a configured service credential.
+  // It is the exact inverse of requires_oauth.
+  optional bool oauth_connected = 4 [deprecated = true];
+  // Number of tools provided by this extension
+  optional int32 tool_count = 5;
+  // Whether any tool of this extension requires a real user identity (i.e. cannot be executed by a service principal
+  // without a permission lease). Mirrors the `com.squareup.kgoose/requires_user_auth` tool _meta flag.
+  optional bool any_tool_requires_user_auth = 6;
+
+  // True if the caller currently has the credentials needed to invoke this extension's tools — covering
+  // OAuth being connected, a configured service credential for service callers, a static_bearer_token,
+  // or no auth being required at all. Reflects current caller state, not an intrinsic property of the
+  // extension.
+  optional bool auth_satisfied_for_caller = 7;
+}
+
+message ListExtensionsResponse {
+  repeated ExtensionInfo extensions = 1;
+}
+
+// ── ListTools ──
+
+message ListToolsRequest {
+  // Name of the extension to list tools for
+  optional string extension_name = 1;
+}
+
+message ListToolsResponse {
+  // Name of the extension these tools belong to
+  optional string extension_name = 1;
+  // Description/instruction for the extension
+  optional string extension_description = 2;
+  // Tools available in this extension (reuses ToolConfig from extension_messages.proto)
+  repeated ToolConfig tools = 3;
+}
+
+// ── CallTool ──
+
+message CallToolRequest {
+  // Name of the extension containing the tool
+  optional string extension_name = 1;
+  // Name of the tool to call
+  optional string tool_name = 2;
+  // JSON-encoded arguments for the tool
+  optional string arguments_json = 3;
+  // Optional headers to forward to the extension
+  map<string, string> headers = 4;
+  // Optional chat source for metrics and extension client resolution. Defaults to SOURCE_BUILDERBOT.
+  optional Source source = 5;
+  // Optional tenancy for metrics. Defaults to TENANCY_DEFAULT.
+  optional Tenancy tenancy = 6;
+}
+
+message CallToolResponse {
+  // Content returned from the tool call (reuses UserContent from chat_messages.proto)
+  repeated UserContent content = 1;
+  // Whether the tool call resulted in an error
+  optional bool is_error = 2;
+  // JSON-encoded structured content from the tool
+  optional string structured_content_json = 3;
+}
+
+// ── ExecuteTool (Cash App client direct execution) ──
+
+message ExecuteToolRequest {
+  // Name of the extension containing the tool (e.g., "savings-piggybank")
+  optional string extension_name = 1;
+  // Name of the tool to execute (e.g., "transfer_to_savings")
+  optional string tool_name = 2;
+  // JSON-encoded arguments for the tool
+  optional string arguments_json = 3;
+  // Chat session ID to anchor activity/card updates to
+  optional string session_id = 4;
+  // Tool request ID from the preview card, used to update the correct card in chat
+  optional string tool_request_id = 5;
+}
+
+message ExecuteToolSuccess {
+  optional string client_route_url = 1;
+  // Content returned from the tool call (reuses UserContent from chat_messages.proto)
+  repeated UserContent content = 2;
+}
+
+message ExecuteToolError {
+  optional string message = 1;
+}
+
+message ExecuteToolResponse {
+  oneof result {
+    ExecuteToolSuccess success = 1;
+    ExecuteToolError error = 2;
+  }
+}

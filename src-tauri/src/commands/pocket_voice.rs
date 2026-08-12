@@ -1,0 +1,2399 @@
+//! Native voice installation, selection, and Pocket playback.
+
+use std::collections::VecDeque;
+use std::fs;
+use std::io::Read;
+#[cfg(target_os = "macos")]
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant, SystemTime};
+
+#[cfg(target_os = "macos")]
+use buzz_voice::SAMPLE_RATE;
+#[cfg(target_os = "macos")]
+use buzz_voice::{load_text_to_speech, load_voice_style, SynthesisOutcome};
+use futures_util::StreamExt;
+#[cfg(target_os = "macos")]
+use rodio::buffer::SamplesBuffer;
+#[cfg(target_os = "macos")]
+use rodio::{DeviceTrait, Player};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+#[cfg(target_os = "macos")]
+use super::pocket_playback_speed_dsp::StreamingSpeedProcessor;
+use super::{native_voice::NativeVoiceState, voice_capture::VoiceCaptureState};
+use tokio::io::AsyncWriteExt;
+
+const CACHE_VERSION: &str = "native-voice-v2";
+const VERIFIED_MARKER: &str = ".verified";
+const POCKET_EVENT: &str = "pocket-voice:event";
+const DEFAULT_VOICE: &str = "mary";
+const DOWNLOAD_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const DOWNLOAD_READ_TIMEOUT: Duration = Duration::from_secs(30);
+const DOWNLOAD_TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+#[cfg(target_os = "macos")]
+const SYNTH_STEPS: usize = 1;
+const PARAKEET_ARCHIVE: Artifact = Artifact {
+    filename: "parakeet.tar.bz2",
+    size: 104_337_827,
+    sha256: "17f945007b52ccd8b7200ffc7c5652e9e8e961dfdf479cefcabd06cf5703630b",
+    url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8.tar.bz2",
+};
+const PARAKEET_ARCHIVE_DIR: &str = "sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8";
+const PARAKEET_MODEL_SIZE: u64 = 131_652_171;
+const PARAKEET_MODEL_SHA256: &str =
+    "9177a9146cf32ee0cc8152276ef95116f312018d316be37ccf57f7efea81fc1a";
+const PARAKEET_TOKENS_SIZE: u64 = 9_953;
+const PARAKEET_TOKENS_SHA256: &str =
+    "450e56bd2f036fe5b6aa821865838cc5aa9d8b0106134ce9a9ba0664abe6cd10";
+const PARAKEET_LICENSE: &str = "\
+NVIDIA Parakeet TDT-CTC 110M (English)
+© NVIDIA Corporation.
+
+Licensed under the Creative Commons Attribution 4.0 International License:
+https://creativecommons.org/licenses/by/4.0/
+
+Original model: https://huggingface.co/nvidia/parakeet-tdt_ctc-110m
+ONNX conversion: https://github.com/k2-fsa/sherpa-onnx
+";
+
+#[derive(Clone, Copy)]
+struct Artifact {
+    filename: &'static str,
+    size: u64,
+    sha256: &'static str,
+    url: &'static str,
+}
+
+struct DownloadSpec<'a> {
+    url: &'a str,
+    destination: &'a Path,
+    expected_size: u64,
+    expected_sha256: &'a str,
+}
+
+const MODEL_ARTIFACTS: &[Artifact] = &[
+    Artifact { filename: "bundle.json", size: 24_381, sha256: "bab643150f437f37df080a710520ff39ed9ebd9a339f8ebdc739f7eddfc28b3f", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/bundle.json" },
+    Artifact { filename: "bos_before_voice.npy", size: 4_224, sha256: "f46edf4f7007b7ba4ea58831f49d003e59e167b4641c44bb3addfe9231a780b1", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/bos_before_voice.npy" },
+    Artifact { filename: "tokenizer.model", size: 59_339, sha256: "d461765ae179566678c93091c5fa6f2984c31bbe990bf1aa62d92c64d91bc3f6", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/tokenizer.model" },
+    Artifact { filename: "flow_lm_main_int8.onnx", size: 76_341_079, sha256: "f9bd8106b79a0192c1c43399ab938fb24900a95c1c599870d75a884e99000116", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/flow_lm_main_int8.onnx" },
+    Artifact { filename: "flow_lm_flow_int8.onnx", size: 9_962_530, sha256: "3dd781ee5abee9e195320bf0106bebd6372a852b3b36352524ee78b40554635d", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/flow_lm_flow_int8.onnx" },
+    Artifact { filename: "mimi_decoder_int8.onnx", size: 22_684_077, sha256: "3630450a3297a101792a6ac66619ebc70ab916b265e6220c2afaef8b1673f925", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/mimi_decoder_int8.onnx" },
+    Artifact { filename: "mimi_encoder.onnx", size: 39_768_446, sha256: "853e2ca623b8782d94c3745ec6133bfdff7ce33d9b11128bd29ea03f28d76e3d", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/mimi_encoder.onnx" },
+    Artifact { filename: "text_conditioner.onnx", size: 16_388_344, sha256: "4ecee995fb69f85c7a7493d11f7b5ee15d9950facc7ab3f5c9c49ef1e03847bb", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/english_2026-04/text_conditioner.onnx" },
+    Artifact { filename: "LICENSE", size: 18_655, sha256: "fe7b4ce83b8381cc5b216bbb4af73c570688d1b819c73bbaed8ca401f4677cd6", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/LICENSE" },
+];
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PocketVoice {
+    id: &'static str,
+    name: &'static str,
+    #[serde(skip_serializing)]
+    filename: &'static str,
+    #[serde(skip_serializing)]
+    size_bytes: u64,
+    #[serde(skip_serializing)]
+    sha256: &'static str,
+    #[serde(skip_serializing)]
+    url: &'static str,
+}
+
+const VOICES: &[PocketVoice] = &[
+    PocketVoice { id: "anna", name: "Anna", filename: "anna.wav", size_bytes: 804_630, sha256: "0a6de25cf12bf1540beb85979f306a92be81fecc051c547c5395e7e5237a3856", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p228_023_enhanced.wav" },
+    PocketVoice { id: "vera", name: "Vera", filename: "vera.wav", size_bytes: 691_416, sha256: "309cf91a895830f15842b398f69a4962cb1f7e0bfab10e25dd27838e826c204b", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p229_023_enhanced.wav" },
+    PocketVoice { id: "fantine", name: "Fantine", filename: "fantine.wav", size_bytes: 674_852, sha256: "5f07d4e2a3f20a15572aae885156b43ef3fc12ef3812996fd135680d9956448b", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p244_023_enhanced.wav" },
+    PocketVoice { id: "charles", name: "Charles", filename: "charles.wav", size_bytes: 639_272, sha256: "6b681a429198f16e378d53bccb08d06939da7b00144a7696111d4f8f76be7756", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p254_023_enhanced.wav" },
+    PocketVoice { id: "paul", name: "Paul", filename: "paul.wav", size_bytes: 717_182, sha256: "7aba504fe0b3b16478b69eb27ce6007e3cb42b0c1915b5f1c6a6024ae37d679b", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p259_023_enhanced.wav" },
+    PocketVoice { id: "eponine", name: "Eponine", filename: "eponine.wav", size_bytes: 716_330, sha256: "a13c27fb47627b05223691a0ef2974358a18c886e6c2f9d2762ff1d02c20926b", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p262_023_enhanced.wav" },
+    PocketVoice { id: "azelma", name: "Azelma", filename: "azelma.wav", size_bytes: 823_852, sha256: "60e3d26cdf2efdec5df712152c839928f4d5522821e6554ae11fd96c57ab1026", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p303_023_enhanced.wav" },
+    PocketVoice { id: "george", name: "George", filename: "george.wav", size_bytes: 642_692, sha256: "29a41f93bf5236e5b21501091d7774c255d5f3d4e62fa4f9fdf0a92a793c84ae", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p315_023_enhanced.wav" },
+    PocketVoice { id: "mary", name: "Mary", filename: "mary.wav", size_bytes: 639_084, sha256: "a35b0468382218e9f37a9a7494d1e4b74deaf18d7ced22265b4e325bb55c183f", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p333_023_enhanced.wav" },
+    PocketVoice { id: "jane", name: "Jane", filename: "jane.wav", size_bytes: 759_340, sha256: "2f12e7f155eb3118f55425394f1b049e5b1b67bdc9b3932c8ba4521420aeb84a", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p339_023_enhanced.wav" },
+    PocketVoice { id: "michael", name: "Michael", filename: "michael.wav", size_bytes: 751_140, sha256: "b6743e9195e5e3fd34fe9d1633ae93f7ffab787b249e45f6467d7d6f7a6ee6ad", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p360_023_enhanced.wav" },
+    PocketVoice { id: "eve", name: "Eve", filename: "eve.wav", size_bytes: 671_872, sha256: "396e7cbd066b0f3fb6d67fa26e7904076958239d736d4390f15b5fe88feb14cd", url: "https://huggingface.co/kyutai/tts-voices/resolve/323332d33f997de8394f24a193e1a76df720e01a/vctk/p361_023_enhanced.wav" },
+];
+
+#[derive(Clone, Debug, Default)]
+pub struct PocketVoiceState {
+    install: std::sync::Arc<std::sync::Mutex<InstallRuntime>>,
+    install_changed: std::sync::Arc<tokio::sync::Notify>,
+    playback: std::sync::Arc<std::sync::Mutex<PlaybackRuntime>>,
+}
+
+#[derive(Debug, Default)]
+struct PlaybackRuntime {
+    active: Option<Arc<AtomicBool>>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct InstallRuntime {
+    status_revision: u64,
+    next_attempt_id: u64,
+    worker_running: bool,
+    active_model: Option<VoiceModelKind>,
+    queued_models: VecDeque<VoiceModelKind>,
+    pocket_attempt_id: Option<u64>,
+    parakeet_attempt_id: Option<u64>,
+    pocket_progress: Option<VoiceModelDownloadProgress>,
+    parakeet_progress: Option<VoiceModelDownloadProgress>,
+    pocket_last_progress_emit: Option<Instant>,
+    parakeet_last_progress_emit: Option<Instant>,
+    pocket_error: Option<String>,
+    parakeet_error: Option<String>,
+    removing: Option<VoiceModelKind>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum VoiceModelDownloadPhase {
+    Queued,
+    Downloading,
+    Extracting,
+    Verifying,
+    Publishing,
+    Complete,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct VoiceModelDownloadProgress {
+    attempt_id: u64,
+    downloaded_bytes: u64,
+    total_bytes: u64,
+    phase: VoiceModelDownloadPhase,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VoiceModelKind {
+    Pocket,
+    Parakeet,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct PocketSettings {
+    selected_voice: String,
+    #[serde(default = "default_playback_speed")]
+    playback_speed: f32,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PocketVoiceStatus {
+    status_revision: u64,
+    installed: bool,
+    pocket_installed: bool,
+    parakeet_installed: bool,
+    pocket_size_bytes: Option<u64>,
+    parakeet_size_bytes: Option<u64>,
+    pocket_download_bytes: u64,
+    parakeet_download_bytes: u64,
+    downloading: bool,
+    active_model: Option<VoiceModelKind>,
+    pocket_attempt_id: Option<u64>,
+    parakeet_attempt_id: Option<u64>,
+    pocket_progress: Option<VoiceModelDownloadProgress>,
+    parakeet_progress: Option<VoiceModelDownloadProgress>,
+    pocket_error: Option<String>,
+    parakeet_error: Option<String>,
+    removing: Option<VoiceModelKind>,
+    removal_queued: bool,
+    downloaded_bytes: u64,
+    total_bytes: u64,
+    error: Option<String>,
+    selected_voice: String,
+    playback_speed: f32,
+    voices: &'static [PocketVoice],
+}
+
+fn default_playback_speed() -> f32 {
+    1.0
+}
+
+fn settings(base: &Path) -> PocketSettings {
+    fs::read(base.join("settings.json"))
+        .ok()
+        .and_then(|data| serde_json::from_slice::<PocketSettings>(&data).ok())
+        .unwrap_or_else(|| PocketSettings {
+            selected_voice: DEFAULT_VOICE.to_string(),
+            playback_speed: default_playback_speed(),
+        })
+}
+
+fn pocket_download_bytes() -> u64 {
+    MODEL_ARTIFACTS.iter().map(|item| item.size).sum::<u64>()
+        + VOICES.iter().map(|item| item.size_bytes).sum::<u64>()
+}
+
+fn parakeet_download_bytes() -> u64 {
+    PARAKEET_ARCHIVE.size
+}
+
+fn pocket_published_bytes() -> u64 {
+    pocket_download_bytes()
+}
+
+#[cfg(test)]
+fn parakeet_published_bytes() -> u64 {
+    PARAKEET_MODEL_SIZE + PARAKEET_TOKENS_SIZE + PARAKEET_LICENSE.len() as u64
+}
+
+fn pocket_disk_bytes(base: &Path) -> Option<u64> {
+    let version = base.join(CACHE_VERSION);
+    MODEL_ARTIFACTS
+        .iter()
+        .map(|item| version.join(item.filename))
+        .chain(
+            VOICES
+                .iter()
+                .map(|voice| version.join("voices").join(voice.filename)),
+        )
+        .try_fold(0_u64, |total, path| {
+            total.checked_add(fs::metadata(path).ok()?.len())
+        })
+}
+
+fn parakeet_disk_bytes(base: &Path) -> Option<u64> {
+    let stt = base.join(CACHE_VERSION).join("stt");
+    [
+        stt.join("model.int8.onnx"),
+        stt.join("tokens.txt"),
+        stt.join("MODEL_LICENSE.txt"),
+    ]
+    .into_iter()
+    .try_fold(0_u64, |total, path| {
+        total.checked_add(fs::metadata(path).ok()?.len())
+    })
+}
+
+#[cfg(test)]
+fn total_bytes() -> u64 {
+    pocket_download_bytes() + parakeet_download_bytes()
+}
+
+fn cache_base(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|path| path.join("pocket-tts"))
+        .map_err(|error| format!("resolve Pocket TTS data directory: {error}"))
+}
+
+fn selected_voice(base: &Path) -> String {
+    Some(settings(base).selected_voice)
+        .filter(|id| VOICES.iter().any(|voice| voice.id == id))
+        .unwrap_or_else(|| DEFAULT_VOICE.to_string())
+}
+
+fn playback_speed(base: &Path) -> f32 {
+    settings(base).playback_speed.clamp(0.75, 2.0)
+}
+
+fn selected_output_device() -> Option<String> {
+    std::env::var("VOICE_CONVERSATION_OUTPUT_DEVICE")
+        .ok()
+        .filter(|value| !value.is_empty())
+}
+
+#[cfg(target_os = "macos")]
+fn effective_output_device_name(configured: Option<&str>) -> Option<String> {
+    use rodio::cpal::traits::HostTrait;
+
+    if let Some(name) = configured {
+        return Some(name.to_string());
+    }
+    rodio::cpal::default_host()
+        .default_output_device()?
+        .description()
+        .ok()
+        .map(|description| description.name().to_string())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn effective_output_device_name(configured: Option<&str>) -> Option<String> {
+    configured.map(ToOwned::to_owned)
+}
+
+fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
+    output_device.is_some_and(|name| name.to_lowercase().contains("speaker"))
+}
+
+fn file_has_size(path: &Path, size: u64) -> bool {
+    fs::metadata(path).is_ok_and(|metadata| metadata.len() == size)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct InstallationFingerprint(Vec<(PathBuf, u64, SystemTime)>);
+
+type InstallationValidation = Option<(PathBuf, InstallationFingerprint, bool)>;
+
+static POCKET_INSTALLATION_VALIDATION: OnceLock<Mutex<InstallationValidation>> = OnceLock::new();
+static PARAKEET_INSTALLATION_VALIDATION: OnceLock<Mutex<InstallationValidation>> = OnceLock::new();
+
+#[cfg(test)]
+fn installation_valid(base: &Path) -> bool {
+    pocket_installation_valid(base) && parakeet_installation_valid(base)
+}
+
+fn cached_installation_valid(
+    base: &Path,
+    fingerprint: Option<InstallationFingerprint>,
+    validation: &'static OnceLock<Mutex<InstallationValidation>>,
+    validate: impl FnOnce() -> bool,
+) -> bool {
+    let Some(fingerprint) = fingerprint else {
+        return false;
+    };
+    let validation = validation.get_or_init(|| Mutex::new(None));
+    let Ok(mut cached) = validation.lock() else {
+        return false;
+    };
+    if let Some((cached_base, cached_fingerprint, valid)) = cached.as_ref() {
+        if cached_base == base && cached_fingerprint == &fingerprint {
+            return *valid;
+        }
+    }
+
+    let valid = validate();
+    *cached = Some((base.to_path_buf(), fingerprint, valid));
+    valid
+}
+
+fn pocket_installation_valid(base: &Path) -> bool {
+    cached_installation_valid(
+        base,
+        pocket_installation_fingerprint(base),
+        &POCKET_INSTALLATION_VALIDATION,
+        || {
+            MODEL_ARTIFACTS.iter().all(|item| {
+                verify_file(
+                    &base.join(CACHE_VERSION).join(item.filename),
+                    item.size,
+                    item.sha256,
+                )
+                .is_ok()
+            }) && VOICES.iter().all(|voice| {
+                verify_file(
+                    &base.join(CACHE_VERSION).join("voices").join(voice.filename),
+                    voice.size_bytes,
+                    voice.sha256,
+                )
+                .is_ok()
+            })
+        },
+    )
+}
+
+fn parakeet_installation_valid(base: &Path) -> bool {
+    cached_installation_valid(
+        base,
+        parakeet_installation_fingerprint(base),
+        &PARAKEET_INSTALLATION_VALIDATION,
+        || {
+            verify_file(
+                &base.join(CACHE_VERSION).join("stt").join("model.int8.onnx"),
+                PARAKEET_MODEL_SIZE,
+                PARAKEET_MODEL_SHA256,
+            )
+            .is_ok()
+                && verify_file(
+                    &base.join(CACHE_VERSION).join("stt").join("tokens.txt"),
+                    PARAKEET_TOKENS_SIZE,
+                    PARAKEET_TOKENS_SHA256,
+                )
+                .is_ok()
+        },
+    )
+}
+
+fn verified_version(base: &Path) -> Option<PathBuf> {
+    let version = base.join(CACHE_VERSION);
+    if !matches!(
+        fs::read_to_string(version.join(VERIFIED_MARKER)).as_deref(),
+        Ok(CACHE_VERSION)
+    ) {
+        return None;
+    }
+    Some(version)
+}
+
+fn pocket_installation_fingerprint(base: &Path) -> Option<InstallationFingerprint> {
+    let version = verified_version(base)?;
+    let mut files: Vec<(PathBuf, u64)> = MODEL_ARTIFACTS
+        .iter()
+        .map(|item| (version.join(item.filename), item.size))
+        .collect();
+    files.extend(VOICES.iter().map(|voice| {
+        (
+            version.join("voices").join(voice.filename),
+            voice.size_bytes,
+        )
+    }));
+    fingerprint_files(files)
+}
+
+fn parakeet_installation_fingerprint(base: &Path) -> Option<InstallationFingerprint> {
+    let version = verified_version(base)?;
+    let mut files = vec![
+        (
+            version.join("stt").join("model.int8.onnx"),
+            PARAKEET_MODEL_SIZE,
+        ),
+        (version.join("stt").join("tokens.txt"), PARAKEET_TOKENS_SIZE),
+    ];
+    let license = version.join("stt").join("MODEL_LICENSE.txt");
+    files.push((license.clone(), fs::metadata(&license).ok()?.len()));
+    fingerprint_files(files)
+}
+
+fn fingerprint_files(
+    files: impl IntoIterator<Item = (PathBuf, u64)>,
+) -> Option<InstallationFingerprint> {
+    let mut fingerprint = Vec::new();
+    for (path, expected_size) in files {
+        let metadata = fs::metadata(&path).ok()?;
+        if metadata.len() != expected_size {
+            return None;
+        }
+        fingerprint.push((path, metadata.len(), metadata.modified().ok()?));
+    }
+    Some(InstallationFingerprint(fingerprint))
+}
+
+#[tauri::command]
+pub fn get_pocket_voice_status(
+    app: AppHandle,
+    state: State<'_, PocketVoiceState>,
+) -> Result<PocketVoiceStatus, String> {
+    pocket_voice_status(&app, &state)
+}
+
+fn pocket_voice_status(
+    app: &AppHandle,
+    state: &PocketVoiceState,
+) -> Result<PocketVoiceStatus, String> {
+    let base = cache_base(app)?;
+    let runtime = state
+        .install
+        .lock()
+        .map_err(|_| "Pocket TTS install state lock was poisoned".to_string())?
+        .clone();
+    let pocket_size_bytes = pocket_installation_valid(&base)
+        .then(|| pocket_disk_bytes(&base))
+        .flatten();
+    let parakeet_size_bytes = parakeet_installation_valid(&base)
+        .then(|| parakeet_disk_bytes(&base))
+        .flatten();
+    let pocket_installed = pocket_size_bytes.is_some();
+    let parakeet_installed = parakeet_size_bytes.is_some();
+    let active_progress = runtime.active_model.and_then(|model| match model {
+        VoiceModelKind::Pocket => runtime.pocket_progress,
+        VoiceModelKind::Parakeet => runtime.parakeet_progress,
+    });
+    Ok(PocketVoiceStatus {
+        status_revision: runtime.status_revision,
+        installed: pocket_installed && parakeet_installed,
+        pocket_installed,
+        parakeet_installed,
+        pocket_size_bytes,
+        parakeet_size_bytes,
+        pocket_download_bytes: pocket_download_bytes(),
+        parakeet_download_bytes: parakeet_download_bytes(),
+        downloading: runtime.active_model.is_some() || !runtime.queued_models.is_empty(),
+        active_model: runtime.active_model,
+        pocket_attempt_id: runtime.pocket_attempt_id,
+        parakeet_attempt_id: runtime.parakeet_attempt_id,
+        pocket_progress: runtime.pocket_progress,
+        parakeet_progress: runtime.parakeet_progress,
+        pocket_error: runtime.pocket_error.clone(),
+        parakeet_error: runtime.parakeet_error.clone(),
+        removing: runtime.removing,
+        removal_queued: runtime.removing.is_some() && install_busy(&runtime),
+        downloaded_bytes: active_progress.map_or(0, |progress| progress.downloaded_bytes),
+        total_bytes: active_progress.map_or(0, |progress| progress.total_bytes),
+        error: runtime.active_model.and_then(|model| match model {
+            VoiceModelKind::Pocket => runtime.pocket_error.clone(),
+            VoiceModelKind::Parakeet => runtime.parakeet_error.clone(),
+        }),
+        selected_voice: selected_voice(&base),
+        playback_speed: playback_speed(&base),
+        voices: VOICES,
+    })
+}
+
+#[tauri::command]
+pub fn select_pocket_voice(app: AppHandle, voice_id: String) -> Result<(), String> {
+    if !VOICES.iter().any(|voice| voice.id == voice_id) {
+        return Err(format!("Unknown Pocket voice: {voice_id}"));
+    }
+    let base = cache_base(&app)?;
+    fs::create_dir_all(&base).map_err(|error| format!("create Pocket settings: {error}"))?;
+    let data = serde_json::to_vec_pretty(&PocketSettings {
+        selected_voice: voice_id,
+        playback_speed: playback_speed(&base),
+    })
+    .map_err(|error| format!("encode Pocket settings: {error}"))?;
+    let temporary = base.join("settings.json.tmp");
+    fs::write(&temporary, data).map_err(|error| format!("write Pocket settings: {error}"))?;
+    fs::rename(&temporary, base.join("settings.json"))
+        .map_err(|error| format!("publish Pocket settings: {error}"))
+}
+
+#[tauri::command]
+pub fn set_pocket_playback_speed(app: AppHandle, speed: f32) -> Result<(), String> {
+    if !speed.is_finite() || !(0.75..=2.0).contains(&speed) {
+        return Err("Pocket playback speed must be between 0.75 and 2.0".to_string());
+    }
+    let base = cache_base(&app)?;
+    fs::create_dir_all(&base).map_err(|error| format!("create Pocket settings: {error}"))?;
+    let data = serde_json::to_vec_pretty(&PocketSettings {
+        selected_voice: selected_voice(&base),
+        playback_speed: speed,
+    })
+    .map_err(|error| format!("encode Pocket settings: {error}"))?;
+    let temporary = base.join("settings.json.tmp");
+    fs::write(&temporary, data).map_err(|error| format!("write Pocket settings: {error}"))?;
+    fs::rename(&temporary, base.join("settings.json"))
+        .map_err(|error| format!("publish Pocket settings: {error}"))
+}
+
+#[tauri::command]
+pub async fn preview_pocket_voice(
+    app: AppHandle,
+    state: State<'_, PocketVoiceState>,
+    native_voice: State<'_, NativeVoiceState>,
+    voice_id: String,
+) -> Result<(), String> {
+    let base = cache_base(&app)?;
+    let voice = VOICES
+        .iter()
+        .find(|voice| voice.id == voice_id)
+        .copied()
+        .ok_or_else(|| format!("Unknown Pocket voice: {voice_id}"))?;
+    if !pocket_installation_valid(&base) {
+        return Err("Pocket TTS must be downloaded before previewing a voice".to_string());
+    }
+    let active = begin_playback(&state, "Another Pocket voice preview is already playing")?;
+    let speed = playback_speed(&base);
+    let output_device = selected_output_device();
+    let effective_output_device = effective_output_device_name(output_device.as_deref());
+    let capture_suppression =
+        output_device_uses_speakers(effective_output_device.as_deref()).then(|| {
+            log::info!("[voice-echo-guard] speaker output detected");
+            native_voice.suppress_capture()
+        });
+
+    let playback = state.playback.clone();
+    let playback_active = active.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _capture_suppression = capture_suppression;
+        let result = synthesize_and_stream(
+            &base,
+            voice,
+            "Hello. This is a preview of my voice.",
+            output_device.as_deref(),
+            active,
+            speed,
+        );
+        finish_playback(&playback, &playback_active);
+        result
+    })
+    .await
+    .map_err(|error| format!("Pocket preview task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn speak_pocket_voice(
+    app: AppHandle,
+    state: State<'_, PocketVoiceState>,
+    native_voice: State<'_, NativeVoiceState>,
+    text: String,
+) -> Result<(), String> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Ok(());
+    }
+    let base = cache_base(&app)?;
+    if !pocket_installation_valid(&base) {
+        return Err("Pocket TTS installation is incomplete or corrupt".to_string());
+    }
+    let voice_id = selected_voice(&base);
+    let voice = VOICES
+        .iter()
+        .find(|voice| voice.id == voice_id)
+        .copied()
+        .ok_or_else(|| format!("Unknown selected Pocket voice: {voice_id}"))?;
+    let active = begin_playback(&state, "Pocket voice playback is already active")?;
+    let speed = playback_speed(&base);
+    let output_device = selected_output_device();
+    let effective_output_device = effective_output_device_name(output_device.as_deref());
+    let capture_suppression =
+        output_device_uses_speakers(effective_output_device.as_deref()).then(|| {
+            log::info!("[voice-echo-guard] speaker output detected");
+            native_voice.suppress_capture()
+        });
+
+    let playback = state.playback.clone();
+    let playback_active = active.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _capture_suppression = capture_suppression;
+        let result =
+            synthesize_and_stream(&base, voice, &text, output_device.as_deref(), active, speed);
+        finish_playback(&playback, &playback_active);
+        result
+    })
+    .await
+    .map_err(|error| format!("Pocket playback task failed: {error}"))?
+}
+
+#[tauri::command]
+pub fn stop_pocket_voice(state: State<'_, PocketVoiceState>) -> Result<bool, String> {
+    stop_pocket_playback(&state)
+}
+
+fn stop_pocket_playback(state: &PocketVoiceState) -> Result<bool, String> {
+    let playback = state
+        .playback
+        .lock()
+        .map_err(|_| "Pocket TTS playback state lock was poisoned".to_string())?;
+    let Some(active) = playback.active.as_ref() else {
+        return Ok(false);
+    };
+    active.store(false, Ordering::SeqCst);
+    Ok(true)
+}
+
+impl PocketVoiceState {
+    pub(crate) fn stop_for_window_destroyed(&self) -> bool {
+        match stop_pocket_playback(self) {
+            Ok(stopped) => stopped,
+            Err(error) => {
+                log::warn!("Failed to stop Pocket playback for a destroyed window: {error}");
+                false
+            }
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn remove_voice_model(
+    app: AppHandle,
+    state: State<'_, PocketVoiceState>,
+    native_voice: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
+    model: VoiceModelKind,
+) -> Result<PocketVoiceStatus, String> {
+    let queued = {
+        let mut runtime = state
+            .install
+            .lock()
+            .map_err(|_| "Pocket TTS install state lock was poisoned".to_string())?;
+        let queued = begin_model_removal(&mut runtime, model)?;
+        match model {
+            VoiceModelKind::Pocket => runtime.pocket_error = None,
+            VoiceModelKind::Parakeet => runtime.parakeet_error = None,
+        }
+        queued
+    };
+    emit_pocket_status(&app, &state);
+    if queued {
+        wait_for_install_idle(&state).await?;
+        emit_pocket_status(&app, &state);
+    }
+
+    let stop_result = match model {
+        VoiceModelKind::Pocket => match stop_pocket_playback(&state) {
+            Ok(false) => Ok(()),
+            Ok(true) => {
+                let playback = state.playback.clone();
+                match tauri::async_runtime::spawn_blocking(move || {
+                    wait_for_pocket_playback_to_stop(&playback)
+                })
+                .await
+                {
+                    Ok(result) => result,
+                    Err(error) => Err(format!("Pocket TTS stop task failed: {error}")),
+                }
+            }
+            Err(error) => Err(error),
+        },
+        VoiceModelKind::Parakeet => native_voice.stop_for_model_removal(&app, &capture).await,
+    };
+    let removal_result = match (stop_result, cache_base(&app)) {
+        (Ok(()), Ok(base)) => {
+            match tauri::async_runtime::spawn_blocking(move || remove_cached_model(&base, model))
+                .await
+            {
+                Ok(result) => result,
+                Err(error) => Err(format!("Voice model removal task failed: {error}")),
+            }
+        }
+        (Err(error), _) | (_, Err(error)) => Err(error),
+    };
+
+    {
+        let mut runtime = state
+            .install
+            .lock()
+            .map_err(|_| "Pocket TTS install state lock was poisoned".to_string())?;
+        runtime.removing = None;
+        match model {
+            VoiceModelKind::Pocket => {
+                runtime.pocket_error = removal_result.as_ref().err().cloned();
+                if removal_result.is_ok() {
+                    runtime.pocket_progress = None;
+                }
+            }
+            VoiceModelKind::Parakeet => {
+                runtime.parakeet_error = removal_result.as_ref().err().cloned();
+                if removal_result.is_ok() {
+                    runtime.parakeet_progress = None;
+                }
+            }
+        }
+    }
+    emit_pocket_status(&app, &state);
+    let status = get_pocket_voice_status(app.clone(), state.clone())?;
+    removal_result?;
+    Ok(status)
+}
+
+fn install_busy(runtime: &InstallRuntime) -> bool {
+    runtime.active_model.is_some() || !runtime.queued_models.is_empty()
+}
+
+fn begin_model_removal(
+    runtime: &mut InstallRuntime,
+    model: VoiceModelKind,
+) -> Result<bool, String> {
+    if runtime.removing.is_some() {
+        return Err("A voice model removal is already in progress".to_string());
+    }
+    if runtime.active_model == Some(model) || runtime.queued_models.contains(&model) {
+        return Err("The model being downloaded cannot be removed".to_string());
+    }
+    runtime.removing = Some(model);
+    Ok(install_busy(runtime))
+}
+
+async fn wait_for_install_idle(state: &PocketVoiceState) -> Result<(), String> {
+    loop {
+        let changed = state.install_changed.notified();
+        let busy = state
+            .install
+            .lock()
+            .map_err(|_| "Pocket TTS install state lock was poisoned".to_string())
+            .map(|runtime| install_busy(&runtime))?;
+        if !busy {
+            return Ok(());
+        }
+        changed.await;
+    }
+}
+
+fn remove_cached_model(base: &Path, model: VoiceModelKind) -> Result<(), String> {
+    let final_dir = base.join(CACHE_VERSION);
+    if !final_dir.exists() {
+        return Ok(());
+    }
+
+    let operation_id = uuid::Uuid::new_v4();
+    let staging = base.join(format!("{CACHE_VERSION}.remove-{operation_id}"));
+    let previous = base.join(format!("{CACHE_VERSION}.removed-{operation_id}"));
+    fs::create_dir_all(&staging)
+        .map_err(|error| format!("stage retained voice model assets: {error}"))?;
+
+    let retained_paths: Vec<PathBuf> = match model {
+        VoiceModelKind::Pocket => vec![PathBuf::from("stt")],
+        VoiceModelKind::Parakeet => MODEL_ARTIFACTS
+            .iter()
+            .map(|artifact| PathBuf::from(artifact.filename))
+            .chain(std::iter::once(PathBuf::from("voices")))
+            .collect(),
+    };
+    let mut retained_any = false;
+    let stage_result = (|| {
+        for relative in retained_paths {
+            let source = final_dir.join(&relative);
+            if !source.exists() {
+                continue;
+            }
+            retained_any = true;
+            clone_cache_path(&source, &staging.join(relative))?;
+        }
+        if retained_any {
+            fs::write(staging.join(VERIFIED_MARKER), CACHE_VERSION)
+                .map_err(|error| format!("verify retained voice model cache: {error}"))?;
+        }
+        Ok::<(), String>(())
+    })();
+    if let Err(error) = stage_result {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+    if !retained_any {
+        fs::remove_dir_all(&staging)
+            .map_err(|error| format!("remove empty voice model staging cache: {error}"))?;
+    }
+
+    fs::rename(&final_dir, &previous)
+        .map_err(|error| format!("retire voice model cache atomically: {error}"))?;
+    if retained_any {
+        if let Err(error) = fs::rename(&staging, &final_dir) {
+            let _ = fs::rename(&previous, &final_dir);
+            let _ = fs::remove_dir_all(&staging);
+            return Err(format!(
+                "publish retained voice model cache atomically: {error}"
+            ));
+        }
+    }
+    fs::remove_dir_all(&previous)
+        .map_err(|error| format!("delete retired voice model cache: {error}"))?;
+    Ok(())
+}
+
+fn clone_cache_path(source: &Path, destination: &Path) -> Result<(), String> {
+    if source.is_dir() {
+        fs::create_dir_all(destination)
+            .map_err(|error| format!("create retained cache directory: {error}"))?;
+        for entry in fs::read_dir(source)
+            .map_err(|error| format!("read retained cache directory: {error}"))?
+        {
+            let entry = entry.map_err(|error| format!("read retained cache entry: {error}"))?;
+            clone_cache_path(&entry.path(), &destination.join(entry.file_name()))?;
+        }
+        return Ok(());
+    }
+    fs::hard_link(source, destination)
+        .or_else(|_| fs::copy(source, destination).map(|_| ()))
+        .map_err(|error| format!("retain voice model asset {}: {error}", source.display()))
+}
+
+fn begin_playback(
+    state: &State<'_, PocketVoiceState>,
+    already_active: &str,
+) -> Result<Arc<AtomicBool>, String> {
+    let install = state
+        .install
+        .lock()
+        .map_err(|_| "Pocket TTS install state lock was poisoned".to_string())?;
+    if install.removing.is_some() {
+        return Err("Pocket TTS is being removed".to_string());
+    }
+    let mut playback = state
+        .playback
+        .lock()
+        .map_err(|_| "Pocket TTS playback state lock was poisoned".to_string())?;
+    if playback.active.is_some() {
+        return Err(already_active.to_string());
+    }
+    let active = Arc::new(AtomicBool::new(true));
+    playback.active = Some(active.clone());
+    drop(install);
+    Ok(active)
+}
+
+fn wait_for_pocket_playback_to_stop(
+    playback: &std::sync::Mutex<PlaybackRuntime>,
+) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let stopped = playback
+            .lock()
+            .map_err(|_| "Pocket TTS playback state lock was poisoned".to_string())?
+            .active
+            .is_none();
+        if stopped {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err("Pocket TTS did not stop before model removal".to_string());
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn finish_playback(playback: &std::sync::Mutex<PlaybackRuntime>, completed: &Arc<AtomicBool>) {
+    if let Ok(mut playback) = playback.lock() {
+        if playback
+            .active
+            .as_ref()
+            .is_some_and(|active| Arc::ptr_eq(active, completed))
+        {
+            playback.active = None;
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn install_voice_model(
+    app: AppHandle,
+    state: State<'_, PocketVoiceState>,
+    model: VoiceModelKind,
+) -> Result<PocketVoiceStatus, String> {
+    let should_start_worker = queue_model_install(&app, &state, model)?;
+    emit_pocket_status(&app, &state);
+    if should_start_worker {
+        spawn_install_worker(app.clone(), state.inner().clone());
+    }
+    pocket_voice_status(&app, &state)
+}
+
+fn queue_model_install(
+    app: &AppHandle,
+    state: &PocketVoiceState,
+    model: VoiceModelKind,
+) -> Result<bool, String> {
+    let base = cache_base(app)?;
+    let already_installed = match model {
+        VoiceModelKind::Pocket => pocket_installation_valid(&base),
+        VoiceModelKind::Parakeet => parakeet_installation_valid(&base),
+    };
+    if already_installed {
+        return Ok(false);
+    }
+    let total = match model {
+        VoiceModelKind::Pocket => pocket_download_bytes(),
+        VoiceModelKind::Parakeet => parakeet_download_bytes(),
+    };
+    let mut runtime = state
+        .install
+        .lock()
+        .map_err(|_| "Pocket TTS install state lock was poisoned".to_string())?;
+    if runtime.removing.is_some() {
+        return Err("A voice model removal is already in progress".to_string());
+    }
+    if runtime.active_model == Some(model) || runtime.queued_models.contains(&model) {
+        return Ok(false);
+    }
+    let should_start_worker = !runtime.worker_running;
+    begin_model_attempt(&mut runtime, model, total, should_start_worker)?;
+    Ok(should_start_worker)
+}
+
+fn begin_model_attempt(
+    runtime: &mut InstallRuntime,
+    model: VoiceModelKind,
+    total_bytes: u64,
+    start_immediately: bool,
+) -> Result<u64, String> {
+    runtime.next_attempt_id = runtime
+        .next_attempt_id
+        .checked_add(1)
+        .ok_or_else(|| "Voice model attempt ID overflow".to_string())?;
+    let attempt_id = runtime.next_attempt_id;
+    let progress = VoiceModelDownloadProgress {
+        attempt_id,
+        downloaded_bytes: 0,
+        total_bytes,
+        phase: if start_immediately {
+            VoiceModelDownloadPhase::Downloading
+        } else {
+            VoiceModelDownloadPhase::Queued
+        },
+    };
+    match model {
+        VoiceModelKind::Pocket => {
+            runtime.pocket_attempt_id = Some(attempt_id);
+            runtime.pocket_progress = Some(progress);
+            runtime.pocket_last_progress_emit = None;
+            runtime.pocket_error = None;
+        }
+        VoiceModelKind::Parakeet => {
+            runtime.parakeet_attempt_id = Some(attempt_id);
+            runtime.parakeet_progress = Some(progress);
+            runtime.parakeet_last_progress_emit = None;
+            runtime.parakeet_error = None;
+        }
+    }
+    if start_immediately {
+        runtime.worker_running = true;
+        runtime.active_model = Some(model);
+    } else {
+        runtime.queued_models.push_back(model);
+    }
+    Ok(attempt_id)
+}
+
+fn spawn_install_worker(app: AppHandle, state: PocketVoiceState) {
+    tauri::async_runtime::spawn(async move {
+        drain_install_queue(&app, &state).await;
+    });
+}
+
+async fn drain_install_queue(app: &AppHandle, state: &PocketVoiceState) {
+    loop {
+        let current = state
+            .install
+            .lock()
+            .ok()
+            .and_then(|mut runtime| current_install_attempt(&mut runtime).ok().flatten());
+        let Some((model, attempt_id)) = current else {
+            return;
+        };
+        let result = install_one_model(app, state, model, attempt_id).await;
+        if let Ok(mut runtime) = state.install.lock() {
+            let _ = finish_model_attempt(&mut runtime, model, attempt_id, result.err());
+        }
+        state.install_changed.notify_waiters();
+        emit_pocket_status(app, state);
+    }
+}
+
+fn current_install_attempt(
+    runtime: &mut InstallRuntime,
+) -> Result<Option<(VoiceModelKind, u64)>, String> {
+    if runtime.active_model.is_none() {
+        let Some(next_model) = runtime.queued_models.pop_front() else {
+            runtime.worker_running = false;
+            return Ok(None);
+        };
+        let next_attempt_id = model_progress(runtime, next_model)
+            .map(|progress| progress.attempt_id)
+            .ok_or_else(|| "Queued voice model progress was not initialized".to_string())?;
+        runtime.active_model = Some(next_model);
+        advance_model_progress(
+            runtime,
+            next_model,
+            next_attempt_id,
+            VoiceModelDownloadPhase::Downloading,
+            Some(0),
+        )?;
+    }
+    let model = runtime
+        .active_model
+        .ok_or_else(|| "Voice model worker has no active model".to_string())?;
+    let attempt_id = model_progress(runtime, model)
+        .map(|progress| progress.attempt_id)
+        .ok_or_else(|| "Active voice model progress was not initialized".to_string())?;
+    Ok(Some((model, attempt_id)))
+}
+
+fn finish_model_attempt(
+    runtime: &mut InstallRuntime,
+    model: VoiceModelKind,
+    attempt_id: u64,
+    error: Option<String>,
+) -> Result<bool, String> {
+    if runtime.active_model != Some(model)
+        || model_progress(runtime, model).is_none_or(|progress| progress.attempt_id != attempt_id)
+    {
+        return Ok(false);
+    }
+    set_model_error(runtime, model, error);
+    runtime.active_model = None;
+    let Some(next_model) = runtime.queued_models.pop_front() else {
+        return Ok(false);
+    };
+    let next_attempt_id = model_progress(runtime, next_model)
+        .map(|progress| progress.attempt_id)
+        .ok_or_else(|| "Queued voice model progress was not initialized".to_string())?;
+    runtime.active_model = Some(next_model);
+    advance_model_progress(
+        runtime,
+        next_model,
+        next_attempt_id,
+        VoiceModelDownloadPhase::Downloading,
+        Some(0),
+    )?;
+    Ok(true)
+}
+
+fn model_progress(
+    runtime: &InstallRuntime,
+    model: VoiceModelKind,
+) -> Option<&VoiceModelDownloadProgress> {
+    match model {
+        VoiceModelKind::Pocket => runtime.pocket_progress.as_ref(),
+        VoiceModelKind::Parakeet => runtime.parakeet_progress.as_ref(),
+    }
+}
+
+fn model_progress_mut(
+    runtime: &mut InstallRuntime,
+    model: VoiceModelKind,
+) -> Option<&mut VoiceModelDownloadProgress> {
+    match model {
+        VoiceModelKind::Pocket => runtime.pocket_progress.as_mut(),
+        VoiceModelKind::Parakeet => runtime.parakeet_progress.as_mut(),
+    }
+}
+
+fn set_model_error(runtime: &mut InstallRuntime, model: VoiceModelKind, error: Option<String>) {
+    match model {
+        VoiceModelKind::Pocket => runtime.pocket_error = error,
+        VoiceModelKind::Parakeet => runtime.parakeet_error = error,
+    }
+}
+
+fn set_model_progress(
+    state: &PocketVoiceState,
+    model: VoiceModelKind,
+    attempt_id: u64,
+    phase: VoiceModelDownloadPhase,
+    downloaded_bytes: Option<u64>,
+) -> Result<(), String> {
+    let mut runtime = state
+        .install
+        .lock()
+        .map_err(|_| "Pocket TTS install state lock was poisoned".to_string())?;
+    advance_model_progress(&mut runtime, model, attempt_id, phase, downloaded_bytes)?;
+    Ok(())
+}
+
+fn phase_rank(phase: VoiceModelDownloadPhase) -> u8 {
+    match phase {
+        VoiceModelDownloadPhase::Queued => 0,
+        VoiceModelDownloadPhase::Downloading => 1,
+        VoiceModelDownloadPhase::Extracting => 2,
+        VoiceModelDownloadPhase::Verifying => 3,
+        VoiceModelDownloadPhase::Publishing => 4,
+        VoiceModelDownloadPhase::Complete => 5,
+    }
+}
+
+fn advance_model_progress(
+    runtime: &mut InstallRuntime,
+    model: VoiceModelKind,
+    attempt_id: u64,
+    phase: VoiceModelDownloadPhase,
+    downloaded_bytes: Option<u64>,
+) -> Result<bool, String> {
+    let Some(progress) = model_progress_mut(runtime, model) else {
+        return Err("Voice model progress was not initialized".to_string());
+    };
+    if progress.attempt_id != attempt_id {
+        return Ok(false);
+    }
+    if phase_rank(phase) < phase_rank(progress.phase) {
+        return Err("Voice model progress phase moved backwards".to_string());
+    }
+    let next_downloaded = downloaded_bytes
+        .map(|bytes| progress.downloaded_bytes.max(bytes))
+        .unwrap_or(progress.downloaded_bytes);
+    if next_downloaded > progress.total_bytes {
+        return Err(format!(
+            "Voice model progress exceeded its attempt total: {next_downloaded} > {}",
+            progress.total_bytes
+        ));
+    }
+    if phase == VoiceModelDownloadPhase::Complete && next_downloaded != progress.total_bytes {
+        return Err("Voice model completed before reaching its verified total".to_string());
+    }
+    progress.downloaded_bytes = next_downloaded;
+    progress.phase = phase;
+    Ok(true)
+}
+
+fn increment_model_progress(
+    runtime: &mut InstallRuntime,
+    model: VoiceModelKind,
+    attempt_id: u64,
+    increment: u64,
+) -> Result<bool, String> {
+    let Some(progress) = model_progress(runtime, model) else {
+        return Err("Voice model progress was not initialized".to_string());
+    };
+    if progress.attempt_id != attempt_id {
+        return Ok(false);
+    }
+    let next_downloaded = progress
+        .downloaded_bytes
+        .checked_add(increment)
+        .ok_or_else(|| "Voice model progress overflow".to_string())?;
+    advance_model_progress(
+        runtime,
+        model,
+        attempt_id,
+        progress.phase,
+        Some(next_downloaded),
+    )
+}
+
+fn should_emit_download_progress_at(
+    runtime: &mut InstallRuntime,
+    model: VoiceModelKind,
+    attempt_id: u64,
+    now: Instant,
+) -> bool {
+    if model_progress(runtime, model).is_none_or(|progress| {
+        progress.attempt_id != attempt_id || progress.phase != VoiceModelDownloadPhase::Downloading
+    }) {
+        return false;
+    }
+    let last_emit = match model {
+        VoiceModelKind::Pocket => &mut runtime.pocket_last_progress_emit,
+        VoiceModelKind::Parakeet => &mut runtime.parakeet_last_progress_emit,
+    };
+    if last_emit.is_some_and(|last| now.duration_since(last) < DOWNLOAD_PROGRESS_EMIT_INTERVAL) {
+        return false;
+    }
+    *last_emit = Some(now);
+    true
+}
+
+fn emit_pocket_status(app: &AppHandle, state: &PocketVoiceState) {
+    if let Ok(mut runtime) = state.install.lock() {
+        runtime.status_revision = runtime.status_revision.saturating_add(1);
+    }
+    if let Ok(status) = pocket_voice_status(app, state) {
+        log::info!(
+            "[voice-model-progress] emit revision={} active={:?} removing={:?} removal_queued={} pocket={:?} parakeet={:?}",
+            status.status_revision,
+            status.active_model,
+            status.removing,
+            status.removal_queued,
+            status.pocket_progress,
+            status.parakeet_progress,
+        );
+        let _ = app.emit(POCKET_EVENT, status);
+    }
+}
+
+async fn install_one_model(
+    app: &AppHandle,
+    state: &PocketVoiceState,
+    model: VoiceModelKind,
+    attempt_id: u64,
+) -> Result<(), String> {
+    let base = cache_base(app)?;
+    fs::create_dir_all(&base).map_err(|error| format!("create Pocket cache: {error}"))?;
+    let staging = base.join(format!("{CACHE_VERSION}.partial-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&staging)
+        .map_err(|error| format!("create voice model staging directory: {error}"))?;
+    let current = base.join(CACHE_VERSION);
+    if current.exists() {
+        for entry in fs::read_dir(&current)
+            .map_err(|error| format!("read current voice model cache: {error}"))?
+        {
+            let entry = entry.map_err(|error| format!("read voice model cache entry: {error}"))?;
+            if entry.file_name() == VERIFIED_MARKER {
+                continue;
+            }
+            clone_cache_path(&entry.path(), &staging.join(entry.file_name()))?;
+        }
+    }
+    match model {
+        VoiceModelKind::Pocket => {
+            for artifact in MODEL_ARTIFACTS {
+                let _ = fs::remove_file(staging.join(artifact.filename));
+            }
+            let _ = fs::remove_dir_all(staging.join("voices"));
+        }
+        VoiceModelKind::Parakeet => {
+            let _ = fs::remove_dir_all(staging.join("stt"));
+        }
+    }
+    let client = voice_download_client(
+        DOWNLOAD_CONNECT_TIMEOUT,
+        DOWNLOAD_READ_TIMEOUT,
+        DOWNLOAD_TOTAL_TIMEOUT,
+    )?;
+    let install_result = async {
+        match model {
+            VoiceModelKind::Parakeet => {
+                let archive = staging.join(PARAKEET_ARCHIVE.filename);
+                download_artifact(
+                    app,
+                    state,
+                    model,
+                    attempt_id,
+                    &client,
+                    DownloadSpec {
+                        url: PARAKEET_ARCHIVE.url,
+                        destination: &archive,
+                        expected_size: PARAKEET_ARCHIVE.size,
+                        expected_sha256: PARAKEET_ARCHIVE.sha256,
+                    },
+                )
+                .await?;
+                set_model_progress(
+                    state,
+                    model,
+                    attempt_id,
+                    VoiceModelDownloadPhase::Extracting,
+                    Some(PARAKEET_ARCHIVE.size),
+                )?;
+                emit_pocket_status(app, state);
+                extract_parakeet(&archive, &staging).await?;
+                tokio::fs::remove_file(&archive)
+                    .await
+                    .map_err(|error| format!("remove Parakeet archive: {error}"))?;
+                set_model_progress(
+                    state,
+                    model,
+                    attempt_id,
+                    VoiceModelDownloadPhase::Verifying,
+                    Some(parakeet_download_bytes()),
+                )?;
+                emit_pocket_status(app, state);
+            }
+            VoiceModelKind::Pocket => {
+                tokio::fs::create_dir_all(staging.join("voices"))
+                    .await
+                    .map_err(|error| format!("create Pocket staging directory: {error}"))?;
+                for item in MODEL_ARTIFACTS {
+                    download_artifact(
+                        app,
+                        state,
+                        model,
+                        attempt_id,
+                        &client,
+                        DownloadSpec {
+                            url: item.url,
+                            destination: &staging.join(item.filename),
+                            expected_size: item.size,
+                            expected_sha256: item.sha256,
+                        },
+                    )
+                    .await?;
+                }
+                for voice in VOICES {
+                    download_artifact(
+                        app,
+                        state,
+                        model,
+                        attempt_id,
+                        &client,
+                        DownloadSpec {
+                            url: voice.url,
+                            destination: &staging.join("voices").join(voice.filename),
+                            expected_size: voice.size_bytes,
+                            expected_sha256: voice.sha256,
+                        },
+                    )
+                    .await?;
+                }
+                set_model_progress(
+                    state,
+                    model,
+                    attempt_id,
+                    VoiceModelDownloadPhase::Verifying,
+                    Some(pocket_published_bytes()),
+                )?;
+                emit_pocket_status(app, state);
+            }
+        }
+        tokio::fs::write(staging.join(VERIFIED_MARKER), CACHE_VERSION)
+            .await
+            .map_err(|error| format!("mark verified voice model installation: {error}"))?;
+        set_model_progress(
+            state,
+            model,
+            attempt_id,
+            VoiceModelDownloadPhase::Publishing,
+            None,
+        )?;
+        emit_pocket_status(app, state);
+        publish_staging(&base, &staging)?;
+        let published = match model {
+            VoiceModelKind::Pocket => pocket_installation_valid(&base),
+            VoiceModelKind::Parakeet => parakeet_installation_valid(&base),
+        };
+        if !published {
+            return Err("Published voice model failed pinned-file verification".to_string());
+        }
+        set_model_progress(
+            state,
+            model,
+            attempt_id,
+            VoiceModelDownloadPhase::Complete,
+            Some(match model {
+                VoiceModelKind::Pocket => pocket_download_bytes(),
+                VoiceModelKind::Parakeet => parakeet_download_bytes(),
+            }),
+        )?;
+        emit_pocket_status(app, state);
+        Ok::<(), String>(())
+    }
+    .await;
+    if let Err(error) = install_result {
+        let _ = tokio::fs::remove_dir_all(&staging).await;
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn voice_download_client(
+    connect_timeout: Duration,
+    read_timeout: Duration,
+    total_timeout: Duration,
+) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(connect_timeout)
+        .read_timeout(read_timeout)
+        .timeout(total_timeout)
+        .build()
+        .map_err(|error| format!("create Pocket download client: {error}"))
+}
+
+async fn extract_parakeet(archive: &Path, staging: &Path) -> Result<(), String> {
+    let archive = archive.to_path_buf();
+    let staging = staging.to_path_buf();
+    tauri::async_runtime::spawn_blocking(move || {
+        let extraction = staging.join("parakeet-extract");
+        fs::create_dir_all(&extraction)
+            .map_err(|error| format!("create Parakeet extraction directory: {error}"))?;
+        let compressed =
+            fs::File::open(&archive).map_err(|error| format!("open Parakeet archive: {error}"))?;
+        let decoder = bzip2::read::BzDecoder::new(compressed);
+        let mut archive = tar::Archive::new(decoder);
+        archive
+            .unpack(&extraction)
+            .map_err(|error| format!("extract Parakeet archive: {error}"))?;
+        let source = extraction.join(PARAKEET_ARCHIVE_DIR);
+        verify_file(
+            &source.join("model.int8.onnx"),
+            PARAKEET_MODEL_SIZE,
+            PARAKEET_MODEL_SHA256,
+        )?;
+        verify_file(
+            &source.join("tokens.txt"),
+            PARAKEET_TOKENS_SIZE,
+            PARAKEET_TOKENS_SHA256,
+        )?;
+        let destination = staging.join("stt");
+        fs::create_dir_all(&destination)
+            .map_err(|error| format!("create Parakeet staging directory: {error}"))?;
+        fs::rename(
+            source.join("model.int8.onnx"),
+            destination.join("model.int8.onnx"),
+        )
+        .map_err(|error| format!("stage Parakeet model: {error}"))?;
+        fs::rename(source.join("tokens.txt"), destination.join("tokens.txt"))
+            .map_err(|error| format!("stage Parakeet tokens: {error}"))?;
+        fs::write(destination.join("MODEL_LICENSE.txt"), PARAKEET_LICENSE)
+            .map_err(|error| format!("write Parakeet attribution: {error}"))?;
+        fs::remove_dir_all(&extraction)
+            .map_err(|error| format!("remove Parakeet extraction directory: {error}"))
+    })
+    .await
+    .map_err(|error| format!("Parakeet extraction task failed: {error}"))?
+}
+
+fn verify_file(path: &Path, expected_size: u64, expected_sha256: &str) -> Result<(), String> {
+    if !file_has_size(path, expected_size) {
+        return Err(format!("Voice asset size mismatch for {}", path.display()));
+    }
+    let mut file =
+        fs::File::open(path).map_err(|error| format!("open {}: {error}", path.display()))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|error| format!("read {}: {error}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let actual = format!("{:x}", hasher.finalize());
+    if actual != expected_sha256 {
+        return Err(format!(
+            "Voice asset checksum mismatch for {}: expected {expected_sha256}, got {actual}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+pub fn parakeet_model_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let base = cache_base(app)?;
+    if !parakeet_installation_valid(&base) {
+        return Err("Native voice installation is incomplete or corrupt".to_string());
+    }
+    Ok(base.join(CACHE_VERSION).join("stt"))
+}
+
+fn publish_staging(base: &Path, staging: &Path) -> Result<(), String> {
+    let final_dir = base.join(CACHE_VERSION);
+    let previous = base.join(format!("{CACHE_VERSION}.previous"));
+    let _ = fs::remove_dir_all(&previous);
+    if final_dir.exists() {
+        fs::rename(&final_dir, &previous)
+            .map_err(|error| format!("retire incomplete Pocket cache: {error}"))?;
+    }
+    if let Err(error) = fs::rename(staging, &final_dir) {
+        if previous.exists() {
+            let _ = fs::rename(&previous, &final_dir);
+        }
+        return Err(format!("publish Pocket cache atomically: {error}"));
+    }
+    let _ = fs::remove_dir_all(previous);
+    Ok(())
+}
+
+async fn download_artifact(
+    app: &AppHandle,
+    state: &PocketVoiceState,
+    model: VoiceModelKind,
+    attempt_id: u64,
+    client: &reqwest::Client,
+    spec: DownloadSpec<'_>,
+) -> Result<(), String> {
+    let DownloadSpec {
+        url,
+        destination,
+        expected_size,
+        expected_sha256,
+    } = spec;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|error| format!("download {url}: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("download {url}: {error}"))?;
+    let mut file = tokio::fs::File::create(destination)
+        .await
+        .map_err(|error| format!("create {}: {error}", destination.display()))?;
+    let mut stream = response.bytes_stream();
+    let mut size = 0_u64;
+    let mut hasher = Sha256::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| format!("read {url}: {error}"))?;
+        size = size
+            .checked_add(chunk.len() as u64)
+            .ok_or_else(|| format!("download size overflow for {url}"))?;
+        if size > expected_size {
+            return Err(format!("download exceeded pinned size for {url}"));
+        }
+        hasher.update(&chunk);
+        file.write_all(&chunk)
+            .await
+            .map_err(|error| format!("write {}: {error}", destination.display()))?;
+        let should_emit = {
+            let mut runtime = state
+                .install
+                .lock()
+                .map_err(|_| "Pocket TTS install state lock was poisoned".to_string())?;
+            increment_model_progress(&mut runtime, model, attempt_id, chunk.len() as u64)?
+                && should_emit_download_progress_at(&mut runtime, model, attempt_id, Instant::now())
+        };
+        if should_emit {
+            emit_pocket_status(app, state);
+        }
+    }
+    file.flush()
+        .await
+        .map_err(|error| format!("flush {}: {error}", destination.display()))?;
+    if size != expected_size {
+        return Err(format!(
+            "size mismatch for {}: expected {expected_size}, got {size}",
+            destination.display()
+        ));
+    }
+    let actual_sha256 = format!("{:x}", hasher.finalize());
+    if actual_sha256 != expected_sha256 {
+        return Err(format!(
+            "checksum mismatch for {}: expected {expected_sha256}, got {actual_sha256}",
+            destination.display()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn cumulative_delta<'a>(
+    previous_len: &mut usize,
+    samples: &'a [f32],
+) -> Result<Option<&'a [f32]>, String> {
+    // Pocket invokes the callback with an empty slice while generating the
+    // next internal model unit. It is progress-only, not a cumulative reset.
+    if samples.is_empty() {
+        return Ok(None);
+    }
+    if samples.len() < *previous_len {
+        return Err(format!(
+            "Pocket cumulative callback length decreased from {} to {}",
+            *previous_len,
+            samples.len()
+        ));
+    }
+    if samples.len() == *previous_len {
+        return Ok(None);
+    }
+    let delta = &samples[*previous_len..];
+    *previous_len = samples.len();
+    Ok(Some(delta))
+}
+
+#[cfg(target_os = "macos")]
+fn synthesize_and_stream(
+    base: &Path,
+    voice: PocketVoice,
+    text: &str,
+    output_device: Option<&str>,
+    active: Arc<AtomicBool>,
+    speed: f32,
+) -> Result<(), String> {
+    use std::cell::RefCell;
+    use std::num::NonZero;
+    use std::rc::Rc;
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    use rodio::cpal::traits::HostTrait;
+
+    let version = base.join(CACHE_VERSION);
+    let engine = load_text_to_speech(
+        version
+            .to_str()
+            .ok_or_else(|| "Pocket model path is not valid UTF-8".to_string())?,
+    )?;
+    let style = load_voice_style(&version.join("voices").join(voice.filename))?;
+    let sink = if let Some(name) = output_device {
+        let host = rodio::cpal::default_host();
+        let mut matching = None;
+        for device in host
+            .output_devices()
+            .map_err(|error| format!("enumerate audio outputs: {error}"))?
+        {
+            if device
+                .description()
+                .ok()
+                .is_some_and(|description| description.name() == name)
+            {
+                matching = Some(device);
+                break;
+            }
+        }
+        let device = matching.ok_or_else(|| format!("audio output not found: {name}"))?;
+        rodio::DeviceSinkBuilder::from_device(device)
+            .map_err(|error| format!("configure audio output {name}: {error}"))?
+            .open_stream()
+            .map_err(|error| format!("open audio output {name}: {error}"))?
+    } else {
+        rodio::DeviceSinkBuilder::open_default_sink()
+            .map_err(|error| format!("open default audio output: {error}"))?
+    };
+    let channels =
+        NonZero::new(1_u16).ok_or_else(|| "Pocket channel count invariant failed".to_string())?;
+    let rate = NonZero::new(SAMPLE_RATE)
+        .ok_or_else(|| "Pocket sample rate invariant failed".to_string())?;
+    let player = Arc::new(Player::connect_new(sink.mixer()));
+    let previous_len = Arc::new(Mutex::new(0_usize));
+    let speed_processor = Rc::new(RefCell::new(StreamingSpeedProcessor::new(
+        speed,
+        SAMPLE_RATE,
+    )?));
+    let callback_error = Arc::new(Mutex::new(None::<String>));
+    let playback_started = Arc::new(AtomicBool::new(false));
+
+    let callback_player = player.clone();
+    let callback_active = active.clone();
+    let callback_previous_len = previous_len.clone();
+    let callback_speed_processor = speed_processor.clone();
+    let callback_error_slot = callback_error.clone();
+    let callback_started = playback_started.clone();
+    let outcome = engine.synth_chunk_streaming(
+        text,
+        "en",
+        &style,
+        SYNTH_STEPS,
+        move |samples: &[f32], _progress: f32| {
+            if !callback_active.load(Ordering::SeqCst) {
+                return false;
+            }
+            let Ok(mut previous_len) = callback_previous_len.lock() else {
+                return false;
+            };
+            let delta = match cumulative_delta(&mut previous_len, samples) {
+                Ok(Some(delta)) => match callback_speed_processor.borrow_mut().process(delta) {
+                    Ok(processed) => processed,
+                    Err(error) => {
+                        if let Ok(mut callback_error) = callback_error_slot.lock() {
+                            *callback_error = Some(error);
+                        }
+                        return false;
+                    }
+                },
+                Ok(None) => return true,
+                Err(error) => {
+                    if let Ok(mut callback_error) = callback_error_slot.lock() {
+                        *callback_error = Some(error);
+                    }
+                    return false;
+                }
+            };
+            if !delta.is_empty() {
+                callback_player.append(SamplesBuffer::new(channels, rate, delta));
+                if !callback_started.swap(true, Ordering::SeqCst) {
+                    println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
+                    if let Err(error) = std::io::stdout().flush() {
+                        if let Ok(mut callback_error) = callback_error_slot.lock() {
+                            *callback_error =
+                                Some(format!("signal Pocket playback start: {error}"));
+                        }
+                        return false;
+                    }
+                }
+            }
+            true
+        },
+    )?;
+
+    if matches!(outcome, SynthesisOutcome::Complete(_)) {
+        let tail = speed_processor.borrow_mut().finish()?;
+        if !tail.is_empty() {
+            player.append(SamplesBuffer::new(channels, rate, tail));
+            if !playback_started.swap(true, Ordering::SeqCst) {
+                println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
+                std::io::stdout()
+                    .flush()
+                    .map_err(|error| format!("signal Pocket playback start: {error}"))?;
+            }
+        }
+    }
+
+    if let Some(error) = callback_error
+        .lock()
+        .map_err(|_| "Pocket callback error lock was poisoned".to_string())?
+        .take()
+    {
+        player.stop();
+        return Err(error);
+    }
+    if matches!(outcome, SynthesisOutcome::Interrupted) {
+        player.stop();
+        return Ok(());
+    }
+    while !player.empty() {
+        if !active.load(Ordering::SeqCst) {
+            player.stop();
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn synthesize_and_stream(
+    _base: &Path,
+    _voice: PocketVoice,
+    _text: &str,
+    _output_device: Option<&str>,
+    _active: Arc<AtomicBool>,
+    _speed: f32,
+) -> Result<(), String> {
+    Err("Pocket voice playback is currently supported on macOS only".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_destroy_cancels_active_pocket_playback() {
+        let state = PocketVoiceState::default();
+        let active = Arc::new(AtomicBool::new(true));
+        state.playback.lock().expect("lock playback runtime").active = Some(Arc::clone(&active));
+
+        assert!(state.stop_for_window_destroyed());
+        assert!(!active.load(Ordering::SeqCst));
+        assert!(!PocketVoiceState::default().stop_for_window_destroyed());
+    }
+
+    #[test]
+    fn manifest_has_unique_paths_and_expected_total() {
+        let mut names = std::collections::HashSet::new();
+        for artifact in MODEL_ARTIFACTS {
+            assert!(names.insert(artifact.filename));
+            assert_eq!(artifact.url.matches("/resolve/").count(), 1);
+        }
+        for voice in VOICES {
+            assert!(names.insert(voice.filename));
+            assert_eq!(voice.url.matches("/resolve/").count(), 1);
+        }
+        assert_eq!(VOICES.len(), 12);
+        assert_eq!(total_bytes(), 278_120_564);
+    }
+
+    #[test]
+    fn invalid_install_rejects_missing_and_corrupt_files() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        assert!(!installation_valid(directory.path()));
+        let version = directory.path().join(CACHE_VERSION);
+        fs::create_dir_all(version.join("voices")).expect("create fixture");
+        fs::write(version.join(VERIFIED_MARKER), CACHE_VERSION).expect("write verified marker");
+        fs::write(version.join("bundle.json"), b"wrong").expect("write corrupt fixture");
+        assert!(!installation_valid(directory.path()));
+    }
+
+    #[test]
+    fn disk_usage_is_summed_from_current_published_files() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let version = directory.path().join(CACHE_VERSION);
+        fs::create_dir_all(version.join("voices")).expect("create Pocket fixture");
+        fs::create_dir_all(version.join("stt")).expect("create Parakeet fixture");
+
+        let mut expected_pocket_bytes = 0;
+        for artifact in MODEL_ARTIFACTS {
+            let contents = vec![b'p'; artifact.filename.len()];
+            expected_pocket_bytes += contents.len() as u64;
+            fs::write(version.join(artifact.filename), contents)
+                .expect("write Pocket artifact fixture");
+        }
+        for voice in VOICES {
+            let contents = vec![b'v'; voice.filename.len()];
+            expected_pocket_bytes += contents.len() as u64;
+            fs::write(version.join("voices").join(voice.filename), contents)
+                .expect("write Pocket voice fixture");
+        }
+
+        fs::write(version.join("stt").join("model.int8.onnx"), b"model")
+            .expect("write Parakeet model fixture");
+        fs::write(version.join("stt").join("tokens.txt"), b"tokens")
+            .expect("write Parakeet tokens fixture");
+        fs::write(version.join("stt").join("MODEL_LICENSE.txt"), b"license")
+            .expect("write Parakeet license fixture");
+
+        assert_eq!(
+            pocket_disk_bytes(directory.path()),
+            Some(expected_pocket_bytes)
+        );
+        assert_eq!(parakeet_disk_bytes(directory.path()), Some(18));
+    }
+
+    #[test]
+    fn verification_rejects_same_length_corruption() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("asset.bin");
+        fs::write(&path, b"same-size-a").expect("write original fixture");
+        let expected_sha256 = format!("{:x}", Sha256::digest(b"same-size-a"));
+        verify_file(&path, 11, &expected_sha256).expect("verify original fixture");
+
+        fs::write(&path, b"same-size-b").expect("write corrupt fixture");
+        assert!(verify_file(&path, 11, &expected_sha256)
+            .expect_err("same-length corruption must fail")
+            .contains("checksum mismatch"));
+    }
+
+    #[tokio::test]
+    async fn voice_download_client_times_out_a_stalled_partial_body() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind partial response server");
+        let address = listener.local_addr().expect("server address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept request");
+            socket
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nx")
+                .await
+                .expect("write partial response");
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        });
+        let client = voice_download_client(
+            Duration::from_millis(100),
+            Duration::from_millis(100),
+            Duration::from_secs(1),
+        )
+        .expect("build timeout client");
+        let response = client
+            .get(format!("http://{address}/model"))
+            .send()
+            .await
+            .expect("receive response headers");
+        let mut stream = response.bytes_stream();
+        assert_eq!(
+            stream
+                .next()
+                .await
+                .expect("first body chunk")
+                .expect("read first body chunk")
+                .as_ref(),
+            b"x"
+        );
+        let error = stream
+            .next()
+            .await
+            .expect("stalled body must terminate")
+            .expect_err("stalled body must time out");
+        assert!(error.is_timeout(), "unexpected error: {error}");
+        server.abort();
+    }
+
+    #[test]
+    fn failed_download_attempt_releases_worker_and_preserves_error() {
+        let mut runtime = InstallRuntime::default();
+        let attempt_id = begin_model_attempt(
+            &mut runtime,
+            VoiceModelKind::Parakeet,
+            parakeet_download_bytes(),
+            true,
+        )
+        .expect("begin attempt");
+        finish_model_attempt(
+            &mut runtime,
+            VoiceModelKind::Parakeet,
+            attempt_id,
+            Some("download timed out".to_string()),
+        )
+        .expect("finish attempt");
+
+        assert!(current_install_attempt(&mut runtime)
+            .expect("read current attempt")
+            .is_none());
+        assert!(!runtime.worker_running);
+        assert_eq!(
+            runtime.parakeet_error.as_deref(),
+            Some("download timed out")
+        );
+    }
+
+    #[test]
+    fn readiness_fingerprint_changes_after_same_length_replacement() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("asset.bin");
+        fs::write(&path, b"same-size-a").expect("write original fixture");
+        let original =
+            fingerprint_files([(path.clone(), 11)]).expect("fingerprint original fixture");
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        fs::write(&path, b"same-size-b").expect("replace fixture");
+        let replacement = fingerprint_files([(path, 11)]).expect("fingerprint replacement fixture");
+
+        assert_ne!(original, replacement);
+    }
+
+    #[test]
+    fn cumulative_callback_emits_only_growth_and_rejects_regression() {
+        let mut previous_len = 0;
+        assert_eq!(cumulative_delta(&mut previous_len, &[]), Ok(None));
+        assert_eq!(
+            cumulative_delta(&mut previous_len, &[1.0, 2.0, 3.0]),
+            Ok(Some(&[1.0, 2.0, 3.0][..]))
+        );
+        assert_eq!(previous_len, 3);
+        assert_eq!(cumulative_delta(&mut previous_len, &[]), Ok(None));
+        assert_eq!(previous_len, 3);
+        assert_eq!(
+            cumulative_delta(&mut previous_len, &[1.0, 2.0, 3.0]),
+            Ok(None)
+        );
+        assert_eq!(
+            cumulative_delta(&mut previous_len, &[1.0, 2.0, 3.0, 4.0]),
+            Ok(Some(&[4.0][..]))
+        );
+        assert_eq!(previous_len, 4);
+        assert_eq!(
+            cumulative_delta(&mut previous_len, &[1.0, 2.0]),
+            Err("Pocket cumulative callback length decreased from 4 to 2".to_string())
+        );
+    }
+
+    #[test]
+    fn failed_atomic_publication_restores_previous_cache() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let final_dir = directory.path().join(CACHE_VERSION);
+        fs::create_dir_all(&final_dir).expect("create previous cache");
+        fs::write(final_dir.join("sentinel"), b"previous").expect("write previous cache");
+
+        let missing_staging = directory.path().join("missing-staging");
+        assert!(publish_staging(directory.path(), &missing_staging).is_err());
+        assert_eq!(
+            fs::read(final_dir.join("sentinel")).expect("restored cache"),
+            b"previous"
+        );
+        assert!(!directory
+            .path()
+            .join(format!("{CACHE_VERSION}.previous"))
+            .exists());
+    }
+
+    #[test]
+    fn pocket_multi_file_progress_is_monotonic_for_one_attempt() {
+        let mut runtime = InstallRuntime::default();
+        let total = pocket_published_bytes();
+        let attempt_id = begin_model_attempt(&mut runtime, VoiceModelKind::Pocket, total, true)
+            .expect("begin Pocket attempt");
+        let mut observed = vec![0];
+
+        for size in MODEL_ARTIFACTS
+            .iter()
+            .map(|artifact| artifact.size)
+            .chain(VOICES.iter().map(|voice| voice.size_bytes))
+        {
+            assert!(increment_model_progress(
+                &mut runtime,
+                VoiceModelKind::Pocket,
+                attempt_id,
+                size,
+            )
+            .expect("advance Pocket file"));
+            observed.push(
+                runtime
+                    .pocket_progress
+                    .expect("Pocket progress")
+                    .downloaded_bytes,
+            );
+        }
+        advance_model_progress(
+            &mut runtime,
+            VoiceModelKind::Pocket,
+            attempt_id,
+            VoiceModelDownloadPhase::Verifying,
+            Some(total),
+        )
+        .expect("verify Pocket");
+        advance_model_progress(
+            &mut runtime,
+            VoiceModelKind::Pocket,
+            attempt_id,
+            VoiceModelDownloadPhase::Publishing,
+            None,
+        )
+        .expect("publish Pocket");
+        advance_model_progress(
+            &mut runtime,
+            VoiceModelKind::Pocket,
+            attempt_id,
+            VoiceModelDownloadPhase::Complete,
+            Some(total),
+        )
+        .expect("complete Pocket");
+        observed.push(
+            runtime
+                .pocket_progress
+                .expect("Pocket progress")
+                .downloaded_bytes,
+        );
+
+        assert!(observed.windows(2).all(|pair| pair[0] <= pair[1]));
+        assert_eq!(observed.last(), Some(&total));
+    }
+
+    #[test]
+    fn progress_emissions_are_rate_limited_per_model_without_losing_byte_state() {
+        let mut runtime = InstallRuntime::default();
+        let pocket_id =
+            begin_model_attempt(&mut runtime, VoiceModelKind::Pocket, 200, true).expect("Pocket");
+        let started = Instant::now();
+
+        increment_model_progress(&mut runtime, VoiceModelKind::Pocket, pocket_id, 25)
+            .expect("first chunk");
+        assert!(should_emit_download_progress_at(
+            &mut runtime,
+            VoiceModelKind::Pocket,
+            pocket_id,
+            started,
+        ));
+        increment_model_progress(&mut runtime, VoiceModelKind::Pocket, pocket_id, 25)
+            .expect("second chunk");
+        assert!(!should_emit_download_progress_at(
+            &mut runtime,
+            VoiceModelKind::Pocket,
+            pocket_id,
+            started + Duration::from_millis(50),
+        ));
+        increment_model_progress(&mut runtime, VoiceModelKind::Pocket, pocket_id, 25)
+            .expect("third chunk");
+        assert!(should_emit_download_progress_at(
+            &mut runtime,
+            VoiceModelKind::Pocket,
+            pocket_id,
+            started + DOWNLOAD_PROGRESS_EMIT_INTERVAL,
+        ));
+        assert_eq!(
+            runtime
+                .pocket_progress
+                .expect("Pocket progress")
+                .downloaded_bytes,
+            75
+        );
+
+        let parakeet_id = begin_model_attempt(&mut runtime, VoiceModelKind::Parakeet, 200, false)
+            .expect("Parakeet");
+        assert!(!should_emit_download_progress_at(
+            &mut runtime,
+            VoiceModelKind::Parakeet,
+            parakeet_id,
+            started,
+        ));
+    }
+
+    #[test]
+    fn speaker_output_detection_is_case_insensitive_and_specific() {
+        for name in [
+            "MacBook Pro Speakers",
+            "Studio SPEAKERS",
+            "Living Room Speaker",
+        ] {
+            assert!(output_device_uses_speakers(Some(name)), "{name}");
+        }
+        for name in ["AirPods Pro", "USB Headphones", "BlackHole 16ch", ""] {
+            assert!(!output_device_uses_speakers(Some(name)), "{name}");
+        }
+        assert!(!output_device_uses_speakers(None));
+    }
+
+    #[test]
+    fn parakeet_progress_is_monotonic_through_extraction_and_verification() {
+        let mut runtime = InstallRuntime::default();
+        let total = parakeet_download_bytes();
+        let attempt_id = begin_model_attempt(&mut runtime, VoiceModelKind::Parakeet, total, true)
+            .expect("begin Parakeet attempt");
+        let first_chunk = 50_000_000;
+        increment_model_progress(
+            &mut runtime,
+            VoiceModelKind::Parakeet,
+            attempt_id,
+            first_chunk,
+        )
+        .expect("advance first Parakeet chunk");
+        let after_first = runtime
+            .parakeet_progress
+            .expect("Parakeet progress")
+            .downloaded_bytes;
+        increment_model_progress(
+            &mut runtime,
+            VoiceModelKind::Parakeet,
+            attempt_id,
+            PARAKEET_ARCHIVE.size - first_chunk,
+        )
+        .expect("finish Parakeet archive");
+        advance_model_progress(
+            &mut runtime,
+            VoiceModelKind::Parakeet,
+            attempt_id,
+            VoiceModelDownloadPhase::Extracting,
+            Some(PARAKEET_ARCHIVE.size),
+        )
+        .expect("extract Parakeet");
+        let after_archive = runtime
+            .parakeet_progress
+            .expect("Parakeet progress")
+            .downloaded_bytes;
+        advance_model_progress(
+            &mut runtime,
+            VoiceModelKind::Parakeet,
+            attempt_id,
+            VoiceModelDownloadPhase::Verifying,
+            Some(total),
+        )
+        .expect("verify Parakeet");
+        advance_model_progress(
+            &mut runtime,
+            VoiceModelKind::Parakeet,
+            attempt_id,
+            VoiceModelDownloadPhase::Publishing,
+            None,
+        )
+        .expect("publish Parakeet");
+        advance_model_progress(
+            &mut runtime,
+            VoiceModelKind::Parakeet,
+            attempt_id,
+            VoiceModelDownloadPhase::Complete,
+            Some(total),
+        )
+        .expect("complete Parakeet");
+        let completed = runtime
+            .parakeet_progress
+            .expect("Parakeet progress")
+            .downloaded_bytes;
+
+        assert!(after_first <= after_archive);
+        assert!(after_archive <= completed);
+        assert_eq!(completed, total);
+        assert_ne!(completed, parakeet_published_bytes());
+    }
+
+    #[test]
+    fn rapid_model_requests_queue_in_either_order_and_continue_after_failure() {
+        for (first, second) in [
+            (VoiceModelKind::Pocket, VoiceModelKind::Parakeet),
+            (VoiceModelKind::Parakeet, VoiceModelKind::Pocket),
+        ] {
+            let mut runtime = InstallRuntime::default();
+            let first_id =
+                begin_model_attempt(&mut runtime, first, 200, true).expect("begin first model");
+            let second_id =
+                begin_model_attempt(&mut runtime, second, 300, false).expect("queue second model");
+            assert_eq!(runtime.active_model, Some(first));
+            assert_eq!(runtime.queued_models.front(), Some(&second));
+            assert_eq!(
+                model_progress(&runtime, second).map(|progress| progress.phase),
+                Some(VoiceModelDownloadPhase::Queued)
+            );
+
+            assert!(finish_model_attempt(
+                &mut runtime,
+                first,
+                first_id,
+                Some("download cancelled".to_string()),
+            )
+            .expect("continue queue"));
+            assert_eq!(runtime.active_model, Some(second));
+            assert_eq!(
+                model_progress(&runtime, second),
+                Some(&VoiceModelDownloadProgress {
+                    attempt_id: second_id,
+                    downloaded_bytes: 0,
+                    total_bytes: 300,
+                    phase: VoiceModelDownloadPhase::Downloading,
+                })
+            );
+            assert_eq!(
+                match first {
+                    VoiceModelKind::Pocket => runtime.pocket_error.as_deref(),
+                    VoiceModelKind::Parakeet => runtime.parakeet_error.as_deref(),
+                },
+                Some("download cancelled")
+            );
+        }
+    }
+
+    #[test]
+    fn removal_of_installed_model_queues_while_other_model_downloads() {
+        for (downloading, removing) in [
+            (VoiceModelKind::Pocket, VoiceModelKind::Parakeet),
+            (VoiceModelKind::Parakeet, VoiceModelKind::Pocket),
+        ] {
+            let mut runtime = InstallRuntime::default();
+            let attempt_id = begin_model_attempt(&mut runtime, downloading, 200, true)
+                .expect("begin model download");
+
+            assert!(begin_model_removal(&mut runtime, removing)
+                .expect("queue independent model removal"));
+            assert_eq!(runtime.removing, Some(removing));
+            assert!(
+                !finish_model_attempt(&mut runtime, downloading, attempt_id, None)
+                    .expect("finish active model")
+            );
+            assert!(!install_busy(&runtime));
+        }
+    }
+
+    #[test]
+    fn removal_then_redownload_resets_only_with_a_new_attempt_and_ignores_stale_events() {
+        for model in [VoiceModelKind::Pocket, VoiceModelKind::Parakeet] {
+            let mut runtime = InstallRuntime::default();
+            let total = 200;
+            let original_id =
+                begin_model_attempt(&mut runtime, model, total, true).expect("begin install");
+            advance_model_progress(
+                &mut runtime,
+                model,
+                original_id,
+                VoiceModelDownloadPhase::Complete,
+                Some(total),
+            )
+            .expect("complete install");
+            runtime.active_model = None;
+            match model {
+                VoiceModelKind::Pocket => runtime.pocket_progress = None,
+                VoiceModelKind::Parakeet => runtime.parakeet_progress = None,
+            }
+
+            let redownload_id =
+                begin_model_attempt(&mut runtime, model, total, true).expect("begin redownload");
+            assert!(redownload_id > original_id);
+            assert_eq!(
+                model_progress(&runtime, model).map(|progress| progress.downloaded_bytes),
+                Some(0)
+            );
+            assert!(!advance_model_progress(
+                &mut runtime,
+                model,
+                original_id,
+                VoiceModelDownloadPhase::Complete,
+                Some(total),
+            )
+            .expect("ignore stale completion"));
+            assert_eq!(
+                model_progress(&runtime, model).map(|progress| progress.downloaded_bytes),
+                Some(0)
+            );
+            increment_model_progress(&mut runtime, model, redownload_id, 50)
+                .expect("advance redownload");
+            advance_model_progress(
+                &mut runtime,
+                model,
+                redownload_id,
+                VoiceModelDownloadPhase::Complete,
+                Some(total),
+            )
+            .expect("complete redownload");
+            assert_eq!(
+                model_progress(&runtime, model).map(|progress| progress.downloaded_bytes),
+                Some(total)
+            );
+        }
+    }
+
+    fn write_removal_fixture(base: &Path) {
+        let version = base.join(CACHE_VERSION);
+        fs::create_dir_all(version.join("voices")).expect("create Pocket fixture");
+        fs::create_dir_all(version.join("stt")).expect("create Parakeet fixture");
+        for artifact in MODEL_ARTIFACTS {
+            fs::write(version.join(artifact.filename), b"pocket")
+                .expect("write Pocket artifact fixture");
+        }
+        fs::write(version.join("voices").join("mary.wav"), b"voice").expect("write voice fixture");
+        fs::write(version.join("stt").join("model.int8.onnx"), b"parakeet")
+            .expect("write Parakeet fixture");
+        fs::write(version.join("stt").join("tokens.txt"), b"tokens")
+            .expect("write Parakeet token fixture");
+        fs::write(version.join("stt").join("MODEL_LICENSE.txt"), b"license")
+            .expect("write Parakeet license fixture");
+        fs::write(version.join(VERIFIED_MARKER), CACHE_VERSION).expect("write verified marker");
+    }
+
+    #[test]
+    fn pocket_removal_atomically_preserves_parakeet_assets() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        write_removal_fixture(directory.path());
+
+        remove_cached_model(directory.path(), VoiceModelKind::Pocket)
+            .expect("remove Pocket assets");
+
+        let version = directory.path().join(CACHE_VERSION);
+        assert!(version.join("stt").join("model.int8.onnx").exists());
+        assert!(version.join(VERIFIED_MARKER).exists());
+        assert!(!version.join("voices").exists());
+        assert!(!version.join(MODEL_ARTIFACTS[0].filename).exists());
+    }
+
+    #[test]
+    fn parakeet_removal_atomically_preserves_pocket_assets() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        write_removal_fixture(directory.path());
+
+        remove_cached_model(directory.path(), VoiceModelKind::Parakeet)
+            .expect("remove Parakeet assets");
+
+        let version = directory.path().join(CACHE_VERSION);
+        assert!(version.join("voices").join("mary.wav").exists());
+        assert!(version.join(MODEL_ARTIFACTS[0].filename).exists());
+        assert!(version.join(VERIFIED_MARKER).exists());
+        assert!(!version.join("stt").exists());
+    }
+
+    #[test]
+    fn selected_voice_uses_persisted_compatible_voice_or_mary() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        assert_eq!(selected_voice(directory.path()), DEFAULT_VOICE);
+
+        fs::write(
+            directory.path().join("settings.json"),
+            br#"{"selected_voice":"jane"}"#,
+        )
+        .expect("write compatible selection");
+        assert_eq!(selected_voice(directory.path()), "jane");
+
+        fs::write(
+            directory.path().join("settings.json"),
+            br#"{"selected_voice":"retired"}"#,
+        )
+        .expect("write incompatible selection");
+        assert_eq!(selected_voice(directory.path()), DEFAULT_VOICE);
+    }
+}

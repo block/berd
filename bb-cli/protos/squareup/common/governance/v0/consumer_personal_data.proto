@@ -1,0 +1,137 @@
+syntax = "proto2";
+package squareup.governance.v0;
+
+// DO NOT EDIT!!!
+// This file was auto-generated from https://github.com/squareup/dsl-framework/blob/ac75c6fa1371fe4950a4ec1b20e9b952d6265e91/rubrics/releases/for-dsl-engine/rubrics_v0.json using /script/EngineModelGenerator.py.
+
+option java_package = "com.squareup.protos.common.governance.v0";
+
+message ConsumerPersonalData {
+  enum SemanticType {
+    DO_NOT_USE = 0;
+    // Facial images used for identity verification, such as on a photo of a Government ID document.
+    GOV_ID_FACIAL_IMAGE = 1;
+    // Facial images not used for identity verification, such as photographs or videos used in other contexts.
+    GENERIC_FACIAL_IMAGE = 2;
+    // Handwriting, including a handwritten signature, such as on a photo of a Government ID document.
+    HANDWRITING = 3;
+    // A person's full name.
+    FULL_NAME = 4;
+    // Personal email address (including hashed email address).
+    EMAIL_ADDRESS = 5;
+    // Residential postal address.
+    RESIDENTIAL_ADDRESS = 6;
+    // Personal phone number (including hashed phone number): seven (7) digits or more.
+    PHONE_NUMBER = 7;
+    // Username, $Cashtag, social media handle.
+    USERNAME = 8;
+    // Bank account number (with more than defined by COARSE_BANK_ACCOUNT_NUMBER).
+    BANK_ACCOUNT_NUMBER = 9;
+    // Payment Card Primary Account Number (PAN) (more than defined by COARSE_PAYMENT_CARD_PAN).
+    PAYMENT_CARD_PAN = 10;
+    // Social Security Number (SSN)
+    SSN = 11;
+    // Passport Number
+    PASSPORT_NUMBER = 12;
+    // Driver's License Number
+    DRIVERS_LICENSE_NUMBER = 13;
+    // Individual Tax ID Number (ITIN)
+    ITIN = 14;
+    // Authentication tokens and session tokens.
+    AUTH_TOKEN = 15;
+    // Consumer's password/passcode.
+    PASSWORD = 16;
+    // Plaid tokens and similar bank account access credentials.
+    BANK_ACCESS_TOKEN = 17;
+    // A first name of a person
+    FIRST_NAME = 18;
+    // A middle name or middle initial of a person
+    MIDDLE_NAME = 19;
+    // A last name of a person (surname)
+    LAST_NAME = 20;
+    // The street name and street number of a consumer's residence, including any additional information about unit/apt/suite/etc.
+    STREET_OF_RESIDENCE = 21;
+    // Residential ZIP/postal code
+    POSTAL_CODE_OF_RESIDENCE = 22;
+    // City of residence
+    CITY_OF_RESIDENCE = 23;
+    // State/Region/Province/County of residence
+    REGION_OF_RESIDENCE = 24;
+    // Country of residence (e.g. Customer Region/Country Code).
+    COUNTRY_OF_RESIDENCE = 25;
+    // Personal phone number: up to six (6) digits
+    COARSE_PHONE_NUMBER = 26;
+    // Device IDs (including Advertising ID and other unique identifiers that corresponds with an individual's mobile device).
+    DEVICE_ID = 27;
+    // Customer ID.
+    CUSTOMER_ID = 28;
+    // Gender.
+    GENDER = 29;
+    // Precise Date of Birth (DOB).
+    DATE_OF_BIRTH = 30;
+    // The day of the month that a customer was born.
+    BIRTH_DAY_OF_MONTH = 31;
+    // The month a customer was born.
+    BIRTH_MONTH = 32;
+    // The year a customer was born.
+    BIRTH_YEAR = 33;
+    // The consumer's age.
+    AGE = 34;
+    // Information pertaining to an individual's religious beliefs, philosophical beliefs, or union membership.
+    BELIEFS_OR_POLITICS = 35;
+    // Information pertaining to an individual's health, sex life, or sexual orientation.
+    HEALTH_OR_SEXUALITY = 36;
+    // Information about an individual's racial or ethnic demographic.
+    ETHNICITY_OR_RACE = 37;
+    // Inferences.
+    INFERENCE = 38;
+    // Touch events on mobile devices. NOTE: individual touch events are quasi-identifiers and should be regarded as pseudonymous, de-identified data by themselves. Sequences of touch events should be considered as equivalent to the data they represent (e.g., touch event sequences for customer identifiers or authentication efforts should be regarded as identifiable and possibly sensitive).
+    TOUCH_EVENTS = 39;
+    // Bank name.
+    BANK_NAME = 40;
+    // Bank routing number.
+    BANK_ROUTING_NUMBER = 41;
+    // Bank account number (coarse): maximum of four (4) digits
+    COARSE_BANK_ACCOUNT_NUMBER = 42;
+    // Coarse Credit Card Primary Account Number (PAN): (a) Last four digits (b) Six digit BIN + last four digits (c) Eight digit BIN + any other two digits.
+    COARSE_PAYMENT_CARD_PAN = 43;
+    // Date of Transaction (e.g. a bank deposit, a purchase, etc.)
+    TRANSACTION_DATE = 44;
+    // Amount of Transaction (e.g. a bank deposit, a purchase, etc.)
+    TRANSACTION_AMOUNT = 45;
+    // Sender/Recipient/Merchant of Transaction (e.g. a bank deposit, a purchase, etc.)
+    TRANSACTION_PARTY = 46;
+    // Credit scores (e.g., FICO).
+    CREDIT_SCORE = 47;
+    // Last four (4) digits of Social Security Number (SSN).
+    COARSE_SSN = 48;
+    // Geolocation (precise): location data with a resolution the same or greater than latitude and longitude with three or more decimal places.
+    PRECISE_GEOLOCATION = 49;
+    // Geolocation (coarse): location data with a resolution the same or less than latitude and longitude with two decimal places.
+    COARSE_GEOLOCATION = 50;
+    // IP Address.
+    IP_ADDRESS = 51;
+    // Free-form text fields and similar user-supplied application content (such as payment notes, email messages, text messages, voice transcripts, etc.), or customer support data generated by the user.
+    USER_GENERATED_TEXT = 52;
+    // Tokens used to identify a consumer, such as pseudonyms for Contact information (e.g. a Cash CustomerToken/ or a Fidelius SSN/ITIN token).
+    PERSON_PSEUDONYM = 53;
+    // Tokens used to identify a specific financial instrument (e.g. a Fidelius PAN token or bank account token).
+    INSTRUMENT_PSEUDONYM = 54;
+    // Tokens used to identify a particular device, such as a customer's phone (e.g. Cash AppToken).
+    DEVICE_PSEUDONYM = 55;
+    // Such as a list of contacts in the user's phone, address book, or social graph (see the Contact Information (Precise) category).
+    CONTACTS = 56;
+    // Information relating to an individual's income, such as salary, commission, investment income, etc.
+    INCOME = 57;
+    // Information relating to an individual's expenses, such as mortgage/rental payments, monthly utilities, debt payments, etc.
+    EXPENSES = 58;
+    // Information relating to an individual's assets, such as details on savings accounts, retirement funds, stocks, bonds, and investments.
+    ASSETS = 59;
+    // Underwriting decisions.
+    UNDERWRITING = 60;
+    // Advertising data, such as information about the advertisements the user has seen.
+    ADVERTISING_DATA = 61;
+    // Product Interaction, such as app launches, link/button presses, scrolling information or other information about how the user interacts with the app. (NOTE: If the data contains raw data about the user's touch inputs on mobile, the data will be more sensitive, see TOUCH_EVENTS).
+    PRODUCT_INTERACTION = 62;
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "title": "Search",
+  "placeholderDescription": "Search across chats, projects, skills, and agents.",
+  "actions": {
+    "clear": "Clear search",
+    "openAgent": "Start chat with {{name}}",
+    "openAutomation": "Open automation {{name}}",
+    "openExtension": "Open extension {{name}}",
+    "openSession": "Open chat {{name}}",
+    "openSettings": "Open {{name}} settings",
+    "openSkill": "Start chat with {{name}}"
+  },
+  "heading": {
+    "ariaLabel": "Universal search",
+    "filterAriaLabel": "Filter search results",
+    "placeholder": "Search your Berd"
+  },
+  "noMatches": "No matches for \"{{query}}\"",
+  "settingsResult": {
+    "meta": "Settings > {{name}}"
+  },
+  "sections": {
+    "agents": "Agents",
+    "automations": "Automations",
+    "chat": "Chats",
+    "extensions": "Extensions",
+    "recents": "Recents",
+    "results": "Results",
+    "settings": "Settings",
+    "skills": "Skills"
+  },
+  "states": {
+    "available": "Available",
+    "enabled": "Enabled"
+  },
+  "fallbackTitles": {
+    "automation": "Untitled automation"
+  }
+}

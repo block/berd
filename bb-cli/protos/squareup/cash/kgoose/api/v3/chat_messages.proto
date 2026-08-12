@@ -1,0 +1,598 @@
+syntax = "proto2";
+
+package squareup.cash.kgoose.api.v3;
+
+option java_package = "com.squareup.protos.cash.kgoose.api.v3";
+
+import "squareup/cash/kgoose/api/v3/agent_config_messages.proto";
+import "squareup/cash/kgoose/api/v3/profile_messages.proto";
+import "squareup/cash/kgoose/api/v3/common_messages.proto";
+import "squareup/cash/kgoose/api/v3/activity_messages.proto";
+
+import "squareup/common/pii.proto";
+import "squareup/common/governance/v0/semantic_types.proto";
+import "google/protobuf/struct.proto";
+import "squareup/cash/kgoosememorystore/api/v1beta1/memory.proto";
+
+// ===== Enums =====
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_USER = 1;
+  ROLE_ASSISTANT = 2;
+  ROLE_SYSTEM = 3;
+}
+
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_TEXT = 1;
+  MESSAGE_TYPE_IMAGE = 2;
+  MESSAGE_TYPE_TOOL_REQUEST = 3;
+  MESSAGE_TYPE_TOOL_RESPONSE = 4;
+  MESSAGE_TYPE_SUMMARY = 5;
+  MESSAGE_TYPE_THINKING = 8;
+  MESSAGE_TYPE_REDACTED_THINKING = 9;
+  MESSAGE_TYPE_FILE = 10;
+}
+
+enum PushMessageStatus {
+  PUSH_MESSAGE_STATUS_DO_NOT_USE = 0;
+  PUSH_MESSAGE_STATUS_FAILED_BUSY_PROCESSING = 1;
+  PUSH_MESSAGE_STATUS_SUBMITTED = 2;
+}
+
+enum ChatSessionStatus {
+  CHAT_SESSION_STATUS_UNSPECIFIED = 0;
+
+  /* Session is initialized and ready for interaction. We will use this
+   * status to indicate that the session is created but no messages have been sent yet.
+   */
+  CHAT_SESSION_STATUS_INITIALIZED = 1;
+
+  /* Session is idle, no active processing */
+  CHAT_SESSION_STATUS_IDLE = 2;
+
+  /* Session is currently processing a request */
+  CHAT_SESSION_STATUS_PROCESSING = 3;
+
+  /* Session is waiting for user input to continue */
+  CHAT_SESSION_STATUS_NEED_CLIENT_INPUT = 4;
+
+  /* Session has been terminated, no further interaction possible */
+  CHAT_SESSION_STATUS_TERMINATED = 5;
+
+  /* Session is canceling the last user message */
+  CHAT_SESSION_STATUS_CANCELLING = 6;
+
+  /* Session is waiting for a permission lease to be granted or denied */
+  CHAT_SESSION_STATUS_WAITING_FOR_PERMISSION_LEASE = 7;
+}
+
+/* Tenancy for isolating sessions by visibility/purpose */
+enum Tenancy {
+  /* The default space for conversations, visible to users */
+  TENANCY_DEFAULT = 0;
+  /* Moneybench (integration test) conversations */
+  TENANCY_MONEYBENCH = 1;
+  /* Moneybot suggestions conversations that shouldn't be visible for the user */
+  TENANCY_MONEYBOT_SUGGESTIONS = 2;
+  /* Load testing from shadow */
+  TENANCY_SHADOW = 3;
+  /* Managerbot Tasks */
+  TENANCY_MANAGERBOT_TASKS = 4;
+  /* Pathfinder */
+  TENANCY_PATHFINDER = 5;
+  /* Moneybot suggestions that are precomputed on app launch/foreground event */
+  TENANCY_MONEYBOT_PRECOMPUTED_SUGGESTIONS = 6;
+  /* Managerbot insights */
+  TENANCY_MANAGERBOT_INSIGHTS = 7;
+  /* Moneybot suggestions that are fetched from Promoter service */
+  TENANCY_MONEYBOT_PROMOTER_SUGGESTIONS = 8;
+  /* G2 conversations */
+  TENANCY_G2 = 9;
+  /* Moneybot memory extraction */
+  TENANCY_MONEYBOT_MEMORY_EXTRACTION = 10;
+  /* Evaluate quality of Moneybot memory extraction */
+  TENANCY_MONEYBOT_MEMORY_EVALUATION = 11;
+  /* Moneybot next best action workflow */
+  TENANCY_MONEYBOT_NEXT_BEST_ACTION = 12;
+  /* Moneybot SMS conversations */
+  TENANCY_MONEYBOT_SMS = 13;
+  /* External unauthenticated conversations */
+  TENANCY_EXTERNAL = 14;
+  /* Cash Support Advocate Copilot - Default or Unclassified Features */
+  TENANCY_CASH_ADVOCATE_COPILOT_DEFAULT = 15;
+  /* Cash Support Advocate Copilot Suggestion Pills */
+  TENANCY_CASH_ADVOCATE_COPILOT_SUGGESTION_PILLS = 16;
+  /* Cash Support Advocate Bot - Default or Unclassified Features */
+  TENANCY_CASH_ADVOCATE_BOT_DEFAULT = 17;
+  /* Moneybot user summary generation (admin endpoint) */
+  TENANCY_MONEYBOT_USER_SUMMARY = 18;
+  /* Cashbot offline experimentation */
+  TENANCY_CASHBOT_OFFLINE = 19;
+  /* Afterpaybot offline experimentation */
+  TENANCY_AFTERPAYBOT_OFFLINE = 20;
+  /* Builderbot slackbot */
+  TENANCY_BUILDERBOT_SLACKBOT = 21;
+  /* Customer reengagement workflow */
+  TENANCY_CUSTOMER_REENGAGEMENT = 22;
+  /* Managerbot mobile web sessions */
+  TENANCY_MANAGERBOT_MOBILE = 23;
+  /* Moneybot proactive notification workflow */
+  TENANCY_MONEYBOT_PROACTIVE_NOTIFICATION = 24;
+  /* Moneybot home prompt rephrase structured output */
+  TENANCY_MONEYBOT_HOME_PROMPT_REPHRASE = 25;
+  /* Managerbot widget creation subagent sessions */
+  TENANCY_MANAGERBOT_WIDGET_CREATE = 26;
+  /* Moneybot Home conversations */
+  TENANCY_MONEYBOT_HOME = 27;
+  /* Moneybot default from home conversations */
+  TENANCY_MONEYBOT_DEFAULT_FROM_HOME = 28;
+  /* Moneybot default from notification conversations */
+  TENANCY_MONEYBOT_DEFAULT_FROM_NOTIFICATION = 29;
+  /* Default tenancy for programmatic tool calls via ToolEndpointService */
+  TENANCY_KGOOSE_TOOL_CALL_ENDPOINTS_DEFAULT = 30;
+  /* Moneybot in-chat prompts selection */
+  TENANCY_MONEYBOT_IN_CHAT_PROMPTS = 31;
+}
+
+// ==== Decryption Config ====
+message McpDecryptionConfig {
+  repeated McpKeyDescriptor mcp_key_descriptor = 1;
+
+  optional string client_key = 3 [(squareup.redacted) = true, (squareup.governance.v0.consumer) = AUTH_TOKEN, (squareup.governance.v0.merchant) = AUTH_TOKEN];
+}
+
+message McpKeyDescriptor {
+  optional string extension_name = 1;
+  optional string identifier = 2;
+}
+
+// ===== Message =====
+
+message InputMessage {
+  repeated MessageContent message_contents = 1 [(squareup.governance.v0.consumer) = USER_GENERATED_TEXT, (squareup.governance.v0.merchant) = USER_GENERATED_TEXT];
+  optional bool hidden = 2;
+  // Client assigned message id (UUID). Most clients should let the server assign the id. If specified, it must be a unique UUID v4 string.
+  optional string id = 3;
+  // this is used if we are seeding push messages with conversation from outside, if role is not provided
+  // we assume it is USER role, for normal conversation it can be left blank
+  optional Role role = 4;
+  // we allow users to seed history so this field can be used to provide time for the seeded messages
+  // do not set this field for regular conversation and we will use current timestamp
+  optional int64 created = 5;
+}
+
+message Message {
+  optional string id = 1; // Always server assigned
+  optional Role role = 2;
+  optional int64 created = 3;
+  repeated MessageContent content = 4;
+  optional bool deleted = 5 [default = false];
+  optional ErrorInfo llm_call_error_info = 6;  // error information if there was an error calling the llm
+
+  message ErrorInfo {
+    optional bool is_error = 1;
+    optional string cause = 2;
+  }
+}
+
+message MessageContent {
+  optional MessageType type = 1;
+
+  oneof content {
+    TextContent text = 2;
+    ImageContent image = 3;
+    ToolRequest tool_request = 4;
+    ToolResponse tool_response = 5;
+    ThinkingContent thinking = 6;
+    RedactedThinkingContent redacted_thinking = 7;
+    FileContent file = 8;
+  }
+}
+
+message TextContent {
+  optional string text = 1 [(squareup.redacted) = true];
+}
+
+message ImageContent {
+  optional string data = 1 [(squareup.redacted) = true];
+  optional string mime_type = 2;
+  optional bool requires_presigned_url = 3; // Indicates if the image requires a presigned URL for access
+  optional string s3_uri = 4; // Original S3 reference (populated at runtime for LLM context)
+}
+
+message FileContent {
+  optional string data = 1 [(squareup.redacted) = true]; // S3 reference after upload
+  optional string mime_type = 2;               // File MIME type
+  optional bool requires_presigned_url = 3;
+  optional string s3_uri = 4;
+  optional string filename = 5;                // Original filename
+  optional uint64 size_bytes = 6;              // File size
+}
+
+message EmbeddedResource {
+  optional google.protobuf.Struct meta = 1;
+  optional ResourceContents resource = 3;
+  optional string type = 5;
+}
+
+message ResourceAnnotations {
+  repeated Role audience = 1;
+  optional string last_modified = 2;  // ISO 8601 timestamp
+  optional double priority = 3;
+}
+
+message ResourceContents {
+  optional google.protobuf.Struct meta = 1;
+  optional string uri = 2;
+  optional string mime_type = 3;
+  optional string text = 4 [(squareup.redacted) = true];
+  optional string blob = 5 [(squareup.redacted) = true];
+  optional ResourceAnnotations annotations = 6;
+}
+
+message ToolResponse {
+  optional string id = 1;
+  optional string status = 2; // "success" or "error"
+  repeated UserContent results = 3;
+  optional string error = 4;
+
+  // The name of the extension that produced this tool response.
+  optional string extension_name = 5;
+}
+
+message ToolRequest {
+  optional string id = 1;
+  optional string status = 2; // "success" or "error"
+
+  oneof result {
+    ToolCall value = 3;
+    string error = 4; // Error message as string
+  }
+
+  optional string tooltip = 5 [(squareup.redacted) = true]; // Tooltip for the tool request
+  optional string tooltip_category = 6 [(squareup.redacted) = true]; // Tooltip category for the tool request
+}
+
+message ToolCall {
+  optional string name = 1;
+  optional string arguments = 2 [(squareup.redacted) = true];
+  optional bool needs_approval = 3 [default = false];
+}
+
+message UserContent {
+  oneof content {
+    TextContent text = 1;
+    ImageContent image = 2;
+
+    // Below are client-specific content types, kgoose will convert them to json content for LLM to read
+    //     ClientRenderable client_renderable = 3 [deprecated = true]; // Deprecated: Use structured_content instead.
+
+    StructuredContent structured_content = 4;
+    EmbeddedResource resource = 5;
+  }
+}
+
+message StructuredContent {
+  optional google.protobuf.Struct data = 1;
+
+  // this is required by moneybot client, since andriod and ios client can't use Struct type directly
+    //   optional ClientRenderable client_renderable = 2;
+}
+
+message ThinkingContent {
+  optional string thinking = 1 [(squareup.redacted) = true];
+  optional string signature = 2 [(squareup.redacted) = true];
+}
+
+message RedactedThinkingContent {
+  optional string data = 1 [(squareup.redacted) = true];
+}
+
+// ==== Session and ChatContexts ====
+message FollowUpChatContext {
+  optional string tile_id = 1;
+  optional string tile_result_id = 2; // This is the session id of the tile refresh
+}
+
+message CreateTileFromTileContext {
+  optional string tile_id = 1;
+  optional string creator = 2;
+}
+
+message EditTileContext {
+  optional string tile_id = 1;
+}
+
+message EditWidgetContext {
+  optional string widget_id = 1;
+}
+
+message RenderContext {
+  optional int32 width = 1; // Width in density independent pixels
+  optional int32 height = 2; // Height in density independent pixels
+}
+
+message SpaceContext {
+  optional string id = 1; // The ID of the space
+  optional string creator = 2; // The creator/owner of the space. Required for shared spaces to enable proper access control and tile retrieval.
+}
+
+message SlackContext {
+  optional string channel_id = 1;
+  optional string thread_timestamp = 2;
+}
+
+message Session {
+  optional string id = 1;
+  optional string name = 2;
+  optional int64 created = 3;
+  optional int64 updated = 4;
+  optional string tile_id = 5;
+  optional bool async_process = 6 [deprecated = true];
+  optional ChatSessionStatus chat_session_status = 7;
+  repeated Activity activities = 8;
+  optional string space_id = 9; // ID of the space this session belongs to
+  optional Source chat_source = 10;
+  optional ChatContext chat_context = 11;
+  // Timestamp (epoch millis) of the most recent message in the session
+  optional int64 last_message_at = 12;
+  // Timestamp (epoch millis) when the user last read/viewed the session (only populated when include_read_state=true)
+  optional int64 last_read_at = 13;
+  // only populated when include_read_state=true
+  optional bool has_unread_messages = 14;
+
+  // Additional metadata for the session (e.g., icon slug for Managerbot)
+  map<string, string> metadata = 15;
+}
+
+/** NOTE: Changes here should be backwards compatible because it is saved in the SessionEntity */
+message ChatContext {
+  // the interface where the chat is initiated
+  optional Source source = 1;
+
+  optional FollowUpChatContext follow_up_chat_context = 2;
+
+  optional SpaceContext space = 3; // The space where the chat is initiated, if applicable
+
+  optional string time_zone = 4; // IANA Time Zone Database time zone, e.g. "America/New_York".
+
+  optional CreateTileFromTileContext create_tile_from_tile_context = 5;
+
+  optional EditTileContext edit_tile_context = 6; // Editing tiles and automations
+
+  // The extra customer context applied in the chat. It will override other customer contexts if
+  // exists.
+    //   optional CustomerContext customer_context = 7;
+
+  // Tenancy for filtering conversations by visibility/purpose, default for standard user conversations is TENANCY_DEFAULT
+  optional Tenancy tenancy = 8;
+
+  // If true, the bot will prompt the user for input when needed.
+  optional bool bot_prompts_you = 9;
+
+  optional string insight_id = 10;
+
+  // ID for tracking which list of suggestions were shown
+  optional string suggestions_id = 11;
+
+  optional ScriptConversionContext script_conversion_context = 12;
+
+  optional MoneybotContext moneybot_context = 13;
+
+  // Context for Managerbot task creation via /v3/create-task endpoint.
+  optional ManagerbotContext managerbot_context = 14;
+
+  // Render context for the client display dimensions
+  optional RenderContext render_context = 15;
+
+  // If true, the session will auto-terminate after processing the current task.
+  // Useful for quick 1-turn conversations where the client knows no follow-up is needed.
+  optional bool auto_terminate = 16;
+
+  optional SlackContext slack_context = 17;
+
+  optional EditWidgetContext edit_widget_context = 18; // Editing widgets via chat
+}
+
+// ===== Kickoff =====
+// This type is used by clients to kickoff new sessions, it is not directly used in kgoose server
+// DEPRECATED: This message is deprecated use the one in 'squareup.cash.kgoose.client.ClientKickoffParams' instead.
+message ClientKickoffParams{
+  repeated InputMessage kickoff_messages = 1;
+  optional bool should_auto_send = 2;
+  optional string session_id = 3;
+  optional Tenancy tenancy = 4;
+}
+
+// ===== Requests and Responses =====
+message PushMessagesRequest {
+  optional string session_id = 1;
+  repeated InputMessage messages = 2 [(squareup.redacted) = true];
+
+  optional string profile_id = 3;
+  optional ProfileConfig profile_config = 4;
+
+  optional OnBehalfOf on_behalf_of = 5;
+
+  // TODO: This can be removed after we enable Slack OAuth
+  optional McpDecryptionConfig mcp_decryption_config = 6 [deprecated = true];
+
+  // provide additional context about the chat
+  optional ChatContext chat_context = 7;
+
+  // If session_id is not provided, session name to for the new session
+  optional string session_name = 8;
+
+  // TTL in seconds for the session. If set, the session will expire after this duration.
+  // Reading/writing to existing session will NOT reset the TTL.
+  optional int32 session_ttl_in_seconds = 9;
+
+  // If set, the server will skip the LLM and execute this tool call directly.
+  // Used by client-side confirmation cards to trigger a tool call without an LLM round-trip.
+  optional ToolCall force_tool_call = 10;
+
+  // Reference a named AgentConfig from the registry. When set, the server loads the
+  // configuration and applies it. Takes precedence over profile_id/profile_config
+  // for fields that are set on the AgentConfig.
+  optional AgentConfigReference agent_config_ref = 11;
+}
+
+message PushMessagesResponse {
+  optional string session_id = 1;
+  optional PushMessageStatus status = 2;
+}
+
+message GetMessagesRequest {
+  optional string session_id = 1;
+  optional string message_cursor = 2;
+  optional OnBehalfOf on_behalf_of = 3;
+}
+
+// Token usage corresponds to the currently active model
+message TokenUsageInfo {
+  optional string model_name = 1;
+  optional int32 token_limit = 2;
+  optional int32 token_usage = 3;
+}
+
+// existing GetMessagesResponse, not changed
+message GetMessagesResponse {
+  repeated Message messages = 1 [(squareup.redacted) = true];
+  optional string next_cursor = 2;
+  optional ChatSessionStatus status = 3;
+  optional string session_name = 4;
+  repeated Activity session_activities = 5;
+  optional TokenUsageInfo token_usage_info = 6;
+}
+
+message GetMessagesStreamResponse {
+  oneof response {
+    GetMessagesResponse get_messages_response = 1;
+    DeltaMessageContent delta_message_content = 2;
+  }
+
+  message DeltaMessageContent {
+    // the current ongoing streamed message id
+    optional string streaming_message_id = 1;
+
+    // currently only text content is supported in delta
+    // we may stream other content types in the future
+    optional MessageContent message_content = 2;
+
+    // indicates if this is the final part of the message content.
+    // NOTE: this is different from the final overall message in the response stream.
+    optional bool is_final = 3;
+
+    // indicates if this is the start of a new message content.
+    optional bool is_start = 4;
+  }
+}
+
+message CancelLastUserMessageRequest {
+  optional string session_id = 1;
+  optional OnBehalfOf on_behalf_of = 2;
+}
+
+message CancelLastUserMessageResponse {
+  optional bool cancelled = 1;
+  optional string message = 2;
+  optional ChatSessionStatus session_status = 3;
+}
+
+message WarmupCustomerContextRequest {}
+
+message WarmupCustomerContextResponse {}
+
+message ReplaceMessageSummaryRequest {
+  optional string session_id = 1;
+  optional OnBehalfOf on_behalf_of = 2;
+  optional string message_id = 3;
+  optional Message message = 4;
+  optional string idempotency_token = 5;
+}
+
+message ReplaceMessageSummaryResponse {
+  optional bool success = 1;
+  optional string error_msg = 2;
+  optional Message message = 3;
+  optional Message original_message = 4;
+}
+
+message ScriptConversionContext {
+  optional string tile_id = 1;
+}
+
+message MoneybotContext {
+  enum TriggerSource {
+    TRIGGER_SOURCE_UNSPECIFIED = 0;
+    TRIGGER_SOURCE_DEFICIT_PREDICTED = 1;
+    TRIGGER_SOURCE_RECURRING_CHARGE = 2;
+  }
+
+  // version of Moneybot to use, if it is provided, we use this specific version, otherwise we the version from the launchdarkly flag
+  optional int32 version = 1;
+
+  // whether to extract the memory from this conversation for future use
+  optional bool should_extract_memory = 2;
+
+  // whether the customer is a new customer for Moneybot usage
+  optional bool is_new_customer = 3;
+
+  // Legal and compliance risk tags for the customer (e.g., "TOPIC_INVESTMENT_ADVICE", "TOPIC_CRYPTOCURRENCY")
+  // When this list is non-empty, the high-risk system preamble is used
+  repeated string legal_and_compliance_tags = 4;
+
+  // The source session ID for memory extraction. Used to track which session the memories were extracted from.
+  // This is passed in MCP tool call headers (not in LLM context) when calling upsert_memories.
+  optional string source_session_id = 5;
+
+  // Whether to retrieve and inject memories into the system preamble.
+  // If null, falls back to the moneybot-memory-injection Amplitude experiment.
+  optional bool enable_memory_retrieval = 6;
+
+  // Client-provided memories to inject into the system preamble.
+  // If non-empty, these memories are used instead of fetching from the memory store.
+  repeated kgoosememorystore.api.v1beta1.Memory memories = 7;
+
+  // When true, memory extraction runs but upsert_memories calls skip persistence.
+  // Used by moneybench for testing memory extraction without writing to the store.
+  optional bool memory_extraction_dry_run = 8;
+
+  // Whether to enable freeform memory extraction (in addition to financial profile).
+  // If null, falls back to the ENABLE_FREEFORM_MEMORIES feature flag.
+  // When true, allows extraction of freeform memories even if the feature flag is disabled.
+  optional bool enable_freeform_memories = 9;
+
+  // When true, skips LLM-based session name generation.
+  // Useful for reducing LLM costs and latency in automated/benchmark scenarios.
+  optional bool skip_session_name_generation = 10;
+
+  // When true, skips LLM-based tooltip generation for tool requests.
+  // Useful for reducing LLM costs and latency in automated/benchmark scenarios.
+  optional bool skip_tooltip_generation = 11;
+
+  // The trigger source that initiated this Moneybot conversation.
+  // Used to pass additional context (e.g., forecast data) when the trigger is DEFICIT_PREDICTED.
+  optional TriggerSource trigger_source = 12;
+
+}
+
+message DataAttribute {
+  optional string data = 1;
+  optional string description = 2;
+}
+
+// Context for Managerbot task creation via /v3/create-task endpoint.
+// These values are passed directly to avoid LLM hallucination.
+message ManagerbotContext {
+  // Whether the task should immediately start executing after creation.
+  optional bool immediate_execution = 1;
+
+  message EvergreenMetricsInfo {
+    optional string id = 1;
+    optional string description = 2;
+    map<string, DataAttribute> data_attributes = 3;
+  }
+  optional EvergreenMetricsInfo evergreen_metrics_info = 2;
+}

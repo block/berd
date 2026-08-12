@@ -1,0 +1,165 @@
+syntax = "proto2";
+package squareup.governance.v0;
+
+// DO NOT EDIT!!!
+// This file was auto-generated from https://github.com/squareup/dsl-framework/blob/ac75c6fa1371fe4950a4ec1b20e9b952d6265e91/rubrics/releases/for-dsl-engine/rubrics_v0.json using /script/EngineModelGenerator.py.
+
+option java_package = "com.squareup.protos.common.governance.v0";
+
+message MerchantData {
+  enum SemanticType {
+    DO_NOT_USE = 0;
+    // Facial images used for identity verification, such as on a photo of a Government ID document.
+    GOV_ID_FACIAL_IMAGE = 1;
+    // Seller's voiceprint.
+    VOICEPRINT = 2;
+    // Seller's fignerprint.
+    FINGERPRINT = 3;
+    // Handwriting, including a handwritten signature, such as on a photo of a Government ID document.
+    HANDWRITING = 4;
+    // A seller's full name.
+    FULL_NAME = 5;
+    // A seller's personal email address (including hashed email address).
+    EMAIL_ADDRESS = 6;
+    // The seller's full residential postal address.
+    RESIDENTIAL_ADDRESS = 7;
+    // A seller's personal phone number (including hashed phone number): seven (7) digits or more.
+    PHONE_NUMBER = 8;
+    // Username, $Cashtag, social media handle.
+    USERNAME = 9;
+    // Bank account number.
+    BANK_ACCOUNT_NUMBER = 10;
+    // Payment Card Primary Account Number (PAN) (more than defined by COARSE_PAYMENT_CARD_PAN).
+    PAYMENT_CARD_PAN = 11;
+    // Social Security Number (SSN).
+    SSN = 12;
+    // Employer Identification Number (EIN).
+    EIN = 13;
+    // Passport Number.
+    PASSPORT_NUMBER = 14;
+    // Driver's License Number.
+    DRIVERS_LICENSE_NUMBER = 15;
+    // Individual Tax ID Number (ITIN).
+    ITIN = 16;
+    // Authentication tokens and session tokens.
+    AUTH_TOKEN = 17;
+    // Passwords/passcodes.
+    PASSWORD = 18;
+    // Security questions and answers.
+    SECURITY_QUESTION_ANSWER = 19;
+    // Plaid tokens and similar access credentials for Seller's bank accounts.
+    BANK_ACCESS_TOKEN = 20;
+    // A first name of a seller.
+    FIRST_NAME = 21;
+    // A middle name or middle initial of a seller.
+    MIDDLE_NAME = 22;
+    // A last name of a seller (surname).
+    LAST_NAME = 23;
+    // The street name and street number of a seller' residence, including any additional information about unit/apt/suite/etc.
+    STREET_OF_RESIDENCE = 24;
+    // Residential ZIP/postal code.
+    POSTAL_CODE_OF_RESIDENCE = 25;
+    // City of residence.
+    CITY_OF_RESIDENCE = 26;
+    // State/Region/Province/County of residence.
+    REGION_OF_RESIDENCE = 27;
+    // Country of residence.
+    COUNTRY_OF_RESIDENCE = 28;
+    // Personal phone number: up to six (6) digits.
+    COARSE_PHONE_NUMBER = 29;
+    // Seller's device IDs (including Advertising ID and other unique identifiers that corresponds with an individual's mobile device).
+    DEVICE_ID = 30;
+    // A seller's full date of birth.
+    DATE_OF_BIRTH = 31;
+    // The day of the month a seller was born.
+    BIRTH_DAY_OF_MONTH = 32;
+    // The month a seller was born.
+    BIRTH_MONTH = 33;
+    // The year a seller was born.
+    BIRTH_YEAR = 34;
+    // Gender.
+    GENDER = 35;
+    // Personal inferences about the Seller.
+    INFERENCES = 36;
+    // Customer ID (of a Seller).
+    CUSTOMER_ID = 37;
+    // Information pertaining to a seller's religious beliefs, philosophical beliefs, or union membership.
+    BELIEFS_OR_POLITICS = 38;
+    // Information pertaining to a seller's health, sex life, or sexual orientation.
+    HEALTH_OR_SEXUALITY = 39;
+    // Information about a seller's racial or ethnic demographic.
+    ETHNICITY_OR_RACE = 40;
+    // Touch events on mobile devices. NOTE: individual touch events are quasi-identifiers and should be regarded as pseudonymous, de-identified data by themselves. Sequences of touch events should be considered as equivalent to the data they represent (e.g., touch event sequences for customer identifiers or authentication efforts should be regarded as identifiable and possibly sensitive).
+    TOUCH_EVENTS = 41;
+    // Seller's bank name.
+    BANK_NAME = 42;
+    // Seller's bank routing number.
+    BANK_ROUTING_NUMBER = 43;
+    // Bank account number (coarse): maximum of four (4) digits.
+    COARSE_BANK_ACCOUNT_NUMBER = 44;
+    // Coarse Credit Card Primary Account Number (PAN): BIN or last four digits (max ten digits).
+    COARSE_PAYMENT_CARD_PAN = 45;
+    // A seller's credit score (e.g., FICO).
+    CREDIT_SCORE = 46;
+    // Date of Transaction (e.g. a bank deposit, a purchase, etc.)
+    TRANSACTION_DATE = 47 [deprecated = true];
+    // Amount of Transaction (e.g. a bank deposit, a purchase, etc.)
+    TRANSACTION_AMOUNT = 48 [deprecated = true];
+    // Sender/Recipient/Merchant of Transaction (e.g. a bank deposit, a purchase, etc.)
+    TRANSACTION_PARTY = 49 [deprecated = true];
+    // Last four (4) digits of a seller's Social Security Number (SSN).
+    COARSE_SSN = 50;
+    // Geolocation (precise): location data with a resolution the same or greater than latitude and longitude with three or more decimal places.
+    PRECISE_GEOLOCATION = 51;
+    // Geolocation (coarse): location data with a resolution the same or less than latitude and longitude with two decimal places.
+    COARSE_GEOLOCATION = 52;
+    // Seller's IP Address.
+    IP_ADDRESS = 53;
+    // Free-form text fields and similar user-supplied application content (such as payment notes, email messages, text messages, voice transcripts, etc.), or customer support data generated by the user.
+    USER_GENERATED_TEXT = 54;
+    // Tokens used to identify a merchant customer, such as pseudonyms for Contact information, such as a Fidelius SSN/ITIN token.
+    PERSON_PSEUDONYM = 55;
+    // Tokens used to identify a specific financial instrument, such as a Fidelius PAN token or bank account token (note: this excludes tokens shared with third-parties to facilitate financial transactions).
+    INSTRUMENT_PSEUDONYM = 56;
+    // Tokens used to identify a particular device, such as a seller's phone, such as App Tokens.
+    DEVICE_PSEUDONYM = 57;
+    // Seller's business zip/postal code.
+    BUSINESS_POSTAL_CODE = 58;
+    // Seller's business name.
+    BUSINESS_NAME = 59;
+    // Seller's business email address (including hashed email address).
+    BUSINESS_EMAIL = 60;
+    // Seller's business postal address.
+    BUSINESS_ADDRESS = 61;
+    // Seller's business phone number (including hashed phone number).
+    BUSINESS_PHONE_NUMBER = 62;
+    // Seller's business social media handles.
+    BUSINESS_USERNAME = 63;
+    // Such as a list of contacts in the user's phone, address book, or social graph (see the Contact Information (Precise) category).
+    CONTACTS = 64;
+    // Information relating to a seller's personal income, such as salary, commission, investment income, etc.
+    INCOME = 65;
+    // Information relating to a seller's personal expenses, such as mortgage/rental payments, monthly utilities, debt payments, etc.
+    EXPENSES = 66;
+    // Information relating to a seller's personal assets, such as details on savings accounts, retirement funds, stocks, bonds, and investments.
+    ASSETS = 67;
+    // Underwriting decisions.
+    UNDERWRITING = 68;
+    // Advertising data, such as information about the advertisements the Seller has seen.
+    ADVERTISING_DATA = 69;
+    // Transaction records (Sales / Purchases).
+    TRANSACTION_RECORDS = 70;
+    // Details on chargebacks including chargeback date, amount, reason, and any supporting documentation.
+    CHARGEBACKS = 71;
+    // Details regarding any refunds issued for a transaction including refund date, amount, and reason.
+    REFUNDS = 72;
+    // Such as app launches, taps, scrolling information or other information about how the user interacts with the Square app.
+    INTERACTIONS = 73;
+    // Payroll information.
+    PAYROLL_INFORMATION = 74;
+    // Tax forms (e.g., W-2, W-4).
+    TAX_FORMS = 75;
+    // Dates and amounts deposited to Seller bank accounts.
+    BANK_DEPOSIT_RECORD = 76;
+  }
+}

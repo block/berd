@@ -1,0 +1,212 @@
+{
+  "actions": {
+    "add": "Add automation",
+    "addShort": "Add",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleting": "Deleting...",
+    "duplicate": "Duplicate",
+    "duplicating": "Duplicating...",
+    "edit": "Edit",
+    "editWithChat": "Edit with chat",
+    "more": "More actions",
+    "refresh": "Refresh automations",
+    "refreshShort": "Refresh",
+    "runNow": "Run now",
+    "running": "Running...",
+    "save": "Save",
+    "saveChanges": "Save changes",
+    "saving": "Saving..."
+  },
+  "delete": {
+    "description": "Delete \"{{name}}\"? This action cannot be undone.",
+    "error": "Failed to delete automation.",
+    "title": "Delete automation"
+  },
+  "duplicate": {
+    "copySuffix": "(copy)",
+    "error": "Failed to duplicate automation.",
+    "unsupportedType": "This automation type cannot be duplicated."
+  },
+  "builder": {
+    "blockedBody": "The last response wasn't a valid automation. Try rephrasing what you want.",
+    "blockedTitle": "Automation rejected",
+    "chatAriaLabel": "Automation builder chat",
+    "close": "Close builder",
+    "create": "Create automation",
+    "created": "Created",
+    "creating": "Creating",
+    "draft": "Draft",
+    "editEmptyBody": "Describe what to change about this automation — the schedule, the steps, anything.",
+    "editEmptyTitle": "Edit this automation",
+    "editPlaceholder": "What should change about this automation?",
+    "editingEyebrow": "Editing",
+    "emptyBody": "Describe what you want to automate.",
+    "emptyTitle": "Make an automation",
+    "failed": "Failed",
+    "copySessionId": "Copy session id",
+    "leaveBody": "You have changes in this automation draft that have not been saved.",
+    "leaveCancel": "Keep editing",
+    "leaveDiscard": "Discard",
+    "leaveSave": "Save changes",
+    "leaveTitle": "Unsaved automation changes",
+    "saveChanges": "Save changes",
+    "saving": "Saving",
+    "previewEmptyBody": "Your draft appears here.",
+    "previewEmptyTitle": "No draft yet",
+    "previewEyebrow": "Automation draft",
+    "processing": "Processing",
+    "previewAriaLabel": "Automation draft preview",
+    "subscriptionStatuses": "Subscription statuses",
+    "sessionId": "Session id",
+    "sessionIdCopied": "Copied",
+    "status": {
+      "cancelling": "Cancelling",
+      "idle": "Idle",
+      "needClientInput": "Draft ready",
+      "processing": "Thinking",
+      "ready": "Ready"
+    },
+    "subtitle": "Create an automation by chatting.",
+    "thinking": "Building automation",
+    "title": "Add automation"
+  },
+  "details": {
+    "connections": "Connections",
+    "description": "Review what this automation does, how it runs, and the state of recent runs.",
+    "details": "Details",
+    "editInstructions": "Edit instructions",
+    "instructions": "Instructions",
+    "lastSuccessfulRun": "Last successful run",
+    "latestResult": "Latest result",
+    "latestRun": "Latest run",
+    "noInstructions": "This automation has no instructions yet.",
+    "noLatestResult": "No latest result was returned for this automation.",
+    "notifications": "Notifications",
+    "notificationsDisabled": "Disabled",
+    "notificationsEnabled": "Enabled",
+    "schedule": "Schedule",
+    "selectBody": "Automation details and run history appear here.",
+    "selectTitle": "Select an automation",
+    "stale": "Detail stale",
+    "status": "Status",
+    "subscribedLabels": "Subscribed labels",
+    "timeZone": "Time zone",
+    "tools": "Tools"
+  },
+  "edit": {
+    "description": "Update this automation's settings.",
+    "fields": {
+      "instructions": "Instructions",
+      "notifications": "Slack notifications",
+      "notificationsHelp": "Receive notifications when this automation succeeds, fails, or needs input.",
+      "schedule": "Schedule",
+      "scheduleCustom": "Cron expression",
+      "scheduleDay": "Day",
+      "scheduleHelp": "Choose a common schedule, or use Custom for a cron expression.",
+      "schedulePlaceholder": "0 13 * * *",
+      "scheduleRepeats": "Repeats",
+      "scheduleTime": "Time",
+      "timeZone": "Time zone",
+      "timeZoneEmpty": "No time zones found.",
+      "timeZoneSearch": "Search timezones",
+      "title": "Title"
+    },
+    "instructionsRequired": "Instructions cannot be empty.",
+    "schedulePresets": {
+      "custom": "Custom",
+      "daily": "Daily",
+      "hourly": "Hourly",
+      "none": "No schedule",
+      "weekdays": "Weekdays",
+      "weekly": "Weekly"
+    },
+    "saveError": "Failed to save automation.",
+    "title": "Edit automation",
+    "weekdays": {
+      "friday": "Friday",
+      "monday": "Monday",
+      "saturday": "Saturday",
+      "sunday": "Sunday",
+      "thursday": "Thursday",
+      "tuesday": "Tuesday",
+      "wednesday": "Wednesday"
+    },
+    "autosave": {
+      "saved": "Autosaves",
+      "saving": "Saving..."
+    }
+  },
+  "fallbacks": {
+    "never": "Never",
+    "none": "None",
+    "notSet": "Not set",
+    "unknown": "Unknown",
+    "untitledAutomation": "Untitled automation"
+  },
+  "history": {
+    "automations": "Automations",
+    "emptyBody": "This automation hasn't run yet.",
+    "emptyTitle": "No runs yet",
+    "goToAutomation": "Go to automation",
+    "loadErrorTitle": "History failed to load",
+    "noSessionMessages": "No chat messages were returned for this run.",
+    "noOutputData": "This run did not return output data.",
+    "noSessionId": "No session id",
+    "previousRuns": "Previous runs",
+    "runOutput": "Run output",
+    "runs": "Runs",
+    "sessionHistory": "Session history",
+    "sessionLoadErrorTitle": "Session history failed to load",
+    "sessionUnavailable": "This run does not have a chat session id.",
+    "unavailableBody": "We couldn't load this automation.",
+    "unavailableTitle": "History unavailable"
+  },
+  "run": {
+    "error": "Failed to start automation",
+    "errorDescription": "The automation could not be started. Please try again.",
+    "started": "Automation started"
+  },
+  "list": {
+    "ariaLabel": "Automation list",
+    "emptyBody": "Create your first automation to schedule recurring work.",
+    "emptyTitle": "No automations",
+    "loadErrorTitle": "Automations failed to load"
+  },
+  "overview": {
+    "lastActivity": "Last ran {{time}}",
+    "neverRun": "Never run",
+    "relativeDays": {
+      "today": "today",
+      "todayStandalone": "Today",
+      "yesterday": "yesterday",
+      "yesterdayStandalone": "Yesterday",
+      "withTime": "{{day}} at {{time}}"
+    },
+    "title": "Your automations"
+  },
+  "schedule": {
+    "cron": {
+      "daily": "Daily at {{time}}",
+      "friday": "Fridays at {{time}}",
+      "hourly": "Hourly",
+      "monday": "Mondays at {{time}}",
+      "saturday": "Saturdays at {{time}}",
+      "sunday": "Sundays at {{time}}",
+      "thursday": "Thursdays at {{time}}",
+      "tuesday": "Tuesdays at {{time}}",
+      "wednesday": "Wednesdays at {{time}}",
+      "weekdays": "Weekdays at {{time}}"
+    },
+    "none": "No schedule",
+    "paused": "Paused",
+    "pausedWithReason": "Paused: {{reason}}"
+  },
+  "subtitle": "Create, edit, and manage your automations.",
+  "tabs": {
+    "details": "Details",
+    "history": "History",
+    "overview": "My automations"
+  },
+  "title": "Automations"
+}

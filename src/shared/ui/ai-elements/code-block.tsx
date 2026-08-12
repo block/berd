@@ -1,0 +1,687 @@
+import { Button } from "@/shared/ui/button";
+import { createVirtualLayoutStabilityAttributes } from "@/features/chat/transcript/measurement";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select";
+import { cn } from "@/shared/lib/cn";
+import { CheckIcon, CopyIcon } from "lucide-react";
+import type { ComponentProps, CSSProperties, HTMLAttributes } from "react";
+import {
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useTranslation } from "react-i18next";
+import type {
+  BundledLanguage,
+  BundledTheme,
+  HighlighterGeneric,
+  ThemedToken,
+} from "shiki";
+import { createHighlighter } from "shiki";
+
+// Shiki uses bitflags for font styles: 1=italic, 2=bold, 4=underline
+// oxlint-disable-next-line eslint(no-bitwise)
+const isItalic = (fontStyle: number | undefined) => fontStyle && fontStyle & 1;
+// oxlint-disable-next-line eslint(no-bitwise)
+const isBold = (fontStyle: number | undefined) => fontStyle && fontStyle & 2;
+const isUnderline = (fontStyle: number | undefined) =>
+  // oxlint-disable-next-line eslint(no-bitwise)
+  fontStyle && fontStyle & 4;
+
+// Transform tokens to include pre-computed keys to avoid noArrayIndexKey lint
+interface KeyedToken {
+  token: ThemedToken;
+  key: string;
+}
+interface KeyedLine {
+  tokens: KeyedToken[];
+  key: string;
+}
+
+const addKeysToTokens = (lines: ThemedToken[][]): KeyedLine[] =>
+  lines.map((line, lineIdx) => ({
+    key: `line-${lineIdx}`,
+    tokens: line.map((token, tokenIdx) => ({
+      key: `line-${lineIdx}-${tokenIdx}`,
+      token,
+    })),
+  }));
+
+// Token rendering component
+const TokenSpan = ({
+  token,
+  transparentBackground,
+}: {
+  token: ThemedToken;
+  transparentBackground: boolean;
+}) => (
+  <span
+    className={cn(
+      "dark:!text-[var(--shiki-dark)]",
+      !transparentBackground && "dark:!bg-[var(--shiki-dark-bg)]",
+    )}
+    style={
+      {
+        color: token.color,
+        fontStyle: isItalic(token.fontStyle) ? "italic" : undefined,
+        fontWeight: isBold(token.fontStyle) ? "bold" : undefined,
+        textDecoration: isUnderline(token.fontStyle) ? "underline" : undefined,
+        ...token.htmlStyle,
+        backgroundColor: transparentBackground ? undefined : token.bgColor,
+      } as CSSProperties
+    }
+  >
+    {token.content}
+  </span>
+);
+
+// Line number styles using CSS counters
+const LINE_NUMBER_CLASSES = cn(
+  "block",
+  "before:content-[counter(line)]",
+  "before:inline-block",
+  "before:[counter-increment:line]",
+  "before:w-4",
+  "before:mr-2",
+  "before:text-left",
+  "before:text-[12px]",
+  "before:text-muted-foreground/50",
+  "before:font-mono",
+  "before:select-none",
+);
+
+// Line rendering component
+const LineSpan = ({
+  keyedLine,
+  showLineNumbers,
+  transparentBackground,
+}: {
+  keyedLine: KeyedLine;
+  showLineNumbers: boolean;
+  transparentBackground: boolean;
+}) => (
+  <span className={showLineNumbers ? LINE_NUMBER_CLASSES : "block"}>
+    {keyedLine.tokens.length === 0
+      ? "\n"
+      : keyedLine.tokens.map(({ token, key }) => (
+          <TokenSpan
+            key={key}
+            token={token}
+            transparentBackground={transparentBackground}
+          />
+        ))}
+  </span>
+);
+
+// Types
+type CodeBlockProps = HTMLAttributes<HTMLDivElement> & {
+  code: string;
+  language: BundledLanguage;
+  showLineNumbers?: boolean;
+  viewportClassName?: string;
+  transparentBackground?: boolean;
+};
+
+interface TokenizedCode {
+  tokens: ThemedToken[][];
+  fg: string;
+  bg: string;
+}
+
+interface CodeBlockContextType {
+  code: string;
+}
+
+// Context
+const CodeBlockContext = createContext<CodeBlockContextType>({
+  code: "",
+});
+
+// Highlighter cache (singleton per language)
+const highlighterCache = new Map<
+  string,
+  Promise<HighlighterGeneric<BundledLanguage, BundledTheme>>
+>();
+
+// Token cache
+const MAX_TOKEN_CACHE_ENTRIES = 100;
+const tokensCache = new Map<string, TokenizedCode>();
+
+const getCachedTokenizedCode = (key: string): TokenizedCode | null => {
+  const cached = tokensCache.get(key);
+  if (!cached) return null;
+
+  tokensCache.delete(key);
+  tokensCache.set(key, cached);
+  return cached;
+};
+
+const rememberTokenizedCode = (key: string, value: TokenizedCode) => {
+  tokensCache.delete(key);
+  tokensCache.set(key, value);
+
+  while (tokensCache.size > MAX_TOKEN_CACHE_ENTRIES) {
+    const oldest = tokensCache.keys().next();
+    if (oldest.done) break;
+    tokensCache.delete(oldest.value);
+  }
+};
+
+// Subscribers for async token updates
+const subscribers = new Map<
+  string,
+  Set<{
+    onError?: (error: unknown) => void;
+    onResult: (result: TokenizedCode) => void;
+  }>
+>();
+
+const getTokensCacheKey = (code: string, language: BundledLanguage) => {
+  const start = code.slice(0, 100);
+  const end = code.length > 100 ? code.slice(-100) : "";
+  return `${language}:${code.length}:${start}:${end}`;
+};
+
+const getCachedTokenizedCodeForInput = (
+  code: string,
+  language: BundledLanguage,
+) => tokensCache.get(getTokensCacheKey(code, language)) ?? null;
+
+const getHighlighter = (
+  language: BundledLanguage,
+): Promise<HighlighterGeneric<BundledLanguage, BundledTheme>> => {
+  const cached = highlighterCache.get(language);
+  if (cached) {
+    return cached;
+  }
+
+  const highlighterPromise = createHighlighter({
+    langs: [language],
+    themes: ["github-light", "github-dark"],
+  });
+
+  highlighterCache.set(language, highlighterPromise);
+  return highlighterPromise;
+};
+
+// Create raw tokens for immediate display while highlighting loads
+const createRawTokens = (code: string): TokenizedCode => ({
+  bg: "transparent",
+  fg: "inherit",
+  tokens: code.split("\n").map((line) =>
+    line === ""
+      ? []
+      : [
+          {
+            color: "inherit",
+            content: line,
+          } as ThemedToken,
+        ],
+  ),
+});
+
+// Synchronous highlight with callback for async results
+export const highlightCode = (
+  code: string,
+  language: BundledLanguage,
+  // oxlint-disable-next-line eslint-plugin-promise(prefer-await-to-callbacks)
+  callback?: (result: TokenizedCode) => void,
+  // oxlint-disable-next-line eslint-plugin-promise(prefer-await-to-callbacks)
+  errorCallback?: (error: unknown) => void,
+): TokenizedCode | null => {
+  const tokensCacheKey = getTokensCacheKey(code, language);
+
+  // Return cached result if available
+  const cached = getCachedTokenizedCode(tokensCacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  // Subscribe callback if provided
+  if (callback) {
+    if (!subscribers.has(tokensCacheKey)) {
+      subscribers.set(tokensCacheKey, new Set());
+    }
+    subscribers.get(tokensCacheKey)?.add({
+      onError: errorCallback,
+      onResult: callback,
+    });
+  }
+
+  // Start highlighting in background - fire-and-forget async pattern
+  getHighlighter(language)
+    // oxlint-disable-next-line eslint-plugin-promise(prefer-await-to-then)
+    .then((highlighter) => {
+      const availableLangs = highlighter.getLoadedLanguages();
+      const langToUse = availableLangs.includes(language) ? language : "text";
+
+      const result = highlighter.codeToTokens(code, {
+        lang: langToUse,
+        themes: {
+          dark: "github-dark",
+          light: "github-light",
+        },
+      });
+
+      const tokenized: TokenizedCode = {
+        bg: result.bg ?? "transparent",
+        fg: result.fg ?? "inherit",
+        tokens: result.tokens,
+      };
+
+      // Cache the result
+      rememberTokenizedCode(tokensCacheKey, tokenized);
+
+      // Notify all subscribers
+      const subs = subscribers.get(tokensCacheKey);
+      if (subs) {
+        for (const sub of subs) {
+          sub.onResult(tokenized);
+        }
+        subscribers.delete(tokensCacheKey);
+      }
+    })
+    // oxlint-disable-next-line eslint-plugin-promise(prefer-await-to-then), eslint-plugin-promise(prefer-await-to-callbacks)
+    .catch((error) => {
+      console.error("Failed to highlight code:", error);
+      const subs = subscribers.get(tokensCacheKey);
+      if (subs) {
+        for (const sub of subs) {
+          sub.onError?.(error);
+        }
+      }
+      subscribers.delete(tokensCacheKey);
+    });
+
+  return null;
+};
+
+const CodeBlockBody = memo(
+  ({
+    tokenized,
+    showLineNumbers,
+    className,
+    transparentBackground,
+  }: {
+    tokenized: TokenizedCode;
+    showLineNumbers: boolean;
+    className?: string;
+    transparentBackground: boolean;
+  }) => {
+    const preStyle = useMemo(
+      () => ({
+        backgroundColor: transparentBackground ? "transparent" : tokenized.bg,
+        color: tokenized.fg,
+      }),
+      [tokenized.bg, tokenized.fg, transparentBackground],
+    );
+
+    const keyedLines = useMemo(
+      () => addKeysToTokens(tokenized.tokens),
+      [tokenized.tokens],
+    );
+
+    return (
+      <pre
+        className={cn(
+          "dark:!text-[var(--shiki-dark)] m-0 p-3 text-[13px] leading-5",
+          !transparentBackground && "dark:!bg-[var(--shiki-dark-bg)]",
+          className,
+        )}
+        style={preStyle}
+      >
+        <code
+          className={cn(
+            "font-mono text-[13px] leading-5",
+            showLineNumbers &&
+              "[counter-increment:line_0] [counter-reset:line]",
+          )}
+        >
+          {keyedLines.map((keyedLine) => (
+            <LineSpan
+              key={keyedLine.key}
+              keyedLine={keyedLine}
+              showLineNumbers={showLineNumbers}
+              transparentBackground={transparentBackground}
+            />
+          ))}
+        </code>
+      </pre>
+    );
+  },
+  (prevProps, nextProps) =>
+    prevProps.tokenized === nextProps.tokenized &&
+    prevProps.showLineNumbers === nextProps.showLineNumbers &&
+    prevProps.className === nextProps.className &&
+    prevProps.transparentBackground === nextProps.transparentBackground,
+);
+
+CodeBlockBody.displayName = "CodeBlockBody";
+
+export const CodeBlockContainer = ({
+  className,
+  language,
+  style,
+  ...props
+}: HTMLAttributes<HTMLDivElement> & { language: string }) => (
+  <div
+    className={cn(
+      "group relative w-full min-w-0 max-w-full overflow-visible bg-transparent text-foreground",
+      className,
+    )}
+    data-language={language}
+    style={style}
+    {...props}
+  />
+);
+
+export const CodeBlockHeader = ({
+  children,
+  className,
+  ...props
+}: HTMLAttributes<HTMLDivElement>) => (
+  <div
+    className={cn(
+      "flex min-h-7 items-end justify-between bg-transparent px-0 py-0 text-[11px] text-muted-foreground leading-4",
+      className,
+    )}
+    {...props}
+  >
+    {children}
+  </div>
+);
+
+export const CodeBlockTitle = ({
+  children,
+  className,
+  ...props
+}: HTMLAttributes<HTMLDivElement>) => (
+  <div className={cn("flex items-end gap-2", className)} {...props}>
+    {children}
+  </div>
+);
+
+export const CodeBlockFilename = ({
+  children,
+  className,
+  ...props
+}: HTMLAttributes<HTMLSpanElement>) => (
+  <span className={cn("font-mono", className)} {...props}>
+    {children}
+  </span>
+);
+
+export const CodeBlockActions = ({
+  children,
+  className,
+  ...props
+}: HTMLAttributes<HTMLDivElement>) => (
+  <div className={cn("flex items-end gap-1", className)} {...props}>
+    {children}
+  </div>
+);
+
+export const CodeBlockContent = ({
+  code,
+  language,
+  showLineNumbers = false,
+  viewportClassName,
+  transparentBackground = false,
+}: {
+  code: string;
+  language: BundledLanguage;
+  showLineNumbers?: boolean;
+  viewportClassName?: string;
+  transparentBackground?: boolean;
+}) => {
+  // Memoized raw tokens for immediate display
+  const rawTokens = useMemo(() => createRawTokens(code), [code]);
+  const cacheKey = useMemo(
+    () => getTokensCacheKey(code, language),
+    [code, language],
+  );
+  const cachedTokens = useMemo(
+    () => getCachedTokenizedCodeForInput(code, language),
+    [code, language],
+  );
+
+  // Async highlighting result (populated after shiki loads)
+  const [highlightState, setHighlightState] = useState<{
+    cacheKey: string;
+    isHighlighting: boolean;
+    tokens: TokenizedCode | null;
+  }>(() => ({
+    cacheKey,
+    isHighlighting: cachedTokens == null,
+    tokens: cachedTokens,
+  }));
+
+  useEffect(() => {
+    if (cachedTokens) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const cached = highlightCode(
+      code,
+      language,
+      (result) => {
+        if (!cancelled) {
+          setHighlightState({
+            cacheKey,
+            isHighlighting: false,
+            tokens: result,
+          });
+        }
+      },
+      () => {
+        if (!cancelled) {
+          setHighlightState({
+            cacheKey,
+            isHighlighting: false,
+            tokens: null,
+          });
+        }
+      },
+    );
+    if (cached) {
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setHighlightState({
+            cacheKey,
+            isHighlighting: false,
+            tokens: cached,
+          });
+        }
+      });
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheKey, cachedTokens, code, language]);
+
+  const highlightedTokens =
+    cachedTokens ??
+    (highlightState.cacheKey === cacheKey ? highlightState.tokens : null);
+  const isHighlighting =
+    highlightedTokens == null &&
+    (highlightState.cacheKey === cacheKey
+      ? highlightState.isHighlighting
+      : true);
+  const tokenized = highlightedTokens ?? rawTokens;
+
+  return (
+    <div
+      className={cn(
+        "relative min-w-0 max-w-full overflow-auto rounded-[0.625rem]",
+        !transparentBackground && "border border-border/80 bg-background",
+        viewportClassName,
+      )}
+      {...createVirtualLayoutStabilityAttributes({
+        isPending: isHighlighting,
+        reason: "code-highlighting",
+      })}
+    >
+      <CodeBlockBody
+        showLineNumbers={showLineNumbers}
+        tokenized={tokenized}
+        transparentBackground={transparentBackground}
+      />
+    </div>
+  );
+};
+
+export const CodeBlock = ({
+  code,
+  language,
+  showLineNumbers = false,
+  viewportClassName,
+  transparentBackground = false,
+  className,
+  children,
+  ...props
+}: CodeBlockProps) => {
+  const contextValue = useMemo(() => ({ code }), [code]);
+
+  return (
+    <CodeBlockContext.Provider value={contextValue}>
+      <CodeBlockContainer className={className} language={language} {...props}>
+        {children}
+        <CodeBlockContent
+          code={code}
+          language={language}
+          showLineNumbers={showLineNumbers}
+          viewportClassName={viewportClassName}
+          transparentBackground={transparentBackground}
+        />
+      </CodeBlockContainer>
+    </CodeBlockContext.Provider>
+  );
+};
+
+export type CodeBlockCopyButtonProps = ComponentProps<typeof Button> & {
+  onCopy?: () => void;
+  onError?: (error: Error) => void;
+  timeout?: number;
+};
+
+export const CodeBlockCopyButton = ({
+  onCopy,
+  onError,
+  timeout = 2000,
+  children,
+  className,
+  ...props
+}: CodeBlockCopyButtonProps) => {
+  const { t } = useTranslation("common");
+  const [isCopied, setIsCopied] = useState(false);
+  const timeoutRef = useRef<number>(0);
+  const { code } = useContext(CodeBlockContext);
+
+  const copyToClipboard = useCallback(async () => {
+    if (typeof window === "undefined" || !navigator?.clipboard?.writeText) {
+      onError?.(new Error(t("errors.clipboardUnavailable")));
+      return;
+    }
+
+    try {
+      if (!isCopied) {
+        await navigator.clipboard.writeText(code);
+        setIsCopied(true);
+        onCopy?.();
+        timeoutRef.current = window.setTimeout(
+          () => setIsCopied(false),
+          timeout,
+        );
+      }
+    } catch (error) {
+      onError?.(error as Error);
+    }
+  }, [code, isCopied, onCopy, onError, t, timeout]);
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(timeoutRef.current);
+    },
+    [],
+  );
+
+  const Icon = isCopied ? CheckIcon : CopyIcon;
+
+  return (
+    <Button
+      aria-label={t("components.codeBlock.copyLabel")}
+      className={cn("shrink-0", className)}
+      onClick={copyToClipboard}
+      size="icon-xs"
+      tooltip={t("components.codeBlock.copyLabel")}
+      variant="ghost"
+      {...props}
+    >
+      {children ?? <Icon size={12} />}
+    </Button>
+  );
+};
+
+export type CodeBlockLanguageSelectorProps = ComponentProps<typeof Select>;
+
+export const CodeBlockLanguageSelector = (
+  props: CodeBlockLanguageSelectorProps,
+) => <Select {...props} />;
+
+export type CodeBlockLanguageSelectorTriggerProps = ComponentProps<
+  typeof SelectTrigger
+>;
+
+export const CodeBlockLanguageSelectorTrigger = ({
+  className,
+  ...props
+}: CodeBlockLanguageSelectorTriggerProps) => (
+  <SelectTrigger
+    className={cn(
+      "h-7 border-none bg-transparent px-2 text-xs shadow-none",
+      className,
+    )}
+    size="sm"
+    {...props}
+  />
+);
+
+export type CodeBlockLanguageSelectorValueProps = ComponentProps<
+  typeof SelectValue
+>;
+
+export const CodeBlockLanguageSelectorValue = (
+  props: CodeBlockLanguageSelectorValueProps,
+) => <SelectValue {...props} />;
+
+export type CodeBlockLanguageSelectorContentProps = ComponentProps<
+  typeof SelectContent
+>;
+
+export const CodeBlockLanguageSelectorContent = ({
+  align = "end",
+  ...props
+}: CodeBlockLanguageSelectorContentProps) => (
+  <SelectContent align={align} {...props} />
+);
+
+export type CodeBlockLanguageSelectorItemProps = ComponentProps<
+  typeof SelectItem
+>;
+
+export const CodeBlockLanguageSelectorItem = (
+  props: CodeBlockLanguageSelectorItemProps,
+) => <SelectItem {...props} />;

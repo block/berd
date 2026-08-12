@@ -1,0 +1,42 @@
+{
+  "title": "Enviar comentarios",
+  "direct": {
+    "submittingTitle": "Enviando comentarios…",
+    "submittingBody": "Preparando y enviando el informe aprobado.",
+    "successTitle": "Comentarios enviados",
+    "successBody": "Tu informe fue enviado al equipo de Berd.",
+    "successWithUrl": "Tu informe está listo para ver.",
+    "failureTitle": "No se enviaron los comentarios"
+  },
+  "dialog": {
+    "title": "Enviar comentarios",
+    "description": "Ayúdanos a mejorar Berd con errores o comentarios.",
+    "titleLabel": "Título",
+    "titlePlaceholder": "Resumen breve",
+    "descriptionLabel": "Descripción",
+    "descriptionPlaceholder": "Describe qué ocurrió o qué podría mejorar",
+    "attachmentsLabel": "Archivos adjuntos",
+    "addImages": "Agregar imágenes",
+    "attachmentsHelp": "PNG, JPG, captura de pantalla o pega directamente en este modal",
+    "attachmentsPickerTitle": "Elegir imágenes",
+    "imageFilesFilter": "Imágenes",
+    "removeAttachment": "Eliminar {{name}}",
+    "attachLogs": "Adjuntar registros y diagnósticos",
+    "attachLogsHelp": "Incluye metadatos locales seguros y registros saneados. Se excluyen prompts, respuestas, payloads de herramientas y bases de datos de sesiones.",
+    "attachmentLimitError": "Los comentarios admiten hasta {{count}} imágenes adjuntas.",
+    "imageOnlyError": "Solo se pueden adjuntar archivos de imagen.",
+    "imageReadError": "No se pudieron adjuntar algunas imágenes.",
+    "submit": "Enviar",
+    "submitting": "Enviando…",
+    "submitError": "No se pudo enviar el comentario",
+    "networkAccessError": "No se pueden enviar los comentarios. Comprueba que estes conectado a Cloudflare WARP e intentalo de nuevo.",
+    "successTitle": "¡Gracias!",
+    "successBody": "Tu comentario ha sido enviado.",
+    "viewTicket": "Ver ticket",
+    "submitAnother": "Enviar otro",
+    "discardTitle": "¿Descartar comentario?",
+    "discardBody": "Tienes comentarios sin enviar. Se perderán tus cambios.",
+    "discardCancel": "Cancelar",
+    "discardConfirm": "Descartar"
+  }
+}

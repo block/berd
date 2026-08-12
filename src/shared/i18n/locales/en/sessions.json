@@ -1,0 +1,117 @@
+{
+  "card": {
+    "export": "Export…",
+    "focusWindowFailed": "Failed to focus session window",
+    "open": "Open {{title}}",
+    "openInNewWindow": "Open in new window",
+    "openWindow": "Open window",
+    "openWindowFailed": "Failed to open session window",
+    "optionsFor": "Options for {{title}}"
+  },
+  "dateGroups": {
+    "today": "Today",
+    "yesterday": "Yesterday"
+  },
+  "history": {
+    "archivedSubtitle": "Sessions you've archived",
+    "archivedTitle": "Archived sessions",
+    "backToActive": "Back to active",
+    "copyTitle": "{{title}} (copy)",
+    "emptyArchived": "No archived sessions",
+    "emptyArchivedHint": "Archived sessions will appear here.",
+    "emptyHint": "Start a chat to see it here.",
+    "emptyTitle": "No sessions yet",
+    "copyImportCommand": "Copy import command",
+    "forkFailed": "Failed to duplicate session",
+    "forked": "Duplicated {{title}}",
+    "importCommandIntro": "Run:",
+    "importCommandRefresh": "Then refresh Session History.",
+    "importComplete": "Import complete",
+    "importCompleteDescription_one": "Imported {{title}} with {{displayCount}} message.",
+    "importCompleteDescription_other": "Imported {{title}} with {{displayCount}} messages.",
+    "importDisconnectedError": "Berd disconnected while {{phase}} ({{fileSize}}). The import did not return a result; the backend may have restarted, crashed, or rejected the large payload. The underlying server error is only available in the Berd logs.",
+    "importFailed": "Import failed",
+    "importFailedDescription": "{{fileName}} {{message}}",
+    "importFailedFallback": "could not be imported.",
+    "importingButton": "Importing...",
+    "importPhase": {
+      "importing": "Importing session",
+      "reading": "Reading file",
+      "refreshing": "Refreshing history"
+    },
+    "importPhaseDescription": {
+      "importing": "sending the session to Berd",
+      "reading": "reading the selected file",
+      "refreshing": "refreshing session history"
+    },
+    "importProgressDescription": "{{fileName}} ({{fileSize}}). Large session imports can take a bit.",
+    "importSuccess": "Imported {{title}}",
+    "importTooLarge": "is too large to import from the app.",
+    "loadMore": "Load more",
+    "loadingMoreSearchResults": "Loading more search results...",
+    "loadingMoreSessions": "Loading more sessions...",
+    "searchArchivedPlaceholder": "Search archived sessions...",
+    "searchError": "Message search failed. Showing title, agent, and project matches only. Try again.",
+    "searchPlaceholder": "Search sessions...",
+    "searching": "Searching sessions...",
+    "selectedContext_one": "{{displayCount}} chat selected",
+    "selectedContext_other": "{{displayCount}} chats selected",
+    "subtitle": "Browse and search past sessions",
+    "toggleArchived": "Archived",
+    "title": "Session history",
+    "controls": {
+      "active": "Active",
+      "archived": "Archived",
+      "archivedWithCount": "Archived ({{count}})",
+      "allProjects": "All projects",
+      "projectsSelected_one": "{{count}} project",
+      "projectsSelected_other": "{{count}} projects",
+      "noProject": "No project",
+      "listView": "List view",
+      "gridView": "Grid view"
+    },
+    "searchStatus": {
+      "searching": "Searching conversations… {{searched}} of {{total}}",
+      "pending": "Searching as you type…",
+      "doneWithContent_one": "{{count}} result · titles, agents, projects, dates, and conversation text",
+      "doneWithContent_other": "{{count}} results · titles, agents, projects, dates, and conversation text",
+      "donePartialContent": "{{done}} — {{note}}",
+      "unreadableNote_one": "{{count}} conversation could not be read",
+      "unreadableNote_other": "{{count}} conversations could not be read",
+      "doneMetadataOnly_one": "{{count}} result · titles, agents, projects, and dates — type more to search conversation text",
+      "doneMetadataOnly_other": "{{count}} results · titles, agents, projects, and dates — type more to search conversation text"
+    },
+    "searchEmpty": {
+      "title": "No sessions match \"{{query}}\"",
+      "clearFilters": "Clear filters",
+      "searchArchived": "Search archived",
+      "scopeWithContent": "Search covers titles, agents, projects, dates, and conversation text.",
+      "scopeWithContentAndArchivedHint": "Search covers titles, agents, projects, dates, and conversation text. Archived sessions may have matches.",
+      "scopeMetadataOnly": "Search covers titles, agents, projects, and dates. Type at least 2 characters to also search conversation text.",
+      "scopeMetadataOnlyWithArchivedHint": "Search covers titles, agents, projects, and dates. Type at least 2 characters to also search conversation text. Archived sessions may have matches."
+    },
+    "timeline": {
+      "label": "Jump to date",
+      "older": "Older",
+      "loadingOlder": "Loading…"
+    },
+    "emptyFiltered": "No sessions match these filters",
+    "emptyFilteredHint": "No active chats are in the selected projects.",
+    "emptyFilteredArchivedHint": "No archived chats are in the selected projects.",
+    "emptyClearFilters": "Clear filters"
+  },
+  "quickSwitch": {
+    "description": "Type to fuzzy-search session titles, then press Enter to jump.",
+    "empty": "No matching sessions",
+    "placeholder": "Jump to session...",
+    "title": "Jump to session"
+  },
+  "search": {
+    "matches_one": "{{displayCount}} match",
+    "matches_other": "{{displayCount}} matches",
+    "messageMatches_one": "{{displayCount}} message match",
+    "messageMatches_other": "{{displayCount}} message matches"
+  },
+  "messageCount_one": "{{displayCount}} message",
+  "messageCount_other": "{{displayCount}} messages"
+}

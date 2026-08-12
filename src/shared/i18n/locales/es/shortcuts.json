@@ -1,0 +1,72 @@
+{
+  "actions": {
+    "archiveSession": "Archivar sesión actual",
+    "back": "Retroceder",
+    "closeSession": "Cerrar sesión actual",
+    "findInConversation": "Buscar en la conversación",
+    "forward": "Avanzar",
+    "globalShortcut": "Atajo global",
+    "toggleVoiceDictation": "Iniciar o detener el dictado por voz",
+    "insertNewline": "Insertar salto de línea",
+    "mentionAcceptSuggestion": "Aceptar la sugerencia seleccionada",
+    "mentionClose": "Cerrar el menú de menciones",
+    "mentionConfirm": "Insertar la mención seleccionada",
+    "mentionNext": "Siguiente sugerencia de mención",
+    "mentionPrevious": "Sugerencia de mención anterior",
+    "newConversation": "Nueva conversación",
+    "newTerminalTab": "Nueva pestaña de terminal (con la terminal enfocada)",
+    "nextSession": "Sesión siguiente",
+    "openSettings": "Abrir ajustes",
+    "paneJump": "Saltar entre paneles",
+    "previousSession": "Sesión anterior",
+    "quickSwitch": "Cambiar de sesión",
+    "recallLastMessage": "Recuperar el último mensaje enviado",
+    "search": "Abrir búsqueda",
+    "searchClose": "Cerrar la búsqueda en la conversación",
+    "searchNext": "Siguiente resultado de búsqueda",
+    "searchPrevious": "Resultado de búsqueda anterior",
+    "sendMessage": "Enviar mensaje",
+    "sendNow": "Enviar inmediatamente",
+    "showShortcuts": "Mostrar esta referencia",
+    "toggleDesignSystemInspector": "Mostrar u ocultar inspector del sistema de diseño",
+    "toggleDesignSystemInspectorMode": "Mostrar u ocultar modo de inspección del sistema de diseño",
+    "toggleSidebar": "Mostrar u ocultar barra lateral",
+    "toggleTerminal": "Mostrar u ocultar terminal",
+    "zoomIn": "Acercar",
+    "zoomOut": "Alejar",
+    "zoomReset": "Restablecer zoom"
+  },
+  "categories": {
+    "chat": "Chat",
+    "help": "Ayuda",
+    "navigation": "Navegación",
+    "view": "Vista"
+  },
+  "dialog": {
+    "dismissHint": "Pulsa Esc para cerrar",
+    "title": "Atajos de teclado"
+  },
+  "settings": {
+    "conflict": "Ya lo usa \"{{command}}\"",
+    "customize": "Personalizar",
+    "default": "Predeterminado: {{shortcut}}",
+    "description": "Personaliza los atajos de teclado",
+    "editLabel": "Cambiar el atajo de {{command}}",
+    "empty": "Ningún atajo coincide con tu búsqueda",
+    "globalShortcut": {
+      "description": "Usa tu atajo global configurado para crear y buscar chats desde cualquier lugar en macOS.",
+      "label": "Activar atajo global"
+    },
+    "invalid": "Los atajos necesitan una tecla modificadora como Cmd, Ctrl o Alt",
+    "invalidUnmodified": "Esa tecla no puede usarse sola: añade una tecla modificadora o usa Enter o una flecha",
+    "label": "Atajos de teclado",
+    "pageDescription": "Personaliza los atajos de teclado que se usan en Berd.",
+    "recording": "Pulsa el atajo…",
+    "recordingHint": "Pulsa la nueva combinación de teclas. Esc cancela.",
+    "reset": "Restablecer valor predeterminado",
+    "resetAll": "Restablecer todo",
+    "saveError": "No se pudo guardar el atajo",
+    "searchPlaceholder": "Buscar atajos",
+    "title": "Atajos de teclado"
+  }
+}

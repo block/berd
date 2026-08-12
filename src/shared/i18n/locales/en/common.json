@@ -1,0 +1,170 @@
+{
+  "actions": {
+    "archive": "Archive",
+    "cancel": "Cancel",
+    "clear": "Clear",
+    "close": "Close",
+    "copy": "Copy",
+    "create": "Create",
+    "delete": "Delete",
+    "duplicate": "Duplicate",
+    "edit": "Edit",
+    "export": "Export",
+    "fix": "Fix",
+    "import": "Import",
+    "new": "New",
+    "next": "Next",
+    "open": "Open",
+    "previous": "Previous",
+    "pinToHome": "Pin to home",
+    "pinnedToHome": "Pinned to home",
+    "pinningToHome": "Pinning...",
+    "unpinFromHome": "Unpin from home",
+    "pinChat": "Pin chat",
+    "pinChats": "Pin chats",
+    "pinnedChat": "Pinned chat",
+    "pinningChat": "Pinning...",
+    "unpinChat": "Unpin chat",
+    "unpinChats": "Unpin chats",
+    "refresh": "Refresh",
+    "remove": "Remove",
+    "rename": "Rename",
+    "restore": "Restore",
+    "retry": "Retry",
+    "run": "Run",
+    "running": "Running",
+    "save": "Save",
+    "saveChanges": "Save changes",
+    "search": "Search",
+    "select": "Select",
+    "send": "Send",
+    "stop": "Stop",
+    "toggle": "Toggle",
+    "update": "Update",
+    "view": "View"
+  },
+  "buttons": {
+    "openFixUrl": "Open fix URL"
+  },
+  "bulkActions": {
+    "archiveConfirmDescription_one": "You can restore it in Settings.",
+    "archiveConfirmDescription_other": "You can restore them in Settings.",
+    "archiveConfirmTitle_one": "Archive 1 chat?",
+    "archiveConfirmTitle_other": "Archive {{displayCount}} chats?",
+    "archiving": "Archiving...",
+    "failed_one": "{{displayCount}} action failed",
+    "failed_other": "{{displayCount}} actions failed"
+  },
+  "components": {
+    "codeBlock": {
+      "copyLabel": "Copy code",
+      "runInTerminalLabel": "Run in terminal"
+    },
+    "environmentVariables": {
+      "copyLabel": "Copy environment variable",
+      "title": "Environment variables",
+      "toggleVisibility": "Toggle value visibility"
+    },
+    "linkSafety": {
+      "copied": "Copied!",
+      "copyLink": "Copy link",
+      "description": "You're about to visit an external website.",
+      "openLink": "Open link",
+      "title": "Open external link?",
+      "dontAskAgain": "Don't ask again for {{domain}}"
+    },
+    "mermaid": {
+      "downloadStarted": "Download started: {{filename}}",
+      "openDownloads": "Open Downloads",
+      "openDownloadsError": "Couldn't open Downloads."
+    },
+    "messageBranch": {
+      "next": "Next branch",
+      "page": "{{current}} of {{total}}",
+      "previous": "Previous branch"
+    },
+    "plan": {
+      "toggle": "Toggle plan"
+    },
+    "snippet": {
+      "copyLabel": "Copy"
+    },
+    "stackTrace": {
+      "copyLabel": "Copy stack trace",
+      "empty": "No stack frames"
+    },
+    "terminal": {
+      "clearLabel": "Clear terminal output",
+      "copyLabel": "Copy terminal output",
+      "title": "Terminal"
+    }
+  },
+  "errors": {
+    "clipboardUnavailable": "Clipboard API not available"
+  },
+  "rendererError": {
+    "description": "Berd hit a renderer error. Reload the window to try again.",
+    "reload": "Reload",
+    "title": "Something went wrong"
+  },
+  "startup": {
+    "loadingLabel": "Starting Berd",
+    "error": {
+      "gooseServe": {
+        "title": "Berd couldn't start",
+        "description": "The local Goose service didn't start. Try again, or copy the startup details and open the logs folder to share them with support."
+      },
+      "networkWarp": {
+        "title": "Berd can't reach Block's internal services",
+        "description": "It looks like you aren't connected to Cloudflare WARP.",
+        "steps": {
+          "connect": "Connect to WARP",
+          "retry": "Click Retry"
+        }
+      },
+      "runtimeConfig": {
+        "title": "Configuration unavailable",
+        "description": "Berd couldn't load its runtime configuration. Try again, or copy the startup details and share them with support."
+      },
+      "unknown": {
+        "title": "Berd couldn't start",
+        "description": "Berd couldn't finish starting. Try again, or copy the startup details and open the logs folder to share them with support."
+      },
+      "copyDetails": "Copy details",
+      "openLogsFolder": "Open logs folder",
+      "technicalDetails": "Technical details",
+      "connectivityProbeLabel": "Connectivity probe",
+      "copySuccess": "Startup details copied.",
+      "copyFailed": "We couldn't copy startup details.",
+      "openLogsFailed": "We couldn't open the logs folder."
+    }
+  },
+  "labels": {
+    "assistant": "Assistant",
+    "copyPath": "Copy path",
+    "openInEditor": "Open in editor",
+    "openInViewer": "Open in viewer",
+    "revealInFileManager_mac": "Reveal in Finder",
+    "revealInFileManager_windows": "Reveal in Explorer",
+    "revealInFileManager_linux": "Reveal in File Manager",
+    "builtIn": "Built-in",
+    "characterCount": "{{count}} chars",
+    "custom": "Custom",
+    "default": "Default",
+    "goose": "Goose",
+    "loading": "Loading...",
+    "preparingContent": "Preparing content",
+    "required": "Required"
+  },
+  "session": {
+    "defaultTitle": "New chat"
+  },
+  "usage": {
+    "cache": "Cache",
+    "input": "Input",
+    "modelContext": "Model context usage",
+    "output": "Output",
+    "reasoning": "Reasoning",
+    "totalCost": "Total cost"
+  }
+}

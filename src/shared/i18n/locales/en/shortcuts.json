@@ -1,0 +1,72 @@
+{
+  "actions": {
+    "archiveSession": "Archive current session",
+    "back": "Go back",
+    "closeSession": "Close current session",
+    "findInConversation": "Find in conversation",
+    "forward": "Go forward",
+    "globalShortcut": "Global shortcut",
+    "toggleVoiceDictation": "Start or stop voice dictation",
+    "insertNewline": "Insert newline",
+    "mentionAcceptSuggestion": "Accept selected suggestion",
+    "mentionClose": "Close mention menu",
+    "mentionConfirm": "Insert selected mention",
+    "mentionNext": "Next mention suggestion",
+    "mentionPrevious": "Previous mention suggestion",
+    "newConversation": "New conversation",
+    "newTerminalTab": "New terminal tab (terminal focused)",
+    "nextSession": "Next session",
+    "openSettings": "Open settings",
+    "paneJump": "Jump between panes",
+    "previousSession": "Previous session",
+    "quickSwitch": "Switch sessions",
+    "recallLastMessage": "Recall last sent message",
+    "search": "Open search",
+    "searchClose": "Close conversation search",
+    "searchNext": "Next search result",
+    "searchPrevious": "Previous search result",
+    "sendMessage": "Send message",
+    "sendNow": "Send immediately",
+    "showShortcuts": "Show this reference",
+    "toggleDesignSystemInspector": "Toggle design system inspector",
+    "toggleDesignSystemInspectorMode": "Toggle design system inspect mode",
+    "toggleSidebar": "Toggle sidebar",
+    "toggleTerminal": "Toggle terminal",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "zoomReset": "Reset zoom"
+  },
+  "categories": {
+    "chat": "Chat",
+    "help": "Help",
+    "navigation": "Navigation",
+    "view": "View"
+  },
+  "dialog": {
+    "dismissHint": "Press Esc to close",
+    "title": "Keyboard shortcuts"
+  },
+  "settings": {
+    "conflict": "Already used by \"{{command}}\"",
+    "customize": "Customize",
+    "default": "Default: {{shortcut}}",
+    "description": "Customize keyboard shortcuts",
+    "editLabel": "Change shortcut for {{command}}",
+    "empty": "No shortcuts match your search",
+    "globalShortcut": {
+      "description": "Use your configured global shortcut to create and find chats from anywhere in macOS.",
+      "label": "Enable global shortcut"
+    },
+    "invalid": "Shortcuts need a modifier key like Cmd, Ctrl, or Alt",
+    "invalidUnmodified": "That key can't be used on its own — add a modifier key, or use Enter or an arrow key",
+    "label": "Keyboard shortcuts",
+    "pageDescription": "Customize the keyboard shortcuts used across Berd.",
+    "recording": "Press shortcut…",
+    "recordingHint": "Press the new key combination. Esc cancels.",
+    "reset": "Reset to default",
+    "resetAll": "Reset all",
+    "saveError": "Couldn't save the shortcut",
+    "searchPlaceholder": "Search shortcuts",
+    "title": "Keyboard shortcuts"
+  }
+}
