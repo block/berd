@@ -180,6 +180,32 @@ describe("ExperimentsSettings", () => {
     expect(resetHomeForOnboardingExperienceMock).toHaveBeenCalledOnce();
   });
 
+  it("hides onboarding experiment controls outside dev builds", () => {
+    vi.stubEnv("DEV", false);
+    renderWithProviders(<ExperimentsSettings />);
+
+    expect(
+      screen.queryByText(
+        i18n.t("experiments.starterTasks.title", { ns: "settings" }),
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        i18n.t("experiments.berdyOnboarding.title", { ns: "settings" }),
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        i18n.t("experiments.firstRunOnboarding.title", { ns: "settings" }),
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("region", {
+        name: i18n.t("experiments.onboarding.title", { ns: "settings" }),
+      }),
+    ).not.toBeInTheDocument();
+  });
+
   it("preserves first-run state when reset-all preparation fails", async () => {
     vi.stubEnv("DEV", true);
     resetHomeForOnboardingExperienceMock.mockResolvedValueOnce(false);
@@ -230,8 +256,8 @@ describe("ExperimentsSettings", () => {
     expect(resetOnboardingTourExperienceMock).toHaveBeenCalledOnce();
   });
 
-  it("syncs Berdy onboarding when its experiment is toggled", async () => {
-    vi.stubEnv("DEV", false);
+  it("syncs Berdy onboarding when its dev-only experiment is toggled", async () => {
+    vi.stubEnv("DEV", true);
     const user = userEvent.setup();
     renderWithProviders(<ExperimentsSettings />);
 
@@ -243,7 +269,7 @@ describe("ExperimentsSettings", () => {
       }),
     );
 
-    expect(syncOnboardingExperimentStateMock).toHaveBeenCalledWith(true);
+    expect(syncOnboardingExperimentStateMock).toHaveBeenCalledWith(false);
   });
 
   it("does not advertise the retired macOS 26 voice requirement", () => {

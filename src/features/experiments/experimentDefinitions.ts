@@ -43,6 +43,8 @@ export interface ExperimentDefinition {
   defaultEnabled?: boolean;
   /** Opt-out of development's global experiment auto-enable behavior. */
   manualEnableOnly?: boolean;
+  /** Limit this experiment's Settings controls without changing runtime state. */
+  settingsVisibility?: "all" | "dev";
   config?: Record<string, ExperimentConfigControl>;
 }
 
@@ -98,6 +100,7 @@ export const EXPERIMENT_DEFINITIONS = [
     id: STARTER_TASKS_EXPERIMENT_ID,
     titleKey: "experiments.starterTasks.title",
     descriptionKey: "experiments.starterTasks.description",
+    settingsVisibility: "dev",
   },
   {
     id: VOICE_CONVERSATION_EXPERIMENT_ID,
@@ -119,6 +122,7 @@ export const EXPERIMENT_DEFINITIONS = [
     id: BERDY_ONBOARDING_EXPERIMENT_ID,
     titleKey: "experiments.berdyOnboarding.title",
     descriptionKey: "experiments.berdyOnboarding.description",
+    settingsVisibility: "dev",
   },
   {
     id: FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
@@ -126,5 +130,6 @@ export const EXPERIMENT_DEFINITIONS = [
     descriptionKey: "experiments.firstRunOnboarding.description",
     defaultEnabled: false,
     manualEnableOnly: true,
+    settingsVisibility: "dev",
   },
 ] as const satisfies readonly ExperimentDefinition[];

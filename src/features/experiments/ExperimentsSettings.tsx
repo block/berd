@@ -61,7 +61,9 @@ export function ExperimentsSettings({
   const visibleRegistry = useMemo(
     () =>
       getVisibleExperimentRegistry(registry).filter(
-        (definition) => !HIDDEN_EXPERIMENT_IDS.has(definition.id),
+        (definition) =>
+          !HIDDEN_EXPERIMENT_IDS.has(definition.id) &&
+          (definition.settingsVisibility !== "dev" || import.meta.env.DEV),
       ),
     [registry],
   );
