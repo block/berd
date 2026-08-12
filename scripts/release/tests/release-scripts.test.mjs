@@ -16,6 +16,7 @@ import { parse as parseYaml } from "yaml";
 
 const repo = resolve(import.meta.dirname, "../../..");
 const tempDirs = [];
+const releaseRepositoryEnv = { BERD_REPO: "squareup/berd" };
 
 async function tempDir() {
   const path = await mkdtemp(join(tmpdir(), "berd-release-test-"));
@@ -661,10 +662,89 @@ describe("desktop release workflow platform gate", () => {
       Array(3).fill(expectedSubjectPath),
     );
     expect(workflow).not.toContain(`${expressionStart} env.asset_dir }}`);
-    expect(workflow).toContain("release delete-asset");
+    expect(workflow).not.toContain("release delete-asset");
+    expect(workflow).toContain("release-reconcile-assets");
     expect(workflow).toContain("group: berd-release-$" + "{{ github.ref }}");
     expect(workflow).toContain("pnpm install --frozen-lockfile");
-    expect(workflow).toContain("release_provenance_name");
+    expect(workflow).toContain("release-write-provenance");
+    expect(workflow).not.toContain("jq -n");
+    const justfile = await readFile(join(repo, "justfile"), "utf8");
+    const provenanceRecipes = justfile.slice(
+      justfile.indexOf(
+        "# Write one platform's tag-bound release provenance receipt.",
+      ),
+      justfile.indexOf("# ── BuilderBot CLI"),
+    );
+    expect(provenanceRecipes).toContain(
+      "[unix]\n[positional-arguments]\nrelease-write-provenance",
+    );
+    expect(provenanceRecipes).toContain(
+      '[windows]\n[positional-arguments]\n[script("bash", "-euo", "pipefail")]\nrelease-write-provenance',
+    );
+    expect(provenanceRecipes.match(/release-write-provenance/g)).toHaveLength(
+      2,
+    );
+    expect(provenanceRecipes).toContain(
+      'bash -euo pipefail -c \'scripts/release/write-provenance.sh "$@"\' _ "$1" "$2" "$3" "$4" "$' +
+        '{@:5}"',
+    );
+    expect(provenanceRecipes).toContain(
+      'scripts/release/write-provenance.sh "$1" "$2" "$3" "$4" "$' + '{@:5}"',
+    );
+    const justVersion = run(join(repo, "bin/just"), ["--version"]);
+    expect(justVersion.status, justVersion.stderr).toBe(0);
+    expect(justVersion.stdout).toContain("just 1.40.0");
+    const stableParse = run(join(repo, "bin/just"), ["--summary"], {
+      JUST_UNSTABLE: "",
+    });
+    expect(stableParse.status, stableParse.stderr).toBe(0);
+    const stableDryRun = run(join(repo, "bin/just"), ["--dry-run", "check"], {
+      JUST_UNSTABLE: "",
+    });
+    expect(stableDryRun.status, stableDryRun.stderr).toBe(0);
+    const provenanceDir = await tempDir();
+    const provenanceAssets = ["asset one", "asset'quote", "asset$literal"];
+    await Promise.all(
+      provenanceAssets.map((asset) =>
+        writeFile(join(provenanceDir, asset), `contents for ${asset}`),
+      ),
+    );
+    const unixProvenance = run(
+      join(repo, "bin/just"),
+      [
+        "release-write-provenance",
+        "0123456789abcdef0123456789abcdef01234567",
+        "1.2.3",
+        "linux-x86_64",
+        provenanceDir,
+        ...provenanceAssets,
+      ],
+      { JUST_UNSTABLE: "" },
+    );
+    expect(unixProvenance.status, unixProvenance.stderr).toBe(0);
+    const provenance = JSON.parse(
+      await readFile(
+        join(provenanceDir, "Berd_1.2.3_linux-x86_64.provenance.json"),
+        "utf8",
+      ),
+    );
+    expect(Object.keys(provenance.artifacts)).toEqual(provenanceAssets);
+    expect(parsedWorkflow.env.JUST_UNSTABLE).toBeUndefined();
+    expect(parsedWorkflow.jobs["stage-windows"].env.JUST_UNSTABLE).toBe("1");
+    for (const [jobName, job] of Object.entries(parsedWorkflow.jobs)) {
+      if (jobName !== "stage-windows") {
+        expect(job.env?.JUST_UNSTABLE).toBeUndefined();
+      }
+    }
+    const setupSteps = parsedWorkflow.jobs.setup.steps;
+    const hermitIndex = setupSteps.findIndex(
+      (step) => step.name === "Activate Hermit",
+    );
+    const ensureReleaseIndex = setupSteps.findIndex((step) =>
+      step.run?.includes("release-ensure-versioned"),
+    );
+    expect(hermitIndex).toBeGreaterThanOrEqual(0);
+    expect(hermitIndex).toBeLessThan(ensureReleaseIndex);
     expect(workflow.indexOf("pnpm install --frozen-lockfile")).toBeLessThan(
       workflow.indexOf(
         "TAURI_SIGNING_PRIVATE_KEY: $" +
@@ -945,6 +1025,279 @@ describe("validate-manifest-promotion", () => {
     ]);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("non-idempotent replacement");
+  });
+});
+
+describe("write-provenance", () => {
+  it.each([
+    [
+      "darwin-aarch64",
+      [
+        "Berd_1.2.3_darwin-aarch64.app.zip",
+        "Berd_1.2.3_darwin-aarch64.dmg",
+        "Berd_1.2.3_darwin-aarch64.app.tar.gz",
+        "Berd_1.2.3_darwin-aarch64.app.tar.gz.sig",
+        "Berd_1.2.3_darwin-aarch64.app.tar.gz.sha256",
+      ],
+    ],
+    [
+      "windows-x86_64",
+      [
+        "Berd_1.2.3_windows-x86_64-setup.exe",
+        "Berd_1.2.3_windows-x86_64-setup.nsis.zip",
+        "Berd_1.2.3_windows-x86_64-setup.nsis.zip.sig",
+        "Berd_1.2.3_windows-x86_64-setup.nsis.zip.sha256",
+      ],
+    ],
+    [
+      "linux-x86_64",
+      [
+        "Berd_1.2.3_linux-x86_64.AppImage",
+        "Berd_1.2.3_linux-x86_64.deb",
+        "Berd_1.2.3_linux-x86_64.rpm",
+        "Berd_1.2.3_linux-x86_64.AppImage.tar.gz",
+        "Berd_1.2.3_linux-x86_64.AppImage.tar.gz.sig",
+        "Berd_1.2.3_linux-x86_64.AppImage.tar.gz.sha256",
+      ],
+    ],
+  ])("writes the complete %s receipt with computed digests", async (platform, names) => {
+    const dir = await tempDir();
+    for (const name of names) {
+      await writeFile(join(dir, name), `artifact:${name}`);
+    }
+
+    const result = run(
+      "scripts/release/write-provenance.sh",
+      ["a".repeat(40), "1.2.3", platform, dir, ...names],
+      releaseRepositoryEnv,
+    );
+    expect(result.status, result.stderr).toBe(0);
+    const provenance = JSON.parse(
+      await readFile(join(dir, `Berd_1.2.3_${platform}.provenance.json`)),
+    );
+    expect(provenance).toMatchObject({
+      schemaVersion: 1,
+      sourceSha: "a".repeat(40),
+      version: "1.2.3",
+      platform,
+    });
+    expect(Object.keys(provenance.artifacts)).toEqual(names);
+    for (const name of names) {
+      expect(provenance.artifacts[name]).toBe(
+        createHash("sha256").update(`artifact:${name}`).digest("hex"),
+      );
+    }
+  });
+
+  it("fails closed on empty, missing, duplicate, or path-qualified assets", async () => {
+    const dir = await tempDir();
+    await writeFile(join(dir, "asset"), "bytes");
+    await writeFile(join(dir, "empty"), "");
+    const base = ["a".repeat(40), "1.2.3", "darwin-aarch64", dir];
+    for (const assets of [
+      ["empty"],
+      ["missing"],
+      ["asset", "asset"],
+      ["../asset"],
+    ]) {
+      const result = run(
+        "scripts/release/write-provenance.sh",
+        [...base, ...assets],
+        releaseRepositoryEnv,
+      );
+      expect(result.status).not.toBe(0);
+    }
+  });
+});
+
+describe("ensure-versioned-release", () => {
+  async function fixture({
+    existing = false,
+    annotated = false,
+    resolvedSha = "a".repeat(40),
+    releaseJson = '{"tagName":"v1.2.3","isDraft":false}',
+  } = {}) {
+    const dir = await tempDir();
+    const bin = join(dir, "bin");
+    const calls = join(dir, "calls");
+    await mkdir(bin);
+    await writeFile(
+      join(bin, "gh"),
+      `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$CALLS"
+if [[ "$1 $2" == "release view" ]]; then
+  if [[ "$EXISTING" != true ]]; then exit 1; fi
+  if [[ "$*" == *"--json tagName,isDraft"* ]]; then
+    printf '%s' "$RELEASE_JSON"
+  fi
+elif [[ "$1 $2" == "release create" ]]; then
+  [[ "$EXISTING" == false ]]
+elif [[ "$1" == "api" && "$2" == */git/ref/tags/* ]]; then
+  case "$*" in
+    *object.type*) [[ "$ANNOTATED" == true ]] && printf tag || printf commit ;;
+    *) [[ "$ANNOTATED" == true ]] && printf bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb || printf %s "$RESOLVED_SHA" ;;
+  esac
+elif [[ "$1" == "api" && "$2" == */git/tags/* ]]; then
+  printf %s "$RESOLVED_SHA"
+else
+  exit 1
+fi
+`,
+      { mode: 0o755 },
+    );
+    return { bin, calls, existing, annotated, resolvedSha, releaseJson };
+  }
+
+  function ensure(f, version = "1.2.3") {
+    return run(
+      "scripts/release/github/ensure-versioned-release.sh",
+      ["squareup/berd", `v${version}`, version, "a".repeat(40)],
+      {
+        PATH: `${f.bin}:${process.env.PATH}`,
+        CALLS: f.calls,
+        EXISTING: String(f.existing),
+        ANNOTATED: String(f.annotated),
+        RESOLVED_SHA: f.resolvedSha,
+        RELEASE_JSON: f.releaseJson,
+        GH_TOKEN: "test-token",
+        ...releaseRepositoryEnv,
+      },
+    );
+  }
+
+  it("creates a missing stable release and verifies its tag", async () => {
+    const f = await fixture();
+    const result = ensure(f);
+    expect(result.status, result.stderr).toBe(0);
+    const calls = await readFile(f.calls, "utf8");
+    expect(calls).toContain("release create v1.2.3");
+    expect(calls).not.toContain("--prerelease");
+    expect(calls).toContain(`--target ${"a".repeat(40)}`);
+  });
+
+  it("reuses an existing release and dereferences annotated tags", async () => {
+    const f = await fixture({ existing: true, annotated: true });
+    const result = ensure(f);
+    expect(result.status, result.stderr).toBe(0);
+    const calls = await readFile(f.calls, "utf8");
+    expect(calls).not.toContain("release create");
+    expect(calls).toContain("/git/tags/");
+  });
+
+  it("marks prereleases and rejects a tag that resolves elsewhere", async () => {
+    const prerelease = await fixture();
+    const prereleaseResult = ensure(prerelease, "1.2.3-rc.1");
+    expect(prereleaseResult.status, prereleaseResult.stderr).toBe(0);
+    expect(await readFile(prerelease.calls, "utf8")).toContain("--prerelease");
+
+    const mismatch = await fixture({ resolvedSha: "b".repeat(40) });
+    const mismatchResult = ensure(mismatch);
+    expect(mismatchResult.status).not.toBe(0);
+    expect(mismatchResult.stderr).toContain("expected");
+  });
+
+  it.each([
+    ['{"tagName":"v9.9.9","isDraft":false}', "tag mismatch"],
+    ['{"tagName":"v1.2.3","isDraft":true}', "must not be a draft"],
+  ])("rejects an invalid existing release: %s", async (releaseJson, error) => {
+    const f = await fixture({ existing: true, releaseJson });
+    const result = ensure(f);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(error);
+  });
+});
+
+describe("reconcile-staged-assets", () => {
+  const platformAssets = {
+    macos_ready: [
+      "Berd_1.2.3_darwin-aarch64.app.zip",
+      "Berd_1.2.3_darwin-aarch64.dmg",
+      "Berd_1.2.3_darwin-aarch64.app.tar.gz",
+      "Berd_1.2.3_darwin-aarch64.app.tar.gz.sig",
+      "Berd_1.2.3_darwin-aarch64.app.tar.gz.sha256",
+      "Berd_1.2.3_darwin-aarch64.provenance.json",
+    ],
+    windows_ready: [
+      "Berd_1.2.3_windows-x86_64-setup.exe",
+      "Berd_1.2.3_windows-x86_64-setup.nsis.zip",
+      "Berd_1.2.3_windows-x86_64-setup.nsis.zip.sig",
+      "Berd_1.2.3_windows-x86_64-setup.nsis.zip.sha256",
+      "Berd_1.2.3_windows-x86_64.provenance.json",
+    ],
+    linux_ready: [
+      "Berd_1.2.3_linux-x86_64.AppImage",
+      "Berd_1.2.3_linux-x86_64.deb",
+      "Berd_1.2.3_linux-x86_64.rpm",
+      "Berd_1.2.3_linux-x86_64.AppImage.tar.gz",
+      "Berd_1.2.3_linux-x86_64.AppImage.tar.gz.sig",
+      "Berd_1.2.3_linux-x86_64.AppImage.tar.gz.sha256",
+      "Berd_1.2.3_linux-x86_64.provenance.json",
+    ],
+  };
+
+  async function fixture(assets) {
+    const dir = await tempDir();
+    const bin = join(dir, "bin");
+    const calls = join(dir, "calls");
+    const state = join(dir, "assets");
+    const output = join(dir, "output");
+    await mkdir(bin);
+    await writeFile(
+      join(bin, "gh"),
+      `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$CALLS"
+if [[ "$1 $2" == "release view" ]]; then
+  cat "$ASSET_STATE"
+elif [[ "$1 $2" == "release delete-asset" ]]; then
+  name="$4"
+  grep -Fxv "$name" "$ASSET_STATE" > "$ASSET_STATE.next" || true
+  mv "$ASSET_STATE.next" "$ASSET_STATE"
+else
+  exit 1
+fi
+`,
+      { mode: 0o755 },
+    );
+    await writeFile(state, `${assets.join("\n")}\n`);
+    return { bin, calls, state, output };
+  }
+
+  function reconcile(f) {
+    return run(
+      "scripts/release/github/reconcile-staged-assets.sh",
+      ["squareup/berd", "v1.2.3", "1.2.3", f.output],
+      {
+        PATH: `${f.bin}:${process.env.PATH}`,
+        CALLS: f.calls,
+        ASSET_STATE: f.state,
+        GH_TOKEN: "test-token",
+        ...releaseRepositoryEnv,
+      },
+    );
+  }
+
+  it("reports complete and absent payloads without mutation", async () => {
+    const f = await fixture(platformAssets.macos_ready);
+    const result = reconcile(f);
+    expect(result.status, result.stderr).toBe(0);
+    expect(await readFile(f.output, "utf8")).toBe(
+      "macos_ready=true\nwindows_ready=false\nlinux_ready=false\n",
+    );
+    expect(await readFile(f.calls, "utf8")).not.toContain("delete-asset");
+  });
+
+  it("deletes every present asset in a partial platform payload", async () => {
+    const partial = platformAssets.linux_ready.slice(0, 3);
+    const f = await fixture(partial);
+    const result = reconcile(f);
+    expect(result.status, result.stderr).toBe(0);
+    expect(await readFile(f.output, "utf8")).toContain("linux_ready=false");
+    const calls = await readFile(f.calls, "utf8");
+    expect(calls.match(/release delete-asset/g)).toHaveLength(partial.length);
+    for (const name of partial) expect(calls).toContain(name);
+    expect(await readFile(f.state, "utf8")).toBe("");
   });
 });
 

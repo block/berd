@@ -241,6 +241,30 @@ ci-windows:
 release-scripts-test:
     pnpm test:release-scripts
 
+# Create or verify the immutable GitHub release for a tag.
+[unix]
+release-ensure-versioned repository tag version source_sha:
+    scripts/release/github/ensure-versioned-release.sh {{ quote(repository) }} {{ quote(tag) }} {{ quote(version) }} {{ quote(source_sha) }}
+
+# Report complete staged platform payloads and clean up partial payloads.
+[unix]
+release-reconcile-assets repository tag version output_file:
+    scripts/release/github/reconcile-staged-assets.sh {{ quote(repository) }} {{ quote(tag) }} {{ quote(version) }} {{ quote(output_file) }}
+
+# Write one platform's tag-bound release provenance receipt.
+[unix]
+[positional-arguments]
+release-write-provenance source_sha version platform output_dir *ASSETS:
+    bash -euo pipefail -c 'scripts/release/write-provenance.sh "$@"' _ "$1" "$2" "$3" "$4" "${@:5}"
+
+# On Windows, run the shared Bash script as one generated recipe so argv remains
+# positional and is not interpolated into shell source.
+[windows]
+[positional-arguments]
+[script("bash", "-euo", "pipefail")]
+release-write-provenance source_sha version platform output_dir *ASSETS:
+    scripts/release/write-provenance.sh "$1" "$2" "$3" "$4" "${@:5}"
+
 # ── BuilderBot CLI ───────────────────────────────────────────
 
 # Build the BuilderBot CLI crate.

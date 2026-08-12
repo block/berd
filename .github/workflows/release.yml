@@ -111,96 +111,26 @@ jobs:
           echo "windows_platform=${RELEASE_PLATFORMS[1]}" >> "$GITHUB_OUTPUT"
           echo "linux_platform=${RELEASE_PLATFORMS[2]}" >> "$GITHUB_OUTPUT"
 
-      - name: Create immutable versioned release if missing
+      - name: Activate Hermit
+        uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+
+      - name: Ensure immutable versioned release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ steps.channel.outputs.repository }}
           SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
           TAG: ${{ steps.release.outputs.tag }}
           VERSION: ${{ steps.release.outputs.version }}
-        run: |
-          set -euo pipefail
-          if gh release view "$TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
-            EXISTING_TAG=$(gh release view "$TAG" --repo "$REPOSITORY" --json tagName --jq .tagName)
-            [[ "$EXISTING_TAG" == "$TAG" ]] || {
-              echo "::error::Existing release tag mismatch: $EXISTING_TAG"
-              exit 1
-            }
-            echo "Using existing versioned release $TAG"
-          else
-            PRERELEASE=()
-            if [[ "$VERSION" == *-* ]]; then
-              PRERELEASE=(--prerelease --latest=false)
-            fi
-            gh release create "$TAG" \
-              --repo "$REPOSITORY" \
-              --verify-tag \
-              --target "$SOURCE_SHA" \
-              --title "Berd v$VERSION" \
-              --notes "$(printf 'Berd v%s\n\nSource commit: `%s`\n\nThe Windows NSIS installer and Linux packages lack platform-native code signatures; their updater archives remain minisign-authenticated.\n' "$VERSION" "$SOURCE_SHA")" \
-              "${PRERELEASE[@]}"
-          fi
+        run: just release-ensure-versioned "$REPOSITORY" "$TAG" "$VERSION" "$SOURCE_SHA"
 
-          RELEASE_TAG_REF=$(gh api "repos/$REPOSITORY/git/ref/tags/$TAG" --jq .object.sha)
-          RELEASE_TAG_TYPE=$(gh api "repos/$REPOSITORY/git/ref/tags/$TAG" --jq .object.type)
-          if [[ "$RELEASE_TAG_TYPE" == "tag" ]]; then
-            RELEASE_TAG_REF=$(gh api "repos/$REPOSITORY/git/tags/$RELEASE_TAG_REF" --jq .object.sha)
-          fi
-          [[ "$RELEASE_TAG_REF" == "$SOURCE_SHA" ]] || {
-            echo "::error::Versioned release $TAG resolves to $RELEASE_TAG_REF, expected $SOURCE_SHA"
-            exit 1
-          }
-
-      - name: Check for complete staged platform payloads
+      - name: Reconcile staged platform payloads
         id: assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ steps.channel.outputs.repository }}
           TAG: ${{ steps.release.outputs.tag }}
           VERSION: ${{ steps.release.outputs.version }}
-          MACOS_PLATFORM: ${{ steps.channel.outputs.macos_platform }}
-          WINDOWS_PLATFORM: ${{ steps.channel.outputs.windows_platform }}
-          LINUX_PLATFORM: ${{ steps.channel.outputs.linux_platform }}
-        run: |
-          set -euo pipefail
-          RELEASE_ASSETS=$(gh release view "$TAG" --repo "$REPOSITORY" --json assets --jq '.assets[].name')
-          check_assets() {
-            local output="$1"
-            shift
-            local ready=true name present=0
-            for name in "$@"; do
-              if grep -Fxq "$name" <<< "$RELEASE_ASSETS"; then
-                present=$((present + 1))
-              else
-                ready=false
-              fi
-            done
-            if [[ "$ready" != true && "$present" -gt 0 ]]; then
-              echo "Removing incomplete $output payload before a clean recovery rebuild"
-              for name in "$@"; do
-                if grep -Fxq "$name" <<< "$RELEASE_ASSETS"; then
-                  gh release delete-asset "$TAG" "$name" --repo "$REPOSITORY" --yes
-                fi
-              done
-            fi
-            echo "$output=$ready" >> "$GITHUB_OUTPUT"
-          }
-          MACOS_ARCHIVE="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$MACOS_PLATFORM")"
-          WINDOWS_ARCHIVE="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$WINDOWS_PLATFORM")"
-          LINUX_ARCHIVE="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$LINUX_PLATFORM")"
-          WINDOWS_INSTALLER="$(source scripts/release/lib.sh; release_installer_name "$VERSION" "$WINDOWS_PLATFORM")"
-          MACOS_PROVENANCE="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$MACOS_PLATFORM")"
-          WINDOWS_PROVENANCE="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$WINDOWS_PLATFORM")"
-          LINUX_PROVENANCE="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$LINUX_PLATFORM")"
-          check_assets macos_ready \
-            "Berd_${VERSION}_${MACOS_PLATFORM}.app.zip" "Berd_${VERSION}_${MACOS_PLATFORM}.dmg" \
-            "$MACOS_ARCHIVE" "$MACOS_ARCHIVE.sig" "$MACOS_ARCHIVE.sha256" "$MACOS_PROVENANCE"
-          check_assets windows_ready \
-            "$WINDOWS_INSTALLER" "$WINDOWS_ARCHIVE" "$WINDOWS_ARCHIVE.sig" "$WINDOWS_ARCHIVE.sha256" "$WINDOWS_PROVENANCE"
-          check_assets linux_ready \
-            "Berd_${VERSION}_${LINUX_PLATFORM}.AppImage" "Berd_${VERSION}_${LINUX_PLATFORM}.deb" \
-            "Berd_${VERSION}_${LINUX_PLATFORM}.rpm" "$LINUX_ARCHIVE" "$LINUX_ARCHIVE.sig" \
-            "$LINUX_ARCHIVE.sha256" "$LINUX_PROVENANCE"
+        run: just release-reconcile-assets "$REPOSITORY" "$TAG" "$VERSION" "$GITHUB_OUTPUT"
 
   stage-macos:
     name: Build, sign, and stage macOS arm64
@@ -278,23 +208,9 @@ jobs:
           app_zip_name="Berd_${VERSION}_${PLATFORM}.app.zip"
           dmg_name="Berd_${VERSION}_${PLATFORM}.dmg"
           ARCHIVE_NAME="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$PLATFORM")"
-          PROVENANCE_NAME="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$PLATFORM")"
-          jq -n \
-            --arg sourceSha "$SOURCE_SHA" \
-            --arg version "$VERSION" \
-            --arg platform "$PLATFORM" \
-            --arg archive "$ARCHIVE_NAME" \
-            --arg archiveSha256 "$(awk 'NR == 1 {print $1}' "$asset_dir/$ARCHIVE_NAME.sha256")" \
-            --arg archiveSignature "$ARCHIVE_NAME.sig" \
-            --arg archiveSignatureSha256 "$(shasum -a 256 "$asset_dir/$ARCHIVE_NAME.sig" | awk '{print $1}')" \
-            --arg archiveDigest "$ARCHIVE_NAME.sha256" \
-            --arg archiveDigestSha256 "$(shasum -a 256 "$asset_dir/$ARCHIVE_NAME.sha256" | awk '{print $1}')" \
-            --arg appZip "$app_zip_name" \
-            --arg appZipSha256 "$(shasum -a 256 "$asset_dir/$app_zip_name" | awk '{print $1}')" \
-            --arg dmg "$dmg_name" \
-            --arg dmgSha256 "$(shasum -a 256 "$asset_dir/$dmg_name" | awk '{print $1}')" \
-            '{schemaVersion: 1, sourceSha: $sourceSha, version: $version, platform: $platform, artifacts: {($archive): $archiveSha256, ($archiveSignature): $archiveSignatureSha256, ($archiveDigest): $archiveDigestSha256, ($appZip): $appZipSha256, ($dmg): $dmgSha256}}' \
-            > "$asset_dir/$PROVENANCE_NAME"
+          just release-write-provenance "$SOURCE_SHA" "$VERSION" "$PLATFORM" "$asset_dir" \
+            "$ARCHIVE_NAME" "$ARCHIVE_NAME.sig" "$ARCHIVE_NAME.sha256" \
+            "$app_zip_name" "$dmg_name"
 
       - name: Attest staged macOS payload
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -351,6 +267,8 @@ jobs:
       BERD_RELEASE_CHANNEL: public
       BERD_UPDATER_ENDPOINT: https://github.com/${{ needs.setup.outputs.repository }}/releases/download/${{ needs.setup.outputs.rolling_tag }}/latest.json
       BERD_UPDATER_PUBLIC_KEY: ${{ vars.BERD_UPDATER_PUBLIC_KEY }}
+      # Windows selects generated [script] recipes that Just 1.40 still gates as unstable.
+      JUST_UNSTABLE: "1"
     steps:
       - name: Check out verified source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -416,21 +334,9 @@ jobs:
           echo "installer_name=$INSTALLER_NAME" >> "$GITHUB_ENV"
           ARCHIVE_NAME="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$PLATFORM")"
           echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_ENV"
-          PROVENANCE_NAME="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$PLATFORM")"
-          jq -n \
-            --arg sourceSha "$SOURCE_SHA" \
-            --arg version "$VERSION" \
-            --arg platform "$PLATFORM" \
-            --arg installer "$INSTALLER_NAME" \
-            --arg installerSha256 "$(sha256sum "$RUNNER_TEMP/release-assets/$INSTALLER_NAME" | awk '{print $1}')" \
-            --arg archive "$ARCHIVE_NAME" \
-            --arg archiveSha256 "$(awk 'NR == 1 {print $1}' "$RUNNER_TEMP/release-assets/$ARCHIVE_NAME.sha256")" \
-            --arg archiveSignature "$ARCHIVE_NAME.sig" \
-            --arg archiveSignatureSha256 "$(sha256sum "$RUNNER_TEMP/release-assets/$ARCHIVE_NAME.sig" | awk '{print $1}')" \
-            --arg archiveDigest "$ARCHIVE_NAME.sha256" \
-            --arg archiveDigestSha256 "$(sha256sum "$RUNNER_TEMP/release-assets/$ARCHIVE_NAME.sha256" | awk '{print $1}')" \
-            '{schemaVersion: 1, sourceSha: $sourceSha, version: $version, platform: $platform, artifacts: {($installer): $installerSha256, ($archive): $archiveSha256, ($archiveSignature): $archiveSignatureSha256, ($archiveDigest): $archiveDigestSha256}}' \
-            > "$RUNNER_TEMP/release-assets/$PROVENANCE_NAME"
+          just release-write-provenance "$SOURCE_SHA" "$VERSION" "$PLATFORM" \
+            "$RUNNER_TEMP/release-assets" "$INSTALLER_NAME" \
+            "$ARCHIVE_NAME" "$ARCHIVE_NAME.sig" "$ARCHIVE_NAME.sha256"
 
       - name: Attest staged Windows payload
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -550,25 +456,9 @@ jobs:
             --version "$VERSION" \
             --output-dir "$asset_dir"
           archive_name="$(source scripts/release/lib.sh; release_archive_name "$VERSION" "$PLATFORM")"
-          provenance_name="$(source scripts/release/lib.sh; release_provenance_name "$VERSION" "$PLATFORM")"
-          jq -n \
-            --arg sourceSha "$SOURCE_SHA" \
-            --arg version "$VERSION" \
-            --arg platform "$PLATFORM" \
-            --arg appimage "$appimage_name" \
-            --arg appimageSha256 "$(shasum -a 256 "$asset_dir/$appimage_name" | awk '{print $1}')" \
-            --arg deb "$deb_name" \
-            --arg debSha256 "$(shasum -a 256 "$asset_dir/$deb_name" | awk '{print $1}')" \
-            --arg rpm "$rpm_name" \
-            --arg rpmSha256 "$(shasum -a 256 "$asset_dir/$rpm_name" | awk '{print $1}')" \
-            --arg archive "$archive_name" \
-            --arg archiveSha256 "$(awk 'NR == 1 {print $1}' "$asset_dir/$archive_name.sha256")" \
-            --arg signature "$archive_name.sig" \
-            --arg signatureSha256 "$(shasum -a 256 "$asset_dir/$archive_name.sig" | awk '{print $1}')" \
-            --arg digest "$archive_name.sha256" \
-            --arg digestSha256 "$(shasum -a 256 "$asset_dir/$archive_name.sha256" | awk '{print $1}')" \
-            '{schemaVersion: 1, sourceSha: $sourceSha, version: $version, platform: $platform, artifacts: {($appimage): $appimageSha256, ($deb): $debSha256, ($rpm): $rpmSha256, ($archive): $archiveSha256, ($signature): $signatureSha256, ($digest): $digestSha256}}' \
-            > "$asset_dir/$provenance_name"
+          just release-write-provenance "$SOURCE_SHA" "$VERSION" "$PLATFORM" "$asset_dir" \
+            "$appimage_name" "$deb_name" "$rpm_name" \
+            "$archive_name" "$archive_name.sig" "$archive_name.sha256"
           echo "asset_dir=$asset_dir" >> "$GITHUB_ENV"
 
       - name: Attest staged Linux payload
