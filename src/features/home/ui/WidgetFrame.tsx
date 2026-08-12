@@ -1,11 +1,18 @@
 import {
   useCallback,
+  useEffect,
   useState,
+  type AnimationEvent,
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { LayoutConstraints } from "@/features/layout/api/layout";
+import { cn } from "@/shared/lib/cn";
+import {
+  consumeFreshWidgetPlacement,
+  hasFreshWidgetPlacement,
+} from "../lib/freshWidgetPlacements";
 import { HOME_WIDGET_CATALOG_BY_ID } from "../widgets/catalog";
 import type {
   WidgetInstance,
@@ -76,6 +83,30 @@ export function WidgetFrame({
   const catalogEntry = HOME_WIDGET_CATALOG_BY_ID[instance.type];
   const { bumpZ, removeWidget, updateWidgetState } = mutations;
   const [pill, setPill] = useState<UnpinPillState>(CLOSED_PILL);
+
+  // Play the "set down" placement animation only when this instance was just
+  // created interactively — returning to Home or reloading the layout must
+  // not replay it. The initializer is a pure read (StrictMode runs it twice
+  // and may discard a render); the one-shot entry is consumed in the mount
+  // effect below, which only runs for committed mounts.
+  const [justPlaced, setJustPlaced] = useState(() =>
+    hasFreshWidgetPlacement(instance.id),
+  );
+  useEffect(() => {
+    consumeFreshWidgetPlacement(instance.id);
+  }, [instance.id]);
+
+  const handleSettleAnimationEnd = useCallback(
+    (event: AnimationEvent<HTMLFieldSetElement>) => {
+      // animationend bubbles: a child widget's own animation (e.g. the
+      // clock's face fade at 180ms) must not cancel the 380ms settle
+      // mid-overshoot. Only the fieldset's own animation ends the state.
+      if (event.target === event.currentTarget) {
+        setJustPlaced(false);
+      }
+    },
+    [],
+  );
 
   const handleUpdateState = useCallback(
     (next: Record<string, unknown>) =>
@@ -158,7 +189,11 @@ export function WidgetFrame({
         onClickCapture={gestureHandlers.onClickCapture}
         onClick={commitZLift}
         onKeyDown={handleFrameKeyDown}
-        className="m-0 h-full w-full min-w-0 cursor-grab select-none border-0 p-0 [min-inline-size:0] touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+        onAnimationEnd={handleSettleAnimationEnd}
+        className={cn(
+          "m-0 h-full w-full min-w-0 cursor-grab select-none border-0 p-0 [min-inline-size:0] touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing",
+          justPlaced && "animate-widget-settle",
+        )}
       >
         <Component
           instance={instance}

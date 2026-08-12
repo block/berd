@@ -20,6 +20,7 @@ import type {
   LayoutConstraints,
 } from "@/features/layout/api/layout";
 import { i18n } from "@/shared/i18n";
+import { markFreshWidgetPlacement } from "../lib/freshWidgetPlacements";
 import { isLayoutConstraints } from "../lib/snapToGrid";
 import {
   createDefaultClockWidget,
@@ -361,6 +362,9 @@ function createHomeWidgetStore() {
             cleanUpWidgetsMutation(withManualPlacement, placementBounds) ??
             withManualPlacement;
 
+          // Mark only after the mutation succeeds so a rejected add does not
+          // leave an orphaned entry in the fresh-placement registry.
+          markFreshWidgetPlacement(id);
           persistCleanUpSnapshot(nextSnapshot);
           setCleanUpSaveOutcomes({ discarded: current.cleanUpSnapshot });
           set({
@@ -386,8 +390,13 @@ function createHomeWidgetStore() {
           }),
         );
         const added = get().instances !== previousInstances;
-        if (added && options?.notifyStarterTask !== false) {
-          starterWidgetCompletionPending = true;
+        if (added) {
+          // Mark only after the mutation succeeds so a rejected add does not
+          // leave an orphaned entry in the fresh-placement registry.
+          markFreshWidgetPlacement(id);
+          if (options?.notifyStarterTask !== false) {
+            starterWidgetCompletionPending = true;
+          }
         }
         return added;
       },

@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import type { SkillInfo } from "@/features/skills/api/skills";
@@ -138,6 +138,9 @@ export const SkillPinWidget = memo(function SkillPinWidget({
   const { t } = useTranslation("home");
   const skillId = getSkillId(instance.state);
 
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const labelRef = useRef<HTMLSpanElement>(null);
+
   const { data: skills, isPending } = useQuery({
     queryKey: SKILL_LIST_QUERY_KEY,
     // Global-scoped skills only — home page is not project-scoped, so
@@ -149,6 +152,43 @@ export const SkillPinWidget = memo(function SkillPinWidget({
   const skill = findSkillById(skills, skillId) ?? skillFallbackFromId(skillId);
   const label = skill?.name ?? t("widgets.skillPin.unavailable");
   const tone = resolveSkillPillTone(skill?.name ?? "", skill?.color);
+
+  // Scale-to-fit: height drives the type size (container query units), so a
+  // long name can overflow the width before it truncates. Measure and shrink
+  // via --skill-pin-fit so the full name always fits — ellipsis on a hero
+  // pill is the failure state, kept only as a floor-of-last-resort.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: label/isPending are read via the DOM refs; the dependencies intentionally re-run the effect when the rendered name changes or the loading shell is replaced by the real pill (whose mount the refs don't otherwise signal).
+  useLayoutEffect(() => {
+    const button = buttonRef.current;
+    const labelEl = labelRef.current;
+    if (!button || !labelEl) return;
+
+    const measure = () => {
+      // Reset before measuring so a previously shrunken label can grow back.
+      button.style.setProperty("--skill-pin-fit", "1");
+      const available = labelEl.clientWidth;
+      const needed = labelEl.scrollWidth;
+      if (needed > available && needed > 0) {
+        const fit = Math.max(0.35, available / needed);
+        button.style.setProperty("--skill-pin-fit", String(fit));
+      }
+    };
+
+    measure();
+    // Fonts loading late change the measured width without resizing the
+    // button — re-measure once they're ready.
+    document.fonts?.ready?.then(measure).catch(() => {});
+    const observer = new ResizeObserver(measure);
+    // Observe the label too: its rendered size changes when container-query
+    // units resolve or the widget's text scale changes, which does not
+    // necessarily resize the button itself.
+    observer.observe(button);
+    observer.observe(labelEl);
+    return () => observer.disconnect();
+    // Refs are stable; re-measure when the rendered name changes, and re-run
+    // once the pending shell is replaced by the real pill — the first-mount
+    // effect sees null refs while the skill list is still loading.
+  }, [label, isPending]);
 
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
     if (skill) {
@@ -171,37 +211,58 @@ export const SkillPinWidget = memo(function SkillPinWidget({
   }
 
   return (
-    <div className="flex h-full w-full items-center justify-center">
+    // container-type:size so cqh units resolve against the widget's height —
+    // the type scale is height-driven, not width-driven.
+    <div className="flex h-full w-full items-center justify-center [container-type:size]">
       <button
+        ref={buttonRef}
         type="button"
         onClick={handleClick}
         aria-label={t("widgets.skillPin.openAria", { name: label })}
         // cursor-grab per Figma image 8 — deliberate divergence from sibling
         // pin widgets.
         className={cn(
-          "flex h-full w-full items-center justify-center cursor-grab",
+          "flex h-full w-full items-center justify-center cursor-grab active:cursor-grabbing",
           skill
-            ? cn("rounded-xs text-skill-pill-fg", skillPillToneClass(tone))
+            ? cn(
+                // Stadium shape: pressable things in Berd are rounded-full,
+                // and the radius stays optically consistent at every size.
+                "relative rounded-full text-skill-pill-fg",
+                skillPillToneClass(tone),
+                // Hover lifts the pill off the board; press thunks it back
+                // down. Tone deepening comes from a fixed-alpha overlay so
+                // the pastel fill itself never changes hue.
+                "transition-[transform,box-shadow] duration-150 ease-out",
+                "hover:-translate-y-px hover:shadow-sm",
+                "active:translate-y-0 active:scale-[0.985] active:shadow-none active:duration-75",
+                "after:pointer-events-none after:absolute after:inset-0 after:rounded-full",
+                "after:bg-transparent after:transition-colors after:duration-150",
+                "hover:after:bg-dark-04 active:after:bg-dark-10",
+                "motion-reduce:transition-none motion-reduce:hover:translate-y-0 motion-reduce:active:scale-100",
+              )
             : "h-full w-full rounded-md bg-card text-muted-foreground",
         )}
         style={
           skill
             ? {
-                paddingLeft:
-                  "clamp(0.75rem, calc(1rem * var(--widget-scale, 1)), 2rem)",
-                paddingRight:
-                  "clamp(0.75rem, calc(1rem * var(--widget-scale, 1)), 2rem)",
+                // Inset scales with height so text clears the round caps.
+                paddingInline: "clamp(0.75rem, 30cqh, 3rem)",
               }
             : undefined
         }
       >
         <span
-          className="max-w-full truncate"
+          ref={labelRef}
+          // leading-[1.2] (not leading-none): truncate clips overflow, and a
+          // 1.0 line box crops Inter's descenders at hero sizes.
+          className="max-w-full truncate whitespace-nowrap leading-[1.2]"
           style={{
+            // Height-driven type: the name is the pill's content, not a
+            // caption inside it. --skill-pin-fit shrinks long names before
+            // truncation kicks in.
             fontSize:
-              "clamp(0.875rem, calc(0.875rem * var(--widget-text-scale, var(--widget-scale, 1))), 1.875rem)",
-            lineHeight:
-              "clamp(1.2rem, calc(1.25rem * var(--widget-text-scale, var(--widget-scale, 1))), 2.375rem)",
+              "calc(clamp(0.875rem, 42cqh, 3.5rem) * var(--skill-pin-fit, 1))",
+            letterSpacing: "-0.015em",
           }}
         >
           {label}

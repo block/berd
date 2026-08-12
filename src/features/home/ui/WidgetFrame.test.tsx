@@ -1,6 +1,10 @@
 import { createEvent, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  consumeFreshWidgetPlacement,
+  markFreshWidgetPlacement,
+} from "../lib/freshWidgetPlacements";
 import type {
   WidgetInstance,
   WidgetMutationHandlers,
@@ -289,5 +293,68 @@ describe("WidgetFrame", () => {
     await user.keyboard("{Delete}");
 
     expect(removeWidget).not.toHaveBeenCalled();
+  });
+
+  describe("placement settle animation", () => {
+    afterEach(() => {
+      // The mount effect normally consumes the entry, but keep the registry
+      // clean even if a test fails before mounting.
+      consumeFreshWidgetPlacement("clock-1");
+    });
+
+    it("plays the settle animation when the instance was freshly placed", () => {
+      markFreshWidgetPlacement("clock-1");
+
+      const { frame } = renderWidgetFrame();
+
+      expect(frame).toHaveClass("animate-widget-settle");
+    });
+
+    it("does not play the settle animation on an ordinary mount", () => {
+      const { frame } = renderWidgetFrame();
+
+      expect(frame).not.toHaveClass("animate-widget-settle");
+    });
+
+    it("does not replay the settle animation when the widget remounts", () => {
+      markFreshWidgetPlacement("clock-1");
+
+      const first = renderWidgetFrame();
+      expect(first.frame).toHaveClass("animate-widget-settle");
+      first.unmount();
+
+      // Returning to Home remounts the frame for the same instance — the
+      // one-shot flag was consumed by the first committed mount.
+      const second = renderWidgetFrame();
+      expect(second.frame).not.toHaveClass("animate-widget-settle");
+    });
+
+    it("keeps the settle animation when a child animation ends", () => {
+      markFreshWidgetPlacement("clock-1");
+
+      const { frame } = renderWidgetFrame();
+      expect(frame).toHaveClass("animate-widget-settle");
+
+      // animationend bubbles: a child widget's own animation (e.g. the
+      // clock's 180ms face fade) must not cancel the 380ms settle.
+      const child = frame.querySelector("div");
+      expect(child).not.toBeNull();
+      if (child) {
+        fireEvent.animationEnd(child, { animationName: "clock-face-fade" });
+      }
+
+      expect(frame).toHaveClass("animate-widget-settle");
+    });
+
+    it("clears the settle animation when the frame's own animation ends", () => {
+      markFreshWidgetPlacement("clock-1");
+
+      const { frame } = renderWidgetFrame();
+      expect(frame).toHaveClass("animate-widget-settle");
+
+      fireEvent.animationEnd(frame, { animationName: "widget-settle" });
+
+      expect(frame).not.toHaveClass("animate-widget-settle");
+    });
   });
 });

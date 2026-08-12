@@ -1252,6 +1252,26 @@
      reduced motion. */
   --animate-clock-face-fade: clock-face-fade 180ms ease-out;
   --animate-clock-colon-blink: clock-colon-blink 1s linear infinite;
+  /* Canvas widgets: "set down" placement when a widget is first pinned or
+     added to the canvas — a short drop with a back-out overshoot as it lands
+     flat on the board. Transform/opacity only, so it works for any widget
+     shape (pills, cards, notes). Disabled under reduced motion. */
+  --animate-widget-settle: widget-settle 380ms cubic-bezier(0.34, 1.56, 0.64, 1)
+    both;
+
+  @keyframes widget-settle {
+    from {
+      opacity: 0;
+      transform: translateY(-10px) scale(0.9);
+    }
+    45% {
+      opacity: 1;
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
 
   @keyframes clock-face-fade {
     from {
@@ -1514,6 +1534,11 @@
   .animate-clock-face-fade,
   .animate-clock-colon-blink {
     animation: none !important;
+  }
+
+  /* Widget placement: replace the drop-and-settle with a plain fade. */
+  .animate-widget-settle {
+    animation: fade-in 150ms ease-out both !important;
   }
 }
 
