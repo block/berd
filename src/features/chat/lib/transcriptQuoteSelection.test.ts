@@ -53,6 +53,7 @@ describe("stagedQuoteFromSelection", () => {
       sources: [
         {
           messageId: "message-1",
+          role: "assistant",
           contentBlockIndex: 0,
           start: 2,
           end: 15,
@@ -100,6 +101,7 @@ describe("stagedQuoteFromSelection", () => {
       sources: [
         {
           messageId: "message-1",
+          role: "assistant",
           contentBlockIndex: 0,
           start: canonicalStart,
           end: canonicalStart + selected.length,
