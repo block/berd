@@ -16,7 +16,30 @@ import {
 import { toIdentityKey } from "@/shared/lib/pathIdentity";
 import type { ProjectArtifactMetadata } from "../artifact/types";
 
-export type ProjectWorkspaceStartupMode = "none" | "branch" | "worktree";
+export type ProjectWorkspaceStartupMode =
+  | "none"
+  | "branch"
+  | "worktree"
+  | "ask-worktree"
+  | "auto-worktree";
+
+export function isWorktreeStartupMode(
+  mode: ProjectWorkspaceStartupMode,
+): boolean {
+  return mode === "worktree" || mode === "auto-worktree";
+}
+
+export function isAskWorktreeStartupMode(
+  mode: ProjectWorkspaceStartupMode,
+): boolean {
+  return mode === "worktree" || mode === "auto-worktree";
+}
+
+export function requiresWorkspaceStartup(
+  mode: ProjectWorkspaceStartupMode,
+): boolean {
+  return mode === "branch" || isWorktreeStartupMode(mode);
+}
 
 export interface ProjectWorkspace extends WorkspaceAttachment {
   startupMode: ProjectWorkspaceStartupMode;
@@ -64,7 +87,10 @@ function createArtifactMetadata(
 }
 
 function validStartupMode(value: unknown): ProjectWorkspaceStartupMode {
-  return value === "branch" || value === "worktree" ? value : "none";
+  if (value === "worktree") return "auto-worktree";
+  if (value === "branch") return "ask-worktree";
+  if (value === "ask-worktree" || value === "auto-worktree") return value;
+  return "none";
 }
 
 function validWorkspaceKind(value: unknown): WorkspaceAttachmentKind {

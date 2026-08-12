@@ -728,7 +728,7 @@
           }
         },
         "set_startup_mode": {
-          "description": "Set the startup behavior for new chats in a project. `worktree` creates an isolated Git worktree per chat, `branch` creates a branch, and `none` uses the configured folders as-is. Existing chats and project folder paths are not changed.",
+          "description": "Set the startup behavior for new chats in a project. `auto-worktree` prompts before creating isolated worktrees, `ask-worktree` leaves worktree creation to the user, and `none` uses configured folders as-is. Legacy `worktree` and `branch` values migrate to those current modes.",
           "fields": [
             {
               "name": "project_id",
@@ -741,7 +741,13 @@
               "required": true,
               "kind": "string",
               "description": "How new chats start from the project's Git workspaces: use them as-is, create a branch, or create an isolated worktree.",
-              "values": ["none", "branch", "worktree"]
+              "values": [
+                "none",
+                "branch",
+                "worktree",
+                "ask-worktree",
+                "auto-worktree"
+              ]
             }
           ],
           "schema": {
@@ -754,7 +760,13 @@
               },
               "mode": {
                 "type": "string",
-                "enum": ["none", "branch", "worktree"],
+                "enum": [
+                  "none",
+                  "branch",
+                  "worktree",
+                  "ask-worktree",
+                  "auto-worktree"
+                ],
                 "description": "How new chats start from the project's Git workspaces: use them as-is, create a branch, or create an isolated worktree."
               }
             },

@@ -15,8 +15,12 @@ import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRe
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { prefetchProjectArtifactRenderer } from "@/features/projects/artifact/prefetchProjectArtifactRenderer";
 import { getPlatform, type Platform } from "@/shared/lib/platform";
-import { archiveProject } from "@/features/projects/api/projects";
-import type { ProjectInfo } from "@/features/projects/api/projects";
+import {
+  archiveProject,
+  isWorktreeStartupMode,
+  requiresWorkspaceStartup,
+  type ProjectInfo,
+} from "@/features/projects/api/projects";
 import {
   DEFAULT_SETTINGS_SECTION,
   resolveEnabledSettingsSection,
@@ -1054,6 +1058,9 @@ export function AppShell({
   const retryFailedSessionsForProjectRef = useRef<
     (project: ProjectInfo) => void
   >(() => {});
+  const startChatForCreatedProjectRef = useRef<(project: ProjectInfo) => void>(
+    () => {},
+  );
   const refreshProjectsAfterDialogSave = useCallback(
     (savedProject: ProjectInfo) => {
       useProjectStore
@@ -1084,6 +1091,8 @@ export function AppShell({
     openEditProjectDialog,
   } = useProjectDialog({
     onProjectSaved: refreshProjectsAfterDialogSave,
+    onProjectCreated: (project) =>
+      startChatForCreatedProjectRef.current(project),
   });
   const startup = useAppStartup();
   const [startupLoadingMinElapsed, setStartupLoadingMinElapsed] = useState(
@@ -1941,7 +1950,10 @@ export function AppShell({
             transferSessionTargetOwnership(session.id, sessionId);
             promoteDraftSession(session.id, sessionId, {
               executionTarget: promotedTarget,
-              workingDir,
+              workingDir: latestSessionAfterReady.workingDir ?? workingDir,
+              workspaceAttachments:
+                latestSessionAfterReady.workspaceAttachments,
+              activeWorkspaceId: latestSessionAfterReady.activeWorkspaceId,
               ...latestSessionPatch,
               ...(resolvedConfigOptionsSnapshot?.reasoningEffort
                 ? {
@@ -2344,8 +2356,8 @@ export function AppShell({
       const chatState = useChatStore.getState();
       const needsStartup =
         workspaceRepository.mode === "multi" &&
-        project.projectWorkspaces.some(
-          (workspace) => workspace.startupMode !== "none",
+        project.projectWorkspaces.some((workspace) =>
+          requiresWorkspaceStartup(workspace.startupMode),
         );
       const existingDraft = findExistingDraft({
         sessions: sessionState.sessions,
@@ -2383,7 +2395,9 @@ export function AppShell({
         workspaceAttachments: needsStartup
           ? asIs?.workspaceAttachments.filter(
               (_, index) =>
-                project.projectWorkspaces[index]?.startupMode === "none",
+                !requiresWorkspaceStartup(
+                  project.projectWorkspaces[index]?.startupMode ?? "none",
+                ),
             )
           : asIs?.workspaceAttachments,
       });
@@ -2483,6 +2497,12 @@ export function AppShell({
       startDraftSessionCreation,
     ],
   );
+
+  startChatForCreatedProjectRef.current = (project) => {
+    void createNewProjectDraft(DEFAULT_CHAT_TITLE, project).catch((error) => {
+      logProjectChatStartError("Failed to start chat for new project:", error);
+    });
+  };
 
   const activateDeferredChatSession = useCallback(
     (sessionId: string) => {
@@ -4979,17 +4999,20 @@ export function AppShell({
               onCreatePersona={agentBuilder.create}
               onStartAgentBuilderSession={agentBuilder.start}
               onArchiveChat={handleArchiveChat}
-              onCreateProject={() => {
+              onCreateProject={(options) => {
                 if (starterTasksVisible) {
                   setStarterTasksAwaitingCompletion((awaiting) =>
                     new Set(awaiting).add("create-project"),
                   );
                   openCreateProjectDialog({
-                    onCreated: handleStarterProjectCreated,
+                    onCreated: (projectId) => {
+                      handleStarterProjectCreated(projectId);
+                      options?.onCreated?.(projectId);
+                    },
                   });
                   return;
                 }
-                openCreateProjectDialog();
+                openCreateProjectDialog(options);
               }}
               onOpenProjectSettings={handleEditProject}
               onActivateHomeSession={activateHomeSession}
@@ -5133,8 +5156,8 @@ export function AppShell({
         requestIdentity={pendingWorkspaceName ?? undefined}
         workspaces={pendingWorkspaceName?.workspaces ?? []}
         requiresWorktreeSafeName={Boolean(
-          pendingWorkspaceName?.workspaces.some(
-            (workspace) => workspace.startupMode === "worktree",
+          pendingWorkspaceName?.workspaces.some((workspace) =>
+            isWorktreeStartupMode(workspace.startupMode),
           ),
         )}
         onCancel={closeWorkspaceName}

@@ -3533,7 +3533,7 @@ describe("projects", () => {
             expect.objectContaining({
               id: "ws-main",
               path: "/projects/repo",
-              startupMode: "worktree",
+              startupMode: "auto-worktree",
             }),
             expect.objectContaining({
               id: "ws-docs",
@@ -3545,9 +3545,9 @@ describe("projects", () => {
       );
       expect(result).toEqual({
         ok: true,
-        mode: "worktree",
+        mode: "auto-worktree",
         workspaces: [
-          { path: "/projects/repo", startup_mode: "worktree" },
+          { path: "/projects/repo", startup_mode: "auto-worktree" },
           { path: "/projects/docs", startup_mode: "none" },
         ],
       });
@@ -3582,7 +3582,7 @@ describe("projects", () => {
       );
     });
 
-    it("rejects branch mode across different checkouts of the same repository", async () => {
+    it("migrates legacy branch mode to manual worktree management", async () => {
       const linkedWorkspace = {
         ...mainWorkspace,
         id: "ws-linked",
@@ -3619,15 +3619,14 @@ describe("projects", () => {
         localBranches: ["main", "feature"],
       }));
 
-      await expectCommandError(
-        dispatchCommand(
-          "projects",
-          { action: "set_startup_mode", project_id: "p-1", mode: "branch" },
-          ctx,
-        ),
-        "invalid_args",
+      const result = await dispatchCommand(
+        "projects",
+        { action: "set_startup_mode", project_id: "p-1", mode: "branch" },
+        ctx,
       );
-      expect(mocks.updateProject).not.toHaveBeenCalled();
+
+      expect(result).toMatchObject({ mode: "ask-worktree" });
+      expect(mocks.updateProject).toHaveBeenCalled();
     });
 
     it("rejects branch/worktree mode when the project has no Git workspaces", async () => {

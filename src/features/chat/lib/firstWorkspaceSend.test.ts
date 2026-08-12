@@ -14,6 +14,7 @@ import {
   chooseDeferredWorkspaceSetup,
   createDeferredWorkspaces,
   prepareExistingFirstSend,
+  provisionPreSendProjectWorkspaces,
   releaseDeferredWorkspaceSend,
   releaseWorkspaceSendAfterUserEdit,
   workspaceAttachmentsEqualConfiguration,
@@ -109,6 +110,80 @@ describe("workspace attachment equality", () => {
 });
 
 describe("first workspace send", () => {
+  it("provisions a named worktree before any message is queued", async () => {
+    const created = {
+      ...selected,
+      id: "created",
+      path: "/repo/worktrees/feature/app",
+      source: "created" as const,
+      worktreePath: "/repo/worktrees/feature",
+    };
+    vi.mocked(planProjectChatWorkspaces).mockResolvedValueOnce({
+      workingDir: created.path,
+      workspaceAttachments: [created],
+    });
+    vi.mocked(transitionSessionTarget).mockImplementationOnce(async () => {
+      expect(useChatSessionStore.getState().getSession("s1")).toMatchObject({
+        workingDir: "/repo/app",
+        workspaceAttachments: [],
+      });
+      return {
+        status: "committed",
+        applied: true,
+        target: { harnessId: "goose" },
+      };
+    });
+
+    await provisionPreSendProjectWorkspaces("s1", project, "feature");
+
+    expect(planProjectChatWorkspaces).toHaveBeenCalledWith(project, "feature");
+    expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
+    expect(useChatSessionStore.getState().getSession("s1")).toMatchObject({
+      workingDir: created.path,
+      workspaceAttachments: [created],
+      activeWorkspaceId: created.id,
+    });
+    expect(transitionSessionTarget).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "s1", workingDir: created.path }),
+    );
+  });
+
+  it("restores the backend target before rolling back a stale completed setup", async () => {
+    const created = {
+      ...selected,
+      id: "created",
+      path: "/repo/worktrees/feature/app",
+      source: "created" as const,
+      worktreePath: "/repo/worktrees/feature",
+    };
+    vi.mocked(planProjectChatWorkspaces).mockResolvedValueOnce({
+      workingDir: created.path,
+      workspaceAttachments: [created],
+    });
+    let transitionCount = 0;
+    vi.mocked(transitionSessionTarget).mockImplementation(async () => {
+      transitionCount += 1;
+      if (transitionCount === 1) {
+        useProjectStore.setState({ projects: [] });
+      }
+      return {
+        status: "committed",
+        applied: true,
+        target: { harnessId: "goose" },
+      };
+    });
+
+    await expect(
+      provisionPreSendProjectWorkspaces("s1", project, "feature"),
+    ).rejects.toThrow("The project workspace changed during setup. Try again.");
+
+    expect(transitionSessionTarget).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ sessionId: "s1", workingDir: "/repo/app" }),
+    );
+    expect(rollbackProjectChatWorkspacePlan).toHaveBeenCalledOnce();
+  });
+
   it("converts an existing transport-ready first send into the choice flow", () => {
     const onNeedsName = vi.fn();
     const onChoice = vi.fn();
@@ -219,6 +294,65 @@ describe("first workspace send", () => {
         assistantPrompt: "Use the selected skill.",
       },
     });
+  });
+
+  it("shows the piggyback for auto-create worktrees", () => {
+    const onNeedsName = vi.fn();
+    useProjectStore.setState({
+      projects: [
+        {
+          ...project,
+          projectWorkspaces: [{ ...workspace, startupMode: "auto-worktree" }],
+        },
+      ],
+    });
+
+    expect(
+      acceptFirstSend(
+        "s1",
+        { persona: { kind: "inherit" }, text: "hello" },
+        { onNeedsName },
+      ),
+    ).toEqual({
+      accepted: true,
+      deferred: true,
+      needsName: false,
+    });
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0],
+    ).toMatchObject({
+      kind: "deferred",
+      state: { status: "choice" },
+    });
+    expect(onNeedsName).not.toHaveBeenCalled();
+    expect(planProjectChatWorkspaces).not.toHaveBeenCalled();
+  });
+
+  it("sends normally when worktrees are manually managed", () => {
+    useProjectStore.setState({
+      projects: [
+        {
+          ...project,
+          projectWorkspaces: [{ ...workspace, startupMode: "ask-worktree" }],
+        },
+      ],
+    });
+
+    expect(
+      acceptFirstSend(
+        "s1",
+        { persona: { kind: "inherit" }, text: "hello" },
+        { queueReady: true },
+      ),
+    ).toEqual({
+      accepted: true,
+      deferred: false,
+      needsName: false,
+    });
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0],
+    ).toMatchObject({ kind: "transport-ready", payload: { text: "hello" } });
+    expect(planProjectChatWorkspaces).not.toHaveBeenCalled();
   });
 
   it("keeps the prior naming flow for non-worktree startup modes", () => {
@@ -380,6 +514,129 @@ describe("first workspace send", () => {
     });
   });
 
+  it("ignores workspace ordering and derived metadata changes during setup", async () => {
+    useProjectStore.setState({
+      projects: [
+        {
+          ...project,
+          projectWorkspaces: [
+            { ...workspace, branch: "enriched", usedByAgent: true },
+          ],
+        },
+      ],
+    });
+    vi.mocked(planProjectChatWorkspaces).mockResolvedValueOnce({
+      workingDir: "/repo/app",
+      workspaceAttachments: [selected],
+    });
+    vi.mocked(transitionSessionTarget).mockResolvedValueOnce({
+      status: "committed",
+      applied: true,
+      target: { harnessId: "goose" },
+    });
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
+    const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
+    if (record?.kind !== "deferred") throw new Error("missing deferred record");
+
+    await createDeferredWorkspaces("s1", record.recordId, "feature");
+
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0],
+    ).toMatchObject({ kind: "transport-ready", recordId: record.recordId });
+  });
+
+  it("restores ACP and rolls back when project policy changes after prepare", async () => {
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
+    const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
+    if (record?.kind !== "deferred") throw new Error("missing deferred record");
+    const plan = {
+      workingDir: "/created",
+      workspaceAttachments: [selected],
+    };
+    vi.mocked(planProjectChatWorkspaces).mockResolvedValueOnce(plan);
+    vi.mocked(transitionSessionTarget).mockImplementationOnce(async () => {
+      useProjectStore.setState({ projects: [] });
+      return {
+        status: "committed",
+        applied: true,
+        target: { harnessId: "goose" },
+      };
+    });
+    vi.mocked(transitionSessionTarget).mockResolvedValueOnce({
+      status: "committed",
+      applied: true,
+      target: { harnessId: "goose" },
+    });
+
+    await createDeferredWorkspaces("s1", record.recordId, "feature");
+
+    expect(transitionSessionTarget).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ workingDir: "/repo/app" }),
+    );
+    expect(rollbackProjectChatWorkspacePlan).toHaveBeenCalledWith(plan);
+    expect(
+      (
+        useChatStore.getState().queuedMessageBySession.s1?.[0] as {
+          state: { status: string };
+        }
+      ).state.status,
+    ).toBe("held");
+  });
+
+  it("preserves a concurrent workspace edit while rolling back prepared setup", async () => {
+    acceptFirstSend(
+      "s1",
+      { persona: { kind: "inherit" }, text: "hello" },
+      { onNeedsName: vi.fn() },
+    );
+    const record = useChatStore.getState().queuedMessageBySession.s1?.[0];
+    if (record?.kind !== "deferred") throw new Error("missing deferred record");
+    const plan = {
+      workingDir: "/created",
+      workspaceAttachments: [selected],
+    };
+    vi.mocked(planProjectChatWorkspaces).mockResolvedValueOnce(plan);
+    vi.mocked(transitionSessionTarget).mockImplementationOnce(async () => {
+      useChatSessionStore.getState().patchSession("s1", {
+        workingDir: "/user-choice",
+        workspaceAttachments: [
+          { ...selected, id: "user-choice", path: "/user-choice" },
+        ],
+      });
+      return {
+        status: "committed",
+        applied: true,
+        target: { harnessId: "goose" },
+      };
+    });
+    vi.mocked(transitionSessionTarget).mockResolvedValueOnce({
+      status: "committed",
+      applied: true,
+      target: { harnessId: "goose" },
+    });
+
+    await createDeferredWorkspaces("s1", record.recordId, "feature");
+
+    expect(transitionSessionTarget).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ workingDir: "/user-choice" }),
+    );
+    expect(useChatSessionStore.getState().getSession("s1")).toMatchObject({
+      workingDir: "/user-choice",
+      workspaceAttachments: [expect.objectContaining({ id: "user-choice" })],
+    });
+    expect(rollbackProjectChatWorkspacePlan).toHaveBeenCalledWith(plan);
+  });
+
   it("stops stale planning before config apply without calling it", async () => {
     acceptFirstSend(
       "s1",
@@ -408,6 +665,41 @@ describe("first workspace send", () => {
         }
       ).state.status,
     ).toBe("held");
+  });
+
+  it("times out stalled draft promotion and rolls back workspace setup", async () => {
+    vi.useFakeTimers();
+    try {
+      const plan = {
+        workingDir: "/repo/worktrees/feature/app",
+        workspaceAttachments: [selected],
+      };
+      vi.mocked(planProjectChatWorkspaces).mockResolvedValueOnce(plan);
+      useChatSessionStore.setState({
+        sessions: [
+          {
+            ...session(),
+            creationState: "pending",
+            clientSessionId: "s1",
+          },
+        ],
+      });
+
+      const provisioning = provisionPreSendProjectWorkspaces(
+        "s1",
+        project,
+        "feature",
+      );
+      const rejection = expect(provisioning).rejects.toThrow(
+        "Chat creation failed during workspace setup.",
+      );
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      await rejection;
+      expect(rollbackProjectChatWorkspacePlan).toHaveBeenCalledWith(plan);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("waits for draft promotion before applying ACP configuration", async () => {
@@ -445,9 +737,12 @@ describe("first workspace send", () => {
     const creating = createDeferredWorkspaces("s1", record.recordId, "feature");
     await vi.waitFor(() => {
       expect(
-        useChatSessionStore.getState().getSession("s1")?.workspaceAttachments,
-      ).toEqual([selected]);
+        useChatSessionStore.getState().getSession("s1")?.creationState,
+      ).toBe("pending");
     });
+    expect(
+      useChatSessionStore.getState().getSession("s1")?.workspaceAttachments,
+    ).toEqual([expect.objectContaining({ source: "inferred" })]);
     expect(transitionSessionTarget).not.toHaveBeenCalled();
 
     useChatStore.getState().promoteSessionId("s1", "backend-s1");
@@ -492,13 +787,8 @@ describe("first workspace send", () => {
     const creating = createDeferredWorkspaces("s1", record.recordId, "feature");
     await vi.waitFor(() => {
       expect(
-        useChatSessionStore
-          .getState()
-          .getSession("s1")
-          ?.workspaceAttachments?.some(
-            (attachment) => attachment.id === selected.id,
-          ),
-      ).toBe(true);
+        useChatSessionStore.getState().getSession("s1")?.creationState,
+      ).toBe("pending");
     });
     useChatSessionStore.getState().patchSession("s1", {
       creationState: "failed",

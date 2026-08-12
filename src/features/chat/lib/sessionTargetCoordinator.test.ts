@@ -798,6 +798,73 @@ describe("session target coordinator", () => {
     expect(getSessionTargetSelection("selection")).toBeUndefined();
   });
 
+  it("settles pending draft work when ownership transfers to an existing backend actor", async () => {
+    const { transferSessionTargetOwnership, hydrateSessionTarget } =
+      await import("./sessionTargetCoordinator");
+    const wire = deferred();
+    mockPrepare.mockReturnValueOnce(wire.promise);
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        ...state.sessions,
+        {
+          ...state.sessions[0],
+          id: "draft",
+          title: "draft",
+        },
+        {
+          ...state.sessions[0],
+          id: "backend",
+          title: "backend",
+        },
+      ],
+    }));
+    const pending = transitionSessionTarget({
+      sessionId: "draft",
+      target: target("b"),
+      workingDir: "/w",
+    });
+    await vi.waitFor(() => expect(mockPrepare).toHaveBeenCalledOnce());
+    hydrateSessionTarget("backend", target("a"));
+
+    transferSessionTargetOwnership("draft", "backend");
+
+    await expect(pending).resolves.toMatchObject({
+      status: "superseded",
+      applied: false,
+    });
+    expect(getSessionTargetState("backend")).toMatchObject({
+      status: "settled",
+      committed: target("a"),
+    });
+    wire.resolve();
+  });
+
+  it("preserves an existing backend actor while transferring draft selection", async () => {
+    const {
+      recordSessionTargetSelection,
+      getSessionTargetSelection,
+      transferSessionTargetOwnership,
+    } = await import("./sessionTargetCoordinator");
+    recordSessionTargetSelection({
+      sessionId: "backend",
+      operationId: "op-backend",
+      target: target("a"),
+    });
+    recordSessionTargetSelection({
+      sessionId: "draft",
+      operationId: "op-draft",
+      target: target("b"),
+    });
+
+    transferSessionTargetOwnership("draft", "backend");
+
+    expect(getSessionTargetSelection("draft")).toBeUndefined();
+    expect(getSessionTargetSelection("backend")).toMatchObject({
+      operationId: "op-backend",
+      target: target("a"),
+    });
+  });
+
   it("transfers pending selection ownership from a draft id", async () => {
     const {
       recordSessionTargetSelection,

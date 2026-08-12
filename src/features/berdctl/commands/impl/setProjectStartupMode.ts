@@ -11,7 +11,7 @@ const setProjectStartupModeSchema = z
   .object({
     project_id: z.string().describe("Id of the project to update."),
     mode: z
-      .enum(["none", "branch", "worktree"])
+      .enum(["none", "branch", "worktree", "ask-worktree", "auto-worktree"])
       .describe(
         "How new chats start from the project's Git workspaces: use them as-is, create a branch, or create an isolated worktree.",
       ),
@@ -25,6 +25,14 @@ interface SetProjectStartupModeResult {
     path: string;
     startup_mode: ProjectWorkspaceStartupMode;
   }>;
+}
+
+function normalizeRequestedMode(
+  mode: z.infer<typeof setProjectStartupModeSchema>["mode"],
+): ProjectWorkspaceStartupMode {
+  if (mode === "branch") return "ask-worktree";
+  if (mode === "worktree") return "auto-worktree";
+  return mode;
 }
 
 function workspacePathKey(path: string): string {
@@ -43,24 +51,25 @@ export const setProjectStartupModeCommand = defineCommand({
   destructive: false,
   summary: "Set how a project's new chats start from its Git workspaces",
   description:
-    "Set the startup behavior for new chats in a project. `worktree` creates " +
-    "an isolated Git worktree per chat, `branch` creates a branch, and " +
-    "`none` uses the configured folders as-is. Existing chats and project " +
-    "folder paths are not changed.",
+    "Set the startup behavior for new chats in a project. `auto-worktree` " +
+    "prompts before creating isolated worktrees, `ask-worktree` leaves " +
+    "worktree creation to the user, and `none` uses configured folders as-is. " +
+    "Legacy `worktree` and `branch` values migrate to those current modes.",
   helpFooter: `The mode applies to every Git workspace configured on the project. Non-Git
-folders remain in the project but use mode "none". Branch and worktree modes
-prompt for a startup name when the next chat is created.
+folders remain in the project but use mode "none". Legacy "worktree" becomes
+"auto-worktree" and legacy "branch" becomes "ask-worktree".
 
 Examples:
-  berdctl project set-startup-mode --project-id <project-id> --mode worktree
+  berdctl project set-startup-mode --project-id <project-id> --mode auto-worktree
   berdctl project set-startup-mode --project-id <project-id> --mode none
 
 Result:
-  {"ok": true, "mode": "worktree", "workspaces": [
-    {"path": "...", "startup_mode": "worktree"}
+  {"ok": true, "mode": "auto-worktree", "workspaces": [
+    {"path": "...", "startup_mode": "auto-worktree"}
   ]}`,
   schema: setProjectStartupModeSchema,
   execute: async (args, ctx): Promise<SetProjectStartupModeResult> => {
+    const mode = normalizeRequestedMode(args.mode);
     const [
       { refusePastDeadline },
       { normalizeProjectWorkspaces },
@@ -94,7 +103,7 @@ Result:
       string,
       Awaited<ReturnType<typeof getGitState>>
     >();
-    if (args.mode !== "none") {
+    if (mode !== "none") {
       try {
         await Promise.all(
           initialWorkspaces.map(async (workspace) => {
@@ -141,9 +150,8 @@ Result:
     }
 
     let gitWorkspaceCount = 0;
-    const branchCheckoutByRepository = new Map<string, string>();
     const projectWorkspaces = liveWorkspaces.map((workspace) => {
-      if (args.mode === "none") {
+      if (mode === "none") {
         return { ...workspace, startupMode: "none" as const };
       }
       const gitState = gitStateByPath.get(workspacePathKey(workspace.path));
@@ -155,30 +163,9 @@ Result:
         workspace,
         gitState,
       );
-      if (args.mode === "branch") {
-        // Match the startup planner's invariant: multiple included paths in
-        // one repository can share a branch startup only when they share the
-        // checkout where that branch will be created.
-        const repositoryKey = workspacePathKey(
-          enriched.repositoryPath ??
-            gitState.mainWorktreePath ??
-            workspace.path,
-        );
-        const checkoutKey = workspacePathKey(
-          enriched.worktreePath ?? workspace.path,
-        );
-        const existingCheckout = branchCheckoutByRepository.get(repositoryKey);
-        if (existingCheckout && existingCheckout !== checkoutKey) {
-          throw new CommandError(
-            "invalid_args",
-            `Project "${args.project_id}" includes multiple checkouts from the same repository; branch mode requires those workspaces to share one checkout. Use --mode worktree or edit the project folders.`,
-          );
-        }
-        branchCheckoutByRepository.set(repositoryKey, checkoutKey);
-      }
-      return { ...workspace, ...enriched, startupMode: args.mode };
+      return { ...workspace, ...enriched, startupMode: mode };
     });
-    if (args.mode !== "none" && gitWorkspaceCount === 0) {
+    if (mode !== "none" && gitWorkspaceCount === 0) {
       throw new CommandError(
         "invalid_args",
         `Project "${args.project_id}" has no Git workspaces; mode "${args.mode}" requires at least one Git workspace.`,
@@ -193,13 +180,13 @@ Result:
       project.icon,
       project.color,
       projectWorkspaces.map((workspace) => workspace.path),
-      args.mode === "worktree",
+      mode === "auto-worktree",
       projectWorkspaces,
     );
 
     return {
       ok: true,
-      mode: args.mode,
+      mode,
       workspaces: updated.projectWorkspaces.map((workspace) => ({
         path: workspace.path,
         startup_mode: workspace.startupMode,

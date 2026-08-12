@@ -902,6 +902,27 @@ describe("useMessageQueue", () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
+  it("does not send the next queued message when the head is dismissed", () => {
+    const sendMessage = vi.fn();
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "first",
+    });
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "second",
+    });
+
+    const { result } = renderHook(() =>
+      useMessageQueue("s1", "idle", sendMessage, false, true),
+    );
+
+    act(() => result.current.dismiss(result.current.queuedRecord?.recordId));
+
+    expect(result.current.queuedMessage?.text).toBe("second");
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   it("queued messages are scoped to session", () => {
     const sendMessage = vi.fn();
     useChatStore.getState().enqueueTransportReadyMessage("s2", {

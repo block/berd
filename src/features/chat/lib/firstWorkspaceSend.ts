@@ -1,6 +1,8 @@
-import type {
-  ProjectInfo,
-  ProjectWorkspace,
+import {
+  isAskWorktreeStartupMode,
+  isWorktreeStartupMode,
+  type ProjectInfo,
+  type ProjectWorkspace,
 } from "@/features/projects/api/projects";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { getWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
@@ -17,6 +19,7 @@ import {
   isSameWorkspacePath,
 } from "./workspaceAttachments";
 import { transitionSessionTarget } from "./sessionTargetCoordinator";
+import type { SessionExecutionTarget } from "./sessionExecutionTarget";
 import { isAdmittedQueuedMessagePayload } from "./admittedSend";
 import {
   useChatStore,
@@ -27,6 +30,30 @@ import { useChatSessionStore } from "../stores/chatSessionStore";
 
 export const UNRESOLVED_DEFERRED_SEND_ERROR =
   "Select a model before sending to this unresolved session.";
+const WORKSPACE_SESSION_PROMOTION_TIMEOUT_MS = 30_000;
+
+function projectWorkspaceConfigurationRevision(
+  workspaces: readonly ProjectWorkspace[],
+): string {
+  return workspaces
+    .map((workspace) => ({
+      path: workspace.path.replace(/\\/g, "/").replace(/\/+$/, ""),
+      startupMode: workspace.startupMode,
+    }))
+    .sort((left, right) => left.path.localeCompare(right.path))
+    .map(({ path, startupMode }) => `${path}\0${startupMode}`)
+    .join("\n");
+}
+
+function projectWorkspaceConfigurationsEqual(
+  left: readonly ProjectWorkspace[],
+  right: readonly ProjectWorkspace[],
+): boolean {
+  return (
+    projectWorkspaceConfigurationRevision(left) ===
+    projectWorkspaceConfigurationRevision(right)
+  );
+}
 
 export interface DeferredWorkspaceSend {
   type: "workspace-first-send";
@@ -34,6 +61,7 @@ export interface DeferredWorkspaceSend {
   projectId: string;
   desired: ProjectWorkspace[];
   cancelBuilderDraftPath?: string;
+  configurationRevision?: string;
   error?: string;
 }
 
@@ -57,12 +85,11 @@ function attachmentMatches(
       isSameWorkspacePath(attachment.path, workspace.path)
     );
   }
-  const requiredCleanup =
-    workspace.startupMode === "worktree"
-      ? "worktree"
-      : workspace.startupMode === "branch"
-        ? "branch"
-        : null;
+  const requiredCleanup = isWorktreeStartupMode(workspace.startupMode)
+    ? "worktree"
+    : workspace.startupMode === "branch"
+      ? "branch"
+      : null;
   if (requiredCleanup && attachment.lifecycle?.cleanup !== requiredCleanup) {
     return false;
   }
@@ -120,6 +147,48 @@ function resolveDeferredSessionId(
     records.some((record) => record.recordId === recordId),
   );
   return queuedEntry?.[0] ?? null;
+}
+
+async function waitForPromotedSessionId(
+  originalSessionId: string,
+): Promise<string | null> {
+  const resolve = (): string | null | undefined => {
+    const session = useChatSessionStore
+      .getState()
+      .sessions.find(
+        (candidate) =>
+          candidate.id === originalSessionId ||
+          candidate.clientSessionId === originalSessionId,
+      );
+    if (!session || session.archivedAt || session.creationState === "failed") {
+      return null;
+    }
+    return session.creationState === "pending" ||
+      session.id === originalSessionId
+      ? undefined
+      : session.id;
+  };
+
+  const initial = resolve();
+  if (initial !== undefined) return initial;
+  return new Promise((finish) => {
+    let settled = false;
+    const complete = (result: string | null) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      unsubscribe();
+      finish(result);
+    };
+    const unsubscribe = useChatSessionStore.subscribe(() => {
+      const result = resolve();
+      if (result !== undefined) complete(result);
+    });
+    const timeoutId = window.setTimeout(
+      () => complete(null),
+      WORKSPACE_SESSION_PROMOTION_TIMEOUT_MS,
+    );
+  });
 }
 
 async function waitForBackendSessionId(
@@ -226,6 +295,150 @@ export function hasDeferredWorkspaceSend(sessionId: string): boolean {
   return deferredRecord(sessionId) !== null;
 }
 
+export async function provisionPreSendProjectWorkspaces(
+  sessionId: string,
+  project: ProjectInfo,
+  startupName: string,
+): Promise<string> {
+  let resolvedSessionId = resolveDeferredSessionId(sessionId);
+  const session = resolvedSessionId
+    ? useChatSessionStore.getState().getSession(resolvedSessionId)
+    : null;
+  if (!resolvedSessionId || !session || session.archivedAt) {
+    throw new Error("The chat is no longer available for workspace setup.");
+  }
+
+  let originalWorkspaceState = {
+    workingDir: session.workingDir,
+    workspaceAttachments: session.workspaceAttachments,
+    activeWorkspaceId: session.activeWorkspaceId,
+  };
+  let originalWorkspaceSnapshot = sessionSnapshot(sessionId);
+  let switchedTarget: SessionExecutionTarget | undefined;
+  const plan = await planProjectChatWorkspaces(project, startupName);
+  if (!plan) {
+    throw new Error("The project has no folders to configure.");
+  }
+
+  try {
+    const liveProject = useProjectStore
+      .getState()
+      .projects.find((candidate) => candidate.id === project.id);
+    if (
+      !liveProject ||
+      !projectWorkspaceConfigurationsEqual(
+        liveProject.projectWorkspaces,
+        project.projectWorkspaces,
+      )
+    ) {
+      throw new Error("The project folders changed during workspace setup.");
+    }
+
+    if (session.creationState === "pending") {
+      const promotedSessionId = await waitForPromotedSessionId(sessionId);
+      if (!promotedSessionId) {
+        throw new Error("Chat creation failed during workspace setup.");
+      }
+      resolvedSessionId = promotedSessionId;
+      const promotedSession = useChatSessionStore
+        .getState()
+        .getSession(resolvedSessionId);
+      if (!promotedSession) {
+        throw new Error("Chat creation failed during workspace setup.");
+      }
+      originalWorkspaceState = {
+        workingDir: promotedSession.workingDir,
+        workspaceAttachments: promotedSession.workspaceAttachments,
+        activeWorkspaceId: promotedSession.activeWorkspaceId,
+      };
+      originalWorkspaceSnapshot = sessionSnapshot(resolvedSessionId);
+    }
+
+    const currentProject = useProjectStore
+      .getState()
+      .projects.find((candidate) => candidate.id === project.id);
+    const currentSessionSnapshot = sessionSnapshot(resolvedSessionId);
+    if (
+      !currentProject ||
+      !projectWorkspaceConfigurationsEqual(
+        currentProject.projectWorkspaces,
+        project.projectWorkspaces,
+      ) ||
+      currentSessionSnapshot !== originalWorkspaceSnapshot
+    ) {
+      throw new Error("The project workspace changed during setup. Try again.");
+    }
+
+    const preparedSession = useChatSessionStore
+      .getState()
+      .getSession(resolvedSessionId);
+    if (!preparedSession?.executionTarget) {
+      throw new Error("Select a model before configuring this workspace.");
+    }
+    const prepared = await transitionSessionTarget({
+      sessionId: resolvedSessionId,
+      target: preparedSession.executionTarget,
+      workingDir: plan.workingDir,
+    });
+    if (!prepared.applied) {
+      throw new Error("The chat could not switch to the new worktree.");
+    }
+    switchedTarget = preparedSession.executionTarget;
+    const finalProject = useProjectStore
+      .getState()
+      .projects.find((candidate) => candidate.id === project.id);
+    if (
+      !finalProject ||
+      !projectWorkspaceConfigurationsEqual(
+        finalProject.projectWorkspaces,
+        project.projectWorkspaces,
+      ) ||
+      sessionSnapshot(resolvedSessionId) !== originalWorkspaceSnapshot
+    ) {
+      throw new Error("The project workspace changed during setup. Try again.");
+    }
+    useChatSessionStore.getState().patchSession(resolvedSessionId, {
+      workingDir: plan.workingDir,
+      workspaceAttachments: plan.workspaceAttachments,
+      activeWorkspaceId: plan.workspaceAttachments[0]?.id,
+      ...(prepared.configOptionsSnapshot?.reasoningEffort
+        ? { reasoningEffort: prepared.configOptionsSnapshot.reasoningEffort }
+        : {}),
+    });
+    return resolvedSessionId;
+  } catch (error) {
+    let rollbackError: unknown;
+    if (switchedTarget && !originalWorkspaceState.workingDir) {
+      rollbackError = new Error(
+        "Berd couldn’t safely return the chat to its original folder.",
+      );
+    } else if (switchedTarget && originalWorkspaceState.workingDir) {
+      const restored = await transitionSessionTarget({
+        sessionId: resolvedSessionId,
+        target: switchedTarget,
+        workingDir: originalWorkspaceState.workingDir,
+      });
+      if (!restored.applied) {
+        rollbackError = new Error(
+          "Berd couldn’t safely return the chat to its original folder.",
+        );
+      }
+    }
+    if (!rollbackError) {
+      await rollbackProjectChatWorkspacePlan(plan);
+      const rollbackSession = useChatSessionStore
+        .getState()
+        .getSession(resolvedSessionId);
+      if (rollbackSession) {
+        useChatSessionStore
+          .getState()
+          .patchSession(resolvedSessionId, originalWorkspaceState);
+      }
+    }
+    throw rollbackError ?? error;
+  }
+}
+
 /** Call only after an explicit successful user workspace/configuration edit. */
 export function releaseWorkspaceSendAfterUserEdit(sessionId: string): boolean {
   const record = deferredRecord(sessionId);
@@ -277,10 +490,13 @@ export async function createDeferredWorkspaces(
     });
     return;
   }
+  const expectedConfigurationRevision =
+    record.state.configurationRevision ??
+    projectWorkspaceConfigurationRevision(record.state.desired);
   if (
     !project ||
-    JSON.stringify(project.projectWorkspaces) !==
-      JSON.stringify(record.state.desired)
+    projectWorkspaceConfigurationRevision(project.projectWorkspaces) !==
+      expectedConfigurationRevision
   ) {
     useChatStore.getState().updateDeferredMessage(resolvedSessionId, recordId, {
       ...record.state,
@@ -314,8 +530,8 @@ export async function createDeferredWorkspaces(
       .projects.find((candidate) => candidate.id === desiredProjectId);
     if (
       !liveProject ||
-      JSON.stringify(liveProject.projectWorkspaces) !==
-        JSON.stringify(record.state.desired)
+      projectWorkspaceConfigurationRevision(liveProject.projectWorkspaces) !==
+        expectedConfigurationRevision
     ) {
       await rollbackProjectChatWorkspacePlan(plan);
       useChatStore
@@ -352,10 +568,6 @@ export async function createDeferredWorkspaces(
       }
       return;
     }
-    useChatSessionStore.getState().patchSession(resolvedSessionId, {
-      workingDir,
-      workspaceAttachments: plan?.workspaceAttachments,
-    });
     if (current.creationState === "pending") {
       const backendSessionId = await waitForBackendSessionId(
         sessionId,
@@ -392,10 +604,6 @@ export async function createDeferredWorkspaces(
         return;
       }
       resolvedSessionId = backendSessionId;
-      useChatSessionStore.getState().patchSession(resolvedSessionId, {
-        workingDir,
-        workspaceAttachments: plan?.workspaceAttachments,
-      });
     }
     const appliedSnapshot = sessionSnapshot(sessionId, recordId);
     const preparedSession = useChatSessionStore
@@ -426,6 +634,30 @@ export async function createDeferredWorkspaces(
       !prepared.applied ||
       sessionSnapshot(sessionId, recordId) !== appliedSnapshot
     ) {
+      if (prepared.applied) {
+        const concurrentWorkspaceState = useChatSessionStore
+          .getState()
+          .getSession(resolvedSessionId);
+        const restored = concurrentWorkspaceState?.workingDir
+          ? await transitionSessionTarget({
+              sessionId: resolvedSessionId,
+              target: preparedSession.executionTarget,
+              workingDir: concurrentWorkspaceState.workingDir,
+            })
+          : null;
+        if (!restored?.applied) {
+          useChatStore
+            .getState()
+            .updateDeferredMessage(resolvedSessionId, recordId, {
+              ...record.state,
+              status: "failed",
+              error:
+                "Berd couldn’t safely return the chat to its original folder.",
+            });
+          return;
+        }
+      }
+      await rollbackProjectChatWorkspacePlan(plan);
       useChatStore
         .getState()
         .updateDeferredMessage(resolvedSessionId, recordId, {
@@ -440,9 +672,33 @@ export async function createDeferredWorkspaces(
       .projects.find((candidate) => candidate.id === finalProjectId);
     if (
       !finalProject ||
-      JSON.stringify(finalProject.projectWorkspaces) !==
-        JSON.stringify(record.state.desired)
+      projectWorkspaceConfigurationRevision(finalProject.projectWorkspaces) !==
+        expectedConfigurationRevision
     ) {
+      const restored = originalWorkspaceState?.workingDir
+        ? await transitionSessionTarget({
+            sessionId: resolvedSessionId,
+            target: preparedSession.executionTarget,
+            workingDir: originalWorkspaceState.workingDir,
+          })
+        : null;
+      if (!restored?.applied) {
+        useChatStore
+          .getState()
+          .updateDeferredMessage(resolvedSessionId, recordId, {
+            ...record.state,
+            status: "failed",
+            error:
+              "Berd couldn’t safely return the chat to its original folder.",
+          });
+        return;
+      }
+      await rollbackProjectChatWorkspacePlan(plan);
+      if (originalWorkspaceState) {
+        useChatSessionStore
+          .getState()
+          .patchSession(resolvedSessionId, originalWorkspaceState);
+      }
       useChatStore
         .getState()
         .updateDeferredMessage(resolvedSessionId, recordId, {
@@ -464,6 +720,9 @@ export async function createDeferredWorkspaces(
       return;
     }
     useChatSessionStore.getState().patchSession(resolvedSessionId, {
+      workingDir,
+      workspaceAttachments: plan?.workspaceAttachments,
+      activeWorkspaceId: plan?.workspaceAttachments[0]?.id,
       ...(prepared.configOptionsSnapshot?.reasoningEffort
         ? { reasoningEffort: prepared.configOptionsSnapshot.reasoningEffort }
         : {}),
@@ -567,10 +826,16 @@ export function prepareExistingFirstSend(
   }
 
   const needsName = projectRequiresStartupWorkspaceName(project);
-  const usesWorktreeChoice = project.projectWorkspaces.some(
-    (workspace) => workspace.startupMode === "worktree",
+  const usesWorktreeChoice = project.projectWorkspaces.some((workspace) =>
+    isAskWorktreeStartupMode(workspace.startupMode),
   );
-  if (needsName && !options.onNeedsName) return false;
+  const manuallyManaged = project.projectWorkspaces.every(
+    (workspace) =>
+      workspace.startupMode === "none" ||
+      workspace.startupMode === "ask-worktree",
+  );
+  if (manuallyManaged) return true;
+  if (needsName && !usesWorktreeChoice && !options.onNeedsName) return false;
   if (
     !chat.deferTransportReadyMessage(
       sessionId,
@@ -584,6 +849,9 @@ export function prepareExistingFirstSend(
             : "creating",
         projectId: project.id,
         desired: project.projectWorkspaces,
+        configurationRevision: projectWorkspaceConfigurationRevision(
+          project.projectWorkspaces,
+        ),
       },
       payloadForDeferredWorkspaceSetup(record.payload),
     )
@@ -670,10 +938,26 @@ export function acceptFirstSend(
   }
 
   const needsName = projectRequiresStartupWorkspaceName(project);
-  const usesWorktreeChoice = project.projectWorkspaces.some(
-    (workspace) => workspace.startupMode === "worktree",
+  const usesWorktreeChoice = project.projectWorkspaces.some((workspace) =>
+    isAskWorktreeStartupMode(workspace.startupMode),
   );
-  if (needsName && options.startupName === undefined && !options.onNeedsName) {
+  const manuallyManaged = project.projectWorkspaces.every(
+    (workspace) =>
+      workspace.startupMode === "none" ||
+      workspace.startupMode === "ask-worktree",
+  );
+  if (manuallyManaged) {
+    return {
+      accepted:
+        options.queueReady && isAdmittedQueuedMessagePayload(payload)
+          ? chat.enqueueTransportReadyMessage(sessionId, payload)
+          : false,
+      deferred: false,
+      needsName: false,
+    };
+  }
+  const startupName = options.startupName;
+  if (needsName && startupName === undefined && !options.onNeedsName) {
     return {
       accepted: false,
       deferred: false,
@@ -686,13 +970,16 @@ export function acceptFirstSend(
     {
       type: "workspace-first-send",
       status:
-        needsName && options.startupName === undefined
+        needsName && startupName === undefined
           ? usesWorktreeChoice
             ? "choice"
             : "naming"
           : "creating",
       projectId: project.id,
       desired: project.projectWorkspaces,
+      configurationRevision: projectWorkspaceConfigurationRevision(
+        project.projectWorkspaces,
+      ),
       cancelBuilderDraftPath: options.cancelBuilderDraftPath,
     },
   );
@@ -705,7 +992,7 @@ export function acceptFirstSend(
     };
   }
 
-  if (needsName && options.startupName === undefined && !usesWorktreeChoice) {
+  if (needsName && startupName === undefined && !usesWorktreeChoice) {
     options.onNeedsName?.({
       workspaces: project.projectWorkspaces,
       submit: (name) =>
@@ -722,11 +1009,11 @@ export function acceptFirstSend(
         }
       },
     });
-  } else if (!(needsName && options.startupName === undefined)) {
+  } else if (!(needsName && startupName === undefined)) {
     void createDeferredWorkspaces(
       sessionId,
       record.recordId,
-      options.startupName ?? null,
+      startupName ?? null,
     );
   }
   return { accepted: true, deferred: true, needsName: false };

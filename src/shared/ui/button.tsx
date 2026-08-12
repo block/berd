@@ -29,6 +29,8 @@ const buttonVariants = cva(
         default:
           "h-9 px-4 py-2 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3.5",
         sm: "h-8 px-3 text-xs [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3",
+        compact:
+          "h-8 px-3 text-sm [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3",
         lg: "h-10 px-8 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4",
         icon: "h-9 w-9 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4",
         "icon-xxs":
@@ -133,6 +135,7 @@ const buttonIconSizeClasses = {
   xs: "size-3",
   default: "size-3.5",
   sm: "size-3",
+  compact: "size-3",
   lg: "size-4",
   icon: "size-4",
   "icon-xxs": "size-3.5",
@@ -166,6 +169,7 @@ function getButtonSpinnerClass(
   switch (size) {
     case "xs":
     case "sm":
+    case "compact":
     case "icon-xxs":
     case "icon-xs":
       return "size-3";

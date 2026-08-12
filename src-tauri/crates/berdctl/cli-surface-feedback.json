@@ -115,7 +115,7 @@
         "set-startup-mode": {
           "action": "set_startup_mode",
           "about": "Set how a project's new chats start from its Git workspaces",
-          "afterHelp": "The mode applies to every Git workspace configured on the project. Non-Git\nfolders remain in the project but use mode \"none\". Branch and worktree modes\nprompt for a startup name when the next chat is created.\n\nExamples:\n  berdctl project set-startup-mode --project-id <project-id> --mode worktree\n  berdctl project set-startup-mode --project-id <project-id> --mode none\n\nResult:\n  {\"ok\": true, \"mode\": \"worktree\", \"workspaces\": [\n    {\"path\": \"...\", \"startup_mode\": \"worktree\"}\n  ]}"
+          "afterHelp": "The mode applies to every Git workspace configured on the project. Non-Git\nfolders remain in the project but use mode \"none\". Legacy \"worktree\" becomes\n\"auto-worktree\" and legacy \"branch\" becomes \"ask-worktree\".\n\nExamples:\n  berdctl project set-startup-mode --project-id <project-id> --mode auto-worktree\n  berdctl project set-startup-mode --project-id <project-id> --mode none\n\nResult:\n  {\"ok\": true, \"mode\": \"auto-worktree\", \"workspaces\": [\n    {\"path\": \"...\", \"startup_mode\": \"auto-worktree\"}\n  ]}"
         },
         "archive": {
           "action": "archive",

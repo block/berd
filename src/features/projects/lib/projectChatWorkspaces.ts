@@ -16,10 +16,12 @@ import {
   normalizeComparableWorkspacePath,
   workspaceAttachmentIdForPath,
 } from "@/features/chat/lib/workspaceAttachments";
-import type {
-  ProjectInfo,
-  ProjectWorkspace,
-  ProjectWorkspaceStartupMode,
+import {
+  isWorktreeStartupMode,
+  requiresWorkspaceStartup,
+  type ProjectInfo,
+  type ProjectWorkspace,
+  type ProjectWorkspaceStartupMode,
 } from "@/features/projects/api/projects";
 
 export interface ProjectWorkspaceStartupSummary {
@@ -37,15 +39,14 @@ export function summarizeProjectWorkspaceStartup(
   let exact = true;
 
   for (const workspace of workspaces) {
-    if (workspace.startupMode === "none") continue;
+    if (!requiresWorkspaceStartup(workspace.startupMode)) continue;
     exact &&= Boolean(workspace.repositoryPath || workspace.worktreePath);
     const repositoryKey = normalizedKey(
       workspace.repositoryPath ?? workspace.worktreePath ?? workspace.path,
     );
-    const repositories =
-      workspace.startupMode === "worktree"
-        ? worktreeRepositories
-        : branchRepositories;
+    const repositories = isWorktreeStartupMode(workspace.startupMode)
+      ? worktreeRepositories
+      : branchRepositories;
     repositories.add(repositoryKey);
   }
 
@@ -113,6 +114,47 @@ function defaultBaseBranch(gitState: GitState): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function friendlyWorkspaceSetupError(error: unknown): Error {
+  const message = errorMessage(error);
+  if (
+    /choose a different name/i.test(message) ||
+    /requires a Git repository/i.test(message) ||
+    /name is required/i.test(message)
+  ) {
+    return new Error(message);
+  }
+  if (/already exists/i.test(message) && /branch/i.test(message)) {
+    return new Error(
+      "That worktree name is already in use. Choose another name.",
+    );
+  }
+  if (
+    /not a valid branch name|invalid branch name|cannot lock ref/i.test(message)
+  ) {
+    return new Error(
+      "That name can’t be used for a worktree. Use letters, numbers, hyphens, or underscores.",
+    );
+  }
+  if (/not inside one|not a git repository/i.test(message)) {
+    return new Error("Choose a project folder that contains a Git repository.");
+  }
+  if (/timed out/i.test(message)) {
+    return new Error("Creating the worktree took too long. Try again.");
+  }
+  if (/permission denied|operation not permitted/i.test(message)) {
+    return new Error(
+      "Berd doesn’t have permission to create a worktree there.",
+    );
+  }
+  if (
+    /git\s+worktree\s+add/i.test(message) ||
+    /failed to create worktree/i.test(message)
+  ) {
+    return new Error("Berd couldn’t create that worktree. Try another name.");
+  }
+  return new Error("Berd couldn’t prepare the project workspace. Try again.");
 }
 
 async function rollbackStartupMutations(
@@ -242,7 +284,8 @@ function gitOperationPathCandidates(
   ];
   const worktreeCandidates = [classifiedWorktreePath, workspace.worktreePath];
   const candidates =
-    workspace.startupMode === "branch" || workspace.startupMode === "worktree"
+    workspace.startupMode === "branch" ||
+    isWorktreeStartupMode(workspace.startupMode)
       ? [...worktreeCandidates, workspace.path, ...repositoryCandidates]
       : [...repositoryCandidates, ...worktreeCandidates, workspace.path];
   return candidates.filter((path): path is string => Boolean(path));
@@ -384,8 +427,8 @@ function attachmentForCreatedBranch(
 export function projectRequiresStartupWorkspaceName(
   project: Pick<ProjectInfo, "projectWorkspaces">,
 ): boolean {
-  return (project.projectWorkspaces ?? []).some(
-    (workspace) => workspace.startupMode !== "none",
+  return (project.projectWorkspaces ?? []).some((workspace) =>
+    requiresWorkspaceStartup(workspace.startupMode),
   );
 }
 
@@ -417,7 +460,9 @@ function validateStartupName(
     throw new Error("A branch or worktree name is required.");
   }
 
-  if (workspaces.some((workspace) => workspace.startupMode === "worktree")) {
+  if (
+    workspaces.some((workspace) => isWorktreeStartupMode(workspace.startupMode))
+  ) {
     if (startupName === "." || startupName === "..") {
       throw new Error(
         "Worktree startup names must be real folder names. Choose a different name.",
@@ -513,8 +558,8 @@ export async function planProjectChatWorkspaces(
   const rollbackActions: StartupRollbackAction[] = [];
   const attachments: WorkspaceAttachment[] = [];
   const trimmedStartupName = startupName?.trim() ?? "";
-  const startupWorkspaces = workspaces.filter(
-    (workspace) => workspace.startupMode !== "none",
+  const startupWorkspaces = workspaces.filter((workspace) =>
+    requiresWorkspaceStartup(workspace.startupMode),
   );
   const gitStateForPath = async (path: string): Promise<GitState> => {
     const pathKey = normalizedKey(path);
@@ -582,7 +627,7 @@ export async function planProjectChatWorkspaces(
     }
     startupModeByRepo.set(repoKey, workspace.startupMode);
 
-    if (workspace.startupMode === "worktree") {
+    if (isWorktreeStartupMode(workspace.startupMode)) {
       const targetWorktreePath = deriveStartupWorktreePath(
         gitContext,
         trimmedStartupName,
@@ -612,7 +657,7 @@ export async function planProjectChatWorkspaces(
 
   try {
     for (const workspace of workspaces) {
-      if (workspace.startupMode === "none") {
+      if (!requiresWorkspaceStartup(workspace.startupMode)) {
         attachments.push(projectWorkspaceToAttachment(workspace));
         continue;
       }
@@ -629,7 +674,7 @@ export async function planProjectChatWorkspaces(
       const repoKey = repositoryKeyForGitContext(gitContext);
       const repositoryPath = repositoryPathForGitContext(gitContext);
       const baseBranch = defaultBaseBranch(gitState);
-      if (workspace.startupMode === "worktree") {
+      if (isWorktreeStartupMode(workspace.startupMode)) {
         let createdWorktree = createdWorktreeByRepo.get(repoKey);
         if (!createdWorktree) {
           const newWorktree = await createWorktree(
@@ -701,7 +746,7 @@ export async function planProjectChatWorkspaces(
         `${errorMessage(error)} Rollback also failed: ${rollbackErrors.join("; ")}`,
       );
     }
-    throw error;
+    throw friendlyWorkspaceSetupError(error);
   }
 
   return {

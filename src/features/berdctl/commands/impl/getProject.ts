@@ -16,7 +16,12 @@ interface GetProjectResult {
   working_dirs: string[];
   workspaces: Array<{
     path: string;
-    startup_mode: "none" | "branch" | "worktree";
+    startup_mode:
+      | "none"
+      | "branch"
+      | "worktree"
+      | "ask-worktree"
+      | "auto-worktree";
   }>;
   archived: boolean;
   session_count: number;

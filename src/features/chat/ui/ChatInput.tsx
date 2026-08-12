@@ -11,6 +11,7 @@ import {
 import { Pencil, X } from "lucide-react";
 import { IconCheck, IconCornerDownLeft } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   attachmentSnapshotsMatch,
   skillDraftSnapshotsMatch,
@@ -478,16 +479,35 @@ export function ChatInput({
     };
   }, [scheduleResizeTextarea, surface]);
 
-  const visibleQueuedMessages = (
+  const shouldReduceMotion = useReducedMotion();
+  const queuedMessageContentRef = useRef<HTMLDivElement>(null);
+  const [queuedMessageContentHeight, setQueuedMessageContentHeight] =
+    useState<number>();
+  const allQueuedMessages =
     queuedMessages ??
-    (queuedMessage ? [{ recordId: "legacy", payload: queuedMessage }] : [])
-  ).filter(({ payload }) => payload.showInComposer !== false);
+    (queuedMessage ? [{ recordId: "legacy", payload: queuedMessage }] : []);
+  const visibleQueuedMessages = allQueuedMessages.filter(
+    ({ payload }) => payload.showInComposer !== false,
+  );
   // A record being edited lives in the composer, so its pill is hidden to
   // avoid showing the same message both queued and in the composer. Queue
   // positions (head-only actions) still come from the unfiltered list.
   const queuedMessagePills = visibleQueuedMessages
     .map((entry, index) => ({ ...entry, index }))
     .filter(({ recordId }) => recordId !== editingQueuedRecordId);
+  useLayoutEffect(() => {
+    const content = queuedMessageContentRef.current;
+    if (!content) {
+      setQueuedMessageContentHeight(undefined);
+      return;
+    }
+    const updateHeight = () =>
+      setQueuedMessageContentHeight(content.scrollHeight);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(content);
+    return () => observer.disconnect();
+  });
   const hasDraftContext =
     (scopedControls.attachments && attachments.length > 0) ||
     visibleSelectedSkills.length > 0;
@@ -504,6 +524,30 @@ export function ChatInput({
     canSteerMessage &&
     visibleQueuedMessages.length === 0 &&
     Boolean(onSteerMessage);
+  // Steering acts on the true queue head, so it is only offered when that
+  // head is also the message the user can see. In practice hidden records
+  // (reliable startup handoffs) cannot coexist with an active run today;
+  // this is a tripwire so a future longer-lived hidden record makes
+  // steering go inert instead of steering something off-screen.
+  const queuedHeadIsVisible =
+    allQueuedMessages.length > 0 &&
+    allQueuedMessages[0].payload.showInComposer !== false;
+  // With an empty composer, the send shortcut steers the first queued
+  // message instead of no-oping — the double-enter flow (enter queues,
+  // enter again steers). Draft content keeps the shortcut on the draft so
+  // it can never discard or bypass what the user is composing, and an
+  // in-progress queue edit keeps the shortcut inert because the edited
+  // message lives in the composer, not the queue.
+  const canSteerQueuedMessageWithShortcut =
+    !hasDraftContent &&
+    !attachmentWorkPending &&
+    !disabled &&
+    !sendDisabled &&
+    isStreaming &&
+    canSteerQueuedMessage &&
+    editingQueuedRecordId === null &&
+    queuedHeadIsVisible &&
+    Boolean(onSteerQueuedMessage);
 
   const effectivePersonaId = editingQueuedPersona
     ? editingQueuedPersona.kind === "persona"
@@ -1148,6 +1192,10 @@ export function ChatInput({
           void handleSteerCurrentMessage();
           return;
         }
+        if (canSteerQueuedMessageWithShortcut) {
+          handleSteerQueuedMessage();
+          return;
+        }
       }
       void handleSend();
       return;
@@ -1181,6 +1229,10 @@ export function ChatInput({
         );
         if (action === "steer" && canSteerCurrentMessage) {
           void handleSteerCurrentMessage();
+          return;
+        }
+        if (canSteerQueuedMessageWithShortcut) {
+          handleSteerQueuedMessage();
           return;
         }
       }
@@ -1553,11 +1605,20 @@ export function ChatInput({
           )}
         >
           <Popover open={mentionOpen}>
+            {queuedMessageAccessory ? (
+              <div
+                data-slot="queued-message-accessory"
+                className="relative z-0 -mb-2 overflow-hidden rounded-t-sm bg-surface-composer-action pb-2"
+              >
+                {queuedMessageAccessory}
+              </div>
+            ) : null}
+
             {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone for file attachments */}
             <div
               ref={containerRef}
               className={cn(
-                "relative transition-colors",
+                "relative z-10 transition-colors",
                 "chat-composer-shell",
                 surface === "bare"
                   ? cn(
@@ -1626,92 +1687,138 @@ export function ChatInput({
               />
 
               {queuedMessagePills.length > 0 && (
-                <div className="mb-2 flex max-h-36 flex-col gap-1 overflow-y-auto">
-                  {queuedMessagePills.map(({ recordId, payload, index }) => (
-                    <div
-                      key={recordId}
-                      data-slot="queued-message"
-                      className="flex items-center gap-2 rounded-full bg-surface-chat-responding-pill-bg px-3 py-1.5 text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]"
-                    >
-                      <span className="flex-1 truncate text-xs opacity-75">
-                        {payload.text}
-                      </span>
-                      {index === 0 && isStreaming && canSteerQueuedMessage ? (
-                        <button
-                          type="button"
-                          onClick={handleSteerQueuedMessage}
-                          className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-current opacity-75 hover:bg-surface-chat-responding-pill-fg/15 hover:opacity-100"
-                          aria-label={t("toolbar.steer")}
-                          title={t("toolbar.steerQueued")}
-                        >
-                          <IconCornerDownLeft
-                            className="size-3"
-                            aria-hidden="true"
-                          />
-                          {t("toolbar.steer")}
-                        </button>
-                      ) : null}
-                      {index === 0 && onSendQueue ? (
-                        <button
-                          type="button"
-                          onClick={() => void onSendQueue()}
-                          className="shrink-0 rounded-full px-2 text-xs"
-                        >
-                          {t("toolbar.send")}
-                        </button>
-                      ) : null}
-                      {(
-                        recordId === "legacy"
-                          ? Boolean(onDismissQueue)
-                          : Boolean(onUpdateQueue)
-                      ) ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleEditQueuedMessage(recordId, payload)
+                <div className="-mx-1 mb-2 max-h-36 overflow-y-auto">
+                  <motion.div
+                    initial={false}
+                    animate={
+                      queuedMessageContentHeight == null
+                        ? undefined
+                        : { height: queuedMessageContentHeight }
+                    }
+                    data-slot="queued-message-group"
+                    transition={
+                      shouldReduceMotion
+                        ? { duration: 0 }
+                        : {
+                            height: {
+                              duration: 0.18,
+                              ease: [0.215, 0.61, 0.355, 1],
+                            },
                           }
-                          className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
-                          aria-label={t("queue.edit")}
-                          title={t("queue.edit")}
-                        >
-                          <Pencil className="size-3.5" aria-hidden="true" />
-                        </button>
-                      ) : null}
-                      {onDismissQueue ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (editingQueuedRecordIdRef.current === recordId) {
-                              setEditingQueuedRecord(null);
-                              setEditingQueuedPersona(null);
-                            }
-                            onDismissQueue?.(
-                              recordId === "legacy" ? undefined : recordId,
-                            );
-                          }}
-                          className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
-                          aria-label={t("queue.dismiss")}
-                        >
-                          <X className="size-3.5" />
-                        </button>
-                      ) : null}
+                    }
+                    className={cn(
+                      "overflow-hidden bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]",
+                      queuedMessagePills.length > 1
+                        ? "rounded-xs"
+                        : "rounded-full",
+                    )}
+                  >
+                    <div
+                      ref={queuedMessageContentRef}
+                      className="flex flex-col gap-1.5 p-1.5"
+                    >
+                      <AnimatePresence initial={false} mode="popLayout">
+                        {queuedMessagePills.map(
+                          ({ recordId, payload, index }) => (
+                            <motion.div
+                              key={recordId}
+                              data-slot="queued-message"
+                              initial={
+                                shouldReduceMotion ? false : { opacity: 0 }
+                              }
+                              animate={{ opacity: 1 }}
+                              exit={{
+                                opacity: 0,
+                                transition: {
+                                  duration: shouldReduceMotion ? 0 : 0.08,
+                                },
+                              }}
+                              transition={{
+                                duration: shouldReduceMotion ? 0 : 0.14,
+                                ease: [0.165, 0.84, 0.44, 1],
+                              }}
+                              className="flex items-center gap-2"
+                            >
+                              <span className="flex-1 truncate pl-1.5 text-sm opacity-75">
+                                {payload.text}
+                              </span>
+                              {index === 0 &&
+                              isStreaming &&
+                              canSteerQueuedMessage &&
+                              queuedHeadIsVisible ? (
+                                <button
+                                  type="button"
+                                  onClick={handleSteerQueuedMessage}
+                                  className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-current opacity-75 hover:bg-surface-chat-responding-pill-fg/15 hover:opacity-100"
+                                  aria-label={t("toolbar.steer")}
+                                  title={t("toolbar.steerQueued")}
+                                >
+                                  <IconCornerDownLeft
+                                    className="size-3"
+                                    aria-hidden="true"
+                                  />
+                                  {t("toolbar.steer")}
+                                </button>
+                              ) : null}
+                              {index === 0 && onSendQueue ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void onSendQueue()}
+                                  className="shrink-0 rounded-full px-2 text-xs"
+                                >
+                                  {t("common:actions.send")}
+                                </button>
+                              ) : null}
+                              {(
+                                recordId === "legacy"
+                                  ? Boolean(onDismissQueue)
+                                  : Boolean(onUpdateQueue)
+                              ) ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleEditQueuedMessage(recordId, payload)
+                                  }
+                                  className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
+                                  aria-label={t("queue.edit")}
+                                  title={t("queue.edit")}
+                                >
+                                  <Pencil
+                                    className="size-3.5"
+                                    aria-hidden="true"
+                                  />
+                                </button>
+                              ) : null}
+                              {onDismissQueue ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (
+                                      editingQueuedRecordIdRef.current ===
+                                      recordId
+                                    ) {
+                                      setEditingQueuedRecord(null);
+                                      setEditingQueuedPersona(null);
+                                    }
+                                    onDismissQueue?.(
+                                      recordId === "legacy"
+                                        ? undefined
+                                        : recordId,
+                                    );
+                                  }}
+                                  className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
+                                  aria-label={t("queue.dismiss")}
+                                >
+                                  <X className="size-3.5" />
+                                </button>
+                              ) : null}
+                            </motion.div>
+                          ),
+                        )}
+                      </AnimatePresence>
                     </div>
-                  ))}
+                  </motion.div>
                 </div>
-              )}
-
-              {visibleQueuedMessages.length > 0 && queuedMessageAccessory ? (
-                <div
-                  data-slot="queued-message-accessory"
-                  className={cn(
-                    "mb-3 overflow-hidden rounded-t-sm bg-surface-composer-action",
-                    surface === "bare" ? "-mx-4" : "-mx-5",
-                  )}
-                >
-                  {queuedMessageAccessory}
-                </div>
-              ) : (
-                queuedMessageAccessory
               )}
 
               <div

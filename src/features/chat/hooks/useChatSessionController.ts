@@ -24,6 +24,7 @@ import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { selectPersonas } from "@/features/agents/stores/agentSelectors";
 import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import { isAskWorktreeStartupMode } from "@/features/projects/api/projects";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { resolveAgentProviderCatalogIdStrictFromEntries } from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
@@ -64,7 +65,9 @@ import {
   chooseDeferredWorkspaceSetup,
   cancelDeferredWorkspaceNaming,
   createDeferredWorkspaces,
+  provisionPreSendProjectWorkspaces,
   releaseDeferredWorkspaceSend,
+  workspaceAttachmentsEqualConfiguration,
   UNRESOLVED_DEFERRED_SEND_ERROR,
   type DeferredWorkspaceSend,
   type WorkspaceNameRequest,
@@ -361,6 +364,13 @@ export function useChatSessionController({
     useState<SessionExecutionTarget | null>();
   const [pendingModelSelection, setPendingModelSelection] =
     useState<PreferredModelSelection | null>();
+  const preSendWorkspaceOperationRef = useRef(0);
+  const [preSendWorkspaceSetup, setPreSendWorkspaceSetup] = useState<{
+    sessionId: string;
+    status: "choice" | "naming" | "creating" | "selected";
+    startupName?: string | null;
+    error?: string;
+  } | null>(null);
   const pendingDefaultReasoningEffortBySessionRef = useRef<
     Record<string, string>
   >({});
@@ -371,7 +381,11 @@ export function useChatSessionController({
     {},
   );
   const sessionLocalMessageCount = useChatStore((s) =>
-    sessionId ? (s.messagesBySession[sessionId]?.length ?? 0) : 0,
+    sessionId
+      ? (s.messagesBySession[sessionId]?.filter(
+          (message) => message.role !== "system",
+        ).length ?? 0)
+      : 0,
   );
   const sessionHasStarted = session
     ? hasSessionStarted(session, sessionLocalMessageCount)
@@ -1963,6 +1977,9 @@ export function useChatSessionController({
         (s.messagesBySession[sessionId]?.length ?? 0) === 0
       : false,
   );
+  const hasQueuedMessages = useChatStore(
+    (state) => (state.queuedMessageBySession[stateSessionId]?.length ?? 0) > 0,
+  );
   const deferredWorkspaceRecord = useChatStore((state) => {
     const record = state.queuedMessageBySession[stateSessionId]?.[0];
     return record?.kind === "deferred" &&
@@ -1973,6 +1990,39 @@ export function useChatSessionController({
   const unresolvedDeferredSend =
     deferredWorkspaceRecord?.state.error === UNRESOLVED_DEFERRED_SEND_ERROR &&
     !session?.executionTarget;
+  const currentPreSendWorkspaceSetup =
+    preSendWorkspaceSetup?.sessionId === stateSessionId
+      ? preSendWorkspaceSetup
+      : null;
+  const canOfferPreSendWorkspaceSetup = Boolean(
+    !readOnly &&
+      sessionId &&
+      session &&
+      !sessionHasStarted &&
+      !deferredWorkspaceRecord &&
+      !hasQueuedMessages &&
+      workspaceRepository.mode === "multi" &&
+      project?.projectWorkspaces.some((workspace) =>
+        isAskWorktreeStartupMode(workspace.startupMode),
+      ) &&
+      !workspaceAttachmentsEqualConfiguration(
+        project.projectWorkspaces,
+        session.workspaceAttachments,
+      ),
+  );
+  const defaultWorkspaceSetup =
+    (canOfferPreSendWorkspaceSetup || currentPreSendWorkspaceSetup) &&
+    currentPreSendWorkspaceSetup?.status !== "selected"
+      ? {
+          status: currentPreSendWorkspaceSetup?.status ?? ("choice" as const),
+          desired: project?.projectWorkspaces ?? [],
+          error: currentPreSendWorkspaceSetup?.error,
+        }
+      : null;
+  const preselectedWorkspaceStartupName =
+    currentPreSendWorkspaceSetup?.status === "selected"
+      ? currentPreSendWorkspaceSetup.startupName
+      : undefined;
   useEffect(() => {
     if (
       !deferredWorkspaceRecord ||
@@ -2236,6 +2286,9 @@ export function useChatSessionController({
       attachments?: ChatAttachmentDraft[],
       sendOptions?: ChatSendOptions,
     ) => {
+      if (currentPreSendWorkspaceSetup?.status === "creating") {
+        return false;
+      }
       const personaName = personaId
         ? selectedPersona?.id === personaId
           ? selectedPersona.displayName
@@ -2329,6 +2382,7 @@ export function useChatSessionController({
             {
               cancelBuilderDraftPath:
                 builderSession.targetAgentPath ?? undefined,
+              startupName: preselectedWorkspaceStartupName,
               onNeedsName: onBuilderWorkspaceNameRequest,
             },
           );
@@ -2370,7 +2424,10 @@ export function useChatSessionController({
             attachments,
             sendOptions,
           }),
-          { onNeedsName: onWorkspaceNameRequest },
+          {
+            startupName: preselectedWorkspaceStartupName,
+            onNeedsName: onWorkspaceNameRequest,
+          },
         );
         if (firstSend.accepted) {
           recordDraftPreservingSubmission(sessionId, text);
@@ -2402,7 +2459,10 @@ export function useChatSessionController({
           attachments,
           sendOptions: preparedSendOptions,
         }),
-        { onNeedsName: onWorkspaceNameRequest },
+        {
+          startupName: preselectedWorkspaceStartupName,
+          onNeedsName: onWorkspaceNameRequest,
+        },
       );
       if (firstSend.accepted) {
         recordDraftPreservingSubmission(sessionId, text);
@@ -2420,11 +2480,13 @@ export function useChatSessionController({
     },
     [
       captureSessionSelection,
+      currentPreSendWorkspaceSetup?.status,
       enqueueCapturedMessage,
       ensureCurrentSessionIsAgentBuilder,
       handlePersonaChange,
       onMessageAccepted,
       onWorkspaceNameRequest,
+      preselectedWorkspaceStartupName,
       queue,
       readOnly,
       recordDraftPreservingSubmission,
@@ -2908,22 +2970,89 @@ export function useChatSessionController({
       dismiss: dismissQueuedMessage,
     },
     deferredWorkspaceRecord,
+    defaultWorkspaceSetup,
     deferredWorkspaceError: deferredWorkspaceRecord?.state.error,
     unresolvedDeferredSend,
-    cancelDeferredWorkspaceName: () =>
-      readOnly ? false : cancelDeferredWorkspaceNaming(stateSessionId),
-    createDeferredWorkspace: () =>
-      readOnly ? false : chooseDeferredWorkspaceSetup(stateSessionId, true),
-    submitDeferredWorkspaceName: (name: string) =>
-      !readOnly && deferredWorkspaceRecord?.state.status === "naming"
+    cancelDeferredWorkspaceName: () => {
+      if (defaultWorkspaceSetup?.status === "naming") {
+        setPreSendWorkspaceSetup({
+          sessionId: stateSessionId,
+          status: "choice",
+        });
+        return true;
+      }
+      return readOnly ? false : cancelDeferredWorkspaceNaming(stateSessionId);
+    },
+    createDeferredWorkspace: () => {
+      if (defaultWorkspaceSetup?.status === "choice") {
+        setPreSendWorkspaceSetup({
+          sessionId: stateSessionId,
+          status: "naming",
+        });
+        return true;
+      }
+      return readOnly
+        ? false
+        : chooseDeferredWorkspaceSetup(stateSessionId, true);
+    },
+    submitDeferredWorkspaceName: (name: string) => {
+      if (defaultWorkspaceSetup?.status === "naming" && project) {
+        const operationId = preSendWorkspaceOperationRef.current + 1;
+        preSendWorkspaceOperationRef.current = operationId;
+        setPreSendWorkspaceSetup({
+          sessionId: stateSessionId,
+          status: "creating",
+        });
+        void provisionPreSendProjectWorkspaces(
+          stateSessionId,
+          project,
+          name,
+        ).then(
+          () =>
+            setPreSendWorkspaceSetup((current) =>
+              preSendWorkspaceOperationRef.current === operationId &&
+              current?.sessionId === stateSessionId
+                ? null
+                : current,
+            ),
+          (error) => {
+            console.error("Failed to configure project worktree:", error);
+            setPreSendWorkspaceSetup((current) =>
+              preSendWorkspaceOperationRef.current === operationId &&
+              current?.sessionId === stateSessionId
+                ? {
+                    sessionId: stateSessionId,
+                    status: "naming",
+                    error:
+                      error instanceof Error ? error.message : String(error),
+                  }
+                : current,
+            );
+          },
+        );
+        return;
+      }
+      return !readOnly && deferredWorkspaceRecord?.state.status === "naming"
         ? void createDeferredWorkspaces(
             stateSessionId,
             deferredWorkspaceRecord.recordId,
             name,
           )
-        : undefined,
-    skipDeferredWorkspace: () =>
-      readOnly ? false : chooseDeferredWorkspaceSetup(stateSessionId, false),
+        : undefined;
+    },
+    skipDeferredWorkspace: () => {
+      if (defaultWorkspaceSetup) {
+        setPreSendWorkspaceSetup({
+          sessionId: stateSessionId,
+          status: "selected",
+          startupName: null,
+        });
+        return true;
+      }
+      return readOnly
+        ? false
+        : chooseDeferredWorkspaceSetup(stateSessionId, false);
+    },
     sendDeferredAnyway: () =>
       !readOnly &&
       deferredWorkspaceRecord &&
@@ -2935,6 +3064,8 @@ export function useChatSessionController({
           )
         : false,
     handleSend,
+    workspaceSetupInProgress:
+      currentPreSendWorkspaceSetup?.status === "creating",
     steerDraftMessage,
     canSteerMessage: Boolean(
       sessionId &&

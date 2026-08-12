@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { isWorktreeStartupMode } from "@/features/projects/api/projects";
 
 import { runChatRuntimeStartup } from "@/app/lib/chatRuntimeStartup";
 import { SessionWindowTopBar } from "@/app/ui/SessionWindowTopBar";
@@ -447,8 +448,8 @@ export function SessionWindowApp({
         requestIdentity={workspaceName ?? undefined}
         workspaces={workspaceName?.workspaces ?? []}
         requiresWorktreeSafeName={Boolean(
-          workspaceName?.workspaces.some(
-            (workspace) => workspace.startupMode === "worktree",
+          workspaceName?.workspaces.some((workspace) =>
+            isWorktreeStartupMode(workspace.startupMode),
           ),
         )}
         onCancel={cancelWorkspaceNameRequest}

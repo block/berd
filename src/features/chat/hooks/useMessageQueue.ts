@@ -106,6 +106,7 @@ export function useMessageQueue(
     QueuedMessageRecord["payload"] | null
   >(null);
   const suppressNextRenderIdleCycleRef = useRef(false);
+  const dismissedRecordIdRef = useRef<string | null>(null);
   const queuedMessageKey = useMemo(
     () => getQueuedMessageKey(queuedRecord),
     [queuedRecord],
@@ -365,6 +366,12 @@ export function useMessageQueue(
       const advancedToNextRecord =
         queuedMessage?.recordId !== previousQueuedMessage?.recordId &&
         previousQueuedMessage !== undefined;
+      const advancedAfterDismiss =
+        advancedToNextRecord &&
+        previousQueuedMessage?.recordId === dismissedRecordIdRef.current;
+      if (advancedAfterDismiss) {
+        dismissedRecordIdRef.current = null;
+      }
 
       if (editedCurrentRecord || advancedToNextRecord) {
         automaticallyRetriedPayloadRef.current = null;
@@ -392,6 +399,10 @@ export function useMessageQueue(
         !editedCurrentRecord &&
         !advancedToNextRecord
       ) {
+        return;
+      }
+
+      if (advancedAfterDismiss) {
         return;
       }
 
@@ -503,6 +514,7 @@ export function useMessageQueue(
     (recordId?: string) => {
       const targetId = recordId ?? queuedRecord?.recordId;
       if (targetId) {
+        dismissedRecordIdRef.current = targetId;
         useChatStore.getState().dismissQueuedMessage(sessionId, targetId);
       }
     },

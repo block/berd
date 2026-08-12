@@ -24,6 +24,12 @@
     "workspacePolicy": {
       "label": "Comportamiento de chats nuevos para {{name}}",
       "sectionLabel": "Al iniciar un chat nuevo",
+      "placeholder": "Configurar chats nuevos",
+      "gitFolderTooltip": "Carpeta conectada a Git",
+      "regularFolderTooltip": "Sin repositorio Git — worktrees no disponibles",
+      "autoWorktree": "Crear worktrees automáticamente",
+      "askWorktree": "Crear worktrees manualmente",
+      "noWorktree": "No crear worktrees",
       "createWorktree": "Crear worktree",
       "createBranch": "Crear rama",
       "neither": "Usar tal cual",
