@@ -134,15 +134,16 @@ describe("OnboardingTourDialog", () => {
       "[data-onboarding-tour-skill]",
     );
     expect(skillPills).toHaveLength(5);
-    expect(screen.getByText("skill-builder")).toHaveClass(
+    expect(screen.getByText("research")).toHaveClass(
       "rounded-full",
       "text-[1.625rem]",
       "smooth-shadow-sm",
     );
-    expect(screen.getByText("agent-builder")).toBeInTheDocument();
-    expect(screen.getByText("goose-help")).toBeInTheDocument();
-    expect(screen.getByText("code-review")).toBeInTheDocument();
-    expect(screen.getByText("weekly-update")).toBeInTheDocument();
+    expect(screen.getByText("writing")).toBeInTheDocument();
+    expect(screen.getByText("planning")).toBeInTheDocument();
+    expect(screen.getByText("code-search")).toBeInTheDocument();
+    expect(screen.getByText("summarize")).toBeInTheDocument();
+    expect(screen.queryByText("goose-help")).not.toBeInTheDocument();
     expect(skillPills[0]?.parentElement).toHaveClass(
       "top-1/2",
       "left-8",

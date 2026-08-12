@@ -359,11 +359,11 @@ function AgentsPreview() {
 function SkillsPreview() {
   const shouldReduceMotion = useReducedMotion();
   const skills = [
-    "skill-builder",
-    "agent-builder",
-    "goose-help",
-    "code-review",
-    "weekly-update",
+    "research",
+    "writing",
+    "planning",
+    "code-search",
+    "summarize",
   ];
 
   return (
