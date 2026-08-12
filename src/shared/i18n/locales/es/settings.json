@@ -339,10 +339,7 @@
       "queue": "Cola",
       "steer": "Guiar (solo arnés de Goose)"
     },
-    "globalShortcut": {
-      "description": "Usa el atajo global configurado para crear y encontrar chats desde cualquier lugar de macOS.",
-      "label": "Activar atajo global"
-    },
+
     "groupChatsByProject": {
       "description": "Muestra grupos de proyectos en la barra lateral. Desactiva esto para tener una sola lista de chats ordenada por actividad.",
       "label": "Agrupar chats por proyecto"

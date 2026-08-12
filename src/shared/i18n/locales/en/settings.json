@@ -339,10 +339,6 @@
       "queue": "Queue",
       "steer": "Steer (Goose harness only)"
     },
-    "globalShortcut": {
-      "description": "Use your configured global shortcut to create and find chats from anywhere in macOS.",
-      "label": "Enable global shortcut"
-    },
     "groupChatsByProject": {
       "description": "Show project groups in the sidebar. Turn this off for one chat list sorted by activity.",
       "label": "Group chats by project"

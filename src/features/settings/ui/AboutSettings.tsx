@@ -28,6 +28,7 @@ import { UpdatesSettings } from "@/features/updates/ui/UpdatesSettings";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 
 interface AboutAppInfo {
+  version: string;
   tauriVersion: string;
   identifier: string;
 }
@@ -77,16 +78,17 @@ export function AboutSettings({ authStatus, onLoggedOut }: AboutSettingsProps) {
       }
 
       try {
-        const { getIdentifier, getTauriVersion } = await import(
+        const { getIdentifier, getTauriVersion, getVersion } = await import(
           "@tauri-apps/api/app"
         );
-        const [tauriVersion, identifier] = await Promise.all([
+        const [version, tauriVersion, identifier] = await Promise.all([
+          getVersion(),
           getTauriVersion(),
           getIdentifier(),
         ]);
 
         if (!cancelled) {
-          setAppInfo({ tauriVersion, identifier });
+          setAppInfo({ version, tauriVersion, identifier });
         }
       } catch {
         if (!cancelled) {
@@ -194,10 +196,20 @@ export function AboutSettings({ authStatus, onLoggedOut }: AboutSettingsProps) {
           Security, Appearance) -- a title here would just repeat the page
           title "About" without adding information. App name dropped: it's
           always just "Berd" (the bundle name), not something worth a row.
-          App version dropped too: the embedded Updates card above already
-          shows it (updates.card.currentVersion) -- this used to duplicate
-          that same getVersion() value in a second row. */}
+          App version normally isn't duplicated here since the embedded
+          Updates card above already shows it -- but in updater-disabled
+          builds (VITE_UPDATER_ENABLED=false / capability off) that card
+          doesn't render at all, and About is still the app identity page,
+          so restricted/custom builds would otherwise have no visible
+          version anywhere. Show the row only when the card is absent.
+          Caught by Builderbot review. */}
         <SettingsSection>
+          {!updatesEnabled ? (
+            <AboutInfoRow
+              label={t("about.fields.version")}
+              value={appInfo?.version ?? aboutFallback}
+            />
+          ) : null}
           <AboutInfoRow
             label={t("about.fields.buildMode")}
             value={

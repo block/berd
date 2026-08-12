@@ -13,6 +13,7 @@ import {
   type ResolvedShortcutCommand,
   type ShortcutCommandId,
 } from "@/features/shortcuts/lib/shortcutRegistry";
+import { useGlobalShortcutPreference } from "@/features/global-shortcut/globalShortcutPreference";
 import {
   keyboardShortcutDisplayParts,
   keyboardShortcutFromEvent,
@@ -24,6 +25,7 @@ import { Kbd } from "@/shared/ui/kbd";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { SettingsRow } from "@/shared/ui/settings-row";
+import { Switch } from "@/shared/ui/switch";
 import {
   SettingsSection,
   SettingsSections,
@@ -58,6 +60,7 @@ export function KeyboardShortcutsSettings() {
     null,
   );
   const [rowError, setRowError] = useState<RowError | null>(null);
+  const globalShortcutPreference = useGlobalShortcutPreference();
 
   const preferences = useShortcutPreferences();
 
@@ -314,6 +317,22 @@ export function KeyboardShortcutsSettings() {
       }
       contentClassName="space-y-8"
     >
+      {isMac ? (
+        <SettingsSections>
+          <SettingsSection>
+            <SettingsRow
+              label={t("settings.globalShortcut.label")}
+              description={t("settings.globalShortcut.description")}
+            >
+              <Switch
+                checked={globalShortcutPreference.enabled}
+                onCheckedChange={globalShortcutPreference.setEnabled}
+                aria-label={t("settings.globalShortcut.label")}
+              />
+            </SettingsRow>
+          </SettingsSection>
+        </SettingsSections>
+      ) : null}
       <SearchBar
         size="pill"
         inputRef={searchInputRef}

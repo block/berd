@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { RotateCcw } from "lucide-react";
-import { getPlatform } from "@/shared/lib/platform";
 import { Button } from "@/shared/ui/button";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { SettingsRow } from "@/shared/ui/settings-row";
@@ -16,7 +15,6 @@ import { GooseAutoCompactSettings } from "./GooseAutoCompactSettings";
 import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPreferences";
 import { useSessionCostPreference } from "@/features/chat/lib/sessionCostPreference";
 import { useResponseStartGutterPreference } from "@/features/chat/lib/responseStartGutterPreference";
-import { useGlobalShortcutPreference } from "@/features/global-shortcut/globalShortcutPreference";
 import { useArtifactAutoOpenPreference } from "@/features/chat/lib/artifactAutoOpenPreference";
 import {
   useStreamingShortcutPreference,
@@ -34,13 +32,19 @@ import { useMultiWorkspacePreference } from "@/features/workspaces/multiWorkspac
 // rationale. Language lives in System (install-level, not a behavior) and
 // Keyboard shortcuts is its own top-level page, so neither is duplicated
 // here. Follow-up behavior is the primary.
+//
+// The global shortcut enable/disable toggle moved to Keyboard Shortcuts
+// (KeyboardShortcutsSettings.tsx) -- it's a shortcut-surface setting, not a
+// chat/work behavior, and Keyboard shortcuts is where the rest of the
+// shortcut configuration (including this shortcut's own chord) already
+// lives. Caught by Builderbot review: the toggle had been left behind here
+// after Keyboard shortcuts was promoted to its own top-level page.
 export function BehaviorSettings() {
   const { t } = useTranslation(["settings", "shortcuts"]);
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const sessionCostPreference = useSessionCostPreference();
   const responseStartGutterPreference = useResponseStartGutterPreference();
   const multiWorkspacePreference = useMultiWorkspacePreference();
-  const globalShortcutPreference = useGlobalShortcutPreference();
   const streamingShortcutPreference = useStreamingShortcutPreference();
   const {
     category: atMentionDefaultCategory,
@@ -53,8 +57,11 @@ export function BehaviorSettings() {
   );
   const followUpBehavior =
     streamingShortcutPreference.mode === "cmd-enter-steers" ? "queue" : "steer";
+  // "agentTools" is the capability id (main renamed it from the older
+  // "agentToolsTip" naming) -- isMac/getPlatform is intentionally dropped
+  // here since the global shortcut toggle that needed it moved to
+  // KeyboardShortcutsSettings.tsx (see the comment above).
   const showAgentToolsTipsSetting = useProfileCapability("agentTools");
-  const isMac = getPlatform() === "mac";
 
   useEffect(() => {
     setStyleGuidelinesPromptDraft(styleGuidelinesPreference.prompt);
@@ -210,19 +217,6 @@ export function BehaviorSettings() {
               aria-label={t("general.multiWorkspace.label")}
             />
           </SettingsRow>
-
-          {isMac ? (
-            <SettingsRow
-              label={t("general.globalShortcut.label")}
-              description={t("general.globalShortcut.description")}
-            >
-              <Switch
-                checked={globalShortcutPreference.enabled}
-                onCheckedChange={globalShortcutPreference.setEnabled}
-                aria-label={t("general.globalShortcut.label")}
-              />
-            </SettingsRow>
-          ) : null}
         </SettingsSection>
 
         <SettingsSection title={t("general.styleGuidelines.title")}>

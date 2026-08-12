@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
@@ -133,6 +134,35 @@ describe("DoctorSettings", () => {
     expect(copied).toContain("Tools (tools)");
     expect(copied).toContain("Permissions (permissions)");
     expect(copied).toContain("missing entitlement");
+  });
+
+  it("disables copy report while a rerun is in flight", async () => {
+    const user = userEvent.setup();
+    mockedInvoke.mockResolvedValue(
+      report([
+        check({
+          id: "git",
+          label: "Git",
+          category: "tools",
+          categoryLabel: "Tools",
+        }),
+      ]),
+    );
+
+    renderDoctor();
+    await screen.findByRole("heading", { name: "Tools" });
+
+    const copyButton = screen.getByRole("button", { name: /copy report/i });
+    expect(copyButton).toBeEnabled();
+
+    // React Query keeps the previous report visible during a rerun
+    // (`loading` goes true, `report` stays populated with the stale data),
+    // so without the fix this button would stay enabled and let a user
+    // export the pre-rerun report as if it were current.
+    mockedInvoke.mockImplementation(() => new Promise(() => {}));
+    await user.click(screen.getByRole("button", { name: /run again/i }));
+
+    await waitFor(() => expect(copyButton).toBeDisabled());
   });
 
   it("keeps checks in their returned category order", async () => {

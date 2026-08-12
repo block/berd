@@ -64,6 +64,21 @@ describe("KeyboardShortcutsSettings", () => {
     expect(screen.getByRole("button", { name: "Reset all" })).toBeDisabled();
   });
 
+  it("renders the global shortcut toggle on mac, reflecting and updating the preference", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<KeyboardShortcutsSettings />);
+
+    const toggle = screen.getByRole("switch", {
+      name: "Enable global shortcut",
+    });
+    expect(toggle).not.toBeChecked();
+
+    await user.click(toggle);
+
+    expect(toggle).toBeChecked();
+    expect(localStorage.getItem("goose:global-shortcut-enabled")).toBe("true");
+  });
+
   it("shows shortcut buttons with content-hugging padding and flat keycaps", () => {
     renderWithProviders(<KeyboardShortcutsSettings />);
 

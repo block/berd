@@ -260,6 +260,12 @@ export function DoctorSettings({ open, onOpenChange }: DoctorSettingsProps) {
               type="button"
               variant="outline"
               size="sm"
+              // React Query keeps the previous report visible while a rerun
+              // is loading (see `loading` above), so without this the
+              // button stays enabled and would export the stale pre-rerun
+              // report during a fix-verification flow, as if it were
+              // current. Caught by Builderbot review.
+              disabled={loading}
               onClick={() => void copyDebugInfo()}
             >
               {copied ? (
