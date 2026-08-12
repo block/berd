@@ -227,7 +227,46 @@ describe("usePinToHomeWidget", () => {
       usePinToHomeWidget({
         kind: "skill",
         id: "app:/Users/test/Library/Application Support/xyz.block.berd/skills/agent-builder",
-        legacyId: "global:/Users/test/.agents/skills/agent-builder",
+        legacyIds: ["global:/Users/test/.agents/skills/agent-builder"],
+      }),
+    );
+
+    expect(result.current.isPinned).toBe(true);
+  });
+
+  it("treats either of multiple historical pin ids as the existing pin", () => {
+    // A skill can accumulate more than one legacy alias (a pre-#974
+    // Personal-skill migration, plus a rename retiring an old-named copy
+    // from a second legacy location). A pin on the *older* of the two
+    // aliases must still resolve.
+    useHomeWidgetStore.setState({
+      instances: [
+        {
+          id: "skill-pin-1",
+          type: "skillPin",
+          x: 0,
+          y: 0,
+          z: 1,
+          state: {
+            skillId: "global:/Users/test/.berd/skills/goose-help",
+          },
+        },
+      ],
+      loadStatus: "ready",
+      itemRevision: 1,
+      cameraRevision: 1,
+      camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+      constraints: layout().constraints,
+    });
+
+    const { result } = renderHook(() =>
+      usePinToHomeWidget({
+        kind: "skill",
+        id: "app:/Users/test/Library/Application Support/xyz.block.berd/skills/berd-help",
+        legacyIds: [
+          "global:/Users/test/.agents/skills/goose-help",
+          "global:/Users/test/.berd/skills/goose-help",
+        ],
       }),
     );
 

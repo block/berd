@@ -58,7 +58,7 @@ export function SkillCard({
   } = usePinToHomeWidget({
     kind: "skill",
     id: skill.id,
-    legacyId: skill.legacyPinId,
+    legacyIds: skill.legacyPinIds,
   });
 
   const handleCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {

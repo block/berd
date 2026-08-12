@@ -58,7 +58,7 @@ export function SkillDetailPage({
   } = usePinToHomeWidget({
     kind: "skill",
     id: skill?.id,
-    legacyId: skill?.legacyPinId,
+    legacyIds: skill?.legacyPinIds,
   });
 
   if (!skill) {

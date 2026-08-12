@@ -28,7 +28,9 @@ export type PinToHomeTargetKind = keyof typeof PIN_TARGET_CONFIG;
 export interface PinToHomeTarget {
   kind: PinToHomeTargetKind;
   id: string | null | undefined;
-  legacyId?: string | null;
+  /** All historical pin ids this target's current id should still resolve
+   *  for. See areSkillPinIdsEquivalent. */
+  legacyIds?: readonly string[] | null;
 }
 
 function normalizedTargetId(id: string | null | undefined): string | null {
@@ -174,7 +176,7 @@ function findPinnedHomeWidgetId(
         ? areSkillPinIdsEquivalent(
             typeof pinnedId === "string" ? pinnedId : null,
             targetId,
-            target.legacyId,
+            target.legacyIds,
           )
         : pinnedId === targetId;
     })?.id ?? null
@@ -186,11 +188,11 @@ export function usePinToHomeWidget(target: PinToHomeTarget) {
   const [isPinning, setIsPinning] = useState(false);
   const instances = useHomeWidgetStore((state) => state.instances);
   const loadStatus = useHomeWidgetStore((state) => state.loadStatus);
-  const { id, kind, legacyId } = target;
+  const { id, kind, legacyIds } = target;
 
   const pinnedWidgetId = useMemo(
-    () => findPinnedHomeWidgetId(instances, { id, kind, legacyId }),
-    [id, instances, kind, legacyId],
+    () => findPinnedHomeWidgetId(instances, { id, kind, legacyIds }),
+    [id, instances, kind, legacyIds],
   );
   const isPinned = pinnedWidgetId !== null;
 
@@ -210,7 +212,7 @@ export function usePinToHomeWidget(target: PinToHomeTarget) {
       const currentPinnedWidgetId = findPinnedHomeWidgetId(state.instances, {
         id: targetId,
         kind,
-        legacyId,
+        legacyIds,
       });
       if (!currentPinnedWidgetId) {
         return;
@@ -221,7 +223,7 @@ export function usePinToHomeWidget(target: PinToHomeTarget) {
     } catch {
       toast.error(t("widgets.unpinFromHome.error"));
     }
-  }, [id, kind, legacyId, t]);
+  }, [id, kind, legacyIds, t]);
 
   const pinToHome = useCallback(async () => {
     const targetId = normalizedTargetId(id);
@@ -232,7 +234,7 @@ export function usePinToHomeWidget(target: PinToHomeTarget) {
     setIsPinning(true);
     try {
       const initialState = useHomeWidgetStore.getState();
-      const pinTarget = { id: targetId, kind, legacyId };
+      const pinTarget = { id: targetId, kind, legacyIds };
       if (isPinnedToHome(initialState.instances, pinTarget)) {
         return;
       }
@@ -274,7 +276,7 @@ export function usePinToHomeWidget(target: PinToHomeTarget) {
     } finally {
       setIsPinning(false);
     }
-  }, [id, kind, legacyId, t]);
+  }, [id, kind, legacyIds, t]);
 
   return {
     isPinned,

@@ -33,6 +33,7 @@ function skill(overrides: Partial<SkillInfo> = {}): SkillInfo {
     sourceLabel: "Personal",
     projectLinks: [],
     readonly: false,
+    legacyPinIds: [],
     color: null,
     ...overrides,
   };
@@ -118,7 +119,7 @@ describe("SkillPinWidget", () => {
         sourceKind: "app",
         sourceLabel: "Berd app",
         readonly: true,
-        legacyPinId: "global:/Users/tulsi/.agents/skills/agent-builder",
+        legacyPinIds: ["global:/Users/tulsi/.agents/skills/agent-builder"],
       }),
     ];
     const { onOpenSkill } = renderPin(

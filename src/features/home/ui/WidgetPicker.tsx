@@ -262,7 +262,7 @@ function skillOptions(
       id: skill.id,
       title: skill.name,
       pinned: [...pinnedIds].some((pinnedId) =>
-        areSkillPinIdsEquivalent(pinnedId, skill.id, skill.legacyPinId),
+        areSkillPinIdsEquivalent(pinnedId, skill.id, skill.legacyPinIds),
       ),
       leading: { kind: "skillPill", name: skill.name, color: skill.color },
     }));

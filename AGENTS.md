@@ -20,7 +20,8 @@ UI can handle operations that are not yet in ACP or are client specific.
 - `src/features/berdctl/` — berdctl command registry
 - `src-tauri/plugins/berdctl/` — berdctl broker
 - `src-tauri/crates/berdctl/` — bundled berdctl CLI
-- `distro/skills/berdctl/` — seeded skill agents use to discover berdctl
+- `distro/skills/berd-help/references/berdctl.md` — berdctl guidance agents
+  read from the bundled `berd-help` skill
 
 ## Architectural laws
 

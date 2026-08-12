@@ -37,7 +37,11 @@ export interface SkillInfo {
   sourceLabel: string;
   projectLinks: SkillProjectLink[];
   readonly: boolean;
-  legacyPinId?: string;
+  /** All historical pin ids this skill's current name should still resolve
+   *  for (a pre-#974 Personal-skill migration, and/or a rename retiring an
+   *  old-named copy from more than one legacy location). Omitted or empty
+   *  when there's no historical pin to preserve. */
+  legacyPinIds?: string[];
   /** User-chosen pill tone or custom pastel hex, persisted to frontmatter as `color`. Null for
    *  legacy skills created before the picker existed — consumers fall back
    *  to the deterministic hash-from-name tone in that case. */
@@ -65,7 +69,7 @@ interface AgentSkillEntry {
   fileLocation: string;
   sourceKind: SkillSourceKind;
   sourceLabel: string;
-  legacyPinId?: string;
+  legacyPinIds?: string[];
 }
 
 interface ListAgentSkillsResponse {
@@ -310,7 +314,7 @@ function toAgentSkillInfo(
         ]
       : [],
     readonly: true,
-    ...(source.legacyPinId ? { legacyPinId: source.legacyPinId } : {}),
+    legacyPinIds: source.legacyPinIds ?? [],
     color: null,
   };
 }

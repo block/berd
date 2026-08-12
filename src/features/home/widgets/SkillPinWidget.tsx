@@ -23,7 +23,7 @@ function findSkillById(
   if (!skills || !id) return undefined;
   const pinnedKeys = skillKeySet(id);
   return skills.find((skill) => {
-    if (areSkillPinIdsEquivalent(id, skill.id, skill.legacyPinId)) return true;
+    if (areSkillPinIdsEquivalent(id, skill.id, skill.legacyPinIds)) return true;
     const candidateKeys = skillKeySet(
       skill.id,
       skill.path,
