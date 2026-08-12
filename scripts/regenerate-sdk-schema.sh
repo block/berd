@@ -37,7 +37,7 @@ log() { echo "[regenerate-sdk-schema] $*" >&2; }
 # `required` mode so offline/lockfile failures abort here instead of
 # silently regenerating from a stale checkout.
 log "Syncing managed Goose checkout to the pinned commit."
-GOOSE_DEV_MODE=required "$script_dir/ensure-local-goose.sh" >/dev/null
+GOOSE_DEV_MODE=required GOOSE_BUILD_PROFILE=debug "$script_dir/ensure-local-goose.sh" >/dev/null
 
 # Re-derive the managed checkout path and cargo target dir via the same
 # shared helper ensure-local-goose.sh used, so cargo reuses the existing

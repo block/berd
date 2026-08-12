@@ -125,6 +125,7 @@ if (-not (Test-Path $env:BERDCTL_BIN -PathType Leaf)) {
 Write-WindowsDevInfo "Using berdctl CLI: $env:BERDCTL_BIN"
 
 if ([string]::IsNullOrWhiteSpace($env:GOOSE_BIN)) {
+    $env:GOOSE_BUILD_PROFILE = "debug"
     $result = Invoke-EnsureLocalGoose -Action Check
     if (-not $result.Ready) {
         throw "Local Goose binary is not ready. Run 'just setup-windows' first."

@@ -23,8 +23,8 @@ cleanup-windows *ARGS:
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Cleanup-Windows.ps1 {{ ARGS }}
 
 # Install pnpm dependencies, build the SDK, install hooks, and build pinned Goose natively on Windows.
-setup-windows:
-    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Setup-Windows.ps1
+setup-windows goose-profile="debug":
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/Setup-Windows.ps1 -GooseBuildProfile "{{ goose-profile }}"
 
 # Launch the native Windows Tauri dev app with managed goose.exe and berdctl.exe.
 dev-windows:
@@ -54,7 +54,7 @@ test-windows-dev:
 # Sync and build the pinned managed local Goose checkout used for Berd development.
 [unix]
 goose-sync:
-    GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
+    GOOSE_DEV_MODE=required GOOSE_BUILD_PROFILE=debug ./scripts/ensure-local-goose.sh
 
 # Regenerate the vendored ACP schema from the pinned Goose backend and rebuild the SDK (kept out of setup; mutates tracked files).
 [unix]
@@ -305,7 +305,10 @@ _bundle-unix:
     set -euo pipefail
 
     TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)"
-    ./scripts/prepare-goose-sidecar.sh
+    if [[ -z "${GOOSE_BIN:-}" ]]; then
+      GOOSE_DEV_MODE=required GOOSE_BUILD_PROFILE=release ./scripts/ensure-local-goose.sh
+    fi
+    GOOSE_BUILD_PROFILE=release ./scripts/prepare-goose-sidecar.sh
     VITE_FEEDBACK="${VITE_FEEDBACK:-0}" CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-catch-sidecar.sh
 
@@ -391,7 +394,10 @@ _bundle-debug-unix:
     set -euo pipefail
 
     TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)"
-    ./scripts/prepare-goose-sidecar.sh
+    if [[ -z "${GOOSE_BIN:-}" ]]; then
+      GOOSE_DEV_MODE=required GOOSE_BUILD_PROFILE=debug ./scripts/ensure-local-goose.sh
+    fi
+    GOOSE_BUILD_PROFILE=debug ./scripts/prepare-goose-sidecar.sh
     VITE_FEEDBACK="${VITE_FEEDBACK:-0}" CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-catch-sidecar.sh
 
@@ -457,7 +463,7 @@ dev:
     if [[ -n "${GOOSE_BIN:-}" ]]; then
         just _setup-no-goose
     else
-        just setup
+        GOOSE_BUILD_PROFILE=debug just setup
     fi
 
     VITE_PORT="$(python3 -c "import hashlib,os; h=int(hashlib.sha256(os.getcwd().encode()).hexdigest(),16); print(10000 + h % 55000)")"
@@ -495,7 +501,7 @@ dev:
     if [[ -n "${GOOSE_BIN:-}" ]]; then
         echo "Using explicitly set GOOSE_BIN: ${GOOSE_BIN}"
     else
-        LOCAL_GOOSE_BIN="$(./scripts/ensure-local-goose.sh --check-bin)" || {
+        LOCAL_GOOSE_BIN="$(GOOSE_BUILD_PROFILE=debug ./scripts/ensure-local-goose.sh --check-bin)" || {
             rc=$?
             if [[ $rc -eq 2 ]]; then
                 echo "❌ Local goose binary is not ready. Run 'just setup' first." >&2
@@ -602,7 +608,7 @@ stage-sidecar:
 
 [unix]
 _stage-sidecar-unix:
-    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && ./scripts/prepare-goose-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh && ./scripts/prepare-catch-sidecar.sh
+    TAURI_CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)" && GOOSE_BUILD_PROFILE=debug ./scripts/prepare-goose-sidecar.sh && CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh && ./scripts/prepare-catch-sidecar.sh
 
 [windows]
 _stage-sidecar-windows:

@@ -98,7 +98,7 @@ fi
   CI=true pnpm install
   cd sdk && pnpm build
   cd /work
-  GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
+  GOOSE_DEV_MODE=required GOOSE_BUILD_PROFILE=release ./scripts/ensure-local-goose.sh
   ./scripts/build_linux.sh
 '
 

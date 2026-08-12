@@ -266,7 +266,7 @@ awk -v v="$RELEASE_VERSION" '
 # just setup: pnpm install, build @aaif/goose-sdk, build the pinned goose
 # backend binary via scripts/ensure-local-goose.sh.
 echo "+++ :hammer: just setup"
-just setup
+GOOSE_BUILD_PROFILE=release just setup
 
 # A release distribution may supply its Databricks workspace and its fast model
 # as narrow, validated inputs. Public builds leave both unset and ship the
@@ -453,7 +453,7 @@ jq 'del(.bundle.macOS.signingIdentity) | del(.bundle.createUpdaterArtifacts)' \
 # publish-updater.sh.
 TARGET_TRIPLE="aarch64-apple-darwin"
 echo "+++ :hammer: pnpm tauri build (unsigned)"
-./scripts/prepare-goose-sidecar.sh
+GOOSE_BUILD_PROFILE=release ./scripts/prepare-goose-sidecar.sh
 # ACP bridges are installed into the managed Node runtime on demand; they are
 # no longer staged as build resources.
 VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" ./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"

@@ -293,7 +293,7 @@ jobs:
 
       - name: Set up Windows build dependencies
         shell: pwsh
-        run: just setup-windows
+        run: just setup-windows release
 
       - name: Generate updater-enabled Tauri configuration
         shell: pwsh
@@ -410,7 +410,7 @@ jobs:
       - name: Set up Linux release dependencies and locked signer tooling
         run: |
           pnpm install --frozen-lockfile
-          just setup
+          GOOSE_BUILD_PROFILE=release just setup
 
       - name: Build Linux packages
         run: |
@@ -421,7 +421,7 @@ jobs:
             '.version = $version | del(.bundle.createUpdaterArtifacts)' \
             src-tauri/tauri.release.conf.json > "$tmp"
           mv "$tmp" src-tauri/tauri.release.conf.json
-          scripts/prepare-goose-sidecar.sh
+          GOOSE_BUILD_PROFILE=release scripts/prepare-goose-sidecar.sh
           CARGO_TARGET_DIR="$BERD_TAURI_CARGO_TARGET_DIR" scripts/prepare-berdctl-sidecar.sh x86_64-unknown-linux-gnu
           scripts/prepare-catch-sidecar.sh x86_64-unknown-linux-gnu
           BERD_APP_VERSION="$VERSION" \

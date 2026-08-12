@@ -1,7 +1,10 @@
 param(
     # Skip the managed Goose build (used by Dev-Windows.ps1 when GOOSE_BIN
     # overrides the managed binary, mirroring unix `just _setup-no-goose`).
-    [switch]$SkipGooseBuild
+    [switch]$SkipGooseBuild,
+    # Development defaults to debug. Release automation opts in explicitly so
+    # setup and bundling reuse the same optimized managed Goose artifact.
+    [ValidateSet("debug", "release")][string]$GooseBuildProfile = "debug"
 )
 
 $ErrorActionPreference = "Stop"
@@ -52,6 +55,7 @@ if ($SkipGooseBuild) {
 } else {
     Write-WindowsDevSection "Build pinned Goose"
     $env:GOOSE_DEV_MODE = "required"
+    $env:GOOSE_BUILD_PROFILE = $GooseBuildProfile
     Invoke-EnsureLocalGoose -Action Build | Out-Null
 }
 

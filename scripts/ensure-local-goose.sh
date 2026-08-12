@@ -27,6 +27,7 @@ Environment variables:
   GOOSE_DEV_PACKAGE          override cargo package from lockfile
   GOOSE_DEV_BIN              override built binary name from lockfile
   GOOSE_DEV_ALLOW_DIRTY      1 to allow building a dirty checkout
+  GOOSE_BUILD_PROFILE        debug|release (default: debug)
 USAGE
 }
 
@@ -83,6 +84,11 @@ pinned_commit="${GOOSE_DEV_COMMIT:-$lock_commit}"
 goose_package="${GOOSE_DEV_PACKAGE:-${lock_package:-goose-cli}}"
 goose_bin="${GOOSE_DEV_BIN:-${lock_bin:-goose}}"
 allow_dirty="${GOOSE_DEV_ALLOW_DIRTY:-0}"
+build_profile="${GOOSE_BUILD_PROFILE:-debug}"
+if [[ "$build_profile" != "debug" && "$build_profile" != "release" ]]; then
+  echo "GOOSE_BUILD_PROFILE must be debug or release, got: $build_profile" >&2
+  exit 1
+fi
 
 log() { echo "[berd-goose-dev] $*" >&2; }
 
@@ -133,7 +139,7 @@ resolve_bin_path() {
   if [[ -z "$target_dir" ]]; then
     target_dir="${goose_repo}/target"
   fi
-  printf '%s/debug/%s\n' "$target_dir" "$goose_bin"
+  printf '%s/%s/%s\n' "$target_dir" "$build_profile" "$goose_bin"
 }
 
 write_stamp() {
@@ -147,6 +153,7 @@ write_stamp() {
     printf 'STAMP_COMMIT=%q\n' "$commit_sha"
     printf 'STAMP_PACKAGE=%q\n' "$goose_package"
     printf 'STAMP_BIN_NAME=%q\n' "$goose_bin"
+    printf 'STAMP_BUILD_PROFILE=%q\n' "$build_profile"
     printf 'STAMP_BIN=%q\n' "$bin_path"
   } >"$goose_stamp_file"
 }
@@ -160,6 +167,7 @@ stamp_matches_current_build() {
   [[ "${STAMP_COMMIT:-}" == "$pinned_commit" ]] || return 1
   [[ "${STAMP_PACKAGE:-$goose_package}" == "$goose_package" ]] || return 1
   [[ "${STAMP_BIN_NAME:-$goose_bin}" == "$goose_bin" ]] || return 1
+  [[ "${STAMP_BUILD_PROFILE:-}" == "$build_profile" ]] || return 1
   [[ -x "${STAMP_BIN:-}" ]] || return 1
   # The recorded binary path must match where cargo writes today; otherwise
   # the user's cargo config (e.g. build.target-dir) changed and the stamp is
@@ -227,10 +235,12 @@ git -C "$goose_repo" checkout --detach "$pinned_commit" >/dev/null 2>&1
 git -C "$goose_repo" reset --hard "$pinned_commit" >/dev/null 2>&1
 
 log "Building Goose from $goose_repo at $pinned_commit."
-# --locked keeps the build on the pinned commit's Cargo.lock; without it cargo
-# may resolve newer deps and the stamp would record a binary that does not
-# match the pin.
-(cd "$goose_repo" && cargo build --locked -p "$goose_package" --bin "$goose_bin")
+# --locked keeps the build on the pinned commit's Cargo.lock. Release bundles
+# opt into Cargo's optimized profile; development keeps the faster debug build.
+cargo_args=(build --locked)
+[[ "$build_profile" == "release" ]] && cargo_args+=(--release)
+cargo_args+=(-p "$goose_package" --bin "$goose_bin")
+(cd "$goose_repo" && cargo "${cargo_args[@]}")
 [[ -x "$bin_path" ]] || { echo "Expected Goose binary at $bin_path, but it was not built." >&2; exit 1; }
 write_stamp "$pinned_ref" "$(git -C "$goose_repo" rev-parse HEAD)"
 log "Local Goose binary ready at $bin_path."

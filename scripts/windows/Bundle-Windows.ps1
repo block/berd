@@ -53,14 +53,18 @@ if (-not $SkipDependencyInstall) {
 Write-WindowsDevInfo "Building the workspace Goose SDK."
 Invoke-CheckedCommand -FilePath $pnpm -ArgumentList @("--filter", "@aaif/goose-sdk", "build") -Label "Goose SDK build"
 
-# Build the exact pinned managed Goose checkout before native staging validates
-# its identity, PE shape, architecture, checksum, and exact Tauri filename.
+$gooseBuildProfile = if ($Debug) { "debug" } else { "release" }
+# Production bundles use optimized Goose; explicit debug bundles retain the
+# development profile for iteration speed.
 $oldGooseMode = $env:GOOSE_DEV_MODE
+$oldGooseBuildProfile = $env:GOOSE_BUILD_PROFILE
 try {
     $env:GOOSE_DEV_MODE = "required"
+    $env:GOOSE_BUILD_PROFILE = $gooseBuildProfile
     $goose = Invoke-EnsureLocalGoose -Action Build
 } finally {
     $env:GOOSE_DEV_MODE = $oldGooseMode
+    $env:GOOSE_BUILD_PROFILE = $oldGooseBuildProfile
 }
 if (-not $goose.Ready -or [string]::IsNullOrWhiteSpace($goose.BinPath)) {
     throw "Pinned Goose sidecar is not ready: $($goose.Message)"
@@ -71,8 +75,14 @@ $env:CARGO_TARGET_DIR = $targetDir
 
 # Stage goosed/berdctl as validated *-<triple>.exe. Catch is macOS-only and is
 # excluded from the Windows externalBin overlay rather than replaced by a stub.
-Invoke-WindowsChildScript -ScriptPath (Join-Path $PSScriptRoot "Stage-Sidecar-Windows.ps1") `
-    -ArgumentList @("-Triple", $targetTriple) -Label "Stage Windows sidecars"
+$oldGooseBuildProfile = $env:GOOSE_BUILD_PROFILE
+try {
+    $env:GOOSE_BUILD_PROFILE = $gooseBuildProfile
+    Invoke-WindowsChildScript -ScriptPath (Join-Path $PSScriptRoot "Stage-Sidecar-Windows.ps1") `
+        -ArgumentList @("-Triple", $targetTriple) -Label "Stage Windows sidecars"
+} finally {
+    $env:GOOSE_BUILD_PROFILE = $oldGooseBuildProfile
+}
 
 Write-WindowsDevInfo "Resolving application version from Git metadata."
 $resolvedVersion = Resolve-AppVersion $Version

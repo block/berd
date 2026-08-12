@@ -880,6 +880,14 @@ function Get-GooseBackendSettings {
         $mode = "auto"
     }
 
+    $buildProfile = $env:GOOSE_BUILD_PROFILE
+    if ([string]::IsNullOrWhiteSpace($buildProfile)) {
+        $buildProfile = "debug"
+    }
+    if ($buildProfile -notin @("debug", "release")) {
+        throw "GOOSE_BUILD_PROFILE must be debug or release, got: $buildProfile"
+    }
+
     $remote = $env:GOOSE_DEV_REMOTE
     if ([string]::IsNullOrWhiteSpace($remote)) {
         $remote = "origin"
@@ -893,6 +901,7 @@ function Get-GooseBackendSettings {
         Package = $package
         Bin = $bin
         Mode = $mode
+        BuildProfile = $buildProfile
         Remote = $remote
         AllowDirty = ($env:GOOSE_DEV_ALLOW_DIRTY -eq "1")
     }
@@ -1148,7 +1157,7 @@ function Resolve-GooseBinaryPath {
         $targetDir = Get-CargoMetadataTargetDirectory -WorkingDirectory $Paths.Repo -Fallback $Paths.CargoTargetDir
     }
 
-    return (Join-Path (Join-Path $targetDir "debug") (Get-WindowsExeName $Settings.Bin))
+    return (Join-Path (Join-Path $targetDir $Settings.BuildProfile) (Get-WindowsExeName $Settings.Bin))
 }
 
 function Test-GooseCheckoutDirtyAllowed {
@@ -1190,6 +1199,7 @@ function Write-GooseStamp {
         commit = $Commit
         package = $Settings.Package
         binName = $Settings.Bin
+        buildProfile = $Settings.BuildProfile
         bin = $BinPath
         sha256 = (Get-FileSha256 -Path $BinPath)
     }
@@ -1221,6 +1231,9 @@ function Test-GooseStampRecordMatches {
         return $false
     }
     if ((Get-ObjectValue $Stamp "binName") -ne $Settings.Bin) {
+        return $false
+    }
+    if ((Get-ObjectValue $Stamp "buildProfile") -ne $Settings.BuildProfile) {
         return $false
     }
     if ((Get-ObjectValue $Stamp "bin") -ne $BinPath) {
@@ -1363,10 +1376,12 @@ function Build-GooseManagedBinary {
     )
 
     Write-WindowsDevInfo "Building Goose from $($Paths.Repo) at $($Settings.Commit)."
-    # --locked keeps the build on the pinned commit's Cargo.lock; without it
-    # cargo may resolve newer deps and the stamp would record a binary that
-    # does not match the pin.
-    Invoke-CheckedCommand -FilePath "cargo" -ArgumentList @("build", "--locked", "-p", $Settings.Package, "--bin", $Settings.Bin) -WorkingDirectory $Paths.Repo -Label "cargo build Goose"
+    $cargoArguments = @("build", "--locked")
+    if ($Settings.BuildProfile -eq "release") {
+        $cargoArguments += "--release"
+    }
+    $cargoArguments += @("-p", $Settings.Package, "--bin", $Settings.Bin)
+    Invoke-CheckedCommand -FilePath "cargo" -ArgumentList $cargoArguments -WorkingDirectory $Paths.Repo -Label "cargo build Goose ($($Settings.BuildProfile))"
 
     if (-not (Test-Path $BinPath -PathType Leaf)) {
         throw "Expected Goose binary at $BinPath, but it was not built."

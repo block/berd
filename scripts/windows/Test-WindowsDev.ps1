@@ -40,6 +40,7 @@ $oldGooseDevRoot = $env:GOOSE_DEV_ROOT
 $oldGooseRepo = $env:GOOSE_DEV_REPO
 $oldGooseTarget = $env:GOOSE_DEV_CARGO_TARGET_DIR
 $oldGooseStamp = $env:GOOSE_DEV_STAMP_FILE
+$oldGooseBuildProfile = $env:GOOSE_BUILD_PROFILE
 $oldLocalAppData = $env:LOCALAPPDATA
 $oldUserProfile = $env:USERPROFILE
 $oldAppData = $env:APPDATA
@@ -218,6 +219,22 @@ try {
     Assert-Equal "default Goose stamp path" $paths.StampFile (Join-Path $env:GOOSE_DEV_ROOT "stamp.json")
     Assert-Equal "Windows exe suffix" (Get-WindowsExeName "goose") "goose.exe"
     Assert-Equal "Existing exe suffix is preserved" (Get-WindowsExeName "goose.exe") "goose.exe"
+    $gooseRepo = Join-Path $temp "goose-repo"
+    $gooseTarget = Join-Path $temp "goose-target"
+    New-Item -ItemType Directory -Force -Path $gooseRepo | Out-Null
+    $goosePaths = [pscustomobject]@{ Repo = $gooseRepo; CargoTargetDir = $gooseTarget }
+    $gooseSettings = [pscustomobject]@{ Bin = "goose"; BuildProfile = "release" }
+    Assert-Equal "managed Goose resolves from the selected profile" `
+        (Resolve-GooseBinaryPath -Paths $goosePaths -Settings $gooseSettings) `
+        (Join-Path (Join-Path $gooseTarget "release") "goose.exe")
+    $env:GOOSE_BUILD_PROFILE = ""
+    Assert-Equal "managed Goose defaults development to debug" (Get-GooseBackendSettings).BuildProfile "debug"
+    $env:GOOSE_BUILD_PROFILE = "release"
+    Assert-Equal "managed Goose accepts the release profile" (Get-GooseBackendSettings).BuildProfile "release"
+    $env:GOOSE_BUILD_PROFILE = ""
+    $windowsDevSource = Get-Content -Raw (Join-Path (Get-BerdRepoRoot) "scripts\windows\WindowsDev.psm1")
+    Assert-Equal "managed Goose release profile adds cargo --release" `
+        ($windowsDevSource -match '(?s)if \(\$Settings\.BuildProfile -eq "release"\).*?\$cargoArguments \+= "--release"') $true
 
     # ── Windows sidecar staging (Get-WindowsSidecarName / Get-WindowsTripleMachine /
     #    Get-PeFileInfo / Assert-WindowsSidecarBinary / Remove-StaleWindowsSidecars /
@@ -438,6 +455,7 @@ try {
         Commit = "abc123"
         Package = "goose-cli"
         Bin = "goose"
+        BuildProfile = "debug"
     }
     $bin = Join-Path $temp "goose.exe"
     Set-Content -Path $bin -Value "fake" -Encoding ASCII
@@ -445,8 +463,12 @@ try {
     $stamp = Read-GooseStamp -Path $paths.StampFile
     Assert-Equal "stamp records ref" (Get-ObjectValue $stamp "ref") "main"
     Assert-Equal "stamp records bin path" (Get-ObjectValue $stamp "bin") $bin
+    Assert-Equal "stamp records build profile" (Get-ObjectValue $stamp "buildProfile") "debug"
     Assert-Equal "stamp match accepts current build" (Test-GooseStampRecordMatches -Stamp $stamp -Paths $paths -Settings $settings -BinPath $bin -LocalHead "abc123") $true
     Assert-Equal "stamp match rejects changed commit" (Test-GooseStampRecordMatches -Stamp $stamp -Paths $paths -Settings $settings -BinPath $bin -LocalHead "def456") $false
+    $releaseSettings = $settings.PSObject.Copy()
+    $releaseSettings.BuildProfile = "release"
+    Assert-Equal "stamp match rejects a different build profile" (Test-GooseStampRecordMatches -Stamp $stamp -Paths $paths -Settings $releaseSettings -BinPath $bin -LocalHead "abc123") $false
 
     # ── Goose readiness is bound to the binary's SHA-256, not just its path ──
     # The stamp records the digest of the built binary; reuse must re-verify it
@@ -678,6 +700,7 @@ try {
     $env:GOOSE_DEV_REPO = $oldGooseRepo
     $env:GOOSE_DEV_CARGO_TARGET_DIR = $oldGooseTarget
     $env:GOOSE_DEV_STAMP_FILE = $oldGooseStamp
+    $env:GOOSE_BUILD_PROFILE = $oldGooseBuildProfile
     $env:LOCALAPPDATA = $oldLocalAppData
     $env:USERPROFILE = $oldUserProfile
     $env:APPDATA = $oldAppData

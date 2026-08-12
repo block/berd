@@ -41,7 +41,7 @@ for (const [name, value] of Object.entries(contract)) {
 if [[ -n "${GOOSE_BIN:-}" ]]; then
   just _setup-no-goose
 else
-  just setup
+  GOOSE_BUILD_PROFILE=debug just setup
 fi
 
 export VITE_PORT="$(python3 -c "import hashlib,os; h=int(hashlib.sha256(os.getcwd().encode()).hexdigest(),16); print(10000 + h % 55000)")"
@@ -61,7 +61,7 @@ if [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]]; then
   ./scripts/prepare-bb-cli-resource.sh
 fi
 if [[ -z "${GOOSE_BIN:-}" ]]; then
-  export GOOSE_BIN="$(./scripts/ensure-local-goose.sh --check-bin)"
+  export GOOSE_BIN="$(GOOSE_BUILD_PROFILE=debug ./scripts/ensure-local-goose.sh --check-bin)"
 fi
 if [[ -z "${GOOSE_DISTRO_DIR:-}" && -d "$REPO_ROOT/distro" ]]; then
   export GOOSE_DISTRO_DIR="$REPO_ROOT/distro"

@@ -38,6 +38,96 @@ afterEach(async () => {
   );
 });
 
+describe("managed Goose build profile", () => {
+  it("defaults development to debug and makes release selection profile-aware", async () => {
+    const script = await readFile(
+      join(repo, "scripts/ensure-local-goose.sh"),
+      "utf8",
+    );
+
+    expect(script).toContain(`build_profile="\${GOOSE_BUILD_PROFILE:-debug}"`);
+    expect(script).toContain(
+      '[[ "$build_profile" == "release" ]] && cargo_args+=(--release)',
+    );
+    expect(script).toContain(
+      'printf \'%s/%s/%s\\n\' "$target_dir" "$build_profile" "$goose_bin"',
+    );
+    expect(script).toContain(
+      "printf 'STAMP_BUILD_PROFILE=%q\\n' \"$build_profile\"",
+    );
+  });
+
+  it("requests release Goose in every Unix packaging lane", async () => {
+    const [justfile, macos, workflow, docker] = await Promise.all([
+      readFile(join(repo, "justfile"), "utf8"),
+      readFile(join(repo, "scripts/release/build-macos.sh"), "utf8"),
+      readFile(join(repo, ".github/workflows/release.yml"), "utf8"),
+      readFile(join(repo, "scripts/build_linux_docker.sh"), "utf8"),
+    ]);
+
+    expect(justfile).toMatch(
+      /_bundle-unix:[\s\S]*if \[\[ -z "\$\{GOOSE_BIN:-\}" \]\]; then[\s\S]*GOOSE_BUILD_PROFILE=release \.\/scripts\/ensure-local-goose\.sh/,
+    );
+    expect(macos).toContain("GOOSE_BUILD_PROFILE=release just setup");
+    expect(workflow).toContain("GOOSE_BUILD_PROFILE=release just setup");
+    expect(docker).toContain("GOOSE_BUILD_PROFILE=release");
+  });
+
+  it("keeps Windows development debug and release bundles optimized", async () => {
+    const [module, bundle, workflow, windowsSetup] = await Promise.all([
+      readFile(join(repo, "scripts/windows/WindowsDev.psm1"), "utf8"),
+      readFile(join(repo, "scripts/windows/Bundle-Windows.ps1"), "utf8"),
+      readFile(join(repo, ".github/workflows/release.yml"), "utf8"),
+      readFile(join(repo, "scripts/windows/Setup-Windows.ps1"), "utf8"),
+    ]);
+
+    expect(module).toContain('$buildProfile = "debug"');
+    expect(module).toContain('$Settings.BuildProfile -eq "release"');
+    expect(module).toContain('$cargoArguments += "--release"');
+    expect(bundle).toContain(
+      '$gooseBuildProfile = if ($Debug) { "debug" } else { "release" }',
+    );
+    expect(bundle).toContain("$env:GOOSE_BUILD_PROFILE = $gooseBuildProfile");
+    expect(workflow).toContain("run: just setup-windows release");
+    expect(windowsSetup).toContain(
+      '[ValidateSet("debug", "release")][string]$GooseBuildProfile = "debug"',
+    );
+    expect(windowsSetup).toContain(
+      "$env:GOOSE_BUILD_PROFILE = $GooseBuildProfile",
+    );
+  });
+
+  it("pins ordinary development entry points to debug Goose", async () => {
+    const [justfile, devE2e, schema, windowsSetup, windowsDev, windowsStage] =
+      await Promise.all([
+        readFile(join(repo, "justfile"), "utf8"),
+        readFile(join(repo, "scripts/dev-e2e.sh"), "utf8"),
+        readFile(join(repo, "scripts/regenerate-sdk-schema.sh"), "utf8"),
+        readFile(join(repo, "scripts/windows/Setup-Windows.ps1"), "utf8"),
+        readFile(join(repo, "scripts/windows/Dev-Windows.ps1"), "utf8"),
+        readFile(
+          join(repo, "scripts/windows/Invoke-Stage-Sidecar-Windows.ps1"),
+          "utf8",
+        ),
+      ]);
+
+    expect(justfile).toMatch(
+      /setup: _setup-dev-deps[\s\S]*GOOSE_DEV_MODE=required \.\/scripts\/ensure-local-goose\.sh/,
+    );
+    expect(justfile).toMatch(
+      /_bundle-debug-unix:[\s\S]*if \[\[ -z "\$\{GOOSE_BIN:-\}" \]\]; then[\s\S]*GOOSE_BUILD_PROFILE=debug \.\/scripts\/ensure-local-goose\.sh/,
+    );
+    expect(justfile).toMatch(
+      /dev:[\s\S]*GOOSE_BUILD_PROFILE=debug just setup[\s\S]*GOOSE_BUILD_PROFILE=debug \.\/scripts\/ensure-local-goose\.sh --check-bin/,
+    );
+    expect(devE2e).toContain("GOOSE_BUILD_PROFILE=debug just setup");
+    expect(schema).toContain("GOOSE_BUILD_PROFILE=debug");
+    expect(windowsSetup).toContain('$GooseBuildProfile = "debug"');
+    expect(windowsDev).toContain('$env:GOOSE_BUILD_PROFILE = "debug"');
+    expect(windowsStage).toContain('$env:GOOSE_BUILD_PROFILE = "debug"');
+  });
+});
+
 describe("Docker Linux registry setup", () => {
   it("forwards the host npm registry when Docker replaces HOME", async () => {
     const dir = await tempDir();
