@@ -394,7 +394,7 @@ describe("development Block-feature resources", () => {
       `[[ "\${VITE_FEEDBACK:-0}" == "1" ]] && BERDCTL_FEATURES+=(--features block-feedback)`,
     );
     expect(source).toContain(
-      `cargo build -p berdctl "\${BERDCTL_FEATURES[@]}"`,
+      `cargo build -p berdctl \${BERDCTL_FEATURES[@]+"\${BERDCTL_FEATURES[@]}"}`,
     );
     expect(source).toContain(`[[ "\${VITE_AGENT_TOOLS:-0}" == "1" ]]`);
     expect(source).toContain("prepare-bb-cli-resource.sh");

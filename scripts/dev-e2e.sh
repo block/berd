@@ -53,7 +53,9 @@ export VITE_APP_VERSION="$BERD_APP_VERSION_RICH"
 
 BERDCTL_FEATURES=()
 [[ "${VITE_FEEDBACK:-0}" == "1" ]] && BERDCTL_FEATURES+=(--features block-feedback)
-(cd src-tauri && cargo build -p berdctl "${BERDCTL_FEATURES[@]}")
+# ${arr[@]+...} guards the empty-array expansion, which bash 3.2 (stock
+# macOS) treats as an unbound variable under `set -u`.
+(cd src-tauri && cargo build -p berdctl ${BERDCTL_FEATURES[@]+"${BERDCTL_FEATURES[@]}"})
 export BERDCTL_BIN="${CARGO_TARGET_DIR}/debug/berdctl"
 if [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]]; then
   ./scripts/prepare-bb-cli-resource.sh
