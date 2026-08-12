@@ -2433,6 +2433,46 @@ describe("ChatInput", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("does not offer steering while a hidden record heads the queue", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessages={[
+          {
+            recordId: "hidden-head",
+            payload: {
+              persona: { kind: "none" as const },
+              text: "startup handoff",
+              showInComposer: false,
+            },
+          },
+          {
+            recordId: "visible-tail",
+            payload: {
+              persona: { kind: "none" as const },
+              text: "queued msg",
+            },
+          },
+        ]}
+      />,
+    );
+
+    // The visible pill must not offer a steer button that would act on the
+    // hidden head, and the empty-composer shortcut must stay inert.
+    expect(screen.queryByTitle("Steer queued message")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("textbox"));
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("does not steer the queued message on enter while a queued record is being edited", async () => {
     const onSend = vi.fn();
     const onSteerQueuedMessage = vi.fn();

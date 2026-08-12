@@ -478,10 +478,12 @@ export function ChatInput({
     };
   }, [scheduleResizeTextarea, surface]);
 
-  const visibleQueuedMessages = (
+  const allQueuedMessages =
     queuedMessages ??
-    (queuedMessage ? [{ recordId: "legacy", payload: queuedMessage }] : [])
-  ).filter(({ payload }) => payload.showInComposer !== false);
+    (queuedMessage ? [{ recordId: "legacy", payload: queuedMessage }] : []);
+  const visibleQueuedMessages = allQueuedMessages.filter(
+    ({ payload }) => payload.showInComposer !== false,
+  );
   // A record being edited lives in the composer, so its pill is hidden to
   // avoid showing the same message both queued and in the composer. Queue
   // positions (head-only actions) still come from the unfiltered list.
@@ -504,6 +506,14 @@ export function ChatInput({
     canSteerMessage &&
     visibleQueuedMessages.length === 0 &&
     Boolean(onSteerMessage);
+  // Steering acts on the true queue head, so it is only offered when that
+  // head is also the message the user can see. In practice hidden records
+  // (reliable startup handoffs) cannot coexist with an active run today;
+  // this is a tripwire so a future longer-lived hidden record makes
+  // steering go inert instead of steering something off-screen.
+  const queuedHeadIsVisible =
+    allQueuedMessages.length > 0 &&
+    allQueuedMessages[0].payload.showInComposer !== false;
   // With an empty composer, the send shortcut steers the first queued
   // message instead of no-oping — the double-enter flow (enter queues,
   // enter again steers). Draft content keeps the shortcut on the draft so
@@ -517,7 +527,7 @@ export function ChatInput({
     isStreaming &&
     canSteerQueuedMessage &&
     editingQueuedRecordId === null &&
-    visibleQueuedMessages.length > 0 &&
+    queuedHeadIsVisible &&
     Boolean(onSteerQueuedMessage);
 
   const effectivePersonaId = editingQueuedPersona
@@ -1659,7 +1669,10 @@ export function ChatInput({
                       <span className="flex-1 truncate text-xs opacity-75">
                         {payload.text}
                       </span>
-                      {index === 0 && isStreaming && canSteerQueuedMessage ? (
+                      {index === 0 &&
+                      isStreaming &&
+                      canSteerQueuedMessage &&
+                      queuedHeadIsVisible ? (
                         <button
                           type="button"
                           onClick={handleSteerQueuedMessage}
