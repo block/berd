@@ -4,13 +4,13 @@ packages:
 
 overrides:
   "@babel/core": "7.29.6"
-  dompurify: "3.4.12"
+  dompurify: "3.4.13"
   uuid: ">=11.1.1 <12.0.0"
   hono: "4.12.34"
   "@hono/node-server": "2.0.12"
   js-yaml: "4.3.0"
   path-to-regexp: ">=8.4.0"
-  mermaid: "11.15.0"
+  mermaid: "11.16.1"
   fast-uri: "3.1.5"
   body-parser: "2.3.0"
   brace-expansion: "5.0.9"
