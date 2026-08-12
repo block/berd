@@ -31,6 +31,13 @@ use tauri_plugin_window_state::StateFlags;
 #[cfg(target_os = "macos")]
 const TRAFFIC_LIGHT_POSITION: (f64, f64) = (14.0, 28.0);
 const APP_LOG_MAX_FILE_SIZE_BYTES: u128 = 10 * 1024 * 1024;
+/// Archived log files kept once `berd.log` hits the size cap. `KeepSome`
+/// counts archives only — the active `berd.log` is always kept on top, so
+/// this retains three files total. The plugin's default strategy is
+/// `KeepOne`, which *deletes* the full file rather than archiving it — that
+/// would wipe the captured `goose serve` stderr (crash backtraces included)
+/// mid-incident.
+const APP_LOG_ARCHIVES_KEPT: usize = 2;
 #[cfg(target_os = "macos")]
 const APP_DISPLAY_NAME: &str = "Berd";
 #[cfg(target_os = "macos")]
@@ -109,6 +116,9 @@ pub fn run() {
                 .level(log::LevelFilter::Info)
                 .level_for("perf", log::LevelFilter::Debug)
                 .max_file_size(APP_LOG_MAX_FILE_SIZE_BYTES)
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(
+                    APP_LOG_ARCHIVES_KEPT,
+                ))
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {

@@ -4,9 +4,9 @@
 //! Two log sources are collected, via a strict **filename allowlist** — never a
 //! directory sweep:
 //!
-//! 1. This app's Tauri shell log (`app_log_dir()`): `berd.log` plus rotated
-//!    `berd.<N>.log` files. Each line is run through
-//!    [`sanitize_app_log_line`], which drops the captured goosed
+//! 1. This app's Tauri shell log (`app_log_dir()`): `berd.log` plus the
+//!    archives rotation leaves behind (`berd_<UTC-timestamp>.log`). Each line
+//!    is run through [`sanitize_app_log_line`], which drops the captured goosed
 //!    stdout/stderr lines (they can carry conversation/LLM content), applies
 //!    the secret-key redactor to what remains, and includes app diagnostic
 //!    events emitted as `[diagnostic] key=value` records.
@@ -56,8 +56,8 @@ pub(crate) const LOG_ZIP_FILENAME: &str = "berd-logs.zip";
 /// the (potentially slow) filesystem enumeration in [`build_logs_zip`] does not,
 /// so resolution and collection are split to keep the blocking work portable.
 pub(crate) struct LogDirs {
-    /// Tauri shell-log directory (`app_log_dir()`): holds `berd.log` and
-    /// rotated `berd.<N>.log` files.
+    /// Tauri shell-log directory (`app_log_dir()`): holds `berd.log` and its
+    /// rotated `berd_<UTC-timestamp>.log` archives.
     app_log_dir: PathBuf,
     /// goosed state log directory (`<goose-state>/logs`). We only ever descend
     /// into its `cli`/`server` subtrees.
@@ -221,7 +221,7 @@ fn write_zip(entries: Vec<ZipEntry>) -> Result<Vec<u8>, String> {
     Ok(cursor.into_inner())
 }
 
-/// Allowlist the Tauri shell log files: `berd.log` and rotated `berd.<N>.log`.
+/// Allowlist the Tauri shell log files: `berd.log` and its rotated archives.
 /// Files last modified before `cutoff` are skipped (recency filter).
 fn enumerate_app_shell_logs(dir: &Path, cutoff: SystemTime) -> Vec<PathBuf> {
     let mut paths = Vec::new();
@@ -247,10 +247,17 @@ fn enumerate_app_shell_logs(dir: &Path, cutoff: SystemTime) -> Vec<PathBuf> {
     paths
 }
 
-/// `berd.log` or `berd.<digits>.log` (rotated). Nothing else.
+/// `berd.log`, a rotated archive (`berd_<UTC-timestamp>.log`), or a legacy
+/// `berd.<digits>.log`. Nothing else.
 fn is_app_shell_log(name: &str) -> bool {
     if name == "berd.log" {
         return true;
+    }
+    if let Some(stamp) = name
+        .strip_prefix("berd_")
+        .and_then(|r| r.strip_suffix(".log"))
+    {
+        return is_rotation_timestamp(stamp);
     }
     match name
         .strip_prefix("berd.")
@@ -259,6 +266,18 @@ fn is_app_shell_log(name: &str) -> bool {
         Some(middle) => !middle.is_empty() && middle.bytes().all(|b| b.is_ascii_digit()),
         None => false,
     }
+}
+
+/// The `YYYY-MM-DD_HH-MM-SS` stamp `tauri_plugin_log` appends when it archives a
+/// full log (`rename_file_to_dated`, its `LOG_DATE_FORMAT`). Matched by shape
+/// rather than parsed: this only decides whether a filename is one of ours.
+fn is_rotation_timestamp(stamp: &str) -> bool {
+    const MASK: &[u8] = b"0000-00-00_00-00-00";
+    stamp.len() == MASK.len()
+        && stamp.bytes().zip(MASK).all(|(byte, mask)| match mask {
+            b'0' => byte.is_ascii_digit(),
+            _ => byte == *mask,
+        })
 }
 
 /// Recursively collect `.log` files under a goosed log subtree (`cli`/`server`),
@@ -486,6 +505,21 @@ mod tests {
         assert!(!is_app_shell_log("llm_request.0.jsonl"));
     }
 
+    /// The name `tauri_plugin_log`'s `rename_file_to_dated` actually produces
+    /// when `KeepSome` archives a full `berd.log`: the target's file name plus
+    /// `_` plus its `[year]-[month]-[day]_[hour]-[minute]-[second]` stamp.
+    #[test]
+    fn allowlists_rotated_shell_log_archives() {
+        assert!(is_app_shell_log("berd_2026-08-12_05-51-14.log"));
+        assert!(is_app_shell_log("berd_2026-01-01_00-00-00.log"));
+        // Only that exact shape — not a stray `berd_`-prefixed file, and not
+        // the plugin's `.bak` collision fallback (no `.log` suffix left).
+        assert!(!is_app_shell_log("berd_notes.log"));
+        assert!(!is_app_shell_log("berd_2026-08-12.log"));
+        assert!(!is_app_shell_log("berd_2026-08-12_05-51-14.log.bak"));
+        assert!(!is_app_shell_log("berd_2026-08-12_05:51:14.log"));
+    }
+
     #[test]
     fn hard_excludes_conversation_artifacts() {
         assert!(is_hard_excluded("llm_request.0.jsonl"));
@@ -606,6 +640,13 @@ mod tests {
             ),
         )
         .unwrap();
+        // A rotated archive alongside the active file — the crash context that
+        // rotation moves out of `berd.log` has to stay collectable.
+        fs::write(
+            app_log_dir.join("berd_2026-08-12_05-51-14.log"),
+            format!("{shell_ts}[INFO] rotated out of the active log\n"),
+        )
+        .unwrap();
         // Conversation artifacts that must never appear, including one placed
         // directly under logs/ (where llm_request actually lives).
         fs::write(state_logs.join("llm_request.0.jsonl"), b"prompt\n").unwrap();
@@ -628,6 +669,9 @@ mod tests {
         }
 
         assert!(names.iter().any(|n| n == "app-shell/berd.log"));
+        assert!(names
+            .iter()
+            .any(|n| n == "app-shell/berd_2026-08-12_05-51-14.log"));
         assert!(names
             .iter()
             .any(|n| n == "goosed-logs/cli/2026-01-01/run.log"));
