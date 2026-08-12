@@ -2350,6 +2350,121 @@ describe("ChatInput", () => {
     ).toBeInTheDocument();
   });
 
+  it("steers the queued message on enter with an empty composer", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("textbox"));
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("steers the queued message on cmd-enter with an empty composer", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("textbox"));
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+    expect(onSteerQueuedMessage).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("does not steer the queued message on enter while the composer holds a draft", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "second follow up");
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledWith("second follow up", null, undefined);
+  });
+
+  it("does not steer the queued message on enter when the session is idle", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("textbox"));
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("does not steer the queued message on enter while a queued record is being edited", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessages={[
+          {
+            recordId: "head",
+            payload: { persona: { kind: "none" as const }, text: "queued msg" },
+          },
+        ]}
+        onEditQueue={vi.fn(() => true)}
+        onCancelQueueEdit={vi.fn(() => true)}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={vi.fn(() => true)}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    await user.clear(screen.getByRole("textbox"));
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
+  });
+
   it("hides queue edit and dismiss actions when dismissal is disabled", () => {
     render(
       <ChatInput
@@ -3167,26 +3282,6 @@ describe("ChatInput", () => {
         threadId: "thread-1",
       },
     });
-  });
-
-  it("does not steer a queued message from an empty composer on enter", async () => {
-    const onSend = vi.fn();
-    const onSteerQueuedMessage = vi.fn();
-    const user = userEvent.setup();
-    render(
-      <ChatInput
-        onSend={onSend}
-        onSteerQueuedMessage={onSteerQueuedMessage}
-        canSteerQueuedMessage
-        isStreaming
-        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
-      />,
-    );
-
-    await user.keyboard("{Enter}");
-
-    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
-    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("appends a draft without steering the queued head", async () => {

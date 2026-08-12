@@ -504,6 +504,21 @@ export function ChatInput({
     canSteerMessage &&
     visibleQueuedMessages.length === 0 &&
     Boolean(onSteerMessage);
+  // With an empty composer, the send shortcut steers the first queued
+  // message instead of no-oping — the double-enter flow (enter queues,
+  // enter again steers). Draft content keeps the shortcut on the draft so
+  // it can never discard or bypass what the user is composing, and an
+  // in-progress queue edit keeps the shortcut inert because the edited
+  // message lives in the composer, not the queue.
+  const canSteerQueuedMessageWithShortcut =
+    !hasDraftContent &&
+    !disabled &&
+    !sendDisabled &&
+    isStreaming &&
+    canSteerQueuedMessage &&
+    editingQueuedRecordId === null &&
+    visibleQueuedMessages.length > 0 &&
+    Boolean(onSteerQueuedMessage);
 
   const effectivePersonaId = editingQueuedPersona
     ? editingQueuedPersona.kind === "persona"
@@ -1148,6 +1163,10 @@ export function ChatInput({
           void handleSteerCurrentMessage();
           return;
         }
+        if (canSteerQueuedMessageWithShortcut) {
+          handleSteerQueuedMessage();
+          return;
+        }
       }
       void handleSend();
       return;
@@ -1181,6 +1200,10 @@ export function ChatInput({
         );
         if (action === "steer" && canSteerCurrentMessage) {
           void handleSteerCurrentMessage();
+          return;
+        }
+        if (canSteerQueuedMessageWithShortcut) {
+          handleSteerQueuedMessage();
           return;
         }
       }
