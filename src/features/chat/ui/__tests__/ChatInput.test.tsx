@@ -104,6 +104,19 @@ vi.mock("@/shared/api/system", () => ({
   readImageAttachment: (path: string) => mockReadImageAttachment(path),
 }));
 
+// jsdom cannot decode image bytes; a controllable stand-in lets tests hold
+// attachment work open (a pending resize) while asserting shortcut gating.
+const mockResizeImage = vi.fn<
+  (file: File) => Promise<{ base64: string; mimeType: string }>
+>((file) =>
+  Promise.resolve({ base64: `base64:${file.name}`, mimeType: file.type }),
+);
+vi.mock("@/features/chat/lib/resizeImage", () => ({
+  resizeImage: (file: File) => mockResizeImage(file),
+  normalizeImageBase64: (base64: string, mimeType: string | undefined) =>
+    Promise.resolve({ base64, mimeType }),
+}));
+
 vi.mock("@/features/skills/api/skills", () => ({
   listSkills: vi.fn(() => immediatelyResolved([])),
 }));
@@ -2350,6 +2363,213 @@ describe("ChatInput", () => {
     ).toBeInTheDocument();
   });
 
+  it("steers the queued message on enter with an empty composer", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("textbox"));
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("steers the queued message on cmd-enter with an empty composer", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("textbox"));
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+    expect(onSteerQueuedMessage).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("does not steer the queued message on enter while the composer holds a draft", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "second follow up");
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledWith("second follow up", null, undefined);
+  });
+
+  it("does not steer the queued message on enter when the session is idle", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
+      />,
+    );
+
+    await user.click(screen.getByRole("textbox"));
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("does not steer the queued message on enter while attachment work is pending", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    // Hold the image resize open so attachment admission stays in flight
+    // while Enter is pressed.
+    let releaseResize: (() => void) | undefined;
+    mockResizeImage.mockImplementationOnce(
+      (file) =>
+        new Promise((resolve) => {
+          releaseResize = () =>
+            resolve({ base64: `base64:${file.name}`, mimeType: file.type });
+        }),
+    );
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
+      />,
+    );
+
+    const textbox = screen.getByRole("textbox");
+    const composer = textbox.closest("div.rounded-composer");
+    if (!composer) {
+      throw new Error("Expected composer container");
+    }
+    fireEvent.drop(composer, {
+      dataTransfer: {
+        files: [new File(["img"], "shot.png", { type: "image/png" })],
+        items: [{ kind: "file" }],
+        types: ["Files"],
+      },
+    });
+
+    await user.click(textbox);
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+
+    // Once admission settles, the attachment lands in the composer — the
+    // lock is the in-flight work, not the attachment itself (and the staged
+    // attachment then keeps the shortcut on the draft as draft content).
+    releaseResize?.();
+    expect(
+      await screen.findByRole("button", { name: "View attachment 1" }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not offer steering while a hidden record heads the queue", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessages={[
+          {
+            recordId: "hidden-head",
+            payload: {
+              persona: { kind: "none" as const },
+              text: "startup handoff",
+              showInComposer: false,
+            },
+          },
+          {
+            recordId: "visible-tail",
+            payload: {
+              persona: { kind: "none" as const },
+              text: "queued msg",
+            },
+          },
+        ]}
+      />,
+    );
+
+    // The visible pill must not offer a steer button that would act on the
+    // hidden head, and the empty-composer shortcut must stay inert.
+    expect(screen.queryByTitle("Steer queued message")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("textbox"));
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("does not steer the queued message on enter while a queued record is being edited", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessages={[
+          {
+            recordId: "head",
+            payload: { persona: { kind: "none" as const }, text: "queued msg" },
+          },
+        ]}
+        onEditQueue={vi.fn(() => true)}
+        onCancelQueueEdit={vi.fn(() => true)}
+        onDismissQueue={vi.fn()}
+        onUpdateQueue={vi.fn(() => true)}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    await user.clear(screen.getByRole("textbox"));
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
+  });
+
   it("hides queue edit and dismiss actions when dismissal is disabled", () => {
     render(
       <ChatInput
@@ -3167,26 +3387,6 @@ describe("ChatInput", () => {
         threadId: "thread-1",
       },
     });
-  });
-
-  it("does not steer a queued message from an empty composer on enter", async () => {
-    const onSend = vi.fn();
-    const onSteerQueuedMessage = vi.fn();
-    const user = userEvent.setup();
-    render(
-      <ChatInput
-        onSend={onSend}
-        onSteerQueuedMessage={onSteerQueuedMessage}
-        canSteerQueuedMessage
-        isStreaming
-        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
-      />,
-    );
-
-    await user.keyboard("{Enter}");
-
-    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
-    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("appends a draft without steering the queued head", async () => {
