@@ -518,12 +518,16 @@ export function ChatInput({
   const stagedItems = scopedControls.quotes ? stagedItemsProp : [];
   const hasDraftContext =
     (scopedControls.attachments && attachments.length > 0) ||
-    visibleSelectedSkills.length > 0 ||
-    stagedItems.length > 0;
+    visibleSelectedSkills.length > 0;
   const stagedItemsRef = useRef(stagedItems);
   stagedItemsRef.current = stagedItems;
+  // Staged quotes are draft context but cannot form a message by
+  // themselves: a quote-only send would dispatch an empty ACP prompt,
+  // which breaks replay provenance matching (and asks the agent to answer
+  // nothing). The user must say something about the quoted passage.
   const hasComposedMessage = text.trim().length > 0 || hasDraftContext;
-  const hasDraftContent = text.length > 0 || hasDraftContext;
+  const hasDraftContent =
+    text.length > 0 || hasDraftContext || stagedItems.length > 0;
   const canQueueMessage =
     hasComposedMessage && !disabled && !sendDisabled && !attachmentWorkPending;
   const canSteerCurrentMessage =

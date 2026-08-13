@@ -49,6 +49,29 @@ describe("ChatInput quotes control", () => {
     expect(sendOptions?.userMessageMetadata?.stagedItems).toHaveLength(1);
   });
 
+  it("refuses a quote-only send until the user types a message", async () => {
+    // A quote-only dispatch would carry an empty ACP prompt, which breaks
+    // replay provenance matching (withRestoredStagedItems skips empty-text
+    // turns): the quote card would silently vanish after replay. Staged
+    // quotes therefore never make an empty composer sendable.
+    const onSend = vi.fn().mockReturnValue(true);
+    render(<ChatInput onSend={onSend} stagedItems={[makeQuote()]} />);
+
+    expect(screen.getByText("a memorable earlier passage")).toBeInTheDocument();
+
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(onSend).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "now with text" },
+    });
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "Enter" });
+    await vi.waitFor(() => expect(onSend).toHaveBeenCalled());
+    const sendOptions = onSend.mock.calls[0][3];
+    expect(sendOptions?.userMessageMetadata?.stagedItems).toHaveLength(1);
+  });
+
   it("neither shows nor sends staged quotes when quotes are disabled", async () => {
     const onSend = vi.fn().mockReturnValue(true);
     render(

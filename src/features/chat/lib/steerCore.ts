@@ -1,11 +1,6 @@
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import {
-  buildStagedQuoteDispatchPrompt,
-  stagedQuoteSourceIsLive,
-} from "@/features/chat/lib/stagedQuoteSend";
-import { recordSubmittedStagedItems } from "@/features/chat/lib/submittedQuoteProvenance";
-import { composeSystemPrompt } from "@/features/projects/lib/chatProjectContext";
+import { prepareStagedQuoteDispatch } from "@/features/chat/lib/stagedQuoteSend";
 import { acpSteerMessage } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import {
@@ -102,27 +97,13 @@ export async function steerPromptInSession(
   // A steer targets the currently running turn, so no compaction can
   // intervene between here and pickup; the current transcript decides
   // anchor-vs-full-excerpt per quote source.
-  let dispatchAssistantPrompt = sendOptions?.assistantPrompt;
-  if (sendOptions?.userMessageMetadata?.stagedItems?.length) {
-    const liveMessages =
-      useChatStore.getState().messagesBySession[sessionId] ?? [];
-    const quotePrompt = buildStagedQuoteDispatchPrompt(
-      sendOptions.userMessageMetadata.stagedItems,
-      (source) => stagedQuoteSourceIsLive(liveMessages, source),
-    );
-    dispatchAssistantPrompt = composeSystemPrompt(
-      sendOptions.assistantPrompt,
-      quotePrompt,
-    );
-    // Durable quote provenance (Berd-local): steered sends carry staged
-    // quotes exactly like foreground sends; record them so replay can
-    // re-attach the quote card to this turn.
-    recordSubmittedStagedItems(
-      sessionId,
-      acpPrompt,
-      sendOptions.userMessageMetadata.stagedItems,
-    );
-  }
+  const dispatchAssistantPrompt = prepareStagedQuoteDispatch({
+    sessionId,
+    assistantPrompt: sendOptions?.assistantPrompt,
+    acpPrompt,
+    stagedItems: sendOptions?.userMessageMetadata?.stagedItems,
+    liveMessages: useChatStore.getState().messagesBySession[sessionId] ?? [],
+  });
   const chatStore = useChatStore.getState();
   chatStore.addMessage(sessionId, userMessage);
   chatStore.setPendingInterventionBoundary(sessionId, {

@@ -165,11 +165,10 @@ export function useChat(
       const sid = sessionId.slice(0, 8);
       const hasAttachments = (attachments?.length ?? 0) > 0;
       const hasAssistantPrompt = Boolean(sendOptions?.assistantPrompt?.trim());
-      // Staged quotes are structured intent serialized at dispatch, so a
-      // quote-only send has no composer text or assistantPrompt yet.
-      const hasStagedItems = Boolean(
-        sendOptions?.userMessageMetadata?.stagedItems?.length,
-      );
+      // Staged quotes deliberately do NOT make an empty send valid: a
+      // quote-only dispatch would carry an empty ACP prompt, which breaks
+      // replay provenance matching (withRestoredStagedItems skips
+      // empty-text turns). The composer enforces the same policy.
       const currentChatState = useChatStore
         .getState()
         .getSessionRuntime(sessionId).chatState;
@@ -177,10 +176,7 @@ export function useChat(
         .getState()
         .getSessionRuntime(sessionId).isRunCancellationPending;
       if (
-        (!text.trim() &&
-          !hasAttachments &&
-          !hasAssistantPrompt &&
-          !hasStagedItems) ||
+        (!text.trim() && !hasAttachments && !hasAssistantPrompt) ||
         isRunCancellationPending ||
         currentChatState === "streaming" ||
         currentChatState === "thinking" ||

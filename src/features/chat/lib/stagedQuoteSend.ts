@@ -1,9 +1,11 @@
+import { composeSystemPrompt } from "@/features/projects/lib/chatProjectContext";
 import type {
   Message,
   StagedItem,
   StagedQuoteItem,
   StagedQuoteSourceRange,
 } from "@/shared/types/messages";
+import { recordSubmittedStagedItems } from "./submittedQuoteProvenance";
 
 /**
  * Quote serialization happens at the authoritative send attempt, not in the
@@ -94,6 +96,35 @@ export function stagedQuoteSourceIsLive(
     typeof block.text === "string" &&
     source.end <= block.text.length
   );
+}
+
+/** The single quote-dispatch step shared by every authoritative send path
+ * (foreground send and steer). Composes the assistant-audience quote
+ * framing into the dispatch prompt and records durable provenance so
+ * replay can re-attach the quotes to this turn. Both callers must go
+ * through here: two copies of this sequence would drift the first time
+ * one is edited. Returns `assistantPrompt` unchanged when nothing is
+ * staged. */
+export function prepareStagedQuoteDispatch({
+  sessionId,
+  assistantPrompt,
+  acpPrompt,
+  stagedItems,
+  liveMessages,
+}: {
+  sessionId: string;
+  assistantPrompt: string | undefined;
+  /** The exact prompt text dispatched over ACP (provenance match key). */
+  acpPrompt: string;
+  stagedItems: readonly StagedItem[] | undefined;
+  liveMessages: readonly Pick<Message, "id" | "content">[];
+}): string | undefined {
+  if (!stagedItems?.length) return assistantPrompt;
+  const quotePrompt = buildStagedQuoteDispatchPrompt(stagedItems, (source) =>
+    stagedQuoteSourceIsLive(liveMessages, source),
+  );
+  recordSubmittedStagedItems(sessionId, acpPrompt, stagedItems);
+  return composeSystemPrompt(assistantPrompt, quotePrompt);
 }
 
 export function stagedItemSnapshotsMatch(

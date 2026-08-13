@@ -520,9 +520,17 @@ function buildAssistantTextFragmentItems({
   let sourceTextStart = 0;
   return textChunks.map((chunk, fragmentIndex) => {
     const { text, isCodeContinuationChunk, startsWithHeading } = chunk;
+    // Chunk text usually occurs verbatim in the source, but not always:
+    // an unterminated fenced code block (streaming tail) gets a synthesized
+    // closing fence. Such a chunk is deliberately unquotable (-1 coordinates,
+    // which the quote mapper rejects) and must not poison the cursor for
+    // any chunks that follow.
     const chunkStart = sourceText.indexOf(text, sourceTextStart);
-    const chunkEnd = chunkStart + text.length;
-    sourceTextStart = chunkEnd;
+    const chunkFound = chunkStart >= 0;
+    const chunkEnd = chunkFound ? chunkStart + text.length : -1;
+    if (chunkFound) {
+      sourceTextStart = chunkEnd;
+    }
     const isStreamingTail = isStreaming && fragmentIndex === lastIndex;
     const fragmentId = useStreamingFragmentIds
       ? fragmentIndex === lastIndex
