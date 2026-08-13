@@ -1484,6 +1484,93 @@ describe("acpNotificationHandler", () => {
     });
   });
 
+  it("retains codex-acp wire provenance on the rendered tool request", async () => {
+    registerPreparedSession("acp-session", "codex", "/Users/test");
+    setActiveMessageId("acp-session", "assistant-1");
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "followup-1",
+        title: "Sending follow-up",
+        rawInput: {
+          prompt: "Re-check the cache boundary",
+          senderThreadId: "root",
+          receiverThreadIds: ["/root/reviewer"],
+          agentsStates: {},
+          model: "gpt-5",
+          reasoningEffort: "medium",
+          status: "running",
+        },
+        _meta: { codex: { collaboration: { tool: "followup_task" } } },
+      },
+    } as never);
+
+    const [message] = useChatStore.getState().messagesBySession["acp-session"];
+    expect(message.content[0]).toMatchObject({
+      type: "toolRequest",
+      id: "followup-1",
+      toolName: "followup_task",
+      arguments: {
+        prompt: "Re-check the cache boundary",
+        receiverThreadIds: ["/root/reviewer"],
+      },
+      subagentAgentName: "/root/reviewer",
+      subagentTaskLabel: "Re-check the cache boundary",
+    });
+  });
+
+  it.each([
+    "live",
+    "replay",
+  ] as const)("retains codex-acp provenance when identity arrives late in %s", async (mode) => {
+    const sessionId = "acp-session";
+    if (mode === "live") {
+      registerPreparedSession(sessionId, "codex", "/Users/test");
+      setActiveMessageId(sessionId, "assistant-1");
+    } else {
+      markSessionReplayLoading(sessionId);
+    }
+
+    await handleSessionNotification({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "followup-1",
+        title: "Sending follow-up",
+        rawInput: {
+          prompt: "Re-check the cache boundary",
+          receiverThreadIds: ["/root/reviewer"],
+        },
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "followup-1",
+        _meta: { codex: { collaboration: { tool: "followup_task" } } },
+      },
+    } as never);
+
+    const messages =
+      mode === "live"
+        ? useChatStore.getState().messagesBySession[sessionId]
+        : getReplayBuffer(sessionId);
+    const request = messages
+      ?.flatMap((message) => message.content)
+      .find(
+        (block) => block.type === "toolRequest" && block.id === "followup-1",
+      );
+    expect(request).toMatchObject({
+      type: "toolRequest",
+      toolName: "followup_task",
+      subagentAgentName: "/root/reviewer",
+      subagentTaskLabel: "Re-check the cache boundary",
+    });
+  });
+
   it("preserves ACP tool kind and locations on tool requests", async () => {
     registerPreparedSession("acp-session", "goose", "/Users/test");
     setActiveMessageId("acp-session", "assistant-1");

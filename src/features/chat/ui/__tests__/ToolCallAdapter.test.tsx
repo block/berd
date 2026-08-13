@@ -204,6 +204,23 @@ describe("ToolCallAdapter — subagent laws", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders lawful Codex follow-up provenance", () => {
+    renderAdapter({
+      name: "followup_task",
+      toolName: "followup_task",
+      arguments: {
+        target: "/root/reviewer",
+        message: "Re-check the cache boundary",
+      },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /Delegating to \/root\/reviewer · Re-check the cache boundary/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("does not expose a task id as an unknown task description", () => {
     renderAdapter({
       name: "Loading source 20260807_72",

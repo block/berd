@@ -8,7 +8,8 @@
  *   `source` (await/peek/cancel a background subagent). `load` with a named
  *   source (recipe/skill) is NOT a subagent run.
  * - Claude Code: `Task` / `Agent` tool (via `_meta.claudeCode.toolName`).
- * - Codex: `spawn_agent` collaboration tool (via `_meta.codex.collaboration`).
+ * - Codex: collaboration lifecycle tools such as `spawn_agent`,
+ *   `followup_task`, and `wait_agent` (via `_meta.codex.collaboration`).
  *
  * Tool names arrive on `ToolRequestContent.toolName` (extracted from `_meta`
  * at the ACP edge by `getToolCallIdentity`). Titles are server-authored and
@@ -37,12 +38,6 @@ export interface SubagentToolCallInfo {
 
 /** Goose background-task ids look like `20260807_72`. */
 const GOOSE_TASK_ID_PATTERN = /^\d{8}_\w+$/;
-
-/** `20260807_72` → `72`; anything unexpected passes through unchanged. */
-export function shortTaskId(taskId: string): string {
-  const separator = taskId.indexOf("_");
-  return separator > 0 ? taskId.slice(separator + 1) : taskId;
-}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -136,14 +131,6 @@ export function resolveDelegateContextForTask(
   return undefined;
 }
 
-/** Compatibility accessor for callers that only need the delegate identity. */
-export function resolveDelegateSourceForTask(
-  messages: ReadonlyArray<{ content: MessageContent[] }>,
-  taskId: string,
-): string | undefined {
-  return resolveDelegateContextForTask(messages, taskId)?.subagentAgentName;
-}
-
 const MAX_LABEL_LENGTH = 60;
 
 function truncateLabel(value: string): string {
@@ -160,6 +147,32 @@ function stringArg(
   return typeof value === "string" && value.trim().length > 0
     ? value
     : undefined;
+}
+
+function soleStringArrayArg(
+  args: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = args[key];
+  if (!Array.isArray(value) || value.length !== 1) return undefined;
+  const [item] = value;
+  return typeof item === "string" && item.trim().length > 0
+    ? item.trim()
+    : undefined;
+}
+
+export function getSubagentToolCallContext(
+  toolName: string | undefined,
+  args: Record<string, unknown>,
+): ResolvedSubagentContext | undefined {
+  const info = getSubagentToolCallInfo({ toolName, arguments: args });
+  if (!info) return undefined;
+  const context: ResolvedSubagentContext = {
+    ...(info.agentName ? { subagentAgentName: info.agentName } : {}),
+    ...(info.label ? { subagentTaskLabel: info.label } : {}),
+    ...(info.sourceDefinesTask ? { subagentTaskIsConfigured: true } : {}),
+  };
+  return Object.keys(context).length > 0 ? context : undefined;
 }
 
 export function getSubagentToolCallInfo(input: {
@@ -214,16 +227,68 @@ export function getSubagentToolCallInfo(input: {
     };
   }
 
-  // Codex: spawn_agent collaboration tool. `task_name` identifies the spawned
-  // agent in the collaboration protocol, while `message` is its delegated
-  // task. Keep `prompt` as a compatibility fallback for older adapters.
+  // Codex: spawn_agent collaboration tool. Direct adapters expose `task_name`
+  // and `message`; codex-acp exposes the same facts as a strict singleton
+  // `receiverThreadIds` and `prompt`. Keep both wire shapes compatible.
   if (toolName === "spawn_agent") {
-    const agentName = stringArg(args, "task_name");
+    const agentName =
+      stringArg(args, "task_name") ??
+      soleStringArrayArg(args, "receiverThreadIds");
     const label = stringArg(args, "message") ?? stringArg(args, "prompt");
     return {
       activity: "delegating",
       ...(agentName ? { agentName: agentName.trim() } : {}),
       ...(label ? { label: truncateLabel(label) } : {}),
+    };
+  }
+
+  // Codex collaboration lifecycle calls expose provenance directly in their
+  // arguments. Targets are canonical subagent task names (or legacy ids), and
+  // message payloads are newly delegated work.
+  if (
+    toolName === "send_input" ||
+    toolName === "send_message" ||
+    toolName === "followup_task"
+  ) {
+    const agentName =
+      stringArg(args, "target") ??
+      soleStringArrayArg(args, "receiverThreadIds");
+    const label = stringArg(args, "message") ?? stringArg(args, "prompt");
+    return {
+      activity: "delegating",
+      ...(agentName ? { agentName: agentName.trim() } : {}),
+      ...(label ? { label: truncateLabel(label) } : {}),
+    };
+  }
+
+  if (toolName === "resume_agent") {
+    const agentName =
+      stringArg(args, "target") ??
+      stringArg(args, "id") ??
+      soleStringArrayArg(args, "receiverThreadIds");
+    return {
+      activity: "delegating",
+      ...(agentName ? { agentName: agentName.trim() } : {}),
+    };
+  }
+
+  if (toolName === "wait_agent") {
+    const agentName =
+      soleStringArrayArg(args, "targets") ??
+      soleStringArrayArg(args, "receiverThreadIds");
+    return {
+      activity: "waiting",
+      ...(agentName ? { agentName } : {}),
+    };
+  }
+
+  if (toolName === "close_agent" || toolName === "interrupt_agent") {
+    const agentName =
+      stringArg(args, "target") ??
+      soleStringArrayArg(args, "receiverThreadIds");
+    return {
+      activity: "cancelling",
+      ...(agentName ? { agentName: agentName.trim() } : {}),
     };
   }
 
