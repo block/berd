@@ -10,6 +10,11 @@ import { parseSessionDeepLink } from "@/features/sessions/lib/sessionDeepLink";
 import { isExternalHref } from "@/shared/lib/isExternalHref";
 import { isUrlTrusted } from "@/shared/lib/trustedDomains";
 import { LinkSafetyModal } from "@/shared/ui/ai-elements/link-safety-modal";
+import {
+  MarkdownSourceBlocksProvider,
+  rehypeMarkdownSourceSegments,
+  useMarkdownSourceBlocks,
+} from "@/shared/ui/ai-elements/markdown-source-segments";
 import { cn } from "@/shared/lib/cn";
 import { useVirtualLayoutPendingForStreamdown } from "@/features/chat/transcript/measurement";
 import { useStreamdownTableScrollbarSizing } from "@/shared/ui/ai-elements/streamdown-table-scrollbar";
@@ -347,6 +352,13 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
    * with a plain <img>. Keeps this shared module free of chat-feature imports.
    */
   imageRenderer?: MarkdownImageRenderer;
+  /**
+   * When true, rendered text carries canonical Markdown source coordinates
+   * (see markdown-source-segments.tsx). Neutral source-location metadata
+   * only; consumers such as transcript quote selection map DOM selections
+   * back to canonical source ranges with it.
+   */
+  sourceSegments?: boolean;
 };
 
 const streamdownPlugins = { cjk, code, math, mermaid };
@@ -694,6 +706,12 @@ const berdRehypePlugins: NonNullable<
   restoreBerdMarkdownDestinations,
 ];
 
+/** Same pipeline plus canonical source segments. Segments are added after
+ * sanitize/harden so the wrapper spans and data attributes survive. */
+const berdRehypePluginsWithSourceSegments: NonNullable<
+  ComponentProps<typeof Streamdown>["rehypePlugins"]
+> = [...berdRehypePlugins, rehypeMarkdownSourceSegments];
+
 const linkSafetyConfig: ComponentProps<typeof Streamdown>["linkSafety"] = {
   enabled: false,
 };
@@ -708,6 +726,7 @@ export const MessageResponse = memo(
     mode,
     onAnimationEnd,
     onAnimationStart,
+    sourceSegments = false,
     ...props
   }: MessageResponseProps) => {
     const { t } = useTranslation("common");
@@ -716,6 +735,7 @@ export const MessageResponse = memo(
       () => buildStreamdownComponents(imageRenderer),
       [imageRenderer],
     );
+    const sourceBlocks = useMarkdownSourceBlocks(sourceSegments);
     const streamdownRootRef = useRef<HTMLDivElement>(null);
     const streamdownLayoutPending = useVirtualLayoutPendingForStreamdown({
       contentKey: children,
@@ -772,27 +792,35 @@ export const MessageResponse = memo(
           ref={streamdownRootRef}
           {...streamdownLayoutPending.layoutPendingAttributes}
         >
-          <Streamdown
-            className={cn(
-              "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-              className,
-            )}
-            components={streamdownComponents}
-            isAnimating={isAnimating}
-            linkSafety={linkSafetyConfig}
-            mode={mode}
-            onAnimationEnd={streamdownLayoutPending.onAnimationEnd}
-            onAnimationStart={streamdownLayoutPending.onAnimationStart}
-            rehypePlugins={berdRehypePlugins}
-            plugins={
-              codeRenderers
-                ? { ...streamdownPlugins, renderers: codeRenderers }
-                : streamdownPlugins
-            }
-            {...props}
-          >
-            {children}
-          </Streamdown>
+          <MarkdownSourceBlocksProvider startsRef={sourceBlocks.startsRef}>
+            <Streamdown
+              className={cn(
+                "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+                className,
+              )}
+              components={streamdownComponents}
+              isAnimating={isAnimating}
+              linkSafety={linkSafetyConfig}
+              mode={mode}
+              onAnimationEnd={streamdownLayoutPending.onAnimationEnd}
+              onAnimationStart={streamdownLayoutPending.onAnimationStart}
+              rehypePlugins={
+                sourceSegments
+                  ? berdRehypePluginsWithSourceSegments
+                  : berdRehypePlugins
+              }
+              BlockComponent={sourceBlocks.BlockComponent}
+              parseMarkdownIntoBlocksFn={sourceBlocks.parseMarkdownIntoBlocksFn}
+              plugins={
+                codeRenderers
+                  ? { ...streamdownPlugins, renderers: codeRenderers }
+                  : streamdownPlugins
+              }
+              {...props}
+            >
+              {children}
+            </Streamdown>
+          </MarkdownSourceBlocksProvider>
         </div>
         <LinkSafetyModal
           isOpen={modalUrl !== null}

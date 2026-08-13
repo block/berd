@@ -1,3 +1,7 @@
+import {
+  readSourceSegmentCoordinates,
+  SOURCE_SEGMENT_SELECTOR,
+} from "@/shared/ui/ai-elements/markdown-source-segments";
 import type {
   Message,
   StagedQuoteItem,
@@ -38,6 +42,75 @@ function getBoundaryOffsetWithin(element: Element, node: Node, offset: number) {
   boundary.selectNodeContents(element);
   boundary.setEnd(node, offset);
   return boundary.toString().length;
+}
+
+function rangeIntersectsNode(range: Range, node: Node): boolean {
+  if (typeof range.intersectsNode === "function") {
+    return range.intersectsNode(node);
+  }
+  const nodeRange = (node.ownerDocument ?? document).createRange();
+  nodeRange.selectNodeContents(node);
+  return (
+    range.compareBoundaryPoints(Range.END_TO_START, nodeRange) < 0 &&
+    range.compareBoundaryPoints(Range.START_TO_END, nodeRange) > 0
+  );
+}
+
+/** Offset of a range boundary within a segment's rendered text, or null
+ * when the boundary sits outside the segment. */
+function boundaryOffsetInSegment(
+  segment: Element,
+  range: Range,
+  edge: "start" | "end",
+): number | null {
+  const node = edge === "start" ? range.startContainer : range.endContainer;
+  const offset = edge === "start" ? range.startOffset : range.endOffset;
+  if (!segment.contains(node)) return null;
+  try {
+    return getBoundaryOffsetWithin(segment, node, offset);
+  } catch {
+    return null;
+  }
+}
+
+/** Maps a DOM range to canonical source offsets using renderer-produced
+ * source segments (see markdown-source-segments.tsx). Returns offsets
+ * within the Markdown string the renderer parsed, or null when the block
+ * carries no segments the range touches. */
+function mapRangeThroughSourceSegments(
+  block: Element,
+  range: Range,
+): { start: number; end: number } | null {
+  const segments = Array.from(
+    block.querySelectorAll(SOURCE_SEGMENT_SELECTOR),
+  ).filter((segment) => rangeIntersectsNode(range, segment));
+  if (segments.length === 0) return null;
+
+  const firstCoordinates = readSourceSegmentCoordinates(segments[0]);
+  const lastCoordinates = readSourceSegmentCoordinates(
+    segments[segments.length - 1],
+  );
+  if (!firstCoordinates || !lastCoordinates) return null;
+
+  // Boundaries inside an exact segment translate directly; boundaries
+  // outside a segment (or inside a non-exact one) clamp to the segment's
+  // canonical bounds, keeping the quote lossless rather than guessing.
+  let start = firstCoordinates.start;
+  if (firstCoordinates.exact) {
+    const offset = boundaryOffsetInSegment(segments[0], range, "start");
+    if (offset !== null) start = firstCoordinates.start + offset;
+  }
+  let end = lastCoordinates.end;
+  if (lastCoordinates.exact) {
+    const offset = boundaryOffsetInSegment(
+      segments[segments.length - 1],
+      range,
+      "end",
+    );
+    if (offset !== null) end = lastCoordinates.start + offset;
+  }
+  if (end <= start) return null;
+  return { start, end };
 }
 
 /** Maps a DOM selection back to the canonical source range for the first
@@ -124,19 +197,29 @@ export function stagedQuoteFromSelection({
       return null;
     }
   } else {
-    // Markdown syntax can change the rendered block without changing the text
-    // the person selected (list markers, emphasis, links, etc.). A unique
-    // verbatim occurrence is a lossless mapping back to canonical source. If
-    // the same selection occurs more than once, decline rather than guess;
-    // later mapper layers can disambiguate with richer syntax coordinates.
-    const selectedText = range.toString();
-    if (!selectedText.trim()) return null;
-    const canonicalSlice = canonicalText.slice(sourceTextStart);
-    const firstMatch = canonicalSlice.indexOf(selectedText);
-    if (firstMatch < 0) return null;
-    if (canonicalSlice.indexOf(selectedText, firstMatch + 1) >= 0) return null;
-    start = sourceTextStart + firstMatch;
-    end = start + selectedText.length;
+    // Rendered Markdown: the renderer produced canonical source segments for
+    // every rendered text node (see markdown-source-segments.tsx), so the
+    // mapper only intersects the DOM range with those segments and reads the
+    // canonical offsets back. No Markdown syntax knowledge lives here.
+    const mapped = mapRangeThroughSourceSegments(startBlock, range);
+    if (mapped) {
+      start = sourceTextStart + mapped.start;
+      end = sourceTextStart + mapped.end;
+    } else {
+      // Legacy fallback for markdown surfaces that have not enabled source
+      // segments: a unique verbatim occurrence is still a lossless mapping.
+      // If the same selection occurs more than once, decline rather than
+      // guess.
+      const selectedText = range.toString();
+      if (!selectedText.trim()) return null;
+      const canonicalSlice = canonicalText.slice(sourceTextStart);
+      const firstMatch = canonicalSlice.indexOf(selectedText);
+      if (firstMatch < 0) return null;
+      if (canonicalSlice.indexOf(selectedText, firstMatch + 1) >= 0)
+        return null;
+      start = sourceTextStart + firstMatch;
+      end = start + selectedText.length;
+    }
   }
   if (start < 0 || end <= start || end > canonicalText.length) return null;
   const excerpt = canonicalText.slice(start, end);

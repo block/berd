@@ -582,6 +582,7 @@ function renderContentBlock(
               options.onRunShellCommand ? options.runItCodeRenderers : undefined
             }
             imageRenderer={MarkdownImage}
+            sourceSegments
           >
             {displayText}
           </MessageResponse>
