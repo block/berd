@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "@/shared/types/messages";
-import { stagedQuoteFromSelection } from "./transcriptQuoteSelection";
+import {
+  getQuoteAffordancePosition,
+  stagedQuoteFromSelection,
+} from "./transcriptQuoteSelection";
 
 function makeMessage(id: string, text: string): Message {
   return {
@@ -33,6 +36,65 @@ function selectionFor(node: Text, start: number, end: number): Selection {
   selection.addRange(range);
   return selection;
 }
+
+function makeRect(rect: {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}): DOMRect {
+  return {
+    ...rect,
+    right: rect.left + rect.width,
+    bottom: rect.top + rect.height,
+    x: rect.left,
+    y: rect.top,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+describe("getQuoteAffordancePosition", () => {
+  it("centers the pill over the selection's first line, not the bounding box", () => {
+    // A multi-line drag: the first line starts mid-paragraph (narrow rect on
+    // the right), later lines span the full width. The bounding rect's center
+    // sits far left of the swept text — the pre-fix behavior this test pins.
+    const root = document.createElement("div");
+    Object.defineProperty(root, "getBoundingClientRect", {
+      value: () => makeRect({ left: 0, top: 0, width: 800, height: 600 }),
+    });
+    const firstLine = makeRect({ left: 500, top: 100, width: 200, height: 20 });
+    const secondLine = makeRect({ left: 0, top: 120, width: 800, height: 20 });
+    const range = document.createRange();
+    Object.defineProperty(range, "getClientRects", {
+      value: () => [firstLine, secondLine],
+    });
+    Object.defineProperty(range, "getBoundingClientRect", {
+      value: () => makeRect({ left: 0, top: 100, width: 800, height: 40 }),
+    });
+
+    const position = getQuoteAffordancePosition(range, root);
+
+    // First line center: 500 + 200/2 = 600. Bounding-box center would be 400.
+    expect(position).toEqual({ left: 600, top: 92 });
+  });
+
+  it("falls back to the bounding rect when getClientRects is unavailable", () => {
+    const root = document.createElement("div");
+    Object.defineProperty(root, "getBoundingClientRect", {
+      value: () => makeRect({ left: 0, top: 0, width: 800, height: 600 }),
+    });
+    const range = document.createRange();
+    Object.defineProperty(range, "getClientRects", { value: undefined });
+    Object.defineProperty(range, "getBoundingClientRect", {
+      value: () => makeRect({ left: 100, top: 50, width: 200, height: 20 }),
+    });
+
+    expect(getQuoteAffordancePosition(range, root)).toEqual({
+      left: 200,
+      top: 42,
+    });
+  });
+});
 
 describe("stagedQuoteFromSelection", () => {
   it("maps a plain-text DOM selection to its canonical message range", () => {

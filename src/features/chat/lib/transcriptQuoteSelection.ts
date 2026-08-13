@@ -273,7 +273,16 @@ export function getQuoteAffordancePosition(
   range: Range,
   root: HTMLElement,
 ): { left: number; top: number } | null {
-  const rangeRect = range.getBoundingClientRect();
+  // A multi-line selection's bounding rect spans full line boxes, so its
+  // horizontal center can sit far from the swept text. The first line's
+  // rect keeps the pill centered over where the selection begins.
+  // (getClientRects is missing in some DOM implementations, e.g. jsdom.)
+  const lineRects =
+    typeof range.getClientRects === "function" ? range.getClientRects() : [];
+  const firstLineRect = Array.from(lineRects).find(
+    (rect) => rect.width > 0 || rect.height > 0,
+  );
+  const rangeRect = firstLineRect ?? range.getBoundingClientRect();
   const rootRect = root.getBoundingClientRect();
   if (rangeRect.width === 0 && rangeRect.height === 0) return null;
   return {

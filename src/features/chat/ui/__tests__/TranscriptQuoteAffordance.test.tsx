@@ -35,7 +35,69 @@ function Fixture() {
   );
 }
 
+function selectTranscriptText(root: HTMLElement) {
+  const textNode = root.querySelector(
+    "[data-quote-content-block-index]",
+  )?.firstChild;
+  if (!textNode) throw new Error("missing transcript text");
+
+  const range = document.createRange();
+  range.setStart(textNode, 0);
+  range.setEnd(textNode, 6);
+  Object.defineProperty(range, "getBoundingClientRect", {
+    value: () => ({
+      bottom: 40,
+      height: 20,
+      left: 20,
+      right: 80,
+      top: 20,
+      width: 60,
+      x: 20,
+      y: 20,
+      toJSON: () => ({}),
+    }),
+  });
+  Object.defineProperty(root, "getBoundingClientRect", {
+    value: () => ({
+      bottom: 400,
+      height: 400,
+      left: 0,
+      right: 600,
+      top: 0,
+      width: 600,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    }),
+  });
+  const selection = window.getSelection();
+  if (!selection) throw new Error("selection unavailable");
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
 describe("TranscriptQuoteAffordance", () => {
+  it("stays hidden while a drag selection is still in progress", () => {
+    renderWithProviders(<Fixture />);
+    const root = screen.getByTestId("transcript-root");
+
+    fireEvent.pointerDown(root);
+    selectTranscriptText(root);
+    // Mid-drag the browser emits selectionchange as the range grows; the
+    // affordance must not appear until the pointer is released.
+    fireEvent(document, new Event("selectionchange"));
+
+    expect(
+      screen.queryByRole("button", { name: "Quote in message" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.pointerUp(document);
+
+    expect(
+      screen.getByRole("button", { name: "Quote in message" }),
+    ).toBeInTheDocument();
+  });
+
   it("shows after the user finishes selecting transcript text", async () => {
     const nativeAddEventListener = document.addEventListener.bind(document);
     vi.spyOn(document, "addEventListener").mockImplementation(
