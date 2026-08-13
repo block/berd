@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { updateChangelog } from "../release.mjs";
+import { releaseNotesFrom, updateChangelog } from "../release.mjs";
 import { compareSemver, parseSemver } from "../version.mjs";
 
 const sourceRepo = resolve(import.meta.dirname, "../../..");
@@ -130,8 +130,10 @@ printf '%s\n' '## generated changes' '' '- generated release notes'
   expect(git(["config", "user.email", "release@example.test"]).status).toBe(0);
   expect(git(["add", "."]).status).toBe(0);
   expect(git(["commit", "-m", "initial"]).status).toBe(0);
+  expect(git(["tag", "v0.5.0"]).status).toBe(0);
   expect(git(["remote", "add", "origin", remote]).status).toBe(0);
   expect(git(["push", "--set-upstream", "origin", "main"]).status).toBe(0);
+  expect(git(["push", "origin", "refs/tags/v0.5.0"]).status).toBe(0);
   const env = {
     BERD_RELEASE_DATE: "2026-08-12",
     BERD_RELEASE_REPO_ROOT: repo,
@@ -157,6 +159,31 @@ describe("release SemVer and changelog", () => {
     );
     expect(() => parseSemver("v0.6.0")).toThrow(/without a leading v/);
     expect(() => parseSemver("0.6.0+build.1")).toThrow(/build metadata/);
+  });
+
+  it("selects cumulative and incremental release note baselines", async () => {
+    const f = await fixture();
+    const initial = f.git(["rev-parse", "v0.5.0^{commit}"]).stdout.trim();
+    await writeFile(join(f.repo, "feature"), "release candidate change\n");
+    expect(f.git(["add", "feature"]).status).toBe(0);
+    expect(f.git(["commit", "-m", "feat: test release candidate"]).status).toBe(
+      0,
+    );
+    expect(f.git(["tag", "v0.6.0-rc.1"]).status).toBe(0);
+
+    expect(releaseNotesFrom(f.repo, "0.6.0-rc.2")).toBe("v0.6.0-rc.1");
+    expect(releaseNotesFrom(f.repo, "0.6.0")).toBe("v0.5.0");
+
+    expect(f.git(["tag", "--delete", "v0.5.0"]).status).toBe(0);
+    const changelog = `# Changelog
+
+## [v0.6.0-rc.1](https://github.com/block/berd/releases/tag/v0.6.0-rc.1) - 2026-08-12
+
+RC notes.
+
+**Full Changelog**: https://github.com/block/berd/compare/${initial}...HEAD
+`;
+    expect(releaseNotesFrom(f.repo, "0.6.0", changelog)).toBe(initial);
   });
 
   it("replaces only the top same-version RC during stable promotion", () => {
@@ -190,9 +217,11 @@ describe("release SemVer and changelog", () => {
 describe("release preparation", () => {
   it("generates notes and requires explicit approval", async () => {
     const declined = await fixture();
+    expect(declined.git(["tag", "--delete", "v0.5.0"]).status).toBe(0);
     const cancelled = declined.release(["prepare", "0.6.0-rc.1"], {}, "n\n");
     expect(cancelled.status).not.toBe(0);
     expect(cancelled.stdout).toContain("generated release notes");
+    expect(cancelled.stderr).toContain("release notes from v0.5.0");
     expect(cancelled.stderr).toContain("release preparation cancelled");
     expect(declined.git(["branch", "--show-current"]).stdout.trim()).toBe(
       "main",
@@ -220,7 +249,7 @@ describe("release preparation", () => {
     expect(published.stderr).toContain(
       "0.5.0 is below minimum public version 0.6.0-rc.1",
     );
-    expect(f.git(["tag", "--list"]).stdout.trim()).toBe("");
+    expect(f.git(["tag", "--list"]).stdout.trim()).toBe("v0.5.0");
   });
 
   it("creates one lockstep release commit, pushes it, opens a PR, and resumes", async () => {
@@ -235,7 +264,7 @@ describe("release preparation", () => {
     );
     const checked = f.release(["version-check", "0.6.0-rc.1"]);
     expect(checked.status, checked.stderr).toBe(0);
-    expect(f.git(["tag", "--list"]).stdout.trim()).toBe("");
+    expect(f.git(["tag", "--list"]).stdout.trim()).toBe("v0.5.0");
     expect(await readFile(f.calls, "utf8")).toContain("pr create");
 
     const head = f.git(["rev-parse", "HEAD"]).stdout.trim();

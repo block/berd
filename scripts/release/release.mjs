@@ -409,7 +409,7 @@ function refExists(root, ref) {
   });
 }
 
-function fetchOriginMain(root) {
+function fetchReleaseState(root) {
   run(
     "git",
     [
@@ -417,6 +417,7 @@ function fetchOriginMain(root) {
       "--no-tags",
       "origin",
       "refs/heads/main:refs/remotes/origin/main",
+      "refs/tags/v*:refs/tags/v*",
     ],
     { cwd: root },
   );
@@ -462,9 +463,42 @@ function validateLocalTag(root, tag, expectedTarget) {
   }
 }
 
-async function generateReviewedNotes(root) {
-  process.stderr.write("generating release notes...\n");
-  const notes = run("just", ["release-notes"], { cwd: root });
+export function releaseNotesFrom(root, version, changelog) {
+  const args = ["describe", "--tags", "--abbrev=0", "--match", "v*"];
+  const parsed = parseSemver(version);
+  if (parsed.prerelease.length > 0) {
+    return run("git", args, { cwd: root });
+  }
+  args.push("--exclude", "v*-*");
+  const previousStable = commandResult("git", args, { cwd: root });
+  if (previousStable.status === 0) return previousStable.stdout.trim();
+
+  const firstPrerelease = changelogEntries(changelog)
+    .filter(
+      (entry) =>
+        sameNumericVersion(entry.version, version) &&
+        parseSemver(entry.version).prerelease.length > 0,
+    )
+    .at(-1);
+  const from =
+    /^\*\*Full Changelog\*\*: https:\/\/github\.com\/\S+\/compare\/(.+?)\.\.\.\S+$/m.exec(
+      firstPrerelease?.body ?? "",
+    )?.[1];
+  if (
+    !from ||
+    !succeeds("git", ["rev-parse", "--verify", `${from}^{commit}`], {
+      cwd: root,
+    })
+  ) {
+    fail("no previous stable tag or first prerelease changelog baseline found");
+  }
+  return from;
+}
+
+async function generateReviewedNotes(root, version, changelog) {
+  const from = releaseNotesFrom(root, version, changelog);
+  process.stderr.write(`generating release notes from ${from}...\n`);
+  const notes = run("just", ["release-notes", from], { cwd: root });
   if (!notes) fail("generated release notes are empty");
   process.stdout.write(`\n${notes}\n\n`);
   const prompt = createInterface({
@@ -549,13 +583,13 @@ async function prepare(version, notesPath) {
   const branch = `release/v${version}`;
   const subject = `chore: release v${version}`;
   assertClean(root);
+  run("gh", ["auth", "status", "--hostname", "github.com"], { cwd: root });
+  fetchReleaseState(root);
   const notes = notesPath
     ? (await readFile(resolve(notesPath), "utf8")).trim()
-    : await generateReviewedNotes(root);
+    : await generateReviewedNotes(root, version, await read("CHANGELOG.md"));
   if (!notes) fail("release notes file must contain reviewed Markdown");
   if (notes.includes("\0")) fail("release notes file contains a NUL byte");
-  run("gh", ["auth", "status", "--hostname", "github.com"], { cwd: root });
-  fetchOriginMain(root);
 
   const remoteBranchOutput = commandResult(
     "git",
@@ -744,7 +778,7 @@ async function publish(version) {
   const subject = `chore: release v${version}`;
   assertClean(root);
   run("gh", ["auth", "status", "--hostname", "github.com"], { cwd: root });
-  fetchOriginMain(root);
+  fetchReleaseState(root);
 
   const prs = releasePrs(root, config.repository, branch);
   if (prs.length !== 1) fail(`expected exactly one PR for ${branch}`);
