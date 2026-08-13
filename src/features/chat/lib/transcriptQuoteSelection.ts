@@ -5,6 +5,7 @@ import {
 import type {
   Message,
   StagedQuoteItem,
+  StagedQuoteSourceRange,
   TextContent,
 } from "@/shared/types/messages";
 
@@ -27,14 +28,6 @@ export function quoteTextBlockAttributes(
     [CONTENT_BLOCK_INDEX_ATTRIBUTE]: String(contentBlockIndex),
     [SOURCE_TEXT_START_ATTRIBUTE]: String(sourceTextStart),
   };
-}
-
-function closestElement(node: Node | null, selector: string): Element | null {
-  const element =
-    node?.nodeType === Node.ELEMENT_NODE
-      ? (node as Element)
-      : node?.parentElement;
-  return element?.closest(selector) ?? null;
 }
 
 function getBoundaryOffsetWithin(element: Element, node: Node, offset: number) {
@@ -113,46 +106,27 @@ function mapRangeThroughSourceSegments(
   return { start, end };
 }
 
-/** Maps a DOM selection back to the canonical source range for the first
- * production slice: one plain-text content block within one message. */
-export function stagedQuoteFromSelection({
-  messages,
-  root,
-  selection,
-  id = crypto.randomUUID(),
-}: {
-  messages: readonly Message[];
-  root: HTMLElement;
-  selection: Selection;
-  id?: string;
-}): StagedQuoteItem | null {
-  if (selection.isCollapsed || selection.rangeCount !== 1) return null;
-  const range = selection.getRangeAt(0);
-  if (!root.contains(range.commonAncestorContainer)) return null;
+/** A quoted slice of one text content block, in canonical coordinates. */
+interface MappedBlockQuote {
+  source: StagedQuoteSourceRange;
+  excerpt: string;
+}
 
-  const startMessage = closestElement(
-    range.startContainer,
-    QUOTE_MESSAGE_SELECTOR,
-  );
-  const endMessage = closestElement(range.endContainer, QUOTE_MESSAGE_SELECTOR);
-  if (!startMessage || startMessage !== endMessage) return null;
-
-  const startBlock = closestElement(
-    range.startContainer,
-    QUOTE_TEXT_BLOCK_SELECTOR,
-  );
-  const endBlock = closestElement(
-    range.endContainer,
-    QUOTE_TEXT_BLOCK_SELECTOR,
-  );
-  if (!startBlock || startBlock !== endBlock) return null;
-
-  const messageId = startMessage.getAttribute(MESSAGE_ID_ATTRIBUTE);
+/** Maps the portion of the selection range that falls inside one rendered
+ * text block back to that block's canonical source range. Returns null when
+ * the block's slice of the selection cannot be mapped losslessly. */
+function mapBlockQuote(
+  blockElement: Element,
+  range: Range,
+  messages: readonly Message[],
+): MappedBlockQuote | null {
+  const messageElement = blockElement.closest(QUOTE_MESSAGE_SELECTOR);
+  const messageId = messageElement?.getAttribute(MESSAGE_ID_ATTRIBUTE);
   const blockIndex = Number(
-    startBlock.getAttribute(CONTENT_BLOCK_INDEX_ATTRIBUTE),
+    blockElement.getAttribute(CONTENT_BLOCK_INDEX_ATTRIBUTE),
   );
   const sourceTextStart = Number(
-    startBlock.getAttribute(SOURCE_TEXT_START_ATTRIBUTE) ?? "0",
+    blockElement.getAttribute(SOURCE_TEXT_START_ATTRIBUTE) ?? "0",
   );
   if (
     !messageId ||
@@ -167,8 +141,20 @@ export function stagedQuoteFromSelection({
   const block = message?.content[blockIndex];
   if (!block || block.type !== "text") return null;
 
+  // Clamp the selection to this block: boundaries outside the block snap to
+  // the block's own edges, so a cross-block selection maps each block's
+  // actually selected slice.
+  const blockRange = range.cloneRange();
+  if (!blockElement.contains(range.startContainer)) {
+    blockRange.setStart(blockElement, 0);
+  }
+  if (!blockElement.contains(range.endContainer)) {
+    blockRange.setEnd(blockElement, blockElement.childNodes.length);
+  }
+  if (blockRange.collapsed) return null;
+
   const canonicalText = (block as TextContent).text;
-  const renderedText = startBlock.textContent ?? "";
+  const renderedText = blockElement.textContent ?? "";
   const renderedSourceText = canonicalText.slice(
     sourceTextStart,
     sourceTextStart + renderedText.length,
@@ -182,16 +168,16 @@ export function stagedQuoteFromSelection({
       start =
         sourceTextStart +
         getBoundaryOffsetWithin(
-          startBlock,
-          range.startContainer,
-          range.startOffset,
+          blockElement,
+          blockRange.startContainer,
+          blockRange.startOffset,
         );
       end =
         sourceTextStart +
         getBoundaryOffsetWithin(
-          startBlock,
-          range.endContainer,
-          range.endOffset,
+          blockElement,
+          blockRange.endContainer,
+          blockRange.endOffset,
         );
     } catch {
       return null;
@@ -201,7 +187,7 @@ export function stagedQuoteFromSelection({
     // every rendered text node (see markdown-source-segments.tsx), so the
     // mapper only intersects the DOM range with those segments and reads the
     // canonical offsets back. No Markdown syntax knowledge lives here.
-    const mapped = mapRangeThroughSourceSegments(startBlock, range);
+    const mapped = mapRangeThroughSourceSegments(blockElement, blockRange);
     if (mapped) {
       start = sourceTextStart + mapped.start;
       end = sourceTextStart + mapped.end;
@@ -210,7 +196,7 @@ export function stagedQuoteFromSelection({
       // segments: a unique verbatim occurrence is still a lossless mapping.
       // If the same selection occurs more than once, decline rather than
       // guess.
-      const selectedText = range.toString();
+      const selectedText = blockRange.toString();
       if (!selectedText.trim()) return null;
       const canonicalSlice = canonicalText.slice(sourceTextStart);
       const firstMatch = canonicalSlice.indexOf(selectedText);
@@ -226,18 +212,60 @@ export function stagedQuoteFromSelection({
   if (!excerpt.trim()) return null;
 
   return {
+    excerpt,
+    source: {
+      messageId,
+      role: message.role,
+      contentBlockIndex: blockIndex,
+      start,
+      end,
+    },
+  };
+}
+
+/** Maps a DOM selection back to canonical source ranges. A selection may
+ * span multiple text blocks and multiple messages (any roles); each touched
+ * block contributes one source range, in document order, and non-text
+ * content between them (tool cards, images) is clamped out rather than
+ * blocking the quote. */
+export function stagedQuoteFromSelection({
+  messages,
+  root,
+  selection,
+  id = crypto.randomUUID(),
+}: {
+  messages: readonly Message[];
+  root: HTMLElement;
+  selection: Selection;
+  id?: string;
+}): StagedQuoteItem | null {
+  if (selection.isCollapsed || selection.rangeCount !== 1) return null;
+  const range = selection.getRangeAt(0);
+  if (!root.contains(range.commonAncestorContainer)) return null;
+
+  // Every touched text block, in document order. querySelectorAll already
+  // returns document order; include the blocks that contain the boundaries
+  // even when the boundary sits in a non-text wrapper inside them.
+  const touchedBlocks = Array.from(
+    root.querySelectorAll(QUOTE_TEXT_BLOCK_SELECTOR),
+  ).filter((blockElement) => rangeIntersectsNode(range, blockElement));
+  if (touchedBlocks.length === 0) return null;
+
+  const mapped = touchedBlocks
+    .map((blockElement) => mapBlockQuote(blockElement, range, messages))
+    .filter((quote): quote is MappedBlockQuote => quote !== null);
+  if (mapped.length === 0) return null;
+
+  // A selection is one quote even across messages. Per-block excerpts join
+  // with a blank line so the quote reads as the passage the user saw.
+  const excerpt = mapped.map((quote) => quote.excerpt).join("\n\n");
+  if (!excerpt.trim()) return null;
+
+  return {
     id,
     kind: "quote",
     excerpt,
-    sources: [
-      {
-        messageId,
-        role: message.role,
-        contentBlockIndex: blockIndex,
-        start,
-        end,
-      },
-    ],
+    sources: mapped.map((quote) => quote.source),
   };
 }
 

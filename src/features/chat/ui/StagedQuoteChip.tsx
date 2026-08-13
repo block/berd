@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { StagedQuoteItem } from "@/shared/types/messages";
 import {
   stagedQuoteLabel,
+  stagedQuoteMessageCount,
   stagedQuoteSourceKind,
   stagedQuoteWordCount,
 } from "../lib/stagedItemPresentation";
@@ -20,7 +21,7 @@ export function StagedQuoteChip({
   const { t } = useTranslation("chat");
   const sourceKind = stagedQuoteSourceKind(quote);
   const source = t(`quotes.source.${sourceKind}`, {
-    count: quote.sources.length,
+    count: stagedQuoteMessageCount(quote),
   });
   const wordCount = stagedQuoteWordCount(quote);
   const extent = t("quotes.extent.words", { count: wordCount });

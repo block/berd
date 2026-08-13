@@ -41,6 +41,25 @@ function renderMarkdownMessage(id: string, markdown: string) {
   return { root, block };
 }
 
+function renderMarkdownTranscript(
+  messages: readonly { id: string; markdown: string }[],
+) {
+  const utils = render(
+    <div>
+      {messages.map((message) => (
+        <div key={message.id} {...quoteMessageAttributes(message.id)}>
+          <div {...quoteTextBlockAttributes(0)}>
+            <MessageResponse mode="static" sourceSegments>
+              {message.markdown}
+            </MessageResponse>
+          </div>
+        </div>
+      ))}
+    </div>,
+  );
+  return { root: utils.container as HTMLElement };
+}
+
 function findTextNode(root: Node, match: string): { node: Text; at: number } {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
@@ -198,6 +217,85 @@ describe("stagedQuoteFromSelection with renderer source segments", () => {
 
     expect(quote?.excerpt).toBe("style guide");
     expect(quote?.sources[0]?.start).toBe(canonical.indexOf("style guide"));
+  });
+
+  it("maps a selection spanning two markdown messages into one ordered quote", () => {
+    const first = "The plan has **three** phases before launch.";
+    const second = "1. Ship the beta.\n2. Collect feedback.";
+    const { root } = renderMarkdownTranscript([
+      { id: "message-1", markdown: first },
+      { id: "message-2", markdown: second },
+    ]);
+
+    const selection = selectBetween(root, "three", "Ship the beta.");
+    const quote = stagedQuoteFromSelection({
+      id: "quote-1",
+      messages: [
+        makeMessage("message-1", first),
+        makeMessage("message-2", second),
+      ],
+      root,
+      selection,
+    });
+
+    expect(quote).not.toBeNull();
+    expect(quote?.sources.map((source) => source.messageId)).toEqual([
+      "message-1",
+      "message-2",
+    ]);
+    const [firstSource, secondSource] = quote?.sources ?? [];
+    const firstExcerpt = first.slice(firstSource?.start, firstSource?.end);
+    const secondExcerpt = second.slice(secondSource?.start, secondSource?.end);
+    expect(firstExcerpt.startsWith("three")).toBe(true);
+    expect(firstExcerpt.endsWith("phases before launch.")).toBe(true);
+    expect(secondExcerpt).toBe("Ship the beta.");
+    expect(quote?.excerpt).toBe(`${firstExcerpt}\n\n${secondExcerpt}`);
+  });
+
+  it("clamps around non-text blocks between the selected messages", () => {
+    const first = "Here is the diagnosis.";
+    const second = "And here is the fix.";
+    const utils = render(
+      <div>
+        <div {...quoteMessageAttributes("message-1")}>
+          <div {...quoteTextBlockAttributes(0)}>
+            <MessageResponse mode="static" sourceSegments>
+              {first}
+            </MessageResponse>
+          </div>
+          <div data-testid="tool-card">ran shell command: just check</div>
+        </div>
+        <div {...quoteMessageAttributes("message-2")}>
+          <div {...quoteTextBlockAttributes(0)}>
+            <MessageResponse mode="static" sourceSegments>
+              {second}
+            </MessageResponse>
+          </div>
+        </div>
+      </div>,
+    );
+    const root = utils.container as HTMLElement;
+
+    const selection = selectBetween(root, "the diagnosis.", "And here");
+    const quote = stagedQuoteFromSelection({
+      id: "quote-1",
+      messages: [
+        makeMessage("message-1", first),
+        makeMessage("message-2", second),
+      ],
+      root,
+      selection,
+    });
+
+    expect(quote).not.toBeNull();
+    // The tool card's text is selected in the DOM but contributes nothing:
+    // only canonical text blocks produce sources and excerpt content.
+    expect(quote?.excerpt).not.toContain("just check");
+    expect(quote?.sources.map((source) => source.messageId)).toEqual([
+      "message-1",
+      "message-2",
+    ]);
+    expect(quote?.excerpt).toBe("the diagnosis.\n\nAnd here");
   });
 
   it("returns a canonical-bounded quote when the selection covers inline code", () => {

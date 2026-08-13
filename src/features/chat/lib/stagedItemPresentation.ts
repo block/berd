@@ -22,10 +22,16 @@ export type StagedQuoteSourceKind =
   | "systemMessage"
   | "multipleMessages";
 
+/** Distinct messages the quote draws from; multiple blocks of one message
+ * still count as one message. */
+export function stagedQuoteMessageCount(quote: StagedQuoteItem): number {
+  return new Set(quote.sources.map((source) => source.messageId)).size;
+}
+
 export function stagedQuoteSourceKind(
   quote: StagedQuoteItem,
 ): StagedQuoteSourceKind {
-  if (quote.sources.length > 1) return "multipleMessages";
+  if (stagedQuoteMessageCount(quote) > 1) return "multipleMessages";
   switch (quote.sources[0]?.role) {
     case "user":
       return "yourMessage";

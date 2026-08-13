@@ -110,7 +110,7 @@ describe("stagedQuoteFromSelection", () => {
     });
   });
 
-  it("refuses a selection that crosses message boundaries", () => {
+  it("maps a selection that crosses message boundaries into one quote", () => {
     const root = document.createElement("div");
     root.innerHTML = `
       <div data-quote-message-id="message-1"><div data-quote-content-block-index="0">first</div></div>
@@ -136,6 +136,26 @@ describe("stagedQuoteFromSelection", () => {
         root,
         selection,
       }),
-    ).toBeNull();
+    ).toEqual({
+      id: "quote-1",
+      kind: "quote",
+      excerpt: "first\n\nsecond",
+      sources: [
+        {
+          messageId: "message-1",
+          role: "assistant",
+          contentBlockIndex: 0,
+          start: 0,
+          end: 5,
+        },
+        {
+          messageId: "message-2",
+          role: "assistant",
+          contentBlockIndex: 0,
+          start: 0,
+          end: 6,
+        },
+      ],
+    });
   });
 });

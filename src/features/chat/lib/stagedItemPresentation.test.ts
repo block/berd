@@ -42,8 +42,26 @@ describe("staged quote presentation", () => {
     expect(stagedQuoteWordCount(quote())).toBe(1);
     expect(
       stagedQuoteSourceKind(
-        quote({ sources: [quote().sources[0], quote().sources[0]] }),
+        quote({
+          sources: [
+            quote().sources[0],
+            { ...quote().sources[0], messageId: "message-2" },
+          ],
+        }),
       ),
     ).toBe("multipleMessages");
+  });
+
+  it("treats multiple blocks of one message as a single-message quote", () => {
+    expect(
+      stagedQuoteSourceKind(
+        quote({
+          sources: [
+            quote().sources[0],
+            { ...quote().sources[0], contentBlockIndex: 1 },
+          ],
+        }),
+      ),
+    ).toBe("agentResponse");
   });
 });
