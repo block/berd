@@ -1231,10 +1231,6 @@ export function ChatInput({
           void handleSteerCurrentMessage();
           return;
         }
-        if (canSteerQueuedMessageWithShortcut) {
-          handleSteerQueuedMessage();
-          return;
-        }
       }
 
       void handleSend();
