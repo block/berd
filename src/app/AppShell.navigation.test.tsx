@@ -637,7 +637,7 @@ vi.mock("./ui/AppShellContent", () => ({
           type="button"
           onClick={() => starterTasks?.onTaskSelect("create-project")}
         >
-          Select project starter task
+          Open project starter task
         </button>
         <button type="button" onClick={() => starterTasks?.onDismiss()}>
           Dismiss starter tasks
@@ -4204,7 +4204,7 @@ describe("AppShell global navigation", () => {
     render(appShellWithTheme(), { container: appRoot });
 
     await user.click(
-      screen.getByRole("button", { name: "Select project starter task" }),
+      screen.getByRole("button", { name: "Open project starter task" }),
     );
     expect(screen.getByTestId("starter-task-selection")).toHaveTextContent(
       "create-project",
