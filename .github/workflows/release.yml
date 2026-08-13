@@ -304,6 +304,7 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24.10.0
+          package-manager-cache: false
 
       - name: Install pinned pnpm
         shell: pwsh
@@ -312,18 +313,6 @@ jobs:
           corepack enable
           corepack prepare pnpm@10.33.0 --activate
           if ((pnpm --version) -ne '10.33.0') { throw 'pnpm 10.33.0 was not activated' }
-
-      - name: Resolve managed Goose Cargo target
-        shell: pwsh
-        run: |
-          $target = Join-Path $env:LOCALAPPDATA 'berd-dev\cargo-target'
-          "GOOSE_DEV_CARGO_TARGET_DIR=$target" >> $env:GITHUB_ENV
-
-      - name: Cache managed Goose Cargo target
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
-        with:
-          path: ${{ env.GOOSE_DEV_CARGO_TARGET_DIR }}
-          key: goose-cargo-${{ runner.os }}-rust-1.94.1-${{ hashFiles('goose-backend.lock.json') }}
 
       - name: Require updater public key
         shell: pwsh
