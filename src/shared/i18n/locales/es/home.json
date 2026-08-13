@@ -11,15 +11,23 @@
       "minimize": "Minimizar tareas iniciales",
       "expand": "Expandir tareas iniciales",
       "connectProvider": "Conecta un proveedor de IA",
-      "startChat": "Inicia un chat",
       "createProject": "Ponle nombre a tu primer proyecto",
-      "buildAgent": "Crea un agente",
-      "addWidget": "Añade un widget a Inicio",
+      "addWidget": "Añade un widget",
       "openTask": "Abrir tarea: {{label}}",
       "completedTask": "Tarea completada: {{label}}",
       "checkTask": "Marcar {{label}}",
       "uncheckTask": "Desmarcar {{label}}",
-      "backHome": "Volver a Inicio"
+      "backHome": "Volver a Inicio",
+      "backToList": "Volver a las tareas iniciales",
+      "taskDetails": {
+        "connectProvider": "Conecta Berd a un proveedor de IA para elegir un modelo y empezar a chatear.",
+        "createProject": "Crea un proyecto para mantener juntos los chats, archivos y contexto relacionados.",
+        "addWidget": "Personaliza Inicio con un widget que mantenga la información útil a mano.",
+        "startChat": "Hazle una pregunta a Berd o dale una tarea para iniciar tu primera conversación."
+      },
+      "markDone": "Marcar como hecha",
+      "startChat": "Inicia un chat",
+      "closeTaskDetails": "Cerrar detalles de la tarea"
     },
     "callout": {
       "avatarLabel": "Berdy",
@@ -183,7 +191,6 @@
       "placeholder": "Escribe una nota...",
       "preview": "Vista previa",
       "edit": "Editar",
-      "starterStickies": "Notas iniciales",
       "fontSizes": {
         "small": "Texto pequeño",
         "medium": "Texto mediano",
@@ -227,7 +234,8 @@
           "body": "Las automatizaciones de G2 ahora viven en Berd. Puedes ver, crear y gestionar trabajo programado aquí.",
           "action": "Abrir automatizaciones"
         }
-      }
+      },
+      "starterTasks": "Lista de tareas iniciales"
     },
     "checklist": {
       "label": "Lista de tareas",

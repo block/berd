@@ -306,6 +306,7 @@ interface CreateProjectDialogProps {
   onCreated: (project: ProjectInfo) => void;
   initialWorkingDir?: string | null;
   editingProject?: ProjectInfo;
+  modal?: boolean;
 }
 
 export function CreateProjectDialog({
@@ -314,6 +315,7 @@ export function CreateProjectDialog({
   onCreated,
   initialWorkingDir,
   editingProject,
+  modal = true,
 }: CreateProjectDialogProps) {
   const { t } = useTranslation(["projects", "common"]);
   const workspaceRepository = useWorkspaceRepository();
@@ -931,9 +933,13 @@ export function CreateProjectDialog({
 
   return (
     <>
-      <Sheet open={isOpen} onOpenChange={(open) => !open && handleClose()}>
+      <Sheet
+        open={isOpen}
+        modal={modal}
+        onOpenChange={(open) => !open && handleClose()}
+      >
         <SheetContent
-          className="top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl transition-colors duration-500 ease-out sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none"
+          className="top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl transition-colors duration-500 ease-out data-[state=open]:duration-500 data-[state=open]:ease-[cubic-bezier(0.19,1,0.22,1)] data-[state=closed]:duration-300 data-[state=closed]:ease-[cubic-bezier(0.215,0.61,0.355,1)] sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none"
           closeButtonClassName="top-5 right-5 rounded-sm bg-transparent opacity-80 hover:bg-card/50"
           overlayClassName="bg-transparent"
           style={{
@@ -946,6 +952,22 @@ export function CreateProjectDialog({
             backgroundColor: `color-mix(in oklab, color-mix(in oklab, ${selectedPanelColor} var(--project-panel-tint), var(--background)) var(--project-panel-alpha), transparent)`,
           }}
           aria-describedby={undefined}
+          onPointerDownOutside={(event) => {
+            if (
+              event.target instanceof Element &&
+              event.target.closest('[data-starter-task-list="true"]')
+            ) {
+              event.preventDefault();
+            }
+          }}
+          onInteractOutside={(event) => {
+            if (
+              event.target instanceof Element &&
+              event.target.closest('[data-starter-task-list="true"]')
+            ) {
+              event.preventDefault();
+            }
+          }}
         >
           <form
             id="project-form"

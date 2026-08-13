@@ -11,15 +11,23 @@
       "minimize": "Minimize starter tasks",
       "expand": "Expand starter tasks",
       "connectProvider": "Connect an AI provider",
-      "startChat": "Start a chat",
       "createProject": "Name your first project",
-      "buildAgent": "Build an agent",
-      "addWidget": "Add a widget to Home",
+      "addWidget": "Add a widget",
       "openTask": "Open task: {{label}}",
       "completedTask": "Completed task: {{label}}",
       "checkTask": "Check {{label}}",
       "uncheckTask": "Uncheck {{label}}",
-      "backHome": "Back to Home"
+      "backHome": "Back to Home",
+      "backToList": "Back to starter tasks",
+      "taskDetails": {
+        "connectProvider": "Connect any provider to chat with it in Berd.\n\nYou can switch between models or providers anytime, even mid-chat.",
+        "createProject": "Link projects to a folder or repo, and that context is there in every chat.\n\nChats, files, and history stay together, not scattered across sessions.",
+        "addWidget": "Right-click to add sticky notes, checklists, or photos.\n\nPin them alongside your agents and projects to make Home feel like yours.",
+        "startChat": "Want something more specialized? @mention an agent to call them in.\n\n@Berdy and ask them about your agents."
+      },
+      "markDone": "Mark as done",
+      "startChat": "Start a chat",
+      "closeTaskDetails": "Close task details"
     },
     "callout": {
       "avatarLabel": "Berdy",
@@ -183,7 +191,6 @@
       "placeholder": "Write a note...",
       "preview": "Preview",
       "edit": "Edit",
-      "starterStickies": "Starter stickies",
       "fontSizes": {
         "small": "Small text",
         "medium": "Medium text",
@@ -227,7 +234,8 @@
           "body": "G2 automations live in Berd now. View, create, and manage scheduled work here.",
           "action": "Open automations"
         }
-      }
+      },
+      "starterTasks": "Starter task list"
     },
     "checklist": {
       "label": "Checklist",

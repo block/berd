@@ -61,6 +61,8 @@ interface WidgetCanvasProps extends WidgetNavigationHandlers {
   viewportLeftOcclusionPx?: number;
   onCreatePersona?: () => void;
   onCreateProject?: () => void;
+  starterTasksAvailable?: boolean;
+  onRestoreStarterTasks?: () => void;
 }
 
 interface PickerState {
@@ -231,46 +233,6 @@ function renderedWidgetContentStyleForResizePreview({
   };
 }
 
-function starterStickyPlacementsNearAnchor(
-  widgets: WidgetInstance[],
-  anchor: { x: number; y: number },
-) {
-  if (widgets.length === 0) {
-    return [];
-  }
-
-  const bounds = widgets.reduce(
-    (current, widget) => {
-      const size = widgetSizeForInstance(widget);
-      return {
-        minX: Math.min(current.minX, widget.x),
-        minY: Math.min(current.minY, widget.y),
-        maxX: Math.max(current.maxX, widget.x + size.width),
-        maxY: Math.max(current.maxY, widget.y + size.height),
-      };
-    },
-    {
-      minX: Number.POSITIVE_INFINITY,
-      minY: Number.POSITIVE_INFINITY,
-      maxX: Number.NEGATIVE_INFINITY,
-      maxY: Number.NEGATIVE_INFINITY,
-    },
-  );
-  const groupCenter = {
-    x: (bounds.minX + bounds.maxX) / 2,
-    y: (bounds.minY + bounds.maxY) / 2,
-  };
-
-  return widgets.map((widget) => {
-    const size = widgetSizeForInstance(widget);
-    return {
-      widget,
-      centerX: anchor.x + (widget.x + size.width / 2 - groupCenter.x),
-      centerY: anchor.y + (widget.y + size.height / 2 - groupCenter.y),
-    };
-  });
-}
-
 const HOME_MIN_ZOOM_BPS = 5_000;
 const HOME_MAX_ZOOM_BPS = 20_000;
 const WIDGET_TEXT_SCALE_MULTIPLIER = 1.08;
@@ -321,6 +283,8 @@ export function WidgetCanvas({
   onOpenAutomations,
   onStartOnboardingTour,
   onResolveBerdyAgent,
+  starterTasksAvailable = false,
+  onRestoreStarterTasks,
 }: WidgetCanvasProps) {
   const { t } = useTranslation("home");
   const resolvedRecenterLabel =
@@ -390,7 +354,12 @@ export function WidgetCanvas({
     camera,
     constraints: viewportConstraints,
     saveCamera,
-    onViewportGestureStart: closePicker,
+    onViewportGestureStart: (kind) => {
+      if (kind !== "pan") closePicker();
+    },
+    onViewportPanEnd: (moved) => {
+      if (!moved) closePicker();
+    },
     onWidgetDragStart: (instance) => {
       handleVisualLift(instance.id, currentMaxZ + 1);
     },
@@ -599,6 +568,7 @@ export function WidgetCanvas({
     // biome-ignore lint/a11y/noStaticElementInteractions: freeform spatial canvas; child widgets and picker provide semantic controls
     <div
       ref={canvasRef}
+      data-home-widget-canvas="true"
       onContextMenu={handleCanvasContextMenu}
       onPointerDown={handleCanvasPointerDown}
       onPointerMove={handlePointerMove}
@@ -812,6 +782,7 @@ export function WidgetCanvas({
         side={picker.side}
         focusOnOpen={picker.focusOnOpen}
         instances={pickerInstances}
+        starterTasksAvailable={starterTasksAvailable}
         onClose={closePicker}
         onSelect={(type, state) => {
           mutations.addWidget(
@@ -823,20 +794,8 @@ export function WidgetCanvas({
           );
           closePicker();
         }}
-        onSelectStarterStickies={(widgets) => {
-          const placements = starterStickyPlacementsNearAnchor(widgets, {
-            x: picker.worldX,
-            y: picker.worldY,
-          });
-          for (const { widget, centerX, centerY } of placements) {
-            mutations.addWidget(
-              widget.type,
-              centerX,
-              centerY,
-              widget.state,
-              constraints,
-            );
-          }
+        onRestoreStarterTasks={() => {
+          onRestoreStarterTasks?.();
           closePicker();
         }}
       />

@@ -3,14 +3,18 @@ import type { StarterTaskCompletionState, StarterTaskId } from "./starterTasks";
 
 export interface StarterTasksContextValue {
   completionState: StarterTaskCompletionState;
+  enabled: boolean;
   visible: boolean;
   docked: boolean;
+  selectedTaskId: StarterTaskId | null;
   starterProjectId: string | null;
   omittedTaskIds: ReadonlySet<StarterTaskId>;
   onTaskSelect: (id: StarterTaskId) => void;
   onTaskToggle: (id: StarterTaskId) => void;
   onBackHome: () => void;
+  onCloseSecondary: () => void;
   onDismiss: () => void;
+  onRestore: () => void;
 }
 
 const StarterTasksContext = createContext<StarterTasksContextValue | null>(

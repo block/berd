@@ -41,7 +41,7 @@ describe("starterTaskProgress", () => {
 
   it("clears progress for onboarding reset", () => {
     saveStarterTaskProgress({
-      completion: { ...EMPTY_STARTER_TASK_COMPLETION, "build-agent": true },
+      completion: { ...EMPTY_STARTER_TASK_COMPLETION, "start-chat": true },
       awaiting: new Set(),
     });
     clearStarterTaskProgress();
