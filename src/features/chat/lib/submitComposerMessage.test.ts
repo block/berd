@@ -33,7 +33,7 @@ function imageDraft(base64: string): ChatAttachmentDraft {
 }
 
 describe("submitComposerMessage", () => {
-  it("sends a staged quote as hidden callback context and visible message metadata", async () => {
+  it("sends a staged quote as structured intent without pre-serializing it", async () => {
     const onSend = vi.fn().mockReturnValue(true);
     const quote: StagedQuoteItem = {
       id: "quote-1",
@@ -58,15 +58,19 @@ describe("submitComposerMessage", () => {
       resolveSkillSlashCommand: () => null,
     });
 
+    // Serialization (anchor vs full excerpt) is a dispatch-time decision
+    // made after any compaction for the attempt (see stagedQuoteSend.ts).
+    // The composer only snapshots the structured quote into the send.
     expect(onSend).toHaveBeenCalledWith(
       "can you elaborate?",
       undefined,
       undefined,
       expect.objectContaining({
-        assistantPrompt: expect.stringContaining(quote.excerpt),
         userMessageMetadata: { stagedItems: [quote] },
       }),
     );
+    const sendOptions = onSend.mock.calls[0][3];
+    expect(sendOptions.assistantPrompt).toBeUndefined();
   });
 
   it("adds skill instructions when a slash skill command matches", async () => {

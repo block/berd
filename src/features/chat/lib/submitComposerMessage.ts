@@ -13,8 +13,6 @@ import {
   promptAttachmentBytes,
 } from "./attachmentPayloadBudget";
 import { buildSkillSendPayload } from "./skillSendPayload";
-import { buildStagedQuoteAssistantPrompt } from "./stagedQuoteSend";
-import { composeSystemPrompt } from "@/features/projects/lib/chatProjectContext";
 
 interface SubmitComposerMessageOptions {
   text: string;
@@ -77,20 +75,15 @@ export async function submitComposerMessage({
     sendOptions?.chips && sendOptions.chips.length > 0
       ? [...chips, ...sendOptions.chips]
       : chips;
-  const stagedQuotePrompt = buildStagedQuoteAssistantPrompt(stagedItems);
+  // Staged quotes travel as structured intent only. Serialization into the
+  // assistant-audience prompt happens at the authoritative dispatch attempt
+  // (see stagedQuoteSend.ts), after any compaction for that attempt, when
+  // anchor-vs-full-excerpt can actually be decided.
   const mergedSendOptions =
-    mergedChips.length > 0 || stagedQuotePrompt || stagedItems.length > 0
+    mergedChips.length > 0 || stagedItems.length > 0
       ? {
           ...sendOptions,
           ...(mergedChips.length > 0 ? { chips: mergedChips } : {}),
-          ...(stagedQuotePrompt
-            ? {
-                assistantPrompt: composeSystemPrompt(
-                  sendOptions?.assistantPrompt,
-                  stagedQuotePrompt,
-                ),
-              }
-            : {}),
           ...(stagedItems.length > 0
             ? { userMessageMetadata: { stagedItems: [...stagedItems] } }
             : {}),

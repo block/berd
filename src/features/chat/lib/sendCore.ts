@@ -30,7 +30,12 @@ import {
   ownsSessionPrompt,
   releaseSessionPrompt,
 } from "@/features/chat/lib/sessionPromptOwnership";
+import {
+  buildStagedQuoteDispatchPrompt,
+  stagedQuoteSourceIsLive,
+} from "@/features/chat/lib/stagedQuoteSend";
 import { recordSubmittedStagedItems } from "@/features/chat/lib/submittedQuoteProvenance";
+import { composeSystemPrompt } from "@/features/projects/lib/chatProjectContext";
 import { perfLog } from "@/shared/lib/perfLog";
 import { completeAssistantMessage } from "@/features/chat/lib/messageCompletion";
 import {
@@ -307,10 +312,25 @@ export async function dispatchPrompt(
     );
     const acpPrompt =
       promptWithPaths || (images?.length ? " " : promptWithPaths);
-    // Durable quote provenance (Berd-local): record the dispatched prompt
-    // text alongside the staged quotes so replay can re-attach them to this
-    // turn after window reopen or compaction-driven history reload.
+    // Quote serialization happens here, at the authoritative send attempt:
+    // any compaction for this attempt already ran, so the current transcript
+    // decides per quote source whether an anchor suffices or the excerpt
+    // must be re-sent in full (see stagedQuoteSend.ts).
+    let dispatchAssistantPrompt = assistantPrompt;
     if (userMessageMetadata?.stagedItems?.length) {
+      const liveMessages =
+        useChatStore.getState().messagesBySession[sessionId] ?? [];
+      const quotePrompt = buildStagedQuoteDispatchPrompt(
+        userMessageMetadata.stagedItems,
+        (source) => stagedQuoteSourceIsLive(liveMessages, source),
+      );
+      dispatchAssistantPrompt = composeSystemPrompt(
+        assistantPrompt,
+        quotePrompt,
+      );
+      // Durable quote provenance (Berd-local): record the dispatched prompt
+      // text alongside the staged quotes so replay can re-attach them to
+      // this turn after window reopen or compaction-driven history reload.
       recordSubmittedStagedItems(
         sessionId,
         acpPrompt,
@@ -325,7 +345,9 @@ export async function dispatchPrompt(
     }
     const promptPromise = acpSendMessage(sessionId, acpPrompt, {
       systemPrompt,
-      ...(assistantPrompt ? { assistantPrompt } : {}),
+      ...(dispatchAssistantPrompt
+        ? { assistantPrompt: dispatchAssistantPrompt }
+        : {}),
       personaId: persona?.id,
       personaName: persona?.name,
       goose: acpGooseMetadata,

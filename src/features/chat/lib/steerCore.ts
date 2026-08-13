@@ -1,6 +1,11 @@
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import {
+  buildStagedQuoteDispatchPrompt,
+  stagedQuoteSourceIsLive,
+} from "@/features/chat/lib/stagedQuoteSend";
 import { recordSubmittedStagedItems } from "@/features/chat/lib/submittedQuoteProvenance";
+import { composeSystemPrompt } from "@/features/projects/lib/chatProjectContext";
 import { acpSteerMessage } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import {
@@ -93,10 +98,25 @@ export async function steerPromptInSession(
 
   const promptWithPaths = appendAttachmentPaths(text.trim(), attachments);
   const acpPrompt = promptWithPaths || (images?.length ? " " : promptWithPaths);
-  // Durable quote provenance (Berd-local): steered sends carry staged
-  // quotes exactly like foreground sends; record them so replay can
-  // re-attach the quote card to this turn.
+  // Quote serialization happens at the send attempt (see stagedQuoteSend.ts).
+  // A steer targets the currently running turn, so no compaction can
+  // intervene between here and pickup; the current transcript decides
+  // anchor-vs-full-excerpt per quote source.
+  let dispatchAssistantPrompt = sendOptions?.assistantPrompt;
   if (sendOptions?.userMessageMetadata?.stagedItems?.length) {
+    const liveMessages =
+      useChatStore.getState().messagesBySession[sessionId] ?? [];
+    const quotePrompt = buildStagedQuoteDispatchPrompt(
+      sendOptions.userMessageMetadata.stagedItems,
+      (source) => stagedQuoteSourceIsLive(liveMessages, source),
+    );
+    dispatchAssistantPrompt = composeSystemPrompt(
+      sendOptions.assistantPrompt,
+      quotePrompt,
+    );
+    // Durable quote provenance (Berd-local): steered sends carry staged
+    // quotes exactly like foreground sends; record them so replay can
+    // re-attach the quote card to this turn.
     recordSubmittedStagedItems(
       sessionId,
       acpPrompt,
@@ -115,8 +135,8 @@ export async function steerPromptInSession(
       activeRunId,
       acpPrompt,
       {
-        ...(sendOptions?.assistantPrompt
-          ? { assistantPrompt: sendOptions.assistantPrompt }
+        ...(dispatchAssistantPrompt
+          ? { assistantPrompt: dispatchAssistantPrompt }
           : {}),
         goose: sendOptions?.acpGooseMetadata,
         images: images?.map(
