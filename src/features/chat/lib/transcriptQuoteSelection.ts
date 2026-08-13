@@ -274,22 +274,43 @@ export function getQuoteAffordancePosition(
   root: HTMLElement,
 ): { left: number; top: number } | null {
   // A multi-line selection's bounding rect spans full line boxes, so its
-  // horizontal center can sit far from the swept text. The first line's
-  // rect keeps the pill centered over where the selection begins.
+  // horizontal center can sit far from the swept text. Centering over the
+  // first visual line keeps the pill above where the selection begins.
+  // getClientRects returns one rect per inline segment (bold spans, links),
+  // so several rects can share the first line; union everything whose
+  // vertical center falls inside the first rect's line box, or the pill
+  // centers over just the first inline segment instead of the line.
   // (getClientRects is missing in some DOM implementations, e.g. jsdom.)
-  const lineRects =
-    typeof range.getClientRects === "function" ? range.getClientRects() : [];
-  const firstLineRect = Array.from(lineRects).find(
-    (rect) => rect.width > 0 || rect.height > 0,
-  );
-  const rangeRect = firstLineRect ?? range.getBoundingClientRect();
+  const rects = Array.from(
+    typeof range.getClientRects === "function" ? range.getClientRects() : [],
+  ).filter((rect) => rect.width > 0 || rect.height > 0);
+  let anchor: { left: number; width: number; top: number };
+  if (rects.length > 0) {
+    const firstLine = rects[0];
+    let left = firstLine.left;
+    let right = firstLine.right;
+    for (const rect of rects) {
+      const centerY = rect.top + rect.height / 2;
+      if (centerY < firstLine.top || centerY > firstLine.bottom) continue;
+      left = Math.min(left, rect.left);
+      right = Math.max(right, rect.right);
+    }
+    anchor = { left, width: right - left, top: firstLine.top };
+  } else {
+    const boundingRect = range.getBoundingClientRect();
+    if (boundingRect.width === 0 && boundingRect.height === 0) return null;
+    anchor = {
+      left: boundingRect.left,
+      width: boundingRect.width,
+      top: boundingRect.top,
+    };
+  }
   const rootRect = root.getBoundingClientRect();
-  if (rangeRect.width === 0 && rangeRect.height === 0) return null;
   return {
     left: Math.min(
-      Math.max(rangeRect.left + rangeRect.width / 2 - rootRect.left, 16),
+      Math.max(anchor.left + anchor.width / 2 - rootRect.left, 16),
       Math.max(16, rootRect.width - 16),
     ),
-    top: Math.max(rangeRect.top - rootRect.top - 8, 8),
+    top: Math.max(anchor.top - rootRect.top - 8, 8),
   };
 }

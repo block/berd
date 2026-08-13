@@ -78,6 +78,43 @@ describe("getQuoteAffordancePosition", () => {
     expect(position).toEqual({ left: 600, top: 92 });
   });
 
+  it("unions inline segments sharing the first line before centering", () => {
+    // A selection starting inside a bold span produces one rect per inline
+    // segment: bold portion, then plain text — both on the same visual
+    // line. Centering on rects[0] alone (the pre-fix behavior) parks the
+    // pill over just the bold words instead of the swept line.
+    const root = document.createElement("div");
+    Object.defineProperty(root, "getBoundingClientRect", {
+      value: () => makeRect({ left: 0, top: 0, width: 800, height: 600 }),
+    });
+    const boldSegment = makeRect({
+      left: 100,
+      top: 100,
+      width: 100,
+      height: 20,
+    });
+    const plainSegment = makeRect({
+      left: 200,
+      top: 100,
+      width: 300,
+      height: 20,
+    });
+    const secondLine = makeRect({ left: 0, top: 120, width: 800, height: 20 });
+    const range = document.createRange();
+    Object.defineProperty(range, "getClientRects", {
+      value: () => [boldSegment, plainSegment, secondLine],
+    });
+    Object.defineProperty(range, "getBoundingClientRect", {
+      value: () => makeRect({ left: 0, top: 100, width: 800, height: 40 }),
+    });
+
+    const position = getQuoteAffordancePosition(range, root);
+
+    // First-line union spans 100..500, center 300. rects[0] alone would
+    // give 150; the bounding box would give 400.
+    expect(position).toEqual({ left: 300, top: 92 });
+  });
+
   it("falls back to the bounding rect when getClientRects is unavailable", () => {
     const root = document.createElement("div");
     Object.defineProperty(root, "getBoundingClientRect", {
