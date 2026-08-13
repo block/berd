@@ -4,7 +4,8 @@ import { Button, type ButtonProps } from "@/shared/ui/button";
 
 /**
  * Primary confirmation action for the agent import flow.
- * Uses a solid black fill on dark import-dialog surfaces without an outline.
+ * Uses the system primary fill (black in light mode) and preserves the
+ * import-dialog-specific dark treatment without an outline.
  */
 export type AgentImportPrimaryButtonProps = Omit<
   ButtonProps,
@@ -17,7 +18,7 @@ export const AgentImportPrimaryButton = React.forwardRef<
 >((props, ref) => (
   <Button
     ref={ref}
-    variant="subtle"
+    variant="primary"
     className="border-0 ring-0 dark:bg-background dark:text-foreground dark:shadow-none dark:hover:bg-background dark:hover:text-foreground dark:active:bg-background"
     {...props}
   />
