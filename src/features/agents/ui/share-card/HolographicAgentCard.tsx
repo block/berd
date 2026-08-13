@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { cn } from "@/shared/lib/cn";
 import { resetCardTilt, updateCardTilt } from "./cardTilt";
@@ -22,6 +22,14 @@ export interface HolographicAgentCardProps {
   children?: ReactNode;
   className?: string;
   settings?: HolographicCardSettings;
+  /** Preserve the source artwork's exact proportions when showing imports. */
+  aspectRatio?: number;
+  /** Optional agent-derived color used to tint the card's ambient shadow. */
+  shadowColor?: string;
+  /** Optional agent-derived color applied to the card's foil frame. */
+  tintColor?: string;
+  /** Restrict the animated foil to the frame when artwork already contains its content panel. */
+  frameOnly?: boolean;
 }
 
 export const holographicCardPresets = {
@@ -37,11 +45,11 @@ export const holographicCardPresets = {
   },
   rainbowPrism: {
     finish: "prismatic",
-    metalness: 38,
-    rainbow: 34,
-    glare: 36,
+    metalness: 30,
+    rainbow: 72,
+    glare: 72,
     grain: 14,
-    diffraction: 42,
+    diffraction: 80,
     speed: 20,
     tilt: 8,
   },
@@ -142,9 +150,14 @@ export function HolographicAgentCard({
   children,
   className,
   settings = holographicCardPresets.rainbowPrism,
+  aspectRatio,
+  shadowColor,
+  tintColor,
+  frameOnly = false,
 }: HolographicAgentCardProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const patternId = `agent-card-wave-${useId().replaceAll(":", "")}`;
   const [contextGeneration, setContextGeneration] = useState(0);
   const pointer = useRef({ x: 0, y: 0 });
   const target = useRef({ x: 0, y: 0 });
@@ -173,15 +186,28 @@ export function HolographicAgentCard({
 
     const vertex = compileShader(gl, gl.VERTEX_SHADER, vertexShader);
     const fragment = compileShader(gl, gl.FRAGMENT_SHADER, fragmentShader);
-    if (!vertex || !fragment) return;
+    if (!vertex || !fragment) {
+      if (vertex) gl.deleteShader(vertex);
+      if (fragment) gl.deleteShader(fragment);
+      return;
+    }
 
     const program = gl.createProgram();
-    if (!program) return;
+    if (!program) {
+      gl.deleteShader(vertex);
+      gl.deleteShader(fragment);
+      return;
+    }
 
     gl.attachShader(program, vertex);
     gl.attachShader(program, fragment);
     gl.linkProgram(program);
-    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) return;
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      gl.deleteProgram(program);
+      gl.deleteShader(vertex);
+      gl.deleteShader(fragment);
+      return;
+    }
     const activateProgram = gl.useProgram.bind(gl);
     activateProgram(program);
 
@@ -322,6 +348,7 @@ export function HolographicAgentCard({
         handlePointerTargetChange,
       );
       image.onload = null;
+      image.removeAttribute("src");
       gl.deleteTexture(texture);
       gl.deleteBuffer(buffer);
       gl.deleteProgram(program);
@@ -333,20 +360,96 @@ export function HolographicAgentCard({
   return (
     <div
       ref={cardRef}
+      data-agent-card-surface="true"
       className={cn(
-        "relative aspect-[642/898] w-full overflow-hidden rounded-[4.8%] shadow-[0_30px_60px_rgba(46,32,18,0.22),0_8px_18px_rgba(46,32,18,0.16)] [transform-origin:50%_50%] [transform-style:preserve-3d] [will-change:transform] motion-reduce:transform-none",
+        "relative aspect-[1227/1839] w-full rounded-[6.5%] [transform-origin:50%_50%] [transform-style:preserve-3d] [will-change:transform] motion-reduce:transform-none",
         className,
       )}
+      style={{
+        ...(aspectRatio ? { aspectRatio } : {}),
+        borderRadius: "6.5%",
+        filter: shadowColor
+          ? `drop-shadow(0 12px 18px color-mix(in srgb, ${shadowColor} 12%, transparent)) drop-shadow(0 4px 7px rgba(46, 32, 18, 0.08))`
+          : "drop-shadow(0 10px 16px rgba(46, 32, 18, 0.1))",
+      }}
       onPointerEnter={(event) => {
         hoverBoundsRef.current = event.currentTarget.getBoundingClientRect();
+        event.currentTarget.style.setProperty(
+          "--agent-card-pattern-local-x",
+          `${event.nativeEvent.offsetX}px`,
+        );
+        event.currentTarget.style.setProperty(
+          "--agent-card-pattern-local-y",
+          `${event.nativeEvent.offsetY}px`,
+        );
+        const localX = event.nativeEvent.offsetX;
+        const localY = event.nativeEvent.offsetY;
+        if (
+          Number.isFinite(localX) &&
+          Number.isFinite(localY) &&
+          event.currentTarget.clientWidth > 0 &&
+          event.currentTarget.clientHeight > 0
+        ) {
+          event.currentTarget.style.setProperty(
+            "--agent-card-pattern-svg-x",
+            `${(localX / event.currentTarget.clientWidth) * 1227}`,
+          );
+          event.currentTarget.style.setProperty(
+            "--agent-card-pattern-svg-y",
+            `${(localY / event.currentTarget.clientHeight) * 1839}`,
+          );
+        }
+        event.currentTarget.style.setProperty(
+          "--agent-card-pattern-opacity",
+          "0.52",
+        );
       }}
       onPointerMove={(event) => {
+        // Re-read bounds after every tilt. The transformed card's client rect
+        // changes as it rotates, so enter-time bounds make cursor effects lag
+        // behind or drift away from the pointer.
+        const measuredBounds = event.currentTarget.getBoundingClientRect();
         const bounds =
-          hoverBoundsRef.current ?? event.currentTarget.getBoundingClientRect();
+          measuredBounds.width > 0 && measuredBounds.height > 0
+            ? measuredBounds
+            : hoverBoundsRef.current;
+        if (!bounds || bounds.width <= 0 || bounds.height <= 0) return;
+        hoverBoundsRef.current = bounds;
         target.current = {
           x: ((event.clientX - bounds.left) / bounds.width - 0.5) * 2,
           y: ((event.clientY - bounds.top) / bounds.height - 0.5) * 2,
         };
+        // Use local pixels from the transformed hit target. Percentages derived from
+        // an axis-aligned bounding box drift as the card rotates in 3D.
+        event.currentTarget.style.setProperty(
+          "--agent-card-pattern-local-x",
+          `${event.nativeEvent.offsetX}px`,
+        );
+        event.currentTarget.style.setProperty(
+          "--agent-card-pattern-local-y",
+          `${event.nativeEvent.offsetY}px`,
+        );
+        const localX = event.nativeEvent.offsetX;
+        const localY = event.nativeEvent.offsetY;
+        if (
+          Number.isFinite(localX) &&
+          Number.isFinite(localY) &&
+          event.currentTarget.clientWidth > 0 &&
+          event.currentTarget.clientHeight > 0
+        ) {
+          event.currentTarget.style.setProperty(
+            "--agent-card-pattern-svg-x",
+            `${(localX / event.currentTarget.clientWidth) * 1227}`,
+          );
+          event.currentTarget.style.setProperty(
+            "--agent-card-pattern-svg-y",
+            `${(localY / event.currentTarget.clientHeight) * 1839}`,
+          );
+        }
+        event.currentTarget.style.setProperty(
+          "--agent-card-pattern-opacity",
+          "0.52",
+        );
         updateCardTilt(
           event.currentTarget,
           event,
@@ -358,32 +461,124 @@ export function HolographicAgentCard({
       onPointerLeave={(event) => {
         hoverBoundsRef.current = null;
         target.current = { x: 0, y: 0 };
+        event.currentTarget.style.removeProperty(
+          "--agent-card-pattern-local-x",
+        );
+        event.currentTarget.style.removeProperty(
+          "--agent-card-pattern-local-y",
+        );
+        event.currentTarget.style.removeProperty("--agent-card-pattern-svg-x");
+        event.currentTarget.style.removeProperty("--agent-card-pattern-svg-y");
+        event.currentTarget.style.setProperty(
+          "--agent-card-pattern-opacity",
+          "0",
+        );
         resetCardTilt(event.currentTarget);
         event.currentTarget.dispatchEvent(new Event("holographic-card-move"));
       }}
     >
-      <img
-        src={src}
-        alt={alt}
-        className="absolute inset-0 block h-full w-full object-cover"
-      />
-      <canvas
-        ref={canvasRef}
-        className="absolute inset-0 block h-full w-full"
-      />
-      {children ? (
-        <div className="pointer-events-none absolute inset-0 z-10">
-          {children}
-        </div>
-      ) : null}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 rounded-[inherit] border border-white/70 shadow-[inset_0_0_0_2px_rgba(255,255,255,0.15),inset_0_0_28px_rgba(255,255,255,0.12)]"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 bg-[linear-gradient(115deg,transparent_30%,rgba(255,255,255,0.12)_45%,transparent_61%)] mix-blend-screen"
-      />
+      <div className="absolute inset-0 overflow-hidden rounded-[inherit]">
+        <img
+          src={src}
+          alt={alt}
+          className="absolute inset-0 block h-full w-full object-cover"
+        />
+        <canvas
+          ref={canvasRef}
+          data-agent-card-frame-only={frameOnly ? "true" : undefined}
+          className="absolute inset-0 block h-full w-full opacity-90"
+          style={
+            frameOnly
+              ? {
+                  WebkitMaskImage:
+                    "linear-gradient(black, black), linear-gradient(black, black)",
+                  WebkitMaskPosition: "center, center",
+                  WebkitMaskSize: "100% 100%, 95.1% 96.6%",
+                  WebkitMaskRepeat: "no-repeat, no-repeat",
+                  WebkitMaskComposite: "xor",
+                  maskImage:
+                    "linear-gradient(black, black), linear-gradient(black, black)",
+                  maskPosition: "center, center",
+                  maskSize: "100% 100%, 95.1% 96.6%",
+                  maskRepeat: "no-repeat, no-repeat",
+                  maskComposite: "exclude",
+                }
+              : undefined
+          }
+        />
+        {tintColor ? (
+          <>
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 rounded-[inherit] border-[7px]"
+              style={{
+                borderColor: tintColor,
+                mixBlendMode: "color",
+                opacity: 0.34,
+              }}
+            />
+            <svg
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 z-[3] size-full opacity-[var(--agent-card-pattern-opacity,0)] transition-opacity duration-150 motion-reduce:hidden"
+              viewBox="0 0 1227 1839"
+            >
+              <defs>
+                <pattern
+                  id={`${patternId}-waves`}
+                  width="160"
+                  height="96"
+                  patternUnits="userSpaceOnUse"
+                >
+                  <g fill="none" stroke={tintColor} strokeWidth="1.4">
+                    {[8, 20, 32, 44, 56, 68, 80, 92].map((y) => (
+                      <path
+                        key={y}
+                        d={`M-40 ${y} C-20 ${y - 12} 0 ${y - 12} 20 ${y} S60 ${y + 12} 80 ${y} S120 ${y - 12} 140 ${y} S180 ${y + 12} 200 ${y}`}
+                      />
+                    ))}
+                  </g>
+                </pattern>
+                <radialGradient id={`${patternId}-reveal`}>
+                  <stop offset="0" stopColor="white" stopOpacity="1" />
+                  <stop offset="0.35" stopColor="white" stopOpacity="0.82" />
+                  <stop offset="0.7" stopColor="white" stopOpacity="0.25" />
+                  <stop offset="1" stopColor="white" stopOpacity="0" />
+                </radialGradient>
+                <mask id={`${patternId}-mask`} maskUnits="userSpaceOnUse">
+                  <circle
+                    cx="var(--agent-card-pattern-svg-x, -500)"
+                    cy="var(--agent-card-pattern-svg-y, -500)"
+                    r="330"
+                    fill={`url(#${patternId}-reveal)`}
+                  />
+                </mask>
+              </defs>
+              <rect
+                x="30"
+                y="31"
+                width="1167"
+                height="1777"
+                rx="70"
+                fill={`url(#${patternId}-waves)`}
+                mask={`url(#${patternId}-mask)`}
+              />
+            </svg>
+          </>
+        ) : null}
+        {children ? (
+          <div className="pointer-events-none absolute inset-0 z-10">
+            {children}
+          </div>
+        ) : null}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 rounded-[inherit] border border-white/70 shadow-[inset_0_0_0_2px_rgba(255,255,255,0.15),inset_0_0_28px_rgba(255,255,255,0.12)]"
+        />
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 bg-[linear-gradient(115deg,transparent_30%,rgba(255,255,255,0.12)_45%,transparent_61%)] mix-blend-screen"
+        />
+      </div>
     </div>
   );
 }
