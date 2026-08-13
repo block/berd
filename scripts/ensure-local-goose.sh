@@ -28,6 +28,7 @@ Environment variables:
   GOOSE_DEV_BIN              override built binary name from lockfile
   GOOSE_DEV_ALLOW_DIRTY      1 to allow building a dirty checkout
   GOOSE_BUILD_PROFILE        debug|release (default: debug)
+  GOOSE_DEV_OPT_LEVEL        opt-level when GOOSE_BUILD_PROFILE=debug (default: 1)
 USAGE
 }
 
@@ -118,6 +119,20 @@ fail_or_skip() {
 # shellcheck source=lib/goose-dev-paths.sh
 source "$script_dir/lib/goose-dev-paths.sh"
 export CARGO_TARGET_DIR="$goose_cargo_target_dir"
+# Validated here, before the export, because cargo parses
+# CARGO_PROFILE_DEV_OPT_LEVEL while loading config — before it picks a profile.
+# An invalid value therefore fails `cargo build --release` too, so an unchecked
+# typo would break the release lanes, which never read [profile.dev]. The set
+# is cargo's own ("must be `0`, `1`, `2`, `3`, `s` or `z`").
+if [[ ! "$goose_dev_opt_level" =~ ^(0|1|2|3|s|z)$ ]]; then
+  echo "GOOSE_DEV_OPT_LEVEL must be 0, 1, 2, 3, s, or z, got: $goose_dev_opt_level" >&2
+  exit 1
+fi
+# Optimized frames keep goose's deep OAuth-discovery descent inside the tokio
+# worker stack (goose-dev-paths.sh has the full why). Exported as an env var
+# so it wins over any [profile.dev] settings in the checkout's Cargo.toml.
+# Release builds compile under [profile.release] and ignore it.
+export CARGO_PROFILE_DEV_OPT_LEVEL="$goose_dev_opt_level"
 
 # bin_path is computed after the checkout exists, via `cargo metadata`, so it
 # matches CARGO_TARGET_DIR exactly (and would also honour any user override).
@@ -154,6 +169,7 @@ write_stamp() {
     printf 'STAMP_PACKAGE=%q\n' "$goose_package"
     printf 'STAMP_BIN_NAME=%q\n' "$goose_bin"
     printf 'STAMP_BUILD_PROFILE=%q\n' "$build_profile"
+    printf 'STAMP_OPT_LEVEL=%q\n' "$goose_dev_opt_level"
     printf 'STAMP_BIN=%q\n' "$bin_path"
   } >"$goose_stamp_file"
 }
@@ -168,6 +184,14 @@ stamp_matches_current_build() {
   [[ "${STAMP_PACKAGE:-$goose_package}" == "$goose_package" ]] || return 1
   [[ "${STAMP_BIN_NAME:-$goose_bin}" == "$goose_bin" ]] || return 1
   [[ "${STAMP_BUILD_PROFILE:-}" == "$build_profile" ]] || return 1
+  # A stamp without STAMP_OPT_LEVEL predates the opt-level knob, meaning its
+  # binary was built at cargo's dev default (0). Default the comparison to 0 —
+  # not to the current value — so those binaries fail the match and rebuild.
+  # Only debug builds read [profile.dev], so release stamps skip the check
+  # rather than paying a rebuild for a knob their binary never saw.
+  if [[ "$build_profile" == "debug" ]]; then
+    [[ "${STAMP_OPT_LEVEL:-0}" == "$goose_dev_opt_level" ]] || return 1
+  fi
   [[ -x "${STAMP_BIN:-}" ]] || return 1
   # The recorded binary path must match where cargo writes today; otherwise
   # the user's cargo config (e.g. build.target-dir) changed and the stamp is
