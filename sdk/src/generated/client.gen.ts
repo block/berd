@@ -10,6 +10,7 @@ export interface ExtMethodProvider {
 import type {
   AddConfigExtensionRequestUnstable,
   AddSessionExtensionRequestUnstable,
+  ApplySessionExtensionsRequestUnstable,
   AppsDeleteRequestUnstable,
   AppsDeleteResponseUnstable,
   AppsExportRequestUnstable,
@@ -287,6 +288,15 @@ export class GooseExtClient {
   ): Promise<void> {
     await this.conn.extMethod(
       "_goose/unstable/session/extensions/remove",
+      params,
+    );
+  }
+
+  async GooseUnstableSessionExtensionsApply(
+    params: ApplySessionExtensionsRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/session/extensions/apply",
       params,
     );
   }
