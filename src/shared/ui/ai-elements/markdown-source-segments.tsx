@@ -82,6 +82,44 @@ interface HastNode {
   };
 }
 
+function nodeStartOffset(node: HastNode): number | null {
+  const offset = node.position?.start?.offset;
+  return typeof offset === "number" ? offset : null;
+}
+
+function nodeEndOffset(node: HastNode): number | null {
+  const offset = node.position?.end?.offset;
+  return typeof offset === "number" ? offset : null;
+}
+
+/** Infers canonical bounds for a text node whose position data the Markdown
+ * transform dropped (for example lazy-continuation text after a hard break,
+ * where stripping the continuation indentation invalidates offsets). The
+ * nearest positioned siblings — or the parent element — still bound where
+ * the text came from, so the segment stays lossless as a non-exact range. */
+function inferTextNodeBounds(
+  parent: HastNode,
+  index: number,
+): { start: number; end: number } | null {
+  const children = parent.children ?? [];
+  let start: number | null = null;
+  for (let cursor = index - 1; cursor >= 0 && start === null; cursor -= 1) {
+    start = nodeEndOffset(children[cursor]);
+  }
+  if (start === null) start = nodeStartOffset(parent);
+  let end: number | null = null;
+  for (
+    let cursor = index + 1;
+    cursor < children.length && end === null;
+    cursor += 1
+  ) {
+    end = nodeStartOffset(children[cursor]);
+  }
+  if (end === null) end = nodeEndOffset(parent);
+  if (start === null || end === null || end <= start) return null;
+  return { start, end };
+}
+
 function annotateTextNodes(node: HastNode, source: string) {
   const children = node.children;
   if (!children) return;
@@ -95,20 +133,19 @@ function annotateTextNodes(node: HastNode, source: string) {
     if (!parentTag || !WRAPPABLE_PARENT_TAGS.has(parentTag)) continue;
     const value = child.value ?? "";
     if (!value.trim()) continue;
-    const start = child.position?.start?.offset;
-    const end = child.position?.end?.offset;
-    if (
-      typeof start !== "number" ||
-      typeof end !== "number" ||
-      start < 0 ||
-      end <= start ||
-      end > source.length
-    ) {
-      continue;
+    let start = child.position?.start?.offset;
+    let end = child.position?.end?.offset;
+    if (typeof start !== "number" || typeof end !== "number") {
+      const inferred = inferTextNodeBounds(node, index);
+      if (!inferred) continue;
+      start = inferred.start;
+      end = inferred.end;
     }
+    if (start < 0 || end <= start || end > source.length) continue;
     // Exact segments render the canonical source verbatim, so DOM offsets
     // within them translate directly to canonical offsets. Non-exact
-    // segments (escapes, entities) still bound the source range.
+    // segments (escapes, entities, inferred bounds) still bound the
+    // source range.
     const exact = source.slice(start, end) === value;
     children[index] = {
       type: "element",
@@ -117,6 +154,12 @@ function annotateTextNodes(node: HastNode, source: string) {
         dataMdSourceStart: String(start),
         dataMdSourceEnd: String(end),
         ...(exact ? { dataMdSourceExact: "true" } : {}),
+      },
+      // Preserve position on the wrapper so later siblings that also lack
+      // position data can still infer their bounds from this one.
+      position: {
+        start: { offset: start },
+        end: { offset: end },
       },
       children: [child],
     };

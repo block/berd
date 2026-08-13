@@ -298,6 +298,34 @@ describe("stagedQuoteFromSelection with renderer source segments", () => {
     expect(quote?.excerpt).toBe("the diagnosis.\n\nAnd here");
   });
 
+  it("maps list-item text after a hard line break despite dropped position data", () => {
+    // Hard break + lazy continuation: the Markdown transform strips the
+    // continuation indentation, dropping position data on the text node.
+    // The annotator must infer bounds so the quote keeps the subcontent.
+    const canonical = [
+      "Three practical code review tips:",
+      "",
+      "1. **Review for intent first**  ",
+      "   Ask: does this change solve the right problem?",
+      "",
+      "2. **Leave actionable comments**  ",
+      "   Be specific and suggest a path forward.",
+    ].join("\n");
+    const { root } = renderMarkdownMessage("message-1", canonical);
+
+    const selection = selectBetween(root, "nable comments", "path forward.");
+    const quote = stagedQuoteFromSelection({
+      id: "quote-1",
+      messages: [makeMessage("message-1", canonical)],
+      root,
+      selection,
+    });
+
+    expect(quote).not.toBeNull();
+    expect(quote?.excerpt).toContain("nable comments");
+    expect(quote?.excerpt).toContain("Be specific and suggest a path forward.");
+  });
+
   it("returns a canonical-bounded quote when the selection covers inline code", () => {
     const canonical = "Run `just check` before pushing.";
     const { root } = renderMarkdownMessage("message-1", canonical);
