@@ -14,7 +14,7 @@
     "generate:berdctl-contract": "node ./scripts/generate-berdctl-contract.mjs",
     "design-system:tokens": "node ./scripts/design-system-tokens.mjs",
     "build": "tsc && vite build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm --filter @aaif/goose-sdk build:ts && tsc --noEmit",
     "avatars:manifest": "node ./scripts/avatar-manifest.mjs manifest",
     "avatars:publish": "node ./scripts/avatar-manifest.mjs publish",
     "avatars:promote": "node ./scripts/avatar-manifest.mjs promote",
