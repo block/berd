@@ -65,6 +65,9 @@ export const SIDEBAR_GROUP_LABEL_TEXT_CLASS =
 export const SIDEBAR_PANEL_ELEVATED_HOVER_SHADOW_CLASS =
   "hover:shadow-sidebar-panel-elevated";
 
+/** Top inset for the primary navigation surface. */
+export const SIDEBAR_PRIMARY_NAV_TOP_INSET_CLASS = "pt-[3px]";
+
 /** Horizontal inset for sidebar section divider lines. */
 export const SIDEBAR_SECTION_DIVIDER_INSET_CLASS = "mx-3";
 

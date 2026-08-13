@@ -19,6 +19,7 @@ import {
 import { cn } from "@/shared/lib/cn";
 import {
   SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS,
+  SIDEBAR_PRIMARY_NAV_TOP_INSET_CLASS,
   SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { SidebarNavItem } from "./SidebarNavItem";
@@ -137,7 +138,10 @@ export const PrimaryNavigationSurface = forwardRef<
       fullHeight
       width={width}
     >
-      <div className="flex-shrink-0 pt-[3px]" aria-hidden="true" />
+      <div
+        className={cn("flex-shrink-0", SIDEBAR_PRIMARY_NAV_TOP_INSET_CLASS)}
+        aria-hidden="true"
+      />
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div
