@@ -2019,6 +2019,7 @@ fn bb_auth_logout_removes_stored_file_session() {
     let server_url = format!("{}/api/goose", server.base_url);
     let default_key = browser_auth_storage_key("default", &server_url);
     let other_key = browser_auth_storage_key("other", &server_url);
+    let purpose_storage_path = PathBuf::from(format!("{}.purpose-tokens", storage_path.display()));
     fs::write(
         &storage_path,
         serde_json::to_string_pretty(&json!({
@@ -2034,6 +2035,14 @@ fn bb_auth_logout_removes_stored_file_session() {
         .expect("serialize storage"),
     )
     .expect("write auth storage");
+    fs::write(
+        &purpose_storage_path,
+        serde_json::to_string_pretty(&json!({
+            "obsolete-purpose-token": { "accessToken": "legacy-secret" }
+        }))
+        .expect("serialize legacy purpose token storage"),
+    )
+    .expect("write legacy purpose token storage");
 
     let output = bb_command()
         .env("BB_HOME", &bb_home)
@@ -2051,6 +2060,7 @@ fn bb_auth_logout_removes_stored_file_session() {
     assert_eq!(response["removed"], json!(true));
     assert_eq!(response["server_revoked"], json!(true));
     assert_eq!(response["storage"], json!("file"));
+    assert_eq!(response["purpose_token_removed"], json!(true));
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "POST");
     assert_eq!(requests[0].path, "/api/goose/v1/auth/logout");
@@ -2065,6 +2075,7 @@ fn bb_auth_logout_removes_stored_file_session() {
     let storage = fs::read_to_string(&storage_path).expect("read storage");
     assert!(!storage.contains("default-session"));
     assert!(storage.contains("other-session"));
+    assert!(!purpose_storage_path.exists());
 
     let output = bb_command()
         .env("BB_HOME", &bb_home)
@@ -2080,6 +2091,7 @@ fn bb_auth_logout_removes_stored_file_session() {
     let response = serde_json::from_str::<Value>(&stdout).expect("parse logout output");
     assert_eq!(response["removed"], json!(false));
     assert_eq!(response["server_revoked"], json!(false));
+    assert_eq!(response["purpose_token_removed"], json!(false));
 
     fs::remove_dir_all(temp).expect("remove temp dir");
 }

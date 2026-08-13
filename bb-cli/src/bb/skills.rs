@@ -670,6 +670,15 @@ fn auth_logout_browser(config: &SkillsConfig) -> Result<()> {
             false
         }
     };
+    let purpose_token_removed = match storage.delete_legacy_purpose_token_cache(&storage_key) {
+        Ok(removed) => removed,
+        Err(err) => {
+            warnings.push(format!(
+                "failed to remove legacy cached Compose credential: {err}"
+            ));
+            false
+        }
+    };
     if config.json {
         return print_json(&json!({
             "profile": config.profile,
@@ -678,6 +687,7 @@ fn auth_logout_browser(config: &SkillsConfig) -> Result<()> {
             "storage": storage.kind(),
             "server_revoked": server_revoked,
             "removed": removed,
+            "purpose_token_removed": purpose_token_removed,
             "warnings": warnings,
         }));
     }

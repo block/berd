@@ -14,6 +14,8 @@ use crate::config::kgoose_service_url;
 
 #[cfg(target_os = "macos")]
 const KEYRING_SERVICE: &str = "com.squareup.builderbot.cli-auth";
+#[cfg(target_os = "macos")]
+const LEGACY_PURPOSE_TOKEN_KEYRING_SERVICE: &str = "com.squareup.builderbot.cli-auth-purpose-token";
 pub const BB_AUTH_STORAGE_ENV_VAR: &str = "BB_AUTH_STORAGE";
 pub const BB_AUTH_STORAGE_FILE_ENV_VAR: &str = "BB_AUTH_STORAGE_FILE";
 
@@ -60,6 +62,11 @@ impl SessionStorageKey {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn legacy_compose_token_account(session: &SessionStorageKey) -> String {
+    format!("compose@{}", session.account())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredSessionCredential {
@@ -84,6 +91,9 @@ pub trait SessionCredentialStorage {
     fn get(&self, key: &SessionStorageKey) -> Result<Option<StoredSessionCredential>>;
     fn set(&self, key: &SessionStorageKey, credential: &StoredSessionCredential) -> Result<()>;
     fn delete(&self, key: &SessionStorageKey) -> Result<bool>;
+    fn delete_legacy_purpose_token_cache(&self, _key: &SessionStorageKey) -> Result<bool> {
+        Ok(false)
+    }
 }
 
 pub fn default_session_storage_for_bb_home(
@@ -252,6 +262,12 @@ impl FileSessionCredentialStorage {
         fs::write(&self.path, json).with_context(|| format!("write {}", self.path.display()))?;
         restrict_permissions(&self.path)
     }
+
+    fn legacy_purpose_tokens_path(&self) -> PathBuf {
+        let mut path = self.path.as_os_str().to_os_string();
+        path.push(".purpose-tokens");
+        PathBuf::from(path)
+    }
 }
 
 impl SessionCredentialStorage for FileSessionCredentialStorage {
@@ -277,6 +293,17 @@ impl SessionCredentialStorage for FileSessionCredentialStorage {
         }
         Ok(removed)
     }
+
+    fn delete_legacy_purpose_token_cache(&self, _key: &SessionStorageKey) -> Result<bool> {
+        let path = self.legacy_purpose_tokens_path();
+        if !path.exists() {
+            return Ok(false);
+        }
+        // Purpose-token storage has no remaining readers or writers. Remove
+        // the obsolete file as a whole instead of rewriting secrets in place.
+        fs::remove_file(&path).with_context(|| format!("remove {}", path.display()))?;
+        Ok(true)
+    }
 }
 
 #[derive(Debug)]
@@ -297,6 +324,10 @@ impl SessionCredentialStorage for KeyringSessionCredentialStorage {
 
     fn delete(&self, key: &SessionStorageKey) -> Result<bool> {
         keyring_delete(key)
+    }
+
+    fn delete_legacy_purpose_token_cache(&self, key: &SessionStorageKey) -> Result<bool> {
+        keyring_delete_legacy_compose_token(key)
     }
 }
 
@@ -334,6 +365,17 @@ fn keyring_delete(key: &SessionStorageKey) -> Result<bool> {
         .context("delete BuilderBot auth session from keyring")
 }
 
+#[cfg(target_os = "macos")]
+fn keyring_delete_legacy_compose_token(key: &SessionStorageKey) -> Result<bool> {
+    use crate::keychain;
+
+    keychain::delete_generic_password_unscoped(
+        LEGACY_PURPOSE_TOKEN_KEYRING_SERVICE,
+        &legacy_compose_token_account(key),
+    )
+    .context("delete legacy BuilderBot Compose token from keyring")
+}
+
 #[cfg(not(target_os = "macos"))]
 fn keyring_get(_key: &SessionStorageKey) -> Result<Option<StoredSessionCredential>> {
     unsupported_keyring_storage()
@@ -346,6 +388,11 @@ fn keyring_set(_key: &SessionStorageKey, _credential: &StoredSessionCredential) 
 
 #[cfg(not(target_os = "macos"))]
 fn keyring_delete(_key: &SessionStorageKey) -> Result<bool> {
+    unsupported_keyring_storage()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn keyring_delete_legacy_compose_token(_key: &SessionStorageKey) -> Result<bool> {
     unsupported_keyring_storage()
 }
 
@@ -457,6 +504,32 @@ mod tests {
     }
 
     #[test]
+    fn file_storage_deletes_the_obsolete_legacy_purpose_token_cache() {
+        let directory = std::env::temp_dir().join(format!(
+            "bb-auth-storage-legacy-compose-delete-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).expect("create test directory");
+        let storage = FileSessionCredentialStorage::new(directory.join("sessions.json"));
+        let local = SessionStorageKey::new("default", "http://localhost:5173");
+        let path = storage.legacy_purpose_tokens_path();
+        fs::write(&path, b"legacy purpose-token contents").expect("write legacy tokens");
+
+        assert!(storage
+            .delete_legacy_purpose_token_cache(&local)
+            .expect("delete legacy purpose-token cache"));
+        assert!(!storage
+            .delete_legacy_purpose_token_cache(&local)
+            .expect("delete legacy purpose-token cache again"));
+        assert!(!path.exists());
+
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
     fn parse_stored_session_accepts_legacy_raw_credential() {
         let stored = parse_stored_session("raw-session").expect("parse raw credential");
 
@@ -492,6 +565,14 @@ mod tests {
         assert_eq!(
             key.account(),
             "default@https://kgoose.stage.sqprod.co/cash-app/goose"
+        );
+        assert_eq!(
+            LEGACY_PURPOSE_TOKEN_KEYRING_SERVICE,
+            "com.squareup.builderbot.cli-auth-purpose-token"
+        );
+        assert_eq!(
+            legacy_compose_token_account(&key),
+            "compose@default@https://kgoose.stage.sqprod.co/cash-app/goose"
         );
     }
 }
