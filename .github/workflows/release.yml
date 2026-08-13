@@ -267,7 +267,7 @@ jobs:
     needs: setup
     if: needs.setup.outputs.staged_windows_assets_ready != 'true'
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     permissions:
       contents: write
       id-token: write
@@ -300,14 +300,35 @@ jobs:
         with:
           tool: just@1.40.0
 
+      - name: Install pinned Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.10.0
+
+      - name: Install pinned pnpm
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+          if ((pnpm --version) -ne '10.33.0') { throw 'pnpm 10.33.0 was not activated' }
+
+      - name: Resolve managed Goose Cargo target
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:LOCALAPPDATA 'berd-dev\cargo-target'
+          "GOOSE_DEV_CARGO_TARGET_DIR=$target" >> $env:GITHUB_ENV
+
+      - name: Cache managed Goose Cargo target
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ env.GOOSE_DEV_CARGO_TARGET_DIR }}
+          key: goose-cargo-${{ runner.os }}-rust-1.94.1-${{ hashFiles('goose-backend.lock.json') }}
+
       - name: Require updater public key
         shell: pwsh
         run: |
           if ([string]::IsNullOrWhiteSpace($env:BERD_UPDATER_PUBLIC_KEY)) { throw 'BERD_UPDATER_PUBLIC_KEY repository secret is required' }
-
-      - name: Set up Windows build dependencies
-        shell: pwsh
-        run: just setup-windows release
 
       - name: Generate updater-enabled Tauri configuration
         shell: pwsh
