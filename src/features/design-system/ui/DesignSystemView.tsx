@@ -768,6 +768,7 @@ const buttonTextSizeBySize = {
   xxs: "text-[11px]",
   xs: "text-xs",
   sm: "text-xs",
+  compact: "text-sm",
   default: "text-sm",
   lg: "text-sm",
   icon: "text-sm",

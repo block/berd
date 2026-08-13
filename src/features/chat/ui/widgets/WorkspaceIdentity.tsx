@@ -9,6 +9,7 @@ import {
 import type { WorkspaceAttachment } from "@/shared/types/chat";
 import type { GitState } from "@/shared/types/git";
 import { cn } from "@/shared/lib/cn";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
   isPathWithin,
   isSamePath,
@@ -228,11 +229,13 @@ interface WorkspaceIdentityProps {
   gitState: GitState | undefined;
   gitContext?: WorkspaceGitContext;
   showMetadata?: boolean;
+  iconKind?: WorkspaceIdentityIconKind;
   className?: string;
   iconClassName?: string;
   titleClassName?: string;
   metadataClassName?: string;
   showHoverChevron?: boolean;
+  iconTooltip?: string;
 }
 
 export function WorkspaceIdentity({
@@ -240,15 +243,17 @@ export function WorkspaceIdentity({
   gitState,
   gitContext,
   showMetadata = true,
+  iconKind: iconKindOverride,
   className,
   iconClassName,
   titleClassName,
   metadataClassName,
   showHoverChevron = true,
+  iconTooltip,
 }: WorkspaceIdentityProps) {
   const { t } = useTranslation("chat");
   const context = gitContext ?? getWorkspaceGitContext(workspace, gitState);
-  const iconKind = getWorkspaceIdentityIconKind(context);
+  const iconKind = iconKindOverride ?? getWorkspaceIdentityIconKind(context);
   const metadataItems = getWorkspaceIdentityMetadataItems(context, {
     mainCheckout: t("contextPanel.includedWorkspaces.mainCheckout"),
     worktree: t("contextPanel.includedWorkspaces.worktree"),
@@ -256,25 +261,30 @@ export function WorkspaceIdentity({
 
   return (
     <div className={cn("flex min-w-0 items-start gap-2", className)}>
-      <span className="relative mt-px size-3.5 shrink-0 text-muted-foreground">
-        <WorkspaceKindIcon
-          kind={iconKind}
-          className={cn(
-            "absolute inset-0 size-3.5 transition-opacity duration-100",
-            showHoverChevron && "group-hover/workspace-row:opacity-0",
-            iconClassName,
-          )}
-        />
-        {showHoverChevron ? (
-          <ChevronDown
-            className={cn(
-              "absolute inset-0 size-3.5 opacity-0 transition-opacity duration-100 group-hover/workspace-row:opacity-100",
-              iconClassName,
-            )}
-            aria-hidden="true"
-          />
-        ) : null}
-      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="relative mt-px size-3.5 shrink-0 text-muted-foreground">
+            <WorkspaceKindIcon
+              kind={iconKind}
+              className={cn(
+                "absolute inset-0 size-3.5 transition-opacity duration-100",
+                showHoverChevron && "group-hover/workspace-row:opacity-0",
+                iconClassName,
+              )}
+            />
+            {showHoverChevron ? (
+              <ChevronDown
+                className={cn(
+                  "absolute inset-0 size-3.5 opacity-0 transition-opacity duration-100 group-hover/workspace-row:opacity-100",
+                  iconClassName,
+                )}
+                aria-hidden="true"
+              />
+            ) : null}
+          </span>
+        </TooltipTrigger>
+        {iconTooltip ? <TooltipContent>{iconTooltip}</TooltipContent> : null}
+      </Tooltip>
       <div className="min-w-0 flex-1">
         <span
           className={cn(

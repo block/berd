@@ -726,8 +726,11 @@ export function ChatView({
     return null;
   }, [controller.messages]);
 
+  const workspaceSetup = controller.defaultWorkspaceSetup
+    ? controller.defaultWorkspaceSetup
+    : controller.deferredWorkspaceRecord?.state;
   const deferredWorkspaceStartup = summarizeProjectWorkspaceStartup(
-    controller.deferredWorkspaceRecord?.state.desired ?? [],
+    workspaceSetup?.desired ?? [],
   );
 
   const composerFooter = (
@@ -751,16 +754,15 @@ export function ChatView({
               </p>
             ) : !isReadOnly &&
               deferredWorkspaceStartup.worktreeCount > 0 &&
-              (controller.deferredWorkspaceRecord?.state.status === "choice" ||
-                controller.deferredWorkspaceRecord?.state.status === "naming" ||
-                controller.deferredWorkspaceRecord?.state.status ===
-                  "creating") ? (
+              (workspaceSetup?.status === "choice" ||
+                workspaceSetup?.status === "naming" ||
+                workspaceSetup?.status === "creating") ? (
               <WorkspaceSetupChoice
-                state={controller.deferredWorkspaceRecord.state.status}
+                state={workspaceSetup.status}
                 worktreeCount={deferredWorkspaceStartup.worktreeCount}
                 branchCount={deferredWorkspaceStartup.branchCount}
                 exactCounts={deferredWorkspaceStartup.exact}
-                workspaces={controller.deferredWorkspaceRecord.state.desired}
+                error={workspaceSetup.error}
                 onCancelName={controller.cancelDeferredWorkspaceName}
                 onCreate={controller.createDeferredWorkspace}
                 onSubmitName={controller.submitDeferredWorkspaceName}
@@ -791,7 +793,8 @@ export function ChatView({
             sendDisabled:
               isReadOnly ||
               effectiveSession?.creationState != null ||
-              isAgentBuilderTargetPending,
+              isAgentBuilderTargetPending ||
+              controller.workspaceSetupInProgress,
             sendDisabledReason,
             queuedMessage: composerHandoffInProgress
               ? null

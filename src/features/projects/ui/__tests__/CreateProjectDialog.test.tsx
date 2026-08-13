@@ -81,7 +81,11 @@ vi.mock("../../api/projects", () => ({
   projectWorkspaceFromDirectory: vi.fn(
     (
       directory: string,
-      startupMode: "none" | "branch" | "worktree" = "none",
+      startupMode:
+        | "none"
+        | "auto-worktree"
+        | "ask-worktree"
+        | "worktree" = "none",
     ) =>
       directory
         ? {
@@ -95,12 +99,22 @@ vi.mock("../../api/projects", () => ({
           }
         : null,
   ),
+  isWorktreeStartupMode: vi.fn(
+    (mode: string) =>
+      mode === "worktree" ||
+      mode === "auto-worktree" ||
+      mode === "ask-worktree",
+  ),
   normalizeProjectWorkspaces: vi.fn(
     (
       workspaces:
         | Array<{
             path: string;
-            startupMode?: "none" | "branch" | "worktree";
+            startupMode?:
+              | "none"
+              | "auto-worktree"
+              | "ask-worktree"
+              | "worktree";
           }>
         | undefined,
       workingDirs: string[] = [],
@@ -116,7 +130,7 @@ vi.mock("../../api/projects", () => ({
         source: "inferred",
         branch: null,
         usedByAgent: false,
-        startupMode: useWorktrees ? "worktree" : "none",
+        startupMode: useWorktrees ? "auto-worktree" : "none",
       }));
     },
   ),
@@ -381,6 +395,30 @@ describe("CreateProjectDialog", () => {
       await waitFor(() => expect(gitMocks.getGitState).toHaveBeenCalled());
     });
 
+    it("shows workspace policy for a resolved Git initial folder", async () => {
+      vi.mocked(resolvePath).mockImplementation(async ({ parts }) => ({
+        path: parts[0].replace("~", "/home/user"),
+      }));
+      gitMocks.getGitState.mockResolvedValue(
+        gitStateForPath("/home/user/code"),
+      );
+
+      render(
+        <CreateProjectDialog
+          {...defaultProps}
+          isOpen={true}
+          initialWorkingDir="~/code"
+        />,
+      );
+
+      expect(
+        await screen.findByRole("combobox", {
+          name: /new chat behavior for code/i,
+        }),
+      ).toHaveTextContent("Configure new chats");
+      expect(gitMocks.getGitState).toHaveBeenCalledWith("/home/user/code");
+    });
+
     it("labels the submit button as create project", () => {
       render(<CreateProjectDialog {...defaultProps} isOpen={true} />);
 
@@ -535,7 +573,7 @@ describe("CreateProjectDialog", () => {
         expect.arrayContaining([
           expect.objectContaining({
             path: "/home/user/newcode",
-            startupMode: "worktree",
+            startupMode: "none",
           }),
         ]),
       );
@@ -633,7 +671,7 @@ describe("CreateProjectDialog", () => {
       ).toEqual([
         expect.objectContaining({
           path: "/home/user/other",
-          startupMode: "worktree",
+          startupMode: "none",
         }),
         expect.objectContaining({
           path: "/home/user/docs",
@@ -642,365 +680,215 @@ describe("CreateProjectDialog", () => {
       ]);
     });
 
-    it("uses the destination repo policy when replacing a project folder", async () => {
+    it("shows the new worktree policies with no branch option", async () => {
       const user = userEvent.setup();
-      vi.mocked(openDialog).mockResolvedValue("/home/user/code/web");
-      gitMocks.getGitState.mockImplementation(async (path: string) => {
-        const repositoryPath = path.startsWith("/home/user/code")
-          ? "/home/user/code"
-          : path;
-        return {
-          isGitRepo: true,
-          currentBranch: "main",
-          dirtyFileCount: 0,
-          incomingCommitCount: 0,
-          worktrees: [{ path: repositoryPath, branch: "main", isMain: true }],
-          isWorktree: false,
-          mainWorktreePath: repositoryPath,
-          localBranches: ["main"],
-        };
-      });
-      const existingRepoWorkspace = {
-        id: "path:/home/user/code/api",
-        path: "/home/user/code/api",
-        kind: "subdirectory" as const,
+      const workspace = {
+        id: "path:/home/user/code",
+        path: "/home/user/code",
+        kind: "git-main-worktree" as const,
         source: "selected" as const,
         branch: "main",
         repositoryPath: "/home/user/code",
         worktreePath: "/home/user/code",
         usedByAgent: false,
-        startupMode: "branch" as const,
-      };
-      const editedWorkspace = {
-        id: "path:/home/user/old",
-        path: "/home/user/old",
-        kind: "git-main-worktree" as const,
-        source: "selected" as const,
-        branch: "main",
-        repositoryPath: "/home/user/old",
-        worktreePath: "/home/user/old",
-        usedByAgent: false,
-        startupMode: "worktree" as const,
-      };
-      const editingProject = makeEditingProject({
-        workingDirs: [existingRepoWorkspace.path, editedWorkspace.path],
-        projectWorkspaces: [existingRepoWorkspace, editedWorkspace],
-      });
-
-      render(
-        <CreateProjectDialog
-          {...defaultProps}
-          isOpen={true}
-          editingProject={editingProject}
-        />,
-      );
-
-      await user.click(screen.getByRole("button", { name: "Edit old" }));
-      expect(
-        await screen.findByRole("button", { name: "Edit web" }),
-      ).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
-
-      await waitFor(() => expect(updateProject).toHaveBeenCalledOnce());
-      expect(
-        vi.mocked(updateProject).mock.calls[0][1].projectWorkspaces,
-      ).toEqual([
-        expect.objectContaining({
-          path: "/home/user/code/api",
-          startupMode: "branch",
-        }),
-        expect.objectContaining({
-          path: "/home/user/code/web",
-          startupMode: "branch",
-        }),
-      ]);
-    });
-
-    it("confirms before using a linked worktree folder to create new worktrees", async () => {
-      const user = userEvent.setup();
-      const linkedWorktreeWorkspace = {
-        id: "path:/home/user/code-feature/service",
-        path: "/home/user/code-feature/service",
-        kind: "subdirectory" as const,
-        source: "selected" as const,
-        branch: "feature",
-        repositoryPath: "/home/user/code",
-        worktreePath: "/home/user/code-feature",
-        usedByAgent: false,
         startupMode: "none" as const,
       };
-      const editingProject = makeEditingProject({
-        workingDirs: [linkedWorktreeWorkspace.path],
-        projectWorkspaces: [linkedWorktreeWorkspace],
-      });
 
       render(
         <CreateProjectDialog
           {...defaultProps}
-          isOpen={true}
-          editingProject={editingProject}
+          editingProject={makeEditingProject({
+            workingDirs: [workspace.path],
+            projectWorkspaces: [workspace],
+          })}
         />,
       );
 
       const policySelect = screen.getByRole("combobox", {
-        name: /new chat behavior for service/i,
+        name: /new chat behavior for code/i,
       });
+      expect(policySelect).toHaveTextContent("Configure new chats");
+
       await user.click(policySelect);
-      await user.click(
-        await screen.findByRole("option", { name: "Create worktree" }),
-      );
-
       expect(
-        await screen.findByRole("dialog", {
-          name: "Create a different worktree?",
+        await screen.findByRole("option", {
+          name: "Manually create worktrees",
         }),
       ).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "Create worktree" }));
       expect(
-        screen.getByRole("combobox", {
-          name: /new chat behavior for service/i,
+        screen.getByRole("option", {
+          name: "Auto-create worktrees",
         }),
-      ).toHaveTextContent("Create worktree");
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("option", { name: "Don’t create worktrees" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("option", { name: /branch/i }),
+      ).not.toBeInTheDocument();
     });
 
-    it("defaults a new workspace to the existing policy for the same repo", async () => {
+    it("keeps worktree policy when Git inspection temporarily fails", async () => {
       const user = userEvent.setup();
-      vi.mocked(openDialog).mockResolvedValue("/home/user/newcode");
-      gitMocks.getGitState.mockResolvedValue(
-        gitStateForPath("/home/user/newcode"),
-      );
-      const existingWorkspace = {
-        id: "path:/home/user/newcode/api",
-        path: "/home/user/newcode/api",
-        kind: "subdirectory" as const,
+      gitMocks.getGitState.mockRejectedValueOnce(new Error("Git unavailable"));
+      const workspace = {
+        id: "path:/home/user/code",
+        path: "/home/user/code",
+        kind: "git-main-worktree" as const,
         source: "selected" as const,
         branch: "main",
-        repositoryPath: "/home/user/newcode",
-        worktreePath: "/home/user/newcode",
+        repositoryPath: "/home/user/code",
+        worktreePath: "/home/user/code",
         usedByAgent: false,
-        startupMode: "branch" as const,
+        startupMode: "auto-worktree" as const,
       };
-      const editingProject = makeEditingProject({
-        workingDirs: [existingWorkspace.path],
-        projectWorkspaces: [existingWorkspace],
-      });
 
       render(
         <CreateProjectDialog
           {...defaultProps}
-          isOpen={true}
-          editingProject={editingProject}
+          editingProject={makeEditingProject({
+            workingDirs: [workspace.path],
+            projectWorkspaces: [workspace],
+          })}
         />,
       );
 
-      await user.click(
-        screen.getByRole("button", {
-          name: "Add another folder",
-        }),
-      );
-      expect(
-        await screen.findByRole("button", { name: "Edit newcode" }),
-      ).toBeInTheDocument();
+      await waitFor(() => expect(gitMocks.getGitState).toHaveBeenCalled());
       await user.click(screen.getByRole("button", { name: "Save changes" }));
 
       await waitFor(() => expect(updateProject).toHaveBeenCalledOnce());
       expect(
         vi.mocked(updateProject).mock.calls[0][1].projectWorkspaces,
-      ).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            path: "/home/user/newcode",
-            startupMode: "branch",
-          }),
-        ]),
-      );
+      ).toEqual([expect.objectContaining({ startupMode: "auto-worktree" })]);
     });
 
-    it("does not inherit branch policy from a different worktree of the same repo", async () => {
+    it("syncs auto-worktree policy across folders in the same repository", async () => {
       const user = userEvent.setup();
-      vi.mocked(openDialog).mockResolvedValue("/home/user/code-other/web");
-      gitMocks.getGitState.mockResolvedValue({
-        isGitRepo: true,
-        currentBranch: "other",
-        dirtyFileCount: 0,
-        incomingCommitCount: 0,
-        worktrees: [
-          { path: "/home/user/code", branch: "main", isMain: true },
-          { path: "/home/user/code-feature", branch: "feature", isMain: false },
-          { path: "/home/user/code-other", branch: "other", isMain: false },
-        ],
-        isWorktree: true,
-        mainWorktreePath: "/home/user/code",
-        localBranches: ["main", "feature", "other"],
-      });
-      const existingWorkspace = {
-        id: "path:/home/user/code-feature/api",
-        path: "/home/user/code-feature/api",
-        kind: "subdirectory" as const,
-        source: "selected" as const,
-        branch: "feature",
-        repositoryPath: "/home/user/code",
-        worktreePath: "/home/user/code-feature",
-        usedByAgent: false,
-        startupMode: "branch" as const,
-      };
-      const editingProject = makeEditingProject({
-        workingDirs: [existingWorkspace.path],
-        projectWorkspaces: [existingWorkspace],
-      });
-
-      render(
-        <CreateProjectDialog
-          {...defaultProps}
-          isOpen={true}
-          editingProject={editingProject}
-        />,
-      );
-
-      await user.click(
-        screen.getByRole("button", {
-          name: "Add another folder",
-        }),
-      );
-      expect(
-        await screen.findByRole("button", { name: "Edit web" }),
-      ).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
-
-      await waitFor(() => expect(updateProject).toHaveBeenCalledOnce());
-      expect(
-        vi.mocked(updateProject).mock.calls[0][1].projectWorkspaces,
-      ).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            path: "/home/user/code-feature/api",
-            startupMode: "branch",
-          }),
-          expect.objectContaining({
-            path: "/home/user/code-other/web",
-            startupMode: "none",
-          }),
-        ]),
-      );
-    });
-
-    it("does not preserve branch policy when replacing a folder with a different worktree", async () => {
-      const user = userEvent.setup();
-      vi.mocked(openDialog).mockResolvedValue("/home/user/code-other/web");
-      gitMocks.getGitState.mockResolvedValue({
-        isGitRepo: true,
-        currentBranch: "other",
-        dirtyFileCount: 0,
-        incomingCommitCount: 0,
-        worktrees: [
-          { path: "/home/user/code", branch: "main", isMain: true },
-          { path: "/home/user/code-feature", branch: "feature", isMain: false },
-          { path: "/home/user/code-other", branch: "other", isMain: false },
-        ],
-        isWorktree: true,
-        mainWorktreePath: "/home/user/code",
-        localBranches: ["main", "feature", "other"],
-      });
-      const existingWorkspace = {
-        id: "path:/home/user/code-feature/api",
-        path: "/home/user/code-feature/api",
-        kind: "subdirectory" as const,
-        source: "selected" as const,
-        branch: "feature",
-        repositoryPath: "/home/user/code",
-        worktreePath: "/home/user/code-feature",
-        usedByAgent: false,
-        startupMode: "branch" as const,
-      };
-      const editedWorkspace = {
-        id: "path:/home/user/code-feature/tools",
-        path: "/home/user/code-feature/tools",
-        kind: "subdirectory" as const,
-        source: "selected" as const,
-        branch: "feature",
-        repositoryPath: "/home/user/code",
-        worktreePath: "/home/user/code-feature",
-        usedByAgent: false,
-        startupMode: "branch" as const,
-      };
-      const editingProject = makeEditingProject({
-        workingDirs: [existingWorkspace.path, editedWorkspace.path],
-        projectWorkspaces: [existingWorkspace, editedWorkspace],
-      });
-
-      render(
-        <CreateProjectDialog
-          {...defaultProps}
-          isOpen={true}
-          editingProject={editingProject}
-        />,
-      );
-
-      await user.click(screen.getByRole("button", { name: "Edit tools" }));
-      expect(
-        await screen.findByRole("button", { name: "Edit web" }),
-      ).toBeInTheDocument();
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
-
-      await waitFor(() => expect(updateProject).toHaveBeenCalledOnce());
-      expect(
-        vi.mocked(updateProject).mock.calls[0][1].projectWorkspaces,
-      ).toEqual([
-        expect.objectContaining({
-          path: "/home/user/code-feature/api",
-          startupMode: "branch",
-        }),
-        expect.objectContaining({
-          path: "/home/user/code-other/web",
-          startupMode: "none",
-        }),
-      ]);
-    });
-
-    it("keeps non-none startup policies in sync for folders in the same repo", async () => {
-      const user = userEvent.setup();
-      const apiWorkspace = {
-        id: "path:/home/user/code/api",
-        path: "/home/user/code/api",
+      const workspaces = ["api", "web"].map((name) => ({
+        id: `path:/home/user/code/${name}`,
+        path: `/home/user/code/${name}`,
         kind: "subdirectory" as const,
         source: "selected" as const,
         branch: "main",
         repositoryPath: "/home/user/code",
         worktreePath: "/home/user/code",
         usedByAgent: false,
-        startupMode: "worktree" as const,
-      };
-      const webWorkspace = {
-        id: "path:/home/user/code/web",
-        path: "/home/user/code/web",
-        kind: "subdirectory" as const,
+        startupMode: "ask-worktree" as const,
+      }));
+
+      render(
+        <CreateProjectDialog
+          {...defaultProps}
+          editingProject={makeEditingProject({
+            workingDirs: workspaces.map(({ path }) => path),
+            projectWorkspaces: workspaces,
+          })}
+        />,
+      );
+
+      await user.click(
+        screen.getByRole("combobox", { name: /new chat behavior for api/i }),
+      );
+      await user.click(
+        await screen.findByRole("option", { name: "Auto-create worktrees" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(updateProject).toHaveBeenCalledOnce());
+      expect(
+        vi.mocked(updateProject).mock.calls[0][1].projectWorkspaces,
+      ).toEqual([
+        expect.objectContaining({
+          path: workspaces[0].path,
+          startupMode: "auto-worktree",
+        }),
+        expect.objectContaining({
+          path: workspaces[1].path,
+          startupMode: "auto-worktree",
+        }),
+      ]);
+    });
+
+    it("does not sync policy across different repositories", async () => {
+      const user = userEvent.setup();
+      const workspaces = ["api", "web"].map((name) => ({
+        id: `path:/home/user/${name}`,
+        path: `/home/user/${name}`,
+        kind: "git-main-worktree" as const,
+        source: "selected" as const,
+        branch: "main",
+        repositoryPath: `/home/user/${name}`,
+        worktreePath: `/home/user/${name}`,
+        usedByAgent: false,
+        startupMode: "ask-worktree" as const,
+      }));
+
+      render(
+        <CreateProjectDialog
+          {...defaultProps}
+          editingProject={makeEditingProject({
+            workingDirs: workspaces.map(({ path }) => path),
+            projectWorkspaces: workspaces,
+          })}
+        />,
+      );
+
+      await user.click(
+        screen.getByRole("combobox", { name: /new chat behavior for api/i }),
+      );
+      await user.click(
+        await screen.findByRole("option", { name: "Auto-create worktrees" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(updateProject).toHaveBeenCalledOnce());
+      expect(
+        vi.mocked(updateProject).mock.calls[0][1].projectWorkspaces,
+      ).toEqual([
+        expect.objectContaining({
+          path: workspaces[0].path,
+          startupMode: "auto-worktree",
+        }),
+        expect.objectContaining({
+          path: workspaces[1].path,
+          startupMode: "ask-worktree",
+        }),
+      ]);
+    });
+
+    it("saves the selected auto-worktree policy", async () => {
+      const user = userEvent.setup();
+      const workspace = {
+        id: "path:/home/user/code",
+        path: "/home/user/code",
+        kind: "git-main-worktree" as const,
         source: "selected" as const,
         branch: "main",
         repositoryPath: "/home/user/code",
         worktreePath: "/home/user/code",
         usedByAgent: false,
-        startupMode: "worktree" as const,
+        startupMode: "none" as const,
       };
-      const editingProject = makeEditingProject({
-        workingDirs: [apiWorkspace.path, webWorkspace.path],
-        projectWorkspaces: [apiWorkspace, webWorkspace],
-      });
 
       render(
         <CreateProjectDialog
           {...defaultProps}
-          isOpen={true}
-          editingProject={editingProject}
+          editingProject={makeEditingProject({
+            workingDirs: [workspace.path],
+            projectWorkspaces: [workspace],
+          })}
         />,
       );
 
       await user.click(
         screen.getByRole("combobox", {
-          name: /new chat behavior for api/i,
+          name: /new chat behavior for code/i,
         }),
       );
       await user.click(
-        await screen.findByRole("option", { name: "Create branch" }),
+        await screen.findByRole("option", {
+          name: "Auto-create worktrees",
+        }),
       );
       await user.click(screen.getByRole("button", { name: "Save changes" }));
 
@@ -1009,79 +897,13 @@ describe("CreateProjectDialog", () => {
         vi.mocked(updateProject).mock.calls[0][1].projectWorkspaces,
       ).toEqual([
         expect.objectContaining({
-          path: "/home/user/code/api",
-          startupMode: "branch",
-        }),
-        expect.objectContaining({
-          path: "/home/user/code/web",
-          startupMode: "branch",
+          path: "/home/user/code",
+          startupMode: "auto-worktree",
         }),
       ]);
     });
 
-    it("does not sync branch startup policies across different worktrees of the same repo", async () => {
-      const user = userEvent.setup();
-      const apiWorkspace = {
-        id: "path:/home/user/code-feature/api",
-        path: "/home/user/code-feature/api",
-        kind: "subdirectory" as const,
-        source: "selected" as const,
-        branch: "feature",
-        repositoryPath: "/home/user/code",
-        worktreePath: "/home/user/code-feature",
-        usedByAgent: false,
-        startupMode: "worktree" as const,
-      };
-      const webWorkspace = {
-        id: "path:/home/user/code-other/web",
-        path: "/home/user/code-other/web",
-        kind: "subdirectory" as const,
-        source: "selected" as const,
-        branch: "other",
-        repositoryPath: "/home/user/code",
-        worktreePath: "/home/user/code-other",
-        usedByAgent: false,
-        startupMode: "worktree" as const,
-      };
-      const editingProject = makeEditingProject({
-        workingDirs: [apiWorkspace.path, webWorkspace.path],
-        projectWorkspaces: [apiWorkspace, webWorkspace],
-      });
-
-      render(
-        <CreateProjectDialog
-          {...defaultProps}
-          isOpen={true}
-          editingProject={editingProject}
-        />,
-      );
-
-      await user.click(
-        screen.getByRole("combobox", {
-          name: /new chat behavior for api/i,
-        }),
-      );
-      await user.click(
-        await screen.findByRole("option", { name: "Create branch" }),
-      );
-      await user.click(screen.getByRole("button", { name: "Save changes" }));
-
-      await waitFor(() => expect(updateProject).toHaveBeenCalledOnce());
-      expect(
-        vi.mocked(updateProject).mock.calls[0][1].projectWorkspaces,
-      ).toEqual([
-        expect.objectContaining({
-          path: "/home/user/code-feature/api",
-          startupMode: "branch",
-        }),
-        expect.objectContaining({
-          path: "/home/user/code-other/web",
-          startupMode: "worktree",
-        }),
-      ]);
-    });
-
-    it("does not preserve branch or worktree policy for non-git directories", async () => {
+    it("hides and clears workspace policy for non-Git directories", async () => {
       const user = userEvent.setup();
       gitMocks.getGitState.mockResolvedValue({
         isGitRepo: false,
@@ -1134,7 +956,10 @@ describe("CreateProjectDialog", () => {
       ]);
     });
 
-    it("renders workspace titles and git root context like chat workspace rows", async () => {
+    it("renders a simple folder row without git metadata", async () => {
+      gitMocks.getGitState.mockResolvedValue(
+        gitStateForPath("/home/user/Development/cash-server"),
+      );
       const workspace = {
         id: "path:/home/user/wt/cash-server-feature/packages/builderbot",
         path: "/home/user/wt/cash-server-feature/packages/builderbot",
@@ -1162,9 +987,14 @@ describe("CreateProjectDialog", () => {
       expect(
         await screen.findByText("cash-server/.../builderbot"),
       ).toBeInTheDocument();
-      expect(screen.getByText("cash-server-feature")).toBeInTheDocument();
+      expect(screen.queryByText("cash-server-feature")).not.toBeInTheDocument();
+      expect(screen.queryByText("feature/builderbot")).not.toBeInTheDocument();
+      expect(document.querySelector(".lucide-folder-git")).toBeInTheDocument();
+      expect(document.querySelector(".lucide-folder")).not.toBeInTheDocument();
+      expect(
+        document.querySelector(".lucide-folder-git")?.closest("button"),
+      ).toHaveAttribute("aria-label");
       expect(screen.getByText("Project folders")).toBeInTheDocument();
-      expect(screen.getByText("When starting a new chat")).toBeInTheDocument();
     });
 
     it("preserves description metadata while saving prompt changes", async () => {

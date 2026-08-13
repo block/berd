@@ -431,6 +431,7 @@ describe("ChatView MCP app messaging", () => {
       stopStreaming: vi.fn(),
       projectMetadataPending: false,
       isCompactingContext: false,
+      workspaceSetupInProgress: false,
       queue: { queuedMessage: null, dismiss: vi.fn() },
       draftValue: "",
       handleDraftChange: mocks.handleDraftChange,

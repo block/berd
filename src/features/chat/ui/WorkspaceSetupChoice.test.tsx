@@ -3,6 +3,13 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { WorkspaceSetupChoice } from "./WorkspaceSetupChoice";
 
+if (!HTMLElement.prototype.hasPointerCapture) {
+  HTMLElement.prototype.hasPointerCapture = () => false;
+}
+if (!HTMLElement.prototype.scrollIntoView) {
+  HTMLElement.prototype.scrollIntoView = () => {};
+}
+
 describe("WorkspaceSetupChoice", () => {
   it("matches Cynthia's collapsed prompt interaction", async () => {
     const user = userEvent.setup();
@@ -77,17 +84,6 @@ describe("WorkspaceSetupChoice", () => {
     render(
       <WorkspaceSetupChoice
         state="naming"
-        workspaces={[
-          {
-            id: "workspace-1",
-            path: "/Berd-internal",
-            kind: "repository",
-            source: "selected",
-            usedByAgent: true,
-            repositoryPath: "/Berd-internal",
-            startupMode: "worktree",
-          },
-        ]}
         onCancelName={onCancelName}
         onCreate={vi.fn()}
         onSubmitName={onSubmitName}
@@ -96,17 +92,17 @@ describe("WorkspaceSetupChoice", () => {
     );
 
     const input = screen.getByRole("textbox", { name: "Worktree name" });
-    expect(
-      screen.getByRole("combobox", { name: "Project folder" }),
-    ).toHaveValue("/Berd-internal");
-    expect(
-      screen.getByRole("option", { name: "Berd-internal" }),
-    ).toBeInTheDocument();
-    expect(input.parentElement?.parentElement).toHaveClass(
-      "grid-cols-1",
-      "sm:grid-cols-[minmax(8rem,0.34fr)_minmax(0,1fr)]",
-    );
     expect(input).toHaveAttribute("placeholder", "Enter worktree name");
+    expect(input).toHaveClass(
+      "text-base",
+      "md:text-sm",
+      "border-transparent",
+      "shadow-none",
+      "placeholder:text-muted-foreground/60",
+      "dark:bg-muted/55",
+      "dark:placeholder:text-muted-foreground/50",
+      "dark:focus-visible:border-ring/50",
+    );
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onCancelName).toHaveBeenCalledOnce();
     await user.type(input, "feature/name");
@@ -115,6 +111,28 @@ describe("WorkspaceSetupChoice", () => {
     await user.type(input, "feature-name");
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(onSubmitName).toHaveBeenCalledWith("feature-name");
+  });
+
+  it("aligns an error to the left of the naming actions", () => {
+    render(
+      <WorkspaceSetupChoice
+        state="naming"
+        error="Choose a Git repository."
+        onCancelName={vi.fn()}
+        onCreate={vi.fn()}
+        onSubmitName={vi.fn()}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    const error = screen.getByRole("alert");
+    expect(error).toHaveClass("flex-1", "truncate");
+    expect(error).toHaveAttribute("title", "Choose a Git repository.");
+    const actionRow = error.parentElement;
+    expect(actionRow).toHaveClass("items-center", "justify-between");
+    expect(actionRow?.lastElementChild).toContainElement(
+      screen.getByRole("button", { name: "Save" }),
+    );
   });
 
   it("reuses the piggyback surface while preparing", () => {

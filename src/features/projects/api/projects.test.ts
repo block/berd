@@ -166,15 +166,63 @@ describe("projects API artifact metadata", () => {
     expect(createRequest.properties.projectWorkspaces).toEqual([
       expect.objectContaining({
         path: "/tmp/launch/packages/app",
-        startupMode: "worktree",
+        startupMode: "auto-worktree",
       }),
     ]);
     expect(project.workingDirs).toEqual(["/tmp/launch/packages/app"]);
     expect(project.projectWorkspaces).toEqual([
       expect.objectContaining({
         path: "/tmp/launch/packages/app",
-        startupMode: "worktree",
+        startupMode: "auto-worktree",
       }),
+    ]);
+  });
+
+  it("migrates legacy branch startup to manually managed worktrees", async () => {
+    const { normalizeProjectWorkspaces } = await import("./projects");
+
+    expect(
+      normalizeProjectWorkspaces([
+        {
+          id: "legacy-branch",
+          path: "/tmp/legacy",
+          kind: "repository",
+          source: "selected",
+          branch: "main",
+          usedByAgent: false,
+          startupMode: "branch",
+        },
+      ]),
+    ).toEqual([expect.objectContaining({ startupMode: "ask-worktree" })]);
+  });
+
+  it("round-trips the new worktree startup policies", async () => {
+    const { normalizeProjectWorkspaces } = await import("./projects");
+
+    expect(
+      normalizeProjectWorkspaces([
+        {
+          id: "auto",
+          path: "/tmp/auto",
+          kind: "repository",
+          source: "selected",
+          branch: "main",
+          usedByAgent: false,
+          startupMode: "auto-worktree",
+        },
+        {
+          id: "ask",
+          path: "/tmp/ask",
+          kind: "repository",
+          source: "selected",
+          branch: "main",
+          usedByAgent: false,
+          startupMode: "ask-worktree",
+        },
+      ]),
+    ).toEqual([
+      expect.objectContaining({ startupMode: "auto-worktree" }),
+      expect.objectContaining({ startupMode: "ask-worktree" }),
     ]);
   });
 

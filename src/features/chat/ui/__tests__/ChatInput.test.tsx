@@ -318,7 +318,7 @@ describe("ChatInput", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps the queue pill outside and above the composer piggyback", () => {
+  it("keeps the composer piggyback at the top with queued messages below it", () => {
     render(
       <ChatInput
         surface="bare"
@@ -332,21 +332,30 @@ describe("ChatInput", () => {
 
     const queue = screen.getByText("queued follow up");
     const accessory = screen.getByText("Configure a new worktree?");
-    expect(queue.parentElement).toHaveClass(
+    expect(
+      queue.parentElement?.parentElement?.parentElement?.parentElement,
+    ).toHaveClass("-mx-1");
+    expect(queue.parentElement).toHaveClass("flex", "items-center", "gap-2");
+    expect(queue.parentElement?.parentElement).toHaveClass(
       "flex",
-      "items-center",
-      "gap-2",
+      "flex-col",
+      "gap-1.5",
+      "p-1.5",
+    );
+    expect(queue.parentElement?.parentElement?.parentElement).toHaveClass(
       "rounded-full",
       "bg-surface-chat-responding-pill-bg",
-      "px-3",
-      "py-1.5",
       "text-surface-chat-responding-pill-fg",
       "shadow-[var(--shadow-chat)]",
     );
+    expect(queue).toHaveClass("pl-1.5", "text-sm");
     expect(accessory.parentElement).toHaveClass(
+      "relative",
+      "z-0",
+      "-mb-2",
       "rounded-t-sm",
       "bg-surface-composer-action",
-      "-mx-4",
+      "pb-2",
     );
     expect(accessory.parentElement).toHaveAttribute(
       "data-slot",
@@ -356,17 +365,18 @@ describe("ChatInput", () => {
       .getByTestId("chat-composer")
       .closest(".chat-composer-shell");
     expect(composerShell).toHaveClass(
+      "z-10",
+      "rounded-sm",
       "bg-surface-chat-composer",
       "[backdrop-filter:var(--backdrop-composer-glass)]",
     );
     expect(composerShell?.parentElement).not.toHaveClass(
       "bg-surface-chat-composer",
     );
-    expect(queue.parentElement?.parentElement).not.toBe(
-      accessory.parentElement?.parentElement,
-    );
+    expect(accessory.parentElement?.nextElementSibling).toBe(composerShell);
+    expect(composerShell?.contains(queue.parentElement)).toBe(true);
     expect(
-      queue.compareDocumentPosition(accessory) &
+      accessory.compareDocumentPosition(queue) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
@@ -2494,12 +2504,14 @@ describe("ChatInput", () => {
 
     // Editing the head hides its pill; the tail pill must not inherit
     // head-only actions like steering.
-    const pillTexts = Array.from(
-      document.querySelectorAll('[data-slot="queued-message"]'),
-    ).map((pill) => pill.textContent);
-    expect(pillTexts).toHaveLength(1);
-    expect(pillTexts[0]).toContain("second");
-    expect(pillTexts[0]).not.toContain("first");
+    await waitFor(() => {
+      const pillTexts = Array.from(
+        document.querySelectorAll('[data-slot="queued-message"]'),
+      ).map((pill) => pill.textContent);
+      expect(pillTexts).toHaveLength(1);
+      expect(pillTexts[0]).toContain("second");
+      expect(pillTexts[0]).not.toContain("first");
+    });
     expect(screen.queryByTitle("Steer queued message")).not.toBeInTheDocument();
   });
 
@@ -2528,8 +2540,21 @@ describe("ChatInput", () => {
       />,
     );
 
-    expect(screen.getByText("first")).toBeInTheDocument();
-    expect(screen.getByText("second")).toBeInTheDocument();
+    const firstQueuedMessage = screen.getByText("first");
+    const secondQueuedMessage = screen.getByText("second");
+    expect(firstQueuedMessage).toBeInTheDocument();
+    expect(secondQueuedMessage).toBeInTheDocument();
+    const queuedMessageGroup =
+      firstQueuedMessage.parentElement?.parentElement?.parentElement;
+    expect(queuedMessageGroup).toBe(
+      secondQueuedMessage.parentElement?.parentElement?.parentElement,
+    );
+    expect(queuedMessageGroup).toHaveAttribute(
+      "data-slot",
+      "queued-message-group",
+    );
+    expect(queuedMessageGroup).toHaveClass("rounded-xs");
+    expect(queuedMessageGroup).not.toHaveClass("rounded-full");
     expect(screen.queryByText("1. first")).not.toBeInTheDocument();
     expect(screen.queryByText("2. second")).not.toBeInTheDocument();
 

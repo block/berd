@@ -577,6 +577,70 @@ describe("useChatSessionController", () => {
     });
   });
 
+  it("offers worktree setup before the first message is sent", () => {
+    useProjectStore.setState({
+      projects: [
+        {
+          id: "project-1",
+          path: "/tmp/project.md",
+          name: "Project",
+          description: "",
+          prompt: "",
+          icon: "",
+          color: "#22c55e",
+          projectWorkspaces: [
+            {
+              id: "workspace-1",
+              path: "/repo/project",
+              kind: "git-main-worktree",
+              source: "selected",
+              branch: "main",
+              usedByAgent: false,
+              repositoryPath: "/repo/project",
+              startupMode: "worktree",
+            },
+          ],
+          workingDirs: ["/repo/project"],
+          useWorktrees: true,
+          order: 0,
+          archivedAt: null,
+          artifact: null,
+        },
+      ],
+      loading: false,
+      activeProjectId: "project-1",
+    });
+    useChatSessionStore.getState().patchSession("session-1", {
+      projectId: "project-1",
+      workingDir: "/repo/project",
+      workspaceAttachments: [],
+    });
+    useChatStore.setState({
+      messagesBySession: {
+        "session-1": [
+          {
+            id: "startup-system-message",
+            role: "system",
+            created: 0,
+            content: [{ type: "text", text: "Session initialized" }],
+          },
+        ],
+      },
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    expect(result.current.defaultWorkspaceSetup).toMatchObject({
+      status: "choice",
+      desired: [{ id: "workspace-1", startupMode: "worktree" }],
+    });
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"],
+    ).toBeUndefined();
+  });
+
   it("debounces draft store writes while composer text changes", () => {
     vi.useFakeTimers();
     try {

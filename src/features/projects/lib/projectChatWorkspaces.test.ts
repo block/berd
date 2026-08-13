@@ -635,6 +635,26 @@ describe("project chat workspaces", () => {
     expect(gitMocks.createBranch).not.toHaveBeenCalled();
   });
 
+  it("turns raw git worktree failures into plain English", async () => {
+    gitMocks.createWorktree.mockRejectedValueOnce(
+      new Error(
+        "git worktree add -b test test /Users/test/repo-worktrees/test failed: fatal: not a valid branch name",
+      ),
+    );
+
+    await expect(
+      planProjectChatWorkspaces(
+        project({
+          projectWorkspaces: [workspace("/repo/builderbot", "worktree")],
+          workingDirs: ["/repo/builderbot"],
+        }),
+        "test test",
+      ),
+    ).rejects.toThrow(
+      "That name can’t be used for a worktree. Use letters, numbers, hyphens, or underscores.",
+    );
+  });
+
   it("rejects configured startup for non-git workspaces before mutating git", async () => {
     gitMocks.getGitState.mockResolvedValue({
       isGitRepo: false,
@@ -780,7 +800,9 @@ describe("project chat workspaces", () => {
         }),
         "chat-123",
       ),
-    ).rejects.toThrow("git lock");
+    ).rejects.toThrow(
+      "Berd couldn’t prepare the project workspace. Try again.",
+    );
 
     expect(gitMocks.deleteBranch).toHaveBeenCalledWith(
       "/repo",
@@ -831,7 +853,9 @@ describe("project chat workspaces", () => {
         }),
         "chat-123",
       ),
-    ).rejects.toThrow("worktree locked");
+    ).rejects.toThrow(
+      "Berd couldn’t prepare the project workspace. Try again.",
+    );
 
     expect(gitMocks.removeWorktree).toHaveBeenCalledWith(
       "/repo",

@@ -38,6 +38,7 @@ import {
   type ProjectInfo,
   type ProjectWorkspace,
   type ProjectWorkspaceStartupMode,
+  isWorktreeStartupMode,
 } from "../api/projects";
 import {
   classifyWorkspaceAttachment,
@@ -80,46 +81,36 @@ function getDefaultProjectName(path: string | null | undefined): string {
   return parts[parts.length - 1] ?? "";
 }
 
+function configuredWorktreeStartupMode(
+  mode: ProjectWorkspaceStartupMode,
+): "ask-worktree" | "auto-worktree" | null {
+  if (mode === "worktree" || mode === "auto-worktree") {
+    return "auto-worktree";
+  }
+  return mode === "ask-worktree" ? mode : null;
+}
+
 function projectWorkspaceStartupModeLabel(
   mode: ProjectWorkspaceStartupMode,
   t: ReturnType<typeof useTranslation<"projects">>["t"],
 ) {
   switch (mode) {
     case "worktree":
-      return t("dialog.workspacePolicy.createWorktree");
+    case "ask-worktree":
+      return t("dialog.workspacePolicy.askWorktree");
+    case "auto-worktree":
+      return t("dialog.workspacePolicy.autoWorktree");
     case "branch":
       return t("dialog.workspacePolicy.createBranch");
     case "none":
-      return t("dialog.workspacePolicy.neither");
+      return t("dialog.workspacePolicy.noWorktree");
   }
 }
 
 function defaultStartupModeForCandidate(
-  candidate: WorkspaceAddCandidate,
-  projectWorkspaces: ProjectWorkspace[] = [],
+  _candidate: WorkspaceAddCandidate,
+  _projectWorkspaces: ProjectWorkspace[] = [],
 ): ProjectWorkspaceStartupMode {
-  const matchingProjectMode = startupModeFromProjectWorkspaceContext(
-    candidate,
-    projectWorkspaces,
-  );
-  if (matchingProjectMode) {
-    return matchingProjectMode;
-  }
-
-  const { kind, repositoryPath, worktreePath } = candidate.classification;
-  if (
-    !repositoryPath ||
-    (worktreePath && !isSameWorkspacePath(repositoryPath, worktreePath))
-  ) {
-    return "none";
-  }
-  if (
-    kind === "repository" ||
-    kind === "git-main-worktree" ||
-    kind === "subdirectory"
-  ) {
-    return "worktree";
-  }
   return "none";
 }
 
@@ -225,19 +216,6 @@ function workspaceStartupModeAppliesToCandidate(
   );
 }
 
-function startupModeFromProjectWorkspaceContext(
-  candidate: WorkspaceAddCandidate,
-  projectWorkspaces: ProjectWorkspace[],
-): ProjectWorkspaceStartupMode | null {
-  for (const workspace of projectWorkspaces) {
-    if (workspaceStartupModeAppliesToCandidate(candidate, workspace)) {
-      return workspace.startupMode;
-    }
-  }
-
-  return null;
-}
-
 function nonNoneStartupModeFromProjectWorkspaceContext(
   candidate: WorkspaceAddCandidate,
   projectWorkspaces: ProjectWorkspace[],
@@ -292,14 +270,6 @@ function hasGitWorkspaceKind(workspace: Pick<ProjectWorkspace, "kind">) {
   );
 }
 
-function canConfigureGitStartup(workspace: ProjectWorkspace): boolean {
-  return Boolean(
-    workspace.repositoryPath ||
-      workspace.worktreePath ||
-      hasGitWorkspaceKind(workspace),
-  );
-}
-
 function workspaceUsesLinkedWorktree(workspace: ProjectWorkspace): boolean {
   if (
     workspace.kind === "git-linked-worktree" ||
@@ -315,28 +285,19 @@ function workspaceUsesLinkedWorktree(workspace: ProjectWorkspace): boolean {
   );
 }
 
-function startupModeOptionsForWorkspace(
-  workspace: ProjectWorkspace,
-): ProjectWorkspaceStartupMode[] {
-  if (!canConfigureGitStartup(workspace)) {
-    return ["none"];
-  }
-
-  return ["none", "worktree", "branch"];
+function startupModeOptionsForWorkspace(): ProjectWorkspaceStartupMode[] {
+  return ["ask-worktree", "auto-worktree"];
 }
 
 function startupModeAllowedForWorkspace(
   workspace: ProjectWorkspace,
   startupMode: ProjectWorkspaceStartupMode,
 ): boolean {
-  return startupModeOptionsForWorkspace(workspace).includes(startupMode);
-}
-
-function sanitizeStartupMode(workspace: ProjectWorkspace): ProjectWorkspace {
-  if (startupModeAllowedForWorkspace(workspace, workspace.startupMode)) {
-    return workspace;
-  }
-  return { ...workspace, startupMode: "none" };
+  return (
+    startupMode === "none" ||
+    hasGitWorkspaceKind(workspace) ||
+    Boolean(workspace.repositoryPath)
+  );
 }
 
 interface CreateProjectDialogProps {
@@ -378,6 +339,8 @@ export function CreateProjectDialog({
   const [projectWorkspaceGitStates, setProjectWorkspaceGitStates] = useState<
     Record<string, GitState>
   >({});
+  const [confirmedNonGitWorkspaceIds, setConfirmedNonGitWorkspaceIds] =
+    useState<Set<string>>(() => new Set());
   const {
     icon,
     iconCandidates,
@@ -446,9 +409,16 @@ export function CreateProjectDialog({
     const results = await Promise.all(
       missingWorkspaces.map(async (workspace) => {
         try {
+          const resolved = await resolvePath({ parts: [workspace.path] });
+          const gitState = await getGitState(resolved.path);
           return {
             key: normalizeComparableWorkspacePath(workspace.path),
-            gitState: await getGitState(workspace.path),
+            workspaceId: workspace.id,
+            classification: classifyWorkspaceAttachment(
+              resolved.path,
+              gitState,
+            ),
+            gitState,
           };
         } catch {
           return null;
@@ -457,9 +427,13 @@ export function CreateProjectDialog({
     );
 
     const nextGitStates: Record<string, GitState> = {};
+    const nextConfirmedNonGitIds = new Set<string>();
     for (const result of results) {
       if (result) {
         nextGitStates[result.key] = result.gitState;
+        if (!result.gitState.isGitRepo) {
+          nextConfirmedNonGitIds.add(result.workspaceId);
+        }
       }
     }
     if (Object.keys(nextGitStates).length === 0) {
@@ -470,6 +444,25 @@ export function CreateProjectDialog({
       ...current,
       ...nextGitStates,
     }));
+    setConfirmedNonGitWorkspaceIds((current) => {
+      const next = new Set(current);
+      for (const workspaceId of nextConfirmedNonGitIds) next.add(workspaceId);
+      return next;
+    });
+    setProjectWorkspaces((current) =>
+      current.map((workspace) => {
+        const result = results.find(
+          (candidate) => candidate?.workspaceId === workspace.id,
+        );
+        if (!result) return workspace;
+        return {
+          ...workspace,
+          ...result.classification,
+          path: workspace.path,
+          startupMode: workspace.startupMode,
+        };
+      }),
+    );
   }, [projectWorkspaceGitStates, projectWorkspaces]);
 
   useEffect(() => {
@@ -564,6 +557,7 @@ export function CreateProjectDialog({
     setProjectWorkspaces([]);
     setWorkingDir("");
     setProjectWorkspaceGitStates({});
+    setConfirmedNonGitWorkspaceIds(new Set());
     setPendingWorktreePolicyWorkspaceId(null);
     resetIcon(DEFAULT_PROJECT_ICON);
     setColor(DEFAULT_PROJECT_COLOR);
@@ -614,8 +608,12 @@ export function CreateProjectDialog({
         }
       }
     }
-    const sanitizedProjectWorkspaces =
-      savedProjectWorkspaces.map(sanitizeStartupMode);
+    const sanitizedProjectWorkspaces = savedProjectWorkspaces.map(
+      (workspace) =>
+        confirmedNonGitWorkspaceIds.has(workspace.id)
+          ? { ...workspace, startupMode: "none" as const }
+          : workspace,
+    );
     const savedWorkingDirs = sanitizedProjectWorkspaces.map(
       (workspace) => workspace.path,
     );
@@ -724,11 +722,7 @@ export function CreateProjectDialog({
           return { ...workspace, startupMode };
         }
 
-        if (
-          !targetSyncKey ||
-          startupMode === "none" ||
-          workspace.startupMode === "none"
-        ) {
+        if (!targetSyncKey || startupMode === "none") {
           return workspace;
         }
 
@@ -844,8 +838,8 @@ export function CreateProjectDialog({
     }
 
     if (
-      startupMode === "worktree" &&
-      workspace.startupMode !== "worktree" &&
+      isWorktreeStartupMode(startupMode) &&
+      !isWorktreeStartupMode(workspace.startupMode) &&
       workspaceUsesLinkedWorktree(workspace)
     ) {
       setPendingWorktreePolicyWorkspaceId(workspace.id);
@@ -1116,14 +1110,17 @@ export function CreateProjectDialog({
                     {enrichedProjectWorkspaces.length > 0 ? (
                       <div className="overflow-hidden rounded-sm bg-card text-card-foreground">
                         {enrichedProjectWorkspaces.map((workspace, index) => {
-                          const gitConfigurable =
-                            canConfigureGitStartup(workspace);
                           const startupModeOptions =
-                            startupModeOptionsForWorkspace(workspace);
+                            startupModeOptionsForWorkspace();
                           const workspaceGitState =
                             projectWorkspaceGitStates[
                               normalizeComparableWorkspacePath(workspace.path)
                             ];
+                          const canConfigureWorktrees =
+                            hasGitWorkspaceKind(workspace) ||
+                            Boolean(workspace.repositoryPath) ||
+                            (!confirmedNonGitWorkspaceIds.has(workspace.id) &&
+                              workspace.startupMode !== "none");
                           return (
                             <div
                               key={workspace.id}
@@ -1133,7 +1130,12 @@ export function CreateProjectDialog({
                                   "border-t border-card-foreground/10",
                               )}
                             >
-                              <div className="min-w-0 flex-1 space-y-2">
+                              <div
+                                className={cn(
+                                  "min-w-0 flex-1 space-y-2",
+                                  !canConfigureWorktrees && "self-center",
+                                )}
+                              >
                                 <button
                                   type="button"
                                   onClick={() =>
@@ -1144,24 +1146,36 @@ export function CreateProjectDialog({
                                       workspace.path,
                                     ),
                                   })}
-                                  className="block w-full rounded-sm text-left outline-none transition-colors hover:bg-card-foreground/[0.03] focus-visible:ring-1 focus-visible:ring-card-foreground/30"
+                                  className="block w-full rounded-sm text-left outline-none focus-visible:ring-1 focus-visible:ring-card-foreground/30"
                                 >
                                   <WorkspaceIdentity
                                     workspace={workspace}
                                     gitState={workspaceGitState}
                                     className="min-w-0"
+                                    iconKind={
+                                      canConfigureWorktrees
+                                        ? "repository"
+                                        : "folder"
+                                    }
+                                    showMetadata={false}
+                                    showHoverChevron={false}
+                                    iconTooltip={t(
+                                      canConfigureWorktrees
+                                        ? "dialog.workspacePolicy.gitFolderTooltip"
+                                        : "dialog.workspacePolicy.regularFolderTooltip",
+                                    )}
                                     iconClassName="text-card-foreground"
                                     titleClassName="text-card-foreground"
-                                    metadataClassName="text-card-foreground/55"
                                   />
                                 </button>
-                                {gitConfigurable ? (
-                                  <div className="max-w-[220px] space-y-1 pl-[22px]">
-                                    <span className="block text-xs leading-none text-card-foreground/55">
-                                      {t("dialog.workspacePolicy.sectionLabel")}
-                                    </span>
+                                {canConfigureWorktrees ? (
+                                  <div className="mt-1 max-w-[260px] pl-[22px]">
                                     <Select
-                                      value={workspace.startupMode}
+                                      value={
+                                        configuredWorktreeStartupMode(
+                                          workspace.startupMode,
+                                        ) ?? "none"
+                                      }
                                       onValueChange={(value) =>
                                         handleWorkspaceStartupModeChange(
                                           workspace.id,
@@ -1178,11 +1192,29 @@ export function CreateProjectDialog({
                                             ),
                                           },
                                         )}
-                                        className="h-8 w-full rounded-[12px] border-0 bg-muted px-2.5 text-xs shadow-none hover:bg-accent-hover"
+                                        className={cn(
+                                          "relative h-8 w-full rounded-sm border border-card-foreground/10 bg-muted px-3 text-sm shadow-none hover:bg-accent-hover focus-visible:ring-0",
+                                          configuredWorktreeStartupMode(
+                                            workspace.startupMode,
+                                          ) === null &&
+                                            "text-card-foreground/40",
+                                        )}
                                       >
-                                        <SelectValue />
+                                        <SelectValue
+                                          placeholder={t(
+                                            "dialog.workspacePolicy.placeholder",
+                                          )}
+                                        />
                                       </SelectTrigger>
                                       <SelectContent>
+                                        <SelectItem
+                                          value="none"
+                                          className="hidden"
+                                        >
+                                          {t(
+                                            "dialog.workspacePolicy.placeholder",
+                                          )}
+                                        </SelectItem>
                                         {startupModeOptions.map((mode) => (
                                           <SelectItem key={mode} value={mode}>
                                             {projectWorkspaceStartupModeLabel(
@@ -1199,6 +1231,7 @@ export function CreateProjectDialog({
                               <Button
                                 type="button"
                                 variant="ghost"
+                                destructive
                                 size="icon-xs"
                                 onClick={() =>
                                   handleRemoveWorkspace(workspace.id)
@@ -1206,7 +1239,12 @@ export function CreateProjectDialog({
                                 aria-label={t("dialog.removeWorkspace", {
                                   name: getWorkspaceDisplayName(workspace.path),
                                 })}
-                                className="mt-0.5 shrink-0 text-muted-foreground hover:text-destructive"
+                                className={cn(
+                                  "shrink-0",
+                                  canConfigureWorktrees
+                                    ? "mt-0.5"
+                                    : "self-center",
+                                )}
                               >
                                 <IconTrash className="size-4" />
                               </Button>

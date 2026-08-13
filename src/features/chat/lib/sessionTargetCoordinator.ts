@@ -1207,6 +1207,25 @@ export function transferSessionTargetOwnership(
   const source = actors.get(fromSessionId);
   if (!source) return;
   actors.delete(fromSessionId);
+  const destination = actors.get(toSessionId);
+  if (destination) {
+    destination.selection ??= source.selection;
+    destination.deferredSelection ??= source.deferredSelection;
+    destination.deferredTargetMutation ??= source.deferredTargetMutation;
+    source.cancelled = true;
+    const pending = new Set(
+      [source.current, source.latest].filter(
+        (operation): operation is PendingOperation => operation !== undefined,
+      ),
+    );
+    for (const operation of pending) {
+      settleOperation(operation, { status: "superseded", applied: false });
+    }
+    source.current = undefined;
+    source.latest = undefined;
+    source.dispatch?.release();
+    return;
+  }
   source.tracksLiveSession = true;
   actors.set(toSessionId, source);
 }

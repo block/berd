@@ -571,6 +571,7 @@ export const designSystemComponentManifest = [
             "xs",
             "default",
             "sm",
+            "compact",
             "lg",
             "icon",
             "icon-xxs",
