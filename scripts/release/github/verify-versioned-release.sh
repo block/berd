@@ -67,7 +67,6 @@ case "$PLATFORM" in
     EXPECTED_ASSETS=(
       "Berd_${VERSION}_${PLATFORM}.AppImage"
       "Berd_${VERSION}_${PLATFORM}.deb"
-      "Berd_${VERSION}_${PLATFORM}.rpm"
     )
     ;;
   *)

@@ -1165,7 +1165,6 @@ describe("write-provenance", () => {
       [
         "Berd_1.2.3_linux-x86_64.AppImage",
         "Berd_1.2.3_linux-x86_64.deb",
-        "Berd_1.2.3_linux-x86_64.rpm",
         "Berd_1.2.3_linux-x86_64.AppImage.tar.gz",
         "Berd_1.2.3_linux-x86_64.AppImage.tar.gz.sig",
         "Berd_1.2.3_linux-x86_64.AppImage.tar.gz.sha256",
@@ -1375,7 +1374,6 @@ describe("reconcile-staged-assets", () => {
     linux_ready: [
       "Berd_1.2.3_linux-x86_64.AppImage",
       "Berd_1.2.3_linux-x86_64.deb",
-      "Berd_1.2.3_linux-x86_64.rpm",
       "Berd_1.2.3_linux-x86_64.AppImage.tar.gz",
       "Berd_1.2.3_linux-x86_64.AppImage.tar.gz.sig",
       "Berd_1.2.3_linux-x86_64.AppImage.tar.gz.sha256",

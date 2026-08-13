@@ -392,12 +392,12 @@ _bundle-unix:
 bundle-macos:
     ./scripts/build_darwin.sh
 
-# Build Linux deb, rpm, and AppImage bundles. Must run on Linux.
+# Build Linux deb and AppImage bundles. Must run on Linux.
 [linux]
 bundle-linux:
     ./scripts/build_linux.sh
 
-# Build Linux deb, rpm, and AppImage bundles inside Docker.
+# Build Linux deb and AppImage bundles inside Docker.
 [linux]
 bundle-linux-docker:
     ./scripts/build_linux_docker.sh

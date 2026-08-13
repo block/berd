@@ -27,7 +27,6 @@ A version `X.Y.Z` publishes architecture-qualified assets for macOS, Windows, an
 - `Berd_X.Y.Z_windows-x86_64-setup.nsis.zip.sha256`
 - `Berd_X.Y.Z_linux-x86_64.AppImage`
 - `Berd_X.Y.Z_linux-x86_64.deb`
-- `Berd_X.Y.Z_linux-x86_64.rpm`
 - `Berd_X.Y.Z_linux-x86_64.AppImage.tar.gz`
 - `Berd_X.Y.Z_linux-x86_64.AppImage.tar.gz.sig`
 - `Berd_X.Y.Z_linux-x86_64.AppImage.tar.gz.sha256`
@@ -43,7 +42,7 @@ Release tags use canonical SemVer without build metadata, such as `v1.2.3` or `v
 3. Run `just release-publish X.Y.Z`. It resolves the PR's squash-merge commit, verifies the committed release state, creates an annotated tag on that exact commit, and pushes only `refs/tags/vX.Y.Z`.
 4. The workflow verifies that the checkout and canonical remote tag resolve to the same main-reachable commit and that the tag is annotated.
 5. It creates or safely resumes an immutable versioned GitHub release using the matching `CHANGELOG.md` section.
-6. The platform jobs produce the macOS app/DMG, Windows NSIS installer, and Linux AppImage/deb/rpm packages.
+6. The platform jobs produce the macOS app/DMG, Windows NSIS installer, and Linux AppImage/deb packages.
 7. The macOS signing action signs, notarizes, and staples its artifacts. The Windows NSIS installer and Linux packages are published without platform-native code signatures.
 8. Each platform produces a minisign-signed updater archive, SHA-256 digest, and attested source-bound provenance receipt. Minisign authenticates the Windows and Linux updater archives even though their enclosed payloads lack platform-native code signatures.
 9. Promotion waits for all three platform jobs and approval in the GitHub `release` environment, then re-downloads and verifies every immutable staged artifact. It rejects version downgrades, rejects changed same-version manifests, and rechecks the rolling manifest immediately before publication.
