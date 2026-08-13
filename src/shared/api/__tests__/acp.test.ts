@@ -209,6 +209,42 @@ describe("acpSendMessage", () => {
     expect(mockPrompt).not.toHaveBeenCalled();
   });
 
+  it("admits a managed-provider prompt without reading live model inventory", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+    sessionRegistry.registerPreparedSession(
+      "acp-session-managed-send",
+      "databricks_v2",
+      "/tmp/project",
+      "goose-gpt-5-5",
+    );
+
+    await acpSendMessage("acp-session-managed-send", "hello");
+
+    expect(mockSupportedModelsList).not.toHaveBeenCalled();
+    expect(mockPrompt).toHaveBeenCalledOnce();
+  });
+
+  it("rejects an out-of-policy provider without reading live model inventory", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+    sessionRegistry.registerPreparedSession(
+      "acp-session-outside-policy",
+      "outside-policy",
+      "/tmp/project",
+      "outside-model",
+    );
+
+    await expect(
+      acpSendMessage("acp-session-outside-policy", "hello"),
+    ).rejects.toThrow("outside the managed Goose provider policy");
+
+    expect(mockSupportedModelsList).not.toHaveBeenCalled();
+    expect(mockPrompt).not.toHaveBeenCalled();
+  });
+
   it("reports dispatch only after ACP setup reaches the transport boundary", async () => {
     const sessionRegistry = await import("../acpSessionRegistry");
     const { acpSendMessage } = await import("../acp");

@@ -28,7 +28,10 @@ import {
   type PersonaHandoffClaim,
 } from "./acpPersonaHandoff";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
-import { resolveValidatedManagedGooseProviderSelection } from "@/shared/runtime-config/modelProviderPolicy";
+import {
+  resolveManagedGooseProviderSelection,
+  resolveValidatedManagedGooseProviderSelection,
+} from "@/shared/runtime-config/modelProviderPolicy";
 import { getStyleGuidelinesPrompt } from "@/shared/preferences/styleGuidelinesPreference";
 import { getBerdctlPreamble } from "@/features/berdctl/appPreamble";
 import { INTERACTION_NORMS_PREAMBLE } from "@/shared/api/interactionNorms";
@@ -182,12 +185,25 @@ async function acpSendMessageNow(
   const sid = sessionId.slice(0, 8);
   const tStart = performance.now();
 
-  const resolvedProvider = (await resolveGooseSessionSelection(providerId))
-    .providerId;
-  if (resolvedProvider !== providerId) {
-    throw new Error(
-      `Session provider ${providerId} is outside the managed Goose provider policy. Re-prepare the session before prompting.`,
-    );
+  if (
+    providerId === "goose" ||
+    CURATED_PROVIDER_CATALOG_BY_ID.get(providerId)?.category !== "agent"
+  ) {
+    const runtimeConfigState = useRuntimeConfigStore.getState();
+    if (runtimeConfigState.result.status === "unavailable") {
+      throw new Error(
+        `Goose provider policy is unavailable: ${runtimeConfigState.result.message}`,
+      );
+    }
+    const resolvedProvider = resolveManagedGooseProviderSelection(
+      runtimeConfigState.config,
+      { providerId },
+    )?.providerId;
+    if (resolvedProvider && resolvedProvider !== providerId) {
+      throw new Error(
+        `Session provider ${providerId} is outside the managed Goose provider policy. Re-prepare the session before prompting.`,
+      );
+    }
   }
 
   // Goose owns prompt assembly and accepts a real system prompt via its ACP
