@@ -1,6 +1,6 @@
-# Free-form issues are disabled on purpose: a well-formed issue is the one way
-# to participate in Berd, so the forms ask for what we need to act on it.
-# See CONTRIBUTING.md.
+# The normal GitHub UI does not offer a blank issue: a well-formed issue is the
+# supported way to participate in Berd, so the forms ask for what we need to act
+# on it. API-created issues remain subject to the same policy. See CONTRIBUTING.md.
 blank_issues_enabled: false
 contact_links:
   - name: Questions about using Berd

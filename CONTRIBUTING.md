@@ -3,9 +3,9 @@
 Berd is developed by a small team at Block, in the open. You can read every line
 of the source, build it yourself, fork it, and tell us when it breaks.
 
-**We do not accept pull requests from outside the maintainer team.** Please do
-not spend your time on one — see [Why we don't take outside PRs](#why-we-dont-take-outside-prs)
-below.
+**We do not accept pull requests from outside authorized repository
+collaborators.** Please do not spend your time on one — see
+[Why we don't take outside PRs](#why-we-dont-take-outside-prs) below.
 
 **The way to participate is to open a well-formed issue.** A good issue is
 genuinely valuable to us and takes real effort to write. This document tells you
@@ -28,14 +28,17 @@ exactly what "well-formed" means.
 
 Open issues at **https://github.com/block/berd/issues/new/choose**.
 
-There are two kinds, and the forms enforce the required fields:
+There are two supported submission paths, and their forms require the fields
+we need to triage:
 
 | Kind | Use it when |
 | --- | --- |
 | **Bug report** | Berd does something other than what it says it does. |
 | **Feature request** | You want Berd to do something it doesn't, or to do something existing noticeably better. |
 
-Free-form issues are disabled. Pick a form.
+The normal GitHub UI does not offer a blank issue. Pick a form. Issues that
+bypass the forms through the API or other tooling are still held to the same
+requirements and may be closed or sent back for missing information.
 
 ### Using an agent
 
@@ -160,9 +163,10 @@ roadmap, and no timeline is promised.
 Your issue will get one of:
 
 - **A label and a place in the queue** — we understand it and it's real.
-- **`needs-info`** — we can't act yet. Answer the questions and it comes back to
-  the queue. If a `needs-info` issue goes quiet for 30 days, we close it; comment
-  any time to reopen.
+- **`needs-info`** — we can't act yet. Answer the questions and a maintainer
+  will review the reply, then remove the label once the issue is actionable. If
+  a `needs-info` issue stays quiet for around 30 days, automation closes it;
+  comment with the missing details any time to request reopening.
 - **Closed as duplicate** — with a link to the original. Follow that thread.
 - **Closed as out of scope** — with a reason. This isn't a judgment on the idea;
   Berd just isn't going to be the thing that does it.
@@ -180,8 +184,9 @@ saves, and it isn't fair to you — we'd be sitting on your work while the groun
 shifts under it.
 
 Anyone can open a PR against a public repo; GitHub offers no way to prevent it.
-So PRs from outside the maintainer team are **closed automatically** with a
-pointer back to this document. That's a policy, not a comment on your code.
+So PRs from outside authorized repository collaborators are **closed
+automatically** with a pointer back to this document. That's a policy, not a
+comment on your code.
 
 What we want from you instead is the issue. A well-researched bug report with
 clean repro steps is worth more to us right now than a patch, because it's the

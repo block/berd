@@ -13,10 +13,10 @@ on:
 permissions:
   contents: read
   issues: write
-  pull-requests: write
 
 jobs:
   stale:
+    if: github.repository == 'block/berd'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/stale@4391f3da665fdf50b6810c1a66712fb9ba21aa93 # v11.0.0
@@ -36,7 +36,8 @@ jobs:
             We still need the information requested above to act on this issue.
             It has been inactive for 23 days, so it will close automatically in
             7 days if there is no reply. Add the missing details in a comment
-            and the countdown will reset.
+            and the countdown will reset. A maintainer will review the answer
+            and remove `needs-info` once the issue is actionable.
           close-issue-message: >-
             Closing because the information we need has not arrived after 30
             days. If you can provide it later, leave a comment with the missing

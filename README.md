@@ -72,7 +72,7 @@ registry contract, storage rules, Tauri guardrails, and test coverage.
 
 Berd is built by a small team at Block, in the open. You can read the source,
 build it, and fork it freely — but **we don't accept pull requests from outside
-the maintainer team**, and outside PRs are closed automatically.
+authorized repository collaborators**, and outside PRs are closed automatically.
 
 The way to participate is to **open a well-formed issue**. A bug report we can
 reproduce is worth more to us than a patch, because it's the part we can't do

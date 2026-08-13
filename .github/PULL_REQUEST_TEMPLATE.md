@@ -1,6 +1,6 @@
 <!--
-  Berd does not accept pull requests from outside the maintainer team, and PRs
-  from outside authors are closed automatically. If that's you: please don't
+  Berd does not accept pull requests from outside authorized repository
+  collaborators, and outside PRs are closed automatically. If that's you: please don't
   spend time on a patch. Open an issue instead — https://github.com/block/berd/blob/main/CONTRIBUTING.md
 -->
 
