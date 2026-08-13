@@ -1,16 +1,13 @@
 import { useEffect, useId, useMemo, useState } from "react";
-import berdIconMask from "@/shared/assets/berd-icon-mask.png";
 import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
 import cardFoil from "@/features/agents/assets/share-card/card-foil.png";
+import berdCardLogo from "@/features/agents/assets/share-card/berd-card-logo.svg";
 import { HolographicAgentCard } from "./HolographicAgentCard";
 import {
   fallbackAgentCardColor,
   sampleAgentAvatarColor,
 } from "./agentCardColor";
-import {
-  deriveAgentCardTraits,
-  stableAgentCardNumber,
-} from "./agentShareCardSpec";
+import { deriveAgentCardTraits } from "./agentShareCardSpec";
 import { deriveAgentShareCardTextLayout } from "./agentShareCardLayout";
 
 function createAgentCardTextMeasure() {
@@ -173,43 +170,18 @@ export function AgentShareCardPreview({
         className="absolute inset-0 z-[4] size-full"
         viewBox="0 0 1227 1839"
       >
-        <defs>
-          <filter id={markFilterId} colorInterpolationFilters="sRGB">
-            <feColorMatrix
-              type="matrix"
-              values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"
-            />
-          </filter>
-        </defs>
-        <image
-          href={berdIconMask}
-          x="120"
-          y="122"
-          width="38"
-          height="38"
-          filter={`url(#${markFilterId})`}
-        />
-        <text
-          x="173"
-          y="153"
-          fill="black"
-          fontFamily="Inter, sans-serif"
-          fontSize="36"
-          fontWeight="600"
-        >
-          {/* i18n-check-ignore: fixed brand text embedded in shareable card artwork */}
-          BERD AGENT
-        </text>
+        <image href={berdCardLogo} x="120" y="122" width="40" height="40" />
         <text
           x="1110"
           y="153"
           fill="black"
           fontFamily="Inter, sans-serif"
-          fontSize="42"
+          fontSize="36"
           fontWeight="600"
           textAnchor="end"
         >
-          {stableAgentCardNumber(identity)}
+          {/* i18n-check-ignore: fixed brand text embedded in shareable card artwork */}
+          BERD AGENT
         </text>
 
         <image

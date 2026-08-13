@@ -1,5 +1,5 @@
 import cardFoil from "@/features/agents/assets/share-card/card-foil.png";
-import berdIconMask from "@/shared/assets/berd-icon-mask.png";
+import berdCardLogo from "@/features/agents/assets/share-card/berd-card-logo.svg";
 import type { ResolvedAvatarMedia } from "@/shared/avatars/catalog";
 import type { Persona } from "@/shared/types/agents";
 import {
@@ -10,7 +10,6 @@ import {
   AGENT_CARD_HEIGHT,
   AGENT_CARD_WIDTH,
   deriveAgentCardTraits,
-  stableAgentCardNumber,
 } from "./agentShareCardSpec";
 import {
   deriveAgentShareCardTextLayout,
@@ -222,7 +221,7 @@ export async function renderAgentShareCard(
   const [base, avatar, berdMark] = await Promise.all([
     loadShareCardImage(cardBase),
     loadShareCardImage(avatarSrc),
-    loadShareCardImage(berdIconMask),
+    loadShareCardImage(berdCardLogo),
   ]);
   const canvas = document.createElement("canvas");
   canvas.width = AGENT_CARD_WIDTH;
@@ -247,28 +246,14 @@ export async function renderAgentShareCard(
   context.fill();
   context.restore();
 
-  // The source mark is an alpha mask. Drawing it with source-in makes a black
-  // Berd mark without needing a second card-only brand asset.
-  const markCanvas = document.createElement("canvas");
-  markCanvas.width = 38;
-  markCanvas.height = 38;
-  const markContext = markCanvas.getContext("2d");
-  if (!markContext) throw new Error("Card rendering is unavailable");
-  markContext.drawImage(berdMark, 0, 0, 38, 38);
-  markContext.globalCompositeOperation = "source-in";
-  markContext.fillStyle = "black";
-  markContext.fillRect(0, 0, 38, 38);
-  context.drawImage(markCanvas, 120, 122);
+  context.drawImage(berdMark, 120, 122, 40, 40);
 
   await loadCardFonts();
   context.fillStyle = "black";
   context.textBaseline = "alphabetic";
   context.font = "600 36px Inter, sans-serif";
-  context.textAlign = "left";
-  context.fillText("BERD AGENT", 173, 153);
-  context.font = "600 42px Inter, sans-serif";
   context.textAlign = "right";
-  context.fillText(stableAgentCardNumber(persona.id), 1110, 153);
+  context.fillText("BERD AGENT", 1110, 153);
 
   // Berd avatars are character illustrations, not portrait photographs. Keep
   // the full artwork visible instead of applying Buzz's circular cover crop.
