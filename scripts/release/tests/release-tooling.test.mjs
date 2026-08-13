@@ -285,9 +285,9 @@ describe("release publishing", () => {
     const releaseHead = f.git(["rev-parse", "HEAD"]).stdout.trim();
     expect(f.git(["switch", "main"]).status).toBe(0);
     expect(f.git(["merge", "--squash", "release/v0.6.0-rc.1"]).status).toBe(0);
-    expect(f.git(["commit", "-m", "chore: release v0.6.0-rc.1"]).status).toBe(
-      0,
-    );
+    expect(
+      f.git(["commit", "-m", "chore: release v0.6.0-rc.1 (#123)"]).status,
+    ).toBe(0);
     const mergeSha = f.git(["rev-parse", "HEAD"]).stdout.trim();
     expect(mergeSha).not.toBe(releaseHead);
     expect(f.git(["push", "origin", "main"]).status).toBe(0);

@@ -774,7 +774,10 @@ async function publish(version) {
   const mergeTitle = run("git", ["show", "-s", "--format=%s", mergeSha], {
     cwd: root,
   });
-  if (mergeTitle !== subject) fail(`merge commit title is not '${subject}'`);
+  const githubMergeTitle = `${subject} (#${pr.number})`;
+  if (mergeTitle !== subject && mergeTitle !== githubMergeTitle) {
+    fail(`merge commit title does not match PR #${pr.number}`);
+  }
   await checkVersions({ root, expected: version, ref: mergeSha });
   const sourceConfig = await releaseConfig(gitReader(root, mergeSha));
   validateMinimumPublicVersion(version, sourceConfig);
