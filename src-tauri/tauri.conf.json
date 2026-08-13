@@ -64,7 +64,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg", "deb", "rpm", "appimage"],
+    "targets": ["app", "dmg", "deb", "appimage"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -87,9 +87,6 @@
     "linux": {
       "deb": {
         "depends": ["libvulkan1"]
-      },
-      "rpm": {
-        "depends": ["vulkan-loader"]
       }
     },
     "macOS": {

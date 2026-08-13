@@ -26,10 +26,19 @@ validate_source_sha "$SOURCE_SHA" || exit 1
   exit 1
 }
 
+changelog_path="${BERD_CHANGELOG_PATH:-$REPO_ROOT/CHANGELOG.md}"
+changelog_notes="$(
+  node "$REPO_ROOT/scripts/release/release.mjs" \
+    changelog-notes "$VERSION" "$changelog_path"
+)"
+notes="$(printf '%s\n\n---\n\nSource commit: `%s`\n\nThe Windows NSIS installer and Linux packages lack platform-native code signatures; their updater archives remain minisign-authenticated.\n' "$changelog_notes" "$SOURCE_SHA")"
+
 if gh release view "$TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
-  existing_release="$(gh release view "$TAG" --repo "$REPOSITORY" --json tagName,isDraft)"
+  existing_release="$(gh release view "$TAG" --repo "$REPOSITORY" --json tagName,isDraft,name,body)"
   existing_tag="$(jq -r .tagName <<< "$existing_release")"
   is_draft="$(jq -r .isDraft <<< "$existing_release")"
+  existing_name="$(jq -r .name <<< "$existing_release")"
+  existing_body="$(jq -r .body <<< "$existing_release")"
   [[ "$existing_tag" == "$TAG" ]] || {
     release_error "existing release tag mismatch: $existing_tag"
     exit 1
@@ -38,13 +47,20 @@ if gh release view "$TAG" --repo "$REPOSITORY" >/dev/null 2>&1; then
     release_error "existing versioned release must not be a draft: $TAG"
     exit 1
   }
+  [[ "$existing_name" == "Berd v$VERSION" ]] || {
+    release_error "existing release title mismatch: $existing_name"
+    exit 1
+  }
+  [[ "$existing_body" == "$notes" ]] || {
+    release_error "existing release notes do not match CHANGELOG.md: $TAG"
+    exit 1
+  }
   echo "Using existing versioned release $TAG"
 else
   prerelease=()
   if [[ "$VERSION" == *-* ]]; then
     prerelease=(--prerelease --latest=false)
   fi
-  notes="$(printf 'Berd v%s\n\nSource commit: `%s`\n\nThe Windows NSIS installer and Linux packages lack platform-native code signatures; their updater archives remain minisign-authenticated.\n' "$VERSION" "$SOURCE_SHA")"
   gh release create "$TAG" \
     --repo "$REPOSITORY" \
     --verify-tag \

@@ -23,6 +23,6 @@ require rustc
 require jq
 
 # Tauri reads src-tauri/tauri.conf.json and emits the configured Linux bundles:
-# deb, rpm, and AppImage. System packages such as webkitgtk, librsvg, rpm, and
-# appimage tooling still need to be provided by the Linux builder image.
+# deb and AppImage. System packages such as webkitgtk, librsvg, and appimage
+# tooling still need to be provided by the Linux builder image.
 exec just bundle

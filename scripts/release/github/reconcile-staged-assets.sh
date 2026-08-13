@@ -49,8 +49,7 @@ platform_assets() {
     linux-*)
       printf '%s\n' \
         "Berd_${VERSION}_${platform}.AppImage" \
-        "Berd_${VERSION}_${platform}.deb" \
-        "Berd_${VERSION}_${platform}.rpm"
+        "Berd_${VERSION}_${platform}.deb"
       ;;
   esac
   printf '%s\n' "$archive" "$archive.sig" "$archive.sha256" "$provenance"

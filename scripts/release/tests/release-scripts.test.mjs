@@ -16,7 +16,7 @@ import { parse as parseYaml } from "yaml";
 
 const repo = resolve(import.meta.dirname, "../../..");
 const tempDirs = [];
-const releaseRepositoryEnv = { BERD_REPO: "squareup/berd" };
+const releaseRepositoryEnv = { BERD_REPO: "block/berd" };
 
 async function tempDir() {
   const path = await mkdtemp(join(tmpdir(), "berd-release-test-"));
@@ -1165,7 +1165,6 @@ describe("write-provenance", () => {
       [
         "Berd_1.2.3_linux-x86_64.AppImage",
         "Berd_1.2.3_linux-x86_64.deb",
-        "Berd_1.2.3_linux-x86_64.rpm",
         "Berd_1.2.3_linux-x86_64.AppImage.tar.gz",
         "Berd_1.2.3_linux-x86_64.AppImage.tar.gz.sig",
         "Berd_1.2.3_linux-x86_64.AppImage.tar.gz.sha256",
@@ -1226,12 +1225,24 @@ describe("ensure-versioned-release", () => {
     existing = false,
     annotated = false,
     resolvedSha = "a".repeat(40),
-    releaseJson = '{"tagName":"v1.2.3","isDraft":false}',
+    releaseJson,
   } = {}) {
     const dir = await tempDir();
     const bin = join(dir, "bin");
     const calls = join(dir, "calls");
+    const changelog = join(dir, "CHANGELOG.md");
     await mkdir(bin);
+    await writeFile(
+      changelog,
+      `# Changelog\n\n## [v1.2.3](https://github.com/block/berd/releases/tag/v1.2.3) - 2026-08-12\n\nstable notes\n\n## [v1.2.3-rc.1](https://github.com/block/berd/releases/tag/v1.2.3-rc.1) - 2026-08-11\n\nrc notes\n`,
+    );
+    const expectedBody = `stable notes\n\n---\n\nSource commit: \`${"a".repeat(40)}\`\n\nThe Windows NSIS installer and Linux packages lack platform-native code signatures; their updater archives remain minisign-authenticated.`;
+    releaseJson ??= JSON.stringify({
+      tagName: "v1.2.3",
+      isDraft: false,
+      name: "Berd v1.2.3",
+      body: expectedBody,
+    });
     await writeFile(
       join(bin, "gh"),
       `#!/usr/bin/env bash
@@ -1239,7 +1250,7 @@ set -euo pipefail
 printf '%s\\n' "$*" >> "$CALLS"
 if [[ "$1 $2" == "release view" ]]; then
   if [[ "$EXISTING" != true ]]; then exit 1; fi
-  if [[ "$*" == *"--json tagName,isDraft"* ]]; then
+  if [[ "$*" == *"--json tagName,isDraft,name,body"* ]]; then
     printf '%s' "$RELEASE_JSON"
   fi
 elif [[ "$1 $2" == "release create" ]]; then
@@ -1257,13 +1268,21 @@ fi
 `,
       { mode: 0o755 },
     );
-    return { bin, calls, existing, annotated, resolvedSha, releaseJson };
+    return {
+      bin,
+      calls,
+      changelog,
+      existing,
+      annotated,
+      resolvedSha,
+      releaseJson,
+    };
   }
 
   function ensure(f, version = "1.2.3") {
     return run(
       "scripts/release/github/ensure-versioned-release.sh",
-      ["squareup/berd", `v${version}`, version, "a".repeat(40)],
+      ["block/berd", `v${version}`, version, "a".repeat(40)],
       {
         PATH: `${f.bin}:${process.env.PATH}`,
         CALLS: f.calls,
@@ -1271,6 +1290,7 @@ fi
         ANNOTATED: String(f.annotated),
         RESOLVED_SHA: f.resolvedSha,
         RELEASE_JSON: f.releaseJson,
+        BERD_CHANGELOG_PATH: f.changelog,
         GH_TOKEN: "test-token",
         ...releaseRepositoryEnv,
       },
@@ -1317,6 +1337,21 @@ fi
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain(error);
   });
+
+  it("rejects existing GitHub release notes that drift from the changelog", async () => {
+    const f = await fixture({
+      existing: true,
+      releaseJson: JSON.stringify({
+        tagName: "v1.2.3",
+        isDraft: false,
+        name: "Berd v1.2.3",
+        body: "stale notes",
+      }),
+    });
+    const result = ensure(f);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("do not match CHANGELOG.md");
+  });
 });
 
 describe("reconcile-staged-assets", () => {
@@ -1339,7 +1374,6 @@ describe("reconcile-staged-assets", () => {
     linux_ready: [
       "Berd_1.2.3_linux-x86_64.AppImage",
       "Berd_1.2.3_linux-x86_64.deb",
-      "Berd_1.2.3_linux-x86_64.rpm",
       "Berd_1.2.3_linux-x86_64.AppImage.tar.gz",
       "Berd_1.2.3_linux-x86_64.AppImage.tar.gz.sig",
       "Berd_1.2.3_linux-x86_64.AppImage.tar.gz.sha256",
@@ -1378,7 +1412,7 @@ fi
   function reconcile(f) {
     return run(
       "scripts/release/github/reconcile-staged-assets.sh",
-      ["squareup/berd", "v1.2.3", "1.2.3", f.output],
+      ["block/berd", "v1.2.3", "1.2.3", f.output],
       {
         PATH: `${f.bin}:${process.env.PATH}`,
         CALLS: f.calls,
@@ -1462,7 +1496,7 @@ fi
   function upload(fixture, assets) {
     return run(
       "scripts/release/github/upload-immutable-assets.sh",
-      ["squareup/berd", "v1.2.3", ...assets],
+      ["block/berd", "v1.2.3", ...assets],
       {
         PATH: `${fixture.bin}:${process.env.PATH}`,
         REMOTE: fixture.remote,
@@ -1528,7 +1562,9 @@ describe("verify-release-ref", () => {
     await writeFile(join(checkout, "source"), "immutable");
     expect(git(["add", "source"]).status).toBe(0);
     expect(git(["commit", "-m", "source"]).status).toBe(0);
-    expect(git(["tag", "--no-sign", "v1.2.3"]).status).toBe(0);
+    expect(
+      git(["tag", "--annotate", "--no-sign", "v1.2.3", "-m", "release"]).status,
+    ).toBe(0);
     expect(git(["remote", "add", "origin", remote]).status).toBe(0);
     expect(git(["push", "origin", "HEAD", "refs/tags/v1.2.3"]).status).toBe(0);
     const verifyEnv = {
@@ -1666,7 +1702,7 @@ fi
         GH_PAGER: "/bin/cat",
         PAGER: "/bin/cat",
         GH_TOKEN: "test-token",
-        REPOSITORY: "squareup/berd",
+        REPOSITORY: "block/berd",
         VERSION: "1.2.3",
         PLATFORM: "darwin-aarch64",
       },
@@ -1817,8 +1853,9 @@ fi
     await writeFile(
       channelConfig,
       JSON.stringify({
-        repository: "squareup/berd",
+        repository: "block/berd",
         rollingTag: "berd-desktop-latest",
+        minimumPublicVersion: "0.6.0-rc.1",
         platforms: ["darwin-aarch64"],
       }),
     );
@@ -1846,7 +1883,7 @@ fi
         PATH: `${f.bin}:${process.env.PATH}`,
         GH_TOKEN: "test-token",
         BERD_UPDATER_PUBLIC_KEY: "test-public-key",
-        GITHUB_REPOSITORY: "squareup/berd",
+        GITHUB_REPOSITORY: "block/berd",
         STAGED_ARCHIVE: f.archive,
         CALLS: f.calls,
         PUBLISHED_MANIFEST: f.publishedManifest,

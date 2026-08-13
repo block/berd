@@ -24,7 +24,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     patchelf \
     protobuf-compiler \
-    rpm \
     xz-utils \
     zstd \
   && if apt-cache show libwebkit2gtk-4.1-dev >/dev/null 2>&1; then \

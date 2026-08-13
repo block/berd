@@ -110,7 +110,7 @@ fi
 
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR"
-find "$bundle_dir" -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+find "$bundle_dir" -type f \( -name '*.deb' -o -name '*.AppImage' \) \
   -exec cp '{}' "$OUTPUT_DIR/" \;
 
 echo "Linux Docker bundle artifacts:"

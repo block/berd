@@ -228,7 +228,7 @@ _tauri-test-windows:
     just _tauri-cargo-windows test -p berdctl
 
 # Run the local CI gate.
-ci: check tauri-fmt-check tauri-check tauri-test clippy test release-scripts-test build
+ci: release-version-check check tauri-fmt-check tauri-check tauri-test clippy test release-scripts-test build
 
 # Native x64 MSVC CI gate for the managed Node runtime + ACP bridge.
 # Runs the managed_node / managed_acp_tools module tests (including the
@@ -240,6 +240,28 @@ ci-windows:
 # Run release/updater script tests.
 release-scripts-test:
     pnpm test:release-scripts
+
+# Verify lockstep app, CLI, plugin, and Cargo.lock versions. An expected version
+# also requires the matching linked CHANGELOG.md entry.
+release-version-check expected="":
+    node scripts/release/release.mjs version-check {{ quote(expected) }}
+
+# Focused validation used by release preparation and release PRs.
+release-validate expected="":
+    node scripts/release/release.mjs version-check {{ quote(expected) }}
+    cargo metadata --locked --no-deps --format-version 1 --manifest-path src-tauri/Cargo.toml >/dev/null
+    pnpm test:release-scripts
+
+# Generate and approve notes, then prepare, push, and open a release PR.
+# This never merges or tags.
+[unix]
+release-prepare version:
+    node scripts/release/release.mjs prepare {{ quote(version) }}
+
+# Sign and publish the immutable tag for an already squash-merged release PR.
+[unix]
+release-publish version:
+    node scripts/release/release.mjs publish {{ quote(version) }}
 
 # Create or verify the immutable GitHub release for a tag.
 [unix]
@@ -370,12 +392,12 @@ _bundle-unix:
 bundle-macos:
     ./scripts/build_darwin.sh
 
-# Build Linux deb, rpm, and AppImage bundles. Must run on Linux.
+# Build Linux deb and AppImage bundles. Must run on Linux.
 [linux]
 bundle-linux:
     ./scripts/build_linux.sh
 
-# Build Linux deb, rpm, and AppImage bundles inside Docker.
+# Build Linux deb and AppImage bundles inside Docker.
 [linux]
 bundle-linux-docker:
     ./scripts/build_linux_docker.sh
@@ -576,7 +598,7 @@ bump-goose ref="main":
 bump-node-runtime *ARGS:
     node scripts/update-node-runtime-lock.mjs {{ ARGS }}
 
-# Generate release notes from commits since the previous release tag (formatting guidelines: scripts/release-notes-prompt.md).
+# Draft release notes from commits without mutating GitHub.
 [unix]
 release-notes from="" to="HEAD":
     FROM_REF="{{ from }}" TO_REF="{{ to }}" ./scripts/generate-release-notes.sh
