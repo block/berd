@@ -630,57 +630,14 @@ describe("NavigationPanesView", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the sidebar search field by default", () => {
+  it("does not show a search field in the sidebar", () => {
     renderSidebar();
 
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("searchbox", { name: "Jump to a chat" }),
-    ).toHaveAttribute("spellcheck", "false");
-    expect(
-      screen.getByRole("searchbox", { name: "Jump to a chat" }),
-    ).toHaveAttribute("autocorrect", "off");
-    expect(
-      screen.getByRole("searchbox", { name: "Jump to a chat" }),
-    ).toHaveAttribute("autocapitalize", "none");
-    expect(
-      screen.queryByRole("button", { name: "Clear" }),
+      screen.queryByRole("button", { name: "Jump to a chat" }),
     ).not.toBeInTheDocument();
     expect(screen.getByTestId("nav-settings")).toHaveAccessibleName("Settings");
-  });
-
-  it("clears the sidebar search query with the clear button", async () => {
-    const user = userEvent.setup();
-    renderSidebar();
-
-    const search = screen.getByRole("searchbox", { name: "Jump to a chat" });
-    await user.type(search, "profile");
-    await user.click(screen.getByRole("button", { name: "Clear" }));
-
-    expect(search).toHaveValue("");
-    expect(search).toHaveFocus();
-    expect(
-      screen.queryByRole("button", { name: "Clear" }),
-    ).not.toBeInTheDocument();
-    expect(screen.getByTestId("nav-settings")).toBeInTheDocument();
-  });
-
-  it("selects a filtered chat before search collapses on blur", async () => {
-    const user = userEvent.setup();
-    const onSelectSession = vi.fn();
-    seedSessions({
-      id: "profile-chat",
-      title: "Profile polish",
-      updatedAt: "2026-04-09T12:00:00.000Z",
-      messageCount: 3,
-    });
-
-    renderSidebar({ onSelectSession });
-
-    const search = screen.getByRole("searchbox", { name: "Jump to a chat" });
-    await user.type(search, "profile");
-    await user.click(screen.getByRole("button", { name: "Profile polish" }));
-
-    expect(onSelectSession).toHaveBeenCalledWith("profile-chat");
   });
 
   it("moves roving focus through main sidebar rows", () => {

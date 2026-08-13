@@ -368,7 +368,7 @@ export function NavigationPanesView({
         onSettingsSectionChange={onSettingsSectionChange}
         renderInlineSessionList={
           !collapsed
-            ? (searchQuery) => (
+            ? () => (
                 <SessionListCapability
                   activeSessionId={activeSessionId}
                   collapsed={collapsed}
@@ -391,7 +391,6 @@ export function NavigationPanesView({
                   onSelectSession={onSelectSession}
                   onSessionSelectForScroll={handleSessionSelectForScroll}
                   projects={projects}
-                  searchQuery={searchQuery}
                   surface={{
                     renderDragHandle: () => null,
                     showTopDivider: true,

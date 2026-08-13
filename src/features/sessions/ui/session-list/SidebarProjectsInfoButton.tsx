@@ -72,9 +72,8 @@ export function useSidebarProjectsInfoMoment({
  * explains what projects are. Render only while the accompanying
  * `useSidebarProjectsInfoMoment` reports `visible`. Exposure is recorded
  * here, on mount, rather than in the hook: the hook also runs when the
- * sidebar is collapsed or in flat/search mode, where the header suppresses
- * the adornment, and those hidden passes must not consume the moment's
- * limited exposures.
+ * sidebar is hidden or the Projects header is not rendered, and those hidden
+ * passes must not consume the moment's limited exposures.
  */
 export function SidebarProjectsInfoButton({
   moment,
