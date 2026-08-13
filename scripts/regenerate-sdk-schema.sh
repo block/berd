@@ -59,7 +59,11 @@ fi
 log "Building generate-acp-schema."
 (
   cd "$goose_repo"
+  # Same opt-level as ensure-local-goose.sh: a differing profile would
+  # invalidate the shared target dir's fingerprints on every alternation
+  # between the binary build and this generator build.
   CARGO_TARGET_DIR="$goose_cargo_target_dir" \
+    CARGO_PROFILE_DEV_OPT_LEVEL="$goose_dev_opt_level" \
     cargo build -p goose --bin generate-acp-schema
 )
 
