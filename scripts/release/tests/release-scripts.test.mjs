@@ -868,6 +868,12 @@ describe("desktop release workflow platform gate", () => {
     expect(workflow).toMatch(/env:\r?\n\s+JUST_UNSTABLE: ["']1["']/);
     expect(workflow).toContain("node-version: 24.10.0");
     expect(workflow).toContain("corepack prepare pnpm@10.33.0 --activate");
+    expect(workflow).toContain(
+      "codesign --force --deep --sign - release/macos/Berd.app",
+    );
+    expect(workflow).toContain(
+      "codesign --verify --deep --strict --verbose=2 release/macos/Berd.app",
+    );
     expect(workflow).toContain("just bundle-windows nsis");
     expect(workflow).not.toContain("just setup-windows");
     expect(workflow).toContain(

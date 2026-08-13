@@ -75,6 +75,8 @@ jobs:
         run: |
           set -euo pipefail
           scripts/release/build-macos.sh
+          codesign --force --deep --sign - release/macos/Berd.app
+          codesign --verify --deep --strict --verbose=2 release/macos/Berd.app
           scripts/package-macos-dmg.sh release/macos/Berd.app release/macos/Berd-unsigned.dmg
 
       - name: Validate unsigned Windows packaging scripts
