@@ -44,7 +44,6 @@ activate_hermit() {
   . "$REPO_ROOT/bin/activate-hermit"
 }
 
-SEMVER_PATTERN='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$'
 RELEASE_PLATFORM_PATTERN='^(darwin-(aarch64|x86_64)|windows-x86_64|linux-x86_64)$'
 REPOSITORY_PATTERN='^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'
 ROLLING_TAG_PATTERN='^[A-Za-z0-9_.-]+$'
@@ -64,7 +63,7 @@ trim_whitespace() {
 
 validate_release_version() {
   local version="$1"
-  [[ "$version" =~ $SEMVER_PATTERN ]] ||
+  node "$REPO_ROOT/scripts/release/version.mjs" validate "$version" >/dev/null ||
     release_error "refusing to use non-canonical semver without build metadata: $version"
 }
 
@@ -166,6 +165,7 @@ load_release_channel() {
   fi
   RELEASE_REPOSITORY="$(jq -er '.repository' "$config")"
   RELEASE_ROLLING_TAG="$(jq -er '.rollingTag' "$config")"
+  RELEASE_MINIMUM_PUBLIC_VERSION="$(jq -er '.minimumPublicVersion' "$config")"
   RELEASE_PLATFORMS=()
   while IFS= read -r platform; do
     [[ -n "$platform" ]] && RELEASE_PLATFORMS+=("$platform")
@@ -183,6 +183,7 @@ load_release_channel() {
   )
   validate_repository "$RELEASE_REPOSITORY"
   validate_rolling_tag "$RELEASE_ROLLING_TAG"
+  validate_release_version "$RELEASE_MINIMUM_PUBLIC_VERSION"
   local platform seen_platforms='|'
   for platform in "${RELEASE_PLATFORMS[@]}"; do
     validate_release_platform "$platform" || return 1
@@ -192,6 +193,14 @@ load_release_channel() {
     }
     seen_platforms="${seen_platforms}${platform}|"
   done
+}
+
+validate_minimum_public_version() {
+  local version="$1"
+  local config="${2:-}"
+  load_release_channel "$config"
+  node "$REPO_ROOT/scripts/release/version.mjs" at-least \
+    "$version" "$RELEASE_MINIMUM_PUBLIC_VERSION"
 }
 
 release_input_version() {

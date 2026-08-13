@@ -6,11 +6,13 @@ The endpoint and verification key form one trust contract. `scripts/release/buil
 
 ## Feed and assets
 
-The release boundary is centralized in `scripts/release/release-channel.json`. While the repository remains at `squareup/berd`, its rolling release endpoint is:
+The release boundary is centralized in `scripts/release/release-channel.json`. The rolling release endpoint is:
 
-`https://github.com/squareup/berd/releases/download/berd-desktop-latest/latest.json`
+`https://github.com/block/berd/releases/download/berd-desktop-latest/latest.json`
 
-The repository is expected to move to `block/berd`. Update the repository value and derived URLs only as part of that transfer so documentation and shipped clients continue to match the active release location.
+Public releases must be at least `0.6.0-rc.1`. The app, bundled `berdctl`,
+internal `tauri-plugin-berdctl`, their Cargo lock entries, and the changelog are
+validated at the immutable tag before GitHub creates a release.
 
 A version `X.Y.Z` publishes architecture-qualified assets for macOS, Windows, and Linux:
 
@@ -36,14 +38,17 @@ The updater manifest contains `darwin-aarch64`, `windows-x86_64`, and `linux-x86
 
 Release tags use canonical SemVer without build metadata, such as `v1.2.3` or `v1.2.3-rc.1`.
 
-1. An authorized maintainer creates and pushes a protected `v<semver>` tag.
-2. The workflow verifies that the checkout, local tag, and canonical remote tag resolve to the same commit.
-3. It creates or safely resumes an immutable versioned GitHub release.
-4. The platform jobs produce the macOS app/DMG, Windows NSIS installer, and Linux AppImage/deb/rpm packages.
-5. The macOS signing action signs, notarizes, and staples its artifacts. The Windows NSIS installer and Linux packages are published without platform-native code signatures.
-6. Each platform produces a minisign-signed updater archive, SHA-256 digest, and attested source-bound provenance receipt. Minisign authenticates the Windows and Linux updater archives even though their enclosed payloads lack platform-native code signatures.
-7. Promotion waits for all three platform jobs and approval in the GitHub `release` environment, then re-downloads and verifies every immutable staged artifact. It rejects version downgrades, rejects changed same-version manifests, and rechecks the rolling manifest immediately before publication.
-8. The promotion script uploads all three platform payloads and uploads a three-platform `latest.json` last.
+1. Draft notes with `just release-notes ... output=/tmp/vX.Y.Z.md`, then review the Markdown.
+2. Run `just release-prepare X.Y.Z /tmp/vX.Y.Z.md`. It creates `release/vX.Y.Z`, synchronizes every release version and Cargo lock entry, updates `CHANGELOG.md`, validates, commits, pushes, and opens a PR.
+3. Review and squash-merge the release PR after CI passes.
+4. Run `just release-publish X.Y.Z`. It resolves the PR's squash-merge commit, verifies the committed release state, creates an annotated tag on that exact commit, and pushes only `refs/tags/vX.Y.Z`.
+5. The workflow verifies that the checkout and canonical remote tag resolve to the same main-reachable commit and that the tag is annotated.
+6. It creates or safely resumes an immutable versioned GitHub release using the matching `CHANGELOG.md` section.
+7. The platform jobs produce the macOS app/DMG, Windows NSIS installer, and Linux AppImage/deb/rpm packages.
+8. The macOS signing action signs, notarizes, and staples its artifacts. The Windows NSIS installer and Linux packages are published without platform-native code signatures.
+9. Each platform produces a minisign-signed updater archive, SHA-256 digest, and attested source-bound provenance receipt. Minisign authenticates the Windows and Linux updater archives even though their enclosed payloads lack platform-native code signatures.
+10. Promotion waits for all three platform jobs and approval in the GitHub `release` environment, then re-downloads and verifies every immutable staged artifact. It rejects version downgrades, rejects changed same-version manifests, and rechecks the rolling manifest immediately before publication.
+11. The promotion script uploads all three platform payloads and uploads a three-platform `latest.json` last.
 
 Uploading the manifest last keeps installed clients on the previous release if staging or verification fails. Rollback is a new, higher patch release containing reverted code rather than a lower manifest version.
 
@@ -55,12 +60,12 @@ Recovery is limited to the same immutable tag and source:
 
 ```bash
 gh workflow run release.yml \
-  --repo squareup/berd \
+  --repo block/berd \
   --ref v1.2.3 \
   -f tag=v1.2.3
 ```
 
-Change `--repo` to `block/berd` after the repository transfer. Recovery verifies the selected tag. A complete platform payload is reused only after its attested receipt is checked during promotion; an incomplete platform payload is deleted as a unit and rebuilt before promotion.
+Recovery verifies the selected tag and is source-bound to that immutable tag and commit. A complete platform payload is reused only after its attested receipt is checked during promotion; an incomplete platform payload is deleted as a unit and rebuilt before promotion.
 
 ## Downstream distributions
 
@@ -74,14 +79,17 @@ configuration, stamps the suffixed version, stages resources, and builds the
 unsigned app; distribution-specific orchestration and artifact destinations do
 not live in this repository.
 
-## Repository transfer
+## GitHub repository setup
 
-When the repository moves from `squareup/berd` to `block/berd`:
+`block/berd` must have a `release` environment that requires maintainer review,
+prevents self-approval, and allows deployments only from `v*` tags. Configure
+the `BERD_UPDATER_PUBLIC_KEY`, `TAURI_SIGNING_PRIVATE_KEY`,
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `OSX_CODESIGN_ROLE`, and
+`CODESIGN_S3_BUCKET` secrets used by the workflow.
 
-1. Update `repository` in `scripts/release/release-channel.json`.
-2. Recreate the release environment, updater and macOS signing configuration, and protected tag rules at the destination.
-3. Preserve updater feed and signing-key continuity for already-installed builds. If release-asset URLs do not redirect after transfer, publish a bridge release or retain the old rolling feed.
-4. Run a non-promoting tagged rehearsal, approve promotion, and verify anonymous archive and manifest access before announcing the new feed.
+Protect `v*` with paired repository rulesets: one restricts tag creation to
+release maintainers, while the other has no bypass and blocks tag updates,
+deletion, and force changes.
 
 ## Verification before promotion
 
@@ -99,6 +107,8 @@ When the repository moves from `squareup/berd` to `block/berd`:
 |---|---|
 | `scripts/release/release-channel.json` | Repository, rolling tag, and platform boundary |
 | `scripts/release/lib.sh` | Release validation, naming, paths, and explicit inputs |
+| `scripts/release/version.mjs` | Shared canonical SemVer parsing and comparison |
+| `scripts/release/release.mjs` | Lockstep version checks and prepare/publish maintainer commands |
 | `scripts/release/build-macos.sh` | Version, resources, sidecar, and macOS build |
 | `scripts/release/build-tauri-release-config.mjs` | Fail-closed updater profile overlay |
 | `scripts/release/package-signed-updater.sh` | macOS signed-app verification, archive, signature, and digest |

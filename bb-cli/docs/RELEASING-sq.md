@@ -101,7 +101,7 @@ The current shape in `../homebrew-formulas/sq-kgoose.rb` is:
 class SqKgoose < Formula
   version "0.1.0"
   stable do
-    url "https://github.com/squareup/berd.git", tag: version.to_s
+    url "https://github.com/block/berd.git", tag: version.to_s
   end
 
   @sq_pack = {

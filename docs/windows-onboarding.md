@@ -72,7 +72,7 @@ Bootstrap installs or validates:
 
 Bootstrap does not create or mutate npm registry or TLS configuration. If your environment uses a registry mirror, proxy, or custom certificate authority, configure those through your normal Node/npm tooling before running `just setup-windows`. Never bypass TLS verification with `strict-ssl=false`.
 
-> **Current limitation:** the checked-in Windows scripts still validate a legacy organization-specific npm mirror. External contributors cannot complete `doctor-windows` or `setup-windows` on a fresh machine until those checks are made distribution-neutral. This guide intentionally does not publish the private environment configuration; contributors working on Windows should follow [the tracking issue](https://github.com/squareup/berd/issues) or use the supported macOS setup in the meantime.
+> **Current limitation:** the checked-in Windows scripts still validate a legacy organization-specific npm mirror. External contributors cannot complete `doctor-windows` or `setup-windows` on a fresh machine until those checks are made distribution-neutral. This guide intentionally does not publish the private environment configuration; contributors working on Windows should follow [the tracking issue](https://github.com/block/berd/issues) or use the supported macOS setup in the meantime.
 
 Open a fresh PowerShell after install mode if PATH changes are not visible.
 

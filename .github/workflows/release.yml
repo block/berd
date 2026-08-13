@@ -84,6 +84,7 @@ jobs:
         run: |
           set -euo pipefail
           scripts/release/github/verify-release-ref.sh "$TAG"
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
           echo "source_sha=$(git rev-parse 'HEAD^{commit}')" >> "$GITHUB_OUTPUT"
 
       - name: Load release channel boundary
@@ -113,6 +114,19 @@ jobs:
 
       - name: Activate Hermit
         uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+
+      - name: Verify release source and committed version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ steps.channel.outputs.repository }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          just release-version-check "$VERSION"
+          scripts/release/github/verify-release-source.sh \
+            "$REPOSITORY" "$TAG" "$VERSION" "$SOURCE_SHA"
 
       - name: Ensure immutable versioned release
         env:
@@ -150,7 +164,7 @@ jobs:
       PLATFORM: ${{ needs.setup.outputs.macos_platform }}
       BERD_RELEASE_CHANNEL: public
       BERD_UPDATER_ENDPOINT: https://github.com/${{ needs.setup.outputs.repository }}/releases/download/${{ needs.setup.outputs.rolling_tag }}/latest.json
-      BERD_UPDATER_PUBLIC_KEY: ${{ vars.BERD_UPDATER_PUBLIC_KEY }}
+      BERD_UPDATER_PUBLIC_KEY: ${{ secrets.BERD_UPDATER_PUBLIC_KEY }}
     steps:
       - name: Check out verified source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -167,7 +181,7 @@ jobs:
 
       - name: Require updater public key
         run: |
-          : "${BERD_UPDATER_PUBLIC_KEY:?BERD_UPDATER_PUBLIC_KEY repository variable is required}"
+          : "${BERD_UPDATER_PUBLIC_KEY:?BERD_UPDATER_PUBLIC_KEY repository secret is required}"
 
       - name: Install locked signer tooling
         run: pnpm install --frozen-lockfile
@@ -266,7 +280,7 @@ jobs:
       PLATFORM: ${{ needs.setup.outputs.windows_platform }}
       BERD_RELEASE_CHANNEL: public
       BERD_UPDATER_ENDPOINT: https://github.com/${{ needs.setup.outputs.repository }}/releases/download/${{ needs.setup.outputs.rolling_tag }}/latest.json
-      BERD_UPDATER_PUBLIC_KEY: ${{ vars.BERD_UPDATER_PUBLIC_KEY }}
+      BERD_UPDATER_PUBLIC_KEY: ${{ secrets.BERD_UPDATER_PUBLIC_KEY }}
       # Windows selects generated [script] recipes that Just 1.40 still gates as unstable.
       JUST_UNSTABLE: "1"
     steps:
@@ -289,7 +303,7 @@ jobs:
       - name: Require updater public key
         shell: pwsh
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:BERD_UPDATER_PUBLIC_KEY)) { throw 'BERD_UPDATER_PUBLIC_KEY repository variable is required' }
+          if ([string]::IsNullOrWhiteSpace($env:BERD_UPDATER_PUBLIC_KEY)) { throw 'BERD_UPDATER_PUBLIC_KEY repository secret is required' }
 
       - name: Set up Windows build dependencies
         shell: pwsh
@@ -376,7 +390,7 @@ jobs:
       PLATFORM: ${{ needs.setup.outputs.linux_platform }}
       BERD_RELEASE_CHANNEL: public
       BERD_UPDATER_ENDPOINT: https://github.com/${{ needs.setup.outputs.repository }}/releases/download/${{ needs.setup.outputs.rolling_tag }}/latest.json
-      BERD_UPDATER_PUBLIC_KEY: ${{ vars.BERD_UPDATER_PUBLIC_KEY }}
+      BERD_UPDATER_PUBLIC_KEY: ${{ secrets.BERD_UPDATER_PUBLIC_KEY }}
       BERD_TAURI_CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
     steps:
       - name: Check out verified source
@@ -405,7 +419,7 @@ jobs:
 
       - name: Require updater public key
         run: |
-          : "${BERD_UPDATER_PUBLIC_KEY:?BERD_UPDATER_PUBLIC_KEY repository variable is required}"
+          : "${BERD_UPDATER_PUBLIC_KEY:?BERD_UPDATER_PUBLIC_KEY repository secret is required}"
 
       - name: Set up Linux release dependencies and locked signer tooling
         run: |
@@ -503,7 +517,7 @@ jobs:
       BERD_WRITES_DATA_EPOCH: "1"
       BERD_MIN_READABLE_DATA_EPOCH: "1"
       BERD_MAX_READABLE_DATA_EPOCH: "1"
-      BERD_UPDATER_PUBLIC_KEY: ${{ vars.BERD_UPDATER_PUBLIC_KEY }}
+      BERD_UPDATER_PUBLIC_KEY: ${{ secrets.BERD_UPDATER_PUBLIC_KEY }}
     steps:
       - name: Check out verified source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6

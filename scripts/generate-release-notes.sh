@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate release notes from commits since the previous release tag.
+# Draft release notes from commits since the previous release tag.
 #
 # Usage:
 #   ./scripts/generate-release-notes.sh [from-ref] [to-ref]
@@ -19,7 +19,7 @@ if [[ -z "$RELEASE_REPOSITORY" && -f "$REPO_ROOT/scripts/release/release-channel
   RELEASE_REPOSITORY="$(jq -er .repository "$REPO_ROOT/scripts/release/release-channel.json")"
 fi
 if [[ -z "$RELEASE_REPOSITORY" ]]; then
-  echo "BERD_REPO must be configured for release-note publishing." >&2
+  echo "BERD_REPO must be configured for release-note generation." >&2
   exit 1
 fi
 
@@ -84,56 +84,10 @@ NOTES="${NOTES}
 
 **Full Changelog**: https://github.com/${RELEASE_REPOSITORY}/compare/${FROM_REF}...${COMPARE_TO}"
 
-echo
-echo "$NOTES"
-echo >&2
-
-# Publishing requires a real tag to target; a symbolic ref like HEAD has no
-# corresponding GitHub release.
-if [[ "$TO_REF" == "HEAD" ]]; then
-  echo "to-ref is HEAD, not a release tag; skipping publish." >&2
-  exit 0
+if [[ -n "${NOTES_FILE:-}" ]]; then
+  printf '%s\n' "$NOTES" > "$NOTES_FILE"
+  echo "Drafted release notes at $NOTES_FILE; review them before release preparation." >&2
+else
+  printf '\n%s\n' "$NOTES"
+  echo "Draft only; review these notes before release preparation." >&2
 fi
-
-# Review gate: require explicit acceptance before publishing.
-read -r -p "Accept these release notes and publish to the GitHub release ${TO_REF}? [y/N] " REPLY
-if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
-  echo "Rejected; not publishing." >&2
-  exit 1
-fi
-
-echo "Publishing release notes for ${TO_REF}..." >&2
-
-# The release body may carry provenance from release automation. Editing the
-# release replaces the whole body, so preserve the existing body by appending it
-# after the new notes.
-EXISTING_BODY="$(gh release view "$TO_REF" --repo "$RELEASE_REPOSITORY" --json body -q .body 2>/dev/null || true)"
-if [[ -n "$EXISTING_BODY" ]]; then
-  NOTES="${NOTES}
-
----
-
-${EXISTING_BODY}"
-fi
-
-# Second goose run with the developer extension enabled so the agent can use
-# the gh CLI to update the release.
-goose run --quiet --no-session --no-profile --with-builtin developer --instructions - <<EOF
-You are publishing release notes for the configured public repository (${RELEASE_REPOSITORY}).
-
-Use the \`gh\` CLI to set the notes on the GitHub release for tag \`${TO_REF}\`:
-
-1. Verify the release exists: \`gh release view ${TO_REF} --repo ${RELEASE_REPOSITORY}\`.
-   If it does not exist, stop and report that — do not create a release.
-2. Update only the release notes body, leaving title, tag, target, and assets
-   unchanged. Write the notes below to a temp file and run:
-   \`gh release edit ${TO_REF} --repo ${RELEASE_REPOSITORY} --notes-file <tempfile>\`.
-3. Confirm the update succeeded and print the release URL.
-
-Use the release notes below verbatim — do not edit, reformat, or summarize
-them. They already include any existing release provenance at the end; keep it.
-
----BEGIN RELEASE NOTES---
-${NOTES}
----END RELEASE NOTES---
-EOF

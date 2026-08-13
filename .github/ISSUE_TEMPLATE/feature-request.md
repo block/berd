@@ -18,4 +18,4 @@ Anything else that helps — links, screenshots, prior art.
 
 ---
 
-Before opening: please [search open issues and PRs](https://github.com/squareup/berd/issues?q=is%3Aopen) for duplicates — link the closest one, or say "none found".
+Before opening: please [search open issues and PRs](https://github.com/block/berd/issues?q=is%3Aopen) for duplicates — link the closest one, or say "none found".
