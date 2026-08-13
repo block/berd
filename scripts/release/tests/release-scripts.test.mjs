@@ -707,6 +707,40 @@ describe("generate-latest-json", () => {
 });
 
 describe("desktop release workflow platform gate", () => {
+  it("uses one public build profile across all platform lanes", async () => {
+    const workflow = parseYaml(
+      await readFile(join(repo, ".github/workflows/release.yml"), "utf8"),
+    );
+
+    expect(workflow.env).toMatchObject({
+      VITE_ENVIRONMENT: "production",
+      VITE_AUTH_GATE: "0",
+      VITE_AGENT_TOOLS: "0",
+      VITE_AUTOMATIONS: "0",
+      VITE_BUILDERBOT: "0",
+      VITE_FEEDBACK: "0",
+      VITE_MANAGED_CONNECTIONS: "0",
+      VITE_VOICE_DICTATION: "0",
+      VITE_BYO_KEY_PROVIDERS: "1",
+      VITE_SECURITY_ML: "0",
+      VITE_UPDATER_ENABLED: "true",
+    });
+
+    const linuxBuild = workflow.jobs["stage-linux"].steps.find(
+      (step) => step.name === "Build Linux packages",
+    ).run;
+    expect(linuxBuild).toContain(
+      'CARGO_FEATURES="$(scripts/block-feature-gates.sh berdctl)"',
+    );
+    expect(linuxBuild).toContain('--features "$CARGO_FEATURES"');
+
+    const macosBuild = await readFile(
+      join(repo, "scripts/release/build-macos.sh"),
+      "utf8",
+    );
+    expect(macosBuild).toContain("VITE_BYO_KEY_PROVIDERS_VALUE=1");
+  });
+
   it("does not interpolate GitHub expressions into executable shell", async () => {
     const workflow = parseYaml(
       await readFile(join(repo, ".github/workflows/release.yml"), "utf8"),

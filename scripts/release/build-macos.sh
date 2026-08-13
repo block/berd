@@ -36,10 +36,8 @@
 #                     trust roots build-bundled
 #   - BERD_RELEASE_CHANNEL_ID: current binary channel ID inside that catalog
 #
-# An official build — the default, with all of the above unset — is byte-for-
-# byte the build this script ran before custom builds existed: features =
-# berdctl, no extra VITE_* overrides, no version suffix, and the committed
-# runtime-config.json shipped as-is.
+# Official builds enable BYO-key providers, add no release-only agents or
+# version suffix, and ship the committed runtime-config.json as-is.
 
 set -euo pipefail
 
@@ -105,7 +103,7 @@ VITE_BUILDERBOT_VALUE="${VITE_BUILDERBOT:-0}"
 VITE_FEEDBACK_VALUE="${VITE_FEEDBACK:-0}"
 VITE_MANAGED_CONNECTIONS_VALUE="${VITE_MANAGED_CONNECTIONS:-0}"
 VITE_VOICE_DICTATION_VALUE="${VITE_VOICE_DICTATION:-0}"
-VITE_BYO_KEY_PROVIDERS_VALUE=0
+VITE_BYO_KEY_PROVIDERS_VALUE=1
 # Public builds have no external security classifier. Internal distributions may
 # opt in by supplying their implementation and setting VITE_SECURITY_ML=1.
 VITE_SECURITY_ML_VALUE="${VITE_SECURITY_ML:-0}"
@@ -421,8 +419,8 @@ if [[ "$BUILD_KIND" == "custom" && "$DISABLE_BB_CLI" == "true" ]]; then
   CARGO_FEATURES="$CARGO_FEATURES,no-bb-cli-install"
 fi
 
-# Stage the selected bundled agents into distro/agents/ for the Tauri resource
-# bundle. Official and custom builds use the default builderbot selection.
+# Stage explicitly selected release-only agents into distro/agents/ for the
+# Tauri resource bundle. Berdy is already present in that directory.
 stage_custom_bundled_agents
 
 # Generate the channel-specific release overlay. The generator validates the

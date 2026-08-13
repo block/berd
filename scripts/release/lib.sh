@@ -236,11 +236,10 @@ default_bundled_agents() {
   [[ -n "$build_kind" ]] || build_kind="$(release_build_kind)"
 
   case "$build_kind" in
-    official)
-      printf '%s' "builderbot"
-      ;;
-    custom)
-      printf '%s' "builderbot"
+    official|custom)
+      # Berdy already lives under distro/agents and is bundled on every
+      # platform. Release-only agents must be selected explicitly.
+      return 0
       ;;
     *)
       echo "invalid build_kind '${build_kind}' (expected official or custom)" >&2
