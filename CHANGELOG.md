@@ -1,5 +1,15 @@
 # Changelog
 
+## [v0.6.0-rc.3](https://github.com/block/berd/releases/tag/v0.6.0-rc.3) - 2026-08-13
+
+This release adds safer chat cleanup, clearer subagent activity, and improved guidance for getting started with Berd.
+
+- **Automatic chat archiving:** Choose when inactive, unpinned chats are archived under Settings → Archive. Berd asks for confirmation before enabling it and protects active, running, pinned, or draft-bearing chats.
+- **Clearer subagent activity:** Chat activity now identifies known subagents and their assigned tasks, with more accurate labels for delegation, messages, waiting, interruptions, and cancellations.
+- **Experimental — Guided starter tasks:** Starter tasks now provide contextual guidance, take you directly to the relevant workflow, and can be restored from the Home widget picker after dismissal.
+
+**Full Changelog**: https://github.com/block/berd/compare/v0.6.0-rc.2...b2460b0
+
 ## [v0.6.0-rc.2](https://github.com/block/berd/releases/tag/v0.6.0-rc.2) - 2026-08-13
 
 This release improves platform support and keeps Berd’s built-in agent runtime current.
