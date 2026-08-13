@@ -1,0 +1,9 @@
+# Berd code owners.
+#
+# `main` requires code-owner review, so this file is what makes that protection
+# real — without it, the rule matches nobody and passes trivially.
+#
+# Format: https://docs.github.com/articles/about-code-owners
+
+# Default owners for everything in the repo.
+*   @block/berd-oss-team

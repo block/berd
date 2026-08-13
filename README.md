@@ -68,11 +68,30 @@ in dev builds and off in production builds. Use
 `.agents/skills/experimental-features/SKILL.md` for the current workflow,
 registry contract, storage rules, Tauri guardrails, and test coverage.
 
-## Contributing
+## Participating
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution setup and expectations.
+Berd is built by a small team at Block, in the open. You can read the source,
+build it, and fork it freely — but **we don't accept pull requests from outside
+the maintainer team**, and outside PRs are closed automatically.
+
+The way to participate is to **open a well-formed issue**. A bug report we can
+reproduce is worth more to us than a patch, because it's the part we can't do
+ourselves. [CONTRIBUTING.md](CONTRIBUTING.md) spells out exactly what each kind
+of issue needs; the [issue forms](https://github.com/block/berd/issues/new/choose)
+require it.
+
+Filing one? Hand this to your coding agent:
+
+```
+Read https://raw.githubusercontent.com/block/berd/main/CONTRIBUTING.md
+and help me file a Berd issue. Interview me for anything the guide
+requires that I haven't given you, and tell me if what I'm reporting
+is actually two separate issues.
+```
+
 Please also review the [Code of Conduct](CODE_OF_CONDUCT.md) and
-[Security Policy](SECURITY.md).
+[Security Policy](SECURITY.md). Never report a security vulnerability as a
+public issue.
 
 ## Useful commands
 

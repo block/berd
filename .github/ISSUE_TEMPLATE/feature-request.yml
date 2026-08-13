@@ -1,0 +1,117 @@
+name: Feature request
+description: You want Berd to do something it doesn't, or to do something existing noticeably better
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We want to understand the **problem**, not just the solution you have in
+        mind — the problem often has a better answer than the one you'd have
+        asked for.
+
+        Before you start, please read
+        [the feature request section of CONTRIBUTING.md](https://github.com/block/berd/blob/main/CONTRIBUTING.md#feature-requests).
+        You're welcome to have an agent help you fill this in — see
+        [Using an agent](https://github.com/block/berd/blob/main/CONTRIBUTING.md#using-an-agent).
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before filing
+      description: All three are required. Please actually do them.
+      options:
+        - label: I searched [open and closed issues](https://github.com/block/berd/issues?q=is%3Aissue) for duplicates.
+          required: true
+        - label: I am using a recent [release](https://github.com/block/berd/releases) and this doesn't already exist.
+          required: true
+        - label: This is one request, not several bundled together.
+          required: true
+
+  - type: input
+    id: duplicate-search
+    attributes:
+      label: Closest existing issue
+      description: Link the nearest thing you found, or write "none found".
+      placeholder: "#123, or none found"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Is this new, or an improvement?
+      options:
+        - New capability — Berd can't do this at all today
+        - Improvement — Berd does this, but badly
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem, in your terms
+      description: |
+        What were you trying to get done, and what made it hard? Describe the
+        situation, not the feature. Lead with this.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do today
+      description: |
+        Your current workaround, however ugly — or "nothing, I gave up". This
+        tells us how much the gap actually costs you.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like to see
+      description: Your proposed change. Rough is fine.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why-core
+    attributes:
+      label: Why this belongs in Berd itself
+      description: |
+        Berd is extensible on purpose. Could this be a
+        [skill](https://github.com/block/berd/tree/main/.agents/skills), an
+        agent, an extension, or an automation instead? If it could and you still
+        think it should be built in, say why. If it genuinely can't be done from
+        outside, say that — it's a strong argument.
+    validations:
+      required: true
+
+  - type: textarea
+    id: non-goals
+    attributes:
+      label: Non-goals
+      description: |
+        What are you explicitly **not** asking for? This is the most useful line
+        in a feature request and almost nobody writes it — it tells us where the
+        edges of your idea are.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Including the ones you rejected, and why.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Mockups, prior art, or other context
+      description: |
+        Screenshots, sketches, or examples of other tools that get this right.
+        Drag files in to attach them.
+    validations:
+      required: false
