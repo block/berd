@@ -65,7 +65,23 @@
     }
   },
   "archive": {
-    "title": "Archivo"
+    "title": "Archivo",
+    "autoArchive": {
+      "sectionTitle": "Archivado automático",
+      "label": "Archivar chats inactivos",
+      "description": "Archiva automáticamente los chats después de este tiempo sin mensajes. Los chats fijados en Inicio nunca se archivan automáticamente.",
+      "confirmTitle": "¿Activar el archivado automático?",
+      "confirmDescription": "Berd archivará los chats no fijados {{duration}} sin volver a preguntar. Puedes restaurarlos desde Archivo o desactivar esta opción cuando quieras.",
+      "confirmAction": "Activar",
+      "options": {
+        "never": "Nunca",
+        "1-day": "Después de 1 día",
+        "7-days": "Después de 7 días",
+        "14-days": "Después de 14 días",
+        "30-days": "Después de 30 días",
+        "90-days": "Después de 90 días"
+      }
+    }
   },
   "chats": {
     "empty": "No hay chats archivados.",
@@ -339,7 +355,6 @@
       "queue": "Cola",
       "steer": "Guiar (solo arnés de Goose)"
     },
-
     "groupChatsByProject": {
       "description": "Muestra grupos de proyectos en la barra lateral. Desactiva esto para tener una sola lista de chats ordenada por actividad.",
       "label": "Agrupar chats por proyecto"

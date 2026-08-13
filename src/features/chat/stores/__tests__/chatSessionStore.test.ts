@@ -287,6 +287,32 @@ describe("chatSessionStore", () => {
       expect(mocks.releaseSession).not.toHaveBeenCalled();
     });
 
+    it("archives a known paged-out session without materializing it", async () => {
+      const pagedOut = makeSession({ id: "paged-out" });
+
+      await useChatSessionStore
+        .getState()
+        .archiveSession(pagedOut.id, pagedOut);
+
+      const state = useChatSessionStore.getState();
+      expect(mocks.archiveSession).toHaveBeenCalledWith("paged-out");
+      expect(state.getSession("paged-out")).toBeUndefined();
+      expect(state.archiveMutationBySessionId["paged-out"]).toBeUndefined();
+    });
+
+    it("leaves no store state when a paged-out archive fails", async () => {
+      const pagedOut = makeSession({ id: "paged-out" });
+      mocks.archiveSession.mockRejectedValue(new Error("backend down"));
+
+      await expect(
+        useChatSessionStore.getState().archiveSession(pagedOut.id, pagedOut),
+      ).rejects.toThrow("backend down");
+
+      const state = useChatSessionStore.getState();
+      expect(state.getSession("paged-out")).toBeUndefined();
+      expect(state.archiveMutationBySessionId["paged-out"]).toBeUndefined();
+    });
+
     it("does not release a windowed session when archiving", async () => {
       seedSession({ id: "session-1" });
       useSessionWindowStore
