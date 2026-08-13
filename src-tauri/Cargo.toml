@@ -1,6 +1,6 @@
 [package]
 name = "Berd"
-version = "0.4.12"
+version = "0.6.0-rc.1"
 description = "Berd desktop app"
 authors = ["Block, Inc."]
 edition = "2021"
