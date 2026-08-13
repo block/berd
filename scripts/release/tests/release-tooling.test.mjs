@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmod,
   mkdir,
@@ -8,7 +8,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { releaseNotesFrom, updateChangelog } from "../release.mjs";
 import { compareSemver, parseSemver } from "../version.mjs";
@@ -110,6 +110,16 @@ fi
       `#!/usr/bin/env bash
 set -euo pipefail
 [[ "$1" == "release-notes" ]]
+if [[ -n "\${ADVANCE_ORIGIN_MAIN_ONCE:-}" && ! -e "$ADVANCE_ORIGIN_MAIN_ONCE" ]]; then
+  touch "$ADVANCE_ORIGIN_MAIN_ONCE"
+  advance_repo="$(mktemp -d)"
+  git clone --quiet "$(git remote get-url origin)" "$advance_repo"
+  git -C "$advance_repo" config user.name 'Release Test'
+  git -C "$advance_repo" config user.email 'release@example.test'
+  git -C "$advance_repo" commit --allow-empty -m 'feat: concurrent main change' >/dev/null
+  git -C "$advance_repo" push origin main >/dev/null 2>&1
+  rm -rf "$advance_repo"
+fi
 printf '%s\n' '## generated changes' '' '- generated release notes'
 `,
     ),
@@ -147,7 +157,34 @@ printf '%s\n' '## generated changes' '' '- generated release notes'
       env: { ...env, ...extraEnv },
       input,
     });
-  return { repo, remote, notes, calls, git, release };
+  const releaseInteractive = (args, extraEnv = {}, answers = []) =>
+    new Promise((resolvePromise) => {
+      const child = spawn(process.execPath, [releaseScript, ...args], {
+        cwd: repo,
+        env: { ...process.env, ...env, ...extraEnv },
+      });
+      let stdout = "";
+      let stderr = "";
+      let answered = 0;
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+        const promptCount =
+          stdout.match(/use these release notes\?/g)?.length ?? 0;
+        while (answered < promptCount && answered < answers.length) {
+          child.stdin.write(`${answers[answered]}\n`);
+          answered += 1;
+        }
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      child.on("close", (status) => {
+        resolvePromise({ status, stdout, stderr });
+      });
+    });
+  return { repo, remote, notes, calls, git, release, releaseInteractive };
 }
 
 describe("release SemVer and changelog", () => {
@@ -249,6 +286,26 @@ describe("release preparation", () => {
     expect(
       await readFile(join(approved.repo, "CHANGELOG.md"), "utf8"),
     ).toContain("generated release notes");
+  });
+
+  it("regenerates notes when main advances while they are reviewed", async () => {
+    const f = await fixture();
+    const marker = join(dirname(f.repo), "advanced-main");
+    const prepared = await f.releaseInteractive(
+      ["prepare", "0.6.0-rc.1"],
+      { ADVANCE_ORIGIN_MAIN_ONCE: marker },
+      ["y", "y"],
+    );
+
+    expect(prepared.status, `${prepared.stdout}\n${prepared.stderr}`).toBe(0);
+    expect(prepared.stderr).toContain(
+      "origin/main advanced while release notes were under review; regenerating",
+    );
+    expect(prepared.stdout.match(/generated release notes/g)).toHaveLength(2);
+    expect(f.git(["branch", "--show-current"]).stdout.trim()).toBe(
+      "release/v0.6.0-rc.1",
+    );
+    expect(await readFile(f.calls, "utf8")).toContain("pr create");
   });
 
   it("rejects versions below the configured public minimum", async () => {

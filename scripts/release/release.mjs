@@ -545,6 +545,39 @@ async function generateReviewedNotes(root, version, changelog) {
   return notes;
 }
 
+async function generateReviewedCurrentNotes(root, version, read) {
+  while (true) {
+    const reviewedMain = run("git", ["rev-parse", "refs/remotes/origin/main"], {
+      cwd: root,
+    });
+    const notes = await generateReviewedNotes(
+      root,
+      version,
+      await read("CHANGELOG.md"),
+    );
+    fetchReleaseState(root);
+    const currentMain = run("git", ["rev-parse", "refs/remotes/origin/main"], {
+      cwd: root,
+    });
+    if (currentMain === reviewedMain) return notes;
+
+    const currentBranch = run("git", ["branch", "--show-current"], {
+      cwd: root,
+    });
+    const head = run("git", ["rev-parse", "HEAD"], { cwd: root });
+    if (currentBranch !== "main" || head !== reviewedMain) {
+      fail("origin/main advanced; rerun release preparation from main");
+    }
+    run("git", ["merge", "--ff-only", "refs/remotes/origin/main"], {
+      cwd: root,
+      visible: true,
+    });
+    process.stderr.write(
+      "origin/main advanced while release notes were under review; regenerating...\n",
+    );
+  }
+}
+
 function releasePrs(root, repository, branch) {
   const json = run(
     "gh",
@@ -616,7 +649,7 @@ async function prepare(version, notesPath) {
   fetchReleaseState(root);
   const notes = notesPath
     ? (await readFile(resolve(notesPath), "utf8")).trim()
-    : await generateReviewedNotes(root, version, await read("CHANGELOG.md"));
+    : await generateReviewedCurrentNotes(root, version, read);
   if (!notes) fail("release notes file must contain reviewed Markdown");
   if (notes.includes("\0")) fail("release notes file contains a NUL byte");
 
