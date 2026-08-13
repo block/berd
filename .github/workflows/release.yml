@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing immutable v<semver> tag to recover; select this same tag as the run ref
+        description: Existing immutable v<semver> tag to recover; run from main
         required: true
         type: string
 
@@ -18,7 +18,7 @@ permissions:
 # incomplete platform payload before rebuilding it, so concurrent runs for the
 # same immutable tag would otherwise race against each other's uploads.
 concurrency:
-  group: berd-release-${{ github.ref }}
+  group: berd-release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -47,7 +47,7 @@ jobs:
       - name: Check out requested immutable ref
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -70,8 +70,8 @@ jobs:
             echo "::error::Expected an existing v<semver> tag without build metadata; got '$TAG'"
             exit 1
           }
-          if [[ "$EVENT_NAME" == "workflow_dispatch" && "${GITHUB_REF:-}" != "refs/tags/$TAG" ]]; then
-            echo "::error::Recovery dispatch must run from refs/tags/$TAG; got '${GITHUB_REF:-<unset>}'"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "${GITHUB_REF:-}" != "refs/heads/main" ]]; then
+            echo "::error::Recovery dispatch must use the workflow from main; got '${GITHUB_REF:-<unset>}'"
             exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
