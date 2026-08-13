@@ -414,42 +414,49 @@ function fetchReleaseState(root) {
     "git",
     [
       "fetch",
+      "--prune",
       "--no-tags",
       "origin",
       "refs/heads/main:refs/remotes/origin/main",
-      "refs/tags/v*:refs/tags/v*",
+      "+refs/tags/v*:refs/remotes/berd-release-tags/v*",
     ],
     { cwd: root },
   );
 }
 
-function remoteReleaseTags(root) {
-  const output = run(
-    "git",
-    ["ls-remote", "--tags", "--refs", "origin", "refs/tags/v*"],
-    { cwd: root },
-  );
-  return new Set(
-    output
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => line.split("\t", 2)[1]?.replace("refs/tags/", ""))
-      .filter(Boolean),
-  );
-}
-
 function describeRemoteReleaseTag(root, stableOnly) {
-  const remoteTags = remoteReleaseTags(root);
-  const args = ["describe", "--tags", "--abbrev=0", "--match", "v*"];
-  if (stableOnly) args.push("--exclude", "v*-*");
+  const tags = run(
+    "git",
+    [
+      "for-each-ref",
+      "--format=%(refname:strip=3)",
+      "refs/remotes/berd-release-tags/v*",
+    ],
+    { cwd: root },
+  )
+    .split("\n")
+    .filter((tag) => tag && (!stableOnly || !tag.includes("-")));
+  if (tags.length === 0) return null;
 
-  while (true) {
-    const result = commandResult("git", args, { cwd: root });
-    if (result.status !== 0) return null;
-    const tag = result.stdout.trim();
-    if (remoteTags.has(tag)) return tag;
-    args.push("--exclude", tag);
-  }
+  const args = [
+    "describe",
+    "--all",
+    "--long",
+    "--abbrev=40",
+    "--match",
+    "berd-release-tags/v*",
+  ];
+  if (stableOnly) args.push("--exclude", "berd-release-tags/v*-*");
+  const result = commandResult("git", args, { cwd: root });
+  if (result.status !== 0) return null;
+  const describedRef = result.stdout.trim().replace(/-\d+-g[0-9a-f]+$/, "");
+  return (
+    tags.find((tag) =>
+      [`remotes/berd-release-tags/${tag}`, `tags/${tag}`].includes(
+        describedRef,
+      ),
+    ) ?? null
+  );
 }
 
 function remoteTagTarget(root, tag) {
@@ -524,10 +531,17 @@ export function releaseNotesFrom(root, version, changelog) {
   return from;
 }
 
-async function generateReviewedNotes(root, version, changelog) {
-  const from = releaseNotesFrom(root, version, changelog);
+function releaseNotesRef(from) {
+  return from.startsWith("v") ? `refs/remotes/berd-release-tags/${from}` : from;
+}
+
+async function generateReviewedNotes(root, from) {
   process.stderr.write(`generating release notes from ${from}...\n`);
-  const notes = run("just", ["release-notes", from], { cwd: root });
+  const notes = run(
+    "just",
+    ["release-notes", releaseNotesRef(from), "HEAD", from],
+    { cwd: root },
+  );
   if (!notes) fail("generated release notes are empty");
   process.stdout.write(`\n${notes}\n\n`);
   const prompt = createInterface({
@@ -550,30 +564,32 @@ async function generateReviewedCurrentNotes(root, version, read) {
     const reviewedMain = run("git", ["rev-parse", "refs/remotes/origin/main"], {
       cwd: root,
     });
-    const notes = await generateReviewedNotes(
-      root,
-      version,
-      await read("CHANGELOG.md"),
-    );
+    const changelog = await read("CHANGELOG.md");
+    const reviewedFrom = releaseNotesFrom(root, version, changelog);
+    const notes = await generateReviewedNotes(root, reviewedFrom);
     fetchReleaseState(root);
     const currentMain = run("git", ["rev-parse", "refs/remotes/origin/main"], {
       cwd: root,
     });
-    if (currentMain === reviewedMain) return notes;
+    const currentFrom = releaseNotesFrom(root, version, changelog);
+    const mainChanged = currentMain !== reviewedMain;
+    if (!mainChanged && currentFrom === reviewedFrom) return notes;
 
-    const currentBranch = run("git", ["branch", "--show-current"], {
-      cwd: root,
-    });
-    const head = run("git", ["rev-parse", "HEAD"], { cwd: root });
-    if (currentBranch !== "main" || head !== reviewedMain) {
-      fail("origin/main advanced; rerun release preparation from main");
+    if (mainChanged) {
+      const currentBranch = run("git", ["branch", "--show-current"], {
+        cwd: root,
+      });
+      const head = run("git", ["rev-parse", "HEAD"], { cwd: root });
+      if (currentBranch !== "main" || head !== reviewedMain) {
+        fail("origin/main advanced; rerun release preparation from main");
+      }
+      run("git", ["merge", "--ff-only", "refs/remotes/origin/main"], {
+        cwd: root,
+        visible: true,
+      });
     }
-    run("git", ["merge", "--ff-only", "refs/remotes/origin/main"], {
-      cwd: root,
-      visible: true,
-    });
     process.stderr.write(
-      "origin/main advanced while release notes were under review; regenerating...\n",
+      "release state changed while release notes were under review; regenerating...\n",
     );
   }
 }

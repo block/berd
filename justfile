@@ -600,8 +600,8 @@ bump-node-runtime *ARGS:
 
 # Draft release notes from commits without mutating GitHub.
 [unix]
-release-notes from="" to="HEAD":
-    FROM_REF="{{ from }}" TO_REF="{{ to }}" ./scripts/generate-release-notes.sh
+release-notes from="" to="HEAD" compare_from="":
+    FROM_REF="{{ from }}" TO_REF="{{ to }}" COMPARE_FROM="{{ compare_from }}" ./scripts/generate-release-notes.sh
 
 # ── Utilities ────────────────────────────────────────────────
 

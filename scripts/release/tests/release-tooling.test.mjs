@@ -113,12 +113,22 @@ set -euo pipefail
 if [[ -n "\${ADVANCE_ORIGIN_MAIN_ONCE:-}" && ! -e "$ADVANCE_ORIGIN_MAIN_ONCE" ]]; then
   touch "$ADVANCE_ORIGIN_MAIN_ONCE"
   advance_repo="$(mktemp -d)"
-  git clone --quiet "$(git remote get-url origin)" "$advance_repo"
+  git clone --quiet --branch main "$(git remote get-url origin)" "$advance_repo"
   git -C "$advance_repo" config user.name 'Release Test'
   git -C "$advance_repo" config user.email 'release@example.test'
   git -C "$advance_repo" commit --allow-empty -m 'feat: concurrent main change' >/dev/null
   git -C "$advance_repo" push origin main >/dev/null 2>&1
   rm -rf "$advance_repo"
+fi
+if [[ -n "\${PUBLISH_RELEASE_TAG_ONCE:-}" && ! -e "$PUBLISH_RELEASE_TAG_ONCE" ]]; then
+  touch "$PUBLISH_RELEASE_TAG_ONCE"
+  tag_repo="$(mktemp -d)"
+  git clone --quiet --branch main "$(git remote get-url origin)" "$tag_repo"
+  git -C "$tag_repo" config user.name 'Release Test'
+  git -C "$tag_repo" config user.email 'release@example.test'
+  git -C "$tag_repo" tag --annotate v0.6.0-rc.1 --message 'release v0.6.0-rc.1'
+  git -C "$tag_repo" push origin refs/tags/v0.6.0-rc.1 >/dev/null 2>&1
+  rm -rf "$tag_repo"
 fi
 printf '%s\n' '## generated changes' '' '- generated release notes'
 `,
@@ -140,10 +150,21 @@ printf '%s\n' '## generated changes' '' '- generated release notes'
   expect(git(["config", "user.email", "release@example.test"]).status).toBe(0);
   expect(git(["add", "."]).status).toBe(0);
   expect(git(["commit", "-m", "initial"]).status).toBe(0);
-  expect(git(["tag", "v0.5.0"]).status).toBe(0);
+  expect(
+    git(["tag", "--annotate", "v0.5.0", "--message", "release v0.5.0"]).status,
+  ).toBe(0);
   expect(git(["remote", "add", "origin", remote]).status).toBe(0);
   expect(git(["push", "--set-upstream", "origin", "main"]).status).toBe(0);
   expect(git(["push", "origin", "refs/tags/v0.5.0"]).status).toBe(0);
+  const fetchReleaseTags = () =>
+    git([
+      "fetch",
+      "--prune",
+      "--no-tags",
+      "origin",
+      "+refs/tags/v*:refs/remotes/berd-release-tags/v*",
+    ]);
+  expect(fetchReleaseTags().status).toBe(0);
   const env = {
     BERD_RELEASE_DATE: "2026-08-12",
     BERD_RELEASE_REPO_ROOT: repo,
@@ -184,7 +205,16 @@ printf '%s\n' '## generated changes' '' '- generated release notes'
         resolvePromise({ status, stdout, stderr });
       });
     });
-  return { repo, remote, notes, calls, git, release, releaseInteractive };
+  return {
+    repo,
+    remote,
+    notes,
+    calls,
+    git,
+    fetchReleaseTags,
+    release,
+    releaseInteractive,
+  };
 }
 
 describe("release SemVer and changelog", () => {
@@ -206,13 +236,23 @@ describe("release SemVer and changelog", () => {
     expect(f.git(["commit", "-m", "feat: test release candidate"]).status).toBe(
       0,
     );
-    expect(f.git(["tag", "v0.6.0-rc.1"]).status).toBe(0);
+    expect(
+      f.git([
+        "tag",
+        "--annotate",
+        "v0.6.0-rc.1",
+        "--message",
+        "release v0.6.0-rc.1",
+      ]).status,
+    ).toBe(0);
     expect(f.git(["push", "origin", "refs/tags/v0.6.0-rc.1"]).status).toBe(0);
+    expect(f.fetchReleaseTags().status).toBe(0);
 
     expect(releaseNotesFrom(f.repo, "0.6.0-rc.2")).toBe("v0.6.0-rc.1");
     expect(releaseNotesFrom(f.repo, "0.6.0")).toBe("v0.5.0");
 
-    expect(f.git(["tag", "--delete", "v0.5.0"]).status).toBe(0);
+    expect(f.git(["push", "origin", ":refs/tags/v0.5.0"]).status).toBe(0);
+    expect(f.fetchReleaseTags().status).toBe(0);
     const changelog = `# Changelog
 
 ## [v0.6.0-rc.1](https://github.com/block/berd/releases/tag/v0.6.0-rc.1) - 2026-08-12
@@ -230,12 +270,17 @@ RC notes.
     expect(f.git(["add", "feature"]).status).toBe(0);
     expect(f.git(["commit", "-m", "feat: unreleased change"]).status).toBe(0);
     expect(f.git(["tag", "v0.5.1"]).status).toBe(0);
+    expect(f.git(["tag", "--force", "v0.5.0"]).status).toBe(0);
+    expect(f.fetchReleaseTags().status).toBe(0);
 
     expect(releaseNotesFrom(f.repo, "0.6.0-rc.1")).toBe("v0.5.0");
     expect(releaseNotesFrom(f.repo, "0.6.0")).toBe("v0.5.0");
 
     expect(f.git(["push", "origin", "refs/tags/v0.5.1"]).status).toBe(0);
+    expect(f.fetchReleaseTags().status).toBe(0);
+    expect(releaseNotesFrom(f.repo, "0.6.0-rc.1")).toBe("v0.5.1");
     expect(f.git(["push", "origin", ":refs/tags/v0.5.1"]).status).toBe(0);
+    expect(f.fetchReleaseTags().status).toBe(0);
     expect(releaseNotesFrom(f.repo, "0.6.0-rc.1")).toBe("v0.5.0");
   });
 
@@ -299,13 +344,39 @@ describe("release preparation", () => {
 
     expect(prepared.status, `${prepared.stdout}\n${prepared.stderr}`).toBe(0);
     expect(prepared.stderr).toContain(
-      "origin/main advanced while release notes were under review; regenerating",
+      "release state changed while release notes were under review; regenerating",
     );
     expect(prepared.stdout.match(/generated release notes/g)).toHaveLength(2);
     expect(f.git(["branch", "--show-current"]).stdout.trim()).toBe(
       "release/v0.6.0-rc.1",
     );
     expect(await readFile(f.calls, "utf8")).toContain("pr create");
+  });
+
+  it("regenerates notes when their release tag baseline changes", async () => {
+    const f = await fixture();
+    await writeFile(join(f.repo, "feature"), "release candidate change\n");
+    expect(f.git(["add", "feature"]).status).toBe(0);
+    expect(
+      f.git(["commit", "-m", "feat: release candidate change"]).status,
+    ).toBe(0);
+    expect(f.git(["push", "origin", "main"]).status).toBe(0);
+    const marker = join(dirname(f.repo), "published-release-tag");
+    const prepared = await f.releaseInteractive(
+      ["prepare", "0.6.0-rc.2"],
+      { PUBLISH_RELEASE_TAG_ONCE: marker },
+      ["y", "y"],
+    );
+
+    expect(prepared.status, `${prepared.stdout}\n${prepared.stderr}`).toBe(0);
+    expect(prepared.stderr).toContain("generating release notes from v0.5.0");
+    expect(prepared.stderr).toContain(
+      "generating release notes from v0.6.0-rc.1",
+    );
+    expect(prepared.stdout.match(/generated release notes/g)).toHaveLength(2);
+    expect(f.git(["branch", "--show-current"]).stdout.trim()).toBe(
+      "release/v0.6.0-rc.2",
+    );
   });
 
   it("rejects versions below the configured public minimum", async () => {

@@ -27,6 +27,7 @@ fi
 
 FROM_REF="${1:-${FROM_REF:-}}"
 TO_REF="${2:-${TO_REF:-HEAD}}"
+COMPARE_FROM="${COMPARE_FROM:-$FROM_REF}"
 
 if [[ -z "$FROM_REF" ]]; then
   FROM_REF="$(git -C "$REPO_ROOT" describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
@@ -82,7 +83,7 @@ if [[ "$TO_REF" == "HEAD" ]]; then
 fi
 NOTES="${NOTES}
 
-**Full Changelog**: https://github.com/${RELEASE_REPOSITORY}/compare/${FROM_REF}...${COMPARE_TO}"
+**Full Changelog**: https://github.com/${RELEASE_REPOSITORY}/compare/${COMPARE_FROM}...${COMPARE_TO}"
 
 printf '\n%s\n' "$NOTES"
 echo "Draft only; review these notes before release preparation." >&2
