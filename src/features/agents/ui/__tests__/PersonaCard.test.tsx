@@ -2,8 +2,6 @@ import { beforeEach, describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { resetHomeWidgetStoreForTests } from "@/features/home/stores/homeWidgetStore";
-import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
-import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { PersonaCard } from "../PersonaCard";
 import type { Persona } from "@/shared/types/agents";
 
@@ -224,8 +222,7 @@ describe("PersonaCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("calls onShare from the options menu when share cards are enabled", async () => {
-    setExperimentEnabled(AGENT_SHARE_CARD_EXPERIMENT_ID, true);
+  it("calls onShare from the options menu", async () => {
     const onShare = vi.fn();
     const user = userEvent.setup();
     const persona = makePersona();
@@ -237,19 +234,13 @@ describe("PersonaCard", () => {
     expect(onShare).toHaveBeenCalledWith(persona);
   });
 
-  it("restores Export when share cards are disabled", async () => {
-    setExperimentEnabled(AGENT_SHARE_CARD_EXPERIMENT_ID, false);
+  it("shows Export when no share handler is provided", async () => {
     const onExport = vi.fn();
     const user = userEvent.setup();
     const persona = makePersona();
-    render(
-      <PersonaCard persona={persona} onExport={onExport} onShare={vi.fn()} />,
-    );
+    render(<PersonaCard persona={persona} onExport={onExport} />);
 
     await user.click(screen.getByRole("button", { name: /agent options/i }));
-    expect(
-      screen.queryByRole("menuitem", { name: /share agent/i }),
-    ).not.toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: /export/i }));
 
     expect(onExport).toHaveBeenCalledWith(persona);

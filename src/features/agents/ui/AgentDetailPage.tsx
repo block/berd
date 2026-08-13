@@ -21,8 +21,6 @@ import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { SIDEBAR_RAISED_MENU_CONTENT_CLASS } from "@/shared/ui/sidebar-tokens";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
-import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -108,8 +106,6 @@ export function AgentDetailPage({
   onAvatarUpdate,
 }: AgentDetailPageProps) {
   const { t } = useTranslation(["agents", "common"]);
-  const shareCardEnabled =
-    useExperiment(AGENT_SHARE_CARD_EXPERIMENT_ID)?.enabled === true;
   const acpProviders = useAgentStore((s) => s.providers);
   const isEditable = canEditPersona(persona);
   const isDeletable = canDeletePersona(persona);
@@ -354,7 +350,7 @@ export function AgentDetailPage({
             <Copy className="size-3.5" />
             {t("common:actions.duplicate")}
           </DropdownMenuItem>
-          {shareCardEnabled && onShare ? (
+          {onShare ? (
             <DropdownMenuItem onSelect={() => onShare(persona)}>
               <Share2 className="size-3.5" />
               {t("share.action")}

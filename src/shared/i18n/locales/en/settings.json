@@ -183,10 +183,6 @@
     }
   },
   "experiments": {
-    "agentShareCard": {
-      "description": "Share agents as downloadable collectible cards from the agent gallery and detail page.",
-      "title": "Agent share cards"
-    },
     "autoEnable": {
       "description": "Dev builds enable experiments by default. Turn off individual experiments below when you need the stable path.",
       "label": "Auto-enable new experiments"

@@ -183,10 +183,6 @@
     }
   },
   "experiments": {
-    "agentShareCard": {
-      "description": "Comparte agentes como tarjetas coleccionables descargables desde la galería y la página de detalles del agente.",
-      "title": "Tarjetas para compartir agentes"
-    },
     "autoEnable": {
       "description": "Las compilaciones de desarrollo activan los experimentos de forma predeterminada. Desactiva experimentos individuales abajo cuando necesites el flujo estable.",
       "label": "Activar nuevos experimentos automáticamente"

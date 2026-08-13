@@ -48,8 +48,6 @@ import { canDeletePersona } from "@/features/agents/lib/personaPresentation";
 import { runAgentViewTransition } from "@/features/agents/lib/agentViewTransitions";
 import { deleteDraftAgentSession } from "@/features/agents/lib/agentBuilderSession";
 import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
-import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 
 function decodeImportFileBytes(fileBytes: Uint8Array): string {
   try {
@@ -105,8 +103,6 @@ export function AgentsView({
   onDeleteDraftSession,
 }: AgentsViewProps = {}) {
   const { t } = useTranslation(["agents", "common"]);
-  const shareCardEnabled =
-    useExperiment(AGENT_SHARE_CARD_EXPERIMENT_ID)?.enabled === true;
   const isActivePersonaControlled = activePersonaId !== undefined;
   const [deletingPersona, setDeletingPersona] = useState<Persona | null>(null);
   const [sharingPersonaId, setSharingPersonaId] = useState<string | null>(null);
@@ -517,7 +513,7 @@ export function AgentsView({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      {shareCardEnabled && sharingPersona ? (
+      {sharingPersona ? (
         <AgentShareDialog
           open
           persona={sharingPersona}
@@ -539,7 +535,7 @@ export function AgentsView({
           onDuplicate={handleDuplicatePersona}
           onDelete={handleDeletePersona}
           onExport={handleExportPersona}
-          onShare={shareCardEnabled ? handleSharePersona : undefined}
+          onShare={handleSharePersona}
           onAvatarUpdate={handleUpdateAvatar}
         />
         {dialogs}
@@ -573,7 +569,7 @@ export function AgentsView({
           onDuplicatePersona={handleDuplicatePersona}
           onDeletePersona={handleDeletePersona}
           onExportPersona={handleExportPersona}
-          onSharePersona={shareCardEnabled ? handleSharePersona : undefined}
+          onSharePersona={handleSharePersona}
           onCreatePersona={handleCreatePersona}
           onImportAgentImage={() => setImportDialogOpen(true)}
           onContinueDraft={handleContinueDraft}
