@@ -409,16 +409,53 @@ function refExists(root, ref) {
   });
 }
 
-function fetchOriginMain(root) {
+function fetchReleaseState(root) {
   run(
     "git",
     [
       "fetch",
+      "--prune",
       "--no-tags",
       "origin",
       "refs/heads/main:refs/remotes/origin/main",
+      "+refs/tags/v*:refs/remotes/berd-release-tags/v*",
     ],
     { cwd: root },
+  );
+}
+
+function describeRemoteReleaseTag(root, stableOnly) {
+  const tags = run(
+    "git",
+    [
+      "for-each-ref",
+      "--format=%(refname:strip=3)",
+      "refs/remotes/berd-release-tags/v*",
+    ],
+    { cwd: root },
+  )
+    .split("\n")
+    .filter((tag) => tag && (!stableOnly || !tag.includes("-")));
+  if (tags.length === 0) return null;
+
+  const args = [
+    "describe",
+    "--all",
+    "--long",
+    "--abbrev=40",
+    "--match",
+    "berd-release-tags/v*",
+  ];
+  if (stableOnly) args.push("--exclude", "berd-release-tags/v*-*");
+  const result = commandResult("git", args, { cwd: root });
+  if (result.status !== 0) return null;
+  const describedRef = result.stdout.trim().replace(/-\d+-g[0-9a-f]+$/, "");
+  return (
+    tags.find((tag) =>
+      [`remotes/berd-release-tags/${tag}`, `tags/${tag}`].includes(
+        describedRef,
+      ),
+    ) ?? null
   );
 }
 
@@ -462,9 +499,49 @@ function validateLocalTag(root, tag, expectedTarget) {
   }
 }
 
-async function generateReviewedNotes(root) {
-  process.stderr.write("generating release notes...\n");
-  const notes = run("just", ["release-notes"], { cwd: root });
+export function releaseNotesFrom(root, version, changelog) {
+  const parsed = parseSemver(version);
+  if (parsed.prerelease.length > 0) {
+    const previousRelease = describeRemoteReleaseTag(root, false);
+    if (!previousRelease) fail("no previous release tag found");
+    return previousRelease;
+  }
+  const previousStable = describeRemoteReleaseTag(root, true);
+  if (previousStable) return previousStable;
+
+  const firstPrerelease = changelogEntries(changelog)
+    .filter(
+      (entry) =>
+        sameNumericVersion(entry.version, version) &&
+        parseSemver(entry.version).prerelease.length > 0,
+    )
+    .at(-1);
+  const from =
+    /^\*\*Full Changelog\*\*: https:\/\/github\.com\/\S+\/compare\/(.+?)\.\.\.\S+$/m.exec(
+      firstPrerelease?.body ?? "",
+    )?.[1];
+  if (
+    !from ||
+    !succeeds("git", ["rev-parse", "--verify", `${from}^{commit}`], {
+      cwd: root,
+    })
+  ) {
+    fail("no previous stable tag or first prerelease changelog baseline found");
+  }
+  return from;
+}
+
+function releaseNotesRef(from) {
+  return from.startsWith("v") ? `refs/remotes/berd-release-tags/${from}` : from;
+}
+
+async function generateReviewedNotes(root, from) {
+  process.stderr.write(`generating release notes from ${from}...\n`);
+  const notes = run(
+    "just",
+    ["release-notes", releaseNotesRef(from), "HEAD", from],
+    { cwd: root },
+  );
   if (!notes) fail("generated release notes are empty");
   process.stdout.write(`\n${notes}\n\n`);
   const prompt = createInterface({
@@ -480,6 +557,41 @@ async function generateReviewedNotes(root) {
     prompt.close();
   }
   return notes;
+}
+
+async function generateReviewedCurrentNotes(root, version, read) {
+  while (true) {
+    const reviewedMain = run("git", ["rev-parse", "refs/remotes/origin/main"], {
+      cwd: root,
+    });
+    const changelog = await read("CHANGELOG.md");
+    const reviewedFrom = releaseNotesFrom(root, version, changelog);
+    const notes = await generateReviewedNotes(root, reviewedFrom);
+    fetchReleaseState(root);
+    const currentMain = run("git", ["rev-parse", "refs/remotes/origin/main"], {
+      cwd: root,
+    });
+    const currentFrom = releaseNotesFrom(root, version, changelog);
+    const mainChanged = currentMain !== reviewedMain;
+    if (!mainChanged && currentFrom === reviewedFrom) return notes;
+
+    if (mainChanged) {
+      const currentBranch = run("git", ["branch", "--show-current"], {
+        cwd: root,
+      });
+      const head = run("git", ["rev-parse", "HEAD"], { cwd: root });
+      if (currentBranch !== "main" || head !== reviewedMain) {
+        fail("origin/main advanced; rerun release preparation from main");
+      }
+      run("git", ["merge", "--ff-only", "refs/remotes/origin/main"], {
+        cwd: root,
+        visible: true,
+      });
+    }
+    process.stderr.write(
+      "release state changed while release notes were under review; regenerating...\n",
+    );
+  }
 }
 
 function releasePrs(root, repository, branch) {
@@ -549,13 +661,13 @@ async function prepare(version, notesPath) {
   const branch = `release/v${version}`;
   const subject = `chore: release v${version}`;
   assertClean(root);
+  run("gh", ["auth", "status", "--hostname", "github.com"], { cwd: root });
+  fetchReleaseState(root);
   const notes = notesPath
     ? (await readFile(resolve(notesPath), "utf8")).trim()
-    : await generateReviewedNotes(root);
+    : await generateReviewedCurrentNotes(root, version, read);
   if (!notes) fail("release notes file must contain reviewed Markdown");
   if (notes.includes("\0")) fail("release notes file contains a NUL byte");
-  run("gh", ["auth", "status", "--hostname", "github.com"], { cwd: root });
-  fetchOriginMain(root);
 
   const remoteBranchOutput = commandResult(
     "git",
@@ -744,7 +856,7 @@ async function publish(version) {
   const subject = `chore: release v${version}`;
   assertClean(root);
   run("gh", ["auth", "status", "--hostname", "github.com"], { cwd: root });
-  fetchOriginMain(root);
+  fetchReleaseState(root);
 
   const prs = releasePrs(root, config.repository, branch);
   if (prs.length !== 1) fail(`expected exactly one PR for ${branch}`);

@@ -37,7 +37,7 @@ The updater manifest currently contains only `darwin-aarch64`. Windows and Linux
 
 Release tags use canonical SemVer without build metadata, such as `v1.2.3` or `v1.2.3-rc.1`.
 
-1. Run `just release-prepare X.Y.Z`. It generates and prints release notes, requires explicit approval, then creates `release/vX.Y.Z`, synchronizes every release version and Cargo lock entry, updates `CHANGELOG.md`, validates, commits, pushes, and opens a PR.
+1. Run `just release-prepare X.Y.Z`. It generates and prints release notes, requires explicit approval, then creates `release/vX.Y.Z`, synchronizes every release version and Cargo lock entry, updates `CHANGELOG.md`, validates, commits, pushes, and opens a PR. Prerelease notes start at the latest release tag; stable notes start at the latest stable tag so they include the full release cycle.
 2. Review and squash-merge the release PR after CI passes.
 3. Run `just release-publish X.Y.Z`. It resolves the PR's squash-merge commit, verifies the committed release state, creates an annotated tag on that exact commit, and pushes only `refs/tags/vX.Y.Z`.
 4. The workflow verifies that the checkout and canonical remote tag resolve to the same main-reachable commit and that the tag is annotated.
