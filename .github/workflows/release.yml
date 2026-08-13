@@ -292,9 +292,7 @@ jobs:
       SOURCE_SHA: ${{ needs.setup.outputs.source_sha }}
       REPOSITORY: ${{ needs.setup.outputs.repository }}
       PLATFORM: ${{ needs.setup.outputs.windows_platform }}
-      BERD_RELEASE_CHANNEL: public
-      BERD_UPDATER_ENDPOINT: https://github.com/${{ needs.setup.outputs.repository }}/releases/download/${{ needs.setup.outputs.rolling_tag }}/latest.json
-      BERD_UPDATER_PUBLIC_KEY: ${{ secrets.BERD_UPDATER_PUBLIC_KEY }}
+      BERD_RELEASE_CHANNEL: disabled
       # Windows selects generated [script] recipes that Just 1.40 still gates as unstable.
       JUST_UNSTABLE: "1"
     steps:
@@ -328,12 +326,7 @@ jobs:
           corepack prepare pnpm@10.33.0 --activate
           if ((pnpm --version) -ne '10.33.0') { throw 'pnpm 10.33.0 was not activated' }
 
-      - name: Require updater public key
-        shell: pwsh
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:BERD_UPDATER_PUBLIC_KEY)) { throw 'BERD_UPDATER_PUBLIC_KEY repository secret is required' }
-
-      - name: Generate updater-enabled Tauri configuration
+      - name: Generate updater-disabled Tauri configuration
         shell: pwsh
         run: pnpm tauri:release:config
 
@@ -356,6 +349,7 @@ jobs:
       - name: Package and sign Windows updater archive
         shell: bash
         env:
+          BERD_UPDATER_PUBLIC_KEY: ${{ secrets.BERD_UPDATER_PUBLIC_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
@@ -412,9 +406,7 @@ jobs:
       SOURCE_SHA: ${{ needs.setup.outputs.source_sha }}
       REPOSITORY: ${{ needs.setup.outputs.repository }}
       PLATFORM: ${{ needs.setup.outputs.linux_platform }}
-      BERD_RELEASE_CHANNEL: public
-      BERD_UPDATER_ENDPOINT: https://github.com/${{ needs.setup.outputs.repository }}/releases/download/${{ needs.setup.outputs.rolling_tag }}/latest.json
-      BERD_UPDATER_PUBLIC_KEY: ${{ secrets.BERD_UPDATER_PUBLIC_KEY }}
+      BERD_RELEASE_CHANNEL: disabled
       BERD_TAURI_CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
     steps:
       - name: Check out verified source
@@ -440,10 +432,6 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev
 
-      - name: Require updater public key
-        run: |
-          : "${BERD_UPDATER_PUBLIC_KEY:?BERD_UPDATER_PUBLIC_KEY repository secret is required}"
-
       - name: Set up Linux release dependencies and locked signer tooling
         run: |
           pnpm install --frozen-lockfile
@@ -464,11 +452,13 @@ jobs:
           CARGO_FEATURES="$(scripts/block-feature-gates.sh berdctl)"
           BERD_APP_VERSION="$VERSION" \
           VITE_APP_VERSION="$VERSION" \
+          VITE_UPDATER_ENABLED=false \
           pnpm tauri build --bundles appimage,deb --features "$CARGO_FEATURES" \
             --config src-tauri/tauri.release.conf.json
 
       - name: Package and sign Linux updater archive
         env:
+          BERD_UPDATER_PUBLIC_KEY: ${{ secrets.BERD_UPDATER_PUBLIC_KEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
@@ -513,8 +503,8 @@ jobs:
 
   promote:
     name: Approve and promote updater feed
-    needs: [setup, stage-macos, stage-windows, stage-linux]
-    if: always() && needs.setup.result == 'success' && (needs.stage-macos.result == 'success' || needs.stage-macos.result == 'skipped') && (needs.stage-windows.result == 'success' || needs.stage-windows.result == 'skipped') && (needs.stage-linux.result == 'success' || needs.stage-linux.result == 'skipped')
+    needs: [setup, stage-macos]
+    if: always() && needs.setup.result == 'success' && (needs.stage-macos.result == 'success' || needs.stage-macos.result == 'skipped')
     runs-on: macos-latest
     timeout-minutes: 30
     environment: release
@@ -564,7 +554,7 @@ jobs:
           }
           echo "environment_approver=$APPROVER" >> "$GITHUB_ENV"
 
-      - name: Verify staged immutable assets for all platforms
+      - name: Verify staged immutable macOS assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ needs.setup.outputs.repository }}
@@ -573,10 +563,8 @@ jobs:
           EXPECTED_SOURCE_SHA: ${{ needs.setup.outputs.source_sha }}
         run: |
           set -euo pipefail
-          for PLATFORM in darwin-aarch64 windows-x86_64 linux-x86_64; do
-            export PLATFORM
-            scripts/release/github/verify-versioned-release.sh "$EXPECTED_TAG" "$EXPECTED_SOURCE_SHA"
-          done
+          export PLATFORM=darwin-aarch64
+          scripts/release/github/verify-versioned-release.sh "$EXPECTED_TAG" "$EXPECTED_SOURCE_SHA"
 
       - name: Install locked signer tooling
         run: pnpm install --frozen-lockfile
@@ -588,7 +576,10 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          scripts/release/github/promote-updater.sh "$TAG" "$SOURCE_SHA" "$RUNNER_TEMP/promotion-summary.md"
+          promotion_config="$RUNNER_TEMP/promotion-channel.json"
+          jq '.platforms = ["darwin-aarch64"]' "$RELEASE_CHANNEL_CONFIG" > "$promotion_config"
+          BERD_RELEASE_CHANNEL_CONFIG="$promotion_config" \
+            scripts/release/github/promote-updater.sh "$TAG" "$SOURCE_SHA" "$RUNNER_TEMP/promotion-summary.md"
           cat "$RUNNER_TEMP/promotion-summary.md" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Record workflow and environment approval

@@ -707,7 +707,7 @@ describe("generate-latest-json", () => {
 });
 
 describe("desktop release workflow platform gate", () => {
-  it("uses one public build profile across all platform lanes", async () => {
+  it("uses one public product profile across all platform lanes", async () => {
     const workflow = parseYaml(
       await readFile(join(repo, ".github/workflows/release.yml"), "utf8"),
     );
@@ -755,23 +755,41 @@ describe("desktop release workflow platform gate", () => {
     expect(interpolatedSteps).toEqual([]);
   });
 
-  it("requires macOS, Windows, and Linux staging before promotion", async () => {
+  it("promotes only macOS while staging every platform", async () => {
     const workflow = await readFile(
       join(repo, ".github/workflows/release.yml"),
       "utf8",
     );
+    expect(workflow).toContain("needs: [setup, stage-macos]");
+    expect(workflow).not.toContain("needs.stage-windows.result");
+    expect(workflow).not.toContain("needs.stage-linux.result");
+    expect(workflow).toContain("export PLATFORM=darwin-aarch64");
     expect(workflow).toContain(
-      "needs: [setup, stage-macos, stage-windows, stage-linux]",
+      `jq '.platforms = ["darwin-aarch64"]' "$RELEASE_CHANNEL_CONFIG"`,
     );
-    expect(workflow).toContain("needs.stage-windows.result == 'success'");
-    expect(workflow).toContain("needs.stage-linux.result == 'success'");
     expect(workflow).toContain(
-      "for PLATFORM in darwin-aarch64 windows-x86_64 linux-x86_64",
+      'BERD_RELEASE_CHANNEL_CONFIG="$promotion_config"',
     );
     expect(workflow).toContain("Package and sign Windows updater archive");
     expect(workflow).toContain("Package and sign Linux updater archive");
     expect(workflow).toContain("actions/attest-build-provenance@");
     const parsedWorkflow = parseYaml(workflow);
+    for (const jobName of ["stage-windows", "stage-linux"]) {
+      const job = parsedWorkflow.jobs[jobName];
+      expect(job.env.BERD_RELEASE_CHANNEL).toBe("disabled");
+      expect(job.env.BERD_UPDATER_ENDPOINT).toBeUndefined();
+      expect(job.env.BERD_UPDATER_PUBLIC_KEY).toBeUndefined();
+      const packageStep = job.steps.find((step) =>
+        step.name.startsWith("Package and sign"),
+      );
+      expect(packageStep.env.BERD_UPDATER_PUBLIC_KEY).toContain(
+        "secrets.BERD_UPDATER_PUBLIC_KEY",
+      );
+    }
+    const linuxBuildStep = parsedWorkflow.jobs["stage-linux"].steps.find(
+      (step) => step.name === "Build Linux packages",
+    );
+    expect(linuxBuildStep.run).toContain("VITE_UPDATER_ENABLED=false");
     const attestationSteps = Object.values(parsedWorkflow.jobs).flatMap((job) =>
       (job.steps ?? []).filter((step) =>
         step.uses?.startsWith("actions/attest-build-provenance@"),
