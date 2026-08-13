@@ -327,6 +327,12 @@ function subagentTitle(
       "tools.subagent.delegatingAgent",
       "tools.subagent.delegatingAgentLabeled",
     ],
+    messaging: [
+      "tools.subagent.messaging",
+      "tools.subagent.messagingLabeled",
+      "tools.subagent.messagingAgent",
+      "tools.subagent.messagingAgentLabeled",
+    ],
     waiting: [
       "tools.subagent.waiting",
       "tools.subagent.waitingLabeled",
@@ -345,26 +351,40 @@ function subagentTitle(
       "tools.subagent.cancellingAgent",
       "tools.subagent.cancellingAgentLabeled",
     ],
+    interrupting: [
+      "tools.subagent.interrupting",
+      "tools.subagent.interruptingLabeled",
+      "tools.subagent.interruptingAgent",
+      "tools.subagent.interruptingAgentLabeled",
+    ],
   } as const;
   const [plain, labeled, agent, agentLabeled] = keys[info.activity];
   const configuredTaskKeys = {
     delegating: "tools.subagent.delegatingAgentConfiguredTask",
+    messaging: "tools.subagent.messagingAgentConfiguredTask",
     waiting: "tools.subagent.waitingAgentConfiguredTask",
     checking: "tools.subagent.checkingAgentConfiguredTask",
     cancelling: "tools.subagent.cancellingAgentConfiguredTask",
+    interrupting: "tools.subagent.interruptingAgentConfiguredTask",
   } as const;
   const taskLabeledKeys = {
     delegating: "tools.subagent.delegatingLabeled",
+    messaging: "tools.subagent.messagingLabeled",
     waiting: "tools.subagent.waitingTaskLabeled",
     checking: "tools.subagent.checkingTaskLabeled",
     cancelling: "tools.subagent.cancellingTaskLabeled",
+    interrupting: "tools.subagent.interruptingTaskLabeled",
   } as const;
   // Agent name comes from the call arguments (delegate source) or is
   // resolved from the transcript (load of a task spawned by a named
   // delegate). It replaces the word "subagent"; the task description is
   // kept alongside it: "Delegating to Rivet · Count markdown files…".
   const agentName = info.agentName ?? resolvedAgentName;
+  const agentNames = info.agentNames;
   const taskLabel = info.label ?? resolvedTaskLabel;
+  if (agentNames) {
+    return t("tools.subagent.waitingAgents", { names: agentNames.join(", ") });
+  }
   if (agentName && (info.sourceDefinesTask || resolvedTaskIsConfigured)) {
     return t(configuredTaskKeys[info.activity], { name: agentName });
   }

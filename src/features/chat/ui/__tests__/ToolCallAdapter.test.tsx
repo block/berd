@@ -221,6 +221,34 @@ describe("ToolCallAdapter — subagent laws", () => {
     ).toBeInTheDocument();
   });
 
+  it.each([
+    {
+      toolName: "send_message",
+      arguments: { target: "/root/reviewer", message: "Review the patch" },
+      title: "Sending a message to /root/reviewer · Review the patch",
+    },
+    {
+      toolName: "interrupt_agent",
+      arguments: { target: "/root/reviewer" },
+      title: "Interrupting /root/reviewer’s current turn",
+    },
+    {
+      toolName: "wait_agent",
+      arguments: { targets: ["agent-1", "agent-2"] },
+      title: "Waiting on agent-1, agent-2",
+    },
+  ])("renders truthful Codex $toolName activity", ({
+    toolName,
+    arguments: args,
+    title,
+  }) => {
+    renderAdapter({ name: toolName, toolName, arguments: args });
+
+    expect(
+      screen.getByRole("button", { name: new RegExp(`^${title}$`, "i") }),
+    ).toBeInTheDocument();
+  });
+
   it("does not expose a task id as an unknown task description", () => {
     renderAdapter({
       name: "Loading source 20260807_72",

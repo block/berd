@@ -359,17 +359,17 @@ describe("getSubagentToolCallInfo", () => {
     });
 
     it.each([
-      ["send_input", "agent-42", "Review the patch"],
-      ["send_message", "/root/reviewer", "Review the patch"],
-      ["followup_task", "/root/reviewer", "Review the patch"],
-    ])("preserves target and task for %s", (toolName, target, message) => {
+      ["send_input", "agent-42", "Review the patch", "delegating"],
+      ["send_message", "/root/reviewer", "Review the patch", "messaging"],
+      ["followup_task", "/root/reviewer", "Review the patch", "delegating"],
+    ])("preserves target and task for %s", (toolName, target, message, activity) => {
       expect(
         getSubagentToolCallInfo({
           toolName,
           arguments: { target, message },
         }),
       ).toEqual({
-        activity: "delegating",
+        activity,
         agentName: target,
         label: message,
       });
@@ -381,7 +381,12 @@ describe("getSubagentToolCallInfo", () => {
       ["interrupt_agent", { target: "/root/reviewer" }, "/root/reviewer"],
     ])("attributes %s to its target", (toolName, args, agentName) => {
       expect(getSubagentToolCallInfo({ toolName, arguments: args })).toEqual({
-        activity: toolName === "resume_agent" ? "delegating" : "cancelling",
+        activity:
+          toolName === "resume_agent"
+            ? "delegating"
+            : toolName === "interrupt_agent"
+              ? "interrupting"
+              : "cancelling",
         agentName,
       });
     });
@@ -389,12 +394,12 @@ describe("getSubagentToolCallInfo", () => {
     it.each([
       ["spawn_agent", "Rivet", "Investigate the failing tests", "delegating"],
       ["send_input", "agent-42", "Review the patch", "delegating"],
-      ["send_message", "/root/reviewer", "Review the patch", "delegating"],
+      ["send_message", "/root/reviewer", "Review the patch", "messaging"],
       ["followup_task", "/root/reviewer", "Review the patch", "delegating"],
       ["resume_agent", "agent-42", undefined, "delegating"],
       ["wait_agent", "agent-42", undefined, "waiting"],
       ["close_agent", "agent-42", undefined, "cancelling"],
-      ["interrupt_agent", "/root/reviewer", undefined, "cancelling"],
+      ["interrupt_agent", "/root/reviewer", undefined, "interrupting"],
     ])("preserves codex-acp wire provenance for %s", (toolName, receiver, prompt, activity) => {
       expect(
         getSubagentToolCallInfo({
@@ -425,9 +430,20 @@ describe("getSubagentToolCallInfo", () => {
       ).toEqual({ activity: "waiting", agentName: "agent-42" });
     });
 
+    it("preserves every known target for multi-agent waits", () => {
+      expect(
+        getSubagentToolCallInfo({
+          toolName: "wait_agent",
+          arguments: { targets: ["agent-1", "agent-2"] },
+        }),
+      ).toEqual({
+        activity: "waiting",
+        agentNames: ["agent-1", "agent-2"],
+      });
+    });
+
     it.each([
       ["wait_agent", {}],
-      ["wait_agent", { targets: ["agent-1", "agent-2"] }],
       ["wait_agent", { targets: ["agent-1", 42] }],
       ["wait_agent", { targets: ["agent-1", "   "] }],
       ["wait_agent", { targets: [42] }],
