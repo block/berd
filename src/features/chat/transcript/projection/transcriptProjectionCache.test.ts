@@ -1460,6 +1460,38 @@ describe("transcript projection cache", () => {
     expect(second.heightRevision).not.toBe(first.heightRevision);
   });
 
+  it.each([
+    ["agent identity", { subagentAgentName: "Rivet" }],
+    ["task description", { subagentTaskLabel: "Count markdown files" }],
+    ["configured task", { subagentTaskIsConfigured: true }],
+  ] satisfies Array<
+    [string, Partial<ToolRequestContent>]
+  >)("invalidates tool rows for provenance-only %s updates", (_label, provenance) => {
+    const originalRequest: ToolRequestContent = {
+      type: "toolRequest",
+      id: "tool-1",
+      name: "load",
+      arguments: { task_id: "20260807_72" },
+      status: "pending",
+    };
+    const original = messageWithContent(
+      "assistant-1",
+      "assistant",
+      [originalRequest],
+      utc(2026, 6, 4, 10),
+    );
+    const updated = {
+      ...original,
+      content: [{ ...originalRequest, ...provenance }],
+    };
+
+    const before = buildMessageRevisions(original);
+    const after = buildMessageRevisions(updated);
+
+    expect(after.renderRevision).not.toBe(before.renderRevision);
+    expect(after.heightRevision).not.toBe(before.heightRevision);
+  });
+
   it("classifies active tool rows as estimate-only keepalive candidates", () => {
     const cache = createTranscriptProjectionCache();
     const toolRequest: ToolRequestContent = {
