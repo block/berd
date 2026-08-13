@@ -56,7 +56,7 @@ jobs:
             await github.rest.issues.createComment({
               owner, repo, issue_number: pull_number,
               body: [
-                `Thanks for the interest, @${author} — and sorry for the automated reply.`,
+                `🤖 Thanks for the interest, @${author} — and sorry for the automated reply.`,
                 '',
                 "**Berd doesn't accept pull requests from outside authorized repository collaborators**, so this one is being closed automatically. It's a policy, not a judgment on your code, and we'd rather tell you now than let it sit.",
                 '',

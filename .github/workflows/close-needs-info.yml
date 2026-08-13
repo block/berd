@@ -33,13 +33,13 @@ jobs:
 
           stale-issue-label: closing-soon
           stale-issue-message: >-
-            We still need the information requested above to act on this issue.
+            🤖 We still need the information requested above to act on this issue.
             It has been inactive for 23 days, so it will close automatically in
             7 days if there is no reply. Add the missing details in a comment
             and the countdown will reset. A maintainer will review the answer
             and remove `needs-info` once the issue is actionable.
           close-issue-message: >-
-            Closing because the information we need has not arrived after 30
+            🤖 Closing because the information we need has not arrived after 30
             days. If you can provide it later, leave a comment with the missing
             details and a maintainer can reopen the issue.
           close-issue-reason: not_planned
