@@ -214,11 +214,15 @@ export function getSubagentToolCallInfo(input: {
     };
   }
 
-  // Codex: spawn_agent collaboration tool.
+  // Codex: spawn_agent collaboration tool. `task_name` identifies the spawned
+  // agent in the collaboration protocol, while `message` is its delegated
+  // task. Keep `prompt` as a compatibility fallback for older adapters.
   if (toolName === "spawn_agent") {
-    const label = stringArg(args, "prompt");
+    const agentName = stringArg(args, "task_name");
+    const label = stringArg(args, "message") ?? stringArg(args, "prompt");
     return {
       activity: "delegating",
+      ...(agentName ? { agentName: agentName.trim() } : {}),
       ...(label ? { label: truncateLabel(label) } : {}),
     };
   }

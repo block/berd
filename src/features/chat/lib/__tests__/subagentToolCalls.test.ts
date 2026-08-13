@@ -353,7 +353,23 @@ describe("getSubagentToolCallInfo", () => {
   });
 
   describe("codex spawn_agent", () => {
-    it("classifies spawn_agent with a prompt label", () => {
+    it("preserves Codex agent identity and delegated task", () => {
+      expect(
+        getSubagentToolCallInfo({
+          toolName: "spawn_agent",
+          arguments: {
+            task_name: "Rivet",
+            message: "Investigate the failing tests",
+          },
+        }),
+      ).toEqual({
+        activity: "delegating",
+        agentName: "Rivet",
+        label: "Investigate the failing tests",
+      });
+    });
+
+    it("falls back to the legacy prompt label", () => {
       expect(
         getSubagentToolCallInfo({
           toolName: "spawn_agent",
@@ -364,7 +380,23 @@ describe("getSubagentToolCallInfo", () => {
         label: "Investigate the failing tests",
       });
     });
-    it("classifies spawn_agent when its task is unknown", () => {
+
+    it("prefers the Codex message when both task fields are present", () => {
+      expect(
+        getSubagentToolCallInfo({
+          toolName: "spawn_agent",
+          arguments: {
+            message: "Use the collaboration task",
+            prompt: "Legacy fallback",
+          },
+        }),
+      ).toEqual({
+        activity: "delegating",
+        label: "Use the collaboration task",
+      });
+    });
+
+    it("classifies spawn_agent when its provenance is unknown", () => {
       expect(
         getSubagentToolCallInfo({
           toolName: "spawn_agent",
