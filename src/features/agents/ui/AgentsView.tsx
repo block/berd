@@ -31,6 +31,7 @@ import {
 import { saveExportedAgentFile } from "@/shared/api/system";
 import {
   decodeAgentImage,
+  getPngDimensions,
   MAX_SNAPSHOT_PNG_BYTES,
   type SnapshotV1,
 } from "@/features/agents/agent-snapshot";
@@ -48,6 +49,7 @@ import { canDeletePersona } from "@/features/agents/lib/personaPresentation";
 import { runAgentViewTransition } from "@/features/agents/lib/agentViewTransitions";
 import { deleteDraftAgentSession } from "@/features/agents/lib/agentBuilderSession";
 import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
+import { isSafePngAvatarDataUrl } from "@/shared/lib/avatarUrl";
 
 function decodeImportFileBytes(fileBytes: Uint8Array): string {
   try {
@@ -450,6 +452,7 @@ export function AgentsView({
           prepareImport={(bytes, name) => {
             if (isAgentImageFileName(name)) {
               const snapshot = decodeAgentImage(bytes);
+              const { width, height } = getPngDimensions(bytes);
               return {
                 displayName:
                   snapshot.profile?.displayName ??
@@ -457,7 +460,13 @@ export function AgentsView({
                   "Imported agent",
                 systemPrompt: snapshot.definition.systemPrompt ?? "",
                 identity: name,
+                avatar:
+                  typeof snapshot.profile?.avatarDataUrl === "string" &&
+                  isSafePngAvatarDataUrl(snapshot.profile.avatarDataUrl)
+                    ? snapshot.profile.avatarDataUrl
+                    : undefined,
                 snapshot,
+                cardAspectRatio: width / height,
                 cardImageUrl: URL.createObjectURL(
                   new Blob([new Uint8Array(bytes).buffer], {
                     type: "image/png",

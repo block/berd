@@ -53,7 +53,19 @@ describe("AgentImportDialog", () => {
     const image = await screen.findByRole("img", {
       name: "importDialog.previewAlt",
     });
-    const tiltSurface = image.parentElement as HTMLDivElement;
+    const tiltSurface = image.closest<HTMLDivElement>(
+      '[data-agent-card-surface="true"]',
+    ) as HTMLDivElement;
+    const reveal = tiltSurface.closest<HTMLDivElement>(
+      '[data-agent-card-reveal="true"]',
+    );
+    const revealContent = reveal?.querySelector<HTMLDivElement>(
+      '[data-agent-card-reveal-content="true"]',
+    );
+    expect(revealContent?.className).toContain("z-10");
+    expect(
+      tiltSurface.querySelector('canvas[data-agent-card-frame-only="true"]'),
+    ).not.toBeNull();
     vi.spyOn(tiltSurface, "getBoundingClientRect").mockReturnValue({
       left: 0,
       top: 0,
