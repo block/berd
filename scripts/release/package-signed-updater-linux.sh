@@ -58,10 +58,6 @@ tar -tzf "$OUTPUT_DIR/$ARCHIVE_NAME" | grep -Fxq "$APPIMAGE_NAME"
 )
 SIGNATURE="$OUTPUT_DIR/$ARCHIVE_NAME.sig"
 [[ -s "$SIGNATURE" ]] || { release_error "tauri signer produced no $SIGNATURE"; exit 1; }
-grep -Fq "untrusted comment: signature from minisign secret key" "$SIGNATURE" || {
-  release_error "tauri signer produced an invalid minisign envelope"
-  exit 1
-}
 "$REPO_ROOT/scripts/release/verify-updater-signature.sh" \
   "$OUTPUT_DIR/$ARCHIVE_NAME" "$SIGNATURE" "$BERD_UPDATER_PUBLIC_KEY"
 unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD

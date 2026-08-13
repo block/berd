@@ -115,10 +115,6 @@ if [[ ! -s "$SIGNATURE" ]]; then
   release_error "tauri signer produced no $SIGNATURE"
   exit 1
 fi
-if ! grep -Fq "untrusted comment: signature from minisign secret key" "$SIGNATURE"; then
-  release_error "tauri signer produced an invalid minisign envelope"
-  exit 1
-fi
 "$REPO_ROOT/scripts/release/verify-updater-signature.sh" \
   "$ARCHIVE" "$SIGNATURE" "$BERD_UPDATER_PUBLIC_KEY"
 unset TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD
