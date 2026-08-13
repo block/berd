@@ -138,9 +138,12 @@ export async function saveDefaultProviderSelection(
   await modelCacheStore.refreshProviderModels(providerId, { force: true });
 
   const cache = useProviderModelCacheStore.getState();
-  const models = cache.isModelInventoryAuthoritative(providerId)
-    ? cache.getProvenModelsForProvider(providerId)
-    : cache.getModelsForProvider(providerId);
+  if (!cache.isModelInventoryAuthoritative(providerId)) {
+    throw new Error(
+      "Could not prove models for provider. Check provider setup and try again.",
+    );
+  }
+  const models = cache.getProvenModelsForProvider(providerId);
   const runtimeDefaultModelId =
     providerId === getDefaultGooseModelProviderId()
       ? getDefaultGooseModelId()

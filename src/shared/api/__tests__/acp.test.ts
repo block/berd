@@ -1392,6 +1392,34 @@ describe("acpCreateSession", () => {
     expect(mockSetModel).not.toHaveBeenCalled();
   });
 
+  it("does not send a same-provider model disproved by live inventory", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    mockSupportedModelsList.mockResolvedValueOnce({
+      models: ["goose-gpt-5-5"],
+    });
+    mockNewSession.mockResolvedValue({ sessionId: "managed-session" });
+    const { acpCreateSession } = await import("../acp");
+
+    await acpCreateSession("databricks_v2", "/tmp/project", {
+      modelId: "retired-model",
+    });
+
+    expect(mockSetProvider).toHaveBeenCalledWith(
+      "managed-session",
+      "databricks_v2",
+    );
+    expect(mockSetModel).toHaveBeenCalledWith(
+      "managed-session",
+      "goose-gpt-5-5",
+      noRequestModelContext("databricks_v2"),
+    );
+    expect(mockSetModel).not.toHaveBeenCalledWith(
+      "managed-session",
+      "retired-model",
+      expect.anything(),
+    );
+  });
+
   it.each([
     "claude-acp",
     "codex-acp",
@@ -1722,6 +1750,9 @@ describe("acpPrepareSession", () => {
 
   it("allows upstream models omitted from recommendation metadata", async () => {
     await setRuntimeConfig(managedRuntimeConfig);
+    mockSupportedModelsList.mockResolvedValueOnce({
+      models: ["new-upstream-model"],
+    });
     const { acpPrepareSession } = await import("../acp");
 
     await acpPrepareSession("other-session", "other-managed", "/tmp/project", {

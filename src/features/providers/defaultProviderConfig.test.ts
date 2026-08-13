@@ -80,6 +80,9 @@ describe("reconcileManagedDefaultProviderSelection", () => {
           modelId: "goose",
         }),
         GooseUnstableDefaultsSave: defaultsSave,
+        GooseUnstableProvidersSupportedModelsList: vi.fn().mockResolvedValue({
+          models: ["goose-gpt-5-5"],
+        }),
       },
     } as never);
 
@@ -296,6 +299,7 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
             {
               providerId,
               fetchedAt: Date.now(),
+              provenModelIds: models.map((model) => model.id),
               models,
             },
           ],

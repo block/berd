@@ -80,7 +80,7 @@ describe("resolveManagedGooseProviderSelection", () => {
     ).toEqual({ providerId: "databricks_v2", modelId: "shared-model" });
   });
 
-  it("repairs the legacy Goose model sentinel without live inventory", () => {
+  it("keeps a legacy model sentinel model-free without live proof", () => {
     expect(
       resolveManagedGooseProviderSelection(managedConfig, {
         providerId: "databricks",
@@ -88,7 +88,7 @@ describe("resolveManagedGooseProviderSelection", () => {
       }),
     ).toEqual({
       providerId: "databricks_v2",
-      modelId: "goose-gpt-5-5",
+      modelId: undefined,
     });
   });
 
@@ -173,14 +173,14 @@ describe("resolveManagedGooseProviderSelection", () => {
     });
   });
 
-  it("uses the configured default only when no model is selected", () => {
+  it("keeps a migrated provider model-free without live proof", () => {
     expect(
       resolveManagedGooseProviderSelection(managedConfig, {
         providerId: "databricks",
       }),
     ).toEqual({
       providerId: "databricks_v2",
-      modelId: "goose-gpt-5-5",
+      modelId: undefined,
     });
   });
 

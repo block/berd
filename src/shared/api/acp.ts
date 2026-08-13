@@ -382,9 +382,9 @@ async function resolveGooseSessionSelection(
     );
   }
 
-  // A concrete provider is renderer-owned. Policy may validate it, but must
-  // not replace its provider or inject a different provider's default model.
-  return requestedSelection;
+  // A concrete provider stays renderer-owned; validation may remove or replace
+  // only its model with a proven result.
+  return managedSelection;
 }
 
 /** Prepare or warm an ACP session ahead of the first prompt. */

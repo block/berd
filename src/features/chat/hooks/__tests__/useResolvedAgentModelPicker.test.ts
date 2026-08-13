@@ -1223,6 +1223,29 @@ describe("useResolvedAgentModelPicker", () => {
     });
   });
 
+  it("does not auto-select an advisory model while inventory proof is unavailable", () => {
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        { id: "advisory", name: "Advisory", recommended: true },
+      ],
+      getProvenModelsForAgent: () => [],
+      isModelInventoryAuthoritative: () => false,
+      modelsLoading: true,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const { result } = renderModelPicker({
+      selectedProvider: "openai",
+      sessionId: null,
+      session: undefined,
+    });
+
+    expect(result.current.effectiveModelSelection).toBeNull();
+  });
+
   it("does not auto-select an unqualified advisory model from authoritative empty inventory", () => {
     mockUseAgentModelPickerState.mockImplementation(() => ({
       pickerAgents: [{ id: "goose", label: "Goose" }],

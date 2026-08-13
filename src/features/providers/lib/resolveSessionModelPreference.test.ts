@@ -65,6 +65,7 @@ describe("resolveSupportedSessionModelPreference", () => {
         modelId: "gpt-5.4",
       },
     });
+    setCachedModels("openai", ["gpt-5.4"]);
 
     await expect(
       resolveSupportedSessionModelPreference("goose"),
@@ -296,6 +297,7 @@ describe("resolveSupportedSessionModelPreference", () => {
         modelId: "goose-gpt-5-5",
       },
     });
+    setCachedModels("databricks_v2", ["goose-gpt-5-5"]);
     mockCheckAllProviderStatus.mockResolvedValue([
       { providerId: "openai", isConfigured: false },
     ]);

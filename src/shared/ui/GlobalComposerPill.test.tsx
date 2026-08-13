@@ -902,6 +902,32 @@ describe("GlobalComposerPill", () => {
     });
   });
 
+  it("does not synthesize an advisory model while inventory proof is unavailable", async () => {
+    const user = userEvent.setup();
+    mockProviderModelsState.inventoryAuthoritative = false;
+    useAgentStore.setState({ selectedProvider: "databricks_v2" });
+    mockGetModelsForAgent.mockReturnValue([
+      { id: "advisory", name: "Advisory", recommended: true },
+    ]);
+    mockGetProvenModelsForAgent.mockReturnValue([]);
+    const onSend = renderGlobalComposer(vi.fn(), {
+      currentExecutionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+      },
+    });
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expectSent(onSend, "Hello", {
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+      },
+    });
+  });
+
   it("does not synthesize an unqualified advisory model from authoritative empty inventory", async () => {
     const user = userEvent.setup();
     useAgentStore.setState({ selectedProvider: "databricks_v2" });

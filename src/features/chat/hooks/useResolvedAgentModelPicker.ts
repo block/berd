@@ -792,18 +792,12 @@ export function useResolvedAgentModelPicker({
       const provenModels = getProvenModelsForAgent(selectedAgentId);
       const selectableModels = availableModels.filter((model) => {
         const providerId = model.providerId ?? concreteSelectedProviderId;
-        const authoritative = providerId
-          ? isModelInventoryAuthoritative(providerId)
-          : isModelInventoryAuthoritative();
-        return (
-          !authoritative ||
-          provenModels.some(
-            (proven) =>
-              proven.id === model.id &&
-              (!providerId ||
-                !proven.providerId ||
-                proven.providerId === providerId),
-          )
+        return provenModels.some(
+          (proven) =>
+            proven.id === model.id &&
+            (!providerId ||
+              !proven.providerId ||
+              proven.providerId === providerId),
         );
       });
       const compatibleModels = concreteSelectedProviderId
@@ -831,7 +825,6 @@ export function useResolvedAgentModelPicker({
       availableModels,
       concreteSelectedProviderId,
       getProvenModelsForAgent,
-      isModelInventoryAuthoritative,
       selectedAgentId,
       selectedProvider,
     ]);

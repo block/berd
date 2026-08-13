@@ -112,15 +112,25 @@ export async function resolveSupportedSessionModelPreference(
     };
   }
 
+  const modelCache = useProviderModelCacheStore.getState();
+
+  // A configured default is synthesized intent. Unlike an explicit preference,
+  // it cannot survive without a successful inventory proof.
   if (providerId === "goose" && !sessionModelPreference.modelId) {
-    sessionModelPreference = gooseDefaultPreference() ?? sessionModelPreference;
+    const fallback = gooseDefaultPreference();
+    if (!fallback) return sessionModelPreference;
+    if (!modelCache.isModelInventoryAuthoritative(fallback.providerId)) {
+      return { providerId };
+    }
+    return sanitizeSessionModelPreference(fallback, {
+      models: modelCache.getProvenModelsForProvider(fallback.providerId),
+    });
   }
 
   if (!sessionModelPreference.modelId) {
     return sessionModelPreference;
   }
 
-  const modelCache = useProviderModelCacheStore.getState();
   const modelProviderId = sessionModelPreference.providerId;
 
   if (modelCache.isModelInventoryAuthoritative(modelProviderId)) {
@@ -135,14 +145,14 @@ export async function resolveSupportedSessionModelPreference(
 
   if (providerId === "goose") {
     const fallback = gooseDefaultPreference();
-    if (fallback && fallback.providerId !== sessionModelPreference.providerId) {
-      const fallbackCache = useProviderModelCacheStore.getState();
-      if (fallbackCache.isModelInventoryAuthoritative(fallback.providerId)) {
-        return sanitizeSessionModelPreference(fallback, {
-          models: fallbackCache.getProvenModelsForProvider(fallback.providerId),
-        });
-      }
-      return fallback;
+    if (
+      fallback &&
+      fallback.providerId !== sessionModelPreference.providerId &&
+      modelCache.isModelInventoryAuthoritative(fallback.providerId)
+    ) {
+      return sanitizeSessionModelPreference(fallback, {
+        models: modelCache.getProvenModelsForProvider(fallback.providerId),
+      });
     }
   }
 

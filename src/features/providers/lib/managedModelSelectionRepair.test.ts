@@ -80,6 +80,17 @@ describe("repairManagedGooseModelSelection", () => {
     ).resolves.toEqual({ providerId: "databricks_v2", modelId: undefined });
   });
 
+  it("preserves same-provider model-free intent when live proof cannot be read", async () => {
+    vi.mocked(getClient).mockRejectedValue(new Error("offline"));
+
+    await expect(
+      repairManagedGooseModelSelection(
+        { providerId: "databricks_v2" },
+        "session",
+      ),
+    ).resolves.toEqual({ providerId: "databricks_v2", modelId: undefined });
+  });
+
   it("repairs any model absent from the live target-provider inventory", async () => {
     vi.mocked(getClient).mockResolvedValue({
       goose: {

@@ -53,8 +53,8 @@ function defaultManagedProviderId(goose: RuntimeGooseConfig): string {
  * - `null` means policy is unrestricted; the caller must preserve its values.
  * - Allowed providers and all of their upstream-discovered models stay selected.
  * - Disallowed/missing providers move to the runtime default provider.
- * - Existing model selections survive provider migration. A missing model uses
- *   the configured default, whose inventory entry is recommendation metadata.
+ * - Existing concrete model selections survive while proof is unavailable.
+ * - A configured default is synthesized only from successful inventory proof.
  */
 export function resolveManagedGooseProviderSelection(
   config: Pick<RuntimeConfig, "goose">,
@@ -70,21 +70,27 @@ export function resolveManagedGooseProviderSelection(
     (provider) => provider.id === selection.providerId,
   )?.id;
   const providerId = configuredProviderId ?? defaultManagedProviderId(goose);
+  const providerWasMigrated = configuredProviderId === undefined;
   const selectedModelId = normalizeConcreteModelId(selection.modelId);
   const defaultModelId = normalizeConcreteModelId(goose.defaultModelId);
   if (context.targetInventoryValidated === true) {
     const provenModelIds = context.targetModelIds ?? new Set<string>();
+    const needsModelRepair = providerWasMigrated || selection.modelId != null;
     const modelId =
       (selectedModelId && provenModelIds.has(selectedModelId)
         ? selectedModelId
         : undefined) ??
-      (defaultModelId && provenModelIds.has(defaultModelId)
+      // A default is a synthesized fallback. Do not turn same-provider,
+      // provider-only intent into a concrete selection merely because live
+      // inventory happened to be available. It may repair an existing concrete
+      // selection (including a legacy sentinel) or a provider migration.
+      (needsModelRepair && defaultModelId && provenModelIds.has(defaultModelId)
         ? defaultModelId
         : undefined);
     return { providerId, modelId };
   }
 
-  return { providerId, modelId: selectedModelId ?? defaultModelId };
+  return { providerId, modelId: selectedModelId };
 }
 
 /**
