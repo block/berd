@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next";
 import type { Persona } from "@/shared/types/agents";
 import { isSafePngAvatarDataUrl } from "@/shared/lib/avatarUrl";
 import {
+  AgentSnapshotError,
   encodeAgentImage,
   MAX_SNAPSHOT_AVATAR_ANIMATION_BYTES,
   personaToSnapshot,
@@ -30,10 +31,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/shared/ui/dialog";
-import {
-  HolographicAgentCard,
-  holographicCardPresets,
-} from "./HolographicAgentCard";
+import { AgentShareCardPreview } from "./AgentShareCardPreview";
+import { AgentCardReveal } from "./AgentCardReveal";
 import {
   blobToBytes,
   createAvatarPoster,
@@ -173,7 +172,7 @@ export function AgentShareDialog({
     try {
       // Render exactly what the reviewed card displays. Re-generating a second
       // poster here can produce a different or blank frame for stacked videos.
-      const cardAvatarSrc = avatarSrc;
+      const cardAvatarSrc = avatarReadySrc;
       if (!cardAvatarSrc) {
         throw new Error("Agent avatar is not ready");
       }
@@ -186,7 +185,16 @@ export function AgentShareDialog({
         avatar: embeddedAvatar ?? persona.avatar,
       });
       let animation = null;
-      if (cachedAvatar?.mediaType === "video") {
+      const stillMatchesAnimation = Boolean(
+        cachedAvatar?.mediaType === "video" &&
+          (cardAvatarSrc === currentGeneratedAvatarPoster ||
+            cardAvatarSrc === cachedAvatar.posterSrc),
+      );
+      if (
+        cachedAvatar?.mediaType === "video" &&
+        stillMatchesAnimation &&
+        /^(?:https?:|blob:|data:)/u.test(cachedAvatar.src)
+      ) {
         try {
           const animationBytes = await fetch(cachedAvatar.src)
             .then((response) => response.blob())
@@ -205,11 +213,21 @@ export function AgentShareDialog({
         }
       }
       if (operationGeneration !== cardOperationGenerationRef.current) return;
-      const encodedCard = encodeAgentImage(
-        await blobToBytes(card),
-        snapshot,
-        animation,
-      );
+      const cardBytes = await blobToBytes(card);
+      let encodedCard: Uint8Array;
+      try {
+        encodedCard = encodeAgentImage(cardBytes, snapshot, animation);
+      } catch (error) {
+        if (
+          !(error instanceof AgentSnapshotError) ||
+          error.code !== "too-large"
+        ) {
+          throw error;
+        }
+        // The still card remains portable when an otherwise-valid animation
+        // would push the combined PNG over the snapshot size limit.
+        encodedCard = encodeAgentImage(cardBytes, snapshot, null);
+      }
       if (operationGeneration !== cardOperationGenerationRef.current) return;
       const filename = getAgentShareFilename(persona.displayName);
       downloadBlob(
@@ -227,7 +245,14 @@ export function AgentShareDialog({
         setCardDownloadPending(false);
       }
     }
-  }, [avatarSrc, cachedAvatar, cardBase, persona, t]);
+  }, [
+    avatarReadySrc,
+    cachedAvatar,
+    cardBase,
+    currentGeneratedAvatarPoster,
+    persona,
+    t,
+  ]);
 
   const handleDownloadAgent = useCallback(async () => {
     if (agentDownloadInFlightRef.current) return;
@@ -243,7 +268,11 @@ export function AgentShareDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg" surface="solid" className="bg-card">
+      <DialogContent
+        size="lg"
+        surface="solid"
+        className="overflow-visible bg-card"
+      >
         <DialogHeader>
           <DialogTitle>
             {t("share.title", { name: persona.displayName })}
@@ -258,6 +287,7 @@ export function AgentShareDialog({
               src={avatarSrc}
               alt=""
               aria-hidden="true"
+              data-testid="agent-card-avatar-preload"
               className="absolute size-px opacity-0"
               onLoad={() => setAvatarReadySrc(avatarSrc)}
               onError={() => {
@@ -286,43 +316,15 @@ export function AgentShareDialog({
                 />
               </motion.div>
             ) : (
-              <motion.div
-                key={`card:${avatarSrc}`}
-                initial={
-                  shouldReduceMotion
-                    ? false
-                    : { opacity: 0, rotateY: -92, scale: 0.92 }
-                }
-                animate={{ opacity: 1, rotateY: 0, scale: 1 }}
-                transition={{
-                  duration: shouldReduceMotion ? 0 : 0.45,
-                  ease: [0.22, 1, 0.36, 1],
-                }}
-                className="w-full max-w-[19rem] [transform-style:preserve-3d]"
-              >
-                <HolographicAgentCard
-                  src={cardBase}
-                  settings={holographicCardPresets.rainbowPrism}
+              <AgentCardReveal identity={cardContentIdentity}>
+                <AgentShareCardPreview
+                  identity={persona.id}
+                  displayName={persona.displayName}
+                  description={description}
+                  avatarSrc={avatarSrc}
                   alt={t("share.cardAlt", { name: persona.displayName })}
-                >
-                  <div className="absolute inset-x-[8%] top-[7%] bottom-[8%] flex flex-col text-center text-agent-share-card-ink">
-                    <h3 className="line-clamp-2 shrink-0 break-words pb-[0.08em] text-[clamp(1.5rem,5vw,2.6rem)] font-bold leading-[1.08] tracking-[-0.04em]">
-                      {persona.displayName}
-                    </h3>
-                    <div className="flex min-h-0 flex-1 items-center justify-center px-[9%] py-[5%]">
-                      <img
-                        src={avatarSrc}
-                        alt=""
-                        aria-hidden="true"
-                        className="max-h-full max-w-full object-contain drop-shadow-xl"
-                      />
-                    </div>
-                    <p className="line-clamp-4 shrink-0 break-words text-center text-[12px] leading-snug">
-                      {description}
-                    </p>
-                  </div>
-                </HolographicAgentCard>
-              </motion.div>
+                />
+              </AgentCardReveal>
             )}
           </AnimatePresence>
         </div>
@@ -338,7 +340,7 @@ export function AgentShareDialog({
                 <Download />
               )
             }
-            disabled={cardDownloadPending}
+            disabled={cardDownloadPending || !cardReady}
             onClick={() => void handleDownloadCard()}
           >
             {t("share.downloadCard")}
