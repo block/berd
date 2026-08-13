@@ -116,6 +116,9 @@ export function AutomationBuilderView({
             controls={{
               agentModelPicker: false,
               projectPicker: false,
+              // The builder converses about an automation; its transcript
+              // is not a quotable source.
+              quotes: false,
             }}
             composerActions={{
               onSend: (text) => builder.sendMessage(text),

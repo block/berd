@@ -202,7 +202,7 @@ export function ChatInput({
   composerActions,
   initialValue = "",
   initialAttachments,
-  stagedItems = [],
+  stagedItems: stagedItemsProp = [],
   onRemoveStagedItem,
   placeholder,
   onDraftChange,
@@ -299,6 +299,7 @@ export function ChatInput({
     autoFocus: controls?.autoFocus ?? true,
     fileMentions: controls?.fileMentions ?? true,
     projectPicker: controls?.projectPicker ?? true,
+    quotes: controls?.quotes ?? true,
     skills: controls?.skills ?? true,
     voice: controls?.voice ?? true,
   };
@@ -512,6 +513,9 @@ export function ChatInput({
     observer.observe(content);
     return () => observer.disconnect();
   });
+  // One quote capability decision: a composer without quotes neither shows
+  // staged quote chips nor includes staged quotes in sends.
+  const stagedItems = scopedControls.quotes ? stagedItemsProp : [];
   const hasDraftContext =
     (scopedControls.attachments && attachments.length > 0) ||
     visibleSelectedSkills.length > 0 ||

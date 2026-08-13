@@ -184,6 +184,14 @@ export interface ChatInputControls {
   autoFocus?: boolean;
   fileMentions?: boolean;
   projectPicker?: boolean;
+  /**
+   * Whether this composer participates in transcript quoting: displays
+   * staged quote chips and includes staged quotes in sends. Surfaces that
+   * disable it (read-only views, Home, the automations builder) must feed
+   * the same decision to their transcript's quote affordance — quoting is
+   * one capability, not two independent switches.
+   */
+  quotes?: boolean;
   skills?: boolean;
   voice?: boolean;
 }
