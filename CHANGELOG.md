@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.6.0-rc.2](https://github.com/block/berd/releases/tag/v0.6.0-rc.2) - 2026-08-13
+
+This release improves platform support and keeps Berd’s built-in agent runtime current.
+
+- **More reliable releases:** Improved Windows packaging and signed update delivery across Windows and Linux.
+- **Extension compatibility:** Updated the bundled Goose runtime while maintaining support for existing ACP extensions.
+
+**Full Changelog**: https://github.com/block/berd/compare/v0.6.0-rc.1...f12536b
+
 ## [v0.6.0-rc.1](https://github.com/block/berd/releases/tag/v0.6.0-rc.1) - 2026-08-13
 
 This release improves project chat setup and refreshes the getting-started experience.

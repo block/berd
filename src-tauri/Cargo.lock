@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "Berd"
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.2"
 dependencies = [
  "anyhow",
  "audioadapter-buffers",
@@ -579,7 +579,7 @@ checksum = "3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1"
 
 [[package]]
 name = "berdctl"
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.2"
 dependencies = [
  "clap",
  "indexmap 2.13.1",
@@ -6580,7 +6580,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-berdctl"
-version = "0.6.0-rc.1"
+version = "0.6.0-rc.2"
 dependencies = [
  "axum",
  "log",
