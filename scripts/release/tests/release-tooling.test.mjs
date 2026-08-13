@@ -17,11 +17,12 @@ const sourceRepo = resolve(import.meta.dirname, "../../..");
 const releaseScript = join(sourceRepo, "scripts/release/release.mjs");
 const tempDirs = [];
 
-function run(command, args, { cwd, env = {} } = {}) {
+function run(command, args, { cwd, env = {}, input } = {}) {
   return spawnSync(command, args, {
     cwd,
     encoding: "utf8",
     env: { ...process.env, ...env },
+    input,
   });
 }
 
@@ -104,9 +105,19 @@ fi
       join(bin, "pnpm"),
       '#!/usr/bin/env bash\nexit "$' + '{PNPM_STATUS:-0}"\n',
     ),
+    writeFile(
+      join(bin, "just"),
+      `#!/usr/bin/env bash
+set -euo pipefail
+[[ "$1" == "release-notes" ]]
+printf '%s\n' '## generated changes' '' '- generated release notes'
+`,
+    ),
   ]);
   await Promise.all(
-    ["gh", "cargo", "pnpm"].map((name) => chmod(join(bin, name), 0o755)),
+    ["gh", "cargo", "pnpm", "just"].map((name) =>
+      chmod(join(bin, name), 0o755),
+    ),
   );
   expect(run("git", ["init", "--bare", remote]).status).toBe(0);
   expect(run("git", ["init", "-b", "main", repo]).status).toBe(0);
@@ -128,12 +139,13 @@ fi
     GIT_CONFIG_GLOBAL: "/dev/null",
     PATH: `${bin}:${process.env.PATH}`,
   };
-  const release = (args, extraEnv = {}) =>
+  const release = (args, extraEnv = {}, input) =>
     run(process.execPath, [releaseScript, ...args], {
       cwd: repo,
       env: { ...env, ...extraEnv },
+      input,
     });
-  return { root, repo, remote, notes, calls, git, env, release };
+  return { repo, remote, notes, calls, git, release };
 }
 
 describe("release SemVer and changelog", () => {
@@ -176,6 +188,41 @@ describe("release SemVer and changelog", () => {
 });
 
 describe("release preparation", () => {
+  it("generates notes and requires explicit approval", async () => {
+    const declined = await fixture();
+    const cancelled = declined.release(["prepare", "0.6.0-rc.1"], {}, "n\n");
+    expect(cancelled.status).not.toBe(0);
+    expect(cancelled.stdout).toContain("generated release notes");
+    expect(cancelled.stderr).toContain("release preparation cancelled");
+    expect(declined.git(["branch", "--show-current"]).stdout.trim()).toBe(
+      "main",
+    );
+
+    const approved = await fixture();
+    const prepared = approved.release(["prepare", "0.6.0-rc.1"], {}, "y\n");
+    expect(prepared.status, `${prepared.stdout}\n${prepared.stderr}`).toBe(0);
+    expect(
+      await readFile(join(approved.repo, "CHANGELOG.md"), "utf8"),
+    ).toContain("generated release notes");
+  });
+
+  it("rejects versions below the configured public minimum", async () => {
+    const f = await fixture();
+    const prepared = f.release(["prepare", "0.5.0", f.notes]);
+    expect(prepared.status).not.toBe(0);
+    expect(prepared.stderr).toContain(
+      "0.5.0 is below minimum public version 0.6.0-rc.1",
+    );
+    expect(f.git(["branch", "--show-current"]).stdout.trim()).toBe("main");
+
+    const published = f.release(["publish", "0.5.0"]);
+    expect(published.status).not.toBe(0);
+    expect(published.stderr).toContain(
+      "0.5.0 is below minimum public version 0.6.0-rc.1",
+    );
+    expect(f.git(["tag", "--list"]).stdout.trim()).toBe("");
+  });
+
   it("creates one lockstep release commit, pushes it, opens a PR, and resumes", async () => {
     const f = await fixture();
     const prepared = f.release(["prepare", "0.6.0-rc.1", f.notes]);
@@ -282,5 +329,23 @@ describe("release publishing", () => {
         "refs/tags/v0.6.0-rc.1^{commit}",
       ]).stdout.trim(),
     ).toBe(mergeSha);
+
+    expect(
+      run("git", [
+        "--git-dir",
+        f.remote,
+        "update-ref",
+        "-d",
+        "refs/tags/v0.6.0-rc.1",
+      ]).status,
+    ).toBe(0);
+    const retried = f.release(["publish", "0.6.0-rc.1"], {
+      GH_PR_LIST_JSON: pr,
+    });
+    expect(retried.status, `${retried.stdout}\n${retried.stderr}`).toBe(0);
+    const resumed = f.release(["publish", "0.6.0-rc.1"], {
+      GH_PR_LIST_JSON: pr,
+    });
+    expect(resumed.status, `${resumed.stdout}\n${resumed.stderr}`).toBe(0);
   });
 });

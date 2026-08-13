@@ -38,17 +38,16 @@ The updater manifest contains `darwin-aarch64`, `windows-x86_64`, and `linux-x86
 
 Release tags use canonical SemVer without build metadata, such as `v1.2.3` or `v1.2.3-rc.1`.
 
-1. Draft notes with `just release-notes ... output=/tmp/vX.Y.Z.md`, then review the Markdown.
-2. Run `just release-prepare X.Y.Z /tmp/vX.Y.Z.md`. It creates `release/vX.Y.Z`, synchronizes every release version and Cargo lock entry, updates `CHANGELOG.md`, validates, commits, pushes, and opens a PR.
-3. Review and squash-merge the release PR after CI passes.
-4. Run `just release-publish X.Y.Z`. It resolves the PR's squash-merge commit, verifies the committed release state, creates an annotated tag on that exact commit, and pushes only `refs/tags/vX.Y.Z`.
-5. The workflow verifies that the checkout and canonical remote tag resolve to the same main-reachable commit and that the tag is annotated.
-6. It creates or safely resumes an immutable versioned GitHub release using the matching `CHANGELOG.md` section.
-7. The platform jobs produce the macOS app/DMG, Windows NSIS installer, and Linux AppImage/deb/rpm packages.
-8. The macOS signing action signs, notarizes, and staples its artifacts. The Windows NSIS installer and Linux packages are published without platform-native code signatures.
-9. Each platform produces a minisign-signed updater archive, SHA-256 digest, and attested source-bound provenance receipt. Minisign authenticates the Windows and Linux updater archives even though their enclosed payloads lack platform-native code signatures.
-10. Promotion waits for all three platform jobs and approval in the GitHub `release` environment, then re-downloads and verifies every immutable staged artifact. It rejects version downgrades, rejects changed same-version manifests, and rechecks the rolling manifest immediately before publication.
-11. The promotion script uploads all three platform payloads and uploads a three-platform `latest.json` last.
+1. Run `just release-prepare X.Y.Z`. It generates and prints release notes, requires explicit approval, then creates `release/vX.Y.Z`, synchronizes every release version and Cargo lock entry, updates `CHANGELOG.md`, validates, commits, pushes, and opens a PR.
+2. Review and squash-merge the release PR after CI passes.
+3. Run `just release-publish X.Y.Z`. It resolves the PR's squash-merge commit, verifies the committed release state, creates an annotated tag on that exact commit, and pushes only `refs/tags/vX.Y.Z`.
+4. The workflow verifies that the checkout and canonical remote tag resolve to the same main-reachable commit and that the tag is annotated.
+5. It creates or safely resumes an immutable versioned GitHub release using the matching `CHANGELOG.md` section.
+6. The platform jobs produce the macOS app/DMG, Windows NSIS installer, and Linux AppImage/deb/rpm packages.
+7. The macOS signing action signs, notarizes, and staples its artifacts. The Windows NSIS installer and Linux packages are published without platform-native code signatures.
+8. Each platform produces a minisign-signed updater archive, SHA-256 digest, and attested source-bound provenance receipt. Minisign authenticates the Windows and Linux updater archives even though their enclosed payloads lack platform-native code signatures.
+9. Promotion waits for all three platform jobs and approval in the GitHub `release` environment, then re-downloads and verifies every immutable staged artifact. It rejects version downgrades, rejects changed same-version manifests, and rechecks the rolling manifest immediately before publication.
+10. The promotion script uploads all three platform payloads and uploads a three-platform `latest.json` last.
 
 Uploading the manifest last keeps installed clients on the previous release if staging or verification fails. Rollback is a new, higher patch release containing reverted code rather than a lower manifest version.
 

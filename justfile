@@ -252,10 +252,11 @@ release-validate expected="":
     cargo metadata --locked --no-deps --format-version 1 --manifest-path src-tauri/Cargo.toml >/dev/null
     pnpm test:release-scripts
 
-# Prepare, push, and open a reviewed release PR. This never merges or tags.
+# Generate and approve notes, then prepare, push, and open a release PR.
+# This never merges or tags.
 [unix]
-release-prepare version notes_file:
-    node scripts/release/release.mjs prepare {{ quote(version) }} {{ quote(notes_file) }}
+release-prepare version:
+    node scripts/release/release.mjs prepare {{ quote(version) }}
 
 # Sign and publish the immutable tag for an already squash-merged release PR.
 [unix]
@@ -597,11 +598,10 @@ bump-goose ref="main":
 bump-node-runtime *ARGS:
     node scripts/update-node-runtime-lock.mjs {{ ARGS }}
 
-# Draft release notes from commits without mutating GitHub. Pass output=<path>
-# to create the file consumed by release-prepare.
+# Draft release notes from commits without mutating GitHub.
 [unix]
-release-notes from="" to="HEAD" output="":
-    FROM_REF="{{ from }}" TO_REF="{{ to }}" NOTES_FILE="{{ output }}" ./scripts/generate-release-notes.sh
+release-notes from="" to="HEAD":
+    FROM_REF="{{ from }}" TO_REF="{{ to }}" ./scripts/generate-release-notes.sh
 
 # ── Utilities ────────────────────────────────────────────────
 

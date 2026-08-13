@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { compareSemver, parseSemver, sameNumericVersion } from "./version.mjs";
 
@@ -135,7 +136,7 @@ function releaseHeadingPattern() {
   return /^## \[v([^\]]+)\]\(([^)]+)\) - (\d{4}-\d{2}-\d{2})\s*$/gm;
 }
 
-export function changelogEntries(content) {
+function changelogEntries(content) {
   if (!content.startsWith("# Changelog\n")) {
     fail("CHANGELOG.md must start with '# Changelog'");
   }
@@ -279,7 +280,15 @@ async function releaseConfig(read) {
   return config;
 }
 
-export async function checkVersions({ root, expected, ref } = {}) {
+function validateMinimumPublicVersion(version, config) {
+  if (compareSemver(version, config.minimumPublicVersion) < 0) {
+    fail(
+      `release version ${version} is below minimum public version ${config.minimumPublicVersion}`,
+    );
+  }
+}
+
+async function checkVersions({ root, expected, ref } = {}) {
   const resolvedRoot = root || repoRoot();
   if (expected) parseSemver(expected, "expected version");
   const read = ref ? gitReader(resolvedRoot, ref) : fileReader(resolvedRoot);
@@ -413,6 +422,66 @@ function fetchOriginMain(root) {
   );
 }
 
+function remoteTagTarget(root, tag) {
+  const result = commandResult(
+    "git",
+    [
+      "ls-remote",
+      "--tags",
+      "origin",
+      `refs/tags/${tag}`,
+      `refs/tags/${tag}^{}`,
+    ],
+    { cwd: root },
+  );
+  if (result.status !== 0) fail("failed to inspect remote tags");
+  const lines = result.stdout.trim().split("\n").filter(Boolean);
+  if (lines.length === 0) return null;
+  const tagRef = `refs/tags/${tag}`;
+  const tagObject = lines.find((line) => line.endsWith(`\t${tagRef}`));
+  const peeledTag = lines.find((line) => line.endsWith(`\t${tagRef}^{}`));
+  if (!tagObject || !peeledTag) fail(`remote tag must be annotated: ${tag}`);
+  const [target] = peeledTag.split(/\s+/, 1);
+  if (!/^[0-9a-f]{40}$/.test(target)) {
+    fail(`remote tag has invalid target: ${tag}`);
+  }
+  return target;
+}
+
+function validateLocalTag(root, tag, expectedTarget) {
+  if (
+    run("git", ["cat-file", "-t", `refs/tags/${tag}`], { cwd: root }) !== "tag"
+  ) {
+    fail(`local tag must be annotated: ${tag}`);
+  }
+  const target = run("git", ["rev-parse", `refs/tags/${tag}^{commit}`], {
+    cwd: root,
+  });
+  if (target !== expectedTarget) {
+    fail(`local tag ${tag} targets ${target}, expected ${expectedTarget}`);
+  }
+}
+
+async function generateReviewedNotes(root) {
+  process.stderr.write("generating release notes...\n");
+  const notes = run("just", ["release-notes"], { cwd: root });
+  if (!notes) fail("generated release notes are empty");
+  process.stdout.write(`\n${notes}\n\n`);
+  const prompt = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  try {
+    const answer = await prompt.question("use these release notes? [y/N] ");
+    if (!/^y(?:es)?$/i.test(answer.trim())) {
+      fail("release preparation cancelled");
+    }
+  } finally {
+    prompt.close();
+  }
+  return notes;
+}
+
 function releasePrs(root, repository, branch) {
   const json = run(
     "gh",
@@ -476,12 +545,15 @@ async function prepare(version, notesPath) {
   const root = repoRoot();
   const read = fileReader(root);
   const config = await releaseConfig(read);
+  validateMinimumPublicVersion(version, config);
   const branch = `release/v${version}`;
   const subject = `chore: release v${version}`;
-  const notes = (await readFile(resolve(notesPath), "utf8")).trim();
+  assertClean(root);
+  const notes = notesPath
+    ? (await readFile(resolve(notesPath), "utf8")).trim()
+    : await generateReviewedNotes(root);
   if (!notes) fail("release notes file must contain reviewed Markdown");
   if (notes.includes("\0")) fail("release notes file contains a NUL byte");
-  assertClean(root);
   run("gh", ["auth", "status", "--hostname", "github.com"], { cwd: root });
   fetchOriginMain(root);
 
@@ -666,28 +738,13 @@ async function publish(version) {
   const root = repoRoot();
   const read = fileReader(root);
   const config = await releaseConfig(read);
+  validateMinimumPublicVersion(version, config);
   const branch = `release/v${version}`;
   const tag = `v${version}`;
   const subject = `chore: release v${version}`;
   assertClean(root);
   run("gh", ["auth", "status", "--hostname", "github.com"], { cwd: root });
-  if (refExists(root, `refs/tags/${tag}`))
-    fail(`local tag already exists: ${tag}`);
-  const remoteTag = commandResult(
-    "git",
-    [
-      "ls-remote",
-      "--tags",
-      "origin",
-      `refs/tags/${tag}`,
-      `refs/tags/${tag}^{}`,
-    ],
-    { cwd: root },
-  );
-  if (remoteTag.status !== 0) fail("failed to inspect remote tags");
-  if (remoteTag.stdout.trim()) fail(`remote tag already exists: ${tag}`);
   fetchOriginMain(root);
-  run("git", ["fetch", "--tags", "origin"], { cwd: root });
 
   const prs = releasePrs(root, config.repository, branch);
   if (prs.length !== 1) fail(`expected exactly one PR for ${branch}`);
@@ -719,27 +776,33 @@ async function publish(version) {
   });
   if (mergeTitle !== subject) fail(`merge commit title is not '${subject}'`);
   await checkVersions({ root, expected: version, ref: mergeSha });
+  const sourceConfig = await releaseConfig(gitReader(root, mergeSha));
+  validateMinimumPublicVersion(version, sourceConfig);
 
-  run(
-    "git",
-    ["tag", "--annotate", "--no-sign", tag, mergeSha, "--message", subject],
-    { cwd: root },
-  );
-  if (
-    run("git", ["cat-file", "-t", `refs/tags/${tag}`], { cwd: root }) !== "tag"
-  ) {
-    fail(`created tag is not annotated: ${tag}`);
+  const remoteTarget = remoteTagTarget(root, tag);
+  if (remoteTarget) {
+    if (remoteTarget !== mergeSha) {
+      fail(`remote tag ${tag} targets ${remoteTarget}, expected ${mergeSha}`);
+    }
+    if (refExists(root, `refs/tags/${tag}`)) {
+      validateLocalTag(root, tag, mergeSha);
+    }
+  } else {
+    if (refExists(root, `refs/tags/${tag}`)) {
+      validateLocalTag(root, tag, mergeSha);
+    } else {
+      run(
+        "git",
+        ["tag", "--annotate", "--no-sign", tag, mergeSha, "--message", subject],
+        { cwd: root },
+      );
+      validateLocalTag(root, tag, mergeSha);
+    }
+    run("git", ["push", "origin", `refs/tags/${tag}`], {
+      cwd: root,
+      visible: true,
+    });
   }
-  if (
-    run("git", ["rev-parse", `refs/tags/${tag}^{commit}`], { cwd: root }) !==
-    mergeSha
-  ) {
-    fail(`created tag does not target ${mergeSha}`);
-  }
-  run("git", ["push", "origin", `refs/tags/${tag}`], {
-    cwd: root,
-    visible: true,
-  });
   console.log(
     `https://github.com/${config.repository}/actions/workflows/release.yml\nwait for all platform assets, then approve the release environment promotion`,
   );
@@ -763,7 +826,7 @@ function usage() {
   console.error(`Usage:
   release.mjs version-check [expected-version] [--ref <commit>]
   release.mjs changelog-notes <version> [changelog-path]
-  release.mjs prepare <version> <notes-file>
+  release.mjs prepare <version> [notes-file]
   release.mjs publish <version>`);
   process.exit(2);
 }
@@ -788,7 +851,7 @@ async function main() {
     await notes(args[0], args[1]);
     return;
   }
-  if (command === "prepare" && args.length === 2) {
+  if (command === "prepare" && args.length >= 1 && args.length <= 2) {
     await prepare(args[0], args[1]);
     return;
   }

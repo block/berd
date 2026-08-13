@@ -41,9 +41,6 @@ jobs:
       - name: Run frontend checks
         run: just check
 
-      - name: Verify lockstep release versions
-        run: just release-version-check
-
       - name: Run unit tests
         run: just test
 

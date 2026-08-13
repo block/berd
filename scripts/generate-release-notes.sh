@@ -84,10 +84,5 @@ NOTES="${NOTES}
 
 **Full Changelog**: https://github.com/${RELEASE_REPOSITORY}/compare/${FROM_REF}...${COMPARE_TO}"
 
-if [[ -n "${NOTES_FILE:-}" ]]; then
-  printf '%s\n' "$NOTES" > "$NOTES_FILE"
-  echo "Drafted release notes at $NOTES_FILE; review them before release preparation." >&2
-else
-  printf '\n%s\n' "$NOTES"
-  echo "Draft only; review these notes before release preparation." >&2
-fi
+printf '\n%s\n' "$NOTES"
+echo "Draft only; review these notes before release preparation." >&2

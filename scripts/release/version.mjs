@@ -2,7 +2,7 @@
 
 import { pathToFileURL } from "node:url";
 
-export const SEMVER_PATTERN =
+const SEMVER_PATTERN =
   /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?$/;
 
 export function parseSemver(value, label = "version") {
