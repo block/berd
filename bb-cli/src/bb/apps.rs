@@ -843,6 +843,7 @@ mod tests {
                 Some("BBIdentity opaque_session_credential_1234567890")
             );
             for forbidden in [
+                "Cookie",
                 "X-BB-Session-Credential",
                 "X-Forwarded-User",
                 "X-Forwarded-Workspace-Id",
