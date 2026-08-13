@@ -1,12 +1,20 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import {
+  memo,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowRight, ChevronLeft, X } from "lucide-react";
+import { X } from "lucide-react";
 import {
   AnimatePresence,
   motion,
   useMotionValue,
   useReducedMotion,
   useSpring,
+  type MotionValue,
 } from "motion/react";
 import { selectAvatarImageUrl } from "@/shared/api/artifacts";
 import { useHomePinLabelsPreference } from "@/features/home/lib/homePinLabelPreference";
@@ -15,12 +23,8 @@ import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import { cn } from "@/shared/lib/cn";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Button } from "@/shared/ui/button";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-} from "@/shared/ui/input-group";
+import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { findBerdyPersonaId } from "@/features/onboarding/berdyAgent";
 import type { WidgetRenderProps } from "./types";
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
 
@@ -30,29 +34,6 @@ const SETTLED_BUBBLE_PATH =
 const SWAY_X_SPRING = { stiffness: 110, damping: 12, mass: 0.85 };
 const SWAY_Y_SPRING = { stiffness: 190, damping: 24, mass: 0.7 };
 const SWAY_ROTATION_SPRING = { stiffness: 140, damping: 16, mass: 0.7 };
-
-const HELP_PRESET_KEYS = ["useCases", "projects", "agentsAndSkills"] as const;
-type HelpPresetKey = (typeof HELP_PRESET_KEYS)[number];
-
-function OnboardingBackButton({
-  label,
-  onClick,
-}: {
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      data-onboarding-tour-back=""
-      className="flex items-center gap-1 pr-5 font-medium leading-5 text-muted-foreground transition-colors hover:text-foreground"
-      onClick={onClick}
-    >
-      <ChevronLeft className="size-3.5" aria-hidden="true" />
-      {label}
-    </button>
-  );
-}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -67,26 +48,8 @@ function directionLockedVelocity(velocity: { x: number; y: number }) {
   return { x, y };
 }
 
-export function OnboardingTourWidget({
-  instance,
-  onUpdateState,
-  shouldIgnoreActivation,
-  onStartOnboardingTour,
-  onStartChatWithPrompt,
-  canvasDragPosition,
-}: WidgetRenderProps) {
-  const { t } = useTranslation("home");
-  const { enabled: alwaysShowLabel } = useHomePinLabelsPreference();
+function useBerdySway(canvasDragPosition?: { x: number; y: number }) {
   const shouldReduceMotion = useReducedMotion();
-  const bubbleShadowId = `berdy-bubble-shadow-${useId().replace(/:/g, "")}`;
-  const [isBubbleSettled, setIsBubbleSettled] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
-  const [composerOpen, setComposerOpen] = useState(false);
-  const [activePreset, setActivePreset] = useState<HelpPresetKey | null>(null);
-  const [prompt, setPrompt] = useState("");
-  const [isStartingChat, setIsStartingChat] = useState(false);
-  const startChatInFlightRef = useRef(false);
-  const welcomeDismissed = instance.state?.welcomeDismissed === true;
   const lastDragPositionRef = useRef<{
     x: number;
     y: number;
@@ -99,88 +62,7 @@ export function OnboardingTourWidget({
   const swayX = useSpring(swayTargetX, SWAY_X_SPRING);
   const swayY = useSpring(swayTargetY, SWAY_Y_SPRING);
   const swayRotate = useSpring(swayTargetRotate, SWAY_ROTATION_SPRING);
-  const gloopyPoster = useArtifacts({
-    select: (artifacts) => selectAvatarImageUrl(artifacts, "gloopies-14"),
-  });
-  const gloopyMedia = useAvatarMedia("app-avatar:gloopies-14");
-  const start = useWidgetActivationGuard(shouldIgnoreActivation, () => {
-    onStartOnboardingTour?.();
-  });
-  const toggleHelp = useWidgetActivationGuard(shouldIgnoreActivation, () => {
-    if (welcomeDismissed) {
-      if (helpOpen) {
-        setHelpOpen(false);
-        setPrompt("");
-        setComposerOpen(false);
-        setActivePreset(null);
-        return;
-      }
-      setIsBubbleSettled(false);
-      setPrompt("");
-      setComposerOpen(false);
-      setActivePreset(null);
-      setHelpOpen(true);
-    }
-  });
 
-  const startChat = async (text: string) => {
-    if (!onStartChatWithPrompt || startChatInFlightRef.current) {
-      return;
-    }
-    startChatInFlightRef.current = true;
-    setIsStartingChat(true);
-    try {
-      const didStart = await onStartChatWithPrompt(text);
-      if (didStart === false) {
-        return;
-      }
-      setPrompt("");
-      setComposerOpen(false);
-      setActivePreset(null);
-      setHelpOpen(false);
-    } finally {
-      startChatInFlightRef.current = false;
-      setIsStartingChat(false);
-    }
-  };
-
-  const showPresetResponse = (key: HelpPresetKey) => {
-    setPrompt("");
-    setComposerOpen(false);
-    setActivePreset(key);
-  };
-
-  const returnToSuggestions = () => {
-    setPrompt("");
-    setComposerOpen(false);
-    setActivePreset(null);
-  };
-
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const text = prompt.trim();
-    if (!text) {
-      return;
-    }
-    void startChat(text);
-  };
-
-  const handlePresetFollowUp = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const followUp = prompt.trim();
-    if (!activePreset || !followUp) {
-      return;
-    }
-
-    void startChat(
-      t("onboarding.callout.followUpContext", {
-        question: t(`onboarding.callout.presets.${activePreset}`),
-        followUp,
-      }),
-    );
-  };
   useEffect(() => {
     const settle = () => {
       swayTargetX.set(0);
@@ -198,9 +80,7 @@ export function OnboardingTourWidget({
     const timestamp = performance.now();
     const lastPosition = lastDragPositionRef.current;
     lastDragPositionRef.current = { ...canvasDragPosition, timestamp };
-    if (!lastPosition) {
-      return;
-    }
+    if (!lastPosition) return;
 
     const elapsed = clamp(timestamp - lastPosition.timestamp, 8, 40);
     const frameScale = 1000 / 60 / elapsed;
@@ -216,8 +96,6 @@ export function OnboardingTourWidget({
     dragVelocityRef.current = velocity;
     const directionalVelocity = directionLockedVelocity(velocity);
 
-    // The bubble trails behind Berdy's direction of travel, like a mass held
-    // by the speech-bubble caret, then preserves that velocity in the spring.
     swayTargetX.set(clamp(-directionalVelocity.x * 1.6, -22, 22));
     swayTargetY.set(clamp(-directionalVelocity.y * 0.55, -8, 8));
     swayTargetRotate.set(clamp(-directionalVelocity.x * 0.5, -8, 8));
@@ -232,6 +110,124 @@ export function OnboardingTourWidget({
     swayTargetY,
   ]);
 
+  return { swayX, swayY, swayRotate };
+}
+
+export function OnboardingTourWidget({
+  instance,
+  onUpdateState,
+  shouldIgnoreActivation,
+  onStartOnboardingTour,
+  onOpenAgent,
+  onTagAgentInComposer,
+  onResolveBerdyAgent,
+  canvasDragPosition,
+}: WidgetRenderProps) {
+  const sway = useBerdySway(canvasDragPosition);
+
+  return (
+    <BerdyContent
+      welcomeDismissed={instance.state?.welcomeDismissed === true}
+      onUpdateState={onUpdateState}
+      shouldIgnoreActivation={shouldIgnoreActivation}
+      onStartOnboardingTour={onStartOnboardingTour}
+      onOpenAgent={onOpenAgent}
+      onTagAgentInComposer={onTagAgentInComposer}
+      onResolveBerdyAgent={onResolveBerdyAgent}
+      {...sway}
+    />
+  );
+}
+
+interface BerdyContentProps {
+  welcomeDismissed: boolean;
+  onUpdateState: WidgetRenderProps["onUpdateState"];
+  shouldIgnoreActivation: WidgetRenderProps["shouldIgnoreActivation"];
+  onStartOnboardingTour: WidgetRenderProps["onStartOnboardingTour"];
+  onOpenAgent: WidgetRenderProps["onOpenAgent"];
+  onTagAgentInComposer: WidgetRenderProps["onTagAgentInComposer"];
+  onResolveBerdyAgent: WidgetRenderProps["onResolveBerdyAgent"];
+  swayX: MotionValue<number>;
+  swayY: MotionValue<number>;
+  swayRotate: MotionValue<number>;
+}
+
+const BerdyContent = memo(function BerdyContent({
+  welcomeDismissed,
+  onUpdateState,
+  shouldIgnoreActivation,
+  onStartOnboardingTour,
+  onOpenAgent,
+  onTagAgentInComposer,
+  onResolveBerdyAgent,
+  swayX,
+  swayY,
+  swayRotate,
+}: BerdyContentProps) {
+  const { t } = useTranslation("home");
+  const { enabled: alwaysShowLabel } = useHomePinLabelsPreference();
+  const shouldReduceMotion = useReducedMotion();
+  const bubbleShadowId = `berdy-bubble-shadow-${useId().replace(/:/g, "")}`;
+  const [isBubbleSettled, setIsBubbleSettled] = useState(false);
+  const [isResolvingBerdy, setIsResolvingBerdy] = useState(false);
+  const mountedRef = useRef(true);
+  const resolveAttemptRef = useRef(0);
+  const personas = useAgentStore((state) => state.personas);
+  const personasLoading = useAgentStore((state) => state.personasLoading);
+  const berdyPersonaId = findBerdyPersonaId(personas);
+  const gloopyPoster = useArtifacts({
+    select: (artifacts) => selectAvatarImageUrl(artifacts, "gloopies-14"),
+  });
+  const gloopyMedia = useAvatarMedia("app-avatar:gloopies-14");
+  const start = useWidgetActivationGuard(shouldIgnoreActivation, () => {
+    onStartOnboardingTour?.(() => {
+      onUpdateState({ welcomeDismissed: true });
+    });
+  });
+  const activateBerdy = useWidgetActivationGuard(shouldIgnoreActivation, () => {
+    if (!welcomeDismissed || isResolvingBerdy) return;
+    if (berdyPersonaId) {
+      (onTagAgentInComposer ?? onOpenAgent)?.(berdyPersonaId);
+      return;
+    }
+    if (!onResolveBerdyAgent) return;
+
+    const attempt = ++resolveAttemptRef.current;
+    setIsResolvingBerdy(true);
+    void onResolveBerdyAgent()
+      .then((resolvedPersonaId) => {
+        if (!mountedRef.current || resolveAttemptRef.current !== attempt)
+          return;
+        if (resolvedPersonaId) {
+          (onTagAgentInComposer ?? onOpenAgent)?.(resolvedPersonaId);
+        }
+      })
+      .catch((error: unknown) => {
+        console.error("Failed to resolve the bundled Berdy agent:", error);
+      })
+      .finally(() => {
+        if (mountedRef.current && resolveAttemptRef.current === attempt) {
+          setIsResolvingBerdy(false);
+        }
+      });
+  });
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      resolveAttemptRef.current += 1;
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!welcomeDismissed) {
+      resolveAttemptRef.current += 1;
+      setIsResolvingBerdy(false);
+      setIsBubbleSettled(false);
+    }
+  }, [welcomeDismissed]);
+
   return (
     <div className="pointer-events-none relative flex h-full w-full items-center">
       <div className="group relative size-40 shrink-0">
@@ -240,8 +236,13 @@ export function OnboardingTourWidget({
           data-onboarding-tour-avatar=""
           className="pointer-events-auto relative z-10 size-full cursor-pointer overflow-visible border-0 bg-transparent p-0 drop-shadow-[0_12px_12px_rgba(0,0,0,0.05)] outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
           aria-label={t("onboarding.callout.openHelp")}
-          disabled={!welcomeDismissed}
-          onClick={toggleHelp}
+          disabled={
+            !welcomeDismissed ||
+            personasLoading ||
+            isResolvingBerdy ||
+            (!berdyPersonaId && !onResolveBerdyAgent)
+          }
+          onClick={activateBerdy}
         >
           {gloopyMedia ? (
             <AvatarMedia
@@ -276,9 +277,9 @@ export function OnboardingTourWidget({
         </span>
       </div>
       <AnimatePresence initial={!welcomeDismissed}>
-        {!welcomeDismissed || helpOpen ? (
+        {!welcomeDismissed ? (
           <motion.div
-            key={welcomeDismissed ? "help" : "welcome"}
+            key="welcome"
             data-onboarding-tour-bubble=""
             className="pointer-events-auto absolute bottom-24 left-36 w-72 text-sm text-card-foreground"
             initial={false}
@@ -431,193 +432,19 @@ export function OnboardingTourWidget({
                 ease: "easeOut",
               }}
             >
-              {welcomeDismissed ? (
-                <div className="space-y-3">
-                  {activePreset || composerOpen ? (
-                    <OnboardingBackButton
-                      label={t("onboarding.callout.back")}
-                      onClick={returnToSuggestions}
-                    />
-                  ) : (
-                    <p className="pr-5 font-medium leading-5">
-                      {t("onboarding.callout.helpTitle")}
-                    </p>
-                  )}
-                  <AnimatePresence mode="wait" initial={false}>
-                    {composerOpen ? (
-                      <motion.form
-                        key="composer"
-                        className="space-y-2"
-                        initial={
-                          shouldReduceMotion ? false : { opacity: 0, x: 6 }
-                        }
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={
-                          shouldReduceMotion ? undefined : { opacity: 0, x: 6 }
-                        }
-                        transition={{ duration: shouldReduceMotion ? 0 : 0.16 }}
-                        onSubmit={handleSubmit}
-                      >
-                        <InputGroup className="border-transparent bg-muted/40 shadow-none focus-within:!border-transparent dark:bg-muted/40">
-                          <InputGroupInput
-                            value={prompt}
-                            onChange={(event) => setPrompt(event.target.value)}
-                            placeholder={t(
-                              "onboarding.callout.helpPlaceholder",
-                            )}
-                            aria-label={t("onboarding.callout.helpPlaceholder")}
-                            autoFocus
-                          />
-                          <InputGroupAddon
-                            align="inline-end"
-                            className="ml-auto"
-                          >
-                            <InputGroupButton
-                              type="submit"
-                              size="icon-sm"
-                              variant="ghost"
-                              disabled={
-                                !prompt.trim() ||
-                                !onStartChatWithPrompt ||
-                                isStartingChat
-                              }
-                              aria-label={t("onboarding.callout.send")}
-                            >
-                              <ArrowRight className="size-4" />
-                            </InputGroupButton>
-                          </InputGroupAddon>
-                        </InputGroup>
-                      </motion.form>
-                    ) : activePreset ? (
-                      <motion.div
-                        key={`preset-${activePreset}`}
-                        className="space-y-2.5"
-                        initial={
-                          shouldReduceMotion ? false : { opacity: 0, x: -6 }
-                        }
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={
-                          shouldReduceMotion ? undefined : { opacity: 0, x: -6 }
-                        }
-                        transition={{ duration: shouldReduceMotion ? 0 : 0.16 }}
-                      >
-                        <div
-                          data-onboarding-tour-response=""
-                          className="space-y-2.5"
-                        >
-                          <p className="text-sm leading-5">
-                            {t(
-                              `onboarding.callout.presetResponses.${activePreset}`,
-                            )}
-                          </p>
-                          <form onSubmit={handlePresetFollowUp}>
-                            <InputGroup className="border-transparent bg-muted/40 shadow-none focus-within:!border-transparent dark:bg-muted/40">
-                              <InputGroupInput
-                                value={prompt}
-                                onChange={(event) =>
-                                  setPrompt(event.target.value)
-                                }
-                                placeholder={t(
-                                  "onboarding.callout.followUpPlaceholder",
-                                )}
-                                aria-label={t(
-                                  "onboarding.callout.followUpPlaceholder",
-                                )}
-                              />
-                              <InputGroupAddon
-                                align="inline-end"
-                                className="ml-auto"
-                              >
-                                <InputGroupButton
-                                  type="submit"
-                                  size="icon-sm"
-                                  variant="ghost"
-                                  disabled={
-                                    !prompt.trim() ||
-                                    !onStartChatWithPrompt ||
-                                    isStartingChat
-                                  }
-                                  aria-label={t(
-                                    "onboarding.callout.sendFollowUp",
-                                  )}
-                                >
-                                  <ArrowRight className="size-4" />
-                                </InputGroupButton>
-                              </InputGroupAddon>
-                            </InputGroup>
-                          </form>
-                        </div>
-                      </motion.div>
-                    ) : (
-                      <motion.div
-                        key="suggestions"
-                        className="space-y-2"
-                        initial={
-                          shouldReduceMotion ? false : { opacity: 0, x: -6 }
-                        }
-                        animate={{ opacity: 1, x: 0 }}
-                        exit={
-                          shouldReduceMotion ? undefined : { opacity: 0, x: -6 }
-                        }
-                        transition={{ duration: shouldReduceMotion ? 0 : 0.16 }}
-                      >
-                        {HELP_PRESET_KEYS.map((key) => {
-                          const question = t(
-                            `onboarding.callout.presets.${key}`,
-                          );
-                          return (
-                            <button
-                              key={key}
-                              type="button"
-                              className="group flex w-full items-center justify-between gap-2 bg-transparent px-0 py-1.5 text-left text-sm leading-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                              onClick={() => showPresetResponse(key)}
-                            >
-                              <span className="transition-[font-weight] duration-150 group-hover:font-medium group-focus-visible:font-medium motion-reduce:transition-none">
-                                {question}
-                              </span>
-                              <ArrowRight
-                                className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none"
-                                aria-hidden="true"
-                              />
-                            </button>
-                          );
-                        })}
-                        <button
-                          type="button"
-                          className="group flex w-full items-center justify-between gap-2 bg-transparent px-0 py-1.5 text-left text-sm leading-4 text-muted-foreground transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          onClick={() => setComposerOpen(true)}
-                        >
-                          <span className="transition-[font-weight] duration-150 group-hover:font-medium group-focus-visible:font-medium motion-reduce:transition-none">
-                            {t("onboarding.callout.askSomethingElse")}
-                          </span>
-                          <ArrowRight
-                            className="size-3 shrink-0 opacity-0 transition-opacity duration-150 ease-out group-hover:opacity-100 group-focus-visible:opacity-100 motion-reduce:transition-none"
-                            aria-hidden="true"
-                          />
-                        </button>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-              ) : (
-                <>
-                  <p className="pr-5 font-medium leading-5">
-                    {t("onboarding.callout.title")}
-                  </p>
-                  <p className="mb-4 leading-5">
-                    {t("onboarding.callout.body")}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="subtle"
-                    size="sm"
-                    className="text-sm shadow-none drop-shadow-none dark:bg-sidebar-accent dark:text-sidebar-accent-foreground dark:hover:bg-sidebar-accent"
-                    onClick={start}
-                  >
-                    {t("onboarding.callout.action")}
-                  </Button>
-                </>
-              )}
+              <p className="pr-5 font-medium leading-5">
+                {t("onboarding.callout.title")}
+              </p>
+              <p className="mb-4 leading-5">{t("onboarding.callout.body")}</p>
+              <Button
+                type="button"
+                variant="subtle"
+                size="sm"
+                className="text-sm shadow-none drop-shadow-none dark:bg-sidebar-accent dark:text-sidebar-accent-foreground dark:hover:bg-sidebar-accent"
+                onClick={start}
+              >
+                {t("onboarding.callout.action")}
+              </Button>
             </motion.div>
             <motion.div
               className="absolute right-3 top-2.5 z-20"
@@ -635,20 +462,10 @@ export function OnboardingTourWidget({
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                aria-label={t(
-                  welcomeDismissed
-                    ? "onboarding.callout.closeHelp"
-                    : "onboarding.callout.dismiss",
-                )}
+                aria-label={t("onboarding.callout.dismiss")}
                 onClick={(event) => {
                   event.stopPropagation();
-                  if (welcomeDismissed) {
-                    setComposerOpen(false);
-                    setActivePreset(null);
-                    setHelpOpen(false);
-                  } else {
-                    onUpdateState({ welcomeDismissed: true });
-                  }
+                  onUpdateState({ welcomeDismissed: true });
                 }}
               >
                 <X />
@@ -659,4 +476,4 @@ export function OnboardingTourWidget({
       </AnimatePresence>
     </div>
   );
-}
+});

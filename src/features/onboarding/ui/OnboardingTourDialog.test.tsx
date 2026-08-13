@@ -9,23 +9,6 @@ vi.mock("@/shared/theme/ThemeProvider", () => ({
   useTheme: () => themeState,
 }));
 
-vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
-  ProjectArtifactPreview: ({
-    input,
-    motionImpulse,
-  }: {
-    input: { name: string; prompt: string };
-    motionImpulse?: { sequence: number };
-  }) => (
-    <div
-      data-testid="tour-project-preview"
-      data-motion-sequence={motionImpulse?.sequence ?? ""}
-    >
-      {input.name}: {input.prompt}
-    </div>
-  ),
-}));
-
 describe("OnboardingTourDialog", () => {
   beforeEach(() => {
     themeState.isDark = false;
@@ -43,11 +26,18 @@ describe("OnboardingTourDialog", () => {
     ).toContain("tour-1-dark.png");
   });
 
-  it("advances through four steps and finishes", async () => {
+  it("advances through five steps and finishes", async () => {
     const user = userEvent.setup();
     const onOpenChange = vi.fn();
+    const onComplete = vi.fn();
 
-    render(<OnboardingTourDialog open={true} onOpenChange={onOpenChange} />);
+    render(
+      <OnboardingTourDialog
+        open={true}
+        onOpenChange={onOpenChange}
+        onComplete={onComplete}
+      />,
+    );
 
     expect(screen.getByRole("dialog")).toHaveClass("dark:bg-card");
     expect(document.querySelector("[data-onboarding-tour-copy]")).toHaveClass(
@@ -57,7 +47,7 @@ describe("OnboardingTourDialog", () => {
     expect(
       screen.getByRole("heading", { name: "Your canvas, your home" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("1 of 4")).toBeInTheDocument();
+    expect(screen.getByText("1 of 5")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Next" })).toHaveClass(
       "bg-accent",
       "rounded-[10px]",
@@ -98,7 +88,7 @@ describe("OnboardingTourDialog", () => {
     );
     await user.click(nextButton);
     const secondStepHeading = screen.getByRole("heading", {
-      name: "Chat with Berd about anything",
+      name: "All your AI providers in one place",
     });
     expect(secondStepHeading).toHaveFocus();
     expect(artwork).toContainElement(
@@ -116,48 +106,80 @@ describe("OnboardingTourDialog", () => {
 
     await user.click(screen.getByRole("button", { name: "Next tour step" }));
     expect(
-      document.querySelectorAll("[data-onboarding-tour-chat-bubble]"),
-    ).toHaveLength(2);
-    expect(
-      document.querySelector("[data-onboarding-tour-chat-bubble]")
-        ?.parentElement,
-    ).toHaveClass("px-16");
-
-    await user.click(screen.getByRole("button", { name: "Next tour step" }));
-    expect(
       document.querySelectorAll("[data-onboarding-tour-provider]"),
     ).toHaveLength(5);
     expect(screen.getByText("Amp")).toHaveClass("sr-only");
     expect(
       document.querySelector("[data-onboarding-tour-provider]"),
     ).toHaveClass("size-24");
+
     await user.click(screen.getByRole("button", { name: "Next tour step" }));
     expect(
-      screen.getByRole("heading", { name: "Bring your projects to life" }),
+      document.querySelectorAll("[data-onboarding-tour-chat-bubble]"),
+    ).toHaveLength(2);
+    expect(
+      document.querySelector("[data-onboarding-tour-chat-bubble]")
+        ?.parentElement,
+    ).toHaveClass("px-16");
+    await user.click(screen.getByRole("button", { name: "Next tour step" }));
+    expect(
+      screen.getByRole("heading", { name: "Agents have joined the chat" }),
     ).toBeInTheDocument();
-    const projectCube = screen.getByRole("button", {
-      name: "Spin project cube",
-    });
-    await user.click(projectCube);
-    expect(screen.getByTestId("tour-project-preview")).toHaveAttribute(
-      "data-motion-sequence",
-      "1",
+    const agentsImage = document.querySelector(
+      "[data-onboarding-tour-agents-image]",
     );
-    expect(screen.getByTestId("tour-project-preview")).toHaveTextContent(
-      "Your project: A place for chats, files, context, and ongoing work.",
+    expect(agentsImage?.getAttribute("src")).toContain("tour-4-agents.png");
+    expect(agentsImage).toHaveClass("object-contain", "max-h-[270px]");
+
+    await user.click(screen.getByRole("button", { name: "Next tour step" }));
+    expect(
+      screen.getByRole("heading", {
+        name: "Teach Berd a new trick with skills",
+      }),
+    ).toBeInTheDocument();
+    const skillPills = document.querySelectorAll(
+      "[data-onboarding-tour-skill]",
     );
+    expect(skillPills).toHaveLength(5);
+    expect(screen.getByText("research")).toHaveClass(
+      "rounded-full",
+      "text-[1.625rem]",
+      "smooth-shadow-sm",
+    );
+    expect(screen.getByText("writing")).toBeInTheDocument();
+    expect(screen.getByText("planning")).toBeInTheDocument();
+    expect(screen.getByText("code-search")).toBeInTheDocument();
+    expect(screen.getByText("summarize")).toBeInTheDocument();
+    expect(screen.queryByText("goose-help")).not.toBeInTheDocument();
+    expect(skillPills[0]?.parentElement).toHaveClass(
+      "top-1/2",
+      "left-8",
+      "-translate-y-1/2",
+      "items-start",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Next tour step" }),
+    ).not.toBeInTheDocument();
 
     const doneButton = screen.getByRole("button", { name: "Done" });
     expect(doneButton).toHaveClass("bg-accent", "rounded-[10px]", "text-sm");
     await user.click(doneButton);
+    expect(onComplete).toHaveBeenCalledOnce();
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it("provides a close button", async () => {
+  it("does not complete the tour from its close button", async () => {
     const user = userEvent.setup();
     const onOpenChange = vi.fn();
+    const onComplete = vi.fn();
 
-    render(<OnboardingTourDialog open={true} onOpenChange={onOpenChange} />);
+    render(
+      <OnboardingTourDialog
+        open={true}
+        onOpenChange={onOpenChange}
+        onComplete={onComplete}
+      />,
+    );
 
     const closeButton = screen.getByRole("button", { name: "Close tour" });
     expect(closeButton).toHaveAttribute("data-slot", "dialog-close");
@@ -168,5 +190,6 @@ describe("OnboardingTourDialog", () => {
 
     await user.click(closeButton);
     expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onComplete).not.toHaveBeenCalled();
   });
 });

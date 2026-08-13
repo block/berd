@@ -77,7 +77,7 @@ export function WidgetFrame({
   onOpenSkills,
   onOpenAutomations,
   onStartOnboardingTour,
-  onStartChatWithPrompt,
+  onResolveBerdyAgent,
 }: WidgetFrameProps) {
   const { t } = useTranslation("home");
   const catalogEntry = HOME_WIDGET_CATALOG_BY_ID[instance.type];
@@ -217,7 +217,7 @@ export function WidgetFrame({
           onOpenSkills={onOpenSkills}
           onOpenAutomations={onOpenAutomations}
           onStartOnboardingTour={onStartOnboardingTour}
-          onStartChatWithPrompt={onStartChatWithPrompt}
+          onResolveBerdyAgent={onResolveBerdyAgent}
           onRemoveWidget={handleRemove}
         />
       </fieldset>

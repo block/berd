@@ -26,39 +26,18 @@
       "avatarAlt": "Berdy, tu guía de introducción",
       "agentUnavailable": "Berdy no pudo iniciar un chat. Inténtalo de nuevo.",
       "dismiss": "Cerrar introducción",
-      "title": "¿No sabes cómo empezar?",
-      "body": "Soy Berdy, tu guía de introducción. Pregúntame cualquier cosa sobre Berd, desde cómo empezar hasta aprender más sobre los flujos de trabajo.",
+      "title": "¡Te damos la bienvenida!",
+      "body": "Soy Berdy, tu asistente integrado de Berd. Estoy aquí para ayudarte a avanzar.",
       "action": "Ver el recorrido",
-      "openHelp": "Preguntarle a Berdy",
-      "helpTitle": "¿Cómo puedo ayudarte?",
-      "presets": {
-        "useCases": "¿Para qué puedo usar Berd?",
-        "projects": "¿Cómo inicio un proyecto?",
-        "agentsAndSkills": "¿Cómo funcionan los agentes y las habilidades?"
-      },
-      "presetResponses": {
-        "useCases": "Berd puede ayudarte a investigar, planificar, escribir, programar, organizar proyectos y automatizar tareas repetitivas.",
-        "projects": "Los proyectos reúnen chats, archivos y carpetas de trabajo relacionados para que los agentes tengan el contexto adecuado.",
-        "agentsAndSkills": "Los agentes le dan a Berd un rol e instrucciones. Las habilidades añaden flujos de trabajo y herramientas reutilizables."
-      },
-      "followUpPlaceholder": "Haz una pregunta de seguimiento",
-      "sendFollowUp": "Enviar seguimiento",
-      "followUpContext": "{{question}}\n\nSeguimiento: {{followUp}}",
-      "askSomethingElse": "Hacer otra pregunta",
-      "back": "Atrás",
-      "helpPlaceholder": "Pregúntale cualquier cosa a Berdy",
-      "send": "Enviar mensaje",
-      "closeHelp": "Cerrar ayuda"
+      "openHelp": "Preguntarle a Berdy"
     },
     "tour": {
       "progress": "{{current}} de {{total}}",
       "previous": "Paso anterior del recorrido",
       "next": "Siguiente paso del recorrido",
-      "finish": "Finalizar recorrido",
       "close": "Cerrar recorrido",
       "nextAction": "Siguiente",
       "doneAction": "Listo",
-      "animateProject": "Girar el cubo del proyecto",
       "chatPreview": {
         "prompt": "¿Puedes ayudarme a escribir un haiku sobre aves?",
         "responseLine1": "Las aves cosen el alba con su canto",
@@ -66,30 +45,31 @@
         "responseLine3": "La mañana aprende a volar",
         "typing": "Berd está escribiendo"
       },
-      "projectPreview": {
-        "name": "Tu proyecto",
-        "description": "Un espacio para chats, archivos, contexto y trabajo continuo."
-      },
       "steps": {
         "1": {
-          "title": "Tu lienzo, tu espacio",
-          "body": "Mantén a las personas, los proyectos y el trabajo que te importan juntos en un lienzo que es tuyo.",
+          "title": "Tu lienzo, tu hogar",
+          "body": "Fija lo que importa y encuéntralo rápido. Inicio es donde guardas lo que no quieres tener que buscar: fija un chat, un agente o un widget.",
           "visual": "Una vista previa del lienzo de inicio de Berd"
         },
         "2": {
-          "title": "Habla con Berd sobre cualquier tema",
-          "body": "Haz preguntas, explora ideas y trabaja en una tarea con un agente que tenga el contexto adecuado.",
-          "visual": "Una conversación breve con Berd"
-        },
-        "3": {
-          "title": "Conecta todos tus proveedores",
-          "body": "Reúne los modelos y proveedores que ya usas en un solo lugar y elige el adecuado para cada tarea.",
+          "title": "Todos tus proveedores de IA en un solo lugar",
+          "body": "Uses el proveedor que uses, puedes chatear con él aquí. Conecta más de uno y cambia entre ellos cuando quieras, incluso a mitad de un chat.",
           "visual": "Una colección de iconos de proveedores de IA"
         },
+        "3": {
+          "title": "Pregúntale cualquier cosa a Berd",
+          "body": "Haz preguntas, explora ideas o resuelve una tarea. Berd conserva el contexto para que puedas seguir avanzando.",
+          "visual": "Una conversación breve con Berd"
+        },
         "4": {
-          "title": "Da vida a tus proyectos",
-          "body": "Agrupa chats, archivos y directorios de trabajo en torno a iniciativas reales para que Berd te ayude a avanzar.",
-          "visual": "Un proyecto que cobra vida"
+          "title": "Los agentes se han unido al chat",
+          "body": "Un agente es un especialista con quien hablas directamente. @Menciónalo en un chat y trabajará contigo como un compañero, no como una herramienta.",
+          "visual": "Una colección de agentes de Berd"
+        },
+        "5": {
+          "title": "Enséñale a Berd un truco nuevo con habilidades",
+          "body": "Las habilidades dan a Berd y a tus agentes instrucciones para una tarea, herramienta o flujo de trabajo específico, para que no tengas que explicarlo cada vez.",
+          "visual": "Una colección de habilidades reutilizables de Berd"
         }
       }
     }
