@@ -28,7 +28,7 @@ function recordToArray(
 }
 
 function isAcpMcpServer(server: McpServer): server is McpServerAcp {
-  return "id" in server && typeof server.id === "string";
+  return "serverId" in server && typeof server.serverId === "string";
 }
 
 function toExtensionEntry(entry: GooseExtensionEntry): ExtensionEntry {
@@ -62,7 +62,7 @@ function toExtensionEntry(entry: GooseExtensionEntry): ExtensionEntry {
         type: "acp",
         name: extension.server.name,
         description,
-        id: extension.server.id,
+        id: extension.server.serverId,
         ...(extension.bundled != null ? { bundled: extension.bundled } : {}),
         config_key: configKey,
         enabled: entry.enabled,
@@ -151,7 +151,7 @@ function toGooseExtension(extensionConfig: ExtensionConfig): GooseExtension {
   if (extensionConfig.type === "acp") {
     const server: McpServerAcp = {
       name: extensionConfig.name,
-      id: extensionConfig.id,
+      serverId: extensionConfig.id,
     };
     return {
       type: "mcp",

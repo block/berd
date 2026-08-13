@@ -170,7 +170,7 @@ export type McpServerAcp = {
      * Providers MUST NOT reuse an ID for multiple ACP-transport MCP servers that are visible
      * on the same ACP connection.
      */
-    id: McpServerAcpId;
+    serverId: McpServerAcpId;
     /**
      * The _meta property is reserved by ACP to allow clients and agents to attach additional
      * metadata to their interactions. Implementations MUST NOT make assumptions about values at
@@ -192,7 +192,7 @@ export type McpServerStdio = {
      */
     name: string;
     /**
-     * Path to the MCP server executable.
+     * Absolute path to the MCP server executable.
      */
     command: string;
     /**
@@ -252,6 +252,24 @@ export type EmptyResponse = {
 export type RemoveSessionExtensionRequestUnstable = {
     sessionId: string;
     name: string;
+};
+
+/**
+ * Recreate the session's provider, keeping its current provider and model,
+ * so that the session's current extension list takes effect.
+ *
+ * Useful after adding or removing session extensions when the provider
+ * forwards extensions to a downstream session (ACP harness providers such as
+ * claude-acp and codex-acp). Those providers snapshot the extension list when
+ * they are built, so extension changes only reach them on rebuild: the
+ * provider is replaced with a new instance whose downstream session is
+ * created with the updated extension list.
+ *
+ * Providers that don't forward extensions pick up extension changes
+ * immediately; for them this call is not required.
+ */
+export type ApplySessionExtensionsRequestUnstable = {
+    sessionId: string;
 };
 
 /**
@@ -2622,6 +2640,7 @@ export type MessageUsageUpdate = {
 export type RequestRecipeParamsUnstable = {
     sessionId: string;
     parameters: Array<RecipeParameterDto>;
+    parameterScopeId?: string | null;
 };
 
 export type RecipeParamsResponseUnstable = {
@@ -2636,7 +2655,7 @@ export type RecipeParamsAction = 'submit' | 'cancel';
 export type ExtRequest = {
     id: string;
     method: string;
-    params?: AddSessionExtensionRequestUnstable | RemoveSessionExtensionRequestUnstable | GetToolsRequestUnstable | SetToolPermissionsRequestUnstable | GooseToolCallRequestUnstable | ReadResourceRequestUnstable | AppsListRequestUnstable | AppsExportRequestUnstable | AppsImportRequestUnstable | AppsDeleteRequestUnstable | UpdateWorkingDirRequestUnstable | SetSessionSystemPromptRequestUnstable | SteerSessionRequestUnstable | DiagnosticsGetRequestUnstable | ListPromptsRequestUnstable | GetPromptRequestUnstable | SavePromptRequestUnstable | ResetPromptRequestUnstable | DeleteSessionRequest | GetConfigExtensionsRequestUnstable | GetAvailableExtensionsRequestUnstable | AddConfigExtensionRequestUnstable | RemoveConfigExtensionRequestUnstable | SetConfigExtensionEnabledRequestUnstable | GetSessionExtensionsRequestUnstable | ListProvidersRequestUnstable | ProviderSupportedModelsListRequestUnstable | ProviderCatalogListRequestUnstable | ProviderSetupCatalogListRequestUnstable | ProviderCatalogTemplateRequestUnstable | CustomProviderCreateRequestUnstable | CustomProviderReadRequestUnstable | CustomProviderUpdateRequestUnstable | CustomProviderDeleteRequestUnstable | RefreshProviderInventoryRequestUnstable | ProviderConfigReadRequestUnstable | ProviderConfigStatusRequestUnstable | ProviderConfigSaveRequestUnstable | ProviderConfigDeleteRequestUnstable | ProviderConfigAuthenticateRequestUnstable | ProviderSecretsListRequestUnstable | ProviderSecretDeleteRequestUnstable | CanonicalModelInfoRequestUnstable | PreferencesReadRequestUnstable | PreferencesSaveRequestUnstable | PreferencesRemoveRequestUnstable | ConfigReadRequestUnstable | ConfigUpsertRequestUnstable | ConfigRemoveRequestUnstable | ConfigReadAllRequestUnstable | DefaultsReadRequestUnstable | DefaultsSaveRequestUnstable | DefaultsClearRequestUnstable | OnboardingImportScanRequestUnstable | OnboardingImportApplyRequestUnstable | ExportSessionRequestUnstable | ImportSessionRequestUnstable | ShareSessionNostrRequestUnstable | EncodeRecipeRequestUnstable | DecodeRecipeRequestUnstable | ScanRecipeRequestUnstable | ListRecipesRequestUnstable | DeleteRecipeRequestUnstable | ScheduleRecipeRequestUnstable | SetRecipeSlashCommandRequestUnstable | SaveRecipeRequestUnstable | ParseRecipeRequestUnstable | RecipeToYamlRequestUnstable | ListSchedulesRequestUnstable | ListScheduleSessionsRequestUnstable | CreateScheduleRequestUnstable | DeleteScheduleRequestUnstable | PauseScheduleRequestUnstable | UnpauseScheduleRequestUnstable | UpdateScheduleRequestUnstable | RunScheduleNowRequestUnstable | KillRunningJobRequestUnstable | InspectRunningJobRequestUnstable | GetSessionInfoRequestUnstable | TruncateSessionConversationRequestUnstable | UpdateSessionProjectRequestUnstable | RenameSessionRequestUnstable | ArchiveSessionRequestUnstable | UnarchiveSessionRequestUnstable | CreateSourceRequestUnstable | ListSourcesRequestUnstable | ListAgentMentionsRequestUnstable | ListSlashCommandsRequestUnstable | UpdateSourceRequestUnstable | DeleteSourceRequestUnstable | ExportSourceRequestUnstable | ImportSourcesRequestUnstable | DictationTranscribeRequestUnstable | DictationConfigRequestUnstable | DictationSecretSaveRequestUnstable | DictationSecretDeleteRequestUnstable | DictationModelsListRequestUnstable | DictationModelDownloadRequestUnstable | DictationModelDownloadProgressRequestUnstable | DictationModelCancelRequestUnstable | DictationModelDeleteRequestUnstable | DictationModelSelectRequestUnstable | LocalInferenceModelsListRequestUnstable | LocalInferenceModelDownloadRequestUnstable | LocalInferenceModelDownloadProgressRequestUnstable | LocalInferenceModelDownloadCancelRequestUnstable | LocalInferenceModelDeleteRequestUnstable | LocalInferenceModelEvictRequestUnstable | LocalInferenceModelSettingsReadRequestUnstable | LocalInferenceModelSettingsUpdateRequestUnstable | LocalInferenceHuggingFaceSearchRequestUnstable | LocalInferenceHuggingFaceRepoVariantsRequestUnstable | LocalInferenceBuiltinChatTemplatesListRequestUnstable | {
+    params?: AddSessionExtensionRequestUnstable | RemoveSessionExtensionRequestUnstable | ApplySessionExtensionsRequestUnstable | GetToolsRequestUnstable | SetToolPermissionsRequestUnstable | GooseToolCallRequestUnstable | ReadResourceRequestUnstable | AppsListRequestUnstable | AppsExportRequestUnstable | AppsImportRequestUnstable | AppsDeleteRequestUnstable | UpdateWorkingDirRequestUnstable | SetSessionSystemPromptRequestUnstable | SteerSessionRequestUnstable | DiagnosticsGetRequestUnstable | ListPromptsRequestUnstable | GetPromptRequestUnstable | SavePromptRequestUnstable | ResetPromptRequestUnstable | DeleteSessionRequest | GetConfigExtensionsRequestUnstable | GetAvailableExtensionsRequestUnstable | AddConfigExtensionRequestUnstable | RemoveConfigExtensionRequestUnstable | SetConfigExtensionEnabledRequestUnstable | GetSessionExtensionsRequestUnstable | ListProvidersRequestUnstable | ProviderSupportedModelsListRequestUnstable | ProviderCatalogListRequestUnstable | ProviderSetupCatalogListRequestUnstable | ProviderCatalogTemplateRequestUnstable | CustomProviderCreateRequestUnstable | CustomProviderReadRequestUnstable | CustomProviderUpdateRequestUnstable | CustomProviderDeleteRequestUnstable | RefreshProviderInventoryRequestUnstable | ProviderConfigReadRequestUnstable | ProviderConfigStatusRequestUnstable | ProviderConfigSaveRequestUnstable | ProviderConfigDeleteRequestUnstable | ProviderConfigAuthenticateRequestUnstable | ProviderSecretsListRequestUnstable | ProviderSecretDeleteRequestUnstable | CanonicalModelInfoRequestUnstable | PreferencesReadRequestUnstable | PreferencesSaveRequestUnstable | PreferencesRemoveRequestUnstable | ConfigReadRequestUnstable | ConfigUpsertRequestUnstable | ConfigRemoveRequestUnstable | ConfigReadAllRequestUnstable | DefaultsReadRequestUnstable | DefaultsSaveRequestUnstable | DefaultsClearRequestUnstable | OnboardingImportScanRequestUnstable | OnboardingImportApplyRequestUnstable | ExportSessionRequestUnstable | ImportSessionRequestUnstable | ShareSessionNostrRequestUnstable | EncodeRecipeRequestUnstable | DecodeRecipeRequestUnstable | ScanRecipeRequestUnstable | ListRecipesRequestUnstable | DeleteRecipeRequestUnstable | ScheduleRecipeRequestUnstable | SetRecipeSlashCommandRequestUnstable | SaveRecipeRequestUnstable | ParseRecipeRequestUnstable | RecipeToYamlRequestUnstable | ListSchedulesRequestUnstable | ListScheduleSessionsRequestUnstable | CreateScheduleRequestUnstable | DeleteScheduleRequestUnstable | PauseScheduleRequestUnstable | UnpauseScheduleRequestUnstable | UpdateScheduleRequestUnstable | RunScheduleNowRequestUnstable | KillRunningJobRequestUnstable | InspectRunningJobRequestUnstable | GetSessionInfoRequestUnstable | TruncateSessionConversationRequestUnstable | UpdateSessionProjectRequestUnstable | RenameSessionRequestUnstable | ArchiveSessionRequestUnstable | UnarchiveSessionRequestUnstable | CreateSourceRequestUnstable | ListSourcesRequestUnstable | ListAgentMentionsRequestUnstable | ListSlashCommandsRequestUnstable | UpdateSourceRequestUnstable | DeleteSourceRequestUnstable | ExportSourceRequestUnstable | ImportSourcesRequestUnstable | DictationTranscribeRequestUnstable | DictationConfigRequestUnstable | DictationSecretSaveRequestUnstable | DictationSecretDeleteRequestUnstable | DictationModelsListRequestUnstable | DictationModelDownloadRequestUnstable | DictationModelDownloadProgressRequestUnstable | DictationModelCancelRequestUnstable | DictationModelDeleteRequestUnstable | DictationModelSelectRequestUnstable | LocalInferenceModelsListRequestUnstable | LocalInferenceModelDownloadRequestUnstable | LocalInferenceModelDownloadProgressRequestUnstable | LocalInferenceModelDownloadCancelRequestUnstable | LocalInferenceModelDeleteRequestUnstable | LocalInferenceModelEvictRequestUnstable | LocalInferenceModelSettingsReadRequestUnstable | LocalInferenceModelSettingsUpdateRequestUnstable | LocalInferenceHuggingFaceSearchRequestUnstable | LocalInferenceHuggingFaceRepoVariantsRequestUnstable | LocalInferenceBuiltinChatTemplatesListRequestUnstable | {
         [key: string]: unknown;
     } | null;
 };

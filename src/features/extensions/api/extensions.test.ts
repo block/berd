@@ -61,7 +61,7 @@ describe("extensions api", () => {
             description: "ACP MCP",
             server: {
               name: "local-acp",
-              id: "acp-server-1",
+              serverId: "acp-server-1",
             },
           },
         },

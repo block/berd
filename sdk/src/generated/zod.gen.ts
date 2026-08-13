@@ -58,7 +58,7 @@ export const zMcpServerAcpId = z.string();
  */
 export const zMcpServerAcp = z.object({
     name: z.string(),
-    id: zMcpServerAcpId,
+    serverId: zMcpServerAcpId,
     _meta: z.record(z.string(), z.unknown()).nullish()
 });
 
@@ -146,6 +146,24 @@ export const zEmptyResponse = z.record(z.string(), z.unknown());
 export const zRemoveSessionExtensionRequestUnstable = z.object({
     sessionId: z.string(),
     name: z.string()
+});
+
+/**
+ * Recreate the session's provider, keeping its current provider and model,
+ * so that the session's current extension list takes effect.
+ *
+ * Useful after adding or removing session extensions when the provider
+ * forwards extensions to a downstream session (ACP harness providers such as
+ * claude-acp and codex-acp). Those providers snapshot the extension list when
+ * they are built, so extension changes only reach them on rebuild: the
+ * provider is replaced with a new instance whose downstream session is
+ * created with the updated extension list.
+ *
+ * Providers that don't forward extensions pick up extension changes
+ * immediately; for them this call is not required.
+ */
+export const zApplySessionExtensionsRequestUnstable = z.object({
+    sessionId: z.string()
 });
 
 /**
@@ -2177,7 +2195,8 @@ export const zGooseSessionNotificationUnstable = z.object({
 
 export const zRequestRecipeParamsUnstable = z.object({
     sessionId: z.string(),
-    parameters: z.array(zRecipeParameterDto)
+    parameters: z.array(zRecipeParameterDto),
+    parameterScopeId: z.string().nullish()
 });
 
 export const zRecipeParamsAction = z.enum(['submit', 'cancel']);
@@ -2194,6 +2213,7 @@ export const zExtRequest = z.object({
         z.union([
             zAddSessionExtensionRequestUnstable,
             zRemoveSessionExtensionRequestUnstable,
+            zApplySessionExtensionsRequestUnstable,
             zGetToolsRequestUnstable,
             zSetToolPermissionsRequestUnstable,
             zGooseToolCallRequestUnstable,
