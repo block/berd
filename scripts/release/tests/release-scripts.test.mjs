@@ -777,8 +777,7 @@ describe("desktop release workflow platform gate", () => {
       2,
     );
     expect(provenanceRecipes).toContain(
-      'bash -euo pipefail -c \'scripts/release/write-provenance.sh "$@"\' _ "$1" "$2" "$3" "$4" "$' +
-        '{@:5}"',
+      'bash -euo pipefail -c \'scripts/release/write-provenance.sh "$@"\' _ "$@"',
     );
     expect(provenanceRecipes).toContain(
       'scripts/release/write-provenance.sh "$1" "$2" "$3" "$4" "$' + '{@:5}"',

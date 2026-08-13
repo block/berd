@@ -277,7 +277,7 @@ release-reconcile-assets repository tag version output_file:
 [unix]
 [positional-arguments]
 release-write-provenance source_sha version platform output_dir *ASSETS:
-    bash -euo pipefail -c 'scripts/release/write-provenance.sh "$@"' _ "$1" "$2" "$3" "$4" "${@:5}"
+    bash -euo pipefail -c 'scripts/release/write-provenance.sh "$@"' _ "$@"
 
 # On Windows, run the shared Bash script as one generated recipe so argv remains
 # positional and is not interpolated into shell source.
