@@ -423,6 +423,35 @@ function fetchReleaseState(root) {
   );
 }
 
+function remoteReleaseTags(root) {
+  const output = run(
+    "git",
+    ["ls-remote", "--tags", "--refs", "origin", "refs/tags/v*"],
+    { cwd: root },
+  );
+  return new Set(
+    output
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.split("\t", 2)[1]?.replace("refs/tags/", ""))
+      .filter(Boolean),
+  );
+}
+
+function describeRemoteReleaseTag(root, stableOnly) {
+  const remoteTags = remoteReleaseTags(root);
+  const args = ["describe", "--tags", "--abbrev=0", "--match", "v*"];
+  if (stableOnly) args.push("--exclude", "v*-*");
+
+  while (true) {
+    const result = commandResult("git", args, { cwd: root });
+    if (result.status !== 0) return null;
+    const tag = result.stdout.trim();
+    if (remoteTags.has(tag)) return tag;
+    args.push("--exclude", tag);
+  }
+}
+
 function remoteTagTarget(root, tag) {
   const result = commandResult(
     "git",
@@ -464,14 +493,14 @@ function validateLocalTag(root, tag, expectedTarget) {
 }
 
 export function releaseNotesFrom(root, version, changelog) {
-  const args = ["describe", "--tags", "--abbrev=0", "--match", "v*"];
   const parsed = parseSemver(version);
   if (parsed.prerelease.length > 0) {
-    return run("git", args, { cwd: root });
+    const previousRelease = describeRemoteReleaseTag(root, false);
+    if (!previousRelease) fail("no previous release tag found");
+    return previousRelease;
   }
-  args.push("--exclude", "v*-*");
-  const previousStable = commandResult("git", args, { cwd: root });
-  if (previousStable.status === 0) return previousStable.stdout.trim();
+  const previousStable = describeRemoteReleaseTag(root, true);
+  if (previousStable) return previousStable;
 
   const firstPrerelease = changelogEntries(changelog)
     .filter(

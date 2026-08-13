@@ -170,6 +170,7 @@ describe("release SemVer and changelog", () => {
       0,
     );
     expect(f.git(["tag", "v0.6.0-rc.1"]).status).toBe(0);
+    expect(f.git(["push", "origin", "refs/tags/v0.6.0-rc.1"]).status).toBe(0);
 
     expect(releaseNotesFrom(f.repo, "0.6.0-rc.2")).toBe("v0.6.0-rc.1");
     expect(releaseNotesFrom(f.repo, "0.6.0")).toBe("v0.5.0");
@@ -184,6 +185,21 @@ RC notes.
 **Full Changelog**: https://github.com/block/berd/compare/${initial}...HEAD
 `;
     expect(releaseNotesFrom(f.repo, "0.6.0", changelog)).toBe(initial);
+  });
+
+  it("ignores local-only and remotely deleted release tags", async () => {
+    const f = await fixture();
+    await writeFile(join(f.repo, "feature"), "unreleased change\n");
+    expect(f.git(["add", "feature"]).status).toBe(0);
+    expect(f.git(["commit", "-m", "feat: unreleased change"]).status).toBe(0);
+    expect(f.git(["tag", "v0.5.1"]).status).toBe(0);
+
+    expect(releaseNotesFrom(f.repo, "0.6.0-rc.1")).toBe("v0.5.0");
+    expect(releaseNotesFrom(f.repo, "0.6.0")).toBe("v0.5.0");
+
+    expect(f.git(["push", "origin", "refs/tags/v0.5.1"]).status).toBe(0);
+    expect(f.git(["push", "origin", ":refs/tags/v0.5.1"]).status).toBe(0);
+    expect(releaseNotesFrom(f.repo, "0.6.0-rc.1")).toBe("v0.5.0");
   });
 
   it("replaces only the top same-version RC during stable promotion", () => {
