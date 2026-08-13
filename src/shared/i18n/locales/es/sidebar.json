@@ -70,9 +70,7 @@
     "loadingMore": "Buscando más chats...",
     "placeholder": "Buscar chats...",
     "searchMore": "Buscar más chats",
-    "searching": "Buscando chats...",
-    "closeJumpToChat": "Cerrar búsqueda de chats",
-    "jumpToChat": "Ir a un chat"
+    "searching": "Buscando chats..."
   },
   "sections": {
     "projects": "Proyectos",

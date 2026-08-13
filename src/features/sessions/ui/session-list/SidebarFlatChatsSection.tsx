@@ -59,8 +59,6 @@ export function SidebarFlatChatsSection({
   showTimestamps,
   onShowTimestampsChange,
   showViewAllInHistory = false,
-  compactGroups = false,
-  compactHeader = false,
   showTopDivider: _showTopDivider = true,
 }: {
   groups: FlatChatGroup[];
@@ -97,8 +95,6 @@ export function SidebarFlatChatsSection({
   showTimestamps: boolean;
   onShowTimestampsChange: (show: boolean) => void;
   showViewAllInHistory?: boolean;
-  compactGroups?: boolean;
-  compactHeader?: boolean;
   showTopDivider?: boolean;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
@@ -127,7 +123,6 @@ export function SidebarFlatChatsSection({
           labelTransition={labelTransition}
           labelVisible={labelVisible}
           labelClassName={sectionHeaderTextClass}
-          className={compactHeader ? "pt-0" : undefined}
           actions={
             (onNavigate && showViewAllInHistory) ||
             onCreateProject ||
@@ -290,10 +285,7 @@ export function SidebarFlatChatsSection({
             {groups.map((group, groupIndex) => (
               <div
                 key={group.id}
-                className={cn(
-                  "space-y-0",
-                  !compactGroups && groupIndex > 0 && "mt-1 pt-1",
-                )}
+                className={cn("space-y-0", groupIndex > 0 && "mt-1 pt-1")}
                 data-sidebar-flat-chat-group={group.id}
               >
                 {group.sessions.map((session) => {

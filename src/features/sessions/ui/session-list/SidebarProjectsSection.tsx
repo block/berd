@@ -61,8 +61,6 @@ export interface SidebarProjectsSectionProps {
   hasVisibleChats: boolean;
   flatChatGroups: FlatChatGroup[];
   hasFlatChatOverflow: boolean;
-  compactFlatGroups?: boolean;
-  searchActive?: boolean;
   groupChatsByProject: boolean;
   onGroupChatsByProjectChange?: (grouped: boolean) => void;
   pinnedShowChatIcons: boolean;
@@ -139,8 +137,6 @@ export function SidebarProjectsSection({
   hasVisibleChats,
   flatChatGroups,
   hasFlatChatOverflow,
-  compactFlatGroups = false,
-  searchActive = false,
   groupChatsByProject,
   onGroupChatsByProjectChange,
   pinnedShowChatIcons,
@@ -218,7 +214,6 @@ export function SidebarProjectsSection({
   // the link.
   const showGroupedHistoryLink =
     !collapsed &&
-    !searchActive &&
     ((projectSessions.standaloneOverflow ?? false) ||
       (hasMoreSessions && hasVisibleChats));
   const emptyActionClasses = cn(
@@ -304,9 +299,7 @@ export function SidebarProjectsSection({
           onMarkSelectedUnread={onMarkSelectedUnread}
           showTimestamps={chatShowTimestamps}
           onShowTimestampsChange={onChatShowTimestampsChange}
-          showViewAllInHistory={hasFlatChatOverflow && !searchActive}
-          compactGroups={compactFlatGroups}
-          compactHeader={searchActive}
+          showViewAllInHistory={hasFlatChatOverflow}
           showTopDivider={_showTopDivider}
         />
       </>

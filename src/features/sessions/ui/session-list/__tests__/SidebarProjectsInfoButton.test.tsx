@@ -31,8 +31,8 @@ function InfoMomentHarness({
 }
 
 /**
- * Mirrors call sites where the hook runs but the affordance never renders
- * (collapsed sidebar, flat/search mode suppressing the header adornment).
+ * Mirrors call sites where the hook runs but the Projects header—and therefore
+ * the affordance—does not render.
  */
 function HookWithoutButtonHarness({ hasProjects }: { hasProjects: boolean }) {
   useSidebarProjectsInfoMoment({ hasProjects, projectsReady: true });

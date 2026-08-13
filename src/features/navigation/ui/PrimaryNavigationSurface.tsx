@@ -5,17 +5,9 @@ import {
   type KeyboardEventHandler,
   type ReactNode,
   type Ref,
-  useEffect,
-  useRef,
-  useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  IconArrowLeft,
-  IconSearch,
-  IconServer,
-  IconX,
-} from "@tabler/icons-react";
+import { IconArrowLeft, IconServer } from "@tabler/icons-react";
 import { ArrowUpCircle } from "lucide-react";
 import type { AppView } from "@/app/AppShell";
 import { PaneSurface } from "@/app/layout/panes/paneChrome";
@@ -25,7 +17,6 @@ import {
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
 import { cn } from "@/shared/lib/cn";
-import { Button } from "@/shared/ui/button";
 import {
   SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS,
   SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
@@ -62,7 +53,7 @@ interface PrimaryNavigationSurfaceProps {
   onSettingsBack?: () => void;
   onSettingsClick?: () => void;
   onSettingsSectionChange?: (section: SectionId) => void;
-  renderInlineSessionList?: (searchQuery: string) => ReactNode;
+  renderInlineSessionList?: () => ReactNode;
   secondaryNavRef: Ref<HTMLElement>;
   settingsSections: readonly (typeof SETTINGS_SECTIONS)[number][];
   showBottomMask: boolean;
@@ -107,30 +98,7 @@ export const PrimaryNavigationSurface = forwardRef<
   },
   ref,
 ) {
-  const { t } = useTranslation(["sidebar", "common", "settings"]);
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const [searchExpanded, setSearchExpanded] = useState(!navCollapsed);
-  const [searchQuery, setSearchQuery] = useState("");
-  const expandSearch = () => {
-    setSearchExpanded(true);
-    window.requestAnimationFrame(() => searchInputRef.current?.focus());
-  };
-  useEffect(() => {
-    if (navCollapsed) {
-      setSearchQuery("");
-      return;
-    }
-    setSearchExpanded(true);
-  }, [navCollapsed]);
-  useEffect(() => {
-    const focusSearch = () => {
-      setSearchExpanded(true);
-      window.requestAnimationFrame(() => searchInputRef.current?.focus());
-    };
-    window.addEventListener("goose:focus-nav-search", focusSearch);
-    return () =>
-      window.removeEventListener("goose:focus-nav-search", focusSearch);
-  }, []);
+  const { t } = useTranslation(["sidebar", "settings"]);
   const mainNavItems: readonly {
     id: AppView;
     label: string;
@@ -169,7 +137,7 @@ export const PrimaryNavigationSurface = forwardRef<
       fullHeight
       width={width}
     >
-      <div className="flex-shrink-0 pt-1.5" aria-hidden="true" />
+      <div className="flex-shrink-0 pt-[3px]" aria-hidden="true" />
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div
@@ -182,55 +150,6 @@ export const PrimaryNavigationSurface = forwardRef<
           inert={isSecondarySurface ? true : undefined}
           aria-hidden={isSecondarySurface}
         >
-          <div className="mb-1 flex h-7 flex-shrink-0 items-center px-1.5">
-            {navCollapsed ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={t("search.jumpToChat")}
-                tooltip={t("search.jumpToChat")}
-                onClick={expandSearch}
-              >
-                <IconSearch aria-hidden="true" className="!size-4" />
-              </Button>
-            ) : searchExpanded ? (
-              <div className="group relative block w-full overflow-hidden rounded-sm">
-                <IconSearch
-                  aria-hidden="true"
-                  className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/50 transition-colors group-hover:text-muted-foreground group-focus-within:text-muted-foreground"
-                />
-                <input
-                  ref={searchInputRef}
-                  type="search"
-                  spellCheck={false}
-                  autoCorrect="off"
-                  autoCapitalize="none"
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder={t("search.jumpToChat")}
-                  aria-label={t("search.jumpToChat")}
-                  className="h-7 w-full appearance-none rounded-sm border-0 bg-muted/40 pl-9 pr-8 text-sm font-normal text-muted-foreground/50 shadow-none outline-none ring-0 transition-colors placeholder:text-muted-foreground/50 hover:bg-muted/60 hover:text-muted-foreground focus:bg-muted/60 focus:text-muted-foreground focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 [&::-webkit-search-cancel-button]:appearance-none"
-                />
-                {searchQuery && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label={t("common:actions.clear")}
-                    title={t("common:actions.clear")}
-                    className="absolute right-1 top-1/2 -translate-y-1/2"
-                    onClick={() => {
-                      setSearchQuery("");
-                      searchInputRef.current?.focus();
-                    }}
-                  >
-                    <IconX aria-hidden="true" />
-                  </Button>
-                )}
-              </div>
-            ) : null}
-          </div>
           <nav
             ref={mainNavRef}
             onKeyDown={onKeyDown}
@@ -246,9 +165,7 @@ export const PrimaryNavigationSurface = forwardRef<
             }
             aria-label={t("navigation.main")}
           >
-            <div
-              className={cn("relative z-10 space-y-0", searchQuery && "hidden")}
-            >
+            <div className="relative z-10 space-y-0">
               <SidebarNavItem
                 testId="nav-home"
                 navId="home"
@@ -279,32 +196,30 @@ export const PrimaryNavigationSurface = forwardRef<
               })}
             </div>
 
-            {!navCollapsed && !searchQuery && <SidebarPinnedSection />}
+            {!navCollapsed && <SidebarPinnedSection />}
 
-            {renderInlineSessionList?.(searchQuery)}
+            {renderInlineSessionList?.()}
           </nav>
-          {(!searchQuery || navCollapsed) && (
-            <div className="flex-shrink-0 px-1.5 py-1.5">
-              <div
-                aria-hidden="true"
-                className={cn(
-                  "mb-1.5 h-px bg-border/70",
-                  SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
-                )}
-              />
-              <SidebarNavItem
-                testId="nav-settings"
-                navId="settings"
-                icon={SidebarNavSettingsIcon}
-                label={t("settings:title")}
-                collapsed={navCollapsed}
-                labelTransition={labelTransition}
-                labelVisible={navLabelVisible}
-                isActive={activeView === "settings"}
-                onClick={() => onSettingsClick?.()}
-              />
-            </div>
-          )}
+          <div className="flex-shrink-0 px-1.5 py-1.5">
+            <div
+              aria-hidden="true"
+              className={cn(
+                "mb-1.5 h-px bg-border/70",
+                SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
+              )}
+            />
+            <SidebarNavItem
+              testId="nav-settings"
+              navId="settings"
+              icon={SidebarNavSettingsIcon}
+              label={t("settings:title")}
+              collapsed={navCollapsed}
+              labelTransition={labelTransition}
+              labelVisible={navLabelVisible}
+              isActive={activeView === "settings"}
+              onClick={() => onSettingsClick?.()}
+            />
+          </div>
         </div>
 
         <div
