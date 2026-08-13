@@ -25,12 +25,16 @@ export function StagedQuoteChip({
   });
   const wordCount = stagedQuoteWordCount(quote);
   const extent = t("quotes.extent.words", { count: wordCount });
-  const preview = (
-    <div className="max-w-80 space-y-1.5">
-      <p className="text-xs text-popover-inverse-foreground/70">
+  // One preview surface: hover opens it, the header pins the provenance,
+  // and the excerpt scrolls when the passage is long.
+  const details = (
+    <div className="flex max-h-80 flex-col">
+      <p className="shrink-0 border-b border-popover-inverse-foreground/15 px-3 py-2 text-xs text-popover-inverse-foreground/70">
         {source} · {extent}
       </p>
-      <p className="whitespace-pre-wrap text-sm">“{quote.excerpt}”</p>
+      <div className="min-h-0 overflow-y-auto px-3 py-2.5">
+        <p className="whitespace-pre-wrap text-sm">“{quote.excerpt}”</p>
+      </div>
     </div>
   );
 
@@ -38,7 +42,7 @@ export function StagedQuoteChip({
     <ComposerChip
       tone="quote"
       label={stagedQuoteLabel(quote)}
-      title={preview}
+      details={details}
       leading={<IconQuote className="size-3.5" />}
       onRemove={mode === "draft" ? () => onRemove?.(quote.id) : undefined}
       removeLabel={mode === "draft" ? t("quotes.remove") : undefined}
