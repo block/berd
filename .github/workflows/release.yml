@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing immutable v<semver> tag to recover; select this same tag as the run ref
+        description: Existing immutable v<semver> tag to recover; run from main
         required: true
         type: string
 
@@ -18,7 +18,7 @@ permissions:
 # incomplete platform payload before rebuilding it, so concurrent runs for the
 # same immutable tag would otherwise race against each other's uploads.
 concurrency:
-  group: berd-release-${{ github.ref }}
+  group: berd-release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -47,7 +47,7 @@ jobs:
       - name: Check out requested immutable ref
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          ref: ${{ github.ref }}
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -70,8 +70,8 @@ jobs:
             echo "::error::Expected an existing v<semver> tag without build metadata; got '$TAG'"
             exit 1
           }
-          if [[ "$EVENT_NAME" == "workflow_dispatch" && "${GITHUB_REF:-}" != "refs/tags/$TAG" ]]; then
-            echo "::error::Recovery dispatch must run from refs/tags/$TAG; got '${GITHUB_REF:-<unset>}'"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "${GITHUB_REF:-}" != "refs/heads/main" ]]; then
+            echo "::error::Recovery dispatch must use the workflow from main; got '${GITHUB_REF:-<unset>}'"
             exit 1
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
@@ -267,7 +267,7 @@ jobs:
     needs: setup
     if: needs.setup.outputs.staged_windows_assets_ready != 'true'
     runs-on: windows-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     permissions:
       contents: write
       id-token: write
@@ -300,14 +300,24 @@ jobs:
         with:
           tool: just@1.40.0
 
+      - name: Install pinned Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.10.0
+          package-manager-cache: false
+
+      - name: Install pinned pnpm
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          corepack enable
+          corepack prepare pnpm@10.33.0 --activate
+          if ((pnpm --version) -ne '10.33.0') { throw 'pnpm 10.33.0 was not activated' }
+
       - name: Require updater public key
         shell: pwsh
         run: |
           if ([string]::IsNullOrWhiteSpace($env:BERD_UPDATER_PUBLIC_KEY)) { throw 'BERD_UPDATER_PUBLIC_KEY repository secret is required' }
-
-      - name: Set up Windows build dependencies
-        shell: pwsh
-        run: just setup-windows release
 
       - name: Generate updater-enabled Tauri configuration
         shell: pwsh

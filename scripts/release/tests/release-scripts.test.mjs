@@ -88,7 +88,7 @@ describe("managed Goose build profile", () => {
       '$gooseBuildProfile = if ($Debug) { "debug" } else { "release" }',
     );
     expect(bundle).toContain("$env:GOOSE_BUILD_PROFILE = $gooseBuildProfile");
-    expect(workflow).toContain("run: just setup-windows release");
+    expect(workflow).toContain("just bundle-windows nsis");
     expect(windowsSetup).toContain(
       '[ValidateSet("debug", "release")][string]$GooseBuildProfile = "debug"',
     );
@@ -754,7 +754,9 @@ describe("desktop release workflow platform gate", () => {
     expect(workflow).not.toContain(`${expressionStart} env.asset_dir }}`);
     expect(workflow).not.toContain("release delete-asset");
     expect(workflow).toContain("release-reconcile-assets");
-    expect(workflow).toContain("group: berd-release-$" + "{{ github.ref }}");
+    expect(workflow).toContain(
+      "group: berd-release-$" + "{{ inputs.tag || github.ref_name }}",
+    );
     expect(workflow).toContain("pnpm install --frozen-lockfile");
     expect(workflow).toContain("release-write-provenance");
     expect(workflow).not.toContain("jq -n");
