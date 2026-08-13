@@ -97,7 +97,12 @@ $releaseUpdaterEnabled = -not $Debug -and `
 # them driven by the same release-channel decision so a packaged updater cannot
 # compile a renderer that permanently reports updates unavailable.
 $env:VITE_UPDATER_ENABLED = if ($releaseUpdaterEnabled) { "true" } else { "false" }
-$env:VITE_AUTH_GATE = if ($env:VITE_BUILDERBOT -eq "1") { "1" } else { "0" }
+if ([string]::IsNullOrWhiteSpace($env:VITE_AUTH_GATE)) {
+    $env:VITE_AUTH_GATE = "0"
+}
+if ([string]::IsNullOrWhiteSpace($env:VITE_BYO_KEY_PROVIDERS)) {
+    $env:VITE_BYO_KEY_PROVIDERS = "1"
+}
 $env:VITE_APP_VERSION = $resolvedVersion.RichVersion
 
 $baseFeatures = @("berdctl")

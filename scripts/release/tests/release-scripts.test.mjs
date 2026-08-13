@@ -128,8 +128,8 @@ describe("managed Goose build profile", () => {
   });
 });
 
-describe("Docker Linux registry setup", () => {
-  it("forwards the host npm registry when Docker replaces HOME", async () => {
+describe("Docker Linux build environment", () => {
+  it("forwards host build configuration when Docker replaces the environment", async () => {
     const dir = await tempDir();
     const bin = join(dir, "bin");
     const capture = join(dir, "docker-args");
@@ -156,6 +156,8 @@ describe("Docker Linux registry setup", () => {
       GOOSE_LINUX_DOCKER_OUTPUT: output,
       NPM_CONFIG_REGISTRY: "",
       COREPACK_NPM_REGISTRY: "",
+      VITE_AUTH_GATE: "1",
+      VITE_BYO_KEY_PROVIDERS: "0",
       PATH: `${bin}:${process.env.PATH}`,
     });
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
@@ -167,6 +169,8 @@ describe("Docker Linux registry setup", () => {
     expect(args).toContain(
       "npm_config_registry=https://host.example.test/npm/",
     );
+    expect(args).toContain("VITE_AUTH_GATE=1");
+    expect(args).toContain("VITE_BYO_KEY_PROVIDERS=0");
   });
 });
 
@@ -429,7 +433,8 @@ describe("local macOS bundle version propagation", () => {
     const justfile = await readFile(join(repo, "justfile"), "utf8");
     const versionEnvironment = `CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" \\
       BERD_APP_VERSION="$BERD_APP_VERSION" \\
-      VITE_AUTH_GATE="\${VITE_BUILDERBOT:-0}" \\
+      VITE_AUTH_GATE="\${VITE_AUTH_GATE:-0}" \\
+      VITE_BYO_KEY_PROVIDERS="\${VITE_BYO_KEY_PROVIDERS:-1}" \\
       VITE_APP_VERSION="$BERD_APP_VERSION_RICH" \\
       `;
 
@@ -468,7 +473,10 @@ describe("local macOS bundle feature-gate propagation", () => {
         expect(recipe).toContain(`\${${viteGate}:-0}`);
         expect(recipe).toContain(cargoFeature);
       }
-      expect(recipe).toContain(`VITE_AUTH_GATE="\${VITE_BUILDERBOT:-0}"`);
+      expect(recipe).toContain(`VITE_AUTH_GATE="\${VITE_AUTH_GATE:-0}"`);
+      expect(recipe).toContain(
+        `VITE_BYO_KEY_PROVIDERS="\${VITE_BYO_KEY_PROVIDERS:-1}"`,
+      );
       expect(recipe).toContain("no-voice-dictation");
       expect(recipe).toContain("prepare-bb-cli-resource.sh");
       expect(recipe).toContain('"../resources/bb"');
@@ -514,7 +522,13 @@ describe("build-macos Block-service feature seam", () => {
       expect(script).toContain(cargoFeature);
       expect(script).toContain(`VITE_${gate}="$VITE_${gate}_VALUE"`);
     }
-    expect(script).toContain('VITE_AUTH_GATE_VALUE="$VITE_BUILDERBOT_VALUE"');
+    expect(script).toContain(`VITE_AUTH_GATE_VALUE="\${VITE_AUTH_GATE:-0}"`);
+    expect(script).toContain(
+      `VITE_BYO_KEY_PROVIDERS_VALUE="\${VITE_BYO_KEY_PROVIDERS:-1}"`,
+    );
+    expect(script).not.toContain(
+      'VITE_AUTH_GATE_VALUE="$VITE_BUILDERBOT_VALUE"',
+    );
     expect(script).toContain("no-voice-dictation");
     expect(script).toContain('if [[ "$VITE_AGENT_TOOLS_VALUE" == "1" ]]; then');
     expect(script).toContain(
@@ -734,11 +748,23 @@ describe("desktop release workflow platform gate", () => {
     );
     expect(linuxBuild).toContain('--features "$CARGO_FEATURES"');
 
-    const macosBuild = await readFile(
-      join(repo, "scripts/release/build-macos.sh"),
-      "utf8",
+    const [macosBuild, windowsBuild] = await Promise.all([
+      readFile(join(repo, "scripts/release/build-macos.sh"), "utf8"),
+      readFile(join(repo, "scripts/windows/Bundle-Windows.ps1"), "utf8"),
+    ]);
+    expect(macosBuild).toContain(
+      `VITE_AUTH_GATE_VALUE="\${VITE_AUTH_GATE:-0}"`,
     );
-    expect(macosBuild).toContain("VITE_BYO_KEY_PROVIDERS_VALUE=1");
+    expect(macosBuild).toContain(
+      `VITE_BYO_KEY_PROVIDERS_VALUE="\${VITE_BYO_KEY_PROVIDERS:-1}"`,
+    );
+    expect(windowsBuild).toContain("IsNullOrWhiteSpace($env:VITE_AUTH_GATE)");
+    expect(windowsBuild).toContain(
+      "IsNullOrWhiteSpace($env:VITE_BYO_KEY_PROVIDERS)",
+    );
+    expect(windowsBuild).not.toContain(
+      "$env:VITE_AUTH_GATE = if ($env:VITE_BUILDERBOT",
+    );
   });
 
   it("does not interpolate GitHub expressions into executable shell", async () => {

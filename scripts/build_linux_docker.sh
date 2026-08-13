@@ -65,6 +65,25 @@ docker_run_args=(
   -w /work
 )
 
+vite_env_names=(
+  VITE_ENVIRONMENT
+  VITE_AUTH_GATE
+  VITE_AGENT_TOOLS
+  VITE_AUTOMATIONS
+  VITE_BUILDERBOT
+  VITE_FEEDBACK
+  VITE_MANAGED_CONNECTIONS
+  VITE_VOICE_DICTATION
+  VITE_BYO_KEY_PROVIDERS
+  VITE_SECURITY_ML
+  VITE_UPDATER_ENABLED
+  VITE_BETA_LINEAR_LABEL_ID
+)
+for name in "${vite_env_names[@]}"; do
+  value="${!name:-}"
+  [[ -n "$value" ]] && docker_run_args+=(-e "$name=$value")
+done
+
 if [[ -n "${DOCKER_PLATFORM:-}" ]]; then
   docker_run_args+=(--platform "$DOCKER_PLATFORM")
 fi
