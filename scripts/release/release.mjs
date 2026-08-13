@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -216,8 +216,8 @@ export function updateChangelog(content, version, notes, date, repository) {
   return `${prefix}${newEntry}${existingEntries ? `\n\n${existingEntries}` : ""}\n`;
 }
 
-async function fileReader(root) {
-  return async (path) => readFile(join(root, path), "utf8");
+function fileReader(root) {
+  return (path) => readFile(join(root, path), "utf8");
 }
 
 function gitReader(root, ref) {
@@ -282,9 +282,7 @@ async function releaseConfig(read) {
 export async function checkVersions({ root, expected, ref } = {}) {
   const resolvedRoot = root || repoRoot();
   if (expected) parseSemver(expected, "expected version");
-  const read = ref
-    ? gitReader(resolvedRoot, ref)
-    : await fileReader(resolvedRoot);
+  const read = ref ? gitReader(resolvedRoot, ref) : fileReader(resolvedRoot);
   const versions = await versionState(read);
   const unique = new Set(versions.values());
   if (unique.size !== 1) {
@@ -370,8 +368,18 @@ async function restoreReleaseFiles(root, originals) {
     cwd: root,
   });
   for (const [path, content] of Object.entries(originals)) {
-    if (content === null) await unlink(join(root, path)).catch(() => {});
-    else await writeFile(join(root, path), content);
+    await writeFile(join(root, path), content);
+  }
+}
+
+function assertReleaseFileSet(output, failureMessage) {
+  const paths = output.split("\n").filter(Boolean).sort();
+  const expected = [...RELEASE_FILES].sort();
+  if (
+    paths.length !== expected.length ||
+    paths.some((path, index) => path !== expected[index])
+  ) {
+    fail(`${failureMessage}:\n${paths.join("\n")}`);
   }
 }
 
@@ -390,6 +398,19 @@ function refExists(root, ref) {
   return succeeds("git", ["show-ref", "--verify", "--quiet", ref], {
     cwd: root,
   });
+}
+
+function fetchOriginMain(root) {
+  run(
+    "git",
+    [
+      "fetch",
+      "--no-tags",
+      "origin",
+      "refs/heads/main:refs/remotes/origin/main",
+    ],
+    { cwd: root },
+  );
 }
 
 function releasePrs(root, repository, branch) {
@@ -428,14 +449,8 @@ function validatePreparedCommit(root, version) {
     "git",
     ["diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"],
     { cwd: root },
-  )
-    .split("\n")
-    .filter(Boolean)
-    .sort();
-  const expected = [...RELEASE_FILES].sort();
-  if (JSON.stringify(changed) !== JSON.stringify(expected)) {
-    fail(`release commit changed unexpected files:\n${changed.join("\n")}`);
-  }
+  );
+  assertReleaseFileSet(changed, "release commit changed unexpected files");
 }
 
 async function validatePreparedFiles(root, version) {
@@ -459,7 +474,7 @@ async function validatePreparedFiles(root, version) {
 async function prepare(version, notesPath) {
   parseSemver(version, "release version");
   const root = repoRoot();
-  const read = await fileReader(root);
+  const read = fileReader(root);
   const config = await releaseConfig(read);
   const branch = `release/v${version}`;
   const subject = `chore: release v${version}`;
@@ -468,16 +483,7 @@ async function prepare(version, notesPath) {
   if (notes.includes("\0")) fail("release notes file contains a NUL byte");
   assertClean(root);
   run("gh", ["auth", "status", "--hostname", "github.com"], { cwd: root });
-  run(
-    "git",
-    [
-      "fetch",
-      "--no-tags",
-      "origin",
-      "refs/heads/main:refs/remotes/origin/main",
-    ],
-    { cwd: root },
-  );
+  fetchOriginMain(root);
 
   const remoteBranchOutput = commandResult(
     "git",
@@ -560,17 +566,11 @@ async function prepare(version, notesPath) {
         "git",
         ["diff", "--cached", "--name-only", "--diff-filter=ACMRT"],
         { cwd: root },
-      )
-        .split("\n")
-        .filter(Boolean)
-        .sort();
-      if (
-        JSON.stringify(staged) !== JSON.stringify([...RELEASE_FILES].sort())
-      ) {
-        fail(
-          `release preparation staged unexpected files:\n${staged.join("\n")}`,
-        );
-      }
+      );
+      assertReleaseFileSet(
+        staged,
+        "release preparation staged unexpected files",
+      );
       run("git", ["commit", "-m", subject, "-m", RELEASE_COMMIT_BODY], {
         cwd: root,
         visible: true,
@@ -664,7 +664,7 @@ async function prepare(version, notesPath) {
 async function publish(version) {
   parseSemver(version, "release version");
   const root = repoRoot();
-  const read = await fileReader(root);
+  const read = fileReader(root);
   const config = await releaseConfig(read);
   const branch = `release/v${version}`;
   const tag = `v${version}`;
@@ -686,16 +686,7 @@ async function publish(version) {
   );
   if (remoteTag.status !== 0) fail("failed to inspect remote tags");
   if (remoteTag.stdout.trim()) fail(`remote tag already exists: ${tag}`);
-  run(
-    "git",
-    [
-      "fetch",
-      "--no-tags",
-      "origin",
-      "refs/heads/main:refs/remotes/origin/main",
-    ],
-    { cwd: root },
-  );
+  fetchOriginMain(root);
   run("git", ["fetch", "--tags", "origin"], { cwd: root });
 
   const prs = releasePrs(root, config.repository, branch);
@@ -757,7 +748,7 @@ async function publish(version) {
 async function notes(version, changelogPath) {
   parseSemver(version, "release version");
   const root = repoRoot();
-  const read = await fileReader(root);
+  const read = fileReader(root);
   const config = await releaseConfig(read);
   const content = await readFile(
     changelogPath || join(root, "CHANGELOG.md"),

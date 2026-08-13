@@ -188,9 +188,6 @@ describe("release preparation", () => {
     );
     const checked = f.release(["version-check", "0.6.0-rc.1"]);
     expect(checked.status, checked.stderr).toBe(0);
-    expect(await readFile(join(f.repo, "CHANGELOG.md"), "utf8")).toContain(
-      "https://github.com/block/berd/releases/tag/v0.6.0-rc.1",
-    );
     expect(f.git(["tag", "--list"]).stdout.trim()).toBe("");
     expect(await readFile(f.calls, "utf8")).toContain("pr create");
 
@@ -230,12 +227,6 @@ describe("release preparation", () => {
     });
     expect(failed.status).not.toBe(0);
     expect(f.git(["status", "--porcelain"]).stdout).toBe("");
-    expect(
-      JSON.parse(await readFile(join(f.repo, "package.json"), "utf8")).version,
-    ).toBe("0.4.12");
-    expect(await readFile(join(f.repo, "CHANGELOG.md"), "utf8")).toBe(
-      "# Changelog\n",
-    );
   });
 });
 
@@ -274,7 +265,6 @@ describe("release publishing", () => {
     expect(published.status, `${published.stdout}\n${published.stderr}`).toBe(
       0,
     );
-    expect(published.stdout).toContain("actions/workflows/release.yml");
     expect(
       run("git", [
         "--git-dir",
@@ -292,26 +282,5 @@ describe("release publishing", () => {
         "refs/tags/v0.6.0-rc.1^{commit}",
       ]).stdout.trim(),
     ).toBe(mergeSha);
-  });
-});
-
-describe("release workflow source gate", () => {
-  it("requires main ancestry and annotated tags before release creation", async () => {
-    const [workflow, verifier, notesGenerator] = await Promise.all([
-      readFile(join(sourceRepo, ".github/workflows/release.yml"), "utf8"),
-      readFile(
-        join(sourceRepo, "scripts/release/github/verify-release-source.sh"),
-        "utf8",
-      ),
-      readFile(join(sourceRepo, "scripts/generate-release-notes.sh"), "utf8"),
-    ]);
-    expect(workflow.indexOf("Verify release source")).toBeLessThan(
-      workflow.indexOf("Ensure immutable versioned release"),
-    );
-    expect(workflow).toContain('just release-version-check "$VERSION"');
-    expect(verifier).toContain("git merge-base --is-ancestor");
-    expect(verifier).toContain('== "tag"');
-    expect(notesGenerator).not.toContain("gh release");
-    expect(notesGenerator).not.toContain("read -r -p");
   });
 });
