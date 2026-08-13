@@ -23,6 +23,20 @@ concurrency:
 
 env:
   RELEASE_CHANNEL_CONFIG: scripts/release/release-channel.json
+  # One public product-build contract for every platform lane. Platform
+  # scripts may derive matching native features, but must not choose different
+  # renderer capabilities.
+  VITE_ENVIRONMENT: production
+  VITE_AUTH_GATE: "0"
+  VITE_AGENT_TOOLS: "0"
+  VITE_AUTOMATIONS: "0"
+  VITE_BUILDERBOT: "0"
+  VITE_FEEDBACK: "0"
+  VITE_MANAGED_CONNECTIONS: "0"
+  VITE_VOICE_DICTATION: "0"
+  VITE_BYO_KEY_PROVIDERS: "1"
+  VITE_SECURITY_ML: "0"
+  VITE_UPDATER_ENABLED: "true"
 
 jobs:
   setup:
@@ -447,11 +461,10 @@ jobs:
           GOOSE_BUILD_PROFILE=release scripts/prepare-goose-sidecar.sh
           CARGO_TARGET_DIR="$BERD_TAURI_CARGO_TARGET_DIR" scripts/prepare-berdctl-sidecar.sh x86_64-unknown-linux-gnu
           scripts/prepare-catch-sidecar.sh x86_64-unknown-linux-gnu
+          CARGO_FEATURES="$(scripts/block-feature-gates.sh berdctl)"
           BERD_APP_VERSION="$VERSION" \
           VITE_APP_VERSION="$VERSION" \
-          VITE_ENVIRONMENT=production \
-          VITE_UPDATER_ENABLED=true \
-          pnpm tauri build --bundles appimage,deb --features berdctl \
+          pnpm tauri build --bundles appimage,deb --features "$CARGO_FEATURES" \
             --config src-tauri/tauri.release.conf.json
 
       - name: Package and sign Linux updater archive

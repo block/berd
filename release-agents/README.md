@@ -2,8 +2,8 @@
 
 This directory holds agent Markdown files available to Berd release builds.
 Selected files are staged into `distro/agents/` only for the duration of the
-build. Official and custom builds default to the public-safe `builderbot`
-selection.
+build. Official and custom builds do not select any release-only agents by
+default. Berdy is always bundled from `distro/agents/berdy.md`.
 
 ## Adding an agent
 
@@ -33,10 +33,9 @@ Requirements:
 
 ## Selecting bundled agents
 
-Official and custom release builds bundle `builderbot` by default. Block-only
-agents are supplied by the private distribution rather than this public catalog.
-Either build kind can override its default by setting `CUSTOM_BUNDLED_AGENTS`.
-Provide a comma-separated list of basenames without the `.md` extension.
+Release builds select no agents from this directory by default. Either build
+kind can opt into agents by setting `CUSTOM_BUNDLED_AGENTS`. Provide a
+comma-separated list of basenames without the `.md` extension.
 
 ```json
 {"CUSTOM_BUNDLED_AGENTS":"support-bot,oncall-captain"}
