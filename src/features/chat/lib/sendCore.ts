@@ -30,6 +30,7 @@ import {
   ownsSessionPrompt,
   releaseSessionPrompt,
 } from "@/features/chat/lib/sessionPromptOwnership";
+import { recordSubmittedStagedItems } from "@/features/chat/lib/submittedQuoteProvenance";
 import { perfLog } from "@/shared/lib/perfLog";
 import { completeAssistantMessage } from "@/features/chat/lib/messageCompletion";
 import {
@@ -306,6 +307,16 @@ export async function dispatchPrompt(
     );
     const acpPrompt =
       promptWithPaths || (images?.length ? " " : promptWithPaths);
+    // Durable quote provenance (Berd-local): record the dispatched prompt
+    // text alongside the staged quotes so replay can re-attach them to this
+    // turn after window reopen or compaction-driven history reload.
+    if (userMessageMetadata?.stagedItems?.length) {
+      recordSubmittedStagedItems(
+        sessionId,
+        acpPrompt,
+        userMessageMetadata.stagedItems,
+      );
+    }
     const tAcp = performance.now();
     if (!background) {
       perfLog(

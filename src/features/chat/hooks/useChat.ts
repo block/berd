@@ -23,6 +23,7 @@ import {
 } from "../lib/sendCore";
 import { perfLog } from "@/shared/lib/perfLog";
 import { sanitizeReplayMessages } from "../lib/replaySanitizer";
+import { withRestoredStagedItems } from "../lib/submittedQuoteProvenance";
 import { i18n } from "@/shared/i18n";
 import type { ChatSendOptions } from "../types";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
@@ -456,7 +457,10 @@ export function useChat(
         const buffer = getAndDeleteReplayBuffer(sessionId);
         if (buffer) {
           setMessages(sessionId, [
-            ...sanitizeReplayMessages(buffer),
+            ...withRestoredStagedItems(
+              sessionId,
+              sanitizeReplayMessages(buffer),
+            ),
             createCompactionConfirmationMessage(),
           ]);
         } else {

@@ -1,5 +1,6 @@
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import { recordSubmittedStagedItems } from "@/features/chat/lib/submittedQuoteProvenance";
 import { acpSteerMessage } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import {
@@ -92,6 +93,16 @@ export async function steerPromptInSession(
 
   const promptWithPaths = appendAttachmentPaths(text.trim(), attachments);
   const acpPrompt = promptWithPaths || (images?.length ? " " : promptWithPaths);
+  // Durable quote provenance (Berd-local): steered sends carry staged
+  // quotes exactly like foreground sends; record them so replay can
+  // re-attach the quote card to this turn.
+  if (sendOptions?.userMessageMetadata?.stagedItems?.length) {
+    recordSubmittedStagedItems(
+      sessionId,
+      acpPrompt,
+      sendOptions.userMessageMetadata.stagedItems,
+    );
+  }
   const chatStore = useChatStore.getState();
   chatStore.addMessage(sessionId, userMessage);
   chatStore.setPendingInterventionBoundary(sessionId, {

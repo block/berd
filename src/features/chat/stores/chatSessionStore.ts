@@ -15,6 +15,7 @@ import {
   removeWorkspaceAttachment,
   withWorkspaceBackfill,
 } from "@/features/chat/lib/workspaceAttachments";
+import { clearSubmittedStagedItems } from "@/features/chat/lib/submittedQuoteProvenance";
 import {
   archiveSession as acpArchiveSession,
   unarchiveSession as acpUnarchiveSession,
@@ -972,6 +973,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       };
     });
     removePersistedChatWorkspaceMetadata(id);
+    clearSubmittedStagedItems(id);
     useSecurityConfirmationStore.getState().cancelAll(id);
     releaseWindowedSession(id);
   },

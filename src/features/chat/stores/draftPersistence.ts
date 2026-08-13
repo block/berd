@@ -63,7 +63,7 @@ function isStagedQuoteSourceRange(
   );
 }
 
-function isStagedItem(value: unknown): value is StagedItem {
+export function isStagedItem(value: unknown): value is StagedItem {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
   return (
