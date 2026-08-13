@@ -27,8 +27,6 @@ import {
 } from "@/features/agents/lib/personaPresentation";
 import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
 import { getAgentAvatarTransitionName } from "@/features/agents/lib/agentViewTransitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
-import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 
 interface PersonaCardProps {
   persona: Persona;
@@ -67,8 +65,6 @@ export const PersonaCard = memo(function PersonaCard({
   isActive = false,
 }: PersonaCardProps) {
   const { t } = useTranslation(["agents", "common"]);
-  const shareCardEnabled =
-    useExperiment(AGENT_SHARE_CARD_EXPERIMENT_ID)?.enabled === true;
   const [menuOpen, setMenuOpen] = useState(false);
   const [readyAnimatedAvatarSrc, setReadyAnimatedAvatarSrc] = useState<
     string | null
@@ -146,7 +142,7 @@ export const PersonaCard = memo(function PersonaCard({
           {t("common:actions.duplicate")}
         </DropdownMenuItem>
 
-        {shareCardEnabled && onShare ? (
+        {onShare ? (
           <DropdownMenuItem onSelect={() => onShare(persona)}>
             <IconShare className="size-3.5" />
             {t("share.action")}

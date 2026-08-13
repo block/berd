@@ -11,8 +11,6 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
-import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
-import { AGENT_SHARE_CARD_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { toast } from "sonner";
 import { AgentsView } from "../AgentsView";
 
@@ -160,7 +158,6 @@ describe("AgentsView entry points", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    setExperimentEnabled(AGENT_SHARE_CARD_EXPERIMENT_ID, true);
     useAgentStore.setState({
       personas: [],
       personasLoading: false,
@@ -194,7 +191,7 @@ describe("AgentsView entry points", () => {
     expect(mockCreatePersona).not.toHaveBeenCalled();
   });
 
-  it("hides share-card actions when the experiment is toggled off", async () => {
+  it("shows share-card actions", async () => {
     useAgentStore.setState({ personas: [persona] });
     const user = userEvent.setup();
 
@@ -202,24 +199,28 @@ describe("AgentsView entry points", () => {
     await user.click(
       screen.getByRole("button", { name: "detail.moreActions" }),
     );
+
     expect(
       screen.getByRole("menuitem", { name: "share.action" }),
     ).toBeInTheDocument();
-    await user.keyboard("{Escape}");
-
-    act(() => {
-      setExperimentEnabled(AGENT_SHARE_CARD_EXPERIMENT_ID, false);
-    });
-    await user.click(
-      screen.getByRole("button", { name: "detail.moreActions" }),
-    );
-
     expect(
-      screen.queryByRole("menuitem", { name: "share.action" }),
+      screen.queryByRole("menuitem", { name: "common:actions.export" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("opens the share dialog from a gallery card", async () => {
+    useAgentStore.setState({ personas: [persona] });
+    const user = userEvent.setup();
+
+    render(<AgentsView />);
+    await user.click(screen.getByRole("button", { name: "card.options" }));
+
     expect(
-      screen.getByRole("menuitem", { name: "common:actions.export" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("menuitem", { name: "common:actions.export" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "share.action" }));
+
+    expect(screen.getByText("share.title")).toBeInTheDocument();
   });
 
   it("opens a no-write preview when selecting a compatible PNG", async () => {
