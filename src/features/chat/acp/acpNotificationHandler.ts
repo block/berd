@@ -56,7 +56,10 @@ import {
   getToolCallIdentity,
   getToolChainSummary,
 } from "@/shared/api/acpToolCallIdentity";
-import { resolveSubagentLabel } from "@/features/chat/lib/subagentToolCalls";
+import {
+  getSubagentToolCallContext,
+  resolveSubagentContext,
+} from "@/features/chat/lib/subagentToolCalls";
 import { applyChatSessionConfigOptionsSnapshot } from "./sessionConfigSnapshotAdapter";
 import { perfLog } from "@/shared/lib/perfLog";
 import {
@@ -431,11 +434,13 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
         getReplayAssistantMessageMetadata(sessionId, update),
       );
       const replayArguments = rawInputToArguments(update.rawInput);
-      const replaySubagentLabel = resolveSubagentLabel(
-        identity.toolName,
-        replayArguments,
-        getReplayBuffer(sessionId) ?? [],
-      );
+      const replaySubagentContext =
+        getSubagentToolCallContext(identity.toolName, replayArguments) ??
+        resolveSubagentContext(
+          identity.toolName,
+          replayArguments,
+          getReplayBuffer(sessionId) ?? [],
+        );
       msg.content.push({
         type: "toolRequest",
         id: update.toolCallId,
@@ -446,7 +451,7 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
         ...toolCallUpdatePatch(update),
         startedAt: created ?? Date.now(),
         ...(chainSummary ? { chainSummary } : {}),
-        ...(replaySubagentLabel ? { subagentLabel: replaySubagentLabel } : {}),
+        ...(replaySubagentContext ?? {}),
       });
       break;
     }
@@ -494,13 +499,19 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
             // The wire tool name can arrive after the initial tool_call
             // (identity patched in by a later update); resolve the subagent
             // label now that we know what the tool is.
-            if (identity.toolName && tc.subagentLabel === undefined) {
-              const lateLabel = resolveSubagentLabel(
-                tc.toolName,
-                tc.arguments,
-                getReplayBuffer(sessionId) ?? [],
-              );
-              if (lateLabel) tc.subagentLabel = lateLabel;
+            if (
+              identity.toolName &&
+              (tc.subagentAgentName === undefined ||
+                tc.subagentTaskLabel === undefined)
+            ) {
+              const lateContext =
+                getSubagentToolCallContext(tc.toolName, tc.arguments) ??
+                resolveSubagentContext(
+                  tc.toolName,
+                  tc.arguments,
+                  getReplayBuffer(sessionId) ?? [],
+                );
+              if (lateContext) Object.assign(tc, lateContext);
             }
           }
         }
@@ -628,11 +639,13 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
       const chainSummary = getToolChainSummary(update);
 
       const liveArguments = rawInputToArguments(update.rawInput);
-      const liveSubagentLabel = resolveSubagentLabel(
-        identity.toolName,
-        liveArguments,
-        useChatStore.getState().messagesBySession[sessionId] ?? [],
-      );
+      const liveSubagentContext =
+        getSubagentToolCallContext(identity.toolName, liveArguments) ??
+        resolveSubagentContext(
+          identity.toolName,
+          liveArguments,
+          useChatStore.getState().messagesBySession[sessionId] ?? [],
+        );
       const toolRequest: ToolRequestContent = {
         type: "toolRequest",
         id: update.toolCallId,
@@ -643,7 +656,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
         ...toolCallUpdatePatch(update),
         startedAt: Date.now(),
         ...(chainSummary ? { chainSummary } : {}),
-        ...(liveSubagentLabel ? { subagentLabel: liveSubagentLabel } : {}),
+        ...(liveSubagentContext ?? {}),
       };
       store.setStreamingMessageId(sessionId, messageId);
       store.appendToStreamingMessage(sessionId, toolRequest);
@@ -674,13 +687,17 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
         // The wire tool name can arrive after the initial tool_call
         // (identity patched in by a later update); resolve the subagent
         // label now that we know what the tool is.
-        const lateSubagentLabel = identity.toolName
-          ? resolveSubagentLabel(
+        const storedArguments = identity.toolName
+          ? (findLiveToolRequest(sessionId, messageId, update.toolCallId)
+              ?.arguments ?? {})
+          : {};
+        const lateSubagentContext = identity.toolName
+          ? (getSubagentToolCallContext(identity.toolName, storedArguments) ??
+            resolveSubagentContext(
               identity.toolName,
-              findLiveToolRequest(sessionId, messageId, update.toolCallId)
-                ?.arguments ?? {},
+              storedArguments,
               useChatStore.getState().messagesBySession[sessionId] ?? [],
-            )
+            ))
           : undefined;
         store.updateMessage(sessionId, messageId, (msg) => ({
           ...msg,
@@ -692,9 +709,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
                   ...identity,
                   ...patch,
                   ...(chainSummary ? { chainSummary } : {}),
-                  ...(lateSubagentLabel && c.subagentLabel === undefined
-                    ? { subagentLabel: lateSubagentLabel }
-                    : {}),
+                  ...(lateSubagentContext ?? {}),
                 }
               : c,
           ),

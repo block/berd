@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArtifactLinkCandidate } from "@/features/chat/hooks/ArtifactPolicyContext";
 import type { ToolCallLocation } from "@/shared/types/messages";
+import enChat from "@/shared/i18n/locales/en/chat.json";
+import esChat from "@/shared/i18n/locales/es/chat.json";
 import { ToolCallAdapter } from "../ToolCallAdapter";
 
 const mockResolveMarkdownHref =
@@ -11,6 +13,21 @@ const mockPathExists = vi.fn<(path: string) => Promise<boolean>>();
 const mockOpenResolvedPath = vi.fn<(path: string) => Promise<void>>();
 const mockOpenInApp =
   vi.fn<(path: string, filename?: string) => Promise<void>>();
+
+const subagentLocaleKeys = Object.keys(enChat.tools.subagent) as Array<
+  keyof typeof enChat.tools.subagent
+>;
+
+describe("ToolCallAdapter — subagent locale parity", () => {
+  it("keeps every subagent law string in English and Spanish", () => {
+    const en = enChat.tools.subagent;
+    const es = esChat.tools.subagent;
+    for (const key of subagentLocaleKeys) {
+      expect(en[key], `English key ${key}`).toBeTruthy();
+      expect(es[key], `Spanish key ${key}`).toBeTruthy();
+    }
+  });
+});
 
 vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
   useArtifactActionsContext: () => ({
@@ -124,6 +141,217 @@ describe("ToolCallAdapter — ArtifactActions", () => {
     await user.click(screen.getByRole("button", { name: /open file/i }));
 
     expect(mockOpenInApp).toHaveBeenCalledWith("/Users/test/project/main.rs");
+  });
+});
+
+describe("ToolCallAdapter — subagent laws", () => {
+  it("attributes a known agent and describes an explicit task", () => {
+    renderAdapter({
+      name: "delegate",
+      toolName: "delegate",
+      arguments: {
+        source: "Rivet",
+        instructions: "Count markdown files",
+      },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /Delegating to Rivet · Count markdown files/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("describes a valid source-only delegation", () => {
+    renderAdapter({
+      name: "delegate",
+      toolName: "delegate",
+      arguments: { source: "Rivet" },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /Asking Rivet to run its configured task/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      toolName: "delegate",
+      arguments: {},
+      title: "Delegating to a subagent",
+    },
+    {
+      toolName: "Agent",
+      arguments: { subagent_type: "code-reviewer" },
+      title: "Delegating to code-reviewer",
+    },
+    {
+      toolName: "spawn_agent",
+      arguments: {},
+      title: "Delegating to a subagent",
+    },
+  ])("does not fabricate an unknown task for $toolName activity", ({
+    toolName,
+    arguments: args,
+    title,
+  }) => {
+    renderAdapter({ name: toolName, toolName, arguments: args });
+
+    expect(
+      screen.getByRole("button", { name: new RegExp(`^${title}$`, "i") }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders lawful Codex follow-up provenance", () => {
+    renderAdapter({
+      name: "followup_task",
+      toolName: "followup_task",
+      arguments: {
+        target: "/root/reviewer",
+        message: "Re-check the cache boundary",
+      },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /Delegating to \/root\/reviewer · Re-check the cache boundary/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      toolName: "send_message",
+      arguments: { target: "/root/reviewer", message: "Review the patch" },
+      title: "Sending a message to /root/reviewer · Review the patch",
+    },
+    {
+      toolName: "interrupt_agent",
+      arguments: { target: "/root/reviewer" },
+      title: "Interrupting /root/reviewer’s current turn",
+    },
+    {
+      toolName: "wait_agent",
+      arguments: { targets: ["agent-1", "agent-2"] },
+      title: "Waiting on agent-1, agent-2",
+    },
+  ])("renders truthful Codex $toolName activity", ({
+    toolName,
+    arguments: args,
+    title,
+  }) => {
+    renderAdapter({ name: toolName, toolName, arguments: args });
+
+    expect(
+      screen.getByRole("button", { name: new RegExp(`^${title}$`, "i") }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not expose a task id as an unknown task description", () => {
+    renderAdapter({
+      name: "Loading source 20260807_72",
+      toolName: "load",
+      arguments: { source: "20260807_72" },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /^Waiting on a subagent$/i,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/20260807_72/)).not.toBeInTheDocument();
+  });
+
+  it("retains recovered identity and task on async follow-ups", () => {
+    renderAdapter({
+      name: "load",
+      toolName: "load",
+      subagentAgentName: "Rivet",
+      subagentTaskLabel: "Count markdown files",
+      arguments: { source: "20260807_72" },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /Waiting on Rivet · Count markdown files/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      arguments: { source: "20260807_72" },
+      title: "Waiting on a delegated task · Count markdown files",
+    },
+    {
+      arguments: { source: "20260807_72", peek: true },
+      title: "Checking on a delegated task · Count markdown files",
+    },
+    {
+      arguments: { source: "20260807_72", cancel: true },
+      title: "Cancelling a delegated task · Count markdown files",
+    },
+  ])("describes task-only async $title activity", ({
+    arguments: args,
+    title,
+  }) => {
+    renderAdapter({
+      name: "load",
+      toolName: "load",
+      subagentTaskLabel: "Count markdown files",
+      arguments: args,
+    });
+
+    expect(
+      screen.getByRole("button", { name: new RegExp(title, "i") }),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      arguments: { source: "20260807_72" },
+      title: "Waiting on Rivet",
+    },
+    {
+      arguments: { source: "20260807_72", peek: true },
+      title: "Checking on Rivet",
+    },
+    {
+      arguments: { source: "20260807_72", cancel: true },
+      title: "Cancelling Rivet",
+    },
+  ])("attributes agent-only async $title activity without inventing a task", ({
+    arguments: args,
+    title,
+  }) => {
+    renderAdapter({
+      name: "load",
+      toolName: "load",
+      subagentAgentName: "Rivet",
+      arguments: args,
+    });
+
+    expect(
+      screen.getByRole("button", { name: new RegExp(`^${title}$`, "i") }),
+    ).toBeInTheDocument();
+  });
+
+  it("retains a recovered configured task on async follow-ups", () => {
+    renderAdapter({
+      name: "load",
+      toolName: "load",
+      subagentAgentName: "Rivet",
+      subagentTaskIsConfigured: true,
+      arguments: { source: "20260807_72", peek: true },
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: /Checking Rivet’s configured task/i,
+      }),
+    ).toBeInTheDocument();
   });
 });
 

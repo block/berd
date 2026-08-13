@@ -8,7 +8,8 @@
  *   `source` (await/peek/cancel a background subagent). `load` with a named
  *   source (recipe/skill) is NOT a subagent run.
  * - Claude Code: `Task` / `Agent` tool (via `_meta.claudeCode.toolName`).
- * - Codex: `spawn_agent` collaboration tool (via `_meta.codex.collaboration`).
+ * - Codex: collaboration lifecycle tools such as `spawn_agent`,
+ *   `followup_task`, and `wait_agent` (via `_meta.codex.collaboration`).
  *
  * Tool names arrive on `ToolRequestContent.toolName` (extracted from `_meta`
  * at the ACP edge by `getToolCallIdentity`). Titles are server-authored and
@@ -19,28 +20,28 @@ import type { MessageContent } from "@/shared/types/messages";
 
 export type SubagentActivity =
   | "delegating"
+  | "messaging"
   | "waiting"
   | "checking"
-  | "cancelling";
+  | "cancelling"
+  | "interrupting";
 
 export interface SubagentToolCallInfo {
   activity: SubagentActivity;
-  /** Short human label: the task description or prompt, when provided. */
+  /** Short human label: the task description or message, when provided. */
   label?: string;
-  /** Named delegate source (custom agent/recipe), when the spawn had one. */
+  /** Named delegate source or collaboration target, when exactly one is known. */
   agentName?: string;
+  /** Collaboration targets when an operation truthfully applies to several. */
+  agentNames?: string[];
+  /** Source-only Goose delegates run the configured task owned by the source. */
+  sourceDefinesTask?: boolean;
   /** Goose background-task id (e.g. `20260807_72`) for await/peek/cancel. */
   taskId?: string;
 }
 
 /** Goose background-task ids look like `20260807_72`. */
 const GOOSE_TASK_ID_PATTERN = /^\d{8}_\w+$/;
-
-/** `20260807_72` → `72`; anything unexpected passes through unchanged. */
-export function shortTaskId(taskId: string): string {
-  const separator = taskId.indexOf("_");
-  return separator > 0 ? taskId.slice(separator + 1) : taskId;
-}
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -70,38 +71,38 @@ function toolResponseMentionsTask(
   return false;
 }
 
-/**
- * For a `load <task-id>` tool call, resolve the named delegate source that
- * spawned the task (if any) from the session transcript. Returns undefined
- * for anything that isn't a task-id load or when the delegate was ad-hoc.
- */
-export function resolveSubagentLabel(
-  toolName: string | undefined,
-  args: Record<string, unknown>,
-  messages: ReadonlyArray<{ content: MessageContent[] }>,
-): string | undefined {
-  if (toolName !== "load") return undefined;
-  const source = stringArg(args, "source")?.trim();
-  if (!source || !GOOSE_TASK_ID_PATTERN.test(source)) return undefined;
-  return resolveDelegateSourceForTask(messages, source);
+/** Context recovered from the delegate that spawned an async Goose task. */
+export interface ResolvedSubagentContext {
+  subagentAgentName?: string;
+  subagentTaskLabel?: string;
+  /** The named Goose source owns a configured task when no instructions were supplied. */
+  subagentTaskIsConfigured?: boolean;
 }
 
 /**
- * Resolve which named delegate source (custom agent, recipe) spawned a
- * background task, by scanning the session transcript for the `delegate`
- * call whose result announced the task id. Purely derived — no side state.
- *
- * Scans newest-to-oldest: the spawning delegate is almost always recent
- * (tasks are typically collected shortly after launch), and if the same
- * task id ever appears twice, the most recent delegate wins.
+ * For a `load <task-id>` tool call, recover the known subagent identity and
+ * task description from the paired delegate in the session transcript.
  */
-export function resolveDelegateSourceForTask(
+export function resolveSubagentContext(
+  toolName: string | undefined,
+  args: Record<string, unknown>,
+  messages: ReadonlyArray<{ content: MessageContent[] }>,
+): ResolvedSubagentContext | undefined {
+  if (toolName !== "load") return undefined;
+  const source = stringArg(args, "source")?.trim();
+  if (!source || !GOOSE_TASK_ID_PATTERN.test(source)) return undefined;
+  return resolveDelegateContextForTask(messages, source);
+}
+
+/**
+ * Resolve the delegate request whose response announced a background task id.
+ * Both identity and task are retained: follow-up activity must not discard
+ * facts that were already present in the transcript.
+ */
+export function resolveDelegateContextForTask(
   messages: ReadonlyArray<{ content: MessageContent[] }>,
   taskId: string,
-): string | undefined {
-  // A delegate's response follows its request chronologically, so a reverse
-  // scan sees the response first: remember matching response ids, then
-  // resolve when the paired delegate request appears.
+): ResolvedSubagentContext | undefined {
   const matchingResponseIds = new Set<string>();
   for (let m = messages.length - 1; m >= 0; m -= 1) {
     const content = messages[m].content;
@@ -117,10 +118,17 @@ export function resolveDelegateSourceForTask(
         block.toolName === "delegate" &&
         matchingResponseIds.has(block.id)
       ) {
-        const source = block.arguments.source;
-        return typeof source === "string" && source.trim().length > 0
-          ? source.trim()
-          : undefined;
+        const agentName = stringArg(block.arguments, "source")?.trim();
+        const taskLabel = stringArg(block.arguments, "instructions");
+        const context: ResolvedSubagentContext = {
+          ...(agentName ? { subagentAgentName: agentName } : {}),
+          ...(taskLabel
+            ? { subagentTaskLabel: truncateLabel(taskLabel) }
+            : agentName
+              ? { subagentTaskIsConfigured: true }
+              : {}),
+        };
+        return Object.keys(context).length > 0 ? context : undefined;
       }
     }
   }
@@ -145,6 +153,42 @@ function stringArg(
     : undefined;
 }
 
+function stringArrayArg(
+  args: Record<string, unknown>,
+  key: string,
+): string[] | undefined {
+  const value = args[key];
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const items: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || item.trim().length === 0) return undefined;
+    items.push(item.trim());
+  }
+  return items;
+}
+
+function soleStringArrayArg(
+  args: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = stringArrayArg(args, key);
+  return value?.length === 1 ? value[0] : undefined;
+}
+
+export function getSubagentToolCallContext(
+  toolName: string | undefined,
+  args: Record<string, unknown>,
+): ResolvedSubagentContext | undefined {
+  const info = getSubagentToolCallInfo({ toolName, arguments: args });
+  if (!info) return undefined;
+  const context: ResolvedSubagentContext = {
+    ...(info.agentName ? { subagentAgentName: info.agentName } : {}),
+    ...(info.label ? { subagentTaskLabel: info.label } : {}),
+    ...(info.sourceDefinesTask ? { subagentTaskIsConfigured: true } : {}),
+  };
+  return Object.keys(context).length > 0 ? context : undefined;
+}
+
 export function getSubagentToolCallInfo(input: {
   toolName?: string;
   arguments: Record<string, unknown>;
@@ -158,10 +202,13 @@ export function getSubagentToolCallInfo(input: {
   if (toolName === "delegate") {
     const agentName = stringArg(args, "source");
     const label = stringArg(args, "instructions");
+    // A named Goose source owns a configured task even when no inline
+    // instructions are present. Unknown task facts remain absent.
     return {
       activity: "delegating",
       ...(agentName ? { agentName: agentName.trim() } : {}),
       ...(label ? { label: truncateLabel(label) } : {}),
+      ...(!label && agentName ? { sourceDefinesTask: true } : {}),
     };
   }
 
@@ -184,7 +231,7 @@ export function getSubagentToolCallInfo(input: {
   // configured agent; description is the task.
   if (toolName === "Task" || toolName === "Agent") {
     const agentName = stringArg(args, "subagent_type");
-    const label = stringArg(args, "description");
+    const label = stringArg(args, "description") ?? stringArg(args, "prompt");
     return {
       activity: "delegating",
       ...(agentName && agentName !== "general-purpose"
@@ -194,12 +241,87 @@ export function getSubagentToolCallInfo(input: {
     };
   }
 
-  // Codex: spawn_agent collaboration tool.
+  // Codex: spawn_agent collaboration tool. Direct adapters expose `task_name`
+  // and `message`; codex-acp exposes the same facts as a strict singleton
+  // `receiverThreadIds` and `prompt`. Keep both wire shapes compatible.
   if (toolName === "spawn_agent") {
-    const label = stringArg(args, "prompt");
+    const agentName =
+      stringArg(args, "task_name") ??
+      soleStringArrayArg(args, "receiverThreadIds");
+    const label = stringArg(args, "message") ?? stringArg(args, "prompt");
     return {
       activity: "delegating",
+      ...(agentName ? { agentName: agentName.trim() } : {}),
       ...(label ? { label: truncateLabel(label) } : {}),
+    };
+  }
+
+  // Codex message delivery does not start a turn. Keep it distinct from
+  // follow-up delegation while retaining the recipient and message text.
+  if (toolName === "send_message") {
+    const agentName =
+      stringArg(args, "target") ??
+      soleStringArrayArg(args, "receiverThreadIds");
+    const label = stringArg(args, "message") ?? stringArg(args, "prompt");
+    return {
+      activity: "messaging",
+      ...(agentName ? { agentName: agentName.trim() } : {}),
+      ...(label ? { label: truncateLabel(label) } : {}),
+    };
+  }
+
+  // Codex input and follow-up calls start work on the target agent.
+  if (toolName === "send_input" || toolName === "followup_task") {
+    const agentName =
+      stringArg(args, "target") ??
+      soleStringArrayArg(args, "receiverThreadIds");
+    const label = stringArg(args, "message") ?? stringArg(args, "prompt");
+    return {
+      activity: "delegating",
+      ...(agentName ? { agentName: agentName.trim() } : {}),
+      ...(label ? { label: truncateLabel(label) } : {}),
+    };
+  }
+
+  if (toolName === "resume_agent") {
+    const agentName =
+      stringArg(args, "target") ??
+      stringArg(args, "id") ??
+      soleStringArrayArg(args, "receiverThreadIds");
+    return {
+      activity: "delegating",
+      ...(agentName ? { agentName: agentName.trim() } : {}),
+    };
+  }
+
+  if (toolName === "wait_agent") {
+    const agentNames =
+      stringArrayArg(args, "targets") ??
+      stringArrayArg(args, "receiverThreadIds");
+    return {
+      activity: "waiting",
+      ...(agentNames?.length === 1 ? { agentName: agentNames[0] } : {}),
+      ...(agentNames && agentNames.length > 1 ? { agentNames } : {}),
+    };
+  }
+
+  if (toolName === "close_agent") {
+    const agentName =
+      stringArg(args, "target") ??
+      soleStringArrayArg(args, "receiverThreadIds");
+    return {
+      activity: "cancelling",
+      ...(agentName ? { agentName: agentName.trim() } : {}),
+    };
+  }
+
+  if (toolName === "interrupt_agent") {
+    const agentName =
+      stringArg(args, "target") ??
+      soleStringArrayArg(args, "receiverThreadIds");
+    return {
+      activity: "interrupting",
+      ...(agentName ? { agentName: agentName.trim() } : {}),
     };
   }
 

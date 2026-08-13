@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   getSubagentToolCallInfo,
-  resolveDelegateSourceForTask,
-  resolveSubagentLabel,
-  shortTaskId,
+  resolveDelegateContextForTask,
+  resolveSubagentContext,
 } from "@/features/chat/lib/subagentToolCalls";
 import type { MessageContent } from "@/shared/types/messages";
 
@@ -47,7 +46,11 @@ describe("getSubagentToolCallInfo", () => {
           toolName: "delegate",
           arguments: { source: "code-reviewer", async: true },
         }),
-      ).toEqual({ activity: "delegating", agentName: "code-reviewer" });
+      ).toEqual({
+        activity: "delegating",
+        agentName: "code-reviewer",
+        sourceDefinesTask: true,
+      });
     });
 
     it("uses instructions as the label and truncates long labels", () => {
@@ -62,7 +65,7 @@ describe("getSubagentToolCallInfo", () => {
       expect(info?.label?.endsWith("…")).toBe(true);
     });
 
-    it("classifies delegate without any label", () => {
+    it("classifies a delegate even when its task is unknown", () => {
       expect(
         getSubagentToolCallInfo({ toolName: "delegate", arguments: {} }),
       ).toEqual({ activity: "delegating" });
@@ -143,7 +146,23 @@ describe("getSubagentToolCallInfo", () => {
       });
     });
 
-    it("classifies a named agent without a description", () => {
+    it("uses prompt as the known task when description is absent", () => {
+      expect(
+        getSubagentToolCallInfo({
+          toolName: "Agent",
+          arguments: {
+            subagent_type: "code-reviewer",
+            prompt: "Review the authentication boundary",
+          },
+        }),
+      ).toEqual({
+        activity: "delegating",
+        agentName: "code-reviewer",
+        label: "Review the authentication boundary",
+      });
+    });
+
+    it("retains known identity when the task is unknown", () => {
       expect(
         getSubagentToolCallInfo({
           toolName: "Agent",
@@ -153,7 +172,7 @@ describe("getSubagentToolCallInfo", () => {
     });
   });
 
-  describe("resolveDelegateSourceForTask", () => {
+  describe("resolveDelegateContextForTask", () => {
     const transcript = (
       blocks: MessageContent[][],
     ): Array<{ content: MessageContent[] }> =>
@@ -184,32 +203,40 @@ describe("getSubagentToolCallInfo", () => {
       isError: false,
     });
 
-    it("resolves the source of the delegate that announced the task id", () => {
+    it("retains both identity and task for async follow-ups", () => {
       const messages = transcript([
         [
-          delegateRequest("call-1", { source: "Rivet", async: true }),
+          delegateRequest("call-1", {
+            source: "Rivet",
+            instructions: "Count markdown files",
+            async: true,
+          }),
           delegateResponse(
             "call-1",
-            'Task 20260807_119 started in background: "count files"',
-          ),
-        ],
-        [
-          delegateRequest("call-2", { source: "Vogue", async: true }),
-          delegateResponse(
-            "call-2",
-            'Task 20260807_120 started in background: "read readme"',
+            'Task 20260807_119 started in background: "Count markdown files"',
           ),
         ],
       ]);
-      expect(resolveDelegateSourceForTask(messages, "20260807_119")).toBe(
-        "Rivet",
-      );
-      expect(resolveDelegateSourceForTask(messages, "20260807_120")).toBe(
-        "Vogue",
-      );
+      expect(resolveDelegateContextForTask(messages, "20260807_119")).toEqual({
+        subagentAgentName: "Rivet",
+        subagentTaskLabel: "Count markdown files",
+      });
     });
 
-    it("finds the task id in structured content", () => {
+    it("retains a named source's configured task for async follow-ups", () => {
+      const messages = transcript([
+        [
+          delegateRequest("call-1", { source: "Rivet", async: true }),
+          delegateResponse("call-1", "Task 20260807_120 started in background"),
+        ],
+      ]);
+      expect(resolveDelegateContextForTask(messages, "20260807_120")).toEqual({
+        subagentAgentName: "Rivet",
+        subagentTaskIsConfigured: true,
+      });
+    });
+
+    it("finds the exact task id in structured content", () => {
       const messages = transcript([
         [
           delegateRequest("call-1", { source: "Trace", async: true }),
@@ -218,12 +245,16 @@ describe("getSubagentToolCallInfo", () => {
           }),
         ],
       ]);
-      expect(resolveDelegateSourceForTask(messages, "20260807_119")).toBe(
-        "Trace",
-      );
+      expect(resolveDelegateContextForTask(messages, "20260807_119")).toEqual({
+        subagentAgentName: "Trace",
+        subagentTaskIsConfigured: true,
+      });
+      expect(
+        resolveDelegateContextForTask(messages, "20260807_11"),
+      ).toBeUndefined();
     });
 
-    it("does not match a task id that is a prefix of another (7 vs 72)", () => {
+    it("does not match a task id that prefixes another", () => {
       const messages = transcript([
         [
           delegateRequest("call-1", { source: "Rivet", async: true }),
@@ -233,30 +264,16 @@ describe("getSubagentToolCallInfo", () => {
           ),
         ],
       ]);
-      // 20260807_7 is a prefix of 20260807_72; it must NOT resolve to Rivet.
       expect(
-        resolveDelegateSourceForTask(messages, "20260807_7"),
+        resolveDelegateContextForTask(messages, "20260807_7"),
       ).toBeUndefined();
-      expect(resolveDelegateSourceForTask(messages, "20260807_72")).toBe(
-        "Rivet",
-      );
+      expect(resolveDelegateContextForTask(messages, "20260807_72")).toEqual({
+        subagentAgentName: "Rivet",
+        subagentTaskIsConfigured: true,
+      });
     });
 
-    it("does not prefix-match inside structured content", () => {
-      const messages = transcript([
-        [
-          delegateRequest("call-1", { source: "Trace", async: true }),
-          delegateResponse("call-1", "started", {
-            subagent_session_id: "20260807_119",
-          }),
-        ],
-      ]);
-      expect(
-        resolveDelegateSourceForTask(messages, "20260807_11"),
-      ).toBeUndefined();
-    });
-
-    it("returns undefined for ad-hoc delegates (no source)", () => {
+    it("retains task-only provenance for ad-hoc delegates", () => {
       const messages = transcript([
         [
           delegateRequest("call-1", { instructions: "do a thing" }),
@@ -266,40 +283,46 @@ describe("getSubagentToolCallInfo", () => {
           ),
         ],
       ]);
-      expect(
-        resolveDelegateSourceForTask(messages, "20260807_119"),
-      ).toBeUndefined();
+      expect(resolveDelegateContextForTask(messages, "20260807_119")).toEqual({
+        subagentTaskLabel: "do a thing",
+      });
     });
 
     it("returns undefined when no delegate mentions the task id", () => {
-      expect(resolveDelegateSourceForTask([], "20260807_119")).toBeUndefined();
+      expect(resolveDelegateContextForTask([], "20260807_119")).toBeUndefined();
     });
   });
 
-  describe("resolveSubagentLabel", () => {
+  describe("resolveSubagentContext", () => {
     it("only resolves for load calls with a task-id source", () => {
       expect(
-        resolveSubagentLabel("load", { source: "deploy" }, []),
+        resolveSubagentContext("load", { source: "deploy" }, []),
       ).toBeUndefined();
       expect(
-        resolveSubagentLabel("delegate", { source: "Rivet" }, []),
+        resolveSubagentContext("delegate", { source: "Rivet" }, []),
       ).toBeUndefined();
-      expect(resolveSubagentLabel(undefined, {}, [])).toBeUndefined();
+      expect(resolveSubagentContext(undefined, {}, [])).toBeUndefined();
     });
   });
 
-  describe("shortTaskId", () => {
-    it("drops the date prefix", () => {
-      expect(shortTaskId("20260807_72")).toBe("72");
+  describe("codex collaboration", () => {
+    it("preserves Codex agent identity and delegated task", () => {
+      expect(
+        getSubagentToolCallInfo({
+          toolName: "spawn_agent",
+          arguments: {
+            task_name: "Rivet",
+            message: "Investigate the failing tests",
+          },
+        }),
+      ).toEqual({
+        activity: "delegating",
+        agentName: "Rivet",
+        label: "Investigate the failing tests",
+      });
     });
 
-    it("passes unexpected values through unchanged", () => {
-      expect(shortTaskId("no-separator")).toBe("no-separator");
-    });
-  });
-
-  describe("codex spawn_agent", () => {
-    it("classifies spawn_agent with a prompt label", () => {
+    it("falls back to the legacy prompt label", () => {
       expect(
         getSubagentToolCallInfo({
           toolName: "spawn_agent",
@@ -308,6 +331,127 @@ describe("getSubagentToolCallInfo", () => {
       ).toEqual({
         activity: "delegating",
         label: "Investigate the failing tests",
+      });
+    });
+
+    it("prefers the Codex message when both task fields are present", () => {
+      expect(
+        getSubagentToolCallInfo({
+          toolName: "spawn_agent",
+          arguments: {
+            message: "Use the collaboration task",
+            prompt: "Legacy fallback",
+          },
+        }),
+      ).toEqual({
+        activity: "delegating",
+        label: "Use the collaboration task",
+      });
+    });
+
+    it("classifies spawn_agent when its provenance is unknown", () => {
+      expect(
+        getSubagentToolCallInfo({
+          toolName: "spawn_agent",
+          arguments: {},
+        }),
+      ).toEqual({ activity: "delegating" });
+    });
+
+    it.each([
+      ["send_input", "agent-42", "Review the patch", "delegating"],
+      ["send_message", "/root/reviewer", "Review the patch", "messaging"],
+      ["followup_task", "/root/reviewer", "Review the patch", "delegating"],
+    ])("preserves target and task for %s", (toolName, target, message, activity) => {
+      expect(
+        getSubagentToolCallInfo({
+          toolName,
+          arguments: { target, message },
+        }),
+      ).toEqual({
+        activity,
+        agentName: target,
+        label: message,
+      });
+    });
+
+    it.each([
+      ["resume_agent", { id: "agent-42" }, "agent-42"],
+      ["close_agent", { target: "agent-42" }, "agent-42"],
+      ["interrupt_agent", { target: "/root/reviewer" }, "/root/reviewer"],
+    ])("attributes %s to its target", (toolName, args, agentName) => {
+      expect(getSubagentToolCallInfo({ toolName, arguments: args })).toEqual({
+        activity:
+          toolName === "resume_agent"
+            ? "delegating"
+            : toolName === "interrupt_agent"
+              ? "interrupting"
+              : "cancelling",
+        agentName,
+      });
+    });
+
+    it.each([
+      ["spawn_agent", "Rivet", "Investigate the failing tests", "delegating"],
+      ["send_input", "agent-42", "Review the patch", "delegating"],
+      ["send_message", "/root/reviewer", "Review the patch", "messaging"],
+      ["followup_task", "/root/reviewer", "Review the patch", "delegating"],
+      ["resume_agent", "agent-42", undefined, "delegating"],
+      ["wait_agent", "agent-42", undefined, "waiting"],
+      ["close_agent", "agent-42", undefined, "cancelling"],
+      ["interrupt_agent", "/root/reviewer", undefined, "interrupting"],
+    ])("preserves codex-acp wire provenance for %s", (toolName, receiver, prompt, activity) => {
+      expect(
+        getSubagentToolCallInfo({
+          toolName,
+          arguments: {
+            prompt,
+            senderThreadId: "root",
+            receiverThreadIds: [receiver],
+            agentsStates: {},
+            model: "gpt-5",
+            reasoningEffort: "medium",
+            status: "running",
+          },
+        }),
+      ).toEqual({
+        activity,
+        agentName: receiver,
+        ...(prompt ? { label: prompt } : {}),
+      });
+    });
+
+    it("attributes a legacy wait with one target", () => {
+      expect(
+        getSubagentToolCallInfo({
+          toolName: "wait_agent",
+          arguments: { targets: ["agent-42"] },
+        }),
+      ).toEqual({ activity: "waiting", agentName: "agent-42" });
+    });
+
+    it("preserves every known target for multi-agent waits", () => {
+      expect(
+        getSubagentToolCallInfo({
+          toolName: "wait_agent",
+          arguments: { targets: ["agent-1", "agent-2"] },
+        }),
+      ).toEqual({
+        activity: "waiting",
+        agentNames: ["agent-1", "agent-2"],
+      });
+    });
+
+    it.each([
+      ["wait_agent", {}],
+      ["wait_agent", { targets: ["agent-1", 42] }],
+      ["wait_agent", { targets: ["agent-1", "   "] }],
+      ["wait_agent", { targets: [42] }],
+      ["wait_agent", { targets: ["   "] }],
+      ["followup_task", { target: 42, message: [] }],
+    ])("does not fabricate provenance for malformed or ambiguous %s", (toolName, args) => {
+      expect(getSubagentToolCallInfo({ toolName, arguments: args })).toEqual({
+        activity: toolName === "wait_agent" ? "waiting" : "delegating",
       });
     });
   });

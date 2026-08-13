@@ -30,3 +30,8 @@
 
 - A message that is not first in the queue MUST NOT steer the session.
 - A steering result MUST affect only the message that produced it.
+
+## Subagent activity
+
+- Subagent activity MUST attribute the subagent when its identity is known.
+- Subagent activity MUST describe the delegated task when it is known.

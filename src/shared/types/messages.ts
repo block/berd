@@ -126,7 +126,11 @@ export interface ToolRequestContent {
    * named source (custom agent/recipe) of the delegate that spawned the task,
    * resolved from the delegate's result in this session's transcript.
    */
-  subagentLabel?: string;
+  subagentAgentName?: string;
+  /** Plain-language task recovered from the spawning delegate. */
+  subagentTaskLabel?: string;
+  /** The named Goose source owns a configured task when no instructions were supplied. */
+  subagentTaskIsConfigured?: boolean;
 }
 
 export interface ToolResponseContent {

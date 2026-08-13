@@ -22,10 +22,7 @@ import {
 } from "@/features/chat/lib/toolCallPresentation";
 import type { ToolCallLocation, ToolCallStatus } from "@/shared/types/messages";
 import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
-import {
-  getSubagentToolCallInfo,
-  shortTaskId,
-} from "@/features/chat/lib/subagentToolCalls";
+import { getSubagentToolCallInfo } from "@/features/chat/lib/subagentToolCalls";
 
 interface ToolCallAdapterProps {
   className?: string;
@@ -33,7 +30,11 @@ interface ToolCallAdapterProps {
   /** Real (wire-level) tool name from `_meta`, when the harness provides it. */
   toolName?: string;
   /** Named delegate source (custom agent) behind a subagent await/peek call. */
-  subagentLabel?: string;
+  subagentAgentName?: string;
+  /** Plain-language task recovered from the spawning delegate. */
+  subagentTaskLabel?: string;
+  /** Whether the named source owns a configured task with no inline label. */
+  subagentTaskIsConfigured?: boolean;
   arguments: Record<string, unknown>;
   status: ToolCallStatus;
   locations?: ToolCallLocation[];
@@ -315,6 +316,8 @@ function subagentTitle(
   t: (key: string, options?: Record<string, unknown>) => string,
   info: NonNullable<ReturnType<typeof getSubagentToolCallInfo>>,
   resolvedAgentName?: string,
+  resolvedTaskLabel?: string,
+  resolvedTaskIsConfigured?: boolean,
 ): string {
   // Explicit key map keeps the i18n usage statically checkable.
   const keys = {
@@ -323,6 +326,12 @@ function subagentTitle(
       "tools.subagent.delegatingLabeled",
       "tools.subagent.delegatingAgent",
       "tools.subagent.delegatingAgentLabeled",
+    ],
+    messaging: [
+      "tools.subagent.messaging",
+      "tools.subagent.messagingLabeled",
+      "tools.subagent.messagingAgent",
+      "tools.subagent.messagingAgentLabeled",
     ],
     waiting: [
       "tools.subagent.waiting",
@@ -342,21 +351,55 @@ function subagentTitle(
       "tools.subagent.cancellingAgent",
       "tools.subagent.cancellingAgentLabeled",
     ],
+    interrupting: [
+      "tools.subagent.interrupting",
+      "tools.subagent.interruptingLabeled",
+      "tools.subagent.interruptingAgent",
+      "tools.subagent.interruptingAgentLabeled",
+    ],
   } as const;
   const [plain, labeled, agent, agentLabeled] = keys[info.activity];
+  const configuredTaskKeys = {
+    delegating: "tools.subagent.delegatingAgentConfiguredTask",
+    messaging: "tools.subagent.messagingAgentConfiguredTask",
+    waiting: "tools.subagent.waitingAgentConfiguredTask",
+    checking: "tools.subagent.checkingAgentConfiguredTask",
+    cancelling: "tools.subagent.cancellingAgentConfiguredTask",
+    interrupting: "tools.subagent.interruptingAgentConfiguredTask",
+  } as const;
+  const taskLabeledKeys = {
+    delegating: "tools.subagent.delegatingLabeled",
+    messaging: "tools.subagent.messagingLabeled",
+    waiting: "tools.subagent.waitingTaskLabeled",
+    checking: "tools.subagent.checkingTaskLabeled",
+    cancelling: "tools.subagent.cancellingTaskLabeled",
+    interrupting: "tools.subagent.interruptingTaskLabeled",
+  } as const;
   // Agent name comes from the call arguments (delegate source) or is
   // resolved from the transcript (load of a task spawned by a named
   // delegate). It replaces the word "subagent"; the task description is
   // kept alongside it: "Delegating to Rivet · Count markdown files…".
   const agentName = info.agentName ?? resolvedAgentName;
-  if (agentName && info.label) {
-    return t(agentLabeled, { name: agentName, label: info.label });
+  const agentNames = info.agentNames;
+  const taskLabel = info.label ?? resolvedTaskLabel;
+  if (agentNames) {
+    return t("tools.subagent.waitingAgents", { names: agentNames.join(", ") });
+  }
+  if (agentName && (info.sourceDefinesTask || resolvedTaskIsConfigured)) {
+    return t(configuredTaskKeys[info.activity], { name: agentName });
+  }
+  if (agentName && taskLabel) {
+    return t(agentLabeled, { name: agentName, label: taskLabel });
   }
   if (agentName) return t(agent, { name: agentName });
-  if (info.taskId) {
-    return t(labeled, { label: shortTaskId(info.taskId) });
+  if (taskLabel) {
+    return info.taskId
+      ? t(taskLabeledKeys[info.activity], { label: taskLabel })
+      : t(labeled, { label: taskLabel });
   }
-  return info.label ? t(labeled, { label: info.label }) : t(plain);
+  // A task id is correlation identity, not a task description. When no
+  // delegate context can be recovered, show only the known activity fact.
+  return t(plain);
 }
 
 function sentenceCaseToolTitle(name: string): string {
@@ -385,7 +428,9 @@ export function ToolCallAdapter({
   className,
   name,
   toolName,
-  subagentLabel,
+  subagentAgentName,
+  subagentTaskLabel,
+  subagentTaskIsConfigured,
   arguments: args,
   status,
   locations,
@@ -418,7 +463,13 @@ export function ToolCallAdapter({
     [toolName, args],
   );
   const displayName = subagentInfo
-    ? subagentTitle(t, subagentInfo, subagentLabel)
+    ? subagentTitle(
+        t,
+        subagentInfo,
+        subagentAgentName,
+        subagentTaskLabel,
+        subagentTaskIsConfigured,
+      )
     : sentenceCaseToolTitle(name);
 
   const pathRow = summaryRows.find((row) => row.kind === "path");

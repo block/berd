@@ -1380,6 +1380,197 @@ describe("acpNotificationHandler", () => {
     warnSpy.mockRestore();
   });
 
+  it.each([
+    { mode: "live", lateIdentity: false, configuredTask: false },
+    { mode: "live", lateIdentity: true, configuredTask: false },
+    { mode: "replay", lateIdentity: false, configuredTask: false },
+    { mode: "replay", lateIdentity: true, configuredTask: false },
+    { mode: "live", lateIdentity: false, configuredTask: true },
+    { mode: "live", lateIdentity: true, configuredTask: true },
+    { mode: "replay", lateIdentity: false, configuredTask: true },
+    { mode: "replay", lateIdentity: true, configuredTask: true },
+  ] as const)("retains async delegate identity and task in $mode when load identity is late=$lateIdentity and configured=$configuredTask", async ({
+    mode,
+    lateIdentity,
+    configuredTask,
+  }) => {
+    const sessionId = "acp-session";
+    if (mode === "live") {
+      registerPreparedSession(sessionId, "goose", "/Users/test");
+      setActiveMessageId(sessionId, "assistant-1");
+    } else {
+      markSessionReplayLoading(sessionId);
+    }
+
+    const replayMeta =
+      mode === "replay"
+        ? { messageId: "assistant-1", created: 1_700_000_120 }
+        : {};
+    const toolMeta = (toolName: string) => ({
+      goose: {
+        ...replayMeta,
+        toolCall: { toolName },
+      },
+    });
+
+    await handleSessionNotification({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "delegate-1",
+        title: "delegate",
+        rawInput: {
+          source: "Rivet",
+          ...(!configuredTask ? { instructions: "Count markdown files" } : {}),
+          async: true,
+        },
+        _meta: toolMeta("delegate"),
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "delegate-1",
+        status: "completed",
+        content: [
+          {
+            type: "content",
+            content: {
+              type: "text",
+              text: "Task 20260807_119 started in background",
+            },
+          },
+        ],
+        _meta: toolMeta("delegate"),
+      },
+    } as never);
+
+    await handleSessionNotification({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "load-1",
+        title: "load",
+        rawInput: { source: "20260807_119" },
+        ...(!lateIdentity ? { _meta: toolMeta("load") } : {}),
+      },
+    } as never);
+    if (lateIdentity) {
+      await handleSessionNotification({
+        sessionId,
+        update: {
+          sessionUpdate: "tool_call_update",
+          toolCallId: "load-1",
+          _meta: toolMeta("load"),
+        },
+      } as never);
+    }
+
+    const messages =
+      mode === "live"
+        ? useChatStore.getState().messagesBySession[sessionId]
+        : getReplayBuffer(sessionId);
+    const load = messages
+      ?.flatMap((message) => message.content)
+      .find((block) => block.type === "toolRequest" && block.id === "load-1");
+    expect(load).toMatchObject({
+      type: "toolRequest",
+      toolName: "load",
+      subagentAgentName: "Rivet",
+      ...(configuredTask
+        ? { subagentTaskIsConfigured: true }
+        : { subagentTaskLabel: "Count markdown files" }),
+    });
+  });
+
+  it("retains codex-acp wire provenance on the rendered tool request", async () => {
+    registerPreparedSession("acp-session", "codex", "/Users/test");
+    setActiveMessageId("acp-session", "assistant-1");
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "followup-1",
+        title: "Sending follow-up",
+        rawInput: {
+          prompt: "Re-check the cache boundary",
+          senderThreadId: "root",
+          receiverThreadIds: ["/root/reviewer"],
+          agentsStates: {},
+          model: "gpt-5",
+          reasoningEffort: "medium",
+          status: "running",
+        },
+        _meta: { codex: { collaboration: { tool: "followup_task" } } },
+      },
+    } as never);
+
+    const [message] = useChatStore.getState().messagesBySession["acp-session"];
+    expect(message.content[0]).toMatchObject({
+      type: "toolRequest",
+      id: "followup-1",
+      toolName: "followup_task",
+      arguments: {
+        prompt: "Re-check the cache boundary",
+        receiverThreadIds: ["/root/reviewer"],
+      },
+      subagentAgentName: "/root/reviewer",
+      subagentTaskLabel: "Re-check the cache boundary",
+    });
+  });
+
+  it.each([
+    "live",
+    "replay",
+  ] as const)("retains codex-acp provenance when identity arrives late in %s", async (mode) => {
+    const sessionId = "acp-session";
+    if (mode === "live") {
+      registerPreparedSession(sessionId, "codex", "/Users/test");
+      setActiveMessageId(sessionId, "assistant-1");
+    } else {
+      markSessionReplayLoading(sessionId);
+    }
+
+    await handleSessionNotification({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "followup-1",
+        title: "Sending follow-up",
+        rawInput: {
+          prompt: "Re-check the cache boundary",
+          receiverThreadIds: ["/root/reviewer"],
+        },
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "followup-1",
+        _meta: { codex: { collaboration: { tool: "followup_task" } } },
+      },
+    } as never);
+
+    const messages =
+      mode === "live"
+        ? useChatStore.getState().messagesBySession[sessionId]
+        : getReplayBuffer(sessionId);
+    const request = messages
+      ?.flatMap((message) => message.content)
+      .find(
+        (block) => block.type === "toolRequest" && block.id === "followup-1",
+      );
+    expect(request).toMatchObject({
+      type: "toolRequest",
+      toolName: "followup_task",
+      subagentAgentName: "/root/reviewer",
+      subagentTaskLabel: "Re-check the cache boundary",
+    });
+  });
+
   it("preserves ACP tool kind and locations on tool requests", async () => {
     registerPreparedSession("acp-session", "goose", "/Users/test");
     setActiveMessageId("acp-session", "assistant-1");
