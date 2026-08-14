@@ -25,6 +25,15 @@ validate_release_platform "$PLATFORM" || exit 1
 }
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 
+if command -v shasum >/dev/null 2>&1; then
+  sha256_command=(shasum -a 256)
+elif command -v sha256sum >/dev/null 2>&1; then
+  sha256_command=(sha256sum)
+else
+  release_error "missing SHA-256 tool: expected shasum or sha256sum"
+  exit 1
+fi
+
 artifacts='{}'
 for asset_name in "$@"; do
   [[ "$asset_name" == "$(basename "$asset_name")" && "$asset_name" != "." && "$asset_name" != ".." ]] || {
@@ -40,7 +49,7 @@ for asset_name in "$@"; do
     release_error "missing or empty provenance asset: $asset_name"
     exit 1
   }
-  digest="$(shasum -a 256 "$asset" | awk '{print $1}')"
+  digest="$("${sha256_command[@]}" "$asset" | awk '{print $1}')"
   [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || {
     release_error "invalid SHA-256 digest for provenance asset: $asset_name"
     exit 1
