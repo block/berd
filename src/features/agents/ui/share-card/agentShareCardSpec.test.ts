@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   deriveAgentCardTraits,
-  stableAgentCardNumber,
   truncateAgentCardTitle,
 } from "./agentShareCardSpec";
 
@@ -40,12 +39,5 @@ describe("agentShareCardSpec", () => {
       goodFor: "building and improving software",
       vibes: "precise, pragmatic",
     });
-  });
-
-  it("creates a stable four-digit card number", () => {
-    expect(stableAgentCardNumber("/agents/reviewer.md")).toMatch(/^\d{4}$/);
-    expect(stableAgentCardNumber("/agents/reviewer.md")).toBe(
-      stableAgentCardNumber("/agents/reviewer.md"),
-    );
   });
 });

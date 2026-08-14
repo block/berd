@@ -12,14 +12,6 @@ export function truncateAgentCardTitle(name: string): string {
     : title;
 }
 
-export function stableAgentCardNumber(identity: string): string {
-  let hash = 0;
-  for (const character of identity) {
-    hash = (hash * 31 + (character.codePointAt(0) ?? 0)) >>> 0;
-  }
-  return String(hash % 10_000).padStart(4, "0");
-}
-
 export interface AgentCardTraits {
   goodFor: string;
   vibes: string;
