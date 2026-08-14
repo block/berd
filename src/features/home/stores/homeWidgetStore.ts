@@ -13,6 +13,7 @@ import {
   notifyHomeWidgetSaveDiscarded,
 } from "@/features/home/onboarding/homeWidgetSaveLifecycle";
 import {
+  markStarterHomeArranged,
   resetStarterHomeArrangement,
   STARTER_HOME_LAYOUT,
 } from "@/features/home/onboarding/starterHomeLayout";
@@ -652,6 +653,7 @@ function createHomeWidgetStore() {
         );
       },
       resetHomeForOnboarding: async () => {
+        await runtime.waitForPendingSaves();
         const state = get();
         if (!canMutateWidgets(state) || state.itemRevision === null) {
           return false;
@@ -721,10 +723,12 @@ function createHomeWidgetStore() {
             latest.camera?.centerX === expectedCamera.centerX &&
             latest.camera.centerY === expectedCamera.centerY &&
             latest.camera.zoomBps === expectedCamera.zoomBps);
-        if (itemsConfirmed && !cameraConfirmed) {
+        if (itemsConfirmed && cameraConfirmed) {
+          markStarterHomeArranged();
+        } else if (itemsConfirmed) {
           toast.warning(i18n.t("home:widgetLayer.toasts.cameraSaveFailed"));
         }
-        return itemsConfirmed && cameraConfirmed;
+        return itemsConfirmed;
       },
       reloadOnboardingTourForDev: () => {
         if (!import.meta.env.DEV) return;

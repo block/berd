@@ -3,10 +3,7 @@ import {
   markStarterAgentPinsSeeded,
   resetStarterAgentPinsSeeded,
 } from "@/features/home/onboarding/starterAgents";
-import {
-  markStarterHomeArranged,
-  STARTER_HOME_LAYOUT,
-} from "@/features/home/onboarding/starterHomeLayout";
+import { STARTER_HOME_LAYOUT } from "@/features/home/onboarding/starterHomeLayout";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
 
 async function initializeHomeWidgets(): Promise<void> {
@@ -41,7 +38,6 @@ export async function resetHomeForOnboardingExperience(): Promise<boolean> {
     } else {
       markStarterAgentPinsEligible();
     }
-    markStarterHomeArranged();
   }
   return didReset;
 }

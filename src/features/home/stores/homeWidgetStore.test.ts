@@ -307,6 +307,59 @@ describe("homeWidgetStore", () => {
     );
   });
 
+  it("waits for pending widget saves before replacing Home during reset", async () => {
+    const pendingSave = deferred<SaveItemsResult>();
+    setReadyHomeState({
+      camera: INITIAL_CAMERA,
+      cameraRevision: 1,
+      itemRevision: 4,
+      instances: [clockWidget()],
+    });
+    vi.mocked(saveLayoutItems)
+      .mockReturnValueOnce(pendingSave.promise)
+      .mockImplementationOnce(async (request) => ({
+        ok: true,
+        layout: layout({ itemRevision: 6, items: request.items }),
+      }));
+    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({
+        itemRevision: 6,
+        cameraRevision: 2,
+        camera: request.camera,
+      }),
+    }));
+
+    useHomeWidgetStore
+      .getState()
+      .addWidget("agentPin", 10, 10, { agentId: "temporary" }, CANVAS_BOUNDS);
+    const resetPromise = useHomeWidgetStore.getState().resetHomeForOnboarding();
+    expect(saveLayoutItems).toHaveBeenCalledOnce();
+
+    pendingSave.resolve({
+      ok: true,
+      layout: layout({
+        itemRevision: 5,
+        items: vi.mocked(saveLayoutItems).mock.calls[0][0].items,
+      }),
+    });
+
+    await expect(resetPromise).resolves.toBe(true);
+    expect(saveLayoutItems).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(saveLayoutItems).mock.calls[1][0].expectedRevision).toBe(
+      5,
+    );
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.some(
+          (instance) =>
+            instance.type === "agentPin" &&
+            instance.state?.agentId === "temporary",
+        ),
+    ).toBe(false);
+  });
+
   it("retries a reset as a full replacement after an item revision conflict", async () => {
     setReadyHomeState({
       camera: INITIAL_CAMERA,
@@ -453,7 +506,8 @@ describe("homeWidgetStore", () => {
 
     await expect(
       useHomeWidgetStore.getState().resetHomeForOnboarding(),
-    ).resolves.toBe(false);
+    ).resolves.toBe(true);
+    expect(localStorage.getItem("goose:home:starter-layout-v18")).toBeNull();
     expect(toast.warning).toHaveBeenCalledWith(
       "home:widgetLayer.toasts.cameraSaveFailed",
     );
