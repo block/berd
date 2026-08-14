@@ -976,6 +976,59 @@ describe("desktop release workflow platform gate", () => {
   });
 });
 
+describe("sign-compatibility-descriptor", () => {
+  it("signs the updater's exact newline-free canonical payload", async () => {
+    const dir = await tempDir();
+    const fakeBin = join(dir, "bin");
+    const capturedPayload = join(dir, "compatibility.json");
+    const artifactSha256 = "AB".repeat(32);
+    await mkdir(fakeBin);
+    await writeFile(
+      join(fakeBin, "pnpm"),
+      `#!/usr/bin/env bash
+set -euo pipefail
+[[ "$*" == "exec tauri signer sign "* ]]
+payload="\${@: -1}"
+cp "$payload" "$CAPTURED_PAYLOAD"
+printf 'fake-signature\r\n' > "$payload.sig"
+`,
+      { mode: 0o755 },
+    );
+
+    const result = run(
+      "scripts/release/sign-compatibility-descriptor.sh",
+      ["1.2.3-rc.4", "main", artifactSha256],
+      {
+        PATH: `${fakeBin}:${process.env.PATH}`,
+        CAPTURED_PAYLOAD: capturedPayload,
+        TAURI_SIGNING_PRIVATE_KEY: "test-key",
+        TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "test-password",
+        BERD_STORE_CONTRACT_VERSION: "1",
+        BERD_WRITES_DATA_EPOCH: "2",
+        BERD_MIN_READABLE_DATA_EPOCH: "1",
+        BERD_MAX_READABLE_DATA_EPOCH: "3",
+      },
+    );
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(result.stdout).toBe("fake-signature");
+    expect(await readFile(capturedPayload, "utf8")).toBe(
+      JSON.stringify({
+        schemaVersion: 1,
+        channelId: "main",
+        version: "1.2.3-rc.4",
+        artifactSha256: artifactSha256.toLowerCase(),
+        compatibility: {
+          storeContractVersion: 1,
+          writesDataEpoch: 2,
+          minReadableDataEpoch: 1,
+          maxReadableDataEpoch: 3,
+        },
+      }),
+    );
+  });
+});
+
 describe("package-signed-updater", () => {
   it("uses the version/platform-qualified filename and keeps Berd.app at archive root", async () => {
     const dir = await tempDir();

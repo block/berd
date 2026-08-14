@@ -22,7 +22,7 @@ fi
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/berd-compatibility.XXXXXX")"
 trap 'rm -rf "$WORK_DIR"' EXIT
 PAYLOAD="$WORK_DIR/compatibility.json"
-jq -cn \
+jq -cjn \
   --arg channelId "$CHANNEL_ID" \
   --arg version "$VERSION" \
   --arg artifactSha256 "$(printf '%s' "$ARTIFACT_SHA256" | tr '[:upper:]' '[:lower:]')" \
