@@ -95,9 +95,9 @@ export function AgentCardReveal({
                   ease: [0.45, 0, 0.55, 1],
                 },
               }}
-              className="absolute inset-0 rounded-[44%] blur-xl"
+              className="absolute inset-0 rounded-[44%]"
               style={{
-                background: `radial-gradient(ellipse, ${lobe.color} 0%, ${lobe.color} 32%, transparent 100%)`,
+                background: `radial-gradient(ellipse, ${lobe.color} 0%, ${lobe.color} 22%, color-mix(in srgb, ${lobe.color} 55%, transparent) 46%, transparent 76%)`,
               }}
             />
           ))}

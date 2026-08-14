@@ -52,9 +52,10 @@ describe("AgentCardReveal", () => {
     );
     expect(refraction).toHaveClass("z-0");
     expect(refraction?.firstElementChild).toHaveClass("inset-0");
+    expect(refraction?.firstElementChild).not.toHaveClass("blur-xl");
     expect(
       (refraction?.firstElementChild as HTMLElement).style.background,
-    ).toContain("transparent 100%");
+    ).toContain("transparent 76%");
     expect((refraction?.firstElementChild as HTMLElement).style.boxShadow).toBe(
       "",
     );
