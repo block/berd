@@ -583,6 +583,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "indexmap 2.13.1",
+ "libc",
  "serde",
  "serde_json",
  "ureq 3.4.0",
@@ -6583,10 +6584,14 @@ name = "tauri-plugin-berdctl"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "getrandom 0.4.3",
+ "hex",
+ "libc",
  "log",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
+ "subtle",
  "tauri",
  "tauri-plugin",
  "tokio",
