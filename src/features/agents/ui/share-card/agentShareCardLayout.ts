@@ -1,4 +1,8 @@
 import { truncateAgentCardTitle } from "./agentShareCardSpec";
+import {
+  segmentCardGraphemes,
+  segmentCardWrapUnits,
+} from "./agentShareCardText";
 
 export const AGENT_CARD_TITLE_MAX_WIDTH = 997;
 export const AGENT_CARD_DESCRIPTION_MAX_WIDTH = 997;
@@ -18,18 +22,41 @@ export function fitAgentCardText(
   maxWidth: number,
   measure: TextWidthMeasure,
   addEllipsis = false,
+  locale = "en",
 ): string {
   const suffix = addEllipsis ? "…" : "";
   if (measure(`${text}${suffix}`) <= maxWidth) return `${text}${suffix}`;
 
-  const characters = Array.from(text);
+  const graphemes = segmentCardGraphemes(text, locale);
   while (
-    characters.length > 0 &&
-    measure(`${characters.join("")}${suffix}`) > maxWidth
+    graphemes.length > 0 &&
+    measure(`${graphemes.join("")}${suffix}`) > maxWidth
   ) {
-    characters.pop();
+    graphemes.pop();
   }
-  return `${characters.join("")}${suffix}`;
+  return `${graphemes.join("")}${suffix}`;
+}
+
+function pushLine(
+  lines: string[],
+  line: string,
+  maxLines: number,
+  maxWidth: number,
+  measure: TextWidthMeasure,
+  hasRemainingContent: boolean,
+  locale: string,
+): boolean {
+  if (!line) return false;
+  if (lines.length < maxLines - 1) {
+    lines.push(line.trimEnd());
+    return false;
+  }
+  lines.push(
+    hasRemainingContent
+      ? fitAgentCardText(line.trimEnd(), maxWidth, measure, true, locale)
+      : line.trimEnd(),
+  );
+  return true;
 }
 
 export function wrapAgentCardText(
@@ -37,46 +64,59 @@ export function wrapAgentCardText(
   maxWidth: number,
   maxLines: number,
   measure: TextWidthMeasure,
+  locale = "en",
 ): string[] {
-  const words = text.split(/\s+/u).filter(Boolean);
+  const units = segmentCardWrapUnits(text.trim(), locale);
   const lines: string[] = [];
   let line = "";
 
-  for (const word of words) {
-    const fittedWord =
-      measure(word) > maxWidth
-        ? fitAgentCardText(word, maxWidth, measure, true)
-        : word;
-    const candidate = line ? `${line} ${fittedWord}` : fittedWord;
+  for (let index = 0; index < units.length; index += 1) {
+    const unit = units[index];
+    if (!unit) continue;
+    const candidate = `${line}${unit}`;
     if (measure(candidate) <= maxWidth) {
       line = candidate;
       continue;
     }
+    if (!line) {
+      const graphemes = segmentCardGraphemes(unit, locale);
+      for (const grapheme of graphemes) {
+        if (line && measure(`${line}${grapheme}`) > maxWidth) {
+          if (
+            pushLine(lines, line, maxLines, maxWidth, measure, true, locale)
+          ) {
+            return lines;
+          }
+          line = "";
+        }
+        line += grapheme;
+      }
+      continue;
+    }
 
-    if (line) lines.push(line);
-    if (lines.length === maxLines) {
-      lines[maxLines - 1] = fitAgentCardText(
-        lines[maxLines - 1],
-        maxWidth,
-        measure,
-        true,
-      );
+    if (pushLine(lines, line, maxLines, maxWidth, measure, true, locale)) {
       return lines;
     }
-    line = fittedWord;
+    line = unit.trimStart();
+    if (measure(line) > maxWidth) {
+      const graphemes = segmentCardGraphemes(line, locale);
+      line = "";
+      for (const grapheme of graphemes) {
+        if (line && measure(`${line}${grapheme}`) > maxWidth) {
+          if (
+            pushLine(lines, line, maxLines, maxWidth, measure, true, locale)
+          ) {
+            return lines;
+          }
+          line = "";
+        }
+        line += grapheme;
+      }
+    }
   }
 
-  if (line) lines.push(line);
-  if (lines.length <= maxLines) return lines;
-
-  const clamped = lines.slice(0, maxLines);
-  clamped[maxLines - 1] = fitAgentCardText(
-    clamped[maxLines - 1] ?? "",
-    maxWidth,
-    measure,
-    true,
-  );
-  return clamped;
+  pushLine(lines, line, maxLines, maxWidth, measure, false, locale);
+  return lines;
 }
 
 export function deriveAgentShareCardTextLayout(
@@ -84,6 +124,7 @@ export function deriveAgentShareCardTextLayout(
   description: string,
   measureTitle: TextWidthMeasure,
   measureDescription: TextWidthMeasure,
+  locale = "en",
 ): AgentShareCardTextLayout {
   const rawTitle = truncateAgentCardTitle(displayName);
   const title =
@@ -94,12 +135,14 @@ export function deriveAgentShareCardTextLayout(
           AGENT_CARD_TITLE_MAX_WIDTH,
           measureTitle,
           true,
+          locale,
         );
   const descriptionLines = wrapAgentCardText(
     description,
     AGENT_CARD_DESCRIPTION_MAX_WIDTH,
     AGENT_CARD_DESCRIPTION_MAX_LINES,
     measureDescription,
+    locale,
   );
   return {
     title,

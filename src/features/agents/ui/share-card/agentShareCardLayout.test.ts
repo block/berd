@@ -26,15 +26,25 @@ describe("deriveAgentShareCardTextLayout", () => {
     expect(layout.contentShift).toBe(52);
   });
 
-  it("clamps long words and Unicode without splitting surrogate pairs", () => {
+  it("clamps long words and Unicode without splitting graphemes", () => {
     const layout = deriveAgentShareCardTextLayout(
       "😀😀😀😀😀😀",
-      "averylongunbrokenword",
+      "averylongunbrokenwordthatcontinueswellpastthreelines",
       (text) => Array.from(text).length * 300,
       (text) => Array.from(text).length * 100,
     );
     expect(layout.title).toMatch(/…$/u);
     expect(layout.title).not.toContain("�");
-    expect(layout.descriptionLines[0]).toMatch(/…$/u);
+    const graphemeLayout = deriveAgentShareCardTextLayout(
+      "👨‍👩‍👧‍👦👨‍👩‍👧‍👦",
+      "你好世界这是一个没有空格的说明文本",
+      (text) => Array.from(text).length * 300,
+      (text) => Array.from(text).length * 100,
+      "zh",
+    );
+    expect(graphemeLayout.title).not.toContain("�");
+    expect(graphemeLayout.descriptionLines.length).toBeGreaterThan(1);
+    expect(layout.descriptionLines).toHaveLength(3);
+    expect(layout.descriptionLines[2]).toMatch(/…$/u);
   });
 });
