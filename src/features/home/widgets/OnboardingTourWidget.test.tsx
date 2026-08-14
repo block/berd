@@ -16,11 +16,15 @@ vi.mock("@/shared/hooks/useArtifacts", () => ({
   useArtifacts: () => ({ data: null }),
 }));
 
-vi.mock("@/shared/hooks/useAvatarSrc", () => ({
-  useAvatarMedia: () => ({
+const avatarMediaState = vi.hoisted(() => ({
+  media: {
     src: "asset://localhost/gloopies-22.webm",
-    mediaType: "video",
-  }),
+    mediaType: "video" as const,
+  } as { src: string; mediaType: "video" } | undefined,
+}));
+
+vi.mock("@/shared/hooks/useAvatarSrc", () => ({
+  useAvatarMedia: () => avatarMediaState.media,
 }));
 
 const avatarMediaRenderMock = vi.hoisted(() => vi.fn());
@@ -63,6 +67,10 @@ describe("OnboardingTourWidget", () => {
   beforeEach(() => {
     localStorage.clear();
     avatarMediaRenderMock.mockClear();
+    avatarMediaState.media = {
+      src: "asset://localhost/gloopies-22.webm",
+      mediaType: "video",
+    };
     useAgentStore.setState({
       personas: [
         {
@@ -157,6 +165,21 @@ describe("OnboardingTourWidget", () => {
     expect(
       screen.queryByText("I’m here to answer any questions you might have."),
     ).not.toBeInTheDocument();
+  });
+
+  it("renders Berdy when avatar media becomes cached after first render", () => {
+    avatarMediaState.media = undefined;
+    const { rerender } = render(<OnboardingTourWidget {...baseProps} />);
+
+    expect(screen.queryByTestId("animated-berdy")).not.toBeInTheDocument();
+
+    avatarMediaState.media = {
+      src: "asset://localhost/gloopies-22.webm",
+      mediaType: "video",
+    };
+    rerender(<OnboardingTourWidget {...baseProps} onOpenAgent={vi.fn()} />);
+
+    expect(screen.getByTestId("animated-berdy")).toBeInTheDocument();
   });
 
   it("keeps Berdy's label visible with the home pin label preference", () => {
