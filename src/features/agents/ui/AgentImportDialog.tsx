@@ -65,7 +65,7 @@ export function AgentImportDialog({
   importTooLargeMessage,
 }: AgentImportDialogProps) {
   const { t, i18n } = useTranslation("agents");
-  const locale = i18n.resolvedLanguage ?? i18n.language ?? "en";
+  const locale = i18n?.resolvedLanguage ?? i18n?.language ?? "en";
   const [importAccentColor, setImportAccentColor] = useState<string | null>(
     null,
   );

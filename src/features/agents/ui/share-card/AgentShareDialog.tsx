@@ -137,7 +137,7 @@ export function AgentShareDialog({
   const cardReady = Boolean(avatarSrc && avatarReadySrc === avatarSrc);
   const cardBase = getAgentShareCardBase(persona.id);
   const description = getAgentShareDescription(persona);
-  const locale = i18n.resolvedLanguage ?? i18n.language ?? "en";
+  const locale = i18n?.resolvedLanguage ?? i18n?.language ?? "en";
   const cardCopy = resolveAgentShareCardCopy(description, t);
   const cardContentIdentity = [
     locale,
