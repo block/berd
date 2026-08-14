@@ -19,8 +19,6 @@ jobs:
             runner: windows-latest
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 240
-    env:
-      JUST_UNSTABLE: "1"
     steps:
       - name: Check out requested revision
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -31,7 +29,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         with:
-          tool: just@1.40.0
+          tool: just@1.48.0
 
       - name: Install pinned Node on Windows
         if: runner.os == 'Windows'
