@@ -141,12 +141,20 @@ export function AgentImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="md" surface="solid" className="bg-card">
+      <DialogContent
+        size="md"
+        surface="solid"
+        className={cn(
+          "bg-card",
+          prepared &&
+            "overflow-visible has-data-[slot=dialog-body]:overflow-visible",
+        )}
+      >
         <DialogHeader>
           <DialogTitle>{t("importDialog.title")}</DialogTitle>
           <DialogDescription>{t("importDialog.description")}</DialogDescription>
         </DialogHeader>
-        <DialogBody>
+        <DialogBody className={prepared ? "overflow-visible" : undefined}>
           {prepared ? (
             <div className="relative flex justify-center py-2 [perspective:1200px]">
               <AgentCardReveal
