@@ -46,10 +46,15 @@ describe("AgentCardReveal", () => {
     expect(screen.getByText("Card").parentElement).toHaveClass("z-10");
     expect(
       document.querySelector('[data-agent-card-reveal="true"]'),
-    ).toHaveClass("overflow-hidden");
-    expect(
-      document.querySelector('[data-agent-card-refraction="true"]'),
-    ).toHaveClass("z-0");
+    ).toHaveClass("overflow-hidden", "p-16");
+    const refraction = document.querySelector(
+      '[data-agent-card-refraction="true"]',
+    );
+    expect(refraction).toHaveClass("z-0");
+    expect(refraction?.firstElementChild).toHaveClass("inset-4");
+    expect((refraction?.firstElementChild as HTMLElement).style.boxShadow).toBe(
+      "",
+    );
 
     act(() => motionMocks.completions.at(-1)?.());
 

@@ -53,7 +53,7 @@ export function AgentCardReveal({
     <div
       data-agent-card-reveal="true"
       className={cn(
-        "relative isolate w-full max-w-[23rem] overflow-hidden p-8 [transform-style:preserve-3d]",
+        "relative isolate w-full max-w-[27rem] overflow-hidden p-16 [transform-style:preserve-3d]",
         className,
       )}
     >
@@ -95,10 +95,9 @@ export function AgentCardReveal({
                   ease: [0.45, 0, 0.55, 1],
                 },
               }}
-              className="absolute top-1/2 left-1/2 size-[170%] -translate-x-1/2 -translate-y-1/2 rounded-[44%] blur-xl"
+              className="absolute inset-4 rounded-[44%] blur-xl"
               style={{
-                background: `radial-gradient(ellipse, ${lobe.color} 0%, ${lobe.color} 24%, transparent 72%)`,
-                boxShadow: `0 0 150px 85px ${lobe.color}`,
+                background: `radial-gradient(ellipse, ${lobe.color} 0%, ${lobe.color} 18%, transparent 68%)`,
               }}
             />
           ))}
