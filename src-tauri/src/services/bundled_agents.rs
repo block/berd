@@ -121,21 +121,30 @@ fn repair_bundled_agent_from_dir(
 
     let mut marker = read_seed_marker(target_root)?;
     let primary_target = target_root.join(file_name);
-    let target = match installed_agent_path_state(&primary_target)? {
-        InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => primary_target,
-        InstalledAgentPathState::UserOwned => {
-            let fallback_file_name = fallback_file_name(file_name)?;
-            let fallback_target = target_root.join(&fallback_file_name);
-            match installed_agent_path_state(&fallback_target)? {
-                InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
-                    fallback_target
-                }
-                InstalledAgentPathState::UserOwned => {
-                    return Err(format!(
-                        "Cannot restore bundled agent because '{}' and '{}' are owned by the user",
-                        primary_target.display(),
-                        fallback_target.display()
-                    ));
+    let fallback_file_name = fallback_file_name(file_name)?;
+    let fallback_target = target_root.join(&fallback_file_name);
+    let has_seeded_fallback = marker.seeded_files.contains(&fallback_file_name)
+        && matches!(
+            installed_agent_path_state(&fallback_target)?,
+            InstalledAgentPathState::Bundled
+        );
+    let target = if has_seeded_fallback {
+        fallback_target
+    } else {
+        match installed_agent_path_state(&primary_target)? {
+            InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => primary_target,
+            InstalledAgentPathState::UserOwned => {
+                match installed_agent_path_state(&fallback_target)? {
+                    InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
+                        fallback_target
+                    }
+                    InstalledAgentPathState::UserOwned => {
+                        return Err(format!(
+                            "Cannot restore bundled agent because '{}' and '{}' are owned by the user",
+                            primary_target.display(),
+                            fallback_target.display()
+                        ));
+                    }
                 }
             }
         }
@@ -254,18 +263,27 @@ fn seed_bundled_agents_from_dir(
 
         let file_name = entry.file_name().to_string_lossy().into_owned();
         let primary_target = target_root.join(&file_name);
-        let (target, target_file_name) = match installed_agent_path_state(&primary_target)? {
-            InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
-                (primary_target, file_name.clone())
-            }
-            InstalledAgentPathState::UserOwned => {
-                let fallback_name = fallback_file_name(&file_name)?;
-                let fallback_target = target_root.join(&fallback_name);
-                match installed_agent_path_state(&fallback_target)? {
-                    InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
-                        (fallback_target, fallback_name)
+        let fallback_name = fallback_file_name(&file_name)?;
+        let fallback_target = target_root.join(&fallback_name);
+        let has_seeded_fallback = marker.seeded_files.contains(&fallback_name)
+            && matches!(
+                installed_agent_path_state(&fallback_target)?,
+                InstalledAgentPathState::Bundled
+            );
+        let (target, target_file_name) = if has_seeded_fallback {
+            (fallback_target, fallback_name)
+        } else {
+            match installed_agent_path_state(&primary_target)? {
+                InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
+                    (primary_target, file_name.clone())
+                }
+                InstalledAgentPathState::UserOwned => {
+                    match installed_agent_path_state(&fallback_target)? {
+                        InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
+                            (fallback_target, fallback_name)
+                        }
+                        InstalledAgentPathState::UserOwned => continue,
                     }
-                    InstalledAgentPathState::UserOwned => continue,
                 }
             }
         };
@@ -570,6 +588,38 @@ mod tests {
     }
 
     #[test]
+    fn startup_keeps_refreshing_a_seeded_fallback_after_primary_is_removed() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        write_agent(
+            source.path(),
+            "tinker.md",
+            "---\nname: Tinker\nmetadata:\n  berdBundled: true\n---\nVersion one.",
+        );
+        write_agent(
+            target.path(),
+            "tinker.md",
+            "---\nname: Mine\n---\nPersonal.",
+        );
+        seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+        fs::remove_file(target.path().join("tinker.md")).unwrap();
+        write_agent(
+            source.path(),
+            "tinker.md",
+            "---\nname: Tinker\nmetadata:\n  berdBundled: true\n---\nVersion two.",
+        );
+
+        let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(result.seeded_count, 1);
+        assert!(!target.path().join("tinker.md").exists());
+        assert_eq!(
+            fs::read_to_string(target.path().join("tinker2.md")).unwrap(),
+            "---\nname: Tinker\nmetadata:\n  berdBundled: true\n---\nVersion two."
+        );
+    }
+
+    #[test]
     fn does_not_mark_an_agent_seeded_when_both_names_are_user_owned() {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
@@ -640,6 +690,29 @@ mod tests {
         assert_eq!(
             fs::read_to_string(target.path().join("berdy2.md")).unwrap(),
             "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nBundled."
+        );
+    }
+
+    #[test]
+    fn explicit_repair_keeps_using_a_seeded_fallback_after_primary_is_removed() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let bundled = "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nBundled.";
+        write_agent(source.path(), BERDY_AGENT_FILE_NAME, bundled);
+        write_agent(
+            target.path(),
+            BERDY_AGENT_FILE_NAME,
+            "---\nname: Personal Berdy\n---\nPersonal.",
+        );
+        repair_bundled_agent_from_dir(source.path(), target.path(), BERDY_AGENT_FILE_NAME).unwrap();
+        fs::remove_file(target.path().join(BERDY_AGENT_FILE_NAME)).unwrap();
+
+        repair_bundled_agent_from_dir(source.path(), target.path(), BERDY_AGENT_FILE_NAME).unwrap();
+
+        assert!(!target.path().join(BERDY_AGENT_FILE_NAME).exists());
+        assert_eq!(
+            fs::read_to_string(target.path().join(BERDY_FALLBACK_FILE_NAME)).unwrap(),
+            bundled
         );
     }
 
