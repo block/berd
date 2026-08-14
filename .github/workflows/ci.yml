@@ -117,7 +117,6 @@ jobs:
       BERD_TAURI_CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
-      JUST_UNSTABLE: "1"
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -127,7 +126,24 @@ jobs:
       - name: Install just
         uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         with:
-          tool: just@1.40.0
+          tool: just@1.48.0
+
+      - name: Exercise Windows release provenance recipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset_dir="$RUNNER_TEMP/release-provenance-smoke"
+          rm -rf "$asset_dir"
+          mkdir -p "$asset_dir"
+          printf 'fixture\n' > "$asset_dir/fixture.bin"
+          just release-write-provenance \
+            0123456789abcdef0123456789abcdef01234567 \
+            1.2.3 windows-x86_64 "$asset_dir" fixture.bin
+          jq -e '
+            .schemaVersion == 1 and
+            .platform == "windows-x86_64" and
+            (.artifacts["fixture.bin"] | test("^[0-9a-f]{64}$"))
+          ' "$asset_dir/Berd_1.2.3_windows-x86_64.provenance.json"
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

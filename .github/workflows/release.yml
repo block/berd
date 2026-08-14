@@ -293,8 +293,6 @@ jobs:
       REPOSITORY: ${{ needs.setup.outputs.repository }}
       PLATFORM: ${{ needs.setup.outputs.windows_platform }}
       BERD_RELEASE_CHANNEL: disabled
-      # Windows selects generated [script] recipes that Just 1.40 still gates as unstable.
-      JUST_UNSTABLE: "1"
     steps:
       - name: Check out verified source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -310,7 +308,7 @@ jobs:
       - name: Install just
         uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         with:
-          tool: just@1.40.0
+          tool: just@1.48.0
 
       - name: Install pinned Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6

@@ -862,7 +862,7 @@ describe("desktop release workflow platform gate", () => {
     );
     const justVersion = run(join(repo, "bin/just"), ["--version"]);
     expect(justVersion.status, justVersion.stderr).toBe(0);
-    expect(justVersion.stdout).toContain("just 1.40.0");
+    expect(justVersion.stdout).toContain("just 1.48.0");
     const stableParse = run(join(repo, "bin/just"), ["--summary"], {
       JUST_UNSTABLE: "",
     });
@@ -898,13 +898,8 @@ describe("desktop release workflow platform gate", () => {
       ),
     );
     expect(Object.keys(provenance.artifacts)).toEqual(provenanceAssets);
-    expect(parsedWorkflow.env.JUST_UNSTABLE).toBeUndefined();
-    expect(parsedWorkflow.jobs["stage-windows"].env.JUST_UNSTABLE).toBe("1");
-    for (const [jobName, job] of Object.entries(parsedWorkflow.jobs)) {
-      if (jobName !== "stage-windows") {
-        expect(job.env?.JUST_UNSTABLE).toBeUndefined();
-      }
-    }
+    expect(workflow).toContain("tool: just@1.48.0");
+    expect(workflow).not.toContain("JUST_UNSTABLE");
     const setupSteps = parsedWorkflow.jobs.setup.steps;
     const hermitIndex = setupSteps.findIndex(
       (step) => step.name === "Activate Hermit",
@@ -937,6 +932,17 @@ describe("desktop release workflow platform gate", () => {
     );
   });
 
+  it("runs the provenance recipe on native Windows CI", async () => {
+    const workflow = await readFile(
+      join(repo, ".github/workflows/ci.yml"),
+      "utf8",
+    );
+    expect(workflow).toContain("tool: just@1.48.0");
+    expect(workflow).toContain("Exercise Windows release provenance recipe");
+    expect(workflow).toContain("just release-write-provenance");
+    expect(workflow).not.toContain("JUST_UNSTABLE");
+  });
+
   it("keeps unsigned desktop build artifacts out of releases", async () => {
     const workflow = await readFile(
       join(repo, ".github/workflows/unsigned-desktop-build.yml"),
@@ -944,7 +950,8 @@ describe("desktop release workflow platform gate", () => {
     );
     expect(workflow).toContain("workflow_dispatch:");
     expect(workflow).toContain("actions/upload-artifact@");
-    expect(workflow).toMatch(/env:\r?\n\s+JUST_UNSTABLE: ["']1["']/);
+    expect(workflow).toContain("tool: just@1.48.0");
+    expect(workflow).not.toContain("JUST_UNSTABLE");
     expect(workflow).toContain("node-version: 24.10.0");
     expect(workflow).toContain("corepack prepare pnpm@10.33.0 --activate");
     expect(workflow).toContain(
