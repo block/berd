@@ -9,7 +9,10 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentImportDialog } from "../AgentImportDialog";
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string) => key,
+    i18n: { resolvedLanguage: "en", language: "en" },
+  }),
 }));
 
 vi.mock("motion/react", async (importOriginal) => {

@@ -37,6 +37,7 @@ import {
 } from "@/shared/ui/dialog";
 import { AgentShareCardPreview } from "./AgentShareCardPreview";
 import { AgentCardReveal } from "./AgentCardReveal";
+import { resolveAgentShareCardCopy } from "./agentShareCardCopy";
 import {
   blobToBytes,
   createAvatarPoster,
@@ -91,7 +92,7 @@ export function AgentShareDialog({
   onOpenChange,
   onDownloadAgent,
 }: AgentShareDialogProps) {
-  const { t } = useTranslation("agents");
+  const { t, i18n } = useTranslation("agents");
   const shouldReduceMotion = useReducedMotion();
   const [avatarReadySrc, setAvatarReadySrc] = useState<string | null>(null);
   const [failedAvatarSources, setFailedAvatarSources] = useState<Set<string>>(
@@ -136,7 +137,10 @@ export function AgentShareDialog({
   const cardReady = Boolean(avatarSrc && avatarReadySrc === avatarSrc);
   const cardBase = getAgentShareCardBase(persona.id);
   const description = getAgentShareDescription(persona);
+  const locale = i18n.resolvedLanguage ?? i18n.language ?? "en";
+  const cardCopy = resolveAgentShareCardCopy(description, t);
   const cardContentIdentity = [
+    locale,
     persona.id,
     persona.avatar,
     persona.displayName,
@@ -211,7 +215,13 @@ export function AgentShareDialog({
       if (!cardAvatarSrc) {
         throw new Error("Agent avatar is not ready");
       }
-      const card = await renderAgentShareCard(persona, cardAvatarSrc, cardBase);
+      const card = await renderAgentShareCard(
+        persona,
+        cardAvatarSrc,
+        cardBase,
+        cardCopy,
+        locale,
+      );
       if (operationGeneration !== cardOperationGenerationRef.current) return;
       const embeddedAvatar = await avatarSourceToDataUrl(cardAvatarSrc);
       if (operationGeneration !== cardOperationGenerationRef.current) return;
@@ -302,8 +312,10 @@ export function AgentShareDialog({
   }, [
     avatarReadySrc,
     cachedAvatar,
+    cardCopy,
     cardBase,
     currentGeneratedAvatarPoster,
+    locale,
     persona,
     t,
   ]);
@@ -322,11 +334,7 @@ export function AgentShareDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        size="lg"
-        surface="solid"
-        className="overflow-visible bg-card"
-      >
+      <DialogContent size="lg" surface="solid" className="bg-card">
         <DialogHeader>
           <DialogTitle>
             {t("share.title", { name: persona.displayName })}
@@ -334,7 +342,7 @@ export function AgentShareDialog({
           <DialogDescription>{t("share.description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="relative flex min-h-[26rem] justify-center py-2 [perspective:1200px]">
+        <div className="relative flex min-h-0 justify-center py-2 [perspective:1200px]">
           {avatarSrc ? (
             <img
               key={`preload:${avatarSrc}`}
@@ -374,7 +382,7 @@ export function AgentShareDialog({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
-                className="absolute inset-0 flex items-center justify-center"
+                className="flex aspect-[1227/1839] w-full max-w-[19rem] items-center justify-center"
               >
                 <Loader2
                   aria-label={t("share.loadingCard")}
@@ -389,6 +397,8 @@ export function AgentShareDialog({
                   description={description}
                   avatarSrc={avatarSrc}
                   alt={t("share.cardAlt", { name: persona.displayName })}
+                  copy={cardCopy}
+                  locale={locale}
                 />
               </AgentCardReveal>
             )}

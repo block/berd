@@ -7,6 +7,7 @@ import type { SnapshotV1 } from "@/features/agents/agent-snapshot";
 import { AgentShareCardPreview } from "@/features/agents/ui/share-card/AgentShareCardPreview";
 import { HolographicAgentCard } from "@/features/agents/ui/share-card/HolographicAgentCard";
 import { AgentCardReveal } from "@/features/agents/ui/share-card/AgentCardReveal";
+import { resolveAgentShareCardCopy } from "@/features/agents/ui/share-card/agentShareCardCopy";
 import {
   fallbackAgentCardColor,
   sampleAgentAvatarColor,
@@ -63,7 +64,8 @@ export function AgentImportDialog({
   maxImportBytes,
   importTooLargeMessage,
 }: AgentImportDialogProps) {
-  const { t } = useTranslation("agents");
+  const { t, i18n } = useTranslation("agents");
+  const locale = i18n.resolvedLanguage ?? i18n.language ?? "en";
   const [importAccentColor, setImportAccentColor] = useState<string | null>(
     null,
   );
@@ -139,20 +141,12 @@ export function AgentImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        size="md"
-        surface="solid"
-        className={cn(
-          "bg-card",
-          prepared &&
-            "overflow-visible has-data-[slot=dialog-body]:overflow-visible",
-        )}
-      >
+      <DialogContent size="md" surface="solid" className="bg-card">
         <DialogHeader>
           <DialogTitle>{t("importDialog.title")}</DialogTitle>
           <DialogDescription>{t("importDialog.description")}</DialogDescription>
         </DialogHeader>
-        <DialogBody className={prepared ? "overflow-visible" : undefined}>
+        <DialogBody>
           {prepared ? (
             <div className="relative flex justify-center py-2 [perspective:1200px]">
               <AgentCardReveal
@@ -184,6 +178,11 @@ export function AgentImportDialog({
                     alt={t("importDialog.previewAlt", {
                       name: prepared.preview.displayName,
                     })}
+                    copy={resolveAgentShareCardCopy(
+                      prepared.preview.systemPrompt,
+                      t,
+                    )}
+                    locale={locale}
                   />
                 )}
               </AgentCardReveal>

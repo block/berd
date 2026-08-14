@@ -30,7 +30,10 @@ const avatarHookMocks = vi.hoisted(() => ({
 }));
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string) => key,
+    i18n: { resolvedLanguage: "en", language: "en" },
+  }),
 }));
 
 vi.mock("sonner", () => ({
@@ -181,6 +184,11 @@ describe("AgentShareDialog", () => {
         generatedPersona,
         "asset://generated-avatar.png",
         expect.any(String),
+        expect.objectContaining({
+          goodForLabel: "share.cardLabels.goodFor",
+          vibesLabel: "share.cardLabels.vibes",
+        }),
+        "en",
       ),
     );
   });

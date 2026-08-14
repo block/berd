@@ -45,6 +45,9 @@ describe("AgentCardReveal", () => {
 
     expect(screen.getByText("Card").parentElement).toHaveClass("z-10");
     expect(
+      document.querySelector('[data-agent-card-reveal="true"]'),
+    ).toHaveClass("overflow-hidden");
+    expect(
       document.querySelector('[data-agent-card-refraction="true"]'),
     ).toHaveClass("z-0");
 
