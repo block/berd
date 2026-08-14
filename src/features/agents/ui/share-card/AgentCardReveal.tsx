@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/shared/lib/cn";
 
@@ -42,12 +42,6 @@ export function AgentCardReveal({
   className,
 }: AgentCardRevealProps) {
   const shouldReduceMotion = useReducedMotion();
-  const [showRefraction, setShowRefraction] = useState(true);
-
-  useEffect(() => {
-    void identity;
-    setShowRefraction(true);
-  }, [identity]);
 
   return (
     <div
@@ -57,20 +51,16 @@ export function AgentCardReveal({
         className,
       )}
     >
-      {!shouldReduceMotion && showRefraction ? (
+      {!shouldReduceMotion ? (
         <div
+          key={`refraction:${identity}`}
           aria-hidden="true"
           data-agent-card-refraction="true"
           className="pointer-events-none absolute inset-0 z-0"
         >
-          {REFRACTION_LOBES.map((lobe, index) => (
+          {REFRACTION_LOBES.map((lobe) => (
             <motion.div
               key={`${lobe.x}:${lobe.y}`}
-              onAnimationComplete={() => {
-                if (index === REFRACTION_LOBES.length - 1) {
-                  setShowRefraction(false);
-                }
-              }}
               initial={{
                 opacity: 0,
                 x: lobe.x * 0.3,

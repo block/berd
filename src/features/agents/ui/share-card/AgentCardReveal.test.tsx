@@ -36,7 +36,7 @@ describe("AgentCardReveal", () => {
     motionMocks.reduced = false;
   });
 
-  it("layers refraction behind the card and removes it after the final lobe", () => {
+  it("keeps the completed refraction geometry mounted behind the card", () => {
     render(
       <AgentCardReveal identity="one">
         <div>Card</div>
@@ -52,7 +52,7 @@ describe("AgentCardReveal", () => {
 
     expect(
       document.querySelector('[data-agent-card-refraction="true"]'),
-    ).not.toBeInTheDocument();
+    ).toBeInTheDocument();
   });
 
   it("replays refraction when the card identity changes", () => {
@@ -61,7 +61,9 @@ describe("AgentCardReveal", () => {
         <div>Card</div>
       </AgentCardReveal>,
     );
-    act(() => motionMocks.completions.at(-1)?.());
+    const firstRefraction = document.querySelector(
+      '[data-agent-card-refraction="true"]',
+    );
 
     rerender(
       <AgentCardReveal identity="two">
@@ -69,9 +71,11 @@ describe("AgentCardReveal", () => {
       </AgentCardReveal>,
     );
 
-    expect(
-      document.querySelector('[data-agent-card-refraction="true"]'),
-    ).toBeInTheDocument();
+    const secondRefraction = document.querySelector(
+      '[data-agent-card-refraction="true"]',
+    );
+    expect(secondRefraction).toBeInTheDocument();
+    expect(secondRefraction).not.toBe(firstRefraction);
   });
 
   it("omits refraction when reduced motion is preferred", () => {
