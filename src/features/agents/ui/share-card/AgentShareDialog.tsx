@@ -334,7 +334,11 @@ export function AgentShareDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg" surface="solid" className="bg-card">
+      <DialogContent
+        size="lg"
+        surface="solid"
+        className="overflow-visible bg-card"
+      >
         <DialogHeader>
           <DialogTitle>
             {t("share.title", { name: persona.displayName })}
