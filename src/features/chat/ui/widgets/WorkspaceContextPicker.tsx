@@ -184,14 +184,22 @@ export function WorkspaceContextPicker({
     void carrySwitch(branch);
   };
 
+  // Hover/selected fills use `muted`: in dark it equals the old
+  // `sidebar-accent` value (gray-700), while in light it stays visible on
+  // white surfaces where `sidebar-accent` (gray-50) disappears. The resting
+  // fill is `muted/60` to match the legacy picker cards — `background/45`
+  // reads darker than the rail surface in dark mode.
   const pickerClassName = cn(
-    "group flex min-h-9 w-full items-center gap-2 rounded-sm bg-background/45 px-2.5 py-2 text-left text-sm",
-    "transition-colors hover:bg-background/70 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+    "group flex min-h-9 w-full items-center gap-2 rounded-sm bg-muted/60 px-2.5 py-2 text-left text-sm",
+    "transition-colors enabled:hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
     "disabled:cursor-not-allowed disabled:opacity-60",
   );
+  // rounded-sm rows sit concentric inside the rounded-md popover's p-1.5
+  // padding (12px + 6px = 18px). The active row carries the selected fill.
   const optionClassName = cn(
-    "flex w-full items-start gap-2 rounded-xs px-2 py-2 text-left text-sm",
-    "hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus-visible:outline-none",
+    "flex w-full items-start gap-2 rounded-sm px-2 py-2 text-left text-sm",
+    "enabled:hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
+    "aria-[current=true]:bg-muted",
     "disabled:cursor-default disabled:text-muted-foreground",
   );
 
@@ -228,9 +236,12 @@ export function WorkspaceContextPicker({
             <PopoverContent
               align="start"
               sideOffset={6}
-              className="w-[var(--radix-popover-trigger-width)] rounded-sm p-2"
+              // Rail dropdowns live on the card surface (the rail glass
+              // derives from card), not the darker overflow-popover surface,
+              // and share the rail container's rounded-md radius.
+              className="w-[var(--radix-popover-trigger-width)] rounded-md bg-card p-1.5"
             >
-              <div className="mb-2 flex h-9 items-center gap-2 rounded-xs bg-muted/60 px-2.5 text-muted-foreground">
+              <div className="mb-2 flex h-9 items-center gap-2 rounded-sm px-2.5 text-muted-foreground transition-colors hover:bg-muted/60">
                 <Search className="size-3.5" />
                 <input
                   type="search"
@@ -327,9 +338,9 @@ export function WorkspaceContextPicker({
             <PopoverContent
               align="start"
               sideOffset={6}
-              className="w-[var(--radix-popover-trigger-width)] rounded-sm p-2"
+              className="w-[var(--radix-popover-trigger-width)] rounded-md bg-card p-1.5"
             >
-              <div className="mb-2 flex h-9 items-center gap-2 rounded-xs bg-muted/60 px-2.5 text-muted-foreground">
+              <div className="mb-2 flex h-9 items-center gap-2 rounded-sm px-2.5 text-muted-foreground transition-colors hover:bg-muted/60">
                 <Search className="size-3.5" />
                 <input
                   type="search"

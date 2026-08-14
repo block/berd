@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ExternalLink } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
@@ -6,11 +6,6 @@ import { FileContextMenu } from "@/shared/ui/file-context-menu";
 import { Skeleton } from "@/shared/ui/skeleton";
 import type { ChangedFile } from "@/shared/types/git";
 import type { WorkspaceChangedFilesRuntime } from "../hooks/useWorkspaceGitRuntimes";
-
-const CHANGES_SCROLL_CONTAINER_CLASS =
-  "scrollbar-none max-h-[300px] overflow-y-auto rounded-sm bg-muted/60 py-1";
-const CHANGES_SCROLL_FADE_CLASS =
-  "pointer-events-none absolute inset-x-0 bottom-0 h-10 rounded-b-sm bg-gradient-to-t from-muted/90 to-transparent";
 
 /** Placeholder rows shared by the widgets and the tab-level loading branch.
  *  Padding is the caller's job: the widgets already sit in a padded
@@ -104,11 +99,10 @@ function ChangedFileRow({
       type="button"
       disabled={isDeleted}
       className={cn(
-        "group relative flex min-h-12 w-full select-none items-center gap-2 py-3 pl-3 pr-2 text-left",
-        "transition-colors duration-100 before:absolute before:inset-x-1 before:inset-y-0 before:rounded-[8px] before:transition-colors after:absolute after:bottom-0 after:left-3 after:right-3 after:h-px after:bg-border/60 last:after:hidden [&:has(+_:focus-visible)]:after:bg-transparent [&:has(+_:hover)]:after:bg-transparent [&>*]:relative [&>*]:z-[1]",
+        "group flex min-h-9 w-full select-none items-center gap-2 rounded-sm px-2.5 py-2 text-left transition-colors duration-100",
         isDeleted
           ? "cursor-not-allowed opacity-60"
-          : "cursor-pointer hover:before:bg-background/45 hover:after:bg-transparent focus-visible:before:bg-background/45 focus-visible:after:bg-transparent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          : "cursor-pointer hover:bg-muted focus-visible:bg-muted focus-visible:outline-none",
       )}
       onClick={isDeleted ? undefined : () => onOpen(file.path)}
     >
@@ -132,6 +126,41 @@ function ChangedFileRow({
   if (isDeleted) return row;
 
   return <FileContextMenu path={fullPath}>{row}</FileContextMenu>;
+}
+
+function ChangedFilesList({
+  files,
+  getFullPath,
+  onOpen,
+}: {
+  files: ChangedFile[];
+  getFullPath: (file: ChangedFile) => string;
+  onOpen: (path: string) => void;
+}) {
+  const [scrolled, setScrolled] = useState(false);
+
+  return (
+    <div
+      // Scrolled rows fade under a top mask like the picker dropdown lists
+      // (`chat-context-dropdown-results-scroll`); the -webkit- duplicate is
+      // for WKWebView.
+      className={cn(
+        "scrollbar-none max-h-[300px] space-y-0.5 overflow-y-auto",
+        scrolled &&
+          "[-webkit-mask-image:linear-gradient(to_bottom,transparent,black_1.25rem)] [mask-image:linear-gradient(to_bottom,transparent,black_1.25rem)]",
+      )}
+      onScroll={(event) => setScrolled(event.currentTarget.scrollTop > 0)}
+    >
+      {files.map((file) => (
+        <ChangedFileRow
+          key={file.path}
+          file={file}
+          fullPath={getFullPath(file)}
+          onOpen={onOpen}
+        />
+      ))}
+    </div>
+  );
 }
 
 interface ChangesWidgetProps {
@@ -215,19 +244,11 @@ export function ChangesWidget({
             )}
           </div>
           {files?.length ? (
-            <div className="relative">
-              <div className={CHANGES_SCROLL_CONTAINER_CLASS}>
-                {files.map((file) => (
-                  <ChangedFileRow
-                    key={file.path}
-                    file={file}
-                    fullPath={`${repoPath}/${file.path}`}
-                    onOpen={onOpenFile}
-                  />
-                ))}
-              </div>
-              <div className={CHANGES_SCROLL_FADE_CLASS} aria-hidden="true" />
-            </div>
+            <ChangedFilesList
+              files={files}
+              getFullPath={(file) => `${repoPath}/${file.path}`}
+              onOpen={onOpenFile}
+            />
           ) : null}
         </div>
       ) : (
@@ -291,12 +312,12 @@ export function WorkspaceChangesWidget({
       ) : changedGroups.length > 0 ? (
         <div className="space-y-4">
           {probeErrorMessage ? (
-            <p className="px-2 text-sm text-destructive">{probeErrorMessage}</p>
+            <p className="text-sm text-destructive">{probeErrorMessage}</p>
           ) : null}
           {changedGroups.map((group) => (
             <div key={group.id} className="space-y-2">
               {hasMultipleGroups ? (
-                <p className="truncate px-2 text-xs text-muted-foreground">
+                <p className="truncate text-xs text-muted-foreground">
                   {group.workspaceTitle}
                 </p>
               ) : null}
@@ -338,24 +359,11 @@ export function WorkspaceChangesWidget({
                 )}
               </div>
               {group.files.length > 0 ? (
-                <div className="relative">
-                  <div className={CHANGES_SCROLL_CONTAINER_CLASS}>
-                    {group.files.map((file) => (
-                      <ChangedFileRow
-                        key={`${group.id}:${file.path}`}
-                        file={file}
-                        fullPath={`${group.repoPath}/${file.path}`}
-                        onOpen={() =>
-                          onOpenFile(`${group.repoPath}/${file.path}`)
-                        }
-                      />
-                    ))}
-                  </div>
-                  <div
-                    className={CHANGES_SCROLL_FADE_CLASS}
-                    aria-hidden="true"
-                  />
-                </div>
+                <ChangedFilesList
+                  files={group.files}
+                  getFullPath={(file) => `${group.repoPath}/${file.path}`}
+                  onOpen={(path) => onOpenFile(`${group.repoPath}/${path}`)}
+                />
               ) : null}
             </div>
           ))}
