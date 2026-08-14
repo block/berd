@@ -139,6 +139,15 @@ pub struct CachedAvatar {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CachedAvatarAnimation {
+    pub bytes: Vec<u8>,
+    pub mime_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alpha_mode: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct AvatarCacheWarmedPayload {
     avatar_refs: Vec<String>,
 }
@@ -362,6 +371,46 @@ pub async fn get_avatar_library_snapshot(
         media_refresh_completed,
         media_error_code,
     })
+}
+
+#[tauri::command]
+pub async fn read_cached_avatar_animation(
+    app: AppHandle,
+    avatar_ref: String,
+) -> Result<Option<CachedAvatarAnimation>, String> {
+    let cached = get_cached_avatar_for_ref(app, avatar_ref).await?;
+    let Some(cached) = cached else {
+        return Ok(None);
+    };
+    read_cached_avatar_animation_asset(cached.asset)
+}
+
+fn read_cached_avatar_animation_asset(
+    asset: CachedAvatarAsset,
+) -> Result<Option<CachedAvatarAnimation>, String> {
+    if !matches!(asset.mime_type.as_str(), "video/webm" | "video/mp4") {
+        return Ok(None);
+    }
+    let metadata = fs::metadata(&asset.path)
+        .map_err(|error| format!("Failed to inspect cached avatar animation: {error}"))?;
+    if metadata.len() == 0 || metadata.len() > MAX_IMPORTED_AVATAR_BYTES as u64 {
+        return Ok(None);
+    }
+    let bytes = fs::read(&asset.path)
+        .map_err(|error| format!("Failed to read cached avatar animation: {error}"))?;
+    // Recheck the actual payload after reading; metadata is only an early exit
+    // and the cache file could be replaced between the stat and read calls.
+    if bytes.is_empty() || bytes.len() > MAX_IMPORTED_AVATAR_BYTES {
+        return Ok(None);
+    }
+    if validate_imported_avatar_signature(&bytes, &asset.mime_type).is_err() {
+        return Ok(None);
+    }
+    Ok(Some(CachedAvatarAnimation {
+        bytes,
+        mime_type: asset.mime_type,
+        alpha_mode: asset.alpha_mode,
+    }))
 }
 
 #[tauri::command]
@@ -2491,6 +2540,43 @@ mod tests {
         let mut bytes = vec![0; size];
         bytes[..WEBM_SIGNATURE.len()].copy_from_slice(WEBM_SIGNATURE);
         format!("data:video/webm;base64,{}", BASE64.encode(bytes))
+    }
+
+    #[test]
+    fn cached_animation_reader_enforces_type_and_payload_bounds() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("avatar.webm");
+        fs::write(&path, WEBM_SIGNATURE).unwrap();
+        let asset = |mime_type: &str| CachedAvatarAsset {
+            id: "gloopy-1".to_string(),
+            path: path.to_string_lossy().into_owned(),
+            mime_type: mime_type.to_string(),
+            alpha_mode: Some("stacked".to_string()),
+            poster_path: None,
+        };
+
+        let animation = read_cached_avatar_animation_asset(asset("video/webm"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(animation.bytes, WEBM_SIGNATURE);
+        assert_eq!(animation.mime_type, "video/webm");
+        assert_eq!(animation.alpha_mode.as_deref(), Some("stacked"));
+
+        assert!(read_cached_avatar_animation_asset(asset("image/png"))
+            .unwrap()
+            .is_none());
+        fs::write(&path, b"not webm").unwrap();
+        assert!(read_cached_avatar_animation_asset(asset("video/webm"))
+            .unwrap()
+            .is_none());
+        fs::write(&path, []).unwrap();
+        assert!(read_cached_avatar_animation_asset(asset("video/webm"))
+            .unwrap()
+            .is_none());
+        fs::write(&path, vec![0; MAX_IMPORTED_AVATAR_BYTES + 1]).unwrap();
+        assert!(read_cached_avatar_animation_asset(asset("video/webm"))
+            .unwrap()
+            .is_none());
     }
 
     #[test]

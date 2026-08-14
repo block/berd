@@ -13,6 +13,7 @@ import {
   listenAvatarCacheWarmed,
   normalizeAvatarLibraryError,
   refreshAvatarCache,
+  readCachedAvatarAnimation,
 } from "./avatars";
 import type { AvatarCatalog } from "@/shared/avatars/catalog";
 
@@ -235,6 +236,20 @@ describe("avatars api", () => {
     ).resolves.toHaveProperty("app-avatar:gloopy-1");
     expect(invokeMock).toHaveBeenCalledWith("get_cached_avatars_for_refs", {
       avatarRefs: ["app-avatar:gloopy-1"],
+    });
+  });
+
+  it("reads cached animation bytes by trusted avatar reference", async () => {
+    invokeMock.mockResolvedValueOnce({
+      bytes: [1, 2, 3],
+      mimeType: "video/webm",
+    });
+
+    await expect(
+      readCachedAvatarAnimation({ avatarRef: "app-avatar:gloopy-1" }),
+    ).resolves.toEqual({ bytes: [1, 2, 3], mimeType: "video/webm" });
+    expect(invokeMock).toHaveBeenCalledWith("read_cached_avatar_animation", {
+      avatarRef: "app-avatar:gloopy-1",
     });
   });
 
