@@ -7,7 +7,7 @@ usage() {
   cat >&2 <<'USAGE'
 Usage: scripts/package-macos-dmg.sh path/to/Berd.app path/to/Berd.dmg
 
-Creates a styled drag-to-Applications DMG with a generated background image.
+Creates a styled drag-to-Applications DMG with a branded background image.
 USAGE
   exit 1
 }
@@ -18,10 +18,11 @@ app_path="$1"
 out_dmg="$2"
 app_name="$(basename "$app_path")"
 vol_name="${VOL_NAME:-Berd}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+background="$script_dir/assets/dmg-background.png"
 work_root="$(mktemp -d "${TMPDIR:-/tmp}/Berd-dmg.XXXXXX")"
 rw_dmg="$work_root/rw-Berd.dmg"
 dmg_root="$work_root/root"
-background="$work_root/background.png"
 applescript="$work_root/style-dmg.applescript"
 
 cleanup() {
@@ -35,6 +36,11 @@ if [[ ! -d "$app_path" ]]; then
   exit 1
 fi
 
+if [[ ! -f "$background" ]]; then
+  echo "DMG background not found: $background" >&2
+  exit 1
+fi
+
 detach_existing_mounts() {
   local mount
   while IFS= read -r mount; do
@@ -42,94 +48,6 @@ detach_existing_mounts() {
     echo "Detaching existing DMG mount $mount" >&2
     hdiutil detach "$mount" >/dev/null 2>&1 || hdiutil detach -force "$mount" >/dev/null 2>&1 || true
   done < <(find /Volumes -maxdepth 1 \( -name "$vol_name" -o -name "$vol_name *" \) -print 2>/dev/null || true)
-}
-
-generate_background() {
-  local output="$1"
-  local generator="$work_root/generate-dmg-background.swift"
-  cat >"$generator" <<'SWIFT'
-import AppKit
-import Foundation
-
-let output = URL(fileURLWithPath: CommandLine.arguments[1])
-let canvas = NSSize(width: 800, height: 400)
-let image = NSImage(size: canvas)
-
-func color(_ hex: UInt32) -> NSColor {
-  NSColor(
-    calibratedRed: CGFloat((hex >> 16) & 0xff) / 255,
-    green: CGFloat((hex >> 8) & 0xff) / 255,
-    blue: CGFloat(hex & 0xff) / 255,
-    alpha: 1
-  )
-}
-
-image.lockFocus()
-NSColor.white.setFill()
-NSRect(origin: .zero, size: canvas).fill()
-
-let ink = color(0x050505)
-let gold = color(0xffd43b)
-
-let arrow = NSBezierPath()
-arrow.move(to: NSPoint(x: 326, y: 178))
-arrow.curve(
-  to: NSPoint(x: 464, y: 178),
-  controlPoint1: NSPoint(x: 372, y: 202),
-  controlPoint2: NSPoint(x: 420, y: 202)
-)
-arrow.lineCapStyle = .round
-arrow.lineJoinStyle = .round
-arrow.lineWidth = 6
-ink.setStroke()
-arrow.stroke()
-
-let head = NSBezierPath()
-head.move(to: NSPoint(x: 464, y: 178))
-head.line(to: NSPoint(x: 438, y: 155))
-head.move(to: NSPoint(x: 464, y: 178))
-head.line(to: NSPoint(x: 438, y: 201))
-head.lineCapStyle = .round
-head.lineJoinStyle = .round
-head.lineWidth = 6
-ink.setStroke()
-head.stroke()
-
-let burstA = NSBezierPath(roundedRect: NSRect(x: 642, y: 250, width: 10, height: 28), xRadius: 3, yRadius: 3)
-var transformA = AffineTransform()
-transformA.translate(x: 647, y: 264)
-transformA.rotate(byDegrees: -6)
-transformA.translate(x: -647, y: -264)
-burstA.transform(using: transformA)
-gold.setFill()
-burstA.fill()
-ink.setStroke()
-burstA.lineWidth = 3
-burstA.stroke()
-
-let burstB = NSBezierPath(roundedRect: NSRect(x: 664, y: 236, width: 10, height: 32), xRadius: 3, yRadius: 3)
-var transformB = AffineTransform()
-transformB.translate(x: 669, y: 252)
-transformB.rotate(byDegrees: 42)
-transformB.translate(x: -669, y: -252)
-burstB.transform(using: transformB)
-gold.setFill()
-burstB.fill()
-ink.setStroke()
-burstB.lineWidth = 3
-burstB.stroke()
-
-image.unlockFocus()
-
-guard let tiff = image.tiffRepresentation,
-      let rep = NSBitmapImageRep(data: tiff),
-      let png = rep.representation(using: .png, properties: [:]) else {
-  fatalError("failed to render DMG background")
-}
-try png.write(to: output)
-SWIFT
-
-  /usr/bin/swift "$generator" "$output"
 }
 
 detach_retry() {
@@ -148,7 +66,6 @@ detach_existing_mounts
 mkdir -p "$dmg_root/.background"
 ditto "$app_path" "$dmg_root/$app_name"
 ln -s /Applications "$dmg_root/Applications"
-generate_background "$background"
 cp "$background" "$dmg_root/.background/background.png"
 
 rm -f "$rw_dmg" "$out_dmg"
@@ -188,8 +105,8 @@ on run argv
     set icon size of opts to 128
     set text size of opts to 12
     set background picture of opts to file ".background:background.png" of dmgRoot
-    set position of item appName of dmgRoot to {190, 210}
-    set position of item "Applications" of dmgRoot to {590, 210}
+    set position of item appName of dmgRoot to {410, 240}
+    set position of item "Applications" of dmgRoot to {655, 240}
     set the extension hidden of item appName of dmgRoot to true
     delay 1
     close dmgWindow
