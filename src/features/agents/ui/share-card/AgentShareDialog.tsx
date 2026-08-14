@@ -10,7 +10,10 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { Persona } from "@/shared/types/agents";
-import { isSafePngAvatarDataUrl } from "@/shared/lib/avatarUrl";
+import {
+  isSafePngAvatarDataUrl,
+  MAX_PNG_AVATAR_BYTES,
+} from "@/shared/lib/avatarUrl";
 import {
   AgentSnapshotError,
   encodeAgentImage,
@@ -22,6 +25,7 @@ import {
   useAvatarMediaState,
 } from "@/shared/hooks/useAvatarSrc";
 import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
+import { readCachedAvatarAnimation } from "@/shared/api/avatars";
 import { Button } from "@/shared/ui/button";
 import {
   Dialog,
@@ -48,8 +52,20 @@ async function avatarSourceToDataUrl(source: string): Promise<string | null> {
   try {
     const response = await fetch(source);
     if (!response.ok) return null;
+    const contentLength = Number(response.headers.get("content-length"));
+    if (
+      Number.isFinite(contentLength) &&
+      contentLength > MAX_PNG_AVATAR_BYTES
+    ) {
+      return null;
+    }
     const blob = await response.blob();
-    if (blob.type && blob.type !== "image/png") return null;
+    if (
+      blob.size > MAX_PNG_AVATAR_BYTES ||
+      (blob.type && blob.type !== "image/png")
+    ) {
+      return null;
+    }
     const bytes = await blobToBytes(blob);
     let binary = "";
     for (let offset = 0; offset < bytes.length; offset += 0x8000) {
@@ -112,6 +128,9 @@ export function AgentShareDialog({
   const avatarSrc = avatarCandidates.find(
     (source) => !failedAvatarSources.has(source),
   );
+  const avatarUnavailable = avatarCandidates.every((source) =>
+    failedAvatarSources.has(source),
+  );
   // The card can render as soon as the exact still image it will display has
   // decoded. Cached animation/poster resolution may continue independently.
   const cardReady = Boolean(avatarSrc && avatarReadySrc === avatarSrc);
@@ -128,6 +147,10 @@ export function AgentShareDialog({
   useEffect(() => {
     if (!open) {
       cardOperationGenerationRef.current += 1;
+      cardDownloadInFlightRef.current = false;
+      agentDownloadInFlightRef.current = false;
+      setCardDownloadPending(false);
+      setAgentDownloadPending(false);
     }
     return () => {
       cardOperationGenerationRef.current += 1;
@@ -144,6 +167,18 @@ export function AgentShareDialog({
     cardDownloadInFlightRef.current = false;
     setCardDownloadPending(false);
   }, [cardContentIdentity]);
+
+  useEffect(() => {
+    if (!open || !avatarSrc || cardReady) return;
+    const timeout = window.setTimeout(() => {
+      setFailedAvatarSources((current) => {
+        const next = new Set(current);
+        next.add(avatarSrc);
+        return next;
+      });
+    }, 10_000);
+    return () => window.clearTimeout(timeout);
+  }, [avatarSrc, cardReady, open]);
 
   useEffect(() => {
     if (!open || !cachedAvatar) return;
@@ -190,23 +225,42 @@ export function AgentShareDialog({
           (cardAvatarSrc === currentGeneratedAvatarPoster ||
             cardAvatarSrc === cachedAvatar.posterSrc),
       );
-      if (
-        cachedAvatar?.mediaType === "video" &&
-        stillMatchesAnimation &&
-        /^(?:https?:|blob:|data:)/u.test(cachedAvatar.src)
-      ) {
+      if (cachedAvatar?.mediaType === "video" && stillMatchesAnimation) {
         try {
-          const animationBytes = await fetch(cachedAvatar.src)
-            .then((response) => response.blob())
-            .then(blobToBytes);
-          if (animationBytes.length <= MAX_SNAPSHOT_AVATAR_ANIMATION_BYTES) {
-            animation = {
-              bytes: animationBytes,
-              mimeType: cachedAvatar.src.toLowerCase().includes(".mp4")
-                ? ("video/mp4" as const)
-                : ("video/webm" as const),
-              alphaMode: cachedAvatar.alphaMode,
-            };
+          if (
+            /^asset:/u.test(cachedAvatar.src) &&
+            typeof persona.avatar === "string"
+          ) {
+            const cachedAnimation = await readCachedAvatarAnimation({
+              avatarRef: persona.avatar,
+            });
+            if (cachedAnimation) {
+              animation = {
+                bytes: new Uint8Array(cachedAnimation.bytes),
+                mimeType:
+                  cachedAnimation.mimeType === "video/mp4"
+                    ? ("video/mp4" as const)
+                    : ("video/webm" as const),
+                alphaMode: cachedAnimation.alphaMode,
+              };
+            }
+          } else if (/^(?:https?:|blob:|data:)/u.test(cachedAvatar.src)) {
+            const response = await fetch(cachedAvatar.src);
+            if (!response.ok)
+              throw new Error("Avatar animation request failed");
+            const blob = await response.blob();
+            if (blob.type !== "video/mp4" && blob.type !== "video/webm") {
+              throw new Error("Avatar animation has an unsupported media type");
+            }
+            const animationBytes = await blobToBytes(blob);
+            const mimeType = blob.type as "video/mp4" | "video/webm";
+            if (animationBytes.length <= MAX_SNAPSHOT_AVATAR_ANIMATION_BYTES) {
+              animation = {
+                bytes: animationBytes,
+                mimeType,
+                alphaMode: cachedAvatar.alphaMode,
+              };
+            }
           }
         } catch (error) {
           console.warn("Could not embed animated avatar:", error);
@@ -301,7 +355,19 @@ export function AgentShareDialog({
             />
           ) : null}
           <AnimatePresence mode="wait" initial={false}>
-            {!cardReady ? (
+            {avatarUnavailable ? (
+              <motion.div
+                key="avatar-unavailable"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
+                className="flex aspect-[1227/1839] w-full max-w-[19rem] items-center justify-center rounded-[6.5%] bg-card text-sm text-muted-foreground shadow-sm"
+                role="status"
+              >
+                {t("share.avatarUnavailable")}
+              </motion.div>
+            ) : !cardReady ? (
               <motion.div
                 key="loader"
                 initial={{ opacity: 0 }}

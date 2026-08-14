@@ -14,6 +14,7 @@ import {
   encodeAgentImage,
   MAX_SNAPSHOT_AVATAR_ANIMATION_BYTES,
 } from "@/features/agents/agent-snapshot";
+import { readCachedAvatarAnimation } from "@/shared/api/avatars";
 import { AgentShareDialog } from "./AgentShareDialog";
 import { downloadBlob, renderAgentShareCard } from "./agentShareCard";
 
@@ -48,6 +49,10 @@ vi.mock("@/features/agents/agent-snapshot", () => ({
   MAX_SNAPSHOT_AVATAR_ANIMATION_BYTES: 5 * 1024 * 1024,
   encodeAgentImage: vi.fn((bytes: Uint8Array) => bytes),
   personaToSnapshot: vi.fn(() => ({})),
+}));
+
+vi.mock("@/shared/api/avatars", () => ({
+  readCachedAvatarAnimation: vi.fn(),
 }));
 
 vi.mock("@/shared/hooks/useAvatarSrc", () => ({
@@ -116,6 +121,7 @@ describe("AgentShareDialog", () => {
     vi.clearAllMocks();
     avatarHookMocks.image = "https://example.com/avatar.png";
     avatarHookMocks.media = undefined;
+    vi.mocked(readCachedAvatarAnimation).mockResolvedValue(null);
   });
 
   it("prevents duplicate agent-file downloads while one is pending", async () => {
@@ -177,6 +183,229 @@ describe("AgentShareDialog", () => {
         expect.any(String),
       ),
     );
+  });
+
+  it("embeds cached asset-protocol avatar animation", async () => {
+    avatarHookMocks.image = undefined;
+    avatarHookMocks.media = {
+      src: "asset://generated-avatar.webm",
+      mediaType: "video",
+      posterSrc: "asset://generated-avatar.png",
+    };
+    vi.mocked(readCachedAvatarAnimation).mockResolvedValue({
+      bytes: [1, 2, 3],
+      mimeType: "video/webm",
+    });
+    vi.mocked(renderAgentShareCard).mockResolvedValue(
+      new Blob(["card"], { type: "image/png" }),
+    );
+
+    render(
+      <AgentShareDialog
+        open
+        persona={{ ...persona, avatar: "user-avatar:generated" }}
+        onOpenChange={vi.fn()}
+        onDownloadAgent={vi.fn()}
+      />,
+    );
+    await markCardReady();
+    await userEvent.click(
+      screen.getByRole("button", { name: "share.downloadCard" }),
+    );
+
+    await waitFor(() =>
+      expect(encodeAgentImage).toHaveBeenCalledWith(
+        expect.any(Uint8Array),
+        expect.anything(),
+        expect.objectContaining({
+          bytes: Uint8Array.from([1, 2, 3]),
+          mimeType: "video/webm",
+        }),
+      ),
+    );
+  });
+
+  it("falls back when an avatar preload stalls", async () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <AgentShareDialog
+          open
+          persona={persona}
+          onOpenChange={vi.fn()}
+          onDownloadAgent={vi.fn()}
+        />,
+      );
+      const firstPreload = screen.getByTestId("agent-card-avatar-preload");
+      expect(firstPreload).toHaveAttribute(
+        "src",
+        "https://example.com/avatar.png",
+      );
+
+      act(() => vi.advanceTimersByTime(10_000));
+
+      const fallbackPreload = screen.getByTestId("agent-card-avatar-preload");
+      expect(fallbackPreload).not.toHaveAttribute(
+        "src",
+        "https://example.com/avatar.png",
+      );
+      fireEvent.load(fallbackPreload);
+      expect(
+        screen.getByRole("button", { name: "share.downloadCard" }),
+      ).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows an empty-card error when every avatar source fails", async () => {
+    render(
+      <AgentShareDialog
+        open
+        persona={persona}
+        onOpenChange={vi.fn()}
+        onDownloadAgent={vi.fn()}
+      />,
+    );
+
+    fireEvent.error(screen.getByTestId("agent-card-avatar-preload"));
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("agent-card-avatar-preload"),
+      ).not.toHaveAttribute("src", "https://example.com/avatar.png"),
+    );
+    fireEvent.error(screen.getByTestId("agent-card-avatar-preload"));
+
+    const error = await screen.findByRole("status");
+    expect(error).toHaveTextContent("share.avatarUnavailable");
+    expect(error).toHaveClass("text-sm");
+    expect(
+      screen.getByRole("button", { name: "share.downloadCard" }),
+    ).toBeDisabled();
+  });
+
+  it("uses the fetched animation MIME for extensionless URLs", async () => {
+    avatarHookMocks.image = undefined;
+    avatarHookMocks.media = {
+      src: "https://example.com/generated-avatar",
+      mediaType: "video",
+      posterSrc: "https://example.com/generated-avatar.png",
+    };
+    vi.mocked(renderAgentShareCard).mockResolvedValue(
+      new Blob(["card"], { type: "image/png" }),
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async () => {
+      const bytes = Uint8Array.from([0, 0, 0, 0, 102, 116, 121, 112]);
+      const blob = new Blob([bytes], { type: "video/mp4" });
+      Object.defineProperty(blob, "arrayBuffer", {
+        value: async () => bytes.buffer,
+      });
+      return { ok: true, blob: async () => blob } as Response;
+    }) as typeof fetch;
+
+    try {
+      render(
+        <AgentShareDialog
+          open
+          persona={{ ...persona, avatar: "user-avatar:generated" }}
+          onOpenChange={vi.fn()}
+          onDownloadAgent={vi.fn()}
+        />,
+      );
+      await markCardReady();
+      await userEvent.click(
+        screen.getByRole("button", { name: "share.downloadCard" }),
+      );
+
+      await waitFor(() =>
+        expect(encodeAgentImage).toHaveBeenCalledWith(
+          expect.any(Uint8Array),
+          expect.anything(),
+          expect.objectContaining({ mimeType: "video/mp4" }),
+        ),
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("does not embed failed or non-video animation responses", async () => {
+    avatarHookMocks.image = undefined;
+    avatarHookMocks.media = {
+      src: "https://example.com/generated-avatar.webm",
+      mediaType: "video",
+      posterSrc: "https://example.com/generated-avatar.png",
+    };
+    vi.mocked(renderAgentShareCard).mockResolvedValue(
+      new Blob(["card"], { type: "image/png" }),
+    );
+    const originalFetch = globalThis.fetch;
+    let animationAttempt = 0;
+    globalThis.fetch = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).endsWith(".png")) {
+        const bytes = Uint8Array.from([137, 80, 78, 71]);
+        const blob = new Blob([bytes], { type: "image/png" });
+        Object.defineProperty(blob, "arrayBuffer", {
+          value: async () => bytes.buffer,
+        });
+        return {
+          ok: true,
+          headers: new Headers(),
+          blob: async () => blob,
+        } as Response;
+      }
+      animationAttempt += 1;
+      return animationAttempt === 1
+        ? ({ ok: false } as Response)
+        : ({
+            ok: true,
+            blob: async () => new Blob(["error"], { type: "text/html" }),
+          } as Response);
+    }) as typeof fetch;
+
+    try {
+      const { unmount } = render(
+        <AgentShareDialog
+          open
+          persona={{ ...persona, avatar: "user-avatar:generated" }}
+          onOpenChange={vi.fn()}
+          onDownloadAgent={vi.fn()}
+        />,
+      );
+      await markCardReady();
+      await userEvent.click(
+        screen.getByRole("button", { name: "share.downloadCard" }),
+      );
+      await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
+      expect(encodeAgentImage).toHaveBeenLastCalledWith(
+        expect.any(Uint8Array),
+        expect.anything(),
+        null,
+      );
+      unmount();
+
+      render(
+        <AgentShareDialog
+          open
+          persona={{ ...persona, avatar: "user-avatar:generated" }}
+          onOpenChange={vi.fn()}
+          onDownloadAgent={vi.fn()}
+        />,
+      );
+      await markCardReady();
+      await userEvent.click(
+        screen.getByRole("button", { name: "share.downloadCard" }),
+      );
+      await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(2));
+      expect(encodeAgentImage).toHaveBeenLastCalledWith(
+        expect.any(Uint8Array),
+        expect.anything(),
+        null,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("retries without animation when the combined card exceeds the PNG limit", async () => {
@@ -459,6 +688,19 @@ describe("AgentShareDialog", () => {
     await waitFor(() => expect(renderAgentShareCard).toHaveBeenCalledTimes(1));
     expect(downloadBlob).not.toHaveBeenCalled();
     expect(toast.success).not.toHaveBeenCalled();
+
+    rerender(
+      <AgentShareDialog
+        open
+        persona={persona}
+        onOpenChange={vi.fn()}
+        onDownloadAgent={vi.fn()}
+      />,
+    );
+    await markCardReady();
+    expect(
+      screen.getByRole("button", { name: "share.downloadCard" }),
+    ).toBeEnabled();
   });
 
   it("starts only one card download for rapid duplicate activation", async () => {

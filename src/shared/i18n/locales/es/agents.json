@@ -155,7 +155,8 @@
     "downloadingAgent": "Descargando agente…",
     "cardDownloaded": "Se descargó {{filename}}",
     "cardDownloadFailed": "No se pudo crear la tarjeta. Inténtalo de nuevo.",
-    "loadingCard": "Cargando tarjeta"
+    "loadingCard": "Cargando tarjeta",
+    "avatarUnavailable": "Avatar no disponible"
   },
   "statuses": {
     "error": "Error",

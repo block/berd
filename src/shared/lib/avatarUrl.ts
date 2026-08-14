@@ -1,7 +1,7 @@
 import { isAppAvatarRef, isUserAvatarRef } from "@/shared/avatars/catalog";
 import type { ResolvedAvatarMedia } from "@/shared/avatars/catalog";
 
-const MAX_PNG_AVATAR_BYTES = 2 * 1024 * 1024;
+export const MAX_PNG_AVATAR_BYTES = 2 * 1024 * 1024;
 const PNG_DATA_URL_PREFIX = "data:image/png;base64,";
 const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10] as const;
 const PNG_IHDR_LENGTH = 13;
