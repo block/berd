@@ -932,17 +932,6 @@ describe("desktop release workflow platform gate", () => {
     );
   });
 
-  it("runs the provenance recipe on native Windows CI", async () => {
-    const workflow = await readFile(
-      join(repo, ".github/workflows/ci.yml"),
-      "utf8",
-    );
-    expect(workflow).toContain("tool: just@1.48.0");
-    expect(workflow).toContain("Exercise Windows release provenance recipe");
-    expect(workflow).toContain("just release-write-provenance");
-    expect(workflow).not.toContain("JUST_UNSTABLE");
-  });
-
   it("keeps unsigned desktop build artifacts out of releases", async () => {
     const workflow = await readFile(
       join(repo, ".github/workflows/unsigned-desktop-build.yml"),

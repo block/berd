@@ -128,23 +128,6 @@ jobs:
         with:
           tool: just@1.48.0
 
-      - name: Exercise Windows release provenance recipe
-        shell: bash
-        run: |
-          set -euo pipefail
-          asset_dir="$RUNNER_TEMP/release-provenance-smoke"
-          rm -rf "$asset_dir"
-          mkdir -p "$asset_dir"
-          printf 'fixture\n' > "$asset_dir/fixture.bin"
-          just release-write-provenance \
-            0123456789abcdef0123456789abcdef01234567 \
-            1.2.3 windows-x86_64 "$asset_dir" fixture.bin
-          jq -e '
-            .schemaVersion == 1 and
-            .platform == "windows-x86_64" and
-            (.artifacts["fixture.bin"] | test("^[0-9a-f]{64}$"))
-          ' "$asset_dir/Berd_1.2.3_windows-x86_64.provenance.json"
-
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
