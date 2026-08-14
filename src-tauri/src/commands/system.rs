@@ -181,16 +181,28 @@ pub fn get_home_dir() -> Result<String, String> {
 
 #[tauri::command]
 pub fn open_in_chrome(app: AppHandle, url: String) -> Result<(), String> {
-    validate_external_url(&url)?;
+    open_in_chrome_with(&url, try_launch_chrome, |fallback_url| {
+        app.opener()
+            .open_url(fallback_url, None::<&str>)
+            .map_err(|error| {
+                format!("Failed to open URL '{fallback_url}' in fallback browser: {error}")
+            })
+    })
+}
 
-    if try_launch_chrome(&url) {
+fn open_in_chrome_with(
+    url: &str,
+    launch_chrome: impl FnOnce(&str) -> bool,
+    open_fallback: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    validate_external_url(url)?;
+
+    if launch_chrome(url) {
         return Ok(());
     }
 
     log::warn!("Could not launch Google Chrome; falling back to default browser for {url}");
-    app.opener()
-        .open_url(&url, None::<&str>)
-        .map_err(|error| format!("Failed to open URL '{url}' in fallback browser: {error}"))
+    open_fallback(url)
 }
 
 fn validate_external_url(url: &str) -> Result<(), String> {
@@ -224,13 +236,108 @@ fn try_launch_chrome(url: &str) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn try_launch_chrome(url: &str) -> bool {
-    // `start` is a shell builtin; the empty "" is the window title argument
-    // that `start` requires when the first argument is quoted.
-    let mut command = std::process::Command::new("cmd");
-    command.args(["/C", "start", "", "chrome", url]);
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WindowsChromeLaunch {
+    program: PathBuf,
+    arguments: [std::ffi::OsString; 1],
+}
+
+#[cfg(target_os = "windows")]
+fn windows_chrome_launches(
+    url: &str,
+    roots: impl IntoIterator<Item = PathBuf>,
+) -> Vec<WindowsChromeLaunch> {
+    const CHROME_RELATIVE_PATH: [&str; 4] = ["Google", "Chrome", "Application", "chrome.exe"];
+
+    roots
+        .into_iter()
+        .filter(|root| root.is_absolute())
+        .map(|root| WindowsChromeLaunch {
+            program: CHROME_RELATIVE_PATH
+                .iter()
+                .fold(root, |path, component| path.join(component)),
+            arguments: [url.into()],
+        })
+        .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn windows_known_folder(folder_id: &windows_sys::core::GUID) -> Option<PathBuf> {
+    use std::ffi::{c_void, OsString};
+    use std::os::windows::ffi::OsStringExt;
+    use std::slice;
+    use windows_sys::Win32::Globalization::lstrlenW;
+    use windows_sys::Win32::System::Com::CoTaskMemFree;
+    use windows_sys::Win32::UI::Shell::SHGetKnownFolderPath;
+
+    let mut raw_path = std::ptr::null_mut();
+    // SAFETY: SHGetKnownFolderPath initializes `raw_path` with a
+    // CoTaskMemAlloc-owned, NUL-terminated UTF-16 string on success. The
+    // pointer is copied before it is released with CoTaskMemFree.
+    let result = unsafe { SHGetKnownFolderPath(folder_id, 0, std::ptr::null_mut(), &mut raw_path) };
+    let path = if result >= 0 && !raw_path.is_null() {
+        // SAFETY: successful SHGetKnownFolderPath output is NUL-terminated.
+        let length = unsafe { lstrlenW(raw_path) } as usize;
+        // SAFETY: `length` excludes the terminator and the pointer remains
+        // valid until the CoTaskMemFree below.
+        let wide_path = unsafe { slice::from_raw_parts(raw_path, length) };
+        Some(PathBuf::from(OsString::from_wide(wide_path)))
+    } else {
+        None
+    };
+    // SAFETY: raw_path is either null or owned by CoTaskMemAlloc.
+    unsafe { CoTaskMemFree(raw_path.cast::<c_void>()) };
+    path
+}
+
+#[cfg(target_os = "windows")]
+fn windows_chrome_roots() -> Vec<PathBuf> {
+    use windows_sys::Win32::UI::Shell::{
+        FOLDERID_LocalAppData, FOLDERID_ProgramFiles, FOLDERID_ProgramFilesX86,
+    };
+
+    [
+        &FOLDERID_LocalAppData,
+        &FOLDERID_ProgramFiles,
+        &FOLDERID_ProgramFilesX86,
+    ]
+    .into_iter()
+    .filter_map(windows_known_folder)
+    .collect()
+}
+
+#[cfg(target_os = "windows")]
+fn try_launch_windows_chrome_with(
+    launches: impl IntoIterator<Item = WindowsChromeLaunch>,
+    mut is_file: impl FnMut(&Path) -> bool,
+    mut launch: impl FnMut(&WindowsChromeLaunch) -> io::Result<()>,
+) -> bool {
+    launches
+        .into_iter()
+        .filter(|candidate| is_file(&candidate.program))
+        .any(|candidate| launch(&candidate).is_ok())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_chrome_command(launch: &WindowsChromeLaunch) -> std::process::Command {
+    let mut command = std::process::Command::new(&launch.program);
+    command.args(&launch.arguments);
     crate::services::process::apply_no_window(&mut command);
-    command.spawn().is_ok()
+    command
+}
+
+#[cfg(target_os = "windows")]
+fn launch_windows_chrome(launch: &WindowsChromeLaunch) -> io::Result<()> {
+    windows_chrome_command(launch).spawn().map(|_| ())
+}
+
+#[cfg(target_os = "windows")]
+fn try_launch_chrome(url: &str) -> bool {
+    try_launch_windows_chrome_with(
+        windows_chrome_launches(url, windows_chrome_roots()),
+        Path::is_file,
+        launch_windows_chrome,
+    )
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -1885,11 +1992,10 @@ mod tests {
     use super::{
         build_file_mention_index, build_file_tree_entry, ensure_directory_path,
         get_or_build_file_mention_index_from_cache, inspect_attachment_path,
-        inspect_attachment_paths, normalize_attachment_paths, normalize_roots,
+        inspect_attachment_paths, normalize_attachment_paths, normalize_roots, open_in_chrome_with,
         read_directory_entries, read_image_attachment, read_text_file,
-        search_file_mentions_blocking, validate_external_url, write_agent_image_atomically,
-        write_sibling_then_replace, FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES,
-        MAX_TEXT_FILE_BYTES,
+        search_file_mentions_blocking, write_agent_image_atomically, write_sibling_then_replace,
+        FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
     };
     use base64::Engine;
     use std::fs;
@@ -2874,11 +2980,166 @@ mod tests {
     }
 
     #[test]
-    fn rejects_non_http_external_urls() {
-        assert!(validate_external_url("https://example.com").is_ok());
-        assert!(validate_external_url("http://example.com").is_ok());
-        assert!(validate_external_url("javascript:alert(1)").is_err());
-        assert!(validate_external_url("file:///etc/passwd").is_err());
-        assert!(validate_external_url("not a url").is_err());
+    fn validates_only_http_external_urls_without_rewriting_them() {
+        for url in [
+            "https://example.com",
+            "http://example.com",
+            "https://example.com/connect?first=one&second=two|three<four>five^six%25",
+        ] {
+            let launched_urls = std::cell::RefCell::new(Vec::new());
+            let fallback_urls = std::cell::RefCell::new(Vec::new());
+
+            open_in_chrome_with(
+                url,
+                |launched_url| {
+                    launched_urls.borrow_mut().push(launched_url.to_owned());
+                    true
+                },
+                |fallback_url| {
+                    fallback_urls.borrow_mut().push(fallback_url.to_owned());
+                    Ok(())
+                },
+            )
+            .expect("valid HTTP(S) URL");
+
+            assert_eq!(launched_urls.into_inner(), [url]);
+            assert!(fallback_urls.into_inner().is_empty());
+        }
+
+        for url in ["javascript:alert(1)", "file:///etc/passwd", "not a url"] {
+            assert!(
+                open_in_chrome_with(
+                    url,
+                    |_| panic!("invalid URL must not reach Chrome"),
+                    |_| panic!("invalid URL must not reach the fallback browser"),
+                )
+                .is_err(),
+                "expected URL to be rejected: {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn falls_back_to_default_browser_when_chrome_is_unavailable() {
+        let url = "https://example.com/connect?first=one&second=two|three<four>five^six%25";
+        let fallback_urls = std::cell::RefCell::new(Vec::new());
+
+        open_in_chrome_with(
+            url,
+            |_| false,
+            |fallback_url| {
+                fallback_urls.borrow_mut().push(fallback_url.to_owned());
+                Ok(())
+            },
+        )
+        .expect("fallback browser should open");
+
+        assert_eq!(fallback_urls.into_inner(), [url]);
+    }
+
+    #[test]
+    fn reports_fallback_browser_failures() {
+        let error = open_in_chrome_with(
+            "https://example.com",
+            |_| false,
+            |_| Err("fallback unavailable".into()),
+        )
+        .expect_err("fallback failure should be returned");
+
+        assert_eq!(error, "fallback unavailable");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_chrome_launch_keeps_shell_metacharacters_in_one_literal_argument() {
+        use std::ffi::OsStr;
+
+        const URL: &str = "https://example.com/connect?first=one&second=two|three<four>five^six%25";
+        let launches = super::windows_chrome_launches(
+            URL,
+            [
+                PathBuf::from(r"C:\Users\alice\AppData\Local"),
+                PathBuf::from(r"C:\Program Files"),
+                PathBuf::from(r"C:\Program Files (x86)"),
+            ],
+        );
+
+        assert_eq!(launches.len(), 3);
+        for launch in &launches {
+            assert!(launch.program.is_absolute());
+            assert_eq!(launch.program.file_name(), Some(OsStr::new("chrome.exe")));
+            assert_eq!(launch.arguments.as_slice(), [OsStr::new(URL)]);
+
+            let command = super::windows_chrome_command(launch);
+            assert_eq!(command.get_program(), launch.program.as_os_str());
+            assert_eq!(command.get_args().collect::<Vec<_>>(), [OsStr::new(URL)]);
+            assert_ne!(command.get_program(), OsStr::new("cmd.exe"));
+        }
+
+        assert!(super::windows_chrome_launches(URL, [PathBuf::from("relative-root")]).is_empty());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_chrome_launch_stops_after_the_first_success() {
+        use std::ffi::OsString;
+
+        let candidates = [r"C:\first\chrome.exe", r"C:\second\chrome.exe"].map(|program| {
+            super::WindowsChromeLaunch {
+                program: PathBuf::from(program),
+                arguments: [OsString::from("https://example.com")],
+            }
+        });
+        let attempted = std::cell::RefCell::new(Vec::new());
+
+        let launched = super::try_launch_windows_chrome_with(
+            candidates,
+            |_| true,
+            |launch| {
+                attempted.borrow_mut().push(launch.program.clone());
+                Ok(())
+            },
+        );
+
+        assert!(launched);
+        assert_eq!(
+            attempted.into_inner(),
+            [PathBuf::from(r"C:\first\chrome.exe")]
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_chrome_launch_tries_candidates_directly_then_reports_unavailable() {
+        use std::ffi::OsString;
+
+        let candidates = [r"C:\first\chrome.exe", r"C:\second\chrome.exe"].map(|program| {
+            super::WindowsChromeLaunch {
+                program: PathBuf::from(program),
+                arguments: [OsString::from("https://example.com")],
+            }
+        });
+        let attempted = std::cell::RefCell::new(Vec::new());
+
+        let launched = super::try_launch_windows_chrome_with(
+            candidates,
+            |_| true,
+            |launch| {
+                attempted.borrow_mut().push(launch.program.clone());
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Chrome unavailable",
+                ))
+            },
+        );
+
+        assert!(!launched);
+        assert_eq!(
+            attempted.into_inner(),
+            [
+                PathBuf::from(r"C:\first\chrome.exe"),
+                PathBuf::from(r"C:\second\chrome.exe")
+            ]
+        );
     }
 }
