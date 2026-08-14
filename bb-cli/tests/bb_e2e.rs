@@ -2707,6 +2707,86 @@ fn bb_skills_install_downloads_verifies_and_installs_into_isolated_home() {
 }
 
 #[test]
+fn bb_skills_install_rejects_unsafe_plan_before_artifact_fetch_or_root_escape() {
+    let temp = temp_test_dir("bb-skills-unsafe-plan-slug");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
+    let skills_home = temp.join("skills-home");
+    let agents_dir = temp.join("agents-skills");
+    let outside = temp.join("outside-sentinel");
+    fs::create_dir_all(&outside).expect("create outside sentinel");
+    fs::write(outside.join("keep"), "untouched").expect("write outside sentinel");
+
+    let malicious_plan = json!({
+        "plan_id": "malicious",
+        "operations": [{
+            "action": "install",
+            "skill": {
+                "slug": "../outside-sentinel",
+                "version_id": "version-1",
+                "content_sha256": "content-sha"
+            },
+            "artifact": {
+                "id": "artifact-1",
+                "download_url": "/must-not-fetch",
+                "sha256": "unused",
+                "size_bytes": 1
+            },
+            "installed_via": "explicit"
+        }],
+        "warnings": []
+    });
+    let server = MockServer::start(vec![
+        capabilities_response(&agents_dir),
+        MockResponse::json(malicious_plan),
+    ]);
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_SKILLS_HOME", &skills_home)
+        .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args([
+            "skills",
+            "install",
+            "builderbot-tools",
+            "--target",
+            "agents",
+            "--yes",
+            "--json",
+        ])
+        .output()
+        .expect("run bb skills install");
+    let requests = server.finish();
+    let (_stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(
+        stderr.contains("invalid skill name"),
+        "stderr was: {stderr}"
+    );
+    assert_eq!(
+        requests.len(),
+        2,
+        "artifact or detail fetch escaped validation"
+    );
+    assert_eq!(
+        fs::read_to_string(outside.join("keep")).unwrap(),
+        "untouched"
+    );
+    assert!(!skills_home.join("outside-sentinel").exists());
+    assert!(!agents_dir.join("outside-sentinel").exists());
+    assert!(
+        !skills_home.join("downloads").exists()
+            || fs::read_dir(skills_home.join("downloads"))
+                .unwrap()
+                .next()
+                .is_none()
+    );
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
 fn bb_skills_install_and_update_restore_package_when_target_linking_fails() {
     for action in ["install", "update"] {
         let zip_bytes = skill_zip(&[("SKILL.md", "# New BuilderBot Tools\n")]);
