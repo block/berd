@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  deriveAgentCardTraits,
+  classifyAgentCardTraits,
   truncateAgentCardTitle,
 } from "./agentShareCardSpec";
 
@@ -17,27 +17,23 @@ describe("agentShareCardSpec", () => {
     expect(Array.from(title)).toHaveLength(26);
   });
 
-  it("derives stable card traits from agent instructions", () => {
+  it("derives stable semantic traits from agent instructions", () => {
     expect(
-      deriveAgentCardTraits(
+      classifyAgentCardTraits(
         "Research unfamiliar topics, search trustworthy sources, and synthesize evidence.",
       ),
-    ).toEqual({
-      goodFor: "finding and synthesizing answers",
-      vibes: "curious, thorough",
-    });
-    expect(deriveAgentCardTraits("Do unusual bespoke work.")).toEqual({
-      goodFor: "making progress on focused work",
-      vibes: "capable, thoughtful",
-    });
+    ).toBe("research");
+    expect(classifyAgentCardTraits("Do unusual bespoke work.")).toBe("default");
   });
 
   it("uses curated order to break equal trait matches", () => {
     expect(
-      deriveAgentCardTraits("Review code and improve software quality"),
-    ).toEqual({
-      goodFor: "building and improving software",
-      vibes: "precise, pragmatic",
-    });
+      classifyAgentCardTraits("Review code and improve software quality"),
+    ).toBe("software");
+  });
+
+  it("uses explicit casing independent of the host locale", () => {
+    expect(truncateAgentCardTitle("mini", "en")).toBe("MINI");
+    expect(classifyAgentCardTraits("INTERFACE designer")).toBe("design");
   });
 });

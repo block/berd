@@ -1,28 +1,47 @@
-export const AGENT_CARD_WIDTH = 1227;
-export const AGENT_CARD_HEIGHT = 1839;
-export const AGENT_CARD_ASPECT_RATIO = `${AGENT_CARD_WIDTH}/${AGENT_CARD_HEIGHT}`;
+import { segmentCardGraphemes } from "./agentShareCardText";
+import {
+  AGENT_CARD_ASPECT_RATIO,
+  AGENT_CARD_GEOMETRY,
+} from "./agentShareCardGeometry";
 
-const MAX_TITLE_CHARACTERS = 26;
+export const AGENT_CARD_WIDTH = AGENT_CARD_GEOMETRY.width;
+export const AGENT_CARD_HEIGHT = AGENT_CARD_GEOMETRY.height;
+export { AGENT_CARD_ASPECT_RATIO };
 
-export function truncateAgentCardTitle(name: string): string {
-  const title = name.trim().toLocaleUpperCase() || "BERD AGENT";
-  const characters = Array.from(title);
-  return characters.length > MAX_TITLE_CHARACTERS
-    ? `${characters.slice(0, MAX_TITLE_CHARACTERS - 1).join("")}…`
+const MAX_TITLE_GRAPHEMES = 26;
+const CARD_MATCH_LOCALE = "en";
+
+export function truncateAgentCardTitle(
+  name: string,
+  locale = CARD_MATCH_LOCALE,
+): string {
+  const title = name.trim().toLocaleUpperCase(locale) || "BERD AGENT";
+  const graphemes = segmentCardGraphemes(title, locale);
+  return graphemes.length > MAX_TITLE_GRAPHEMES
+    ? `${graphemes.slice(0, MAX_TITLE_GRAPHEMES - 1).join("")}…`
     : title;
 }
 
-export interface AgentCardTraits {
-  goodFor: string;
-  vibes: string;
-}
+export type AgentCardTraitId =
+  | "software"
+  | "review"
+  | "research"
+  | "writing"
+  | "design"
+  | "planning"
+  | "automation"
+  | "data"
+  | "support"
+  | "default";
 
-interface TraitRule extends AgentCardTraits {
+interface TraitRule {
+  id: Exclude<AgentCardTraitId, "default">;
   keywords: readonly string[];
 }
 
 const TRAIT_RULES: readonly TraitRule[] = [
   {
+    id: "software",
     keywords: [
       "code",
       "coding",
@@ -32,15 +51,13 @@ const TRAIT_RULES: readonly TraitRule[] = [
       "implement",
       "debug",
     ],
-    goodFor: "building and improving software",
-    vibes: "precise, pragmatic",
   },
   {
+    id: "review",
     keywords: ["review", "audit", "risk", "quality", "security", "critique"],
-    goodFor: "spotting risks and raising quality",
-    vibes: "sharp, dependable",
   },
   {
+    id: "research",
     keywords: [
       "research",
       "investigate",
@@ -49,10 +66,9 @@ const TRAIT_RULES: readonly TraitRule[] = [
       "evidence",
       "discover",
     ],
-    goodFor: "finding and synthesizing answers",
-    vibes: "curious, thorough",
   },
   {
+    id: "writing",
     keywords: [
       "write",
       "writing",
@@ -62,10 +78,9 @@ const TRAIT_RULES: readonly TraitRule[] = [
       "content",
       "summarize",
     ],
-    goodFor: "turning ideas into clear words",
-    vibes: "clear, thoughtful",
   },
   {
+    id: "design",
     keywords: [
       "design",
       "visual",
@@ -75,10 +90,9 @@ const TRAIT_RULES: readonly TraitRule[] = [
       "prototype",
       "creative",
     ],
-    goodFor: "shaping useful, polished experiences",
-    vibes: "creative, intentional",
   },
   {
+    id: "planning",
     keywords: [
       "plan",
       "planning",
@@ -87,10 +101,9 @@ const TRAIT_RULES: readonly TraitRule[] = [
       "organize",
       "coordinate",
     ],
-    goodFor: "turning goals into practical plans",
-    vibes: "organized, strategic",
   },
   {
+    id: "automation",
     keywords: [
       "automate",
       "automation",
@@ -99,10 +112,9 @@ const TRAIT_RULES: readonly TraitRule[] = [
       "script",
       "schedule",
     ],
-    goodFor: "streamlining repetitive work",
-    vibes: "efficient, resourceful",
   },
   {
+    id: "data",
     keywords: [
       "data",
       "analyze",
@@ -112,24 +124,18 @@ const TRAIT_RULES: readonly TraitRule[] = [
       "report",
       "insight",
     ],
-    goodFor: "making sense of complex data",
-    vibes: "analytical, precise",
   },
   {
+    id: "support",
     keywords: ["help", "support", "troubleshoot", "guide", "explain", "teach"],
-    goodFor: "untangling problems and helping people",
-    vibes: "patient, resourceful",
   },
 ];
 
-/**
- * Produces short, stable card copy locally from an agent's instructions.
- * Word-boundary matches keep incidental substrings from changing the result;
- * ties preserve the curated rule order so the same instructions always render
- * the same card.
- */
-export function deriveAgentCardTraits(instructions: string): AgentCardTraits {
-  const normalized = instructions.toLocaleLowerCase();
+/** Returns a stable semantic id; localized presentation copy is resolved later. */
+export function classifyAgentCardTraits(
+  instructions: string,
+): AgentCardTraitId {
+  const normalized = instructions.toLocaleLowerCase(CARD_MATCH_LOCALE);
   let bestRule: TraitRule | undefined;
   let bestScore = 0;
 
@@ -146,10 +152,5 @@ export function deriveAgentCardTraits(instructions: string): AgentCardTraits {
     }
   }
 
-  return bestRule
-    ? { goodFor: bestRule.goodFor, vibes: bestRule.vibes }
-    : {
-        goodFor: "making progress on focused work",
-        vibes: "capable, thoughtful",
-      };
+  return bestRule?.id ?? "default";
 }

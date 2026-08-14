@@ -156,7 +156,53 @@
     "cardDownloaded": "Downloaded {{filename}}",
     "cardDownloadFailed": "Couldn't create the card. Try again.",
     "loadingCard": "Loading card",
-    "avatarUnavailable": "Avatar unavailable"
+    "avatarUnavailable": "Avatar unavailable",
+    "cardLabels": {
+      "goodFor": "Good for:",
+      "vibes": "Vibes:"
+    },
+    "cardTraits": {
+      "software": {
+        "goodFor": "building and improving software",
+        "vibes": "precise, pragmatic"
+      },
+      "review": {
+        "goodFor": "spotting risks and raising quality",
+        "vibes": "sharp, dependable"
+      },
+      "research": {
+        "goodFor": "finding and synthesizing answers",
+        "vibes": "curious, thorough"
+      },
+      "writing": {
+        "goodFor": "turning ideas into clear words",
+        "vibes": "clear, thoughtful"
+      },
+      "design": {
+        "goodFor": "shaping useful, polished experiences",
+        "vibes": "creative, intentional"
+      },
+      "planning": {
+        "goodFor": "turning goals into practical plans",
+        "vibes": "organized, strategic"
+      },
+      "automation": {
+        "goodFor": "streamlining repetitive work",
+        "vibes": "efficient, resourceful"
+      },
+      "data": {
+        "goodFor": "making sense of complex data",
+        "vibes": "analytical, precise"
+      },
+      "support": {
+        "goodFor": "untangling problems and helping people",
+        "vibes": "patient, resourceful"
+      },
+      "default": {
+        "goodFor": "making progress on focused work",
+        "vibes": "capable, thoughtful"
+      }
+    }
   },
   "statuses": {
     "error": "Error",

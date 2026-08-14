@@ -156,7 +156,53 @@
     "cardDownloaded": "Se descargó {{filename}}",
     "cardDownloadFailed": "No se pudo crear la tarjeta. Inténtalo de nuevo.",
     "loadingCard": "Cargando tarjeta",
-    "avatarUnavailable": "Avatar no disponible"
+    "avatarUnavailable": "Avatar no disponible",
+    "cardLabels": {
+      "goodFor": "Ideal para:",
+      "vibes": "Estilo:"
+    },
+    "cardTraits": {
+      "software": {
+        "goodFor": "crear y mejorar software",
+        "vibes": "preciso, pragmático"
+      },
+      "review": {
+        "goodFor": "detectar riesgos y mejorar la calidad",
+        "vibes": "agudo, confiable"
+      },
+      "research": {
+        "goodFor": "buscar y sintetizar respuestas",
+        "vibes": "curioso, minucioso"
+      },
+      "writing": {
+        "goodFor": "convertir ideas en palabras claras",
+        "vibes": "claro, reflexivo"
+      },
+      "design": {
+        "goodFor": "dar forma a experiencias útiles y pulidas",
+        "vibes": "creativo, intencional"
+      },
+      "planning": {
+        "goodFor": "convertir objetivos en planes prácticos",
+        "vibes": "organizado, estratégico"
+      },
+      "automation": {
+        "goodFor": "agilizar el trabajo repetitivo",
+        "vibes": "eficiente, resolutivo"
+      },
+      "data": {
+        "goodFor": "entender datos complejos",
+        "vibes": "analítico, preciso"
+      },
+      "support": {
+        "goodFor": "resolver problemas y ayudar a las personas",
+        "vibes": "paciente, resolutivo"
+      },
+      "default": {
+        "goodFor": "avanzar en trabajo enfocado",
+        "vibes": "capaz, reflexivo"
+      }
+    }
   },
   "statuses": {
     "error": "Error",
