@@ -53,7 +53,7 @@ export function AgentCardReveal({
     <div
       data-agent-card-reveal="true"
       className={cn(
-        "relative isolate w-full max-w-[min(22rem,calc((100dvh-12rem)*0.72))] overflow-visible p-6 [transform-style:preserve-3d]",
+        "relative isolate w-full max-w-[min(22rem,calc((100dvh-18rem)*0.6667))] overflow-visible p-6 [transform-style:preserve-3d]",
         className,
       )}
     >

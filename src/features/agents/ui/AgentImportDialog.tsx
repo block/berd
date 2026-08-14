@@ -154,7 +154,7 @@ export function AgentImportDialog({
         </DialogHeader>
         <DialogBody className={prepared ? "overflow-visible" : undefined}>
           {prepared ? (
-            <div className="relative flex min-h-[26rem] justify-center py-2 [perspective:1200px]">
+            <div className="relative flex justify-center py-2 [perspective:1200px]">
               <AgentCardReveal
                 identity={[
                   prepared.name,
