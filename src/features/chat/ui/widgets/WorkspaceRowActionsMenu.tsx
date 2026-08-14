@@ -157,7 +157,8 @@ export function WorkspaceRowActionsMenu({
     SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
     SIDEBAR_NAV_TEXT_CLASS,
     SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-    "rounded-xs text-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus:bg-sidebar-accent focus:text-sidebar-foreground data-[highlighted]:bg-sidebar-accent data-[highlighted]:text-sidebar-foreground",
+    // `muted`, not `sidebar-accent`: identical in dark, visible in light.
+    "rounded-xs text-foreground hover:bg-muted focus:bg-muted data-[highlighted]:bg-muted",
   );
   const menuLabelClassName =
     "px-3 pb-1 text-sm font-normal text-muted-foreground";
@@ -290,7 +291,9 @@ export function WorkspaceRowActionsMenu({
         <DropdownMenuContent
           align="end"
           sideOffset={8}
-          className="w-64 rounded-sm px-3 pb-[6px] pt-3"
+          // Card surface + the rail's rounded-md; rounded-xs items stay
+          // concentric inside the px-3 gutter (6px + 12px = 18px).
+          className="w-64 rounded-md bg-card px-3 pb-[6px] pt-3"
         >
           {onOpenTerminalAtPath ? (
             <DropdownMenuItem

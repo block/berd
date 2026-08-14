@@ -115,7 +115,7 @@ export function WorkspaceActionsMenu({
     SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
     SIDEBAR_NAV_TEXT_CLASS,
     SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-    "rounded-xs pl-2 pr-3 text-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus:bg-sidebar-accent focus:text-sidebar-foreground data-[highlighted]:bg-sidebar-accent data-[highlighted]:text-sidebar-foreground",
+    "rounded-sm pl-2 pr-3 text-foreground hover:bg-muted focus:bg-muted data-[highlighted]:bg-muted",
   );
   const menuLabelClassName =
     "px-2 pb-1 text-sm font-normal text-muted-foreground";
@@ -137,7 +137,7 @@ export function WorkspaceActionsMenu({
         <DropdownMenuContent
           align="end"
           sideOffset={8}
-          className="w-64 rounded-sm px-1 pb-[6px] pt-3"
+          className="w-64 rounded-md bg-card px-1.5 pb-[6px] pt-3"
         >
           {onToggleTerminal ? (
             <DropdownMenuItem

@@ -280,7 +280,8 @@ function AddWorkspaceRow({
       disabled={disabled}
       className={cn(
         "gap-2 bg-transparent px-2 py-1 leading-[15px] text-foreground duration-150",
-        "hover:bg-sidebar-accent hover:text-foreground focus-visible:bg-sidebar-accent focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        // `muted`, not `sidebar-accent`: identical in dark, visible in light.
+        "hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-foreground",
       )}
       iconClassName="size-3.5 text-current"
@@ -326,10 +327,13 @@ function WorkspaceSectionActionsMenu({
       <DropdownMenuContent
         align="end"
         sideOffset={8}
-        className="w-56 rounded-sm px-1 pb-[6px] pt-1"
+        // Card surface + the rail's rounded-md, with the primitive's p-1.5 so
+        // the rounded-sm items stay concentric.
+        className="w-56 rounded-md bg-card p-1.5"
       >
         <DropdownMenuItem
           disabled={!onAddWorkspace}
+          className="focus:bg-muted data-[highlighted]:bg-muted"
           onSelect={() => void onAddWorkspace?.()}
         >
           <FolderPlus className="size-4" />
@@ -537,7 +541,7 @@ export function WorkspaceWidget({
                 className={cn(
                   "flex w-full items-center gap-2 rounded-sm px-2 py-1",
                   "text-sm text-foreground transition-colors",
-                  "hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                  "hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                   "disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:bg-transparent",
                 )}
                 aria-label={t("contextPanel.folder.change")}

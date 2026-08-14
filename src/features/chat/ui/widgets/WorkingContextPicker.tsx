@@ -312,15 +312,20 @@ export function WorkingContextPicker({
   const hasWorktrees = worktrees.length > 0;
   const hasVisibleWorktrees = visibleWorktrees.length > 0;
   const hasVisibleBranches = visibleBranches.length > 0 && Boolean(currentPath);
+  // Hover/selected fills use `muted`: in dark it equals the old
+  // `sidebar-accent` value (gray-700), while in light it stays visible on
+  // white surfaces where `sidebar-accent` (gray-50) disappears. rounded-sm
+  // rows sit concentric inside the rounded-md popover's p-1.5 padding
+  // (12px + 6px = 18px); the active row carries the selected fill.
   const pickerRowClassName = cn(
-    "group flex w-full items-start gap-3 rounded-xs px-2 py-2.5 text-left",
+    "group flex w-full items-start gap-3 rounded-sm px-2 py-2.5 text-left",
     SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-    "hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-foreground focus-visible:outline-none aria-[current=true]:bg-sidebar-accent aria-[current=true]:text-sidebar-foreground",
+    "enabled:hover:bg-muted focus-visible:bg-muted focus-visible:outline-none aria-[current=true]:bg-muted",
   );
   const branchRowClassName = cn(
-    "group flex w-full items-center gap-3 rounded-xs px-2 py-2.5 text-left",
+    "group flex w-full items-center gap-3 rounded-sm px-2 py-2.5 text-left",
     SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-    "hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-foreground focus-visible:outline-none aria-[current=true]:bg-sidebar-accent aria-[current=true]:text-sidebar-foreground",
+    "enabled:hover:bg-muted focus-visible:bg-muted focus-visible:outline-none aria-[current=true]:bg-muted",
   );
 
   return (
@@ -334,7 +339,7 @@ export function WorkingContextPicker({
                 "flex w-full items-start gap-3 rounded-sm bg-muted/60 px-3.5 py-2.5",
                 "text-sm text-foreground",
                 SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-                "hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                "hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
               )}
               aria-label={t("contextPanel.picker.selectWorktree")}
             >
@@ -359,9 +364,9 @@ export function WorkingContextPicker({
           <PopoverContent
             align="start"
             sideOffset={8}
-            className="flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] min-w-72 flex-col overflow-hidden rounded-sm p-2 text-sm font-normal"
+            className="flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] min-w-72 flex-col overflow-hidden rounded-md bg-card p-1.5 text-sm font-normal"
           >
-            <div className="mb-2 flex h-10 items-center gap-2 rounded-xs border border-transparent bg-muted/60 px-3 text-muted-foreground focus-within:border-transparent focus-within:ring-0">
+            <div className="mb-2 flex h-10 items-center gap-2 rounded-sm border border-transparent px-3 text-muted-foreground transition-colors hover:bg-muted/60 focus-within:border-transparent focus-within:ring-0">
               <IconSearch className="size-4 shrink-0" />
               <input
                 type="search"
@@ -456,7 +461,7 @@ export function WorkingContextPicker({
                 "flex w-full items-start gap-3 rounded-sm bg-muted/60 px-3.5 py-2.5",
                 "text-sm text-foreground",
                 SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-                "hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                "hover:bg-muted focus-visible:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
               )}
               aria-label={t("contextPanel.picker.selectBranch")}
             >
@@ -473,9 +478,9 @@ export function WorkingContextPicker({
           <PopoverContent
             align="start"
             sideOffset={8}
-            className="flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] min-w-72 flex-col overflow-hidden rounded-sm p-2 text-sm font-normal"
+            className="flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] min-w-72 flex-col overflow-hidden rounded-md bg-card p-1.5 text-sm font-normal"
           >
-            <div className="mb-2 flex h-10 items-center gap-2 rounded-xs border border-transparent bg-muted/60 px-3 text-muted-foreground focus-within:border-transparent focus-within:ring-0">
+            <div className="mb-2 flex h-10 items-center gap-2 rounded-sm border border-transparent px-3 text-muted-foreground transition-colors hover:bg-muted/60 focus-within:border-transparent focus-within:ring-0">
               <IconSearch className="size-4 shrink-0" />
               <input
                 type="search"
