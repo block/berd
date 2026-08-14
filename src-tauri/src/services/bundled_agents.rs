@@ -13,7 +13,9 @@ const GLOBAL_AGENTS_DIR_NAME: &str = ".agents";
 const AGENTS_DIR_NAME: &str = "agents";
 const MARKER_FILE_NAME: &str = ".berd-bundled-agents.json";
 const LEGACY_MARKER_FILE_NAME: &str = ".goose-internal-bundled-agents.json";
+#[cfg(test)]
 const BERDY_AGENT_FILE_NAME: &str = "berdy.md";
+#[cfg(test)]
 const BERDY_FALLBACK_FILE_NAME: &str = "berdy2.md";
 static INSTALL_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -252,19 +254,22 @@ fn seed_bundled_agents_from_dir(
 
         let file_name = entry.file_name().to_string_lossy().into_owned();
         let primary_target = target_root.join(&file_name);
-        let fallback_target = target_root.join(BERDY_FALLBACK_FILE_NAME);
-        let use_berdy_fallback = file_name == BERDY_AGENT_FILE_NAME
-            && marker.seeded_files.contains(BERDY_FALLBACK_FILE_NAME)
-            && matches!(
-                installed_agent_path_state(&fallback_target)?,
-                InstalledAgentPathState::Bundled
-            );
-        let target = if use_berdy_fallback {
-            fallback_target
-        } else {
-            primary_target
+        let (target, target_file_name) = match installed_agent_path_state(&primary_target)? {
+            InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
+                (primary_target, file_name.clone())
+            }
+            InstalledAgentPathState::UserOwned => {
+                let fallback_name = fallback_file_name(&file_name)?;
+                let fallback_target = target_root.join(&fallback_name);
+                match installed_agent_path_state(&fallback_target)? {
+                    InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
+                        (fallback_target, fallback_name)
+                    }
+                    InstalledAgentPathState::UserOwned => continue,
+                }
+            }
         };
-        let was_previously_seeded = marker.seeded_files.contains(&file_name);
+        let was_previously_seeded = marker.seeded_files.contains(&target_file_name);
         let installed_or_refreshed =
             if should_install_agent(&source, &target, was_previously_seeded)? {
                 install_agent_file(&source, &target)?;
@@ -273,16 +278,17 @@ fn seed_bundled_agents_from_dir(
             } else {
                 false
             };
+        let target_is_bundled = target.exists() && is_installed_bundled_agent(&target)?;
 
-        if (installed_or_refreshed || was_previously_seeded)
-            && target.exists()
-            && is_installed_bundled_agent(&target)?
-        {
+        if (installed_or_refreshed || was_previously_seeded) && target_is_bundled {
             if let Some(avatar_ref) = source_agent_avatar_ref(&source)? {
                 avatar_refs_to_warm.insert(avatar_ref);
             }
         }
-        marker.seeded_files.insert(file_name);
+        if target_is_bundled {
+            marker.seeded_files.insert(file_name);
+            marker.seeded_files.insert(target_file_name);
+        }
     }
 
     if !marker.seeded_files.is_empty() {
@@ -536,6 +542,67 @@ mod tests {
     }
 
     #[test]
+    fn startup_uses_a_fallback_for_any_user_owned_bundled_agent_name() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let bundled = "---\nname: Tinker\nmetadata:\n  berdBundled: true\n---\nBundled.";
+        write_agent(source.path(), "tinker.md", bundled);
+        write_agent(
+            target.path(),
+            "tinker.md",
+            "---\nname: Personal Tinker\n---\nPersonal.",
+        );
+
+        let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(result.seeded_count, 1);
+        assert_eq!(
+            fs::read_to_string(target.path().join("tinker.md")).unwrap(),
+            "---\nname: Personal Tinker\n---\nPersonal."
+        );
+        assert_eq!(
+            fs::read_to_string(target.path().join("tinker2.md")).unwrap(),
+            bundled
+        );
+        let marker = read_seed_marker(target.path()).unwrap();
+        assert!(marker.seeded_files.contains("tinker.md"));
+        assert!(marker.seeded_files.contains("tinker2.md"));
+    }
+
+    #[test]
+    fn does_not_mark_an_agent_seeded_when_both_names_are_user_owned() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let bundled = "---\nname: Tinker\nmetadata:\n  berdBundled: true\n---\nBundled.";
+        write_agent(source.path(), "tinker.md", bundled);
+        write_agent(
+            target.path(),
+            "tinker.md",
+            "---\nname: Mine\n---\nPersonal.",
+        );
+        write_agent(
+            target.path(),
+            "tinker2.md",
+            "---\nname: Mine 2\n---\nPersonal.",
+        );
+
+        let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(result.seeded_count, 0);
+        let marker = read_seed_marker(target.path()).unwrap();
+        assert!(!marker.seeded_files.contains("tinker.md"));
+        assert!(!marker.seeded_files.contains("tinker2.md"));
+
+        fs::remove_file(target.path().join("tinker2.md")).unwrap();
+        let retry = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+        assert_eq!(retry.seeded_count, 1);
+        assert_eq!(
+            fs::read_to_string(target.path().join("tinker2.md")).unwrap(),
+            bundled
+        );
+    }
+
+    #[test]
     fn explicitly_repairs_a_deleted_seeded_agent() {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
@@ -702,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    fn treats_existing_user_agent_as_already_handled() {
+    fn preserves_existing_user_agent_and_seeds_bundled_fallback() {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         write_agent(
@@ -718,23 +785,22 @@ mod tests {
 
         let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
 
-        assert_eq!(result.seeded_count, 0);
-        assert!(result.avatar_refs_to_warm.is_empty());
+        assert_eq!(result.seeded_count, 1);
         assert_eq!(
             fs::read_to_string(target.path().join("builderbot.md")).unwrap(),
             "---\nname: Builderbot\ndescription: Agent\n---\nUser edited."
         );
+        assert!(target.path().join("builderbot2.md").exists());
 
         fs::remove_file(target.path().join("builderbot.md")).unwrap();
         let second_result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
 
         assert_eq!(second_result.seeded_count, 0);
-        assert!(second_result.avatar_refs_to_warm.is_empty());
-        assert!(!target.path().join("builderbot.md").exists());
+        assert!(target.path().join("builderbot2.md").exists());
     }
 
     #[test]
-    fn does_not_inspect_existing_unmarked_user_agent() {
+    fn preserves_unreadable_user_agent_and_seeds_bundled_fallback() {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         write_agent(
@@ -747,16 +813,15 @@ mod tests {
 
         let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
 
-        assert_eq!(result.seeded_count, 0);
-        assert!(result.avatar_refs_to_warm.is_empty());
+        assert_eq!(result.seeded_count, 1);
         assert_eq!(
             fs::read(target.path().join("builderbot.md")).unwrap(),
             [0xff]
         );
+        assert!(target.path().join("builderbot2.md").exists());
 
         let second_result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
         assert_eq!(second_result.seeded_count, 0);
-        assert!(second_result.avatar_refs_to_warm.is_empty());
     }
 
     #[test]

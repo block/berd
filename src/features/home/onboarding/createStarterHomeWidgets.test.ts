@@ -1,0 +1,87 @@
+import { describe, expect, it, vi } from "vitest";
+import type { Persona } from "@/shared/types/agents";
+import { createStarterHomeWidgets } from "./createStarterHomeWidgets";
+
+function starterPersona(fileName: "tinker.md" | "wildcard.md"): Persona {
+  return {
+    id: `/Users/test/.agents/agents/${fileName}`,
+    displayName: fileName === "tinker.md" ? "Tinker" : "Wildcard",
+    systemPrompt: "Help.",
+    isBuiltin: false,
+    writable: true,
+    sourceProperties: { metadata: { berdBundled: true } },
+  };
+}
+
+describe("createStarterHomeWidgets", () => {
+  it("builds the usable base Home when starter agents are unavailable", () => {
+    const widgets = createStarterHomeWidgets([]);
+
+    expect(widgets.map(({ type }) => type)).toEqual(
+      expect.arrayContaining([
+        "clock",
+        "onboardingTour",
+        "onboardingProjectArtifact",
+        "stickyNote",
+      ]),
+    );
+    expect(widgets.some(({ type }) => type === "agentPin")).toBe(false);
+  });
+
+  it.each([
+    ["tinker.md", 10, -394],
+    ["wildcard.md", -310, 310],
+  ] as const)("keeps %s in its stable slot when it is the only available agent", (fileName, x, y) => {
+    const widgets = createStarterHomeWidgets([starterPersona(fileName)]);
+
+    expect(widgets.find((widget) => widget.type === "agentPin")).toMatchObject({
+      x,
+      y,
+      state: { agentId: `/Users/test/.agents/agents/${fileName}` },
+    });
+  });
+
+  it("derives the complete canonical starter composition", () => {
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000001")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000002")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000003")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000004")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000005")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000006")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000007")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000008")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000009")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000010")
+      .mockReturnValueOnce("00000000-0000-4000-8000-000000000011");
+
+    const widgets = createStarterHomeWidgets([
+      starterPersona("wildcard.md"),
+      starterPersona("tinker.md"),
+    ]);
+
+    expect(widgets).not.toBeNull();
+    expect(widgets?.find((widget) => widget.type === "clock")).toMatchObject({
+      x: 390,
+      y: -210,
+      width: 192,
+      height: 192,
+    });
+    expect(
+      widgets
+        ?.filter((widget) => widget.type === "agentPin")
+        .map((widget) => ({ ...widget.state, x: widget.x, y: widget.y })),
+    ).toEqual([
+      {
+        agentId: "/Users/test/.agents/agents/tinker.md",
+        x: 10,
+        y: -394,
+      },
+      {
+        agentId: "/Users/test/.agents/agents/wildcard.md",
+        x: -310,
+        y: 310,
+      },
+    ]);
+  });
+});

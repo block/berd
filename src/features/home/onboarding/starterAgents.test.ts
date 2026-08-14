@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Persona } from "@/shared/types/agents";
 import {
+  areStarterAgentPinsEligible,
   haveStarterAgentPinsBeenSeeded,
+  markStarterAgentPinsEligible,
   markStarterAgentPinsSeeded,
   resetStarterAgentPinsSeeded,
   selectStarterAgentPersonas,
@@ -28,24 +30,61 @@ function persona(
 describe("starter agents", () => {
   beforeEach(() => localStorage.clear());
 
-  it("selects block.md and Builderbot without duplicating Berdy", () => {
-    expect(STARTER_AGENT_NAMES).toEqual(["block.md", "Builderbot"]);
+  it("selects Tinker and Wildcard in pinned order", () => {
+    expect(STARTER_AGENT_NAMES).toEqual(["Tinker", "Wildcard"]);
     expect(
       selectStarterAgentPersonas([
-        persona("Builderbot"),
+        persona("Wildcard"),
+        persona("Choosey"),
         persona("Berdy"),
-        persona("block.md"),
+        persona("Tinker"),
       ]).map((agent) => agent.displayName),
-    ).toEqual(["block.md", "Builderbot"]);
+    ).toEqual(["Tinker", "Wildcard"]);
   });
 
-  it("does not treat similarly named user agents as starter agents", () => {
+  it("uses stable bundled file identities rather than display names", () => {
+    const renamedTinker = persona("Workbench", {
+      id: "/Users/test/.agents/agents/tinker.md",
+    });
+    const fallbackWildcard = persona("Surprise", {
+      id: "/Users/test/.agents/agents/wildcard2.md",
+    });
+    const impostor = persona("Tinker", {
+      id: "/Users/test/.agents/agents/choosey.md",
+    });
+
     expect(
       selectStarterAgentPersonas([
-        persona("Berdy", { bundled: false }),
-        persona("Builderbot copy"),
-      ]),
-    ).toEqual([]);
+        fallbackWildcard,
+        impostor,
+        renamedTinker,
+      ]).map((agent) => agent.id),
+    ).toEqual([renamedTinker.id, fallbackWildcard.id]);
+  });
+
+  it("deduplicates canonical and fallback files by starter slot", () => {
+    const canonical = persona("Tinker", {
+      id: "/Users/test/.agents/agents/tinker.md",
+    });
+    const fallback = persona("Tinker fallback", {
+      id: "/Users/test/.agents/agents/tinker2.md",
+    });
+
+    expect(selectStarterAgentPersonas([fallback, canonical])).toEqual([
+      canonical,
+    ]);
+    expect(selectStarterAgentPersonas([canonical, fallback])).toEqual([
+      canonical,
+    ]);
+  });
+
+  it("clears recovery eligibility after starter pins are seeded", () => {
+    markStarterAgentPinsEligible();
+    expect(areStarterAgentPinsEligible()).toBe(true);
+
+    markStarterAgentPinsSeeded();
+
+    expect(areStarterAgentPinsEligible()).toBe(false);
   });
 
   it("clears starter-agent seeding for onboarding reset", () => {

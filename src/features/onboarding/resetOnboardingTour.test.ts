@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const storeMocks = vi.hoisted(() => {
   let loadStatus = "idle";
+  let instances: Array<{ type: string }> = [];
   const initialize = vi.fn(async () => {
     loadStatus = "ready";
   });
@@ -17,6 +18,12 @@ const storeMocks = vi.hoisted(() => {
     setLoadStatus(next: string) {
       loadStatus = next;
     },
+    get instances() {
+      return instances;
+    },
+    setInstances(next: Array<{ type: string }>) {
+      instances = next;
+    },
     initialize,
     resetOnboardingTour,
     resetHomeForOnboarding,
@@ -29,6 +36,7 @@ vi.mock("@/features/home/stores/homeWidgetStore", () => ({
   useHomeWidgetStore: {
     getState: () => ({
       loadStatus: storeMocks.loadStatus,
+      instances: storeMocks.instances,
       initialize: storeMocks.initialize,
       resetOnboardingTour: storeMocks.resetOnboardingTour,
       resetHomeForOnboarding: storeMocks.resetHomeForOnboarding,
@@ -44,10 +52,15 @@ import {
   resetStarterTasksExperience,
   syncOnboardingExperimentState,
 } from "./resetOnboardingTour";
+import {
+  areStarterAgentPinsEligible,
+  haveStarterAgentPinsBeenSeeded,
+} from "@/features/home/onboarding/starterAgents";
 
 describe("onboarding tour experience controls", () => {
   beforeEach(() => {
     storeMocks.setLoadStatus("idle");
+    storeMocks.setInstances([{ type: "agentPin" }, { type: "agentPin" }]);
     storeMocks.initialize.mockClear();
     storeMocks.resetOnboardingTour.mockClear();
     storeMocks.resetHomeForOnboarding.mockClear();
@@ -60,6 +73,15 @@ describe("onboarding tour experience controls", () => {
 
     expect(storeMocks.initialize).toHaveBeenCalledOnce();
     expect(storeMocks.resetHomeForOnboarding).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a partial reset eligible for starter-agent recovery", async () => {
+    storeMocks.setInstances([]);
+
+    await expect(resetHomeForOnboardingExperience()).resolves.toBe(true);
+
+    expect(haveStarterAgentPinsBeenSeeded()).toBe(false);
+    expect(areStarterAgentPinsEligible()).toBe(true);
   });
 
   it("initializes before resetting starter tasks from another route", async () => {

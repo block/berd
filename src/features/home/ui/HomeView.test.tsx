@@ -37,6 +37,15 @@ type WidgetCanvasProps = ComponentProps<
 const widgetCanvasMock = vi.hoisted(() =>
   vi.fn((_props: WidgetCanvasProps) => <div>widget canvas</div>),
 );
+const usePersonasMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@/features/agents/hooks/usePersonas", () => ({
+  usePersonas: usePersonasMock,
+}));
+
+vi.mock("@/shared/api/agents", () => ({
+  listPersonas: vi.fn(async () => useAgentStore.getState().personas),
+}));
 
 vi.mock("@/features/layout/api/layout", async (importOriginal) => {
   const actual =
@@ -133,6 +142,10 @@ beforeEach(() => {
   localStorage.clear();
   localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "6");
   useAgentStore.setState({ personas: [], personasLoading: false });
+  usePersonasMock.mockImplementation(() => ({
+    personas: useAgentStore.getState().personas,
+    isLoading: useAgentStore.getState().personasLoading,
+  }));
   setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, false);
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -287,9 +300,9 @@ describe("HomeView", () => {
     });
     useAgentStore.setState({
       personas: [
-        bundledPersona("Builderbot"),
+        bundledPersona("Tinker"),
         bundledPersona("Berdy"),
-        bundledPersona("block.md"),
+        bundledPersona("Wildcard"),
       ],
       personasLoading: false,
     });
@@ -302,13 +315,55 @@ describe("HomeView", () => {
         .getState()
         .instances.filter((instance) => instance.type === "agentPin"),
     ).toHaveLength(0);
+  });
+
+  it("recovers starter-agent pins after the base Home loads without them", async () => {
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, true);
+    vi.mocked(getLayout).mockResolvedValue(layout({ items: [] }));
+    markStarterAgentPinsEligible();
+    useAgentStore.setState({ personas: [], personasLoading: false });
+
+    const view = renderHomeView();
+    await screen.findByText("widget canvas");
     expect(
-      localStorage.getItem("goose:home:starter-agent-pins-seeded-v2"),
-    ).toBe("1");
+      useHomeWidgetStore
+        .getState()
+        .instances.filter((instance) => instance.type === "agentPin"),
+    ).toHaveLength(0);
+
+    const personas: Persona[] = [
+      {
+        id: "/Users/test/.agents/agents/tinker.md",
+        displayName: "Tinker",
+        systemPrompt: "Help.",
+        isBuiltin: false,
+        writable: true,
+        sourceProperties: { metadata: { berdBundled: true } },
+      },
+      {
+        id: "/Users/test/.agents/agents/wildcard.md",
+        displayName: "Wildcard",
+        systemPrompt: "Help.",
+        isBuiltin: false,
+        writable: true,
+        sourceProperties: { metadata: { berdBundled: true } },
+      },
+    ];
+    useAgentStore.setState({ personas, personasLoading: false });
+    view.rerender(<HomeView />);
+
+    await waitFor(() =>
+      expect(
+        useHomeWidgetStore
+          .getState()
+          .instances.filter((instance) => instance.type === "agentPin"),
+      ).toHaveLength(2),
+    );
   });
 
   it("adds bundled starter agents to a newly seeded Home", async () => {
-    vi.mocked(getLayout).mockResolvedValue(layout());
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, true);
+    vi.mocked(getLayout).mockResolvedValue(layout({ items: [] }));
     const bundledPersona = (displayName: string): Persona => ({
       id: `/Users/test/.agents/agents/${displayName.toLowerCase()}.md`,
       displayName,
@@ -317,7 +372,7 @@ describe("HomeView", () => {
       writable: true,
       sourceProperties: { metadata: { berdBundled: true } },
     });
-    const personas = [bundledPersona("block.md"), bundledPersona("Builderbot")];
+    const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
     useAgentStore.setState({ personas, personasLoading: false });
     markStarterAgentPinsEligible();
 

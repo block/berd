@@ -14,6 +14,10 @@ import { deleteUserAvatar } from "@/shared/api/avatars";
 import { isUserAvatarRef } from "@/shared/avatars/catalog";
 
 const REFRESH_INTERVAL_MS = 60_000;
+let initialPersonaLoad: Promise<void> | null = null;
+let listRequestInFlight = false;
+let personaMutationVersion = 0;
+let personaMutationsInFlight = 0;
 
 function deleteUnreferencedUserAvatar(avatar: string | null | undefined) {
   if (!avatar || !isUserAvatarRef(avatar)) return;
@@ -36,21 +40,18 @@ export function usePersonas() {
   const removePersona = useAgentStore((s) => s.removePersona);
   const setPersonasLoading = useAgentStore((s) => s.setPersonasLoading);
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const listRequestInFlightRef = useRef(false);
-  const mutationVersionRef = useRef(0);
-  const mutationsInFlightRef = useRef(0);
 
   const replacePersonasFromApi = useCallback(
     async (
       fetchPersonas: () => Promise<Persona[]>,
       options: { showLoading: boolean; errorMessage: string },
     ) => {
-      if (listRequestInFlightRef.current) {
+      if (listRequestInFlight) {
         return;
       }
 
-      listRequestInFlightRef.current = true;
-      const mutationVersionAtStart = mutationVersionRef.current;
+      listRequestInFlight = true;
+      const mutationVersionAtStart = personaMutationVersion;
       if (options.showLoading) {
         setPersonasLoading(true);
       }
@@ -58,15 +59,15 @@ export function usePersonas() {
       try {
         const personas = await fetchPersonas();
         if (
-          mutationVersionAtStart === mutationVersionRef.current &&
-          mutationsInFlightRef.current === 0
+          mutationVersionAtStart === personaMutationVersion &&
+          personaMutationsInFlight === 0
         ) {
           setPersonas(personas);
         }
       } catch (error) {
         console.error(options.errorMessage, error);
       } finally {
-        listRequestInFlightRef.current = false;
+        listRequestInFlight = false;
         if (options.showLoading) {
           setPersonasLoading(false);
         }
@@ -76,21 +77,26 @@ export function usePersonas() {
   );
 
   const trackMutation = useCallback(async <T>(mutation: () => Promise<T>) => {
-    mutationVersionRef.current += 1;
-    mutationsInFlightRef.current += 1;
+    personaMutationVersion += 1;
+    personaMutationsInFlight += 1;
     try {
       return await mutation();
     } finally {
-      mutationsInFlightRef.current -= 1;
-      mutationVersionRef.current += 1;
+      personaMutationsInFlight -= 1;
+      personaMutationVersion += 1;
     }
   }, []);
 
   const loadPersonas = useCallback(async () => {
-    await replacePersonasFromApi(api.listPersonas, {
-      showLoading: true,
-      errorMessage: "Failed to load personas:",
-    });
+    if (!initialPersonaLoad) {
+      initialPersonaLoad = replacePersonasFromApi(api.listPersonas, {
+        showLoading: true,
+        errorMessage: "Failed to load personas:",
+      }).finally(() => {
+        initialPersonaLoad = null;
+      });
+    }
+    await initialPersonaLoad;
   }, [replacePersonasFromApi]);
 
   const refreshFromDisk = useCallback(async () => {

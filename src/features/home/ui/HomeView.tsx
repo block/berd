@@ -3,10 +3,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { prefetchProjectArtifactRenderer } from "@/features/projects/artifact/prefetchProjectArtifactRenderer";
 import { OnboardingTourDialog } from "@/features/onboarding/ui/OnboardingTourDialog";
-import { findBerdyPersonaId } from "@/features/onboarding/berdyAgent";
 import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
+import { usePersonas } from "@/features/agents/hooks/usePersonas";
+import {
+  areStarterAgentPinsEligible,
+  markStarterAgentPinsSeeded,
+  selectStarterAgentPersonas,
+} from "@/features/home/onboarding/starterAgents";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
 import { clampLayoutCamera } from "../lib/layoutCamera";
@@ -21,30 +26,14 @@ import type { WidgetInstance } from "../widgets/types";
 import { WidgetCanvas } from "./WidgetCanvas";
 import { useStarterTasks } from "@/features/home/onboarding/StarterTasksContext";
 import {
-  HOME_CAMERA_SAVE_CONFIRMED_EVENT,
-  HOME_CAMERA_SAVE_DISCARDED_EVENT,
-  HOME_WIDGET_SAVE_CONFIRMED_EVENT,
-  HOME_WIDGET_SAVE_DISCARDED_EVENT,
-} from "@/features/home/onboarding/homeWidgetSaveLifecycle";
-import {
-  areStarterAgentPinsEligible,
-  haveStarterAgentPinsBeenSeeded,
-  markStarterAgentPinsSeeded,
-  selectStarterAgentPersonas,
-  shouldRemoveLegacyBerdyPin,
-} from "@/features/home/onboarding/starterAgents";
-import {
   STARTER_PROJECT_ID,
   STARTER_TASKS_NOTE_ID,
 } from "@/features/home/onboarding/starterTasks";
 import {
   getStarterTasksHeight,
-  hasArrangedStarterHome,
-  markStarterHomeArranged,
   starterLayoutCenter,
   STARTER_HOME_LAYOUT,
 } from "@/features/home/onboarding/starterHomeLayout";
-import { useAgentStore } from "@/features/agents/stores/agentStore";
 
 const RETIRED_EDUCATIONAL_STICKY_IDS = new Set([
   "onboarding:welcome",
@@ -97,17 +86,10 @@ export function HomeView({
   const starterTasksHeight = getStarterTasksHeight(
     starterTasks?.omittedTaskIds.size ?? 0,
   );
-  const personas = useAgentStore((state) => state.personas);
-  const personasLoading = useAgentStore((state) => state.personasLoading);
+  const { personas, isLoading: personasLoading } = usePersonas();
   const setTopBarActions = useSetTopBarActions();
   useInvalidateHomeWidgetSkillsOnChange();
   const [layoutMotionActive, setLayoutMotionActive] = useState(false);
-  const pendingStarterAgentSeedRef = useRef(false);
-  const pendingStarterLayoutArrangementRef = useRef(false);
-  const starterLayoutItemsConfirmedRef = useRef(false);
-  const starterLayoutCameraConfirmedRef = useRef(false);
-  const starterAgentSeedAttemptedRef = useRef(false);
-  const starterLayoutArrangementAttemptedRef = useRef(false);
 
   const [tourOpen, setTourOpen] = useState(false);
   const tourCompleteRef = useRef<(() => void) | null>(null);
@@ -133,268 +115,22 @@ export function HomeView({
   } = useHomeWidgetLayoutController();
 
   useEffect(() => {
-    const finishStarterLayoutIfConfirmed = () => {
-      if (
-        pendingStarterLayoutArrangementRef.current &&
-        starterLayoutItemsConfirmedRef.current &&
-        starterLayoutCameraConfirmedRef.current
-      ) {
-        pendingStarterLayoutArrangementRef.current = false;
-        markStarterHomeArranged();
-      }
-    };
-    const confirmItems = () => {
-      if (pendingStarterAgentSeedRef.current) {
-        pendingStarterAgentSeedRef.current = false;
-        markStarterAgentPinsSeeded();
-      }
-      if (pendingStarterLayoutArrangementRef.current) {
-        starterLayoutItemsConfirmedRef.current = true;
-        finishStarterLayoutIfConfirmed();
-      }
-    };
-    const confirmCamera = () => {
-      if (!pendingStarterLayoutArrangementRef.current) return;
-      starterLayoutCameraConfirmedRef.current = true;
-      finishStarterLayoutIfConfirmed();
-    };
-    const discard = () => {
-      pendingStarterAgentSeedRef.current = false;
-      pendingStarterLayoutArrangementRef.current = false;
-      starterLayoutItemsConfirmedRef.current = false;
-      starterLayoutCameraConfirmedRef.current = false;
-      starterAgentSeedAttemptedRef.current = false;
-      starterLayoutArrangementAttemptedRef.current = false;
-    };
-    window.addEventListener(HOME_WIDGET_SAVE_CONFIRMED_EVENT, confirmItems);
-    window.addEventListener(HOME_WIDGET_SAVE_DISCARDED_EVENT, discard);
-    window.addEventListener(HOME_CAMERA_SAVE_CONFIRMED_EVENT, confirmCamera);
-    window.addEventListener(HOME_CAMERA_SAVE_DISCARDED_EVENT, discard);
-    return () => {
-      window.removeEventListener(
-        HOME_WIDGET_SAVE_CONFIRMED_EVENT,
-        confirmItems,
-      );
-      window.removeEventListener(HOME_WIDGET_SAVE_DISCARDED_EVENT, discard);
-      window.removeEventListener(
-        HOME_CAMERA_SAVE_CONFIRMED_EVENT,
-        confirmCamera,
-      );
-      window.removeEventListener(HOME_CAMERA_SAVE_DISCARDED_EVENT, discard);
-    };
-  }, []);
-
-  useEffect(() => {
     if (
       loadStatus !== "ready" ||
       personasLoading ||
-      pendingStarterAgentSeedRef.current ||
-      starterAgentSeedAttemptedRef.current
+      !areStarterAgentPinsEligible()
     ) {
       return;
     }
-
-    const legacyBerdyMigration = shouldRemoveLegacyBerdyPin();
-    const berdyPersonaId = findBerdyPersonaId(personas);
-    if (legacyBerdyMigration && !berdyPersonaId) return;
-    if (legacyBerdyMigration) {
-      for (const instance of instances) {
-        if (
-          instance.type === "agentPin" &&
-          instance.state?.agentId === berdyPersonaId
-        ) {
-          widgetMutations.removeWidget(instance.id);
-        }
-      }
-    }
-
-    const haveSeededStarterAgents = haveStarterAgentPinsBeenSeeded();
-    const starterAgentPinsEligible = areStarterAgentPinsEligible();
-    // A missing marker is not proof of a new Home: every existing user lacks
-    // this newly introduced key. Only a layout seeded from empty is eligible;
-    // otherwise migrate the marker without touching the user's canvas.
-    if (
-      !haveSeededStarterAgents &&
-      !starterAgentPinsEligible &&
-      !legacyBerdyMigration
-    ) {
-      markStarterAgentPinsSeeded();
-      return;
-    }
-    const availableStarterAgents = haveSeededStarterAgents
-      ? []
-      : selectStarterAgentPersonas(personas);
-    if (availableStarterAgents.length === 0) {
-      if (legacyBerdyMigration) {
-        starterAgentSeedAttemptedRef.current = true;
-        pendingStarterAgentSeedRef.current = true;
-      }
-      return;
-    }
-
-    const pinnedAgentIds = new Set(
-      instances
-        .filter((instance) => instance.type === "agentPin")
-        .map((instance) => instance.state?.agentId)
-        .filter((agentId): agentId is string => typeof agentId === "string"),
-    );
-    const missingAgents = availableStarterAgents
-      .map((persona, index) => ({ persona, index }))
-      .filter(({ persona }) => !pinnedAgentIds.has(persona.id));
-    if (missingAgents.length === 0 && !legacyBerdyMigration) {
-      markStarterAgentPinsSeeded();
-      return;
-    }
-    const allSeeded = missingAgents.every(({ persona, index }) => {
-      const placement = STARTER_HOME_LAYOUT.agents[index];
-      const center = placement
-        ? starterLayoutCenter(placement)
-        : { x: -420 + index * 220, y: 410 };
-      return widgetMutations.addWidget(
-        "agentPin",
-        center.x,
-        center.y,
-        { agentId: persona.id },
-        undefined,
-        { notifyStarterTask: false },
-      );
-    });
-    if (allSeeded) {
-      starterAgentSeedAttemptedRef.current = true;
-      pendingStarterAgentSeedRef.current = true;
-    }
-  }, [instances, loadStatus, personas, personasLoading, widgetMutations]);
-
-  useEffect(() => {
-    if (
-      loadStatus !== "ready" ||
-      !starterTasks?.visible ||
-      personasLoading ||
-      hasArrangedStarterHome() ||
-      pendingStarterLayoutArrangementRef.current ||
-      starterLayoutArrangementAttemptedRef.current
-    ) {
-      return;
-    }
-
-    const starterAgentPersonas = selectStarterAgentPersonas(personas);
-    const starterAgentIds = new Set(
-      starterAgentPersonas.map((persona) => persona.id),
-    );
-    const hasCompleteStarterSet =
-      starterAgentPersonas.length > 0 &&
-      starterAgentPersonas.every((persona) =>
-        instances.some(
-          (instance) =>
-            instance.type === "agentPin" &&
-            instance.state?.agentId === persona.id,
-        ),
-      ) &&
-      instances.some((instance) => instance.type === "clock") &&
-      instances.some((instance) => instance.type === "onboardingTour") &&
-      instances.some(
-        (instance) => instance.state?.noteId === STARTER_TASKS_NOTE_ID,
-      ) &&
-      instances.some(
-        (instance) =>
-          instance.type === "onboardingProjectArtifact" ||
-          instance.state?.onboardingStarterProject === true,
-      );
-    if (!hasCompleteStarterSet) return;
-
-    // Guard against synchronous Zustand re-entry while the layout mutations
-    // are queued. The durable marker is written only after the runtime confirms
-    // the save, so a discarded save can retry on the next render.
-    starterLayoutArrangementAttemptedRef.current = true;
-    pendingStarterLayoutArrangementRef.current = true;
-    starterLayoutItemsConfirmedRef.current = false;
-    starterLayoutCameraConfirmedRef.current = camera === null;
-
-    const starterClock = instances
-      .filter((instance) => instance.type === "clock")
-      .sort((left, right) => left.z - right.z)[0];
-
-    for (const instance of instances) {
-      const noteId = instance.state?.noteId;
-
-      if (instance.id === starterClock?.id) {
-        widgetMutations.moveWidget(
-          instance.id,
-          STARTER_HOME_LAYOUT.clock.x,
-          STARTER_HOME_LAYOUT.clock.y,
-        );
-      } else if (instance.type === "onboardingTour") {
-        widgetMutations.moveWidget(
-          instance.id,
-          STARTER_HOME_LAYOUT.berdy.x,
-          STARTER_HOME_LAYOUT.berdy.y,
-        );
-      } else if (
-        instance.type === "agentPin" &&
-        typeof instance.state?.agentId === "string" &&
-        starterAgentIds.has(instance.state.agentId)
-      ) {
-        const starterAgentIndex = starterAgentPersonas.findIndex(
-          (persona) => persona.id === instance.state?.agentId,
-        );
-        const placement = STARTER_HOME_LAYOUT.agents[starterAgentIndex];
-        if (placement) {
-          widgetMutations.moveWidget(instance.id, placement.x, placement.y);
-        }
-      } else if (noteId === STARTER_TASKS_NOTE_ID) {
-        widgetMutations.moveWidget(
-          instance.id,
-          STARTER_HOME_LAYOUT.tasks.x,
-          STARTER_HOME_LAYOUT.tasks.y,
-        );
-        widgetMutations.resizeWidget(
-          instance.id,
-          STARTER_HOME_LAYOUT.tasks.width,
-          starterTasksHeight,
-        );
-      } else if (
-        instance.type === "onboardingProjectArtifact" ||
-        instance.state?.onboardingStarterProject === true
-      ) {
-        widgetMutations.moveWidget(
-          instance.id,
-          STARTER_HOME_LAYOUT.project.x,
-          STARTER_HOME_LAYOUT.project.y,
-        );
-        widgetMutations.resizeWidget(
-          instance.id,
-          STARTER_HOME_LAYOUT.project.width,
-          STARTER_HOME_LAYOUT.project.height,
-        );
-      }
-    }
-    const berdyTour = instances.find(
-      (instance) => instance.type === "onboardingTour",
-    );
-    if (berdyTour) {
-      // Run after the project's layout mutations so Berdy is definitively the
-      // topmost starter widget, even when the cube previously had a higher z.
-      widgetMutations.bumpZ(berdyTour.id);
-    }
-    if (camera) {
-      saveCamera({
-        ...camera,
-        centerX: 80,
-        centerY: 44,
-        zoomBps: 10_000,
+    const starterPersonas = selectStarterAgentPersonas(personas);
+    if (starterPersonas.length !== STARTER_HOME_LAYOUT.agents.length) return;
+    void useHomeWidgetStore
+      .getState()
+      .addMissingStarterAgentPins(starterPersonas.map(({ id }) => id))
+      .then((didPersist) => {
+        if (didPersist) markStarterAgentPinsSeeded();
       });
-    }
-  }, [
-    camera,
-    instances,
-    loadStatus,
-    personas,
-    personasLoading,
-    saveCamera,
-    starterTasks?.visible,
-    starterTasksHeight,
-    widgetMutations,
-  ]);
+  }, [loadStatus, personas, personasLoading]);
 
   const experimentVisibleInstances = useMemo(
     () =>

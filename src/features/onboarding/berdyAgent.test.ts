@@ -6,7 +6,7 @@ function persona(overrides: Partial<Persona> = {}): Persona {
   return {
     id: "/Users/test/.agents/agents/berdy.md",
     displayName: "Berdy",
-    avatar: "app-avatar:gloopies-14",
+    avatar: "app-avatar:gloopies-22",
     systemPrompt: "Help people use Berd.",
     isBuiltin: false,
     writable: true,

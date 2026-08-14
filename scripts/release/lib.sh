@@ -237,8 +237,8 @@ default_bundled_agents() {
 
   case "$build_kind" in
     official|custom)
-      # Berdy already lives under distro/agents and is bundled on every
-      # platform. Release-only agents must be selected explicitly.
+      # Starter agents already live under distro/agents and are bundled on
+      # every platform. Release-only agents must be selected explicitly.
       return 0
       ;;
     *)

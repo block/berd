@@ -3,7 +3,7 @@
 This directory holds agent Markdown files available to Berd release builds.
 Selected files are staged into `distro/agents/` only for the duration of the
 build. Official and custom builds do not select any release-only agents by
-default. Berdy is always bundled from `distro/agents/berdy.md`.
+default. The starter agents are always bundled from `distro/agents/`.
 
 ## Adding an agent
 

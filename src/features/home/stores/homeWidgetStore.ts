@@ -6,6 +6,8 @@ import {
   STARTER_TASKS_NOTE_ID,
 } from "@/features/home/onboarding/starterTasks";
 import { notifyStarterWidgetAdded } from "@/features/home/onboarding/starterWidgetTask";
+import { createStarterHomeWidgets } from "@/features/home/onboarding/createStarterHomeWidgets";
+import { listPersonas } from "@/shared/api/agents";
 import {
   notifyHomeWidgetSaveConfirmed,
   notifyHomeWidgetSaveDiscarded,
@@ -15,17 +17,21 @@ import {
   STARTER_HOME_LAYOUT,
 } from "@/features/home/onboarding/starterHomeLayout";
 import { getExperiment } from "@/features/experiments/experimentPreferences";
-import type {
-  LayoutCamera,
-  LayoutConstraints,
+import {
+  HOME_LAYOUT_ID,
+  saveLayoutItems,
+  type LayoutCamera,
+  type LayoutConstraints,
 } from "@/features/layout/api/layout";
 import { i18n } from "@/shared/i18n";
 import { markFreshWidgetPlacement } from "../lib/freshWidgetPlacements";
 import { isLayoutConstraints } from "../lib/snapToGrid";
 import {
-  createDefaultClockWidget,
   createDefaultOnboardingTourWidget,
   defaultStickyNoteId,
+  homeWidgetsToLayoutItems,
+  HOME_LAYOUT_REPLACE_KINDS,
+  layoutItemsToHomeWidgets,
   onboardingTourAvatarCenter,
   reconcileOnboardingExperimentWidgets,
 } from "../lib/homeLayoutMapper";
@@ -210,6 +216,7 @@ interface HomeWidgetStore extends HomeWidgetState {
   resetOnboardingTour: () => Promise<boolean>;
   resetStarterTasks: () => Promise<boolean>;
   resetHomeForOnboarding: () => Promise<boolean>;
+  addMissingStarterAgentPins: (agentIds: readonly string[]) => Promise<boolean>;
   reloadOnboardingTourForDev: () => void;
   removeWidget: (id: string) => void;
   updateWidgetState: (
@@ -231,6 +238,7 @@ function createHomeWidgetStore() {
   let cleanUpSnapshotOnSaveDiscarded: PendingCleanUpSnapshot =
     UNCHANGED_SNAPSHOT;
   let starterWidgetCompletionPending = false;
+  let starterAgentRecoveryPromise: Promise<boolean> | null = null;
 
   function applyPendingCleanUpSnapshot(snapshot: PendingCleanUpSnapshot): void {
     if (snapshot === UNCHANGED_SNAPSHOT) {
@@ -320,6 +328,61 @@ function createHomeWidgetStore() {
         } catch {
           toast.error(i18n.t("home:widgetLayer.toasts.copyFailed"));
         }
+      },
+      addMissingStarterAgentPins: (agentIds) => {
+        if (starterAgentRecoveryPromise) return starterAgentRecoveryPromise;
+        starterAgentRecoveryPromise = (async () => {
+          const state = get();
+          if (!canMutateWidgets(state) || agentIds.length === 0) return false;
+          const pinnedAgentIds = new Set(
+            state.instances.flatMap((instance) =>
+              instance.type === "agentPin" &&
+              typeof instance.state?.agentId === "string"
+                ? [instance.state.agentId]
+                : [],
+            ),
+          );
+          const missingAgentIds = agentIds.filter(
+            (agentId) => !pinnedAgentIds.has(agentId),
+          );
+          if (missingAgentIds.length === 0) return true;
+
+          let maxZ = state.instances.reduce(
+            (currentMax, instance) => Math.max(currentMax, instance.z),
+            0,
+          );
+          const nextInstances = [
+            ...state.instances,
+            ...missingAgentIds.map((agentId) => {
+              const index = agentIds.indexOf(agentId);
+              return {
+                id: crypto.randomUUID(),
+                type: "agentPin" as const,
+                ...STARTER_HOME_LAYOUT.agents[index],
+                z: ++maxZ,
+                state: { agentId },
+              };
+            }),
+          ];
+          const initialItemRevision = state.itemRevision;
+          set({ instances: nextInstances });
+          runtime.enqueueSave(nextInstances);
+          await runtime.waitForPendingSaves();
+          const latest = get();
+          return (
+            latest.itemRevision !== initialItemRevision &&
+            agentIds.every((agentId) =>
+              latest.instances.some(
+                (instance) =>
+                  instance.type === "agentPin" &&
+                  instance.state?.agentId === agentId,
+              ),
+            )
+          );
+        })().finally(() => {
+          starterAgentRecoveryPromise = null;
+        });
+        return starterAgentRecoveryPromise;
       },
       addWidget: (type, x, y, state, bounds, options) => {
         if (!HOME_WIDGET_CATALOG_BY_ID[type]) {
@@ -590,65 +653,58 @@ function createHomeWidgetStore() {
       },
       resetHomeForOnboarding: async () => {
         const state = get();
-        if (!canMutateWidgets(state)) {
+        if (!canMutateWidgets(state) || state.itemRevision === null) {
           return false;
         }
         const initialItemRevision = state.itemRevision;
         const initialCameraRevision = state.cameraRevision;
 
         resetStarterHomeArrangement();
-        const clock = {
-          ...createDefaultClockWidget(),
-          x: STARTER_HOME_LAYOUT.clock.x,
-          y: STARTER_HOME_LAYOUT.clock.y,
-        };
-        const onboardingTour = {
-          ...createDefaultOnboardingTourWidget(clock),
-          x: STARTER_HOME_LAYOUT.berdy.x,
-          y: STARTER_HOME_LAYOUT.berdy.y,
-        };
-        const nextInstances: WidgetInstance[] = [
-          { ...clock, z: 1 },
-          { ...onboardingTour, z: 2 },
-          {
-            id: crypto.randomUUID(),
-            type: "stickyNote",
-            x: STARTER_HOME_LAYOUT.tasks.x,
-            y: STARTER_HOME_LAYOUT.tasks.y,
-            z: 3,
-            width: STARTER_HOME_LAYOUT.tasks.width,
-            height: STARTER_HOME_LAYOUT.tasks.height,
-            state: { noteId: STARTER_TASKS_NOTE_ID },
-          },
-          {
-            id: crypto.randomUUID(),
-            type: "onboardingProjectArtifact",
-            x: STARTER_HOME_LAYOUT.project.x,
-            y: STARTER_HOME_LAYOUT.project.y,
-            z: 4,
-            width: STARTER_HOME_LAYOUT.project.width,
-            height: STARTER_HOME_LAYOUT.project.height,
-            state: {
-              projectId: STARTER_PROJECT_ID,
-              onboardingStarterProject: true,
-            },
-          },
-        ];
+        const nextInstances = createStarterHomeWidgets(
+          await listPersonas().catch(() => []),
+        );
+        if (!nextInstances) return false;
+
         const expectedCamera = state.camera
           ? {
               ...state.camera,
-              centerX: 80,
-              centerY: 44,
+              centerX: 0,
+              centerY: 40,
               zoomBps: 10_000,
             }
           : null;
         persistCleanUpSnapshot(null);
         clearPendingCleanUpSaveOutcomes();
         set({ instances: nextInstances, cleanUpSnapshot: null });
-        runtime.enqueueSave(nextInstances);
-        if (expectedCamera) {
-          get().saveCamera(expectedCamera);
+        let itemResult = await saveLayoutItems({
+          layoutId: HOME_LAYOUT_ID,
+          expectedRevision: initialItemRevision,
+          replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
+          items: homeWidgetsToLayoutItems(nextInstances),
+        });
+        if (!itemResult.ok) {
+          itemResult = await saveLayoutItems({
+            layoutId: HOME_LAYOUT_ID,
+            expectedRevision: itemResult.layout.itemRevision,
+            replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
+            items: homeWidgetsToLayoutItems(nextInstances),
+          });
         }
+        if (!itemResult.ok) {
+          set({
+            ...initialHomeWidgetState,
+            ...itemResult.layout,
+            instances: layoutItemsToHomeWidgets(itemResult.layout.items),
+            loadStatus: "ready",
+          });
+          return false;
+        }
+        set({
+          instances: layoutItemsToHomeWidgets(itemResult.layout.items),
+          itemRevision: itemResult.layout.itemRevision,
+          lastConfirmedLayout: itemResult.layout,
+        });
+        if (expectedCamera) get().saveCamera(expectedCamera);
         await runtime.waitForPendingSaves();
 
         const latest = get();
@@ -668,7 +724,7 @@ function createHomeWidgetStore() {
         if (itemsConfirmed && !cameraConfirmed) {
           toast.warning(i18n.t("home:widgetLayer.toasts.cameraSaveFailed"));
         }
-        return itemsConfirmed;
+        return itemsConfirmed && cameraConfirmed;
       },
       reloadOnboardingTourForDev: () => {
         if (!import.meta.env.DEV) return;

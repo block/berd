@@ -23,7 +23,7 @@ export function findBerdyPersonaId(
       ) &&
       isBerdBundled &&
       persona.displayName.trim().toLowerCase() === "berdy" &&
-      persona.avatar === "app-avatar:gloopies-14"
+      persona.avatar === "app-avatar:gloopies-22"
     );
   });
 

@@ -11,7 +11,17 @@ import {
   type LayoutConstraints,
 } from "@/features/layout/api/layout";
 import { i18n } from "@/shared/i18n";
-import { markStarterAgentPinsEligible } from "@/features/home/onboarding/starterAgents";
+import {
+  markStarterAgentPinsEligible,
+  markStarterAgentPinsSeeded,
+  selectStarterAgentPersonas,
+} from "@/features/home/onboarding/starterAgents";
+import {
+  markStarterHomeArranged,
+  STARTER_HOME_LAYOUT,
+} from "@/features/home/onboarding/starterHomeLayout";
+import { createStarterHomeWidgets } from "@/features/home/onboarding/createStarterHomeWidgets";
+import { listPersonas } from "@/shared/api/agents";
 import {
   notifyHomeCameraSaveConfirmed,
   notifyHomeCameraSaveDiscarded,
@@ -19,12 +29,10 @@ import {
 import {
   createDefaultHomeLayoutItems,
   createDefaultOnboardingWidgets,
-  createDefaultOnboardingTourWidget,
   defaultStickyNoteId,
   homeWidgetsToLayoutItems,
   HOME_LAYOUT_REPLACE_KINDS,
   layoutItemsToHomeWidgets,
-  onboardingTourAvatarCenter,
   reconcileOnboardingExperimentWidgets,
 } from "../lib/homeLayoutMapper";
 import type { WidgetInstance } from "../widgets/types";
@@ -500,25 +508,38 @@ export function createHomeWidgetRuntime({
           return;
         }
 
-        // Empty layout — seed default onboarding widgets so first-run users
-        // have something on the canvas. If the user later unpins them, that
-        // choice is respected: only an empty layout re-seeds.
-        const defaultItems = createDefaultHomeLayoutItems(
-          undefined,
-          berdyOnboardingEnabled,
-        );
+        if (!berdyOnboardingEnabled) {
+          const defaultItems = createDefaultHomeLayoutItems(undefined, false);
+          const result = await saveLayoutItems({
+            layoutId: HOME_LAYOUT_ID,
+            expectedRevision: layout.itemRevision,
+            replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
+            items: defaultItems,
+          });
+          if (generation !== runtime.generation) return;
+          if (hasStickyNote(layoutItemsToHomeWidgets(result.layout.items))) {
+            markOnboardingStickiesSeen();
+          }
+          setReadyLayout(result.layout, generation);
+          return;
+        }
+
+        // Empty layout: build the complete starter composition before the
+        // first save. This avoids exposing a partial Home to renderer effects
+        // and makes the item layout a single optimistic transaction.
+        const personas = await listPersonas().catch(() => []);
+        const starterPersonas = selectStarterAgentPersonas(personas);
+        const hasAllStarterAgents =
+          starterPersonas.length === STARTER_HOME_LAYOUT.agents.length;
+        const starterWidgets = createStarterHomeWidgets(personas);
+
         const result = await saveLayoutItems({
           layoutId: HOME_LAYOUT_ID,
           expectedRevision: layout.itemRevision,
           replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
-          items: defaultItems,
+          items: homeWidgetsToLayoutItems(starterWidgets),
         });
-        if (generation !== runtime.generation) {
-          return;
-        }
-        // During default seeding, a revision conflict means another writer
-        // already created a newer backend layout. There are no local edits to
-        // preserve yet, so initialization adopts the returned conflict layout.
+        if (generation !== runtime.generation) return;
         if (hasStickyNote(layoutItemsToHomeWidgets(result.layout.items))) {
           markOnboardingStickiesSeen();
         }
@@ -526,25 +547,33 @@ export function createHomeWidgetRuntime({
           setReadyLayout(result.layout, generation);
           return;
         }
-        markStarterAgentPinsEligible();
 
-        if (!berdyOnboardingEnabled) {
-          setReadyLayout(result.layout, generation);
-          return;
+        if (hasAllStarterAgents) {
+          markStarterAgentPinsSeeded();
+        } else {
+          markStarterAgentPinsEligible();
         }
 
-        const onboardingTour = createDefaultOnboardingTourWidget();
-        const avatarCenter = onboardingTourAvatarCenter(onboardingTour);
-        const centeredCamera = {
+        const starterCamera = {
           ...result.layout.camera,
-          centerX: avatarCenter.x,
-          centerY: avatarCenter.y,
+          centerX: 0,
+          centerY: 40,
+          zoomBps: 10_000,
         };
-        setReadyLayout(
-          { ...result.layout, camera: centeredCamera },
-          generation,
-        );
-        enqueueCameraSave(centeredCamera);
+        const cameraRevisionBeforeSave = result.layout.cameraRevision;
+        setReadyLayout({ ...result.layout, camera: starterCamera }, generation);
+        enqueueCameraSave(starterCamera);
+        await waitForPendingSaves();
+        if (generation !== runtime.generation) return;
+        const savedState = getState();
+        const cameraSaved =
+          savedState.cameraRevision !== cameraRevisionBeforeSave &&
+          savedState.camera?.centerX === starterCamera.centerX &&
+          savedState.camera.centerY === starterCamera.centerY &&
+          savedState.camera.zoomBps === starterCamera.zoomBps;
+        if (cameraSaved) {
+          markStarterHomeArranged();
+        }
         return;
       } catch (error) {
         if (generation !== runtime.generation) {

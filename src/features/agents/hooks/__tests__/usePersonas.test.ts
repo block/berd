@@ -116,6 +116,57 @@ describe("usePersonas", () => {
       });
     });
 
+    it("shares the initial list request across simultaneous consumers", async () => {
+      const personas = [makePersona({ id: "p1" })];
+      let resolveList!: (value: Persona[]) => void;
+      vi.mocked(api.listPersonas).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveList = resolve;
+          }),
+      );
+
+      const first = renderHook(() => usePersonas());
+      const second = renderHook(() => usePersonas());
+
+      await waitFor(() => {
+        expect(api.listPersonas).toHaveBeenCalledTimes(1);
+      });
+
+      await act(async () => resolveList(personas));
+
+      await waitFor(() => {
+        expect(first.result.current.personas).toEqual(personas);
+        expect(second.result.current.personas).toEqual(personas);
+      });
+    });
+
+    it("does not let one consumer's stale load overwrite another consumer's mutation", async () => {
+      let resolveList!: (value: Persona[]) => void;
+      vi.mocked(api.listPersonas).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveList = resolve;
+          }),
+      );
+      const created = makePersona({ id: "created-during-load" });
+      vi.mocked(api.createPersona).mockResolvedValueOnce(created);
+
+      renderHook(() => usePersonas());
+      const mutatingConsumer = renderHook(() => usePersonas());
+      await waitFor(() => expect(api.listPersonas).toHaveBeenCalledOnce());
+
+      await act(async () => {
+        await mutatingConsumer.result.current.createPersona({
+          displayName: "Created during load",
+          systemPrompt: "Help.",
+        });
+      });
+      await act(async () => resolveList([]));
+
+      expect(useAgentStore.getState().personas).toContainEqual(created);
+    });
+
     it("sets loading state correctly", async () => {
       // Create a deferred promise to control timing
       let resolveList!: (value: Persona[]) => void;
