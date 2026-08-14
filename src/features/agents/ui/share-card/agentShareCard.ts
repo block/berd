@@ -6,15 +6,14 @@ import {
   fallbackAgentCardColor,
   sampleAgentAvatarColor,
 } from "./agentCardColor";
-import {
-  AGENT_CARD_HEIGHT,
-  AGENT_CARD_WIDTH,
-  deriveAgentCardTraits,
-} from "./agentShareCardSpec";
+import { AGENT_CARD_HEIGHT, AGENT_CARD_WIDTH } from "./agentShareCardSpec";
 import {
   deriveAgentShareCardTextLayout,
   wrapAgentCardText,
 } from "./agentShareCardLayout";
+import { loadAgentCardFonts } from "./agentShareCardFonts";
+import type { AgentShareCardCopy } from "./agentShareCardCopy";
+import { AGENT_CARD_GEOMETRY } from "./agentShareCardGeometry";
 
 export const AVATAR_VIDEO_LOAD_TIMEOUT_MS = 10_000;
 export const SHARE_CARD_IMAGE_LOAD_TIMEOUT_MS = 10_000;
@@ -216,7 +215,9 @@ function drawContainedImage(
 export async function renderAgentShareCard(
   persona: Persona,
   avatarSrc: string,
-  cardBase = getAgentShareCardBase(persona.id),
+  cardBase: string,
+  copy: AgentShareCardCopy,
+  locale: string,
 ): Promise<Blob> {
   const [base, avatar, berdMark] = await Promise.all([
     loadShareCardImage(cardBase),
@@ -236,28 +237,50 @@ export async function renderAgentShareCard(
   context.globalCompositeOperation = "color";
   context.globalAlpha = 0.34;
   context.fillStyle = accentColor;
-  roundedRect(context, 0, 0, AGENT_CARD_WIDTH, AGENT_CARD_HEIGHT, 80);
-  context.fill();
+  drawAgentCardFrame(context);
+  context.fill("evenodd");
   context.restore();
   context.save();
   context.globalAlpha = 0.95;
   context.fillStyle = "white";
-  roundedRect(context, 30, 31, 1167, 1777, 70);
+  const { panel } = AGENT_CARD_GEOMETRY;
+  roundedRect(
+    context,
+    panel.x,
+    panel.y,
+    panel.width,
+    panel.height,
+    panel.radius,
+  );
   context.fill();
   context.restore();
 
-  context.drawImage(berdMark, 120, 122, 40, 40);
+  const {
+    logo,
+    brand,
+    avatar: avatarGeometry,
+    title: titleGeometry,
+    description: descriptionGeometry,
+  } = AGENT_CARD_GEOMETRY;
+  context.drawImage(berdMark, logo.x, logo.y, logo.width, logo.height);
 
-  await loadCardFonts();
+  await loadAgentCardFonts();
   context.fillStyle = "black";
   context.textBaseline = "alphabetic";
   context.font = "600 36px Inter, sans-serif";
   context.textAlign = "right";
-  context.fillText("BERD AGENT", 1110, 153);
+  context.fillText("BERD AGENT", brand.x, brand.y);
 
   // Berd avatars are character illustrations, not portrait photographs. Keep
   // the full artwork visible instead of applying Buzz's circular cover crop.
-  drawContainedImage(context, avatar, 155, 240, 917, 920);
+  drawContainedImage(
+    context,
+    avatar,
+    avatarGeometry.x,
+    avatarGeometry.y,
+    avatarGeometry.width,
+    avatarGeometry.height,
+  );
 
   context.fillStyle = "black";
   context.textAlign = "left";
@@ -276,28 +299,49 @@ export async function renderAgentShareCard(
       description,
       measureTitle,
       measureDescription,
+      locale,
     );
 
   context.font = "600 64px Inter, sans-serif";
-  context.fillText(title, 115, 1370 - contentShift);
+  context.fillText(title, titleGeometry.x, titleGeometry.y - contentShift);
 
   context.font = "600 42px Inter, sans-serif";
   descriptionLines.forEach((line, index) => {
-    context.fillText(line, 115, 1445 - contentShift + index * 52);
+    context.fillText(
+      line,
+      descriptionGeometry.x,
+      descriptionGeometry.y -
+        contentShift +
+        index * descriptionGeometry.lineHeight,
+    );
   });
 
-  const traits = deriveAgentCardTraits(description);
-  context.lineWidth = 4;
+  const { goodFor, vibes, traitRule, traitCopyY } = AGENT_CARD_GEOMETRY;
+  context.lineWidth = traitRule.width;
   context.strokeStyle = "black";
   context.beginPath();
-  context.moveTo(120, 1585);
-  context.lineTo(120, 1683);
-  context.moveTo(700, 1585);
-  context.lineTo(700, 1683);
+  context.moveTo(goodFor.ruleX, traitRule.y1);
+  context.lineTo(goodFor.ruleX, traitRule.y2);
+  context.moveTo(vibes.ruleX, traitRule.y1);
+  context.lineTo(vibes.ruleX, traitRule.y2);
   context.stroke();
 
-  drawLabeledCardCopy(context, "Good for:", traits.goodFor, 139, 1614, 500);
-  drawLabeledCardCopy(context, "Vibes:", traits.vibes, 729, 1614, 373);
+  drawLabeledCardCopy(
+    context,
+    copy.goodForLabel,
+    copy.goodFor,
+    goodFor.copyX,
+    traitCopyY,
+    goodFor.width,
+  );
+  drawLabeledCardCopy(
+    context,
+    copy.vibesLabel,
+    copy.vibes,
+    vibes.copyX,
+    traitCopyY,
+    vibes.width,
+  );
 
   return new Promise((resolve, reject) => {
     canvas.toBlob(
@@ -343,14 +387,18 @@ function drawLabeledCardCopy(
   }
 }
 
-async function loadCardFonts(): Promise<void> {
-  if (!document.fonts) return;
-  await Promise.allSettled([
-    document.fonts.load("600 64px Inter"),
-    document.fonts.load("600 42px Inter"),
-    document.fonts.load("600 40px Inter"),
-    document.fonts.load("600 36px Inter"),
-  ]);
+function drawAgentCardFrame(context: CanvasRenderingContext2D): void {
+  const { width, height, panel } = AGENT_CARD_GEOMETRY;
+  context.beginPath();
+  context.rect(0, 0, width, height);
+  addRoundedRectPath(
+    context,
+    panel.x,
+    panel.y,
+    panel.width,
+    panel.height,
+    panel.radius,
+  );
 }
 
 function roundedRect(
@@ -362,6 +410,17 @@ function roundedRect(
   radius: number,
 ): void {
   context.beginPath();
+  addRoundedRectPath(context, x, y, width, height, radius);
+}
+
+function addRoundedRectPath(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+): void {
   context.moveTo(x + radius, y);
   context.lineTo(x + width - radius, y);
   context.quadraticCurveTo(x + width, y, x + width, y + radius);

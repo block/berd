@@ -7,8 +7,13 @@ import {
   fallbackAgentCardColor,
   sampleAgentAvatarColor,
 } from "./agentCardColor";
-import { deriveAgentCardTraits } from "./agentShareCardSpec";
 import { deriveAgentShareCardTextLayout } from "./agentShareCardLayout";
+import { loadAgentCardFonts } from "./agentShareCardFonts";
+import type { AgentShareCardCopy } from "./agentShareCardCopy";
+import {
+  AGENT_CARD_GEOMETRY,
+  agentCardFramePath,
+} from "./agentShareCardGeometry";
 
 function createAgentCardTextMeasure() {
   const canvas = document.createElement("canvas");
@@ -28,6 +33,8 @@ interface AgentShareCardPreviewProps {
   description: string;
   avatarSrc?: string;
   alt: string;
+  copy: AgentShareCardCopy;
+  locale: string;
 }
 
 export function AgentShareCardPreview({
@@ -36,17 +43,15 @@ export function AgentShareCardPreview({
   description,
   avatarSrc,
   alt,
+  copy,
+  locale,
 }: AgentShareCardPreviewProps) {
   const resolvedAvatarSrc = avatarSrc ?? resolveAgentIcon(identity);
-  const traits = deriveAgentCardTraits(description);
   const markFilterId = `berd-card-mark-${useId().replaceAll(":", "")}`;
   const [fontGeneration, setFontGeneration] = useState(0);
   useEffect(() => {
     let active = true;
-    void Promise.allSettled([
-      document.fonts?.load("600 64px Inter"),
-      document.fonts?.load("600 42px Inter"),
-    ]).then(() => {
+    void loadAgentCardFonts().then(() => {
       if (active) setFontGeneration((generation) => generation + 1);
     });
     return () => {
@@ -61,8 +66,9 @@ export function AgentShareCardPreview({
       description,
       (value) => measure(value, "600 64px Inter, sans-serif"),
       (value) => measure(value, "600 42px Inter, sans-serif"),
+      locale,
     );
-  }, [description, displayName, fontGeneration]);
+  }, [description, displayName, fontGeneration, locale]);
   const [accentColor, setAccentColor] = useState(() =>
     fallbackAgentCardColor(identity),
   );
@@ -83,6 +89,7 @@ export function AgentShareCardPreview({
     };
   }, [identity, resolvedAvatarSrc]);
 
+  const geometry = AGENT_CARD_GEOMETRY;
   const { title, descriptionLines, contentShift } = textLayout;
   const descriptionLineKeys = descriptionLines.map(
     (line, index) =>
@@ -97,7 +104,7 @@ export function AgentShareCardPreview({
         viewBox="0 0 1227 1839"
       >
         <path
-          d="M0 0H1227V1839H0Z M30 101Q30 31 100 31H1127Q1197 31 1197 101V1738Q1197 1808 1127 1808H100Q30 1808 30 1738Z"
+          d={agentCardFramePath()}
           fill={accentColor}
           fillRule="evenodd"
           opacity="0.34"
@@ -110,11 +117,11 @@ export function AgentShareCardPreview({
         viewBox="0 0 1227 1839"
       >
         <rect
-          x="30"
-          y="31"
-          width="1167"
-          height="1777"
-          rx="70"
+          x={geometry.panel.x}
+          y={geometry.panel.y}
+          width={geometry.panel.width}
+          height={geometry.panel.height}
+          rx={geometry.panel.radius}
           fill="white"
           fillOpacity="0.95"
         />
@@ -156,11 +163,11 @@ export function AgentShareCardPreview({
           </mask>
         </defs>
         <rect
-          x="30"
-          y="31"
-          width="1167"
-          height="1777"
-          rx="70"
+          x={geometry.panel.x}
+          y={geometry.panel.y}
+          width={geometry.panel.width}
+          height={geometry.panel.height}
+          rx={geometry.panel.radius}
           fill={`url(#${markFilterId}-waves)`}
           mask={`url(#${markFilterId}-mask)`}
         />
@@ -170,7 +177,13 @@ export function AgentShareCardPreview({
         className="absolute inset-0 z-[4] size-full"
         viewBox="0 0 1227 1839"
       >
-        <image href={berdCardLogo} x="120" y="122" width="40" height="40" />
+        <image
+          href={berdCardLogo}
+          x={geometry.logo.x}
+          y={geometry.logo.y}
+          width={geometry.logo.width}
+          height={geometry.logo.height}
+        />
         <text
           x="1110"
           y="153"
@@ -186,21 +199,26 @@ export function AgentShareCardPreview({
 
         <image
           href={avatarSrc ?? resolveAgentIcon(identity)}
-          x="155"
-          y="240"
-          width="917"
-          height="920"
+          x={geometry.avatar.x}
+          y={geometry.avatar.y}
+          width={geometry.avatar.width}
+          height={geometry.avatar.height}
           preserveAspectRatio="xMidYMid meet"
         />
 
-        <foreignObject x="115" y={1306 - contentShift} width="997" height="78">
+        <foreignObject
+          x={geometry.title.x}
+          y={1306 - contentShift}
+          width={geometry.title.width}
+          height="78"
+        >
           <div className="truncate font-sans text-[64px] font-semibold leading-none text-black">
             {title}
           </div>
         </foreignObject>
         <text
-          x="115"
-          y={1445 - contentShift}
+          x={geometry.description.x}
+          y={geometry.description.y - contentShift}
           fill="black"
           fontFamily="Inter, sans-serif"
           fontSize="42"
@@ -209,8 +227,8 @@ export function AgentShareCardPreview({
           {descriptionLines.map((line, index) => (
             <tspan
               key={descriptionLineKeys[index]}
-              x="115"
-              dy={index === 0 ? 0 : 52}
+              x={geometry.description.x}
+              dy={index === 0 ? 0 : geometry.description.lineHeight}
             >
               {line}
             </tspan>
@@ -218,32 +236,41 @@ export function AgentShareCardPreview({
         </text>
 
         <line
-          x1="120"
-          x2="120"
-          y1="1585"
-          y2="1683"
+          x1={geometry.goodFor.ruleX}
+          x2={geometry.goodFor.ruleX}
+          y1={geometry.traitRule.y1}
+          y2={geometry.traitRule.y2}
           stroke="black"
-          strokeWidth="4"
+          strokeWidth={geometry.traitRule.width}
         />
         <line
-          x1="700"
-          x2="700"
-          y1="1585"
-          y2="1683"
+          x1={geometry.vibes.ruleX}
+          x2={geometry.vibes.ruleX}
+          y1={geometry.traitRule.y1}
+          y2={geometry.traitRule.y2}
           stroke="black"
-          strokeWidth="4"
+          strokeWidth={geometry.traitRule.width}
         />
-        <foreignObject x="139" y="1580" width="500" height="110">
+        <foreignObject
+          x={geometry.goodFor.copyX}
+          y="1580"
+          width={geometry.goodFor.width}
+          height="110"
+        >
           <div className="font-sans text-[42px] font-semibold leading-[1.2] text-black">
-            {/* i18n-check-ignore: fixed label embedded in shareable card artwork */}
-            <strong className="font-semibold">Good for:</strong>{" "}
-            {traits.goodFor}
+            <strong className="font-semibold">{copy.goodForLabel}</strong>{" "}
+            {copy.goodFor}
           </div>
         </foreignObject>
-        <foreignObject x="729" y="1580" width="373" height="110">
+        <foreignObject
+          x={geometry.vibes.copyX}
+          y="1580"
+          width={geometry.vibes.width}
+          height="110"
+        >
           <div className="font-sans text-[42px] font-semibold leading-[1.2] text-black">
-            {/* i18n-check-ignore: fixed label embedded in shareable card artwork */}
-            <strong className="font-semibold">Vibes:</strong> {traits.vibes}
+            <strong className="font-semibold">{copy.vibesLabel}</strong>{" "}
+            {copy.vibes}
           </div>
         </foreignObject>
       </svg>
