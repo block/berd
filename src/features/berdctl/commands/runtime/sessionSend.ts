@@ -14,9 +14,9 @@ export {
   SessionDispatchUnresolvedError,
 } from "@/features/chat/lib/queuedSessionSend";
 import { formatIncludedWorkspacesPrompt } from "@/features/chat/lib/workspaceAttachments";
-import type { QueuedMessageRecord } from "@/features/chat/stores/chatStore";
 import type { MessageMetadata } from "@/shared/types/messages";
 import type { ChatSendOptions } from "@/features/chat/types";
+export { isBerdctlCrossSessionQueuedMessage } from "@/features/chat/lib/queuedMessageOrigin";
 
 export const BERDCTL_CROSS_SESSION_ORIGIN =
   "berdctl_cross_session" satisfies NonNullable<MessageMetadata["origin"]>;
@@ -30,16 +30,6 @@ export function berdctlCrossSessionSendOptions(): ChatSendOptions {
       origin: BERDCTL_CROSS_SESSION_ORIGIN,
     },
   };
-}
-
-export function isBerdctlCrossSessionQueuedMessage(
-  message: QueuedMessageRecord | undefined,
-): boolean {
-  return (
-    message?.kind === "transport-ready" &&
-    message.payload.sendOptions?.userMessageMetadata?.origin ===
-      BERDCTL_CROSS_SESSION_ORIGIN
-  );
 }
 
 export async function sendPromptToExistingSessionInBackground(

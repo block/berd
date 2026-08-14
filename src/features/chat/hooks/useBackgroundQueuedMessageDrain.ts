@@ -11,6 +11,11 @@ import {
   becameQueuedMessageTargetAttemptable,
   isQueuedMessageTargetAttemptable,
 } from "@/features/chat/lib/queuedMessageAttemptOwnership";
+import {
+  hasForegroundQueueOwner,
+  subscribeForegroundQueueOwnership,
+} from "@/features/chat/lib/foregroundQueueOwnership";
+import { isBerdctlCrossSessionQueuedMessage } from "@/features/chat/lib/queuedMessageOrigin";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import {
   type QueuedMessageRecord,
@@ -35,6 +40,30 @@ const contentionWaiters = new Map<string, ContentionWaiter>();
 
 function ownerIdFor(scopedSessionId?: string): string {
   return scopedSessionId ? `session:${scopedSessionId}` : "global";
+}
+
+/**
+ * The background drain claims a queued head when either
+ * - it was released from a deferred workspace send (the foreground queue never
+ *   claims released heads), or
+ * - no mounted foreground chat currently owns the session's queue, so nothing
+ *   else will send it (the user queued a message and left the chat).
+ *
+ * berdctl cross-session sends are excluded; they have a dedicated drain.
+ * Ordinary heads restored from persistence are excluded so an app relaunch
+ * does not fire stale prompts without the user reopening the chat.
+ */
+function isBackgroundDrainableHead(
+  record: QueuedMessageRecord & { kind: "transport-ready" },
+  sessionId: string,
+): boolean {
+  if (isBerdctlCrossSessionQueuedMessage(record)) {
+    return false;
+  }
+  if (record.releasedFromDeferred) {
+    return true;
+  }
+  return !record.restored && !hasForegroundQueueOwner(sessionId);
 }
 
 function reconcileContentionWaiters(scopedSessionId?: string): void {
@@ -72,10 +101,10 @@ function scheduleContentionResume(
   }
   waiter.resumeScheduled = true;
   contentionWaiters.delete(sessionId);
-  queueMicrotask(() => drainReleasedQueuedMessage(sessionId, waiter.ownerId));
+  queueMicrotask(() => drainQueuedMessage(sessionId, waiter.ownerId));
 }
 
-function drainReleasedQueuedMessage(sessionId: string, ownerId: string): void {
+function drainQueuedMessage(sessionId: string, ownerId: string): void {
   if (!activeOwners.has(ownerId)) return;
   const sessionExists = Boolean(
     useChatSessionStore.getState().getSession(sessionId),
@@ -106,7 +135,7 @@ function drainReleasedQueuedMessage(sessionId: string, ownerId: string): void {
       queuedMessage,
       sessionStore.getSession(sessionId),
     ) ||
-    !queuedMessage.releasedFromDeferred ||
+    !isBackgroundDrainableHead(queuedMessage, sessionId) ||
     !isQueuedSessionReady(runtime)
   ) {
     return;
@@ -163,7 +192,7 @@ function drainReleasedQueuedMessage(sessionId: string, ownerId: string): void {
       if (error instanceof PreCommitSendRejectedError) return;
       const message = i18n.t("chat:queue.releasedSendFailed");
       console.error(
-        `[released-queue] failed to send queued prompt for session ${sessionId}`,
+        `[background-queue] failed to send queued prompt for session ${sessionId}`,
         error,
       );
       const current =
@@ -186,10 +215,10 @@ function drainReleasedQueuedMessage(sessionId: string, ownerId: string): void {
           waiter.attemptSettled = true;
           scheduleContentionResume(sessionId, waiter);
         } else {
-          queueMicrotask(() => drainReleasedQueuedMessage(sessionId, ownerId));
+          queueMicrotask(() => drainQueuedMessage(sessionId, ownerId));
         }
       } else {
-        drainReleasedQueuedMessage(sessionId, ownerId);
+        drainQueuedMessage(sessionId, ownerId);
       }
     });
 }
@@ -206,7 +235,7 @@ function getOwnedSessionIds(
   );
 }
 
-function drainReadyReleasedMessages(scopedSessionId?: string): void {
+function drainReadyQueuedMessages(scopedSessionId?: string): void {
   const ownerId = ownerIdFor(scopedSessionId);
   if (!activeOwners.has(ownerId)) return;
   reconcileContentionWaiters(scopedSessionId);
@@ -215,11 +244,11 @@ function drainReadyReleasedMessages(scopedSessionId?: string): void {
     queuedMessageBySession,
     scopedSessionId,
   )) {
-    drainReleasedQueuedMessage(sessionId, ownerId);
+    drainQueuedMessage(sessionId, ownerId);
   }
 }
 
-export function useReleasedQueuedMessageDrain(
+export function useBackgroundQueuedMessageDrain(
   scopedSessionId?: string,
   ownerReady = true,
 ): void {
@@ -227,7 +256,7 @@ export function useReleasedQueuedMessageDrain(
     if (!ownerReady) return;
     const ownerId = ownerIdFor(scopedSessionId);
     activeOwners.add(ownerId);
-    drainReadyReleasedMessages(scopedSessionId);
+    drainReadyQueuedMessages(scopedSessionId);
     const unsubscribeWindowStore = scopedSessionId
       ? undefined
       : useSessionWindowStore.subscribe((state, previousState) => {
@@ -236,9 +265,14 @@ export function useReleasedQueuedMessageDrain(
             (!previousState.hasLoadedSnapshot ||
               state.openSessions !== previousState.openSessions)
           ) {
-            drainReadyReleasedMessages();
+            drainReadyQueuedMessages();
           }
         });
+    // When a foreground chat releases queue ownership (the user left the
+    // chat), any ready queued head it never sent becomes ours to send.
+    const unsubscribeForegroundOwnership = subscribeForegroundQueueOwnership(
+      () => drainReadyQueuedMessages(scopedSessionId),
+    );
     const unsubscribeSessionStore = useChatSessionStore.subscribe(
       (state, previousState) => {
         reconcileContentionWaiters(scopedSessionId);
@@ -258,11 +292,11 @@ export function useReleasedQueuedMessageDrain(
               ),
             )
           ) {
-            drainReleasedQueuedMessage(sessionId, ownerId);
+            drainQueuedMessage(sessionId, ownerId);
           }
         }
         if (state.hasHydratedSessions && !previousState.hasHydratedSessions) {
-          drainReadyReleasedMessages(scopedSessionId);
+          drainReadyQueuedMessages(scopedSessionId);
         }
       },
     );
@@ -276,7 +310,7 @@ export function useReleasedQueuedMessageDrain(
           const queuedMessage = state.queuedMessageBySession[sessionId]?.[0];
           if (
             queuedMessage?.kind !== "transport-ready" ||
-            !queuedMessage.releasedFromDeferred
+            !isBackgroundDrainableHead(queuedMessage, sessionId)
           ) {
             continue;
           }
@@ -294,13 +328,14 @@ export function useReleasedQueuedMessageDrain(
             !currentBlocked &&
             (previousBlocked || becameTransportReady)
           ) {
-            drainReleasedQueuedMessage(sessionId, ownerId);
+            drainQueuedMessage(sessionId, ownerId);
           }
         }
       },
     );
     return () => {
       unsubscribeWindowStore?.();
+      unsubscribeForegroundOwnership();
       unsubscribeSessionStore();
       unsubscribeChatStore();
       activeOwners.delete(ownerId);

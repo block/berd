@@ -17,6 +17,8 @@ import {
   acquireSessionDispatchTarget,
   type SessionDispatchTargetLease,
 } from "../lib/sessionTargetCoordinator";
+import { registerForegroundQueueOwner } from "../lib/foregroundQueueOwnership";
+import { isBerdctlCrossSessionQueuedMessage } from "../lib/queuedMessageOrigin";
 import type { QueuedMessageRecord } from "../stores/chatStore";
 import type { ChatSendOptions } from "../types";
 import type { SessionExecutionTarget } from "../lib/sessionExecutionTarget";
@@ -46,23 +48,15 @@ function getQueuedMessageKey(
     : null;
 }
 
-function isBerdctlCrossSessionQueuedMessage(
-  queuedMessage: QueuedMessageRecord | null,
-): boolean {
-  return (
-    queuedMessage?.kind === "transport-ready" &&
-    queuedMessage.payload.sendOptions?.userMessageMetadata?.origin ===
-      "berdctl_cross_session"
-  );
-}
-
 /**
  * Single-slot message queue that holds one pending message while the agent is
  * busy and auto-sends it when the chat transitions back to idle.
  *
  * State lives in the Zustand store (keyed by session) so it survives tab
- * switches — users can queue a follow-up, navigate away, and come back to
- * find it sent.
+ * switches. While mounted, this hook registers as the session's foreground
+ * queue owner; when the user navigates away and it unmounts, the background
+ * drain (`useBackgroundQueuedMessageDrain`) takes over so queued messages
+ * still send without the chat being open.
  *
  * A direct Zustand store subscription ensures the drain fires even when the
  * webview is backgrounded and React defers re-renders (e.g. rAF paused,
@@ -111,6 +105,13 @@ export function useMessageQueue(
     () => getQueuedMessageKey(queuedRecord),
     [queuedRecord],
   );
+
+  // Claim foreground ownership of this session's queue so the background
+  // drain defers to this hook while the chat is open and interactive.
+  useEffect(() => {
+    if (readOnly) return;
+    return registerForegroundQueueOwner(sessionId);
+  }, [readOnly, sessionId]);
 
   // --- Background-safe store subscription ---
   // When the webview is hidden/minimized, React may not schedule re-renders
