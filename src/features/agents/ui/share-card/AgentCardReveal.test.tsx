@@ -51,7 +51,10 @@ describe("AgentCardReveal", () => {
       '[data-agent-card-refraction="true"]',
     );
     expect(refraction).toHaveClass("z-0");
-    expect(refraction?.firstElementChild).toHaveClass("inset-4");
+    expect(refraction?.firstElementChild).toHaveClass("inset-0");
+    expect(
+      (refraction?.firstElementChild as HTMLElement).style.background,
+    ).toContain("transparent 100%");
     expect((refraction?.firstElementChild as HTMLElement).style.boxShadow).toBe(
       "",
     );
