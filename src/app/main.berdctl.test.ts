@@ -105,7 +105,7 @@ describe("main entrypoint berdctl bridge loading", () => {
     expect(mainBranch).toContain("<OptionalBerdctlBridge />");
   });
 
-  it("mounts the released queued-message drain unconditionally", () => {
+  it("mounts the background queued-message drain unconditionally", () => {
     expect(mainSource).toContain(
       'import { BackgroundQueuedMessageDrain } from "@/features/chat/ui/BackgroundQueuedMessageDrain"',
     );

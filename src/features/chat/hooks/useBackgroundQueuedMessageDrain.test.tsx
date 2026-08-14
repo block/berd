@@ -11,12 +11,23 @@ import {
 } from "@/features/chat/lib/foregroundQueueOwnership";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import * as queuePersistence from "@/features/chat/stores/queuePersistence";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import type { QueuedMessageRecord } from "@/features/chat/stores/chatStore";
-import { useBackgroundQueuedMessageDrain } from "./useBackgroundQueuedMessageDrain";
+import {
+  resetBackgroundQueueDrainStateForTesting,
+  useBackgroundQueuedMessageDrain,
+} from "./useBackgroundQueuedMessageDrain";
 
 const mocks = vi.hoisted(() => ({
   sendQueuedPromptToExistingSessionInBackground: vi.fn(),
+  toastError: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({
+  toast: Object.assign(vi.fn(), {
+    error: (...args: unknown[]) => mocks.toastError(...args),
+  }),
 }));
 
 vi.mock("@/features/chat/lib/queuedSessionSend", () => ({
@@ -89,6 +100,10 @@ describe("useBackgroundQueuedMessageDrain", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetForegroundQueueOwnershipForTesting();
+    resetBackgroundQueueDrainStateForTesting();
+    vi.spyOn(queuePersistence, "loadPersistedMessageQueues").mockResolvedValue(
+      {},
+    );
     mocks.sendQueuedPromptToExistingSessionInBackground.mockResolvedValue(
       undefined,
     );
@@ -704,6 +719,32 @@ describe("useBackgroundQueuedMessageDrain", () => {
         },
       });
     });
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      "Session",
+      expect.objectContaining({ description: expect.any(String) }),
+    );
+  });
+
+  it("does not toast when a send loses ownership pre-commit", async () => {
+    const released = releasedRecord();
+    mocks.sendQueuedPromptToExistingSessionInBackground.mockRejectedValueOnce(
+      new QueuedMessageOwnershipLostError(),
+    );
+    useChatStore.setState({
+      queuedMessageBySession: { "session-1": [released] },
+    });
+
+    render(<DrainHarness />);
+
+    await waitFor(() =>
+      expect(
+        mocks.sendQueuedPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledOnce(),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.toastError).not.toHaveBeenCalled();
   });
 
   it("scopes released draining to the renderer that owns each session", async () => {
@@ -751,6 +792,97 @@ describe("useBackgroundQueuedMessageDrain", () => {
         expect.any(Function),
       );
     });
+  });
+
+  it("refreshes a reclaimed session's queue from persistence before draining", async () => {
+    // The session window already sent/dismissed the head; this renderer still
+    // holds a stale in-memory copy. Persistence is the source of truth.
+    const stale = { ...ordinaryRecord(), recordId: "stale-record" };
+    useChatStore.setState({
+      queuedMessageBySession: { "session-1": [stale] },
+    });
+    useSessionWindowStore.setState({
+      openSessions: { "session-1": "window-1" },
+    });
+    vi.spyOn(queuePersistence, "loadPersistedMessageQueues").mockResolvedValue(
+      {},
+    );
+
+    render(<DrainHarness />);
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+
+    act(() => useSessionWindowStore.setState({ openSessions: {} }));
+
+    await waitFor(() =>
+      expect(queuePersistence.loadPersistedMessageQueues).toHaveBeenCalled(),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"],
+    ).toBeUndefined();
+  });
+
+  it("does not fire a reclaimed head that persistence marks restored", async () => {
+    const stale = ordinaryRecord();
+    useChatStore.setState({
+      queuedMessageBySession: { "session-1": [stale] },
+    });
+    useSessionWindowStore.setState({
+      openSessions: { "session-1": "window-1" },
+    });
+    vi.spyOn(queuePersistence, "loadPersistedMessageQueues").mockResolvedValue({
+      "session-1": [{ ...ordinaryRecord(), restored: true }],
+    });
+
+    render(<DrainHarness />);
+    act(() => useSessionWindowStore.setState({ openSessions: {} }));
+
+    await waitFor(() =>
+      expect(queuePersistence.loadPersistedMessageQueues).toHaveBeenCalled(),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0]
+        ?.restored,
+    ).toBe(true);
+  });
+
+  it("drains immediately when window changes reclaim no sessions", async () => {
+    useChatStore.setState({
+      queuedMessageBySession: { "session-1": [ordinaryRecord()] },
+    });
+    useSessionWindowStore.setState({
+      openSessions: { "other-session": "window-1" },
+    });
+
+    render(<DrainHarness />);
+    await waitFor(() =>
+      expect(
+        mocks.sendQueuedPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledOnce(),
+    );
+
+    act(() =>
+      useSessionWindowStore.setState({
+        openSessions: {
+          "other-session": "window-1",
+          "main-session": "window-2",
+        },
+      }),
+    );
+    expect(queuePersistence.loadPersistedMessageQueues).not.toHaveBeenCalled();
   });
 
   it("waits for the authoritative window snapshot before global draining", async () => {
@@ -839,6 +971,55 @@ describe("useBackgroundQueuedMessageDrain", () => {
     expect(
       mocks.sendQueuedPromptToExistingSessionInBackground,
     ).not.toHaveBeenCalled();
+  });
+
+  it("keeps excluding a restored head after an incidental load clears the flag", async () => {
+    const restored = { ...ordinaryRecord(), restored: true };
+    useChatStore.setState({
+      queuedMessageBySession: { "session-1": [restored] },
+    });
+
+    render(<DrainHarness />);
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+
+    // Simulate markQueuedMessagesReady from a session load the user did not
+    // initiate: the flag clears and a new head object appears.
+    act(() => useChatStore.getState().markQueuedMessagesReady("session-1"));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("lifts a restored exclusion when the user opens the chat", async () => {
+    const restored = { ...ordinaryRecord(), restored: true };
+    useChatStore.setState({
+      queuedMessageBySession: { "session-1": [restored] },
+    });
+
+    render(<DrainHarness />);
+    act(() => useChatStore.getState().markQueuedMessagesReady("session-1"));
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+
+    // The user opens the chat (foreground owner registers), then leaves.
+    let releaseOwner: (() => void) | undefined;
+    act(() => {
+      releaseOwner = registerForegroundQueueOwner("session-1");
+    });
+    act(() => releaseOwner?.());
+
+    await waitFor(() =>
+      expect(
+        mocks.sendQueuedPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledOnce(),
+    );
   });
 
   it("drains an ordinary queued head after the foreground owner unmounts", async () => {
