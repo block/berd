@@ -1,1 +1,14 @@
-blank_issues_enabled: true
+# The normal GitHub UI does not offer a blank issue: a well-formed issue is the
+# supported way to participate in Berd, so the forms ask for what we need to act
+# on it. API-created issues remain subject to the same policy. See CONTRIBUTING.md.
+blank_issues_enabled: false
+contact_links:
+  - name: Questions about using Berd
+    url: https://github.com/block/berd/blob/main/README.md
+    about: The README covers setup, building, and how Berd is put together. The issue tracker is not a support channel.
+  - name: Security vulnerabilities
+    url: https://github.com/block/berd/blob/main/SECURITY.md
+    about: Please report privately — never as a public issue.
+  - name: How to participate
+    url: https://github.com/block/berd/blob/main/CONTRIBUTING.md
+    about: What we accept, what makes a good issue, and why we don't take outside pull requests.

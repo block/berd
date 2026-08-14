@@ -1,0 +1,147 @@
+name: Bug report
+description: Berd does something other than what it says it does
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. A report we can reproduce without asking you
+        anything is worth a great deal to us.
+
+        Before you start, please read
+        [the bug report section of CONTRIBUTING.md](https://github.com/block/berd/blob/main/CONTRIBUTING.md#bug-reports).
+        You're welcome to have an agent help you fill this in — see
+        [Using an agent](https://github.com/block/berd/blob/main/CONTRIBUTING.md#using-an-agent).
+
+        **Do not report security vulnerabilities here.** Use
+        [SECURITY.md](https://github.com/block/berd/blob/main/SECURITY.md).
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before filing
+      description: All three are required. Please actually do them.
+      options:
+        - label: I searched [open and closed issues](https://github.com/block/berd/issues?q=is%3Aissue) for duplicates.
+          required: true
+        - label: I reproduced this on the [latest release](https://github.com/block/berd/releases).
+          required: true
+        - label: This is one bug, not several bundled together.
+          required: true
+
+  - type: input
+    id: duplicate-search
+    attributes:
+      label: Closest existing issue
+      description: Link the nearest thing you found, or write "none found".
+      placeholder: "#123, or none found"
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What's broken
+      description: One or two sentences. Save the detail for the fields below.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Numbered, starting from a freshly launched Berd. Include the model and
+        provider, whether the chat had prior history, and anything about your
+        setup that might matter.
+      value: |
+        1. Launch Berd
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected to happen
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does it happen?
+      description: This changes how we chase it more than almost anything else.
+      options:
+        - Every time — reliably reproducible
+        - Intermittently — happens often but not always
+        - Once — I have not been able to reproduce it
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Berd version
+      description: 'Settings → About. If Berd will not launch, write "cannot launch".'
+      placeholder: "0.6.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux
+        - Windows
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model and provider
+      description: If the bug involves a chat or an agent turn. Otherwise "n/a".
+      placeholder: "Claude Sonnet 4.5 via Anthropic"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: |
+        The lines around when the problem happened — not the whole file, not a
+        screenshot of text. **Scrub anything private first**: logs can contain
+        file paths, prompt text, and project names.
+
+        macOS `~/Library/Logs/xyz.block.berd/` · Linux
+        `~/.local/share/xyz.block.berd/logs/` · Windows
+        `%LOCALAPPDATA%\xyz.block.berd\logs\`
+
+        If there is genuinely nothing relevant, write "no relevant log output"
+        so we know you looked.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Screenshots, recordings, or other context
+      description: |
+        Required for anything visual — a few seconds of capture saves an hour of
+        back-and-forth. Drag files in to attach them.
+    validations:
+      required: false

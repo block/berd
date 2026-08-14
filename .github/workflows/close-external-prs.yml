@@ -1,0 +1,76 @@
+# Berd does not accept pull requests from outside authorized repository collaborators.
+#
+# GitHub offers no way to stop anyone from opening a PR against a public repo,
+# so we close them politely and point back at CONTRIBUTING.md. Branch protection
+# already makes an outside merge impossible; this exists so nobody sinks time
+# into a patch we can't take, and so the PR queue stays readable.
+#
+# Uses pull_request_target so the token has write access even for fork PRs.
+# It never checks out or runs any PR code — only the GitHub API calls below.
+name: Close external pull requests
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    # Cheap pre-filter: OWNER/MEMBER/COLLABORATOR never need the API check.
+    if: >-
+      github.event.pull_request.author_association != 'OWNER' &&
+      github.event.pull_request.author_association != 'MEMBER' &&
+      github.event.pull_request.author_association != 'COLLABORATOR'
+    steps:
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const author = context.payload.pull_request.user.login;
+            const pull_number = context.payload.pull_request.number;
+            const { owner, repo } = context.repo;
+
+            // author_association can read as CONTRIBUTOR for maintainers whose
+            // org membership is private, so confirm against real permissions.
+            // Anything at write or above is on the team.
+            let permission = 'none';
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner, repo, username: author,
+              });
+              permission = data.permission;
+            } catch (error) {
+              // 404 means "not a collaborator" — treat as external.
+              if (error.status !== 404) throw error;
+            }
+
+            if (['admin', 'maintain', 'write'].includes(permission)) {
+              core.info(`${author} has ${permission} permission — leaving PR open.`);
+              return;
+            }
+
+            core.info(`${author} has ${permission} permission — closing PR #${pull_number}.`);
+
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: pull_number,
+              body: [
+                `🤖 Thanks for the interest, @${author} — and sorry for the automated reply.`,
+                '',
+                "**Berd doesn't accept pull requests from outside authorized repository collaborators**, so this one is being closed automatically. It's a policy, not a judgment on your code, and we'd rather tell you now than let it sit.",
+                '',
+                "Berd is early and its architecture is still moving week to week. Reviewing outside patches against a design that keeps shifting costs us more than it saves, and it isn't fair to you either.",
+                '',
+                '**What we do want:** a well-formed issue. A bug report with clean reproduction steps is worth more to us right now than a patch, because it\'s the part we genuinely can\'t do ourselves.',
+                '',
+                '- [How to participate](https://github.com/block/berd/blob/main/CONTRIBUTING.md)',
+                '- [Open an issue](https://github.com/block/berd/issues/new/choose)',
+                '',
+                "You're also free to fork and build on Berd however you like — it's Apache 2.0.",
+              ].join('\n'),
+            });
+
+            await github.rest.pulls.update({
+              owner, repo, pull_number, state: 'closed',
+            });
