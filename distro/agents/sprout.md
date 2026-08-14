@@ -1,5 +1,5 @@
 ---
-name: agt-builder
+name: Agt. Builder
 display_name: Agt. Builder
 description: Builds your agents with you, then keeps making them better.
 avatar: app-avatar:gloopies-20
