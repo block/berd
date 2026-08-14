@@ -97,11 +97,14 @@ vi.mock("@/shared/api/system", () => ({
   readImageAttachment: (path: string) => mockReadImageAttachment(path),
 }));
 
+const mockResizeImage = vi.fn((file: File) =>
+  Promise.resolve({ base64: `base64:${file.name}`, mimeType: file.type }),
+);
+
 // jsdom cannot decode image bytes, so stand in for the normalize pipeline;
 // its behavior is covered by useChatInputAttachments tests.
 vi.mock("@/features/chat/lib/resizeImage", () => ({
-  resizeImage: (file: File) =>
-    Promise.resolve({ base64: `base64:${file.name}`, mimeType: file.type }),
+  resizeImage: (file: File) => mockResizeImage(file),
   normalizeImageBase64: (base64: string, mimeType: string | undefined) =>
     Promise.resolve({ base64, mimeType }),
 }));
@@ -121,6 +124,10 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 describe("ChatInput attachments", () => {
   beforeEach(() => {
+    mockResizeImage.mockReset();
+    mockResizeImage.mockImplementation((file) =>
+      Promise.resolve({ base64: `base64:${file.name}`, mimeType: file.type }),
+    );
     mockSearchFilesForMentions.mockClear();
     mockSearchFilesForMentions.mockResolvedValue([]);
     mockInspectAttachmentPaths.mockClear();
@@ -245,6 +252,51 @@ describe("ChatInput attachments", () => {
       ).not.toBeInTheDocument();
     });
     expect(await screen.findByText("report.txt")).toBeInTheDocument();
+  });
+
+  it("does not steer a queued message while attachment work is pending", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    let releaseResize: (() => void) | undefined;
+    mockResizeImage.mockImplementationOnce(
+      (file) =>
+        new Promise((resolve) => {
+          releaseResize = () =>
+            resolve({ base64: `base64:${file.name}`, mimeType: file.type });
+        }),
+    );
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessage={{ persona: { kind: "none" }, text: "queued msg" }}
+      />,
+    );
+
+    const textbox = screen.getByRole("textbox");
+    const composer = textbox.closest("div.rounded-composer");
+    if (!composer) {
+      throw new Error("Expected composer container");
+    }
+    const dataTransfer = {
+      files: [new File(["img"], "shot.png", { type: "image/png" })],
+      items: [{ kind: "file" }],
+      types: ["Files"],
+    } as unknown as DataTransfer;
+    fireEvent.drop(composer, { dataTransfer });
+
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+
+    releaseResize?.();
+    expect(
+      await screen.findByRole("button", { name: "View attachment 1" }),
+    ).toBeInTheDocument();
   });
 
   it("does not cancel non-file drops into the composer", () => {

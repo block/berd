@@ -30,6 +30,8 @@
 
 - A message that is not first in the queue MUST NOT steer the session.
 - A steering result MUST affect only the message that produced it.
+- While the session is running, a send shortcut with an empty composer MUST steer the first queued message when steering is available.
+- A send shortcut MUST NOT steer a queued message while the composer holds draft content or a queued message is being edited.
 
 ## Subagent activity
 
