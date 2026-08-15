@@ -382,6 +382,22 @@ async fn find_check_with_options(
     check_freshness: bool,
 ) -> Result<doctor::DoctorCheck, String> {
     let target = crate_check_id(provider_id);
+    run_crate_check_report(app, check_freshness)
+        .await
+        .into_iter()
+        .find(|check| check.id == target)
+        .ok_or_else(|| format!("Unknown agent provider '{provider_id}'"))
+}
+
+/// The crate's AI-agent doctor report (with the Windows managed-bridge repair
+/// applied), built with the same env/registry/bundled-tools view the settings
+/// screen reads. `check_freshness` mirrors [`find_check`] vs [`find_check_fresh`]:
+/// the cheap path skips version/registry probing. Shared by the provider check
+/// lookups and the offered-fix resolver so both authorize against one report.
+async fn run_crate_check_report(
+    app: &AppHandle,
+    check_freshness: bool,
+) -> Vec<doctor::DoctorCheck> {
     let env_vars = setup_env_vars(app).await;
     let bundled_tools_dir = managed_acp_tools::bundled_tools_dir_for_checks(app);
     let mut report = doctor::run_checks_with_options(
@@ -408,11 +424,25 @@ async fn find_check_with_options(
         )
         .await;
     }
-    report
-        .checks
+    report.checks
+}
+
+/// The top-level fix a crate AI-agent check (`ai-agent-*`) currently offers from
+/// trusted state, resolved from the same non-fresh crate report the renderer
+/// reads: `Some(Command | Bridge | Auth)` when the check currently offers that
+/// fix, `None` when it offers none (already installed and authenticated) or the
+/// check id isn't present. `run_doctor_fix` authorizes every agent fix request
+/// against this before dispatch, so a forged or stale `(check_id, fix_type)`
+/// pair fails closed rather than reaching a shell/native side effect.
+pub(crate) async fn offered_crate_check_fix(
+    app: &AppHandle,
+    check_id: &str,
+) -> Result<Option<FixType>, String> {
+    Ok(run_crate_check_report(app, false)
+        .await
         .into_iter()
-        .find(|check| check.id == target)
-        .ok_or_else(|| format!("Unknown agent provider '{provider_id}'"))
+        .find(|check| check.id == check_id)
+        .and_then(|check| check.fix_type))
 }
 
 /// Whether the agent's main CLI or ACP bridge resolved on disk. Used as the
@@ -517,12 +547,31 @@ fn resolve_update_command(
     })
 }
 
+/// Authorize a renderer-requested `Auth` action against the provider's current
+/// doctor state (`offered` = the fix the check actually offers now). Sign-in is
+/// only authorized when the check currently offers `Auth` (installed but not
+/// authenticated); a request against a check that offers a different fix
+/// (missing install → `Command`/`Bridge`) or no fix at all (already
+/// authenticated, or auth status unknown) fails closed before the auth shell
+/// command runs. Pure so the boundary is unit-testable without a Tauri handle.
+fn authorize_auth(provider_id: &str, offered: Option<FixType>) -> Result<(), String> {
+    match offered {
+        Some(FixType::Auth) => Ok(()),
+        Some(offered) => Err(format!(
+            "'{provider_id}' currently offers the '{offered:?}' fix, not sign-in"
+        )),
+        None => Err(format!(
+            "'{provider_id}' offers no sign-in in its current state"
+        )),
+    }
+}
+
 /// The install fix (`Command` / `Bridge`) the provider's check currently offers
 /// from trusted crate state, or `None` when it offers no install fix (already
-/// installed, or exposes only auth/update). Used by `run_doctor_fix` to reject a
-/// forged or mismatched managed-install request before dispatching the
-/// privileged managed installer.
-pub(crate) async fn offered_install_fix(
+/// installed, or exposes only auth/update). Used by [`run_install`] to reject a
+/// forged or mismatched managed-install seed before the install loop runs any
+/// command.
+async fn offered_install_fix(
     app: &AppHandle,
     provider_id: &str,
 ) -> Result<Option<FixType>, String> {
@@ -718,6 +767,15 @@ async fn run_auth(
     provider_id: &str,
     plan: &SetupPlan,
 ) -> Result<(), String> {
+    // The renderer only names the *action*; before running the auth shell
+    // command we re-read the provider's doctor check and authorize `Auth`
+    // against the fix it currently offers. A forged/stale sign-in for a
+    // provider that is missing (offers `Command`/`Bridge`), already
+    // authenticated, or has an unknown auth state (offers no fix) rejects here
+    // rather than executing the static `<agent> login` command on demand.
+    // `find_check` also fails closed on an unknown provider.
+    let check = find_check(app, provider_id).await?;
+    authorize_auth(provider_id, check.fix_type)?;
     set_phase(app, registry, provider_id, SetupPhase::Authenticating);
     run_fix(app, registry, provider_id, FixType::Auth, None).await?;
 
@@ -1003,7 +1061,10 @@ mod tests {
         // A forged plan naming an install/auth fix as an "update" must never
         // resolve to a command — those are not update slots.
         let mut check = check_with_fix(None);
-        check.main = Some(readout_with_update("brew upgrade codex", FixType::UpdateMain));
+        check.main = Some(readout_with_update(
+            "brew upgrade codex",
+            FixType::UpdateMain,
+        ));
 
         for forged in [FixType::Command, FixType::Bridge, FixType::Auth] {
             assert!(
@@ -1092,11 +1153,7 @@ mod tests {
             Ok(FixType::Command)
         );
         assert_eq!(
-            authorize_install_seed(
-                "codex-acp",
-                &InstallFixType::Bridge,
-                Some(FixType::Bridge)
-            ),
+            authorize_install_seed("codex-acp", &InstallFixType::Bridge, Some(FixType::Bridge)),
             Ok(FixType::Bridge)
         );
     }
@@ -1106,14 +1163,18 @@ mod tests {
         // A renderer that requests `bridge` when the check offers only `command`
         // (or vice versa) must reject before any install shell command runs,
         // rather than execute the provider's other install recipe on demand.
-        assert!(
-            authorize_install_seed("codex-acp", &InstallFixType::Bridge, Some(FixType::Command))
-                .is_err()
-        );
-        assert!(
-            authorize_install_seed("codex-acp", &InstallFixType::Command, Some(FixType::Bridge))
-                .is_err()
-        );
+        assert!(authorize_install_seed(
+            "codex-acp",
+            &InstallFixType::Bridge,
+            Some(FixType::Command)
+        )
+        .is_err());
+        assert!(authorize_install_seed(
+            "codex-acp",
+            &InstallFixType::Command,
+            Some(FixType::Bridge)
+        )
+        .is_err());
     }
 
     #[test]
@@ -1121,12 +1182,26 @@ mod tests {
         // An already-installed provider (or one exposing only auth/update)
         // offers no install fix, so a forged install seed must fail closed
         // instead of re-running the install shell command.
-        assert!(
-            authorize_install_seed("codex-acp", &InstallFixType::Command, None).is_err()
-        );
-        assert!(
-            authorize_install_seed("codex-acp", &InstallFixType::Bridge, None).is_err()
-        );
+        assert!(authorize_install_seed("codex-acp", &InstallFixType::Command, None).is_err());
+        assert!(authorize_install_seed("codex-acp", &InstallFixType::Bridge, None).is_err());
+    }
+
+    #[test]
+    fn authorize_auth_rejects_a_forged_sign_in_against_a_non_auth_state() {
+        // Regression for the auth bypass: `run_auth` re-reads the provider check
+        // and authorizes `Auth` against its current offered fix. A provider that
+        // is missing (offers `Command`/`Bridge`) or already authenticated
+        // (offers no fix) must reject before the `<agent> login` command runs.
+        assert!(authorize_auth("copilot-acp", Some(FixType::Command)).is_err());
+        assert!(authorize_auth("amp-acp", Some(FixType::Bridge)).is_err());
+        assert!(authorize_auth("copilot-acp", None).is_err());
+    }
+
+    #[test]
+    fn authorize_auth_allows_a_currently_offered_sign_in() {
+        // Installed-but-signed-out is exactly the state that offers `Auth`, so a
+        // legitimate sign-in is authorized and reaches the auth command.
+        assert!(authorize_auth("copilot-acp", Some(FixType::Auth)).is_ok());
     }
 
     #[test]
@@ -1150,12 +1225,10 @@ mod tests {
             );
         }
         // And it must not deserialize as the SetupPlan field either.
-        assert!(
-            serde_json::from_str::<SetupPlan>(
-                "{\"installFixType\":\"auth\",\"updateFixTypes\":[],\"verifyInstall\":false}"
-            )
-            .is_err()
-        );
+        assert!(serde_json::from_str::<SetupPlan>(
+            "{\"installFixType\":\"auth\",\"updateFixTypes\":[],\"verifyInstall\":false}"
+        )
+        .is_err());
     }
 
     /// Test model of the install loop in [`run_install`]: both share
