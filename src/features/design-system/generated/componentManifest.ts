@@ -107,7 +107,7 @@ export const designSystemComponentManifest = [
     name: "Agent Import Primary Button",
     source: "src/shared/ui/agent-import-primary-button.tsx",
     description:
-      "Primary confirmation action for the agent import flow.\nUses a solid black fill on dark import-dialog surfaces without an outline.",
+      "Primary confirmation action for the agent import flow.\nUses the system primary fill (black in light mode) and preserves the\nimport-dialog-specific dark treatment without an outline.",
     exports: ["AgentImportPrimaryButton", "AgentImportPrimaryButtonProps"],
     slots: [],
     cva: [],

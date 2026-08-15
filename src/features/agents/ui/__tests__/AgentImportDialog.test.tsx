@@ -9,7 +9,10 @@ import { describe, expect, it, vi } from "vitest";
 import { AgentImportDialog } from "../AgentImportDialog";
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string) => key,
+    i18n: { resolvedLanguage: "en", language: "en" },
+  }),
 }));
 
 vi.mock("motion/react", async (importOriginal) => {
@@ -40,6 +43,7 @@ describe("AgentImportDialog", () => {
           systemPrompt: "Review carefully.",
           identity: "agent.agent.png",
           cardImageUrl: "blob:card",
+          cardAspectRatio: 1 / 8192,
         })}
         validateImportFile={() => null}
         onImportError={vi.fn()}
@@ -53,7 +57,21 @@ describe("AgentImportDialog", () => {
     const image = await screen.findByRole("img", {
       name: "importDialog.previewAlt",
     });
-    const tiltSurface = image.parentElement as HTMLDivElement;
+    const tiltSurface = image.closest<HTMLDivElement>(
+      '[data-agent-card-surface="true"]',
+    ) as HTMLDivElement;
+    const reveal = tiltSurface.closest<HTMLDivElement>(
+      '[data-agent-card-reveal="true"]',
+    );
+    const revealContent = reveal?.querySelector<HTMLDivElement>(
+      '[data-agent-card-reveal-content="true"]',
+    );
+    expect(revealContent?.className).toContain("z-10");
+    expect(tiltSurface.style.aspectRatio).toBe("");
+    expect(image).toHaveClass("object-contain");
+    expect(
+      tiltSurface.querySelector('canvas[data-agent-card-frame-only="true"]'),
+    ).not.toBeNull();
     vi.spyOn(tiltSurface, "getBoundingClientRect").mockReturnValue({
       left: 0,
       top: 0,

@@ -10,8 +10,12 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { Persona } from "@/shared/types/agents";
-import { isSafePngAvatarDataUrl } from "@/shared/lib/avatarUrl";
 import {
+  isSafePngAvatarDataUrl,
+  MAX_PNG_AVATAR_BYTES,
+} from "@/shared/lib/avatarUrl";
+import {
+  AgentSnapshotError,
   encodeAgentImage,
   MAX_SNAPSHOT_AVATAR_ANIMATION_BYTES,
   personaToSnapshot,
@@ -21,6 +25,7 @@ import {
   useAvatarMediaState,
 } from "@/shared/hooks/useAvatarSrc";
 import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
+import { readCachedAvatarAnimation } from "@/shared/api/avatars";
 import { Button } from "@/shared/ui/button";
 import {
   Dialog,
@@ -30,10 +35,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/shared/ui/dialog";
-import {
-  HolographicAgentCard,
-  holographicCardPresets,
-} from "./HolographicAgentCard";
+import { AgentShareCardPreview } from "./AgentShareCardPreview";
+import { AgentCardReveal } from "./AgentCardReveal";
+import { resolveAgentShareCardCopy } from "./agentShareCardCopy";
 import {
   blobToBytes,
   createAvatarPoster,
@@ -49,8 +53,20 @@ async function avatarSourceToDataUrl(source: string): Promise<string | null> {
   try {
     const response = await fetch(source);
     if (!response.ok) return null;
+    const contentLength = Number(response.headers.get("content-length"));
+    if (
+      Number.isFinite(contentLength) &&
+      contentLength > MAX_PNG_AVATAR_BYTES
+    ) {
+      return null;
+    }
     const blob = await response.blob();
-    if (blob.type && blob.type !== "image/png") return null;
+    if (
+      blob.size > MAX_PNG_AVATAR_BYTES ||
+      (blob.type && blob.type !== "image/png")
+    ) {
+      return null;
+    }
     const bytes = await blobToBytes(blob);
     let binary = "";
     for (let offset = 0; offset < bytes.length; offset += 0x8000) {
@@ -60,6 +76,27 @@ async function avatarSourceToDataUrl(source: string): Promise<string | null> {
     return isSafePngAvatarDataUrl(dataUrl) ? dataUrl : null;
   } catch {
     return null;
+  }
+}
+
+export const AVATAR_ANIMATION_EMBED_TIMEOUT_MS = 5_000;
+
+async function withAnimationEmbedDeadline<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs = AVATAR_ANIMATION_EMBED_TIMEOUT_MS,
+): Promise<T> {
+  const controller = new AbortController();
+  let timeout: number | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timeout = window.setTimeout(() => {
+      controller.abort();
+      reject(new Error("Avatar animation request timed out"));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([operation(controller.signal), deadline]);
+  } finally {
+    if (timeout !== undefined) window.clearTimeout(timeout);
   }
 }
 
@@ -76,7 +113,7 @@ export function AgentShareDialog({
   onOpenChange,
   onDownloadAgent,
 }: AgentShareDialogProps) {
-  const { t } = useTranslation("agents");
+  const { t, i18n } = useTranslation("agents");
   const shouldReduceMotion = useReducedMotion();
   const [avatarReadySrc, setAvatarReadySrc] = useState<string | null>(null);
   const [failedAvatarSources, setFailedAvatarSources] = useState<Set<string>>(
@@ -88,6 +125,7 @@ export function AgentShareDialog({
     avatar: Persona["avatar"];
     src: string;
   } | null>(null);
+  const avatarPreloadRef = useRef<HTMLImageElement>(null);
   const cardDownloadInFlightRef = useRef(false);
   const agentDownloadInFlightRef = useRef(false);
   const cardOperationGenerationRef = useRef(0);
@@ -113,12 +151,18 @@ export function AgentShareDialog({
   const avatarSrc = avatarCandidates.find(
     (source) => !failedAvatarSources.has(source),
   );
+  const avatarUnavailable = avatarCandidates.every((source) =>
+    failedAvatarSources.has(source),
+  );
   // The card can render as soon as the exact still image it will display has
   // decoded. Cached animation/poster resolution may continue independently.
   const cardReady = Boolean(avatarSrc && avatarReadySrc === avatarSrc);
   const cardBase = getAgentShareCardBase(persona.id);
   const description = getAgentShareDescription(persona);
+  const locale = i18n?.resolvedLanguage ?? i18n?.language ?? "en";
+  const cardCopy = resolveAgentShareCardCopy(description, t);
   const cardContentIdentity = [
+    locale,
     persona.id,
     persona.avatar,
     persona.displayName,
@@ -129,6 +173,10 @@ export function AgentShareDialog({
   useEffect(() => {
     if (!open) {
       cardOperationGenerationRef.current += 1;
+      cardDownloadInFlightRef.current = false;
+      agentDownloadInFlightRef.current = false;
+      setCardDownloadPending(false);
+      setAgentDownloadPending(false);
     }
     return () => {
       cardOperationGenerationRef.current += 1;
@@ -145,6 +193,18 @@ export function AgentShareDialog({
     cardDownloadInFlightRef.current = false;
     setCardDownloadPending(false);
   }, [cardContentIdentity]);
+
+  useEffect(() => {
+    if (!open || !avatarSrc || cardReady) return;
+    const timeout = window.setTimeout(() => {
+      setFailedAvatarSources((current) => {
+        const next = new Set(current);
+        next.add(avatarSrc);
+        return next;
+      });
+    }, 10_000);
+    return () => window.clearTimeout(timeout);
+  }, [avatarSrc, cardReady, open]);
 
   useEffect(() => {
     if (!open || !cachedAvatar) return;
@@ -173,11 +233,17 @@ export function AgentShareDialog({
     try {
       // Render exactly what the reviewed card displays. Re-generating a second
       // poster here can produce a different or blank frame for stacked videos.
-      const cardAvatarSrc = avatarSrc;
+      const cardAvatarSrc = avatarReadySrc;
       if (!cardAvatarSrc) {
         throw new Error("Agent avatar is not ready");
       }
-      const card = await renderAgentShareCard(persona, cardAvatarSrc, cardBase);
+      const card = await renderAgentShareCard(
+        persona,
+        cardAvatarSrc,
+        cardBase,
+        cardCopy,
+        locale,
+      );
       if (operationGeneration !== cardOperationGenerationRef.current) return;
       const embeddedAvatar = await avatarSourceToDataUrl(cardAvatarSrc);
       if (operationGeneration !== cardOperationGenerationRef.current) return;
@@ -186,30 +252,71 @@ export function AgentShareDialog({
         avatar: embeddedAvatar ?? persona.avatar,
       });
       let animation = null;
-      if (cachedAvatar?.mediaType === "video") {
+      const stillMatchesAnimation = Boolean(
+        cachedAvatar?.mediaType === "video" &&
+          (cardAvatarSrc === currentGeneratedAvatarPoster ||
+            cardAvatarSrc === cachedAvatar.posterSrc),
+      );
+      if (cachedAvatar?.mediaType === "video" && stillMatchesAnimation) {
         try {
-          const animationBytes = await fetch(cachedAvatar.src)
-            .then((response) => response.blob())
-            .then(blobToBytes);
-          if (animationBytes.length <= MAX_SNAPSHOT_AVATAR_ANIMATION_BYTES) {
-            animation = {
-              bytes: animationBytes,
-              mimeType: cachedAvatar.src.toLowerCase().includes(".mp4")
-                ? ("video/mp4" as const)
-                : ("video/webm" as const),
-              alphaMode: cachedAvatar.alphaMode,
-            };
+          if (
+            /^asset:/u.test(cachedAvatar.src) &&
+            typeof persona.avatar === "string"
+          ) {
+            const avatarRef = persona.avatar;
+            const cachedAnimation = await withAnimationEmbedDeadline(() =>
+              readCachedAvatarAnimation({ avatarRef }),
+            );
+            if (cachedAnimation) {
+              animation = {
+                bytes: new Uint8Array(cachedAnimation.bytes),
+                mimeType:
+                  cachedAnimation.mimeType === "video/mp4"
+                    ? ("video/mp4" as const)
+                    : ("video/webm" as const),
+                alphaMode: cachedAnimation.alphaMode,
+              };
+            }
+          } else if (/^(?:https?:|blob:|data:)/u.test(cachedAvatar.src)) {
+            const blob = await withAnimationEmbedDeadline(async (signal) => {
+              const response = await fetch(cachedAvatar.src, { signal });
+              if (!response.ok)
+                throw new Error("Avatar animation request failed");
+              return await response.blob();
+            });
+            if (blob.type !== "video/mp4" && blob.type !== "video/webm") {
+              throw new Error("Avatar animation has an unsupported media type");
+            }
+            const animationBytes = await blobToBytes(blob);
+            const mimeType = blob.type as "video/mp4" | "video/webm";
+            if (animationBytes.length <= MAX_SNAPSHOT_AVATAR_ANIMATION_BYTES) {
+              animation = {
+                bytes: animationBytes,
+                mimeType,
+                alphaMode: cachedAvatar.alphaMode,
+              };
+            }
           }
         } catch (error) {
           console.warn("Could not embed animated avatar:", error);
         }
       }
       if (operationGeneration !== cardOperationGenerationRef.current) return;
-      const encodedCard = encodeAgentImage(
-        await blobToBytes(card),
-        snapshot,
-        animation,
-      );
+      const cardBytes = await blobToBytes(card);
+      let encodedCard: Uint8Array;
+      try {
+        encodedCard = encodeAgentImage(cardBytes, snapshot, animation);
+      } catch (error) {
+        if (
+          !(error instanceof AgentSnapshotError) ||
+          error.code !== "too-large"
+        ) {
+          throw error;
+        }
+        // The still card remains portable when an otherwise-valid animation
+        // would push the combined PNG over the snapshot size limit.
+        encodedCard = encodeAgentImage(cardBytes, snapshot, null);
+      }
       if (operationGeneration !== cardOperationGenerationRef.current) return;
       const filename = getAgentShareFilename(persona.displayName);
       downloadBlob(
@@ -227,7 +334,29 @@ export function AgentShareDialog({
         setCardDownloadPending(false);
       }
     }
-  }, [avatarSrc, cachedAvatar, cardBase, persona, t]);
+  }, [
+    avatarReadySrc,
+    cachedAvatar,
+    cardCopy,
+    cardBase,
+    currentGeneratedAvatarPoster,
+    locale,
+    persona,
+    t,
+  ]);
+
+  const handleAvatarPreloadRef = useCallback(
+    (node: HTMLImageElement | null) => {
+      avatarPreloadRef.current = node;
+      if (!node || !avatarSrc) return;
+      // Run after layout effects reset readiness for changed card content.
+      queueMicrotask(() => {
+        if (avatarPreloadRef.current !== node || !node.complete) return;
+        if (node.naturalWidth > 0) setAvatarReadySrc(avatarSrc);
+      });
+    },
+    [avatarSrc],
+  );
 
   const handleDownloadAgent = useCallback(async () => {
     if (agentDownloadInFlightRef.current) return;
@@ -243,7 +372,11 @@ export function AgentShareDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="lg" surface="solid" className="bg-card">
+      <DialogContent
+        size="lg"
+        surface="solid"
+        className="overflow-visible overflow-y-visible bg-card"
+      >
         <DialogHeader>
           <DialogTitle>
             {t("share.title", { name: persona.displayName })}
@@ -251,13 +384,15 @@ export function AgentShareDialog({
           <DialogDescription>{t("share.description")}</DialogDescription>
         </DialogHeader>
 
-        <div className="relative flex min-h-[26rem] justify-center py-2 [perspective:1200px]">
+        <div className="relative flex min-h-0 justify-center py-2 [perspective:1200px]">
           {avatarSrc ? (
             <img
+              ref={handleAvatarPreloadRef}
               key={`preload:${avatarSrc}`}
               src={avatarSrc}
               alt=""
               aria-hidden="true"
+              data-testid="agent-card-avatar-preload"
               className="absolute size-px opacity-0"
               onLoad={() => setAvatarReadySrc(avatarSrc)}
               onError={() => {
@@ -271,14 +406,26 @@ export function AgentShareDialog({
             />
           ) : null}
           <AnimatePresence mode="wait" initial={false}>
-            {!cardReady ? (
+            {avatarUnavailable ? (
+              <motion.div
+                key="avatar-unavailable"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
+                className="flex aspect-[1227/1839] w-full max-w-[min(19rem,calc((100dvh-18rem)*0.6667))] items-center justify-center rounded-[6.5%] bg-card text-sm text-muted-foreground shadow-sm"
+                role="status"
+              >
+                {t("share.avatarUnavailable")}
+              </motion.div>
+            ) : !cardReady ? (
               <motion.div
                 key="loader"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
-                className="absolute inset-0 flex items-center justify-center"
+                className="flex aspect-[1227/1839] w-full max-w-[min(19rem,calc((100dvh-18rem)*0.6667))] items-center justify-center"
               >
                 <Loader2
                   aria-label={t("share.loadingCard")}
@@ -286,43 +433,17 @@ export function AgentShareDialog({
                 />
               </motion.div>
             ) : (
-              <motion.div
-                key={`card:${avatarSrc}`}
-                initial={
-                  shouldReduceMotion
-                    ? false
-                    : { opacity: 0, rotateY: -92, scale: 0.92 }
-                }
-                animate={{ opacity: 1, rotateY: 0, scale: 1 }}
-                transition={{
-                  duration: shouldReduceMotion ? 0 : 0.45,
-                  ease: [0.22, 1, 0.36, 1],
-                }}
-                className="w-full max-w-[19rem] [transform-style:preserve-3d]"
-              >
-                <HolographicAgentCard
-                  src={cardBase}
-                  settings={holographicCardPresets.rainbowPrism}
+              <AgentCardReveal identity={cardContentIdentity}>
+                <AgentShareCardPreview
+                  identity={persona.id}
+                  displayName={persona.displayName}
+                  description={description}
+                  avatarSrc={avatarSrc}
                   alt={t("share.cardAlt", { name: persona.displayName })}
-                >
-                  <div className="absolute inset-x-[8%] top-[7%] bottom-[8%] flex flex-col text-center text-agent-share-card-ink">
-                    <h3 className="line-clamp-2 shrink-0 break-words pb-[0.08em] text-[clamp(1.5rem,5vw,2.6rem)] font-bold leading-[1.08] tracking-[-0.04em]">
-                      {persona.displayName}
-                    </h3>
-                    <div className="flex min-h-0 flex-1 items-center justify-center px-[9%] py-[5%]">
-                      <img
-                        src={avatarSrc}
-                        alt=""
-                        aria-hidden="true"
-                        className="max-h-full max-w-full object-contain drop-shadow-xl"
-                      />
-                    </div>
-                    <p className="line-clamp-4 shrink-0 break-words text-center text-[12px] leading-snug">
-                      {description}
-                    </p>
-                  </div>
-                </HolographicAgentCard>
-              </motion.div>
+                  copy={cardCopy}
+                  locale={locale}
+                />
+              </AgentCardReveal>
             )}
           </AnimatePresence>
         </div>
@@ -338,7 +459,7 @@ export function AgentShareDialog({
                 <Download />
               )
             }
-            disabled={cardDownloadPending}
+            disabled={cardDownloadPending || !cardReady}
             onClick={() => void handleDownloadCard()}
           >
             {t("share.downloadCard")}

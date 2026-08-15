@@ -5,6 +5,7 @@ import {
   decodeAgentImage,
   decodeAvatarAnimation,
   encodeAgentImage,
+  getPngDimensions,
 } from "./pngCodec";
 import {
   AgentSnapshotError,
@@ -112,6 +113,15 @@ function expectCode(
 }
 
 describe("buzz-agent-snapshot PNG codec", () => {
+  it("returns dimensions from a fully validated PNG", () => {
+    expect(getPngDimensions(pngWithDimensions(321, 654))).toEqual({
+      width: 321,
+      height: 654,
+    });
+    expect(() => getPngDimensions(Uint8Array.from([1, 2, 3]))).toThrow(
+      "Invalid PNG signature",
+    );
+  });
   it("round trips animated avatar bytes outside snapshot JSON", () => {
     const animation = {
       bytes: Uint8Array.from([26, 69, 223, 163]),

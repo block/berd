@@ -209,6 +209,22 @@ export async function deleteUserAvatar(avatarRef: string): Promise<void> {
   await invoke("delete_user_avatar", { avatarRef });
 }
 
+export interface CachedAvatarAnimation {
+  bytes: number[];
+  mimeType: string;
+  alphaMode?: ResolvedAvatarMedia["alphaMode"];
+}
+
+export async function readCachedAvatarAnimation({
+  avatarRef,
+}: {
+  avatarRef: string;
+}): Promise<CachedAvatarAnimation | null> {
+  return invoke<CachedAvatarAnimation | null>("read_cached_avatar_animation", {
+    avatarRef,
+  });
+}
+
 export async function getCachedAvatarForRef({
   avatarRef,
 }: {

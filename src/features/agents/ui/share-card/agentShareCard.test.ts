@@ -112,6 +112,6 @@ describe("agentShareCard", () => {
       2,
     );
 
-    expect(lines).toEqual(["avery…"]);
+    expect(lines).toEqual(["averyl", "ongun…"]);
   });
 });
