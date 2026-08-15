@@ -202,6 +202,15 @@ describe("VirtualMessageTimeline indexed search", () => {
     expect(initial?.indexing).toBe(true);
     expect(initial?.activeOrdinal).toBe(-1);
 
+    // Searchable rows remain rendered while harvesting, but the host contains
+    // any batch height without a fixed translateY hoist.
+    const harvestHost = screen.getByTestId("transcript-search-harvest-host");
+    expect(harvestHost.style.height).toBe("0px");
+    expect(harvestHost.style.overflow).toBe("clip");
+    expect(harvestHost.style.transform).toBe("");
+    expect(harvestHost.style.visibility).toBe("");
+    expect(harvestHost.style.display).toBe("");
+
     // The harvest host renders the missing rows offscreen, the count
     // converges to the full transcript, and the anchor lands on the
     // transcript-order FIRST match — not whatever was mounted.

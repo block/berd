@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranscriptRowDescriptor } from "../../projection/transcriptItemTypes";
 import {
   createLoadedTranscriptState,
+  MEASUREMENT_FLUSH_FALLBACK_MS,
   useTranscriptVirtualTimeline,
 } from "./useTranscriptVirtualTimeline";
 
@@ -37,10 +38,12 @@ describe("useTranscriptVirtualTimeline", () => {
 
   afterEach(() => {
     document.body.replaceChildren();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  it("flushes visible measurements on the next animation frame instead of a microtask", async () => {
+  it("lets the animation frame flush once and cancel its timer fallback", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const container = createContainer();
     const containerRef = {
       current: container,
@@ -84,17 +87,66 @@ describe("useTranscriptVirtualTimeline", () => {
       runPendingFrames();
     });
 
-    await waitFor(() => {
-      expect(
-        result.current.snapshot.measurementStats.visibleMeasurementAttempts,
-      ).toBe(1);
-      expect(
-        result.current.snapshot.measurementStats.acceptedVisibleMeasurements,
-      ).toBe(1);
+    expect(
+      result.current.snapshot.measurementStats.visibleMeasurementAttempts,
+    ).toBe(1);
+    expect(
+      result.current.snapshot.measurementStats.acceptedVisibleMeasurements,
+    ).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+
+    // The losing delivery cannot flush the accepted measurement again.
+    await act(async () => {
+      vi.advanceTimersByTime(MEASUREMENT_FLUSH_FALLBACK_MS + 1);
     });
+    expect(
+      result.current.snapshot.measurementStats.visibleMeasurementAttempts,
+    ).toBe(1);
   });
 
-  it("cancels pending measurements when the loaded transcript unmounts", async () => {
+  it("flushes queued measurements when animation frames are withheld", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = [row("intro", 100), row("assistant-tail", 120)];
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    act(() => {
+      result.current.measureRowElement(
+        "assistant-tail",
+        createMeasuredElement(240),
+      );
+    });
+
+    // The frame queue is intentionally never delivered, matching WKWebView
+    // while it considers the window occluded or in transition.
+    act(() => {
+      vi.advanceTimersByTime(MEASUREMENT_FLUSH_FALLBACK_MS + 1);
+    });
+
+    expect(
+      result.current.snapshot.measurementStats.visibleMeasurementAttempts,
+    ).toBe(1);
+    expect(
+      result.current.snapshot.measurementStats.acceptedVisibleMeasurements,
+    ).toBe(1);
+    expect(frameCallbacks).toHaveLength(0);
+    expect(cancelAnimationFrame).toHaveBeenCalled();
+  });
+
+  it("cancels pending frame and timer deliveries when the loaded transcript unmounts", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const container = createContainer();
     const containerRef = {
       current: container,
@@ -119,11 +171,13 @@ describe("useTranscriptVirtualTimeline", () => {
     });
     const pendingMeasurementFrameCount = frameCallbacks.length;
     expect(pendingMeasurementFrameCount).toBeGreaterThan(0);
+    expect(vi.getTimerCount()).toBe(1);
 
     unmount();
 
     expect(frameCallbacks.length).toBeLessThan(pendingMeasurementFrameCount);
     expect(cancelAnimationFrame).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it("replaces fallback runtime state when the session changes", async () => {
