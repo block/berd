@@ -64,10 +64,15 @@ vi.mock("@/shared/api/acpConnection", () => ({
   getClient: mocks.getClient,
 }));
 
+Object.defineProperty(window, "__BERD_MCP_SANDBOX_IPC_NONCE__", {
+  configurable: true,
+  value: "IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
+});
+
 vi.mock("@/shared/api/gooseServeHost", () => ({
-  getGooseServeHostInfo: vi.fn().mockResolvedValue({
-    httpBaseUrl: "http://127.0.0.1:4242",
-    secretKey: "test-secret",
+  createMcpAppSandbox: vi.fn().mockResolvedValue({
+    proxyUrl:
+      "http://127.0.0.1:4243/mcp-app-sandbox/proxy/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA#document=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
   }),
 }));
 
@@ -638,9 +643,10 @@ describe("McpAppView nested tool calls", () => {
       expect(iframe.style.getPropertyValue("color-scheme")).toBe("light");
       expect(iframe.style.backgroundColor).toBe("transparent");
     });
-    expect(
-      getLatestAppRendererProps().sandbox?.url.searchParams.get("color_scheme"),
-    ).toBe("light");
+    expect(getLatestAppRendererProps().sandbox?.url.search).toBe("");
+    expect(getLatestAppRendererProps().sandbox?.url.href).not.toContain(
+      "test-secret",
+    );
     expect(getLatestAppRendererProps().hostContext?.theme).toBe("light");
 
     const initialSandbox = getLatestAppRendererProps().sandbox;
@@ -653,9 +659,7 @@ describe("McpAppView nested tool calls", () => {
     });
     expect(getLatestAppRendererProps().hostContext?.theme).toBe("dark");
     expect(getLatestAppRendererProps().sandbox).toBe(initialSandbox);
-    expect(
-      getLatestAppRendererProps().sandbox?.url.searchParams.get("color_scheme"),
-    ).toBe("light");
+    expect(getLatestAppRendererProps().sandbox?.url.search).toBe("");
   });
 
   it("declares readily available host context fields", async () => {

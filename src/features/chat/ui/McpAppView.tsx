@@ -7,7 +7,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import packageJson from "../../../../package.json";
 import { getClient } from "@/shared/api/acpConnection";
-import { getGooseServeHostInfo } from "@/shared/api/gooseServeHost";
 import { useTheme } from "@/shared/theme/ThemeProvider";
 import { createVirtualLayoutStabilityAttributes } from "@/features/chat/transcript/measurement";
 import {
@@ -120,10 +119,6 @@ export function McpAppView({
 }: McpAppViewProps) {
   const { t } = useTranslation("chat");
   const { resolvedTheme } = useTheme();
-  const [hostInfo, setHostInfo] = useState<{
-    httpBaseUrl: string;
-    secretKey: string;
-  } | null>(null);
   const [inlineHeight, setInlineHeight] = useState(DEFAULT_APP_HEIGHT);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [activeToolInput, setActiveToolInput] = useState<
@@ -239,44 +234,6 @@ export function McpAppView({
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
-    getGooseServeHostInfo()
-      .then((info) => {
-        if (!cancelled) {
-          setHostInfo(info);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRenderError(t("message.mcpAppRenderError"));
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [t]);
-
-  const isHostInfoRequestPending =
-    renderableDocument !== null && renderError === null && hostInfo === null;
-  useEffect(() => {
-    if (!rowStateEnabled || !isHostInfoRequestPending) {
-      return;
-    }
-
-    setMcpActivity("host-request", true, {
-      sourceId: "mcp-host-info",
-    });
-
-    return () => {
-      setMcpActivity("host-request", false, {
-        sourceId: "mcp-host-info",
-      });
-    };
-  }, [isHostInfoRequestPending, rowStateEnabled, setMcpActivity]);
-
-  useEffect(() => {
     patchMcpAppState(
       {
         inlineHeightPx: inlineHeight,
@@ -297,20 +254,33 @@ export function McpAppView({
     console.debug("renderableDocument", renderableDocument);
     console.debug("currentToolInput", currentToolInput ?? null);
     console.debug("currentToolResult", currentToolResult ?? null);
-    console.debug("hostInfo", hostInfo);
     console.groupEnd();
-  }, [
-    currentToolInput,
-    currentToolResult,
-    hostInfo,
-    payload,
-    renderableDocument,
-  ]);
+  }, [currentToolInput, currentToolResult, payload, renderableDocument]);
 
-  const sandbox = useMcpAppSandbox({
-    hostInfo,
+  // Reset an AppRenderer failure when a replacement MCP document arrives.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: renderableDocument is the reset signal.
+  useEffect(() => {
+    setRenderError(null);
+  }, [renderableDocument]);
+
+  const handleSandboxError = useCallback(() => {
+    setRenderError(t("message.mcpAppRenderError"));
+  }, [t]);
+  const handleSandboxPendingChange = useCallback(
+    (pending: boolean) => {
+      if (rowStateEnabled) {
+        setMcpActivity("host-request", pending, {
+          sourceId: "mcp-sandbox",
+        });
+      }
+    },
+    [rowStateEnabled, setMcpActivity],
+  );
+  const preparedSandboxDocument = useMcpAppSandbox({
     renderableDocument,
     colorScheme: resolvedTheme,
+    onPendingChange: handleSandboxPendingChange,
+    onError: handleSandboxError,
   });
 
   const hostContext = useMemo<McpUiHostContext>(
@@ -455,7 +425,9 @@ export function McpAppView({
   }, [t]);
 
   const shouldRenderApp =
-    renderableDocument !== null && sandbox !== null && renderError === null;
+    renderableDocument !== null &&
+    preparedSandboxDocument !== null &&
+    renderError === null;
   const shouldShowFallback =
     renderError !== null || renderableDocument === null;
   const isMcpLayoutPending =
@@ -511,8 +483,8 @@ export function McpAppView({
           <AppRenderer
             toolName={payload.tool.name}
             toolResourceUri={renderableDocument.resourceUri}
-            html={renderableDocument.html}
-            sandbox={sandbox}
+            html={preparedSandboxDocument.html}
+            sandbox={preparedSandboxDocument.sandbox}
             toolInput={currentToolInput}
             toolResult={currentToolResult}
             hostContext={hostContext}

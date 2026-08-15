@@ -157,11 +157,15 @@ pub fn run() {
         mode.log_enabled();
     }
 
+    let trusted_mcp_sandbox_ipc = services::mcp_app_proxy::TrustedMcpSandboxIpc::new();
+    let trusted_mcp_sandbox_init = trusted_mcp_sandbox_ipc.initialization_script();
     let builder = if let Some(mode) = e2e_mode {
         builder.manage(mode)
     } else {
         builder
-    };
+    }
+    .append_invoke_initialization_script(trusted_mcp_sandbox_init)
+    .manage(trusted_mcp_sandbox_ipc);
 
     builder
         .setup(|app| {
@@ -211,6 +215,10 @@ pub fn run() {
             app.manage(commands::pocket_voice::PocketVoiceState::default());
             app.manage(commands::native_voice::NativeVoiceState::default());
             app.manage(commands::voice_capture::VoiceCaptureState::default());
+            let mcp_app_proxy =
+                tauri::async_runtime::block_on(services::mcp_app_proxy::McpAppProxyServer::start())
+                    .map_err(std::io::Error::other)?;
+            app.manage(mcp_app_proxy);
             let release_channel_state = commands::updates::ReleaseChannelState::load(app.handle())?;
             app.manage(release_channel_state);
 
@@ -485,7 +493,7 @@ pub fn run() {
             commands::builderbot::update_builderbot_routing_rule,
             commands::whoami::whoami,
             commands::acp::get_goose_serve_url,
-            commands::acp::get_goose_serve_host_info,
+            services::mcp_app_proxy::create_mcp_app_sandbox,
             commands::project_icons::scan_project_icons,
             commands::project_icons::read_project_icon,
             commands::renderer::log_renderer_event,

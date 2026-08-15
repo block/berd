@@ -69,14 +69,12 @@ impl GooseServeProcess {
         acp_websocket_url(self.port, &self.secret_key)
     }
 
-    /// Return the HTTP base URL for authenticated Goose server routes.
-    pub fn http_base_url(&self) -> String {
-        format!("http://{LOCALHOST}:{}", self.port)
-    }
-
-    /// Return the secret key used to authenticate local HTTP requests.
-    pub fn secret_key(&self) -> &str {
-        &self.secret_key
+    /// Return the HTTP base URL and secret for the in-process MCP sandbox proxy.
+    pub(crate) fn proxy_credentials(&self) -> (String, &str) {
+        (
+            format!("http://{LOCALHOST}:{}", self.port),
+            &self.secret_key,
+        )
     }
 
     /// Get a reference to the running process, or an error if it was never
