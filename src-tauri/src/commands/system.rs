@@ -478,16 +478,28 @@ pub async fn save_exported_session_files(
         .into_path()
         .map_err(|_| "Selected folder path is not available".to_string())?;
 
+    // Pin the selected directory by an open handle immediately after the
+    // picker returns. Every subsequent write is performed relative to this
+    // handle (see `write_export_file`), so an attacker who renames the
+    // selected directory and drops a symlink/reparse point in its place
+    // afterwards cannot redirect writes: the handle still refers to the
+    // originally selected inode. Re-resolving `folder_path` per write would
+    // reopen the ambient path and reintroduce that TOCTOU escape.
+    let dir = cap_std::fs::Dir::open_ambient_dir(&folder_path, cap_std::ambient_authority())
+        .map_err(|e| {
+            format!(
+                "Failed to open selected folder '{}': {}",
+                folder_path.display(),
+                e
+            )
+        })?;
+
     let mut used: HashSet<String> = HashSet::new();
     let mut written: Vec<String> = Vec::with_capacity(items.len());
 
     for item in items {
-        let resolved = write_export_file(
-            &folder_path,
-            &item.filename,
-            item.contents.as_bytes(),
-            &mut used,
-        )?;
+        let resolved =
+            write_export_file(&dir, &item.filename, item.contents.as_bytes(), &mut used)?;
         written.push(resolved);
     }
 
@@ -565,17 +577,23 @@ fn sanitize_export_leaf_filename(filename: &str) -> Result<String, String> {
     Ok(filename.to_string())
 }
 
-/// Write one exported session file into `folder` under a validated leaf name,
-/// never following symlinks and never overwriting an existing entry.
+/// Write one exported session file beneath the pinned directory handle `dir`
+/// under a validated leaf name, never following symlinks and never overwriting
+/// an existing entry.
+///
+/// `dir` is a `cap_std::fs::Dir` opened once when the picker returned. All
+/// operations here are performed relative to that handle inside cap-std's
+/// sandbox, so a candidate can never resolve outside the originally selected
+/// directory even if its path is swapped for a symlink/reparse point after
+/// selection — this closes the parent-directory TOCTOU escape that a plain
+/// `folder.join(candidate)` re-resolution would reopen.
 ///
 /// Collisions get a deterministic `-N` suffix. `create_new(true)` guarantees
-/// each write lands on a freshly created file directly inside `folder`: a
-/// pre-existing file, directory, or symlink (including a dangling one) at the
-/// target fails with `AlreadyExists` and is skipped rather than followed or
-/// overwritten. Combined with the leaf-only filename, this confines every
-/// write beneath the selected directory and closes the symlink/TOCTOU escape.
+/// each write lands on a freshly created file: a pre-existing file, directory,
+/// or symlink (including a dangling one) at the target fails with
+/// `AlreadyExists` and is skipped rather than followed or overwritten.
 fn write_export_file(
-    folder: &Path,
+    dir: &cap_std::fs::Dir,
     filename: &str,
     contents: &[u8],
     used: &mut HashSet<String>,
@@ -596,11 +614,10 @@ fn write_export_file(
         if used.contains(&candidate) {
             continue;
         }
-        match OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(folder.join(&candidate))
-        {
+        match dir.open_with(
+            &candidate,
+            cap_std::fs::OpenOptions::new().create_new(true).write(true),
+        ) {
             Ok(mut file) => {
                 file.write_all(contents)
                     .map_err(|e| format!("Failed to write file '{candidate}': {e}"))?;
@@ -3055,10 +3072,12 @@ mod tests {
     #[test]
     fn write_export_file_writes_valid_export_into_folder() {
         let dir = tempdir().expect("tempdir");
+        let handle =
+            cap_std::fs::Dir::open_ambient_dir(dir.path(), cap_std::ambient_authority()).unwrap();
         let mut used = std::collections::HashSet::new();
 
-        let name = write_export_file(dir.path(), "session.json", b"hello", &mut used)
-            .expect("valid export");
+        let name =
+            write_export_file(&handle, "session.json", b"hello", &mut used).expect("valid export");
         assert_eq!(name, "session.json");
         assert_eq!(fs::read(dir.path().join("session.json")).unwrap(), b"hello");
     }
@@ -3066,11 +3085,13 @@ mod tests {
     #[test]
     fn write_export_file_rejects_traversal_and_absolute_paths() {
         let dir = tempdir().expect("tempdir");
+        let handle =
+            cap_std::fs::Dir::open_ambient_dir(dir.path(), cap_std::ambient_authority()).unwrap();
         let mut used = std::collections::HashSet::new();
 
-        assert!(write_export_file(dir.path(), "../escape.json", b"x", &mut used).is_err());
-        assert!(write_export_file(dir.path(), "/etc/passwd", b"x", &mut used).is_err());
-        assert!(write_export_file(dir.path(), "sub\\win.json", b"x", &mut used).is_err());
+        assert!(write_export_file(&handle, "../escape.json", b"x", &mut used).is_err());
+        assert!(write_export_file(&handle, "/etc/passwd", b"x", &mut used).is_err());
+        assert!(write_export_file(&handle, "sub\\win.json", b"x", &mut used).is_err());
         // Nothing was created inside the folder, and no escape file exists.
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
         assert!(!dir.path().parent().unwrap().join("escape.json").exists());
@@ -3080,10 +3101,12 @@ mod tests {
     fn write_export_file_suffixes_disk_collisions_deterministically() {
         let dir = tempdir().expect("tempdir");
         fs::write(dir.path().join("chat.json"), b"pre-existing").unwrap();
+        let handle =
+            cap_std::fs::Dir::open_ambient_dir(dir.path(), cap_std::ambient_authority()).unwrap();
         let mut used = std::collections::HashSet::new();
 
-        let name = write_export_file(dir.path(), "chat.json", b"new", &mut used)
-            .expect("collision suffix");
+        let name =
+            write_export_file(&handle, "chat.json", b"new", &mut used).expect("collision suffix");
         assert_eq!(name, "chat-2.json");
         // The pre-existing file is untouched.
         assert_eq!(
@@ -3096,14 +3119,16 @@ mod tests {
     #[test]
     fn write_export_file_suffixes_duplicate_names_within_one_batch() {
         let dir = tempdir().expect("tempdir");
+        let handle =
+            cap_std::fs::Dir::open_ambient_dir(dir.path(), cap_std::ambient_authority()).unwrap();
         let mut used = std::collections::HashSet::new();
 
         let first =
-            write_export_file(dir.path(), "chat.json", b"a", &mut used).expect("first duplicate");
+            write_export_file(&handle, "chat.json", b"a", &mut used).expect("first duplicate");
         let second =
-            write_export_file(dir.path(), "chat.json", b"b", &mut used).expect("second duplicate");
+            write_export_file(&handle, "chat.json", b"b", &mut used).expect("second duplicate");
         let third =
-            write_export_file(dir.path(), "chat.json", b"c", &mut used).expect("third duplicate");
+            write_export_file(&handle, "chat.json", b"c", &mut used).expect("third duplicate");
 
         assert_eq!(first, "chat.json");
         assert_eq!(second, "chat-2.json");
@@ -3128,8 +3153,10 @@ mod tests {
         let target = outside_dir.join("victim.json");
         symlink(&target, export_dir.join("chat.json")).unwrap();
 
+        let handle =
+            cap_std::fs::Dir::open_ambient_dir(&export_dir, cap_std::ambient_authority()).unwrap();
         let mut used = std::collections::HashSet::new();
-        let name = write_export_file(&export_dir, "chat.json", b"payload", &mut used)
+        let name = write_export_file(&handle, "chat.json", b"payload", &mut used)
             .expect("symlink collision is skipped");
 
         // The symlinked target outside the folder must never be written.
@@ -3140,5 +3167,43 @@ mod tests {
             fs::read(export_dir.join("chat-2.json")).unwrap(),
             b"payload"
         );
+    }
+
+    /// Regression for the parent-directory TOCTOU: after the picker returns and
+    /// the directory handle is opened, an attacker renames the selected
+    /// directory and replaces its path with a symlink pointing outside. Writes
+    /// must stay attached to the originally selected inode (via the pinned
+    /// handle) and must never land in the attacker-controlled location.
+    #[cfg(unix)]
+    #[test]
+    fn write_export_file_stays_attached_to_pinned_dir_after_parent_swap() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempdir().expect("tempdir");
+        let selected = root.path().join("selected");
+        let outside = root.path().join("outside");
+        fs::create_dir(&selected).unwrap();
+        fs::create_dir(&outside).unwrap();
+
+        // Handle is pinned to the originally selected directory.
+        let handle =
+            cap_std::fs::Dir::open_ambient_dir(&selected, cap_std::ambient_authority()).unwrap();
+
+        // Attacker swaps the selected path for a symlink to `outside`.
+        fs::rename(&selected, root.path().join("selected-old")).unwrap();
+        symlink(&outside, &selected).unwrap();
+
+        let mut used = std::collections::HashSet::new();
+        let name = write_export_file(&handle, "chat.json", b"payload", &mut used)
+            .expect("write via pinned handle");
+        assert_eq!(name, "chat.json");
+
+        // The write landed on the original inode (now `selected-old`), not the
+        // attacker's redirect target.
+        assert_eq!(
+            fs::read(root.path().join("selected-old/chat.json")).unwrap(),
+            b"payload"
+        );
+        assert!(!outside.join("chat.json").exists());
     }
 }
