@@ -9,7 +9,9 @@ function starterPersona(fileName: "tinker.md" | "wildcard.md"): Persona {
     systemPrompt: "Help.",
     isBuiltin: false,
     writable: true,
-    sourceProperties: { metadata: { berdBundled: true } },
+    sourceProperties: {
+      metadata: { berdBundled: true, berdBundledSource: fileName.slice(0, -3) },
+    },
   };
 }
 

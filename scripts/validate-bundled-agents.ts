@@ -19,12 +19,17 @@ import YAML from "yaml";
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---(?:\n|$)/;
 const APP_AVATAR_REF_RE = /^app-avatar:[a-z0-9][a-z0-9_-]{0,63}$/;
+const BUNDLED_SOURCE_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 interface BundledAgentFrontmatter {
   name?: unknown;
   description?: unknown;
   avatar?: unknown;
-  metadata?: { berdBundled?: unknown; [key: string]: unknown };
+  metadata?: {
+    berdBundled?: unknown;
+    berdBundledSource?: unknown;
+    [key: string]: unknown;
+  };
 }
 
 const USAGE =
@@ -101,6 +106,18 @@ export function validateBundledAgent(
     errors.push(
       error(
         "frontmatter `avatar` is required and must be an `app-avatar:<id>` ref",
+        filePath,
+      ),
+    );
+  }
+
+  if (
+    typeof frontmatter.metadata?.berdBundledSource !== "string" ||
+    !BUNDLED_SOURCE_RE.test(frontmatter.metadata.berdBundledSource)
+  ) {
+    errors.push(
+      error(
+        "frontmatter must set a stable `metadata.berdBundledSource` id",
         filePath,
       ),
     );

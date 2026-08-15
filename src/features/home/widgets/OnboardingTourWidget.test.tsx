@@ -80,7 +80,9 @@ describe("OnboardingTourWidget", () => {
           systemPrompt: "Help people use Berd.",
           isBuiltin: false,
           writable: true,
-          sourceProperties: { metadata: { berdBundled: true } },
+          sourceProperties: {
+            metadata: { berdBundled: true, berdBundledSource: "berdy" },
+          },
         },
       ],
     });
@@ -297,7 +299,9 @@ describe("OnboardingTourWidget", () => {
             systemPrompt: "Help people use Berd.",
             isBuiltin: false,
             writable: true,
-            sourceProperties: { metadata: { berdBundled: true } },
+            sourceProperties: {
+              metadata: { berdBundled: true, berdBundledSource: "berdy" },
+            },
           },
         ],
       });

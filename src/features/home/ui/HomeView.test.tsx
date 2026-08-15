@@ -296,7 +296,9 @@ describe("HomeView", () => {
       systemPrompt: "Help.",
       isBuiltin: false,
       writable: true,
-      sourceProperties: { metadata: { berdBundled: true } },
+      sourceProperties: {
+        metadata: { berdBundled: true, berdBundledSource: "tinker" },
+      },
     });
     useAgentStore.setState({
       personas: [
@@ -338,7 +340,9 @@ describe("HomeView", () => {
         systemPrompt: "Help.",
         isBuiltin: false,
         writable: true,
-        sourceProperties: { metadata: { berdBundled: true } },
+        sourceProperties: {
+          metadata: { berdBundled: true, berdBundledSource: "tinker" },
+        },
       },
       {
         id: "/Users/test/.agents/agents/wildcard.md",
@@ -346,7 +350,12 @@ describe("HomeView", () => {
         systemPrompt: "Help.",
         isBuiltin: false,
         writable: true,
-        sourceProperties: { metadata: { berdBundled: true } },
+        sourceProperties: {
+          metadata: {
+            berdBundled: true,
+            berdBundledSource: "wildcard",
+          },
+        },
       },
     ];
     useAgentStore.setState({ personas, personasLoading: false });
@@ -370,7 +379,12 @@ describe("HomeView", () => {
       systemPrompt: "Help.",
       isBuiltin: false,
       writable: true,
-      sourceProperties: { metadata: { berdBundled: true } },
+      sourceProperties: {
+        metadata: {
+          berdBundled: true,
+          berdBundledSource: displayName.toLowerCase(),
+        },
+      },
     });
     const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
     useAgentStore.setState({ personas, personasLoading: false });

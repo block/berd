@@ -13,7 +13,7 @@ import {
 
 function persona(
   displayName: string,
-  options: { bundled?: boolean; id?: string } = {},
+  options: { bundled?: boolean; id?: string; sourceId?: string } = {},
 ): Persona {
   return {
     id: options.id ?? `/Users/test/.agents/agents/${displayName}.md`,
@@ -22,7 +22,10 @@ function persona(
     isBuiltin: false,
     writable: true,
     sourceProperties: {
-      metadata: { berdBundled: options.bundled ?? true },
+      metadata: {
+        berdBundled: options.bundled ?? true,
+        berdBundledSource: options.sourceId ?? displayName.toLowerCase(),
+      },
     },
   };
 }
@@ -44,13 +47,16 @@ describe("starter agents", () => {
 
   it("uses stable bundled file identities rather than display names", () => {
     const renamedTinker = persona("Workbench", {
-      id: "/Users/test/.agents/agents/tinker.md",
+      id: "/Users/test/.agents/agents/tinker7.md",
+      sourceId: "tinker",
     });
     const fallbackWildcard = persona("Surprise", {
-      id: "/Users/test/.agents/agents/wildcard2.md",
+      id: "/Users/test/.agents/agents/wildcard12.md",
+      sourceId: "wildcard",
     });
     const impostor = persona("Tinker", {
       id: "/Users/test/.agents/agents/choosey.md",
+      sourceId: "choosey",
     });
 
     expect(

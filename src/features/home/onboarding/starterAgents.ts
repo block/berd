@@ -12,15 +12,17 @@ const STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY =
   "goose:home:starter-agent-pins-eligible-v1";
 let starterAgentPinsEligibleForCurrentRun = false;
 
+function bundledSourceId(persona: Persona): string | undefined {
+  const metadata = persona.sourceProperties?.metadata;
+  if (typeof metadata !== "object" || metadata === null) return undefined;
+  const source = Reflect.get(metadata, "berdBundledSource");
+  return typeof source === "string" ? source : undefined;
+}
+
 export function starterAgentIndex(persona: Persona): number {
-  const normalizedPath = persona.id.replaceAll("\\", "/").toLowerCase();
-  return STARTER_AGENT_FILE_NAMES.findIndex((fileName) => {
-    const stem = fileName.slice(0, -3);
-    return (
-      normalizedPath.endsWith(`/.agents/agents/${fileName}`) ||
-      normalizedPath.endsWith(`/.agents/agents/${stem}2.md`)
-    );
-  });
+  return STARTER_AGENT_FILE_NAMES.findIndex(
+    (fileName) => bundledSourceId(persona) === fileName.slice(0, -3),
+  );
 }
 
 function isBundledPersona(persona: Persona): boolean {
@@ -111,13 +113,7 @@ export function selectStarterAgentPersonas(
     if (!isBundledPersona(persona)) continue;
     const index = starterAgentIndex(persona);
     if (index < 0) continue;
-    const current = selected[index];
-    const canonicalSuffix = `/.agents/agents/${STARTER_AGENT_FILE_NAMES[index]}`;
-    const isCanonical = persona.id
-      .replaceAll("\\", "/")
-      .toLowerCase()
-      .endsWith(canonicalSuffix);
-    if (!current || isCanonical) selected[index] = persona;
+    if (!selected[index]) selected[index] = persona;
   }
   return selected.filter(
     (persona): persona is Persona => persona !== undefined,

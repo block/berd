@@ -241,7 +241,9 @@ beforeEach(() => {
         systemPrompt: "Help.",
         isBuiltin: false,
         writable: true,
-        sourceProperties: { metadata: { berdBundled: true } },
+        sourceProperties: {
+          metadata: { berdBundled: true, berdBundledSource: "tinker" },
+        },
       },
       {
         id: "/Users/test/.agents/agents/wildcard.md",
@@ -249,7 +251,9 @@ beforeEach(() => {
         systemPrompt: "Help.",
         isBuiltin: false,
         writable: true,
-        sourceProperties: { metadata: { berdBundled: true } },
+        sourceProperties: {
+          metadata: { berdBundled: true, berdBundledSource: "wildcard" },
+        },
       },
     ]);
   vi.mocked(toast.error).mockClear();
@@ -571,6 +575,9 @@ describe("homeWidgetStore", () => {
       useHomeWidgetStore.getState().resetHomeForOnboarding(),
     ).resolves.toEqual({ itemsConfirmed: true, cameraConfirmed: false });
     expect(localStorage.getItem("goose:home:starter-layout-v18")).toBeNull();
+    expect(localStorage.getItem("goose:home:starter-camera-pending-v1")).toBe(
+      "1",
+    );
     expect(toast.warning).toHaveBeenCalledWith(
       "home:widgetLayer.toasts.cameraSaveFailed",
     );
@@ -820,6 +827,38 @@ describe("homeWidgetStore", () => {
       localStorage.getItem("goose:home:starter-agent-pins-eligible-v1"),
     ).toBe("1");
     expect(localStorage.getItem("goose:home:starter-layout-v18")).toBeNull();
+  });
+
+  it("retries a pending starter camera during Home initialization", async () => {
+    localStorage.setItem("goose:home:starter-camera-pending-v1", "1");
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        camera: INITIAL_CAMERA,
+        cameraRevision: 4,
+        itemRevision: 7,
+        items: [clockLayoutItem(BACKEND_CLOCK_ID, 360)],
+      }),
+    );
+    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({
+        camera: request.camera,
+        cameraRevision: 5,
+        itemRevision: 7,
+        items: [clockLayoutItem(BACKEND_CLOCK_ID, 360)],
+      }),
+    }));
+
+    await useHomeWidgetStore.getState().initialize();
+
+    expect(saveLayoutCamera).toHaveBeenCalledWith({
+      layoutId: HOME_LAYOUT_ID,
+      expectedRevision: 4,
+      camera: { centerX: 0, centerY: 40, zoomBps: 10_000 },
+    });
+    expect(
+      localStorage.getItem("goose:home:starter-camera-pending-v1"),
+    ).toBeNull();
   });
 
   it("does not seed or center on Berdy while its experiment is disabled", async () => {

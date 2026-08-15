@@ -10,7 +10,9 @@ function persona(overrides: Partial<Persona> = {}): Persona {
     systemPrompt: "Help people use Berd.",
     isBuiltin: false,
     writable: true,
-    sourceProperties: { metadata: { berdBundled: true } },
+    sourceProperties: {
+      metadata: { berdBundled: true, berdBundledSource: "berdy" },
+    },
     ...overrides,
   };
 }
@@ -33,7 +35,12 @@ describe("findBerdyPersonaId", () => {
   it("does not select another agent that only shares Berdy's name", () => {
     expect(
       findBerdyPersonaId([
-        persona({ id: "/Users/test/.agents/agents/other.md" }),
+        persona({
+          id: "/Users/test/.agents/agents/other.md",
+          sourceProperties: {
+            metadata: { berdBundled: true, berdBundledSource: "other" },
+          },
+        }),
       ]),
     ).toBeNull();
   });
