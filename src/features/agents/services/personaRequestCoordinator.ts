@@ -8,17 +8,34 @@ let activeDrain: Promise<void> | null = null;
 let invalidationEpoch = 0;
 let mutationsInFlight = 0;
 let trailingReadRequired = false;
-let mutationSettledWaiters: Array<() => void> = [];
+let dirtyAfterMutation = false;
+let applyingAuthoritativeSnapshot = false;
+let unsubscribeFromPersonaStore: (() => void) | null = null;
 
-function waitForMutationsToSettle(): Promise<void> {
-  if (mutationsInFlight === 0) return Promise.resolve();
-  return new Promise((resolve) => mutationSettledWaiters.push(resolve));
+function ensureCoordinatorInitialized(): void {
+  if (unsubscribeFromPersonaStore) return;
+  let previousPersonas = useAgentStore.getState().personas;
+  unsubscribeFromPersonaStore = useAgentStore.subscribe((state) => {
+    if (state.personas === previousPersonas) return;
+    previousPersonas = state.personas;
+    if (applyingAuthoritativeSnapshot) return;
+    invalidationEpoch += 1;
+    if (activeDrain) trailingReadRequired = true;
+  });
 }
 
-function notifyMutationsSettled(): void {
-  const waiters = mutationSettledWaiters;
-  mutationSettledWaiters = [];
-  for (const resolve of waiters) resolve();
+function commitAuthoritativeSnapshot(personas: Persona[]): void {
+  applyingAuthoritativeSnapshot = true;
+  try {
+    useAgentStore.getState().setPersonas(personas);
+  } finally {
+    applyingAuthoritativeSnapshot = false;
+  }
+}
+
+function scheduleReconciliation(): void {
+  if (!dirtyAfterMutation || mutationsInFlight > 0 || activeDrain) return;
+  void refreshPersonasCoordinated();
 }
 
 async function drainReads(
@@ -34,18 +51,22 @@ async function drainReads(
       const epochAtStart = invalidationEpoch;
       try {
         const personas = await reader();
-        if (epochAtStart === invalidationEpoch && mutationsInFlight === 0) {
-          useAgentStore.getState().setPersonas(personas);
+        const snapshotIsCurrent = epochAtStart === invalidationEpoch;
+        if (snapshotIsCurrent) {
+          dirtyAfterMutation = false;
+          commitAuthoritativeSnapshot(personas);
+        } else if (mutationsInFlight > 0) {
+          dirtyAfterMutation = true;
+          return;
         } else {
           trailingReadRequired = true;
         }
       } catch (error) {
         console.error(errorMessage, error);
-        return;
+        if (!trailingReadRequired) return;
       }
 
       if (!trailingReadRequired) return;
-      await waitForMutationsToSettle();
       reader = api.refreshPersonas;
     }
   } finally {
@@ -61,6 +82,7 @@ function requestRead(
     requireFreshSnapshot: boolean;
   },
 ): Promise<void> {
+  ensureCoordinatorInitialized();
   if (activeDrain) {
     if (options.requireFreshSnapshot) {
       invalidationEpoch += 1;
@@ -75,6 +97,7 @@ function requestRead(
     options.errorMessage,
   ).finally(() => {
     activeDrain = null;
+    scheduleReconciliation();
   });
   return activeDrain;
 }
@@ -98,6 +121,7 @@ export function refreshPersonasCoordinated(): Promise<void> {
 export async function runPersonaMutation<T>(
   mutation: () => Promise<T>,
 ): Promise<T> {
+  ensureCoordinatorInitialized();
   invalidationEpoch += 1;
   mutationsInFlight += 1;
   if (activeDrain) trailingReadRequired = true;
@@ -105,15 +129,18 @@ export async function runPersonaMutation<T>(
     return await mutation();
   } finally {
     mutationsInFlight -= 1;
-    invalidationEpoch += 1;
-    if (mutationsInFlight === 0) notifyMutationsSettled();
+    dirtyAfterMutation = true;
+    scheduleReconciliation();
   }
 }
 
 export function resetPersonaRequestCoordinatorForTests(): void {
+  unsubscribeFromPersonaStore?.();
+  unsubscribeFromPersonaStore = null;
   activeDrain = null;
   invalidationEpoch = 0;
   mutationsInFlight = 0;
   trailingReadRequired = false;
-  mutationSettledWaiters = [];
+  dirtyAfterMutation = false;
+  applyingAuthoritativeSnapshot = false;
 }

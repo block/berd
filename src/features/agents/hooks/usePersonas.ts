@@ -65,40 +65,41 @@ export function usePersonas() {
   }, [refreshFromDisk]);
 
   const createPersona = useCallback(
-    async (req: CreatePersonaRequest) => {
-      const persona = await runPersonaMutation(() => api.createPersona(req));
-      addPersona(persona);
-      return persona;
-    },
+    async (req: CreatePersonaRequest) =>
+      runPersonaMutation(async () => {
+        const persona = await api.createPersona(req);
+        addPersona(persona);
+        return persona;
+      }),
     [addPersona],
   );
 
   const updatePersona = useCallback(
-    async (existing: Persona, req: UpdatePersonaRequest) => {
-      const persona = await runPersonaMutation(() =>
-        api.updatePersona(existing, req),
-      );
-      const displacedAvatar = useAgentStore
-        .getState()
-        .personas.find((candidate) => candidate.id === existing.id)?.avatar;
-      updatePersonaInStore(existing.id, persona);
-      if (displacedAvatar !== persona.avatar) {
-        deleteUnreferencedUserAvatar(displacedAvatar);
-      }
-      return persona;
-    },
+    async (existing: Persona, req: UpdatePersonaRequest) =>
+      runPersonaMutation(async () => {
+        const persona = await api.updatePersona(existing, req);
+        const displacedAvatar = useAgentStore
+          .getState()
+          .personas.find((candidate) => candidate.id === existing.id)?.avatar;
+        updatePersonaInStore(existing.id, persona);
+        if (displacedAvatar !== persona.avatar) {
+          deleteUnreferencedUserAvatar(displacedAvatar);
+        }
+        return persona;
+      }),
     [updatePersonaInStore],
   );
 
   const deletePersona = useCallback(
-    async (id: string) => {
-      const deletedAvatar = useAgentStore
-        .getState()
-        .personas.find((persona) => persona.id === id)?.avatar;
-      await runPersonaMutation(() => api.deletePersona(id));
-      removePersona(id);
-      deleteUnreferencedUserAvatar(deletedAvatar);
-    },
+    async (id: string) =>
+      runPersonaMutation(async () => {
+        const deletedAvatar = useAgentStore
+          .getState()
+          .personas.find((persona) => persona.id === id)?.avatar;
+        await api.deletePersona(id);
+        removePersona(id);
+        deleteUnreferencedUserAvatar(deletedAvatar);
+      }),
     [removePersona],
   );
 
