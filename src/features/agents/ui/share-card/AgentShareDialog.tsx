@@ -337,7 +337,7 @@ export function AgentShareDialog({
       <DialogContent
         size="lg"
         surface="solid"
-        className="overflow-visible bg-card"
+        className="overflow-visible overflow-y-visible bg-card"
       >
         <DialogHeader>
           <DialogTitle>

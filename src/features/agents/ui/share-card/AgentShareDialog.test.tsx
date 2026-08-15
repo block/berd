@@ -150,6 +150,22 @@ describe("AgentShareDialog", () => {
     await waitFor(() => expect(button).not.toBeDisabled());
   });
 
+  it("keeps the modal out of scroll containment for the refraction halo", () => {
+    render(
+      <AgentShareDialog
+        open
+        persona={persona}
+        onOpenChange={vi.fn()}
+        onDownloadAgent={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("dialog")).toHaveClass(
+      "overflow-visible",
+      "overflow-y-visible",
+    );
+  });
+
   it("uses viewport-safe geometry for loading and unavailable states", async () => {
     const { rerender } = render(
       <AgentShareDialog
