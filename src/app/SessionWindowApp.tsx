@@ -37,7 +37,7 @@ import {
 } from "@/features/chat/stores/sessionWindowStore";
 import { useBerdctlQueuedMessageDrain } from "@/features/berdctl/bridge/useBerdctlQueuedMessageDrain";
 import { ChatView } from "@/features/chat/ui/ChatView";
-import { ReleasedQueuedMessageDrain } from "@/features/chat/ui/ReleasedQueuedMessageDrain";
+import { BackgroundQueuedMessageDrain } from "@/features/chat/ui/BackgroundQueuedMessageDrain";
 import { useWorkspaceNameRequestQueue } from "@/features/chat/hooks/useWorkspaceNameRequestQueue";
 import { ProjectWorkspaceStartupNameDialog } from "@/features/projects/ui/ProjectWorkspaceStartupNameDialog";
 import { Button } from "@/shared/ui/button";
@@ -437,7 +437,7 @@ export function SessionWindowApp({
 
   return (
     <>
-      <ReleasedQueuedMessageDrain
+      <BackgroundQueuedMessageDrain
         sessionId={sessionId}
         ownerReady={phase === "ready"}
       />
