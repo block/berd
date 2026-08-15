@@ -115,6 +115,28 @@ impl SetupOperation {
     }
 }
 
+/// The renderer-selectable install fix identity. Narrowed to the two *install*
+/// slots so a forged `auth` / `updateMain` / `updateBridge` cannot deserialize
+/// into the install seed at all; the backend still re-authorizes the value
+/// against the provider's current doctor state before running it (see
+/// [`authorize_install_seed`]). The TypeScript contract mirrors this, but the
+/// narrow wire type — not the TS `Extract<>` — is the security boundary.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InstallFixType {
+    Command,
+    Bridge,
+}
+
+impl From<InstallFixType> for FixType {
+    fn from(value: InstallFixType) -> Self {
+        match value {
+            InstallFixType::Command => FixType::Command,
+            InstallFixType::Bridge => FixType::Bridge,
+        }
+    }
+}
+
 /// The execution recipe captured at click time. Keeping readout *derivation* in
 /// TS (it already has the doctor report) avoids porting `actionableReadouts`
 /// into Rust; the backend just runs the recipe autonomously so the chain
@@ -124,8 +146,11 @@ impl SetupOperation {
 pub struct SetupPlan {
     /// The install recipe to seed the install loop with (`command` for the main
     /// CLI, `bridge` for a missing ACP bridge). `null` for a pure update/auth.
+    /// Only the two install variants can deserialize here; the backend still
+    /// re-authorizes it against the provider's current doctor state before
+    /// running it (see [`authorize_install_seed`]).
     #[serde(default)]
-    install_fix_type: Option<FixType>,
+    install_fix_type: Option<InstallFixType>,
     /// Per-readout update fix identities to run after the install loop. Only
     /// `updateMain` / `updateBridge` are valid; the exact source-aware command
     /// is resolved by the backend from the crate's trusted freshness readout,
@@ -492,10 +517,47 @@ fn resolve_update_command(
     })
 }
 
+/// The install fix (`Command` / `Bridge`) the provider's check currently offers
+/// from trusted crate state, or `None` when it offers no install fix (already
+/// installed, or exposes only auth/update). Used by `run_doctor_fix` to reject a
+/// forged or mismatched managed-install request before dispatching the
+/// privileged managed installer.
+pub(crate) async fn offered_install_fix(
+    app: &AppHandle,
+    provider_id: &str,
+) -> Result<Option<FixType>, String> {
+    let check = find_check(app, provider_id).await?;
+    Ok(install_fix_for_check(&check))
+}
+
+/// Authorize a renderer-requested install seed against the provider's current
+/// doctor state (`offered` = the install fix the check actually offers now).
+/// The renderer names *which* install fix it intends; this returns the backend
+/// value only when it matches, rejecting a mismatched seed or one against a
+/// check that offers no install fix (already installed / auth-or-update only)
+/// before any install shell command runs. Pure so the authorization boundary is
+/// unit-testable without a Tauri `AppHandle`.
+fn authorize_install_seed(
+    provider_id: &str,
+    requested: &InstallFixType,
+    offered: Option<FixType>,
+) -> Result<FixType, String> {
+    let requested = FixType::from(requested.clone());
+    match offered {
+        Some(offered) if offered == requested => Ok(offered),
+        Some(offered) => Err(format!(
+            "'{requested:?}' install is not the '{offered:?}' fix currently offered for '{provider_id}'"
+        )),
+        None => Err(format!(
+            "'{provider_id}' offers no '{requested:?}' install fix in its current state"
+        )),
+    }
+}
+
 /// The install recipe a check still needs, if any. Only the two *install* fix
 /// types qualify — `Auth` (installed-but-signed-out) and the per-readout update
 /// types are handled by later chain steps, not the install loop.
-fn install_fix_for_check(check: &doctor::DoctorCheck) -> Option<FixType> {
+pub(crate) fn install_fix_for_check(check: &doctor::DoctorCheck) -> Option<FixType> {
     match check.fix_type {
         Some(FixType::Command) => Some(FixType::Command),
         Some(FixType::Bridge) => Some(FixType::Bridge),
@@ -601,7 +663,20 @@ async fn run_install(
     // after each install and run the next install fix the crate reports, so a
     // from-scratch Codex installs `codex` + `codex-acp` under one click. See
     // `next_install_fix` for the ≤2-pass bound that terminates a stuck install.
-    let mut pending = plan.install_fix_type.clone();
+    //
+    // The renderer only names *which* install fix it intends; before running it
+    // we re-read the provider's doctor check and authorize the seed against that
+    // trusted state, so a forged/mismatched seed (or one against an
+    // already-installed check) rejects before the install shell command runs.
+    // Subsequent passes re-derive `pending` from the backend check directly, so
+    // only the renderer-supplied seed needs this gate.
+    let mut pending = match &plan.install_fix_type {
+        Some(requested) => {
+            let offered = offered_install_fix(app, provider_id).await?;
+            Some(authorize_install_seed(provider_id, requested, offered)?)
+        }
+        None => None,
+    };
     let mut ran: Vec<FixType> = Vec::new();
     while let Some(fix) = next_install_fix(&pending, &ran) {
         ran.push(fix.clone());
@@ -1002,6 +1077,85 @@ mod tests {
         );
         // A fully-installed agent has no install fix pending.
         assert_eq!(install_fix_for_check(&check_with_fix(None)), None);
+    }
+
+    #[test]
+    fn authorize_install_seed_returns_the_matching_backend_fix() {
+        // The renderer names the install fix it intends; when it matches the
+        // fix the check currently offers, the backend value is what runs.
+        assert_eq!(
+            authorize_install_seed(
+                "codex-acp",
+                &InstallFixType::Command,
+                Some(FixType::Command)
+            ),
+            Ok(FixType::Command)
+        );
+        assert_eq!(
+            authorize_install_seed(
+                "codex-acp",
+                &InstallFixType::Bridge,
+                Some(FixType::Bridge)
+            ),
+            Ok(FixType::Bridge)
+        );
+    }
+
+    #[test]
+    fn authorize_install_seed_rejects_a_mismatched_seed() {
+        // A renderer that requests `bridge` when the check offers only `command`
+        // (or vice versa) must reject before any install shell command runs,
+        // rather than execute the provider's other install recipe on demand.
+        assert!(
+            authorize_install_seed("codex-acp", &InstallFixType::Bridge, Some(FixType::Command))
+                .is_err()
+        );
+        assert!(
+            authorize_install_seed("codex-acp", &InstallFixType::Command, Some(FixType::Bridge))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn authorize_install_seed_rejects_when_no_install_fix_is_offered() {
+        // An already-installed provider (or one exposing only auth/update)
+        // offers no install fix, so a forged install seed must fail closed
+        // instead of re-running the install shell command.
+        assert!(
+            authorize_install_seed("codex-acp", &InstallFixType::Command, None).is_err()
+        );
+        assert!(
+            authorize_install_seed("codex-acp", &InstallFixType::Bridge, None).is_err()
+        );
+    }
+
+    #[test]
+    fn install_fix_type_wire_rejects_non_install_variants() {
+        // The security boundary is the narrow Rust wire type: `auth` and the
+        // update slots must not deserialize into the install seed at all, so a
+        // forged plan can never smuggle a non-install identity through
+        // `installFixType` regardless of the TS `Extract<>` contract.
+        assert_eq!(
+            serde_json::from_str::<InstallFixType>("\"command\"").unwrap(),
+            InstallFixType::Command
+        );
+        assert_eq!(
+            serde_json::from_str::<InstallFixType>("\"bridge\"").unwrap(),
+            InstallFixType::Bridge
+        );
+        for forged in ["\"auth\"", "\"updateMain\"", "\"updateBridge\""] {
+            assert!(
+                serde_json::from_str::<InstallFixType>(forged).is_err(),
+                "{forged} must not deserialize into an install seed"
+            );
+        }
+        // And it must not deserialize as the SetupPlan field either.
+        assert!(
+            serde_json::from_str::<SetupPlan>(
+                "{\"installFixType\":\"auth\",\"updateFixTypes\":[],\"verifyInstall\":false}"
+            )
+            .is_err()
+        );
     }
 
     /// Test model of the install loop in [`run_install`]: both share

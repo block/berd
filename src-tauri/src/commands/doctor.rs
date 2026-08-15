@@ -1568,15 +1568,30 @@ pub async fn run_doctor_fix(
     fix_type: FixType,
 ) -> Result<(), String> {
     // The node-runtime fix is native — (re)install the pinned managed
-    // runtime — not a shell command.
+    // runtime — not a shell command. Validate the requested identity against
+    // the fix the check currently offers before the privileged reinstall: a
+    // passing runtime offers no fix, and the only fix it ever offers is
+    // `Command`, so a forged or mismatched `(node-runtime, <other>)` pair must
+    // fail closed rather than trigger a networked native download.
     if check_id == NODE_RUNTIME_CHECK.id {
+        ensure_offered_fix(&check_id, &fix_type, node_runtime_offered_fix(&app_handle).await)?;
         return ensure_managed_node_runtime_logged(&app_handle).await;
     }
     // Managed bridge installs (claude, codex) go through the managed installer
     // so the floating `<pkg>@latest` install lands in `packages/tools` with an
-    // absolute-path shim, rather than the crate's `npm install -g`.
+    // absolute-path shim, rather than the crate's `npm install -g`. Only the
+    // install fix types route here, and only after confirming the check
+    // currently offers that exact install fix — the pinned registry offers
+    // `Command` for these managed checks and no `Bridge`, so a mismatched
+    // `(ai-agent-claude, bridge)` pair (or a request against an already-healthy
+    // check) rejects before the networked native install.
     if matches!(fix_type, FixType::Command | FixType::Bridge) {
         if let Some(provider_id) = managed_provider_for_check(&check_id) {
+            ensure_offered_fix(
+                &check_id,
+                &fix_type,
+                crate::commands::agent_setup::offered_install_fix(&app_handle, provider_id).await?,
+            )?;
             let log_prefix = format!("[doctor fix {check_id}]");
             return managed_acp_tools::install_managed_tool(&app_handle, provider_id, &|line| {
                 log::info!("{log_prefix} {line}");
@@ -1618,6 +1633,45 @@ pub async fn run_doctor_fix(
         .with_env_snapshot(env_vars),
     )
     .await
+}
+
+/// Reject a fix request whose typed identity doesn't match the fix the check
+/// currently offers from trusted backend state. `offered` is the check's
+/// current fix type (`None` when it offers no fix — e.g. already healthy); the
+/// request is authorized only when the requested `fix_type` equals it. This is
+/// the backend-owned check/fix-combination gate that keeps a compromised
+/// renderer from driving a native or managed operation outside the check's
+/// registered, currently-actionable identity.
+fn ensure_offered_fix(
+    check_id: &str,
+    requested: &FixType,
+    offered: Option<FixType>,
+) -> Result<(), String> {
+    match offered {
+        Some(ref offered) if offered == requested => Ok(()),
+        Some(offered) => Err(format!(
+            "'{requested:?}' does not match the '{offered:?}' fix currently offered for '{check_id}'"
+        )),
+        None => Err(format!(
+            "'{check_id}' offers no '{requested:?}' fix in its current state"
+        )),
+    }
+}
+
+/// The fix the managed Node runtime check currently offers, resolved from the
+/// same trusted state the report is built from: `Some(Command)` when the
+/// runtime is missing/broken (the native reinstall), `None` when it is healthy
+/// or unreported. Mirrors `build_managed_node_runtime_check`'s `offers_fix`
+/// decision so the fix gate can't disagree with the report the renderer saw.
+async fn node_runtime_offered_fix(app_handle: &AppHandle) -> Option<FixType> {
+    let paths = ManagedRuntimePaths::resolve(app_handle);
+    let check = run_node_runtime_check(
+        paths.node_root,
+        paths.npm_prefix_bin_dir,
+        paths.shim_bin_dir,
+    )
+    .await?;
+    check.fix_type
 }
 
 /// The provider id of a managed bridge, when this crate check id maps to one
@@ -1905,6 +1959,49 @@ mod tests {
         assert!(text.contains("  details:\n    exit status: 0"));
         // Category headers appear before the checks that belong to them.
         assert!(text.find("== Tools ==").unwrap() < text.find("(git)").unwrap());
+    }
+
+    #[test]
+    fn ensure_offered_fix_authorizes_only_the_currently_offered_fix() {
+        // The dispatch gate the node-runtime and managed-install branches call
+        // before any native/managed side effect. A request is authorized only
+        // when it equals the fix the check currently offers from trusted state.
+        assert!(ensure_offered_fix("node-runtime", &FixType::Command, Some(FixType::Command)).is_ok());
+        assert!(
+            ensure_offered_fix("ai-agent-claude", &FixType::Command, Some(FixType::Command)).is_ok()
+        );
+    }
+
+    #[test]
+    fn ensure_offered_fix_rejects_a_mismatched_fix_identity() {
+        // Concrete mismatch from the review: the managed Claude check offers
+        // `Command`, so `(ai-agent-claude, Bridge)` must reject before the
+        // networked native install, not silently install.
+        assert!(
+            ensure_offered_fix("ai-agent-claude", &FixType::Bridge, Some(FixType::Command)).is_err()
+        );
+        // Any non-Command identity against node-runtime is a forged pair.
+        for forged in [
+            FixType::Bridge,
+            FixType::Auth,
+            FixType::UpdateMain,
+            FixType::UpdateBridge,
+        ] {
+            assert!(
+                ensure_offered_fix("node-runtime", &forged, Some(FixType::Command)).is_err(),
+                "expected {forged:?} against a Command-only check to reject"
+            );
+        }
+    }
+
+    #[test]
+    fn ensure_offered_fix_rejects_when_the_check_offers_no_fix() {
+        // A passing runtime (or an already-installed managed agent) offers no
+        // fix, so every request must fail closed rather than trigger a
+        // privileged reinstall.
+        assert!(ensure_offered_fix("node-runtime", &FixType::Command, None).is_err());
+        assert!(ensure_offered_fix("ai-agent-claude", &FixType::Command, None).is_err());
+        assert!(ensure_offered_fix("ai-agent-claude", &FixType::Bridge, None).is_err());
     }
 
     #[test]
