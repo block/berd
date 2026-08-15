@@ -38,8 +38,10 @@ import {
   STARTER_TASKS_NOTE_ID,
 } from "@/features/home/onboarding/starterTasks";
 import {
+  clearStarterHomeLayoutEligibility,
   getStarterTasksHeight,
   hasArrangedStarterHome,
+  isStarterHomeLayoutEligible,
   markStarterHomeArranged,
   starterLayoutCenter,
   STARTER_HOME_LAYOUT,
@@ -300,7 +302,9 @@ export function HomeView({
           instance.type === "onboardingProjectArtifact" ||
           instance.state?.onboardingStarterProject === true,
       );
-    if (!hasCompleteStarterSet) return;
+    if (!hasCompleteStarterSet || !isStarterHomeLayoutEligible()) {
+      return;
+    }
 
     // Guard against synchronous Zustand re-entry while the layout mutations
     // are queued. The durable marker is written only after the runtime confirms
@@ -314,22 +318,24 @@ export function HomeView({
       .filter((instance) => instance.type === "clock")
       .sort((left, right) => left.z - right.z)[0];
 
-    for (const instance of instances) {
+    const berdyTour = instances.find(
+      (instance) => instance.type === "onboardingTour",
+    );
+    const maxZ = Math.max(0, ...instances.map((instance) => instance.z));
+    const arrangedInstances = instances.map((instance) => {
       const noteId = instance.state?.noteId;
-
       if (instance.id === starterClock?.id) {
-        widgetMutations.moveWidget(
-          instance.id,
-          STARTER_HOME_LAYOUT.clock.x,
-          STARTER_HOME_LAYOUT.clock.y,
-        );
-      } else if (instance.type === "onboardingTour") {
-        widgetMutations.moveWidget(
-          instance.id,
-          STARTER_HOME_LAYOUT.berdy.x,
-          STARTER_HOME_LAYOUT.berdy.y,
-        );
-      } else if (
+        return { ...instance, ...STARTER_HOME_LAYOUT.clock };
+      }
+      if (instance.type === "onboardingTour") {
+        return {
+          ...instance,
+          x: STARTER_HOME_LAYOUT.berdy.x,
+          y: STARTER_HOME_LAYOUT.berdy.y,
+          z: instance.id === berdyTour?.id ? maxZ + 1 : instance.z,
+        };
+      }
+      if (
         instance.type === "agentPin" &&
         typeof instance.state?.agentId === "string" &&
         starterAgentIds.has(instance.state.agentId)
@@ -338,50 +344,34 @@ export function HomeView({
           (persona) => persona.id === instance.state?.agentId,
         );
         const placement = STARTER_HOME_LAYOUT.agents[starterAgentIndex];
-        if (placement) {
-          widgetMutations.moveWidget(instance.id, placement.x, placement.y);
-        }
-      } else if (noteId === STARTER_TASKS_NOTE_ID) {
-        widgetMutations.moveWidget(
-          instance.id,
-          STARTER_HOME_LAYOUT.tasks.x,
-          STARTER_HOME_LAYOUT.tasks.y,
-        );
-        widgetMutations.resizeWidget(
-          instance.id,
-          STARTER_HOME_LAYOUT.tasks.width,
-          starterTasksHeight,
-        );
-      } else if (
+        return placement
+          ? { ...instance, x: placement.x, y: placement.y }
+          : instance;
+      }
+      if (noteId === STARTER_TASKS_NOTE_ID) {
+        return {
+          ...instance,
+          x: STARTER_HOME_LAYOUT.tasks.x,
+          y: STARTER_HOME_LAYOUT.tasks.y,
+          width: STARTER_HOME_LAYOUT.tasks.width,
+          height: starterTasksHeight,
+        };
+      }
+      if (
         instance.type === "onboardingProjectArtifact" ||
         instance.state?.onboardingStarterProject === true
       ) {
-        widgetMutations.moveWidget(
-          instance.id,
-          STARTER_HOME_LAYOUT.project.x,
-          STARTER_HOME_LAYOUT.project.y,
-        );
-        widgetMutations.resizeWidget(
-          instance.id,
-          STARTER_HOME_LAYOUT.project.width,
-          STARTER_HOME_LAYOUT.project.height,
-        );
+        return { ...instance, ...STARTER_HOME_LAYOUT.project };
       }
-    }
-    const berdyTour = instances.find(
-      (instance) => instance.type === "onboardingTour",
-    );
-    if (berdyTour) {
-      // Run after the project's layout mutations so Berdy is definitively the
-      // topmost starter widget, even when the cube previously had a higher z.
-      widgetMutations.bumpZ(berdyTour.id);
-    }
+      return instance;
+    });
+    widgetMutations.applyStarterLayout(arrangedInstances);
     if (camera) {
       saveCamera({
         ...camera,
         centerX: 80,
         centerY: 44,
-        zoomBps: 10_000,
+        zoomBps: 9_000,
       });
     }
   }, [
@@ -606,6 +596,7 @@ export function HomeView({
       return;
     }
 
+    clearStarterHomeLayoutEligibility();
     setLayoutMotionActive(true);
     const nextCamera = {
       centerX: recenterTarget.x,
@@ -618,6 +609,7 @@ export function HomeView({
   }, [camera, constraints, recenterTarget, saveCamera]);
 
   const handleCleanUp = useCallback(() => {
+    clearStarterHomeLayoutEligibility();
     setLayoutMotionActive(true);
     toggleCleanUpWidgets(constraints ?? undefined);
   }, [constraints, toggleCleanUpWidgets]);
@@ -790,6 +782,9 @@ function useHomeWidgetLayoutController() {
   const moveWidget = useHomeWidgetStore((state) => state.moveWidget);
   const resizeWidget = useHomeWidgetStore((state) => state.resizeWidget);
   const bumpZ = useHomeWidgetStore((state) => state.bumpZ);
+  const applyStarterLayout = useHomeWidgetStore(
+    (state) => state.applyStarterLayout,
+  );
   const cleanUpSnapshot = useHomeWidgetStore((state) => state.cleanUpSnapshot);
   const toggleCleanUpWidgets = useHomeWidgetStore(
     (state) => state.toggleCleanUpWidgets,
@@ -815,6 +810,7 @@ function useHomeWidgetLayoutController() {
       moveWidget,
       resizeWidget,
       bumpZ,
+      applyStarterLayout,
       removeWidget,
       updateWidgetState,
     }),
@@ -823,6 +819,7 @@ function useHomeWidgetLayoutController() {
       moveWidget,
       resizeWidget,
       bumpZ,
+      applyStarterLayout,
       removeWidget,
       updateWidgetState,
     ],

@@ -26,6 +26,7 @@ import type { Persona } from "@/shared/types/agents";
 import { markStarterAgentPinsEligible } from "@/features/home/onboarding/starterAgents";
 import { StarterTasksProvider } from "@/features/home/onboarding/StarterTasksContext";
 import { EMPTY_STARTER_TASK_COMPLETION } from "@/features/home/onboarding/starterTaskProgress";
+import { markStarterHomeLayoutEligible } from "@/features/home/onboarding/starterHomeLayout";
 
 const ONBOARDING_STICKIES_SEEDED_STORAGE_KEY =
   "goose:home:onboarding-stickies-seeded";
@@ -116,6 +117,30 @@ function renderHomeViewWithTopBarActions() {
   );
 }
 
+function renderHomeViewWithVisibleStarterTasks() {
+  return render(
+    <StarterTasksProvider
+      value={{
+        completionState: EMPTY_STARTER_TASK_COMPLETION,
+        enabled: true,
+        visible: true,
+        docked: false,
+        selectedTaskId: null,
+        starterProjectId: "onboarding-starter-project",
+        omittedTaskIds: new Set(),
+        onTaskSelect: vi.fn(),
+        onTaskToggle: vi.fn(),
+        onBackHome: vi.fn(),
+        onCloseSecondary: vi.fn(),
+        onDismiss: vi.fn(),
+        onRestore: vi.fn(),
+      }}
+    >
+      <HomeView />
+    </StarterTasksProvider>,
+  );
+}
+
 beforeEach(() => {
   resetHomeWidgetStoreForTests();
   widgetCanvasMock.mockClear();
@@ -194,6 +219,174 @@ describe("HomeView", () => {
         }),
       ]),
     );
+  });
+
+  it("does not rearrange an existing complete starter Home without new-layout eligibility", async () => {
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, true);
+    const bundledPersona = (displayName: string): Persona => ({
+      id: `/Users/test/.agents/agents/${displayName.toLowerCase()}.md`,
+      displayName,
+      systemPrompt: "Help.",
+      isBuiltin: false,
+      writable: true,
+      sourceProperties: { metadata: { berdBundled: true } },
+    });
+    const personas = [bundledPersona("block.md"), bundledPersona("Builderbot")];
+    useAgentStore.setState({ personas, personasLoading: false });
+    const existingItems: Layout["items"] = [
+      ...layout().items,
+      {
+        id: "tour",
+        kind: "stickyNote",
+        targetId: "onboarding:tour",
+        centerX: -100,
+        centerY: -100,
+        width: 448,
+        height: 180,
+        zIndex: 2,
+        titleOverride: null,
+      },
+      {
+        id: "tasks",
+        kind: "stickyNote",
+        targetId: "onboarding:starter-tasks",
+        centerX: 100,
+        centerY: 100,
+        width: 256,
+        height: 224,
+        zIndex: 3,
+        titleOverride: null,
+      },
+      {
+        id: "project",
+        kind: "stickyNote",
+        targetId: "onboarding:starter-project",
+        centerX: 300,
+        centerY: 300,
+        width: 440,
+        height: 440,
+        zIndex: 4,
+        titleOverride: null,
+      },
+      ...personas.map((persona, index) => ({
+        id: `agent-${index}`,
+        kind: "persona" as const,
+        targetId: persona.id,
+        centerX: 500 + index * 220,
+        centerY: 500,
+        width: 200,
+        height: 220,
+        zIndex: 5 + index,
+        titleOverride: null,
+      })),
+    ];
+    vi.mocked(getLayout).mockResolvedValue(layout({ items: existingItems }));
+
+    renderHomeViewWithVisibleStarterTasks();
+    await screen.findByText("widget canvas");
+    await waitFor(() =>
+      expect(useHomeWidgetStore.getState().loadStatus).toBe("ready"),
+    );
+
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.find((item) => item.type === "clock"),
+    ).toMatchObject({
+      width: 240,
+      height: 240,
+      x: 120,
+      y: 120,
+    });
+  });
+
+  it("arranges a newly seeded Home with the exact fractional clock center", async () => {
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, true);
+    const bundledPersona = (displayName: string): Persona => ({
+      id: `/Users/test/.agents/agents/${displayName.toLowerCase()}.md`,
+      displayName,
+      systemPrompt: "Help.",
+      isBuiltin: false,
+      writable: true,
+      sourceProperties: { metadata: { berdBundled: true } },
+    });
+    const personas = [bundledPersona("block.md"), bundledPersona("Builderbot")];
+    useAgentStore.setState({ personas, personasLoading: false });
+    markStarterHomeLayoutEligible();
+    const existingItems: Layout["items"] = [
+      ...layout().items,
+      {
+        id: "tour",
+        kind: "stickyNote",
+        targetId: "onboarding:tour",
+        centerX: -100,
+        centerY: -100,
+        width: 448,
+        height: 180,
+        zIndex: 2,
+        titleOverride: null,
+      },
+      {
+        id: "tasks",
+        kind: "stickyNote",
+        targetId: "onboarding:starter-tasks",
+        centerX: 100,
+        centerY: 100,
+        width: 256,
+        height: 224,
+        zIndex: 3,
+        titleOverride: null,
+      },
+      {
+        id: "project",
+        kind: "stickyNote",
+        targetId: "onboarding:starter-project",
+        centerX: 300,
+        centerY: 300,
+        width: 440,
+        height: 440,
+        zIndex: 4,
+        titleOverride: null,
+      },
+      ...personas.map((persona, index) => ({
+        id: `agent-${index}`,
+        kind: "persona" as const,
+        targetId: persona.id,
+        centerX: 500 + index * 220,
+        centerY: 500,
+        width: 200,
+        height: 220,
+        zIndex: 5 + index,
+        titleOverride: null,
+      })),
+    ];
+    vi.mocked(getLayout).mockResolvedValue(layout({ items: existingItems }));
+
+    renderHomeViewWithVisibleStarterTasks();
+    await waitFor(() =>
+      expect(
+        useHomeWidgetStore
+          .getState()
+          .instances.find((item) => item.type === "clock"),
+      ).toMatchObject({
+        width: 173,
+        height: 173,
+        x: 533.5,
+        y: -266.5,
+      }),
+    );
+    await waitFor(() => expect(saveLayoutCamera).toHaveBeenCalled());
+    const savedClock = vi
+      .mocked(saveLayoutItems)
+      .mock.calls.flatMap(([request]) => request.items)
+      .findLast((item) => item.kind === "clock" && item.width === 173);
+    expect(savedClock).toMatchObject({
+      centerX: 620,
+      centerY: -180,
+      width: 173,
+      height: 173,
+    });
   });
 
   it("does not offer starter tasks when the experiment is disabled", async () => {

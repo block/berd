@@ -50,14 +50,17 @@ describe("photo size profiles", () => {
 describe("clock size profiles", () => {
   it("uses the analog (square) profile by default", () => {
     expect(widgetSizeForInstance(baseClock)).toEqual({
-      width: 240,
-      height: 240,
+      width: 173,
+      height: 173,
     });
   });
 
   it("uses the digital (landscape) profile when mode is digital", () => {
     const digital = { ...baseClock, state: { mode: "digital" } };
-    expect(widgetSizeForInstance(digital)).toEqual({ width: 264, height: 104 });
+    expect(widgetSizeForInstance(digital)).toEqual({
+      width: 224,
+      height: 88,
+    });
   });
 
   it("clamps a digital resize to digital bounds and aspect ratio", () => {
@@ -67,7 +70,7 @@ describe("clock size profiles", () => {
       height: 999,
     });
     expect(clamped.width).toBe(396);
-    expect(clamped.height).toBeCloseTo(156, 5); // 396 * 104/264
+    expect(clamped.height).toBeCloseTo(155.57, 2); // 396 * 88/224
   });
 
   it("clamps an analog resize to the square aspect ratio", () => {

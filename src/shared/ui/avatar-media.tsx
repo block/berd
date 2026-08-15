@@ -97,16 +97,23 @@ function paintStackedAlphaFrame(
   }
 
   const frameHeight = Math.floor(sourceHeight / 2);
-  canvas.width = sourceWidth;
-  canvas.height = frameHeight;
+  // Assigning canvas dimensions clears its backing store. Only resize when the
+  // decoded media dimensions actually change; clearing on every animation
+  // frame creates a blank compositor window that is visible while dragging.
+  if (canvas.width !== sourceWidth || canvas.height !== frameHeight) {
+    canvas.width = sourceWidth;
+    canvas.height = frameHeight;
+  }
 
   const context = canvas.getContext("2d");
   if (!context) {
     return;
   }
 
-  maskCanvas.width = sourceWidth;
-  maskCanvas.height = frameHeight;
+  if (maskCanvas.width !== sourceWidth || maskCanvas.height !== frameHeight) {
+    maskCanvas.width = sourceWidth;
+    maskCanvas.height = frameHeight;
+  }
   const maskContext = maskCanvas.getContext("2d");
   if (!maskContext) {
     return;

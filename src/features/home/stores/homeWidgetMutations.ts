@@ -78,13 +78,14 @@ function resolvePosition(
   y: number,
   size: WidgetSize,
   bounds?: LayoutConstraints,
+  snapToGrid = true,
 ): { x: number; y: number } {
   const entry = HOME_WIDGET_CATALOG_BY_ID[type];
-  const snapped = snapPoint({ x, y });
+  const position = snapToGrid ? snapPoint({ x, y }) : { x, y };
   if (!entry || !isLayoutConstraints(bounds)) {
-    return snapped;
+    return position;
   }
-  return clampToLayoutConstraints(snapped, size, bounds);
+  return clampToLayoutConstraints(position, size, bounds);
 }
 
 function cleanUpStride(maxSize: number): number {
@@ -169,6 +170,25 @@ function profileKey(profile: WidgetSizeProfile): string {
   return `${profile.defaultSize.width}x${profile.defaultSize.height}`;
 }
 
+const LEGACY_CLOCK_PROFILE_KEYS: Record<string, string> = {
+  "173x173": "240x240",
+  "224x88": "264x104",
+};
+
+function rememberedSizeForProfile(
+  type: string,
+  sizeMemory: Record<string, WidgetSize>,
+  profile: WidgetSizeProfile,
+): WidgetSize | undefined {
+  const key = profileKey(profile);
+  return (
+    sizeMemory[key] ??
+    (type === "clock"
+      ? sizeMemory[LEGACY_CLOCK_PROFILE_KEYS[key] ?? ""]
+      : undefined)
+  );
+}
+
 function readSizeMemory(
   state: Record<string, unknown> | undefined,
 ): Record<string, WidgetSize> {
@@ -242,6 +262,7 @@ export function moveWidgetMutation(
     y,
     widgetSizeForInstance(target),
     bounds,
+    options.snapToGrid ?? true,
   );
   const moved = target.x !== position.x || target.y !== position.y;
   const nextInstances = moved
@@ -496,7 +517,11 @@ export function updateWidgetStateMutation(
     ...readSizeMemory(target.state),
     [profileKey(prevProfile)]: widgetSizeForInstance(target),
   };
-  const remembered = sizeMemory[profileKey(nextProfile)];
+  const remembered = rememberedSizeForProfile(
+    target.type,
+    sizeMemory,
+    nextProfile,
+  );
   const preserveWidth =
     HOME_WIDGET_CATALOG_BY_ID[target.type]?.preserveWidthOnProfileChange;
   const currentSize = widgetSizeForInstance(target);

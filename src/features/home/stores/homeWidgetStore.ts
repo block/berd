@@ -205,6 +205,7 @@ interface HomeWidgetStore extends HomeWidgetState {
     options?: MoveWidgetOptions,
   ) => void;
   bumpZ: (id: string) => void;
+  applyStarterLayout: (instances: WidgetInstance[]) => void;
   toggleCleanUpWidgets: (bounds?: WidgetPlacementInput) => void;
   syncOnboardingExperiment: (enabled: boolean) => void;
   resetOnboardingTour: () => Promise<boolean>;
@@ -427,6 +428,9 @@ function createHomeWidgetStore() {
       bumpZ: (id) => {
         applyMutation((instances) => bumpZMutation(instances, id));
       },
+      applyStarterLayout: (instances) => {
+        applyMutation(() => instances);
+      },
       toggleCleanUpWidgets: (bounds) => {
         const state = get();
         if (!canMutateWidgets(state)) {
@@ -601,6 +605,8 @@ function createHomeWidgetStore() {
           ...createDefaultClockWidget(),
           x: STARTER_HOME_LAYOUT.clock.x,
           y: STARTER_HOME_LAYOUT.clock.y,
+          width: STARTER_HOME_LAYOUT.clock.width,
+          height: STARTER_HOME_LAYOUT.clock.height,
         };
         const onboardingTour = {
           ...createDefaultOnboardingTourWidget(clock),
@@ -639,7 +645,7 @@ function createHomeWidgetStore() {
               ...state.camera,
               centerX: 80,
               centerY: 44,
-              zoomBps: 10_000,
+              zoomBps: 9_000,
             }
           : null;
         persistCleanUpSnapshot(null);

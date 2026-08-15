@@ -20,6 +20,7 @@ export interface CanvasBounds {
 
 export interface MoveWidgetOptions {
   bringToFront?: boolean;
+  snapToGrid?: boolean;
 }
 
 export interface WidgetSize {

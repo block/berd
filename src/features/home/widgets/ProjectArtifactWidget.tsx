@@ -115,17 +115,23 @@ export function ProjectArtifactWidget({
   const [motionImpulse, setMotionImpulse] =
     useState<ProjectArtifactMotionImpulse>();
   const glCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const captureGestureSnapshot = useCallback(() => {
+  const pointerDownSnapshotRef = useRef<string | null>(null);
+  const captureCanvasSnapshot = useCallback(() => {
     const canvas = glCanvasRef.current;
     if (!canvas) {
       return null;
     }
     try {
-      return canvas.toDataURL("image/png");
+      const snapshot = canvas.toDataURL("image/png");
+      return snapshot && snapshot !== "data:," ? snapshot : null;
     } catch {
       return null;
     }
   }, []);
+  const captureGestureSnapshot = useCallback(
+    () => pointerDownSnapshotRef.current ?? captureCanvasSnapshot(),
+    [captureCanvasSnapshot],
+  );
   const shouldFreezeVisual = canvasGestureActive && !widgetResizePreviewActive;
   const gestureSnapshot = useWidgetGestureFreeze(
     shouldFreezeVisual,
@@ -157,11 +163,15 @@ export function ProjectArtifactWidget({
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
+    // Capture before the canvas starts moving. WKWebView can briefly expose a
+    // blank WebGL backing surface after the widget's compositor position
+    // changes, which made the delayed drag snapshot intermittently invisible.
+    pointerDownSnapshotRef.current = captureCanvasSnapshot();
     rememberPointerPosition(event);
   };
 
   const handlePointerMove = (event: PointerEvent<HTMLButtonElement>) => {
-    if (!project || shouldIgnoreActivation?.()) {
+    if ((!project && !isStarterProject) || canvasGestureActive) {
       lastPointerPosition.current = null;
       return;
     }
@@ -204,6 +214,7 @@ export function ProjectArtifactWidget({
       type="button"
       onClick={handleClick}
       onPointerDown={handlePointerDown}
+      onPointerEnter={rememberPointerPosition}
       onPointerLeave={handlePointerLeave}
       onPointerMove={handlePointerMove}
       disabled={!project && !isStarterProject}

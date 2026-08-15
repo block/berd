@@ -13,6 +13,7 @@ import {
   consumeFreshWidgetPlacement,
   hasFreshWidgetPlacement,
 } from "../lib/freshWidgetPlacements";
+import { clearStarterHomeLayoutEligibility } from "@/features/home/onboarding/starterHomeLayout";
 import { HOME_WIDGET_CATALOG_BY_ID } from "../widgets/catalog";
 import type {
   WidgetInstance,
@@ -109,12 +110,15 @@ export function WidgetFrame({
   );
 
   const handleUpdateState = useCallback(
-    (next: Record<string, unknown>) =>
-      updateWidgetState(instance.id, next, constraints ?? undefined),
+    (next: Record<string, unknown>) => {
+      clearStarterHomeLayoutEligibility();
+      updateWidgetState(instance.id, next, constraints ?? undefined);
+    },
     [constraints, instance.id, updateWidgetState],
   );
 
   const handleRemove = useCallback(() => {
+    clearStarterHomeLayoutEligibility();
     removeWidget(instance.id);
   }, [instance.id, removeWidget]);
 

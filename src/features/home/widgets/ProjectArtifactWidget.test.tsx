@@ -78,6 +78,7 @@ function renderWidget(
     onStartProjectChat?: (projectId: string) => void;
     onTagProjectInComposer?: (projectId: string) => void;
     renderPaused?: boolean;
+    canvasGestureActive?: boolean;
     shouldIgnoreActivation?: () => boolean;
   } = {},
 ) {
@@ -232,8 +233,8 @@ describe("ProjectArtifactWidget", () => {
     expect(onStartProjectChat).not.toHaveBeenCalled();
   });
 
-  it("does not animate pointer impulse while the canvas drag guard is active", () => {
-    renderWidget({ shouldIgnoreActivation: () => true });
+  it("does not animate pointer impulse while a canvas gesture is active", () => {
+    renderWidget({ canvasGestureActive: true });
 
     const button = screen.getByRole("button", {
       name: "Start chat in Alpha Project",
@@ -256,6 +257,70 @@ describe("ProjectArtifactWidget", () => {
     expect(screen.getByTestId("project-artifact-preview")).toHaveAttribute(
       "data-motion-sequence",
       "",
+    );
+  });
+
+  it("keeps hover motion independent from click suppression", () => {
+    renderWidget({ shouldIgnoreActivation: () => true });
+
+    const button = screen.getByRole("button", {
+      name: "Start chat in Alpha Project",
+    });
+    vi.spyOn(button, "getBoundingClientRect").mockReturnValue({
+      width: 200,
+      height: 200,
+      left: 0,
+      top: 0,
+      right: 200,
+      bottom: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerEnter(button, { clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(button, { clientX: 80, clientY: 20 });
+
+    expect(screen.getByTestId("project-artifact-preview")).toHaveAttribute(
+      "data-motion-sequence",
+      "1",
+    );
+  });
+
+  it("animates the starter project cube on hover", () => {
+    state.projects = [];
+    render(
+      <ProjectArtifactWidget
+        instance={{
+          ...instance,
+          type: "onboardingProjectArtifact",
+          state: { projectId: "onboarding:starter-project" },
+        }}
+        onUpdateState={vi.fn()}
+      />,
+    );
+
+    const button = screen.getByRole("button", {
+      name: "Name your first project",
+    });
+    vi.spyOn(button, "getBoundingClientRect").mockReturnValue({
+      width: 200,
+      height: 200,
+      left: 0,
+      top: 0,
+      right: 200,
+      bottom: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerEnter(button, { clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(button, { clientX: 80, clientY: 20 });
+
+    expect(screen.getByTestId("project-artifact-preview")).toHaveAttribute(
+      "data-motion-sequence",
+      "1",
     );
   });
 

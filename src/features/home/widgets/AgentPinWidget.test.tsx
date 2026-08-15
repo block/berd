@@ -155,6 +155,45 @@ describe("AgentPinWidget", () => {
     expect(screen.queryByText("A")).not.toBeInTheDocument();
   });
 
+  it("keeps the decoded avatar node mounted across rerenders", async () => {
+    state.personas = [
+      persona({ avatar: "https://example.test/berdy-drag-frame.png" }),
+    ];
+    const onOpenAgent = vi.fn();
+    const view = renderPin({ onOpenAgent });
+    const button = screen.getByRole("button", {
+      name: "Start chat with Agent One",
+    });
+
+    await waitFor(() =>
+      expect(
+        view.container.querySelector(
+          'img[src="https://example.test/berdy-drag-frame.png"]',
+        ),
+      ).toBeInTheDocument(),
+    );
+    const avatarBeforeDrag = view.container.querySelector(
+      'img[src="https://example.test/berdy-drag-frame.png"]',
+    );
+    expect(avatarBeforeDrag).toBeInTheDocument();
+    fireEvent.pointerDown(button);
+
+    view.rerender(
+      <AgentPinWidget
+        instance={{ ...instance }}
+        onUpdateState={vi.fn()}
+        onOpenAgent={onOpenAgent}
+      />,
+    );
+
+    const matchingImages = view.container.querySelectorAll(
+      'img[src="https://example.test/berdy-drag-frame.png"]',
+    );
+    expect(matchingImages).toHaveLength(1);
+    expect(matchingImages[0]).toBe(avatarBeforeDrag);
+    expect(matchingImages[0]?.parentElement).not.toHaveClass("invisible");
+  });
+
   it("keeps the label always visible when the home pin labels preference is enabled", () => {
     setHomePinLabelsAlwaysVisible(true);
 
