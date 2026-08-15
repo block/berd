@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { deriveAgentShareCardTextLayout } from "./agentShareCardLayout";
+import {
+  deriveAgentCardTraitLines,
+  deriveAgentShareCardTextLayout,
+} from "./agentShareCardLayout";
 
 const measure = (text: string) => Array.from(text).length * 10;
 
@@ -24,6 +27,18 @@ describe("deriveAgentShareCardTextLayout", () => {
     );
     expect(layout.descriptionLines).toHaveLength(3);
     expect(layout.contentShift).toBe(52);
+  });
+
+  it("bounds long localized trait copy to the shared two-line region", () => {
+    expect(
+      deriveAgentCardTraitLines(
+        "Ideal para:",
+        "convertir objetivos en planes prácticos y alcanzables",
+        170,
+        measure,
+        "es",
+      ),
+    ).toEqual(["Ideal para:", "convertir…"]);
   });
 
   it("clamps long words and Unicode without splitting graphemes", () => {

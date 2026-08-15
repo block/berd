@@ -8,6 +8,7 @@ import {
 } from "./agentCardColor";
 import { AGENT_CARD_HEIGHT, AGENT_CARD_WIDTH } from "./agentShareCardSpec";
 import {
+  deriveAgentCardTraitLines,
   deriveAgentShareCardTextLayout,
   wrapAgentCardText,
 } from "./agentShareCardLayout";
@@ -326,21 +327,31 @@ export async function renderAgentShareCard(
   context.lineTo(vibes.ruleX, traitRule.y2);
   context.stroke();
 
-  drawLabeledCardCopy(
+  context.font = "600 42px Inter, sans-serif";
+  const measureTrait = (value: string) => context.measureText(value).width;
+  drawAgentCardTraitLines(
     context,
-    copy.goodForLabel,
-    copy.goodFor,
+    deriveAgentCardTraitLines(
+      copy.goodForLabel,
+      copy.goodFor,
+      goodFor.width,
+      measureTrait,
+      locale,
+    ),
     goodFor.copyX,
     traitCopyY,
-    goodFor.width,
   );
-  drawLabeledCardCopy(
+  drawAgentCardTraitLines(
     context,
-    copy.vibesLabel,
-    copy.vibes,
+    deriveAgentCardTraitLines(
+      copy.vibesLabel,
+      copy.vibes,
+      vibes.width,
+      measureTrait,
+      locale,
+    ),
     vibes.copyX,
     traitCopyY,
-    vibes.width,
   );
 
   return new Promise((resolve, reject) => {
@@ -352,39 +363,16 @@ export async function renderAgentShareCard(
   });
 }
 
-function drawLabeledCardCopy(
+function drawAgentCardTraitLines(
   context: CanvasRenderingContext2D,
-  label: string,
-  value: string,
+  lines: readonly string[],
   x: number,
   y: number,
-  maxWidth: number,
 ): void {
   context.font = "600 42px Inter, sans-serif";
-  context.fillText(label, x, y);
-  const labelWidth = context.measureText(`${label} `).width;
-  context.font = "600 42px Inter, sans-serif";
-  const words = value.split(/\s+/u);
-  let line = "";
-  let lineIndex = 0;
-  for (const word of words) {
-    const candidate = line ? `${line} ${word}` : word;
-    const firstLineOffset = lineIndex === 0 ? labelWidth : 0;
-    if (
-      line &&
-      context.measureText(candidate).width > maxWidth - firstLineOffset
-    ) {
-      context.fillText(line, x + firstLineOffset, y + lineIndex * 50);
-      line = word;
-      lineIndex += 1;
-    } else {
-      line = candidate;
-    }
-  }
-  if (line) {
-    const firstLineOffset = lineIndex === 0 ? labelWidth : 0;
-    context.fillText(line, x + firstLineOffset, y + lineIndex * 50);
-  }
+  lines.forEach((line, index) => {
+    context.fillText(line, x, y + index * 50);
+  });
 }
 
 function drawAgentCardFrame(context: CanvasRenderingContext2D): void {

@@ -7,7 +7,10 @@ import {
   fallbackAgentCardColor,
   sampleAgentAvatarColor,
 } from "./agentCardColor";
-import { deriveAgentShareCardTextLayout } from "./agentShareCardLayout";
+import {
+  deriveAgentCardTraitLines,
+  deriveAgentShareCardTextLayout,
+} from "./agentShareCardLayout";
 import { loadAgentCardFonts } from "./agentShareCardFonts";
 import type { AgentShareCardCopy } from "./agentShareCardCopy";
 import {
@@ -90,6 +93,21 @@ export function AgentShareCardPreview({
   }, [identity, resolvedAvatarSrc]);
 
   const geometry = AGENT_CARD_GEOMETRY;
+  const traitMeasure = createAgentCardTextMeasure();
+  const goodForLines = deriveAgentCardTraitLines(
+    copy.goodForLabel,
+    copy.goodFor,
+    geometry.goodFor.width,
+    (value) => traitMeasure(value, "600 42px Inter, sans-serif"),
+    locale,
+  );
+  const vibesLines = deriveAgentCardTraitLines(
+    copy.vibesLabel,
+    copy.vibes,
+    geometry.vibes.width,
+    (value) => traitMeasure(value, "600 42px Inter, sans-serif"),
+    locale,
+  );
   const { title, descriptionLines, contentShift } = textLayout;
   const descriptionLineKeys = descriptionLines.map(
     (line, index) =>
@@ -251,28 +269,42 @@ export function AgentShareCardPreview({
           stroke="black"
           strokeWidth={geometry.traitRule.width}
         />
-        <foreignObject
+        <text
           x={geometry.goodFor.copyX}
-          y="1580"
-          width={geometry.goodFor.width}
-          height="110"
+          y={geometry.traitCopyY}
+          fill="black"
+          fontFamily="Inter, sans-serif"
+          fontSize="42"
+          fontWeight="600"
         >
-          <div className="font-sans text-[42px] font-semibold leading-[1.2] text-black">
-            <strong className="font-semibold">{copy.goodForLabel}</strong>{" "}
-            {copy.goodFor}
-          </div>
-        </foreignObject>
-        <foreignObject
+          {goodForLines.map((line, index) => (
+            <tspan
+              key={`good-for:${line}`}
+              x={geometry.goodFor.copyX}
+              dy={index === 0 ? 0 : 50}
+            >
+              {line}
+            </tspan>
+          ))}
+        </text>
+        <text
           x={geometry.vibes.copyX}
-          y="1580"
-          width={geometry.vibes.width}
-          height="110"
+          y={geometry.traitCopyY}
+          fill="black"
+          fontFamily="Inter, sans-serif"
+          fontSize="42"
+          fontWeight="600"
         >
-          <div className="font-sans text-[42px] font-semibold leading-[1.2] text-black">
-            <strong className="font-semibold">{copy.vibesLabel}</strong>{" "}
-            {copy.vibes}
-          </div>
-        </foreignObject>
+          {vibesLines.map((line, index) => (
+            <tspan
+              key={`vibes:${line}`}
+              x={geometry.vibes.copyX}
+              dy={index === 0 ? 0 : 50}
+            >
+              {line}
+            </tspan>
+          ))}
+        </text>
       </svg>
     </HolographicAgentCard>
   );
