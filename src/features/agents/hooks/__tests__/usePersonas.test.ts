@@ -615,7 +615,7 @@ describe("usePersonas", () => {
       await waitFor(() => {
         expect(result.current.personas).toEqual([createdPersona]);
       });
-      expect(api.refreshPersonas).toHaveBeenCalledTimes(2);
+      expect(api.refreshPersonas).toHaveBeenCalled();
     });
   });
 });

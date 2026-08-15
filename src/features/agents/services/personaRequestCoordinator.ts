@@ -3,14 +3,31 @@ import * as api from "@/shared/api/agents";
 import type { Persona } from "@/shared/types/agents";
 
 type PersonaReader = () => Promise<Persona[]>;
+type ReadKind = "load" | "refresh";
 
-let activeDrain: Promise<void> | null = null;
-let invalidationEpoch = 0;
-let mutationsInFlight = 0;
-let trailingReadRequired = false;
-let dirtyAfterMutation = false;
+type ActiveRead = {
+  generation: number;
+  kind: ReadKind;
+  promise: Promise<void>;
+};
+
+const PERSONA_READ_TIMEOUT_MS = 5_000;
+const READ_TIMEOUT = Symbol("persona-read-timeout");
+
+let activeRead: ActiveRead | null = null;
+let generation = 0;
 let applyingAuthoritativeSnapshot = false;
 let unsubscribeFromPersonaStore: (() => void) | null = null;
+let reconciliationScheduled = false;
+
+function scheduleExternalWriteReconciliation(): void {
+  if (reconciliationScheduled) return;
+  reconciliationScheduled = true;
+  queueMicrotask(() => {
+    reconciliationScheduled = false;
+    void refreshPersonasCoordinated();
+  });
+}
 
 function ensureCoordinatorInitialized(): void {
   if (unsubscribeFromPersonaStore) return;
@@ -19,8 +36,8 @@ function ensureCoordinatorInitialized(): void {
     if (state.personas === previousPersonas) return;
     previousPersonas = state.personas;
     if (applyingAuthoritativeSnapshot) return;
-    invalidationEpoch += 1;
-    if (activeDrain) trailingReadRequired = true;
+    generation += 1;
+    scheduleExternalWriteReconciliation();
   });
 }
 
@@ -33,114 +50,94 @@ function commitAuthoritativeSnapshot(personas: Persona[]): void {
   }
 }
 
-function scheduleReconciliation(): void {
-  if (!dirtyAfterMutation || mutationsInFlight > 0 || activeDrain) return;
-  void refreshPersonasCoordinated();
+async function readWithTimeout(
+  reader: PersonaReader,
+): Promise<Persona[] | typeof READ_TIMEOUT> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      reader(),
+      new Promise<typeof READ_TIMEOUT>((resolve) => {
+        timeoutId = setTimeout(
+          () => resolve(READ_TIMEOUT),
+          PERSONA_READ_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
 }
 
-async function drainReads(
-  initialReader: PersonaReader,
+function startRead(
+  kind: ReadKind,
+  reader: PersonaReader,
   showLoading: boolean,
   errorMessage: string,
 ): Promise<void> {
-  if (showLoading) useAgentStore.getState().setPersonasLoading(true);
-  let reader = initialReader;
-  try {
-    while (true) {
-      trailingReadRequired = false;
-      const epochAtStart = invalidationEpoch;
-      try {
-        const personas = await reader();
-        const snapshotIsCurrent = epochAtStart === invalidationEpoch;
-        if (snapshotIsCurrent) {
-          dirtyAfterMutation = false;
-          commitAuthoritativeSnapshot(personas);
-        } else if (mutationsInFlight > 0) {
-          dirtyAfterMutation = true;
-          return;
-        } else {
-          trailingReadRequired = true;
-        }
-      } catch (error) {
-        console.error(errorMessage, error);
-        if (!trailingReadRequired) return;
-      }
-
-      if (!trailingReadRequired) return;
-      reader = api.refreshPersonas;
-    }
-  } finally {
-    if (showLoading) useAgentStore.getState().setPersonasLoading(false);
-  }
-}
-
-function requestRead(
-  reader: PersonaReader,
-  options: {
-    showLoading: boolean;
-    errorMessage: string;
-    requireFreshSnapshot: boolean;
-  },
-): Promise<void> {
   ensureCoordinatorInitialized();
-  if (activeDrain) {
-    if (options.requireFreshSnapshot) {
-      invalidationEpoch += 1;
-      trailingReadRequired = true;
-    }
-    return activeDrain;
-  }
+  const readGeneration = ++generation;
+  if (showLoading) useAgentStore.getState().setPersonasLoading(true);
 
-  activeDrain = drainReads(
-    reader,
-    options.showLoading,
-    options.errorMessage,
-  ).finally(() => {
-    activeDrain = null;
-    scheduleReconciliation();
-  });
-  return activeDrain;
+  let promise!: Promise<void>;
+  promise = (async () => {
+    try {
+      const result = await readWithTimeout(reader);
+      if (result === READ_TIMEOUT) {
+        console.warn(`${errorMessage} request timed out`);
+        return;
+      }
+      if (readGeneration === generation) commitAuthoritativeSnapshot(result);
+    } catch (error) {
+      console.error(errorMessage, error);
+    } finally {
+      if (showLoading) {
+        useAgentStore.getState().setPersonasLoading(false);
+      }
+      if (activeRead?.promise === promise) activeRead = null;
+    }
+  })();
+  activeRead = { generation: readGeneration, kind, promise };
+  return promise;
 }
 
 export function loadPersonasCoordinated(): Promise<void> {
-  return requestRead(api.listPersonas, {
-    showLoading: true,
-    errorMessage: "Failed to load personas:",
-    requireFreshSnapshot: false,
-  });
+  ensureCoordinatorInitialized();
+  if (activeRead?.kind === "load") return activeRead.promise;
+  return startRead("load", api.listPersonas, true, "Failed to load personas:");
 }
 
 export function refreshPersonasCoordinated(): Promise<void> {
-  return requestRead(api.refreshPersonas, {
-    showLoading: false,
-    errorMessage: "Failed to refresh personas from disk:",
-    requireFreshSnapshot: true,
-  });
+  ensureCoordinatorInitialized();
+  if (activeRead?.kind === "refresh") return activeRead.promise;
+  if (activeRead?.kind === "load") {
+    useAgentStore.getState().setPersonasLoading(false);
+  }
+  return startRead(
+    "refresh",
+    api.refreshPersonas,
+    false,
+    "Failed to refresh personas from disk:",
+  );
 }
 
 export async function runPersonaMutation<T>(
   mutation: () => Promise<T>,
 ): Promise<T> {
   ensureCoordinatorInitialized();
-  invalidationEpoch += 1;
-  mutationsInFlight += 1;
-  if (activeDrain) trailingReadRequired = true;
+  generation += 1;
   try {
     return await mutation();
   } finally {
-    mutationsInFlight -= 1;
-    dirtyAfterMutation = true;
-    scheduleReconciliation();
+    scheduleExternalWriteReconciliation();
   }
 }
 
 export function resetPersonaRequestCoordinatorForTests(): void {
   unsubscribeFromPersonaStore?.();
   unsubscribeFromPersonaStore = null;
-  activeDrain = null;
-  invalidationEpoch = 0;
-  mutationsInFlight = 0;
-  trailingReadRequired = false;
-  dirtyAfterMutation = false;
+  activeRead = null;
+  generation = 0;
   applyingAuthoritativeSnapshot = false;
+  reconciliationScheduled = false;
 }
