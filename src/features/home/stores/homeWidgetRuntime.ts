@@ -13,8 +13,10 @@ import {
 import { i18n } from "@/shared/i18n";
 import { markStarterAgentPinsEligible } from "@/features/home/onboarding/starterAgents";
 import {
-  hasPendingStarterHomeCamera,
+  clearPendingStarterHomeCamera,
+  getPendingStarterHomeCamera,
   markStarterHomeArranged,
+  markStarterHomeCameraPending,
 } from "@/features/home/onboarding/starterHomeLayout";
 import { createStarterHomeWidgets } from "@/features/home/onboarding/createStarterHomeWidgets";
 import {
@@ -441,40 +443,36 @@ export function createHomeWidgetRuntime({
     );
   }
 
-  async function setReadyLayout(
-    layout: Layout,
-    generation: number,
-  ): Promise<void> {
-    if (generation !== runtime.generation) return;
-
-    let readyLayout = layout;
-    if (hasPendingStarterHomeCamera()) {
-      const camera = {
-        ...layout.camera,
-        centerX: 0,
-        centerY: 40,
-        zoomBps: 10_000,
-      };
-      try {
-        const result = await saveLayoutCamera({
-          layoutId: HOME_LAYOUT_ID,
-          expectedRevision: layout.cameraRevision,
-          camera,
-        });
-        if (result.ok) {
-          readyLayout = result.layout;
-          markStarterHomeArranged();
-        }
-      } catch (error) {
-        console.warn("Failed to recover starter Home camera:", error);
-      }
-    }
+  function setReadyLayout(layout: Layout, generation: number): void {
     if (generation !== runtime.generation) return;
     setState({
-      ...adoptLayout(readyLayout),
+      ...adoptLayout(layout),
       loadStatus: "ready",
       error: null,
     });
+
+    const pending = getPendingStarterHomeCamera();
+    if (!pending) return;
+    if (pending.expectedRevision !== layout.cameraRevision) {
+      clearPendingStarterHomeCamera();
+      return;
+    }
+    void saveLayoutCamera({
+      layoutId: HOME_LAYOUT_ID,
+      expectedRevision: pending.expectedRevision,
+      camera: pending.camera,
+    })
+      .then((result) => {
+        if (generation !== runtime.generation || !result.ok) return;
+        setState((current) => ({
+          ...adoptLayoutCamera(result.layout, current),
+          error: null,
+        }));
+        markStarterHomeArranged();
+      })
+      .catch((error) => {
+        console.warn("Failed to recover starter Home camera:", error);
+      });
   }
 
   async function loadFromBackend(generation: number): Promise<void> {
@@ -516,14 +514,14 @@ export function createHomeWidgetRuntime({
             if (hasStickyNote(layoutItemsToHomeWidgets(result.layout.items))) {
               markOnboardingStickiesSeen();
             }
-            await setReadyLayout(result.layout, generation);
+            setReadyLayout(result.layout, generation);
             return;
           }
 
           if (hasStickyNote(instances)) {
             markOnboardingStickiesSeen();
           }
-          await setReadyLayout(layout, generation);
+          setReadyLayout(layout, generation);
           return;
         }
 
@@ -539,7 +537,7 @@ export function createHomeWidgetRuntime({
           if (hasStickyNote(layoutItemsToHomeWidgets(result.layout.items))) {
             markOnboardingStickiesSeen();
           }
-          await setReadyLayout(result.layout, generation);
+          setReadyLayout(result.layout, generation);
           return;
         }
 
@@ -558,7 +556,7 @@ export function createHomeWidgetRuntime({
           markOnboardingStickiesSeen();
         }
         if (!result.ok) {
-          await setReadyLayout(result.layout, generation);
+          setReadyLayout(result.layout, generation);
           return;
         }
 
@@ -571,10 +569,7 @@ export function createHomeWidgetRuntime({
           zoomBps: 10_000,
         };
         const cameraRevisionBeforeSave = result.layout.cameraRevision;
-        await setReadyLayout(
-          { ...result.layout, camera: starterCamera },
-          generation,
-        );
+        setReadyLayout({ ...result.layout, camera: starterCamera }, generation);
         enqueueCameraSave(starterCamera);
         await waitForPendingSaves();
         if (generation !== runtime.generation) return;
@@ -586,6 +581,11 @@ export function createHomeWidgetRuntime({
           savedState.camera.zoomBps === starterCamera.zoomBps;
         if (cameraSaved) {
           markStarterHomeArranged();
+        } else {
+          markStarterHomeCameraPending({
+            expectedRevision: cameraRevisionBeforeSave,
+            camera: starterCamera,
+          });
         }
         return;
       } catch (error) {
@@ -806,7 +806,10 @@ export function createHomeWidgetRuntime({
                 : result.layout.camera,
               error: null,
             }));
-            if (!runtime.queuedCamera) notifyHomeCameraSaveConfirmed();
+            if (!runtime.queuedCamera) {
+              clearPendingStarterHomeCamera();
+              notifyHomeCameraSaveConfirmed();
+            }
           } catch {
             if (generation !== runtime.generation) {
               break;

@@ -223,7 +223,10 @@ interface HomeWidgetStore extends HomeWidgetState {
   resetOnboardingTour: () => Promise<boolean>;
   resetStarterTasks: () => Promise<boolean>;
   resetHomeForOnboarding: () => Promise<OnboardingHomeResetResult>;
-  addMissingStarterAgentPins: (agentIds: readonly string[]) => Promise<boolean>;
+  addMissingStarterAgentPins: (
+    agentIds: readonly string[],
+    legacyBerdyAgentId?: string | null,
+  ) => Promise<boolean>;
   reloadOnboardingTourForDev: () => void;
   removeWidget: (id: string) => void;
   updateWidgetState: (
@@ -336,13 +339,22 @@ function createHomeWidgetStore() {
           toast.error(i18n.t("home:widgetLayer.toasts.copyFailed"));
         }
       },
-      addMissingStarterAgentPins: (agentIds) => {
+      addMissingStarterAgentPins: (agentIds, legacyBerdyAgentId) => {
         if (starterAgentRecoveryPromise) return starterAgentRecoveryPromise;
         starterAgentRecoveryPromise = (async () => {
           const state = get();
           if (!canMutateWidgets(state) || agentIds.length === 0) return false;
+          const retainedInstances = legacyBerdyAgentId
+            ? state.instances.filter(
+                (instance) =>
+                  !(
+                    instance.type === "agentPin" &&
+                    instance.state?.agentId === legacyBerdyAgentId
+                  ),
+              )
+            : state.instances;
           const pinnedAgentIds = new Set(
-            state.instances.flatMap((instance) =>
+            retainedInstances.flatMap((instance) =>
               instance.type === "agentPin" &&
               typeof instance.state?.agentId === "string"
                 ? [instance.state.agentId]
@@ -352,14 +364,19 @@ function createHomeWidgetStore() {
           const missingAgentIds = agentIds.filter(
             (agentId) => !pinnedAgentIds.has(agentId),
           );
-          if (missingAgentIds.length === 0) return true;
+          if (
+            missingAgentIds.length === 0 &&
+            retainedInstances === state.instances
+          ) {
+            return true;
+          }
 
-          let maxZ = state.instances.reduce(
+          let maxZ = retainedInstances.reduce(
             (currentMax, instance) => Math.max(currentMax, instance.z),
             0,
           );
           const nextInstances = [
-            ...state.instances,
+            ...retainedInstances,
             ...missingAgentIds.map((agentId) => {
               const index = agentIds.indexOf(agentId);
               return {
@@ -744,8 +761,11 @@ function createHomeWidgetStore() {
             latest.camera.zoomBps === expectedCamera.zoomBps);
         if (itemsConfirmed && cameraConfirmed) {
           markStarterHomeArranged();
-        } else if (itemsConfirmed) {
-          markStarterHomeCameraPending();
+        } else if (itemsConfirmed && expectedCamera) {
+          markStarterHomeCameraPending({
+            expectedRevision: initialCameraRevision ?? 0,
+            camera: expectedCamera,
+          });
           toast.warning(i18n.t("home:widgetLayer.toasts.cameraSaveFailed"));
         }
         return { itemsConfirmed, cameraConfirmed };

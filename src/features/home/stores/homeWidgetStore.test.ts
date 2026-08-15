@@ -575,8 +575,11 @@ describe("homeWidgetStore", () => {
       useHomeWidgetStore.getState().resetHomeForOnboarding(),
     ).resolves.toEqual({ itemsConfirmed: true, cameraConfirmed: false });
     expect(localStorage.getItem("goose:home:starter-layout-v18")).toBeNull();
-    expect(localStorage.getItem("goose:home:starter-camera-pending-v1")).toBe(
-      "1",
+    expect(localStorage.getItem("goose:home:starter-camera-pending-v2")).toBe(
+      JSON.stringify({
+        expectedRevision: 1,
+        camera: { centerX: 0, centerY: 40, zoomBps: 10_000 },
+      }),
     );
     expect(toast.warning).toHaveBeenCalledWith(
       "home:widgetLayer.toasts.cameraSaveFailed",
@@ -830,7 +833,13 @@ describe("homeWidgetStore", () => {
   });
 
   it("retries a pending starter camera during Home initialization", async () => {
-    localStorage.setItem("goose:home:starter-camera-pending-v1", "1");
+    localStorage.setItem(
+      "goose:home:starter-camera-pending-v2",
+      JSON.stringify({
+        expectedRevision: 4,
+        camera: { centerX: 0, centerY: 40, zoomBps: 10_000 },
+      }),
+    );
     vi.mocked(getLayout).mockResolvedValue(
       layout({
         camera: INITIAL_CAMERA,
@@ -857,7 +866,7 @@ describe("homeWidgetStore", () => {
       camera: { centerX: 0, centerY: 40, zoomBps: 10_000 },
     });
     expect(
-      localStorage.getItem("goose:home:starter-camera-pending-v1"),
+      localStorage.getItem("goose:home:starter-camera-pending-v2"),
     ).toBeNull();
   });
 

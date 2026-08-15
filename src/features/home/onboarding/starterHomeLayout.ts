@@ -1,8 +1,15 @@
+import type { LayoutCamera } from "@/features/layout/api/layout";
+
 const STARTER_HOME_LAYOUT_STORAGE_KEY = "goose:home:starter-layout-v18";
 const STARTER_HOME_CAMERA_PENDING_STORAGE_KEY =
-  "goose:home:starter-camera-pending-v1";
+  "goose:home:starter-camera-pending-v2";
 
 const STARTER_TASK_ROW_HEIGHT = 32;
+
+export type PendingStarterHomeCamera = {
+  expectedRevision: number;
+  camera: LayoutCamera;
+};
 
 export function getStarterTasksHeight(omittedTaskCount: number): number {
   return Math.max(
@@ -22,9 +29,6 @@ export function starterLayoutCenter(rect: {
 }
 
 export const STARTER_HOME_LAYOUT = {
-  // Match the reference composition: a large project cube anchors the center,
-  // agents orbit it at upper-left and bottom-left, and utility widgets stay on
-  // the right. Berdy's tour avatar is the upper-left agent.
   project: { x: -310, y: -260, width: 680, height: 680 },
   berdy: { x: -500, y: -190 },
   clock: { x: 390, y: -210, width: 192, height: 192 },
@@ -43,28 +47,51 @@ export function hasArrangedStarterHome(): boolean {
   }
 }
 
-export function markStarterHomeArranged(): void {
+export function getPendingStarterHomeCamera(): PendingStarterHomeCamera | null {
   try {
-    localStorage.setItem(STARTER_HOME_LAYOUT_STORAGE_KEY, "1");
+    const raw = localStorage.getItem(STARTER_HOME_CAMERA_PENDING_STORAGE_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<PendingStarterHomeCamera>;
+    if (
+      typeof value.expectedRevision !== "number" ||
+      !value.camera ||
+      typeof value.camera.centerX !== "number" ||
+      typeof value.camera.centerY !== "number" ||
+      typeof value.camera.zoomBps !== "number"
+    ) {
+      return null;
+    }
+    return value as PendingStarterHomeCamera;
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingStarterHomeCamera(): void {
+  try {
     localStorage.removeItem(STARTER_HOME_CAMERA_PENDING_STORAGE_KEY);
   } catch {
     // Home remains usable when localStorage is unavailable.
   }
 }
 
-export function hasPendingStarterHomeCamera(): boolean {
+export function markStarterHomeArranged(): void {
   try {
-    return (
-      localStorage.getItem(STARTER_HOME_CAMERA_PENDING_STORAGE_KEY) === "1"
-    );
+    localStorage.setItem(STARTER_HOME_LAYOUT_STORAGE_KEY, "1");
+    clearPendingStarterHomeCamera();
   } catch {
-    return false;
+    // Home remains usable when localStorage is unavailable.
   }
 }
 
-export function markStarterHomeCameraPending(): void {
+export function markStarterHomeCameraPending(
+  pending: PendingStarterHomeCamera,
+): void {
   try {
-    localStorage.setItem(STARTER_HOME_CAMERA_PENDING_STORAGE_KEY, "1");
+    localStorage.setItem(
+      STARTER_HOME_CAMERA_PENDING_STORAGE_KEY,
+      JSON.stringify(pending),
+    );
   } catch {
     // Home remains usable when localStorage is unavailable.
   }
@@ -73,6 +100,7 @@ export function markStarterHomeCameraPending(): void {
 export function resetStarterHomeArrangement(): void {
   try {
     localStorage.removeItem(STARTER_HOME_LAYOUT_STORAGE_KEY);
+    clearPendingStarterHomeCamera();
   } catch {
     // Home remains usable when localStorage is unavailable.
   }
