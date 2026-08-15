@@ -41,6 +41,28 @@ describe("createStarterHomeWidgets", () => {
     });
   });
 
+  it("contains exactly the visible starter Home widgets", () => {
+    const widgets = createStarterHomeWidgets([
+      starterPersona("tinker.md"),
+      starterPersona("wildcard.md"),
+    ]);
+
+    expect(widgets).toHaveLength(6);
+    expect(widgets.map(({ type }) => type)).toEqual([
+      "clock",
+      "onboardingTour",
+      "onboardingProjectArtifact",
+      "stickyNote",
+      "agentPin",
+      "agentPin",
+    ]);
+    expect(
+      widgets
+        .filter((widget) => widget.type === "stickyNote")
+        .map((widget) => widget.state?.noteId),
+    ).toEqual(["onboarding:starter-tasks"]);
+  });
+
   it("derives the complete canonical starter composition", () => {
     vi.spyOn(crypto, "randomUUID")
       .mockReturnValueOnce("00000000-0000-4000-8000-000000000001")

@@ -11,17 +11,9 @@ import {
   type LayoutConstraints,
 } from "@/features/layout/api/layout";
 import { i18n } from "@/shared/i18n";
-import {
-  markStarterAgentPinsEligible,
-  markStarterAgentPinsSeeded,
-  selectStarterAgentPersonas,
-} from "@/features/home/onboarding/starterAgents";
-import {
-  markStarterHomeArranged,
-  STARTER_HOME_LAYOUT,
-} from "@/features/home/onboarding/starterHomeLayout";
+import { markStarterAgentPinsEligible } from "@/features/home/onboarding/starterAgents";
+import { markStarterHomeArranged } from "@/features/home/onboarding/starterHomeLayout";
 import { createStarterHomeWidgets } from "@/features/home/onboarding/createStarterHomeWidgets";
-import { listPersonas } from "@/shared/api/agents";
 import {
   notifyHomeCameraSaveConfirmed,
   notifyHomeCameraSaveDiscarded,
@@ -524,14 +516,9 @@ export function createHomeWidgetRuntime({
           return;
         }
 
-        // Empty layout: build the complete starter composition before the
-        // first save. This avoids exposing a partial Home to renderer effects
-        // and makes the item layout a single optimistic transaction.
-        const personas = await listPersonas().catch(() => []);
-        const starterPersonas = selectStarterAgentPersonas(personas);
-        const hasAllStarterAgents =
-          starterPersonas.length === STARTER_HOME_LAYOUT.agents.length;
-        const starterWidgets = createStarterHomeWidgets(personas);
+        // Starter-agent pins are optional enrichment. Persist the usable Home
+        // immediately, then let Home recover pins when persona discovery is ready.
+        const starterWidgets = createStarterHomeWidgets([]);
 
         const result = await saveLayoutItems({
           layoutId: HOME_LAYOUT_ID,
@@ -548,11 +535,7 @@ export function createHomeWidgetRuntime({
           return;
         }
 
-        if (hasAllStarterAgents) {
-          markStarterAgentPinsSeeded();
-        } else {
-          markStarterAgentPinsEligible();
-        }
+        markStarterAgentPinsEligible();
 
         const starterCamera = {
           ...result.layout.camera,

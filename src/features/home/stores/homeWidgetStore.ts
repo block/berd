@@ -7,7 +7,6 @@ import {
 } from "@/features/home/onboarding/starterTasks";
 import { notifyStarterWidgetAdded } from "@/features/home/onboarding/starterWidgetTask";
 import { createStarterHomeWidgets } from "@/features/home/onboarding/createStarterHomeWidgets";
-import { listPersonas } from "@/shared/api/agents";
 import {
   notifyHomeWidgetSaveConfirmed,
   notifyHomeWidgetSaveDiscarded,
@@ -23,6 +22,7 @@ import {
   saveLayoutItems,
   type LayoutCamera,
   type LayoutConstraints,
+  type LayoutMutationResult,
 } from "@/features/layout/api/layout";
 import { i18n } from "@/shared/i18n";
 import { markFreshWidgetPlacement } from "../lib/freshWidgetPlacements";
@@ -662,10 +662,7 @@ function createHomeWidgetStore() {
         const initialCameraRevision = state.cameraRevision;
 
         resetStarterHomeArrangement();
-        const nextInstances = createStarterHomeWidgets(
-          await listPersonas().catch(() => []),
-        );
-        if (!nextInstances) return false;
+        const nextInstances = createStarterHomeWidgets([]);
 
         const expectedCamera = state.camera
           ? {
@@ -675,22 +672,38 @@ function createHomeWidgetStore() {
               zoomBps: 10_000,
             }
           : null;
+        const previousState = {
+          instances: state.instances,
+          itemRevision: state.itemRevision,
+          camera: state.camera,
+          cameraRevision: state.cameraRevision,
+          lastConfirmedLayout: state.lastConfirmedLayout,
+          cleanUpSnapshot: state.cleanUpSnapshot,
+        };
         persistCleanUpSnapshot(null);
         clearPendingCleanUpSaveOutcomes();
         set({ instances: nextInstances, cleanUpSnapshot: null });
-        let itemResult = await saveLayoutItems({
-          layoutId: HOME_LAYOUT_ID,
-          expectedRevision: initialItemRevision,
-          replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
-          items: homeWidgetsToLayoutItems(nextInstances),
-        });
-        if (!itemResult.ok) {
+        let itemResult: LayoutMutationResult;
+        try {
           itemResult = await saveLayoutItems({
             layoutId: HOME_LAYOUT_ID,
-            expectedRevision: itemResult.layout.itemRevision,
+            expectedRevision: initialItemRevision,
             replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
             items: homeWidgetsToLayoutItems(nextInstances),
           });
+          if (!itemResult.ok) {
+            itemResult = await saveLayoutItems({
+              layoutId: HOME_LAYOUT_ID,
+              expectedRevision: itemResult.layout.itemRevision,
+              replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
+              items: homeWidgetsToLayoutItems(nextInstances),
+            });
+          }
+        } catch (error) {
+          persistCleanUpSnapshot(previousState.cleanUpSnapshot);
+          set(previousState);
+          console.error("Failed to reset Home for onboarding:", error);
+          return false;
         }
         if (!itemResult.ok) {
           set({

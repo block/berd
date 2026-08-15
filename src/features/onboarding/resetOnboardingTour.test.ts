@@ -75,6 +75,16 @@ describe("onboarding tour experience controls", () => {
     expect(storeMocks.resetHomeForOnboarding).toHaveBeenCalledOnce();
   });
 
+  it("preserves starter-agent markers when the Home reset fails", async () => {
+    localStorage.setItem("goose:home:starter-agent-pins-seeded-v5", "1");
+    storeMocks.resetHomeForOnboarding.mockResolvedValueOnce(false);
+
+    await expect(resetHomeForOnboardingExperience()).resolves.toBe(false);
+
+    expect(haveStarterAgentPinsBeenSeeded()).toBe(true);
+    expect(areStarterAgentPinsEligible()).toBe(false);
+  });
+
   it("keeps a partial reset eligible for starter-agent recovery", async () => {
     storeMocks.setInstances([]);
 

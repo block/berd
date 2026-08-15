@@ -9,7 +9,10 @@ import {
   saveLayoutCamera,
   saveLayoutItems,
 } from "@/features/layout/api/layout";
-import { HOME_LAYOUT_REPLACE_KINDS } from "../lib/homeLayoutMapper";
+import {
+  homeWidgetsToLayoutItems,
+  HOME_LAYOUT_REPLACE_KINDS,
+} from "../lib/homeLayoutMapper";
 import { loadStarterTaskProgress } from "../onboarding/starterTaskProgress";
 import type { WidgetInstance } from "../widgets/types";
 import { listPersonas } from "@/shared/api/agents";
@@ -360,6 +363,72 @@ describe("homeWidgetStore", () => {
     ).toBe(false);
   });
 
+  it("resets the base Home without waiting for persona discovery", async () => {
+    vi.mocked(listPersonas).mockReturnValue(new Promise(() => {}));
+    setReadyHomeState({
+      camera: INITIAL_CAMERA,
+      cameraRevision: 1,
+      itemRevision: 4,
+      instances: [clockWidget()],
+    });
+    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({ itemRevision: 5, items: request.items }),
+    }));
+    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({
+        itemRevision: 5,
+        cameraRevision: 2,
+        camera: request.camera,
+      }),
+    }));
+
+    await expect(
+      useHomeWidgetStore.getState().resetHomeForOnboarding(),
+    ).resolves.toBe(true);
+
+    expect(listPersonas).not.toHaveBeenCalled();
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.some((instance) => instance.type === "agentPin"),
+    ).toBe(false);
+  });
+
+  it("rolls back a rejected onboarding reset to the confirmed Home", async () => {
+    const originalInstances = [
+      clockWidget({ id: "original-clock", x: 42, y: 84 }),
+    ];
+    const confirmed = layout({
+      itemRevision: 4,
+      cameraRevision: 1,
+      camera: INITIAL_CAMERA,
+      items: homeWidgetsToLayoutItems(originalInstances),
+    });
+    setReadyHomeState({
+      camera: INITIAL_CAMERA,
+      cameraRevision: 1,
+      itemRevision: 4,
+      instances: originalInstances,
+      lastConfirmedLayout: confirmed,
+    });
+    vi.mocked(saveLayoutItems).mockRejectedValue(new Error("save failed"));
+
+    await expect(
+      useHomeWidgetStore.getState().resetHomeForOnboarding(),
+    ).resolves.toBe(false);
+
+    expect(useHomeWidgetStore.getState()).toMatchObject({
+      instances: originalInstances,
+      itemRevision: 4,
+      cameraRevision: 1,
+      lastConfirmedLayout: confirmed,
+    });
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
+    expect(localStorage.getItem("goose:home:starter-layout-v18")).toBeNull();
+  });
+
   it("retries a reset as a full replacement after an item revision conflict", async () => {
     setReadyHomeState({
       camera: INITIAL_CAMERA,
@@ -464,24 +533,15 @@ describe("homeWidgetStore", () => {
     ).resolves.toBe(true);
 
     const instances = useHomeWidgetStore.getState().instances;
-    expect(instances.map((instance) => instance.type)).toEqual(
-      expect.arrayContaining([
-        "clock",
-        "onboardingTour",
-        "stickyNote",
-        "onboardingProjectArtifact",
-        "agentPin",
-        "agentPin",
-      ]),
-    );
-    expect(
-      instances
-        .filter((instance) => instance.type === "agentPin")
-        .map((instance) => instance.state?.agentId),
-    ).toEqual([
-      "/Users/test/.agents/agents/tinker.md",
-      "/Users/test/.agents/agents/wildcard.md",
+    expect(instances.map((instance) => instance.type)).toEqual([
+      "clock",
+      "onboardingTour",
+      "onboardingProjectArtifact",
+      "stickyNote",
     ]);
+    expect(instances.some((instance) => instance.type === "agentPin")).toBe(
+      false,
+    );
     expect(
       instances.find((instance) => instance.type === "clock"),
     ).toMatchObject({ width: 192, height: 192 });
@@ -631,6 +691,37 @@ describe("homeWidgetStore", () => {
     ]);
   });
 
+  it("initializes the base Home without waiting for persona discovery", async () => {
+    vi.mocked(listPersonas).mockReturnValue(new Promise(() => {}));
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({ itemRevision: 7, items: [] }),
+    );
+    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({ itemRevision: 8, items: request.items }),
+    }));
+    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({
+        itemRevision: 8,
+        cameraRevision: 2,
+        camera: request.camera,
+      }),
+    }));
+
+    await expect(useHomeWidgetStore.getState().initialize()).resolves.toBe(
+      undefined,
+    );
+
+    expect(useHomeWidgetStore.getState().loadStatus).toBe("ready");
+    expect(listPersonas).not.toHaveBeenCalled();
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.some((instance) => instance.type === "agentPin"),
+    ).toBe(false);
+  });
+
   it("seeds default onboarding widgets when backend returns zero typed items", async () => {
     vi.mocked(getLayout).mockResolvedValue(
       layout({ itemRevision: 7, items: [] }),
@@ -673,14 +764,6 @@ describe("homeWidgetStore", () => {
           kind: "stickyNote",
           targetId: "onboarding:starter-tasks",
         }),
-        expect.objectContaining({
-          kind: "persona",
-          targetId: "/Users/test/.agents/agents/tinker.md",
-        }),
-        expect.objectContaining({
-          kind: "persona",
-          targetId: "/Users/test/.agents/agents/wildcard.md",
-        }),
       ]),
     );
     expect(saveLayoutCamera).toHaveBeenCalledWith({
@@ -711,7 +794,7 @@ describe("homeWidgetStore", () => {
     await flushMicrotasks();
 
     expect(
-      localStorage.getItem("goose:home:starter-agent-pins-seeded-v5"),
+      localStorage.getItem("goose:home:starter-agent-pins-eligible-v1"),
     ).toBe("1");
     expect(localStorage.getItem("goose:home:starter-layout-v18")).toBeNull();
   });
