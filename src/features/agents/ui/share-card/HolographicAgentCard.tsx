@@ -24,6 +24,8 @@ export interface HolographicAgentCardProps {
   settings?: HolographicCardSettings;
   /** Preserve the source artwork's exact proportions when showing imports. */
   aspectRatio?: number;
+  /** Constrain extreme imported proportions without cropping their pixels. */
+  containArtwork?: boolean;
   /** Optional agent-derived color used to tint the card's ambient shadow. */
   shadowColor?: string;
   /** Optional agent-derived color applied to the card's foil frame. */
@@ -151,6 +153,7 @@ export function HolographicAgentCard({
   className,
   settings = holographicCardPresets.rainbowPrism,
   aspectRatio,
+  containArtwork = false,
   shadowColor,
   tintColor,
   frameOnly = false,
@@ -366,7 +369,7 @@ export function HolographicAgentCard({
         className,
       )}
       style={{
-        ...(aspectRatio ? { aspectRatio } : {}),
+        ...(aspectRatio && !containArtwork ? { aspectRatio } : {}),
         borderRadius: "6.5%",
         filter: shadowColor
           ? `drop-shadow(0 12px 18px color-mix(in srgb, ${shadowColor} 12%, transparent)) drop-shadow(0 4px 7px rgba(46, 32, 18, 0.08))`
@@ -481,7 +484,10 @@ export function HolographicAgentCard({
         <img
           src={src}
           alt={alt}
-          className="absolute inset-0 block h-full w-full object-cover"
+          className={cn(
+            "absolute inset-0 block h-full w-full",
+            containArtwork ? "object-contain" : "object-cover",
+          )}
         />
         <canvas
           ref={canvasRef}

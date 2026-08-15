@@ -43,6 +43,7 @@ describe("AgentImportDialog", () => {
           systemPrompt: "Review carefully.",
           identity: "agent.agent.png",
           cardImageUrl: "blob:card",
+          cardAspectRatio: 1 / 8192,
         })}
         validateImportFile={() => null}
         onImportError={vi.fn()}
@@ -66,6 +67,8 @@ describe("AgentImportDialog", () => {
       '[data-agent-card-reveal-content="true"]',
     );
     expect(revealContent?.className).toContain("z-10");
+    expect(tiltSurface.style.aspectRatio).toBe("");
+    expect(image).toHaveClass("object-contain");
     expect(
       tiltSurface.querySelector('canvas[data-agent-card-frame-only="true"]'),
     ).not.toBeNull();

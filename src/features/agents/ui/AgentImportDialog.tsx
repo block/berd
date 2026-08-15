@@ -170,6 +170,7 @@ export function AgentImportDialog({
                   <HolographicAgentCard
                     src={prepared.preview.cardImageUrl}
                     aspectRatio={prepared.preview.cardAspectRatio}
+                    containArtwork
                     shadowColor={importAccentColor ?? undefined}
                     tintColor={importAccentColor ?? undefined}
                     frameOnly
