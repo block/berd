@@ -50,8 +50,8 @@ const TRUSTED_IPC_NONCE_PROPERTY: &str = "__BERD_MCP_SANDBOX_IPC_NONCE__";
 // from the Goose commit in `goose-backend.lock.json`. The digest regression
 // pins provenance and the runtime rejects any upstream template drift.
 const PINNED_GOOSE_PROXY_TEMPLATE: &str =
-    include_str!("../../testdata/goose/mcp_app_proxy_1c1bd529.html");
-const PINNED_GOOSE_COMMIT: &str = "1c1bd5299a243f309cb251d2bbe429c7f470793e";
+    include_str!("../../testdata/goose/mcp_app_proxy_11deb564.html");
+const PINNED_GOOSE_COMMIT: &str = "11deb564d09db782a17878af7cfafd299d9fa461";
 const SECRET_QUERY_EXPRESSION: &str = "params.get('secret') || ''";
 const LOCATION_QUERY_EXPRESSION: &str = "new URLSearchParams(window.location.search)";
 const COLOR_SCHEME_QUERY_EXPRESSION: &str = "params.get('color_scheme')";
