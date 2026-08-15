@@ -13,6 +13,7 @@ import {
 } from "@/features/home/onboarding/homeWidgetSaveLifecycle";
 import {
   markStarterHomeArranged,
+  markStarterHomeCameraPending,
   resetStarterHomeArrangement,
   STARTER_HOME_LAYOUT,
 } from "@/features/home/onboarding/starterHomeLayout";
@@ -744,6 +745,7 @@ function createHomeWidgetStore() {
         if (itemsConfirmed && cameraConfirmed) {
           markStarterHomeArranged();
         } else if (itemsConfirmed) {
+          markStarterHomeCameraPending();
           toast.warning(i18n.t("home:widgetLayer.toasts.cameraSaveFailed"));
         }
         return { itemsConfirmed, cameraConfirmed };

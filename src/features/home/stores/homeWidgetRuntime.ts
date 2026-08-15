@@ -12,7 +12,10 @@ import {
 } from "@/features/layout/api/layout";
 import { i18n } from "@/shared/i18n";
 import { markStarterAgentPinsEligible } from "@/features/home/onboarding/starterAgents";
-import { markStarterHomeArranged } from "@/features/home/onboarding/starterHomeLayout";
+import {
+  hasPendingStarterHomeCamera,
+  markStarterHomeArranged,
+} from "@/features/home/onboarding/starterHomeLayout";
 import { createStarterHomeWidgets } from "@/features/home/onboarding/createStarterHomeWidgets";
 import {
   notifyHomeCameraSaveConfirmed,
@@ -438,13 +441,37 @@ export function createHomeWidgetRuntime({
     );
   }
 
-  function setReadyLayout(layout: Layout, generation: number): void {
-    if (generation !== runtime.generation) {
-      return;
-    }
+  async function setReadyLayout(
+    layout: Layout,
+    generation: number,
+  ): Promise<void> {
+    if (generation !== runtime.generation) return;
 
+    let readyLayout = layout;
+    if (hasPendingStarterHomeCamera()) {
+      const camera = {
+        ...layout.camera,
+        centerX: 0,
+        centerY: 40,
+        zoomBps: 10_000,
+      };
+      try {
+        const result = await saveLayoutCamera({
+          layoutId: HOME_LAYOUT_ID,
+          expectedRevision: layout.cameraRevision,
+          camera,
+        });
+        if (result.ok) {
+          readyLayout = result.layout;
+          markStarterHomeArranged();
+        }
+      } catch (error) {
+        console.warn("Failed to recover starter Home camera:", error);
+      }
+    }
+    if (generation !== runtime.generation) return;
     setState({
-      ...adoptLayout(layout),
+      ...adoptLayout(readyLayout),
       loadStatus: "ready",
       error: null,
     });
@@ -489,14 +516,14 @@ export function createHomeWidgetRuntime({
             if (hasStickyNote(layoutItemsToHomeWidgets(result.layout.items))) {
               markOnboardingStickiesSeen();
             }
-            setReadyLayout(result.layout, generation);
+            await setReadyLayout(result.layout, generation);
             return;
           }
 
           if (hasStickyNote(instances)) {
             markOnboardingStickiesSeen();
           }
-          setReadyLayout(layout, generation);
+          await setReadyLayout(layout, generation);
           return;
         }
 
@@ -512,7 +539,7 @@ export function createHomeWidgetRuntime({
           if (hasStickyNote(layoutItemsToHomeWidgets(result.layout.items))) {
             markOnboardingStickiesSeen();
           }
-          setReadyLayout(result.layout, generation);
+          await setReadyLayout(result.layout, generation);
           return;
         }
 
@@ -531,7 +558,7 @@ export function createHomeWidgetRuntime({
           markOnboardingStickiesSeen();
         }
         if (!result.ok) {
-          setReadyLayout(result.layout, generation);
+          await setReadyLayout(result.layout, generation);
           return;
         }
 
@@ -544,7 +571,10 @@ export function createHomeWidgetRuntime({
           zoomBps: 10_000,
         };
         const cameraRevisionBeforeSave = result.layout.cameraRevision;
-        setReadyLayout({ ...result.layout, camera: starterCamera }, generation);
+        await setReadyLayout(
+          { ...result.layout, camera: starterCamera },
+          generation,
+        );
         enqueueCameraSave(starterCamera);
         await waitForPendingSaves();
         if (generation !== runtime.generation) return;

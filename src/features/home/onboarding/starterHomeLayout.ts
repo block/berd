@@ -1,4 +1,6 @@
 const STARTER_HOME_LAYOUT_STORAGE_KEY = "goose:home:starter-layout-v18";
+const STARTER_HOME_CAMERA_PENDING_STORAGE_KEY =
+  "goose:home:starter-camera-pending-v1";
 
 const STARTER_TASK_ROW_HEIGHT = 32;
 
@@ -44,6 +46,25 @@ export function hasArrangedStarterHome(): boolean {
 export function markStarterHomeArranged(): void {
   try {
     localStorage.setItem(STARTER_HOME_LAYOUT_STORAGE_KEY, "1");
+    localStorage.removeItem(STARTER_HOME_CAMERA_PENDING_STORAGE_KEY);
+  } catch {
+    // Home remains usable when localStorage is unavailable.
+  }
+}
+
+export function hasPendingStarterHomeCamera(): boolean {
+  try {
+    return (
+      localStorage.getItem(STARTER_HOME_CAMERA_PENDING_STORAGE_KEY) === "1"
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function markStarterHomeCameraPending(): void {
+  try {
+    localStorage.setItem(STARTER_HOME_CAMERA_PENDING_STORAGE_KEY, "1");
   } catch {
     // Home remains usable when localStorage is unavailable.
   }
