@@ -344,6 +344,7 @@
   },
   "notifications": {
     "compactionComplete": "Conversacion compactada. El contexto anterior se resumio.",
+    "compactionReplayIncomplete": "No se pudo verificar la conversación compactada porque no se recibió el historial actualizado. Tus mensajes anteriores siguen visibles. Intenta volver a cargar la sesión.",
     "modelSwitchError": "No se pudo cambiar a {{model}}. Este chat sigue usando {{fallbackModel}}.",
     "modelSwitchErrorWithoutFallback": "No se pudo cambiar a {{model}}.",
     "archiveError": "No se pudo archivar el chat",
@@ -515,6 +516,7 @@
     "sessionLoadMissingProjectDir": "La carpeta del proyecto de esta sesión ya no existe: {{missingPath}}. Se cargó la conversación usando {{fallbackPath}} en su lugar.",
     "sessionLoadMissingWorkingDir": "La carpeta de esta sesión ya no existe: {{missingPath}}. Se cargó la conversación usando {{fallbackPath}} en su lugar.",
     "sessionLoadFailed": "No se pudo cargar esta sesión.",
+    "sessionReplayIncomplete": "No se pudo actualizar esta conversación. Tus mensajes anteriores siguen visibles.",
     "editProjectFolders": "Editar proyecto",
     "changeFolder": "Cambiar carpeta",
     "stopGeneration": "Detener generación",

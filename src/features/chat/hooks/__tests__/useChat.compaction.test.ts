@@ -171,6 +171,53 @@ describe("useChat compaction", () => {
     ).toBe(false);
   });
 
+  it("keeps the transcript and reports failure when compacted replay is invalid", async () => {
+    mockAcpLoadSession.mockImplementation(async (sessionId: string) => {
+      ensureReplayBuffer(sessionId).push(
+        createTextMessage("compact-1", "user", "/compact/compact"),
+      );
+    });
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        createTextMessage("user-1", "user", "Before compact"),
+        createTextMessage("assistant-1", "assistant", "A long answer"),
+      ]);
+
+    const { result } = renderHook(() => useChat("session-1"));
+    let compactResult: unknown;
+    await act(async () => {
+      compactResult = await result.current.compactConversation();
+    });
+
+    expect(compactResult).toBe("failed");
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    expect(messages.map((message) => message.id)).toEqual([
+      "user-1",
+      "assistant-1",
+      expect.any(String),
+    ]);
+    expect(
+      messages.some((message) =>
+        message.content.some(
+          (block) =>
+            block.type === "systemNotification" &&
+            block.notificationType === "compaction",
+        ),
+      ),
+    ).toBe(false);
+    expect(messages[2].content).toEqual([
+      {
+        type: "systemNotification",
+        notificationType: "error",
+        text: "Couldn't verify the compacted conversation because refreshed history wasn't received. Your previous messages are still shown. Try reloading the session.",
+      },
+    ]);
+    expect(useChatStore.getState().getSessionRuntime("session-1").error).toBe(
+      "Couldn't verify the compacted conversation because refreshed history wasn't received. Your previous messages are still shown. Try reloading the session.",
+    );
+  });
+
   it("prepares and compacts the override persona session", async () => {
     let preparedPersonaId: string | undefined;
     const ensurePrepared = vi.fn(async (personaId?: string) => {

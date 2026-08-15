@@ -4,6 +4,8 @@ import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useChatStore } from "../../stores/chatStore";
 import { useChatSessionStore } from "../../stores/chatSessionStore";
+import { ensureReplayBuffer } from "../replayBuffer";
+import { createUserMessage } from "@/shared/types/messages";
 import { beginModelSelectionIntent } from "../../model-selection/modelSelectionIntent";
 import {
   resetSessionTargetCoordinatorsForTests,
@@ -212,7 +214,11 @@ describe("controller/useChat queued target lease during compaction", () => {
     transportProviders.length = 0;
     selectedAgentId = "goose";
     mockAcpPrepareSession.mockResolvedValue(undefined);
-    mockAcpLoadSession.mockResolvedValue(undefined);
+    mockAcpLoadSession.mockImplementation(async (sessionId: string) => {
+      ensureReplayBuffer(sessionId).push(
+        createUserMessage("Compacted history"),
+      );
+    });
     mockAcpSendMessage.mockResolvedValue(undefined);
     mockResolveSessionCwd.mockResolvedValue("/tmp/project");
     useAgentStore.setState({

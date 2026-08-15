@@ -345,6 +345,7 @@
   },
   "notifications": {
     "compactionComplete": "Conversation compacted. Older context was summarized.",
+    "compactionReplayIncomplete": "Couldn't verify the compacted conversation because refreshed history wasn't received. Your previous messages are still shown. Try reloading the session.",
     "modelSwitchError": "Could not switch to {{model}}. This chat is still using {{fallbackModel}}.",
     "modelSwitchErrorWithoutFallback": "Could not switch to {{model}}.",
     "archiveError": "Failed to archive chat",
@@ -518,6 +519,7 @@
     "sessionLoadMissingProjectDir": "This session's project folder no longer exists: {{missingPath}}. Loaded the conversation using {{fallbackPath}} instead.",
     "sessionLoadMissingWorkingDir": "This session's folder no longer exists: {{missingPath}}. Loaded the conversation using {{fallbackPath}} instead.",
     "sessionLoadFailed": "Couldn't load this session.",
+    "sessionReplayIncomplete": "Couldn't refresh this conversation. Your previous messages are still shown.",
     "editProjectFolders": "Edit project",
     "changeFolder": "Change folder",
     "stopGeneration": "Stop generation",

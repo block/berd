@@ -281,6 +281,54 @@ describe("loadSessionMessages", () => {
     ).toBe("assistant-1");
   });
 
+  it("preserves a populated transcript when a forced replay is invalid", async () => {
+    seedSession(
+      { id: "empty-forced-replay", messageCount: 2 },
+      { replay: false },
+    );
+    useChatStore
+      .getState()
+      .setMessages("empty-forced-replay", [replayUserMessage("existing-1")]);
+    ensureReplayBuffer("empty-forced-replay");
+
+    await expect(
+      loadSessionMessages("empty-forced-replay", { force: true }),
+    ).resolves.toBe(false);
+
+    expect(
+      messagesFor("empty-forced-replay").map((message) => message.id),
+    ).toEqual(["existing-1", "session-load-error:empty-forced-replay"]);
+    expect(notificationFromLastMessage("empty-forced-replay")).toMatchObject({
+      notificationType: "error",
+      text: "Couldn't refresh this conversation. Your previous messages are still shown.",
+    });
+    expect(
+      useChatSessionStore.getState().getSession("empty-forced-replay")
+        ?.messageCount,
+    ).toBe(2);
+    expect(
+      useChatStore.getState().loadingSessionIds.has("empty-forced-replay"),
+    ).toBe(false);
+  });
+
+  it("rejects an empty cold replay when session metadata expects history", async () => {
+    seedSession(
+      { id: "cold-empty-replay", messageCount: 3 },
+      { replay: false },
+    );
+    ensureReplayBuffer("cold-empty-replay");
+
+    await expect(loadSessionMessages("cold-empty-replay")).resolves.toBe(false);
+
+    expect(notificationFromLastMessage("cold-empty-replay")).toMatchObject({
+      notificationType: "error",
+    });
+    expect(
+      useChatSessionStore.getState().getSession("cold-empty-replay")
+        ?.messageCount,
+    ).toBe(3);
+  });
+
   it("clears replay loading before publishing error-to-idle", async () => {
     seedSession({ id: "error-replay" });
     useChatStore.getState().setError("error-replay", "stale error");
