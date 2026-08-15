@@ -494,19 +494,44 @@ pub async fn save_exported_session_files(
     // require an identity-bearing handle from the selection boundary itself.
     let dir = open_selected_export_dir(&folder_path)?;
 
-    let mut used: HashSet<String> = HashSet::new();
-    let mut written: Vec<String> = Vec::with_capacity(items.len());
-
-    for item in items {
-        let resolved =
-            write_export_file(&dir, &item.filename, item.contents.as_bytes(), &mut used)?;
-        written.push(resolved);
-    }
+    let written = write_export_batch(&dir, &items)?;
 
     Ok(Some(SessionExportBatchResult {
         folder: folder_path.to_string_lossy().into_owned(),
         files: written,
     }))
+}
+
+/// Write a whole renderer-controlled export batch beneath the pinned directory
+/// handle in two phases.
+///
+/// Phase 1 validates *every* filename before any file is created. A batch such
+/// as `[session.json, ../escape.json]` is rejected in full — the malformed
+/// second item aborts the command before the valid first item is written, so a
+/// rejected batch never leaves a partial export on disk. Phase 2 then creates
+/// the files from the already-validated leaf names. The `ValidExportLeaf`
+/// newtype makes this ordering unbypassable: `write_export_file` only accepts a
+/// name that has already cleared `sanitize_export_leaf_filename`.
+fn write_export_batch(
+    dir: &cap_std::fs::Dir,
+    items: &[SessionExportItem],
+) -> Result<Vec<String>, String> {
+    let leaves = items
+        .iter()
+        .map(|item| ValidExportLeaf::parse(&item.filename))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut used: HashSet<String> = HashSet::new();
+    let mut written: Vec<String> = Vec::with_capacity(items.len());
+    for (leaf, item) in leaves.iter().zip(items) {
+        written.push(write_export_file(
+            dir,
+            leaf,
+            item.contents.as_bytes(),
+            &mut used,
+        )?);
+    }
+    Ok(written)
 }
 
 /// Open the user-selected export directory into a cap-std `Dir` handle without
@@ -546,8 +571,16 @@ fn open_selected_export_dir(folder_path: &Path) -> Result<cap_std::fs::Dir, Stri
         // the subsequent directory-handle use instead of redirecting.
         const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
         const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        // cap-std's `Dir::from_std_file` requires the Windows handle be opened
+        // WITHOUT FILE_SHARE_DELETE so the directory cannot be renamed/deleted
+        // out from under the capability root (cap-std 4.0.2 src/fs/dir.rs).
+        // Rust std defaults to FILE_SHARE_READ|WRITE|DELETE, so set the share
+        // mode explicitly, excluding DELETE.
+        const FILE_SHARE_READ: u32 = 0x0000_0001;
+        const FILE_SHARE_WRITE: u32 = 0x0000_0002;
         fs::OpenOptions::new()
             .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
             .open(folder_path)
             .map_err(map_err)?
@@ -576,6 +609,22 @@ const WINDOWS_RESERVED_DEVICE_NAMES: &[&str] = &[
 /// a name only Windows refuses. The path separators `/`, `\`, and the drive /
 /// alternate-data-stream separator `:` are handled separately.
 const WINDOWS_FORBIDDEN_CHARS: &[char] = &['<', '>', '"', '|', '?', '*'];
+
+/// A renderer-supplied export filename that has been validated as a safe bare
+/// leaf name. Constructing one is the only way to obtain a name
+/// `write_export_file` will write, so the batch cannot mutate the filesystem
+/// with an unvalidated name.
+struct ValidExportLeaf(String);
+
+impl ValidExportLeaf {
+    fn parse(filename: &str) -> Result<Self, String> {
+        Ok(Self(sanitize_export_leaf_filename(filename)?))
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 /// Validate a renderer-supplied export filename and return a safe leaf name.
 ///
@@ -672,20 +721,20 @@ fn sanitize_export_leaf_filename(filename: &str) -> Result<String, String> {
 /// `AlreadyExists` and is skipped rather than followed or overwritten.
 fn write_export_file(
     dir: &cap_std::fs::Dir,
-    filename: &str,
+    leaf: &ValidExportLeaf,
     contents: &[u8],
     used: &mut HashSet<String>,
 ) -> Result<String, String> {
-    let leaf = sanitize_export_leaf_filename(filename)?;
+    let leaf = leaf.as_str();
 
     let (stem, ext) = match leaf.rsplit_once('.') {
         Some((s, e)) => (s.to_string(), format!(".{e}")),
-        None => (leaf.clone(), String::new()),
+        None => (leaf.to_string(), String::new()),
     };
 
     for attempt in 1..=9999 {
         let candidate = if attempt == 1 {
-            leaf.clone()
+            leaf.to_string()
         } else {
             format!("{stem}-{attempt}{ext}")
         };
@@ -2082,8 +2131,9 @@ mod tests {
         inspect_attachment_paths, normalize_attachment_paths, normalize_roots,
         open_selected_export_dir, read_directory_entries, read_image_attachment, read_text_file,
         sanitize_export_leaf_filename, search_file_mentions_blocking, validate_external_url,
-        write_agent_image_atomically, write_export_file, write_sibling_then_replace,
-        FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
+        write_agent_image_atomically, write_export_batch, write_export_file,
+        write_sibling_then_replace, FileMentionIndexCache, SessionExportItem, ValidExportLeaf,
+        MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
     };
     use base64::Engine;
     use std::fs;
@@ -3190,22 +3240,56 @@ mod tests {
             cap_std::fs::Dir::open_ambient_dir(dir.path(), cap_std::ambient_authority()).unwrap();
         let mut used = std::collections::HashSet::new();
 
-        let name =
-            write_export_file(&handle, "session.json", b"hello", &mut used).expect("valid export");
+        let name = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("session.json").unwrap(),
+            b"hello",
+            &mut used,
+        )
+        .expect("valid export");
         assert_eq!(name, "session.json");
         assert_eq!(fs::read(dir.path().join("session.json")).unwrap(), b"hello");
     }
 
     #[test]
-    fn write_export_file_rejects_traversal_and_absolute_paths() {
+    fn write_export_batch_validates_all_names_before_writing_any() {
         let dir = tempdir().expect("tempdir");
-        let handle =
-            cap_std::fs::Dir::open_ambient_dir(dir.path(), cap_std::ambient_authority()).unwrap();
-        let mut used = std::collections::HashSet::new();
+        let handle = open_selected_export_dir(dir.path()).expect("acquire handle");
 
-        assert!(write_export_file(&handle, "../escape.json", b"x", &mut used).is_err());
-        assert!(write_export_file(&handle, "/etc/passwd", b"x", &mut used).is_err());
-        assert!(write_export_file(&handle, "sub\\win.json", b"x", &mut used).is_err());
+        // A valid first item followed by a malformed later item must abort the
+        // whole batch before any file is created.
+        let items = vec![
+            SessionExportItem {
+                filename: "session.json".to_string(),
+                contents: "hello".to_string(),
+            },
+            SessionExportItem {
+                filename: "../escape.json".to_string(),
+                contents: "x".to_string(),
+            },
+        ];
+
+        assert!(write_export_batch(&handle, &items).is_err());
+        // No partial export: the valid first item was not written.
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+        assert!(!dir.path().parent().unwrap().join("escape.json").exists());
+    }
+
+    #[test]
+    fn write_export_batch_rejects_traversal_and_absolute_names() {
+        let dir = tempdir().expect("tempdir");
+        let handle = open_selected_export_dir(dir.path()).expect("acquire handle");
+
+        for bad in ["../escape.json", "/etc/passwd", "sub\\win.json"] {
+            let items = vec![SessionExportItem {
+                filename: bad.to_string(),
+                contents: "x".to_string(),
+            }];
+            assert!(
+                write_export_batch(&handle, &items).is_err(),
+                "expected reject: {bad:?}"
+            );
+        }
         // Nothing was created inside the folder, and no escape file exists.
         assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
         assert!(!dir.path().parent().unwrap().join("escape.json").exists());
@@ -3219,8 +3303,13 @@ mod tests {
             cap_std::fs::Dir::open_ambient_dir(dir.path(), cap_std::ambient_authority()).unwrap();
         let mut used = std::collections::HashSet::new();
 
-        let name =
-            write_export_file(&handle, "chat.json", b"new", &mut used).expect("collision suffix");
+        let name = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("chat.json").unwrap(),
+            b"new",
+            &mut used,
+        )
+        .expect("collision suffix");
         assert_eq!(name, "chat-2.json");
         // The pre-existing file is untouched.
         assert_eq!(
@@ -3237,12 +3326,27 @@ mod tests {
             cap_std::fs::Dir::open_ambient_dir(dir.path(), cap_std::ambient_authority()).unwrap();
         let mut used = std::collections::HashSet::new();
 
-        let first =
-            write_export_file(&handle, "chat.json", b"a", &mut used).expect("first duplicate");
-        let second =
-            write_export_file(&handle, "chat.json", b"b", &mut used).expect("second duplicate");
-        let third =
-            write_export_file(&handle, "chat.json", b"c", &mut used).expect("third duplicate");
+        let first = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("chat.json").unwrap(),
+            b"a",
+            &mut used,
+        )
+        .expect("first duplicate");
+        let second = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("chat.json").unwrap(),
+            b"b",
+            &mut used,
+        )
+        .expect("second duplicate");
+        let third = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("chat.json").unwrap(),
+            b"c",
+            &mut used,
+        )
+        .expect("third duplicate");
 
         assert_eq!(first, "chat.json");
         assert_eq!(second, "chat-2.json");
@@ -3270,8 +3374,13 @@ mod tests {
         let handle =
             cap_std::fs::Dir::open_ambient_dir(&export_dir, cap_std::ambient_authority()).unwrap();
         let mut used = std::collections::HashSet::new();
-        let name = write_export_file(&handle, "chat.json", b"payload", &mut used)
-            .expect("symlink collision is skipped");
+        let name = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("chat.json").unwrap(),
+            b"payload",
+            &mut used,
+        )
+        .expect("symlink collision is skipped");
 
         // The symlinked target outside the folder must never be written.
         assert!(!target.exists());
@@ -3308,8 +3417,13 @@ mod tests {
         symlink(&outside, &selected).unwrap();
 
         let mut used = std::collections::HashSet::new();
-        let name = write_export_file(&handle, "chat.json", b"payload", &mut used)
-            .expect("write via pinned handle");
+        let name = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("chat.json").unwrap(),
+            b"payload",
+            &mut used,
+        )
+        .expect("write via pinned handle");
         assert_eq!(name, "chat.json");
 
         // The write landed on the original inode (now `selected-old`), not the
@@ -3353,8 +3467,13 @@ mod tests {
         let handle = open_selected_export_dir(dir.path()).expect("acquire handle");
         let mut used = std::collections::HashSet::new();
 
-        let name =
-            write_export_file(&handle, "session.json", b"hi", &mut used).expect("valid export");
+        let name = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("session.json").unwrap(),
+            b"hi",
+            &mut used,
+        )
+        .expect("valid export");
         assert_eq!(name, "session.json");
         assert_eq!(fs::read(dir.path().join("session.json")).unwrap(), b"hi");
     }
