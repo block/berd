@@ -482,11 +482,12 @@ pub async fn save_exported_session_files(
     let mut written: Vec<String> = Vec::with_capacity(items.len());
 
     for item in items {
-        let resolved = resolve_export_filename(&folder_path, &item.filename, &used);
-        let path = folder_path.join(&resolved);
-        std::fs::write(&path, &item.contents)
-            .map_err(|e| format!("Failed to write file '{}': {}", path.display(), e))?;
-        used.insert(resolved.clone());
+        let resolved = write_export_file(
+            &folder_path,
+            &item.filename,
+            item.contents.as_bytes(),
+            &mut used,
+        )?;
         written.push(resolved);
     }
 
@@ -496,24 +497,122 @@ pub async fn save_exported_session_files(
     }))
 }
 
-fn resolve_export_filename(folder: &Path, filename: &str, used: &HashSet<String>) -> String {
-    if !folder.join(filename).exists() && !used.contains(filename) {
-        return filename.to_string();
+/// Windows reserved device names. A file name is unsafe if its stem (the part
+/// before the first `.`) matches one of these case-insensitively, with or
+/// without an extension (e.g. `CON`, `con.json`).
+const WINDOWS_RESERVED_FILE_NAMES: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
+
+/// Validate a renderer-supplied export filename and return a safe leaf name.
+///
+/// `SessionExportItem.filename` is renderer-controlled, so this is the IPC
+/// security boundary — frontend cleanup does not count. Only a bare leaf file
+/// name may be written, so the result always stays directly inside the
+/// user-selected directory. Rejected inputs, on every supported OS:
+///
+/// - empty or whitespace-only names,
+/// - the path separators `/`, `\`, and the Windows drive / alternate-data-
+///   stream separator `:`, plus embedded NUL,
+/// - anything that does not parse to exactly one `Component::Normal` (absolute
+///   paths, drive/UNC prefixes, root, `.` and `..`),
+/// - dot-only names (`.`, `..`, `...`),
+/// - trailing `.` or space (silently stripped by Windows, which would change
+///   the target),
+/// - Windows reserved device names.
+fn sanitize_export_leaf_filename(filename: &str) -> Result<String, String> {
+    let reject = || format!("Unsafe export filename: {filename:?}");
+
+    if filename.trim().is_empty() {
+        return Err(reject());
+    }
+    if filename.contains('\0')
+        || filename.contains('/')
+        || filename.contains('\\')
+        || filename.contains(':')
+    {
+        return Err(reject());
     }
 
-    let (stem, ext) = match filename.rsplit_once('.') {
-        Some((s, e)) => (s.to_string(), format!(".{}", e)),
-        None => (filename.to_string(), String::new()),
+    // Must be exactly one normal path component. This rejects absolute paths,
+    // drive/UNC prefixes, root, "." and "..".
+    let mut components = Path::new(filename).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(part)), None) if part == std::ffi::OsStr::new(filename) => {}
+        _ => return Err(reject()),
+    }
+
+    // Dot-only names (e.g. "...") are not useful and are treated specially by
+    // some filesystems.
+    if filename.chars().all(|c| c == '.') {
+        return Err(reject());
+    }
+
+    // Windows strips trailing dots and spaces, which can change the target.
+    if filename.ends_with('.') || filename.ends_with(' ') {
+        return Err(reject());
+    }
+
+    let stem = filename.split('.').next().unwrap_or(filename);
+    if WINDOWS_RESERVED_FILE_NAMES
+        .iter()
+        .any(|reserved| stem.eq_ignore_ascii_case(reserved))
+    {
+        return Err(reject());
+    }
+
+    Ok(filename.to_string())
+}
+
+/// Write one exported session file into `folder` under a validated leaf name,
+/// never following symlinks and never overwriting an existing entry.
+///
+/// Collisions get a deterministic `-N` suffix. `create_new(true)` guarantees
+/// each write lands on a freshly created file directly inside `folder`: a
+/// pre-existing file, directory, or symlink (including a dangling one) at the
+/// target fails with `AlreadyExists` and is skipped rather than followed or
+/// overwritten. Combined with the leaf-only filename, this confines every
+/// write beneath the selected directory and closes the symlink/TOCTOU escape.
+fn write_export_file(
+    folder: &Path,
+    filename: &str,
+    contents: &[u8],
+    used: &mut HashSet<String>,
+) -> Result<String, String> {
+    let leaf = sanitize_export_leaf_filename(filename)?;
+
+    let (stem, ext) = match leaf.rsplit_once('.') {
+        Some((s, e)) => (s.to_string(), format!(".{e}")),
+        None => (leaf.clone(), String::new()),
     };
 
-    for n in 2..=9999 {
-        let candidate = format!("{}-{}{}", stem, n, ext);
-        if !folder.join(&candidate).exists() && !used.contains(&candidate) {
-            return candidate;
+    for attempt in 1..=9999 {
+        let candidate = if attempt == 1 {
+            leaf.clone()
+        } else {
+            format!("{stem}-{attempt}{ext}")
+        };
+        if used.contains(&candidate) {
+            continue;
+        }
+        match OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(folder.join(&candidate))
+        {
+            Ok(mut file) => {
+                file.write_all(contents)
+                    .map_err(|e| format!("Failed to write file '{candidate}': {e}"))?;
+                used.insert(candidate.clone());
+                return Ok(candidate);
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("Failed to write file '{candidate}': {e}")),
         }
     }
 
-    format!("{}-{}{}", stem, 9999, ext)
+    Err(format!("Too many name collisions for export file '{leaf}'"))
 }
 
 #[tauri::command]
@@ -1887,9 +1986,9 @@ mod tests {
         get_or_build_file_mention_index_from_cache, inspect_attachment_path,
         inspect_attachment_paths, normalize_attachment_paths, normalize_roots,
         read_directory_entries, read_image_attachment, read_text_file,
-        search_file_mentions_blocking, validate_external_url, write_agent_image_atomically,
-        write_sibling_then_replace, FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES,
-        MAX_TEXT_FILE_BYTES,
+        sanitize_export_leaf_filename, search_file_mentions_blocking, validate_external_url,
+        write_agent_image_atomically, write_export_file, write_sibling_then_replace,
+        FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
     };
     use base64::Engine;
     use std::fs;
@@ -2880,5 +2979,166 @@ mod tests {
         assert!(validate_external_url("javascript:alert(1)").is_err());
         assert!(validate_external_url("file:///etc/passwd").is_err());
         assert!(validate_external_url("not a url").is_err());
+    }
+
+    #[test]
+    fn export_filename_accepts_plain_leaf_names() {
+        assert_eq!(
+            sanitize_export_leaf_filename("session.json").unwrap(),
+            "session.json"
+        );
+        assert_eq!(
+            sanitize_export_leaf_filename("My Chat - 2026.json").unwrap(),
+            "My Chat - 2026.json"
+        );
+        // No extension is fine.
+        assert_eq!(sanitize_export_leaf_filename("notes").unwrap(), "notes");
+        // A leading dot (dotfile) is allowed as long as it is not dot-only.
+        assert_eq!(
+            sanitize_export_leaf_filename(".hidden.json").unwrap(),
+            ".hidden.json"
+        );
+    }
+
+    #[test]
+    fn export_filename_rejects_empty_and_whitespace() {
+        assert!(sanitize_export_leaf_filename("").is_err());
+        assert!(sanitize_export_leaf_filename("   ").is_err());
+        assert!(sanitize_export_leaf_filename("\t\n").is_err());
+    }
+
+    #[test]
+    fn export_filename_rejects_parent_and_current_dir() {
+        assert!(sanitize_export_leaf_filename(".").is_err());
+        assert!(sanitize_export_leaf_filename("..").is_err());
+        assert!(sanitize_export_leaf_filename("...").is_err());
+        assert!(sanitize_export_leaf_filename("../secret.json").is_err());
+        assert!(sanitize_export_leaf_filename("../../etc/passwd").is_err());
+        assert!(sanitize_export_leaf_filename("foo/../bar.json").is_err());
+    }
+
+    #[test]
+    fn export_filename_rejects_separators_on_every_os() {
+        // Unix separator.
+        assert!(sanitize_export_leaf_filename("sub/dir.json").is_err());
+        assert!(sanitize_export_leaf_filename("/etc/passwd").is_err());
+        // Windows separator, rejected on all platforms.
+        assert!(sanitize_export_leaf_filename("sub\\dir.json").is_err());
+        assert!(sanitize_export_leaf_filename("\\\\server\\share\\x").is_err());
+        // Mixed separators.
+        assert!(sanitize_export_leaf_filename("a/b\\c.json").is_err());
+        // Windows drive / alternate-data-stream separator.
+        assert!(sanitize_export_leaf_filename("C:\\Windows\\x.json").is_err());
+        assert!(sanitize_export_leaf_filename("file.json:stream").is_err());
+        // Embedded NUL.
+        assert!(sanitize_export_leaf_filename("a\0b.json").is_err());
+    }
+
+    #[test]
+    fn export_filename_rejects_windows_unsafe_names() {
+        // Reserved device names, with and without extension, any case.
+        assert!(sanitize_export_leaf_filename("CON").is_err());
+        assert!(sanitize_export_leaf_filename("con.json").is_err());
+        assert!(sanitize_export_leaf_filename("NUL.txt").is_err());
+        assert!(sanitize_export_leaf_filename("Com1").is_err());
+        assert!(sanitize_export_leaf_filename("lpt9.json").is_err());
+        // Trailing dot or space are stripped by Windows.
+        assert!(sanitize_export_leaf_filename("session.json.").is_err());
+        assert!(sanitize_export_leaf_filename("session ").is_err());
+        // Not reserved: names that merely start with a reserved token.
+        assert_eq!(
+            sanitize_export_leaf_filename("console.json").unwrap(),
+            "console.json"
+        );
+    }
+
+    #[test]
+    fn write_export_file_writes_valid_export_into_folder() {
+        let dir = tempdir().expect("tempdir");
+        let mut used = std::collections::HashSet::new();
+
+        let name = write_export_file(dir.path(), "session.json", b"hello", &mut used)
+            .expect("valid export");
+        assert_eq!(name, "session.json");
+        assert_eq!(fs::read(dir.path().join("session.json")).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn write_export_file_rejects_traversal_and_absolute_paths() {
+        let dir = tempdir().expect("tempdir");
+        let mut used = std::collections::HashSet::new();
+
+        assert!(write_export_file(dir.path(), "../escape.json", b"x", &mut used).is_err());
+        assert!(write_export_file(dir.path(), "/etc/passwd", b"x", &mut used).is_err());
+        assert!(write_export_file(dir.path(), "sub\\win.json", b"x", &mut used).is_err());
+        // Nothing was created inside the folder, and no escape file exists.
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+        assert!(!dir.path().parent().unwrap().join("escape.json").exists());
+    }
+
+    #[test]
+    fn write_export_file_suffixes_disk_collisions_deterministically() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("chat.json"), b"pre-existing").unwrap();
+        let mut used = std::collections::HashSet::new();
+
+        let name = write_export_file(dir.path(), "chat.json", b"new", &mut used)
+            .expect("collision suffix");
+        assert_eq!(name, "chat-2.json");
+        // The pre-existing file is untouched.
+        assert_eq!(
+            fs::read(dir.path().join("chat.json")).unwrap(),
+            b"pre-existing"
+        );
+        assert_eq!(fs::read(dir.path().join("chat-2.json")).unwrap(), b"new");
+    }
+
+    #[test]
+    fn write_export_file_suffixes_duplicate_names_within_one_batch() {
+        let dir = tempdir().expect("tempdir");
+        let mut used = std::collections::HashSet::new();
+
+        let first =
+            write_export_file(dir.path(), "chat.json", b"a", &mut used).expect("first duplicate");
+        let second =
+            write_export_file(dir.path(), "chat.json", b"b", &mut used).expect("second duplicate");
+        let third =
+            write_export_file(dir.path(), "chat.json", b"c", &mut used).expect("third duplicate");
+
+        assert_eq!(first, "chat.json");
+        assert_eq!(second, "chat-2.json");
+        assert_eq!(third, "chat-3.json");
+        assert_eq!(fs::read(dir.path().join("chat.json")).unwrap(), b"a");
+        assert_eq!(fs::read(dir.path().join("chat-2.json")).unwrap(), b"b");
+        assert_eq!(fs::read(dir.path().join("chat-3.json")).unwrap(), b"c");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_export_file_does_not_follow_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempdir().expect("tempdir");
+        let export_dir = root.path().join("export");
+        let outside_dir = root.path().join("outside");
+        fs::create_dir(&export_dir).unwrap();
+        fs::create_dir(&outside_dir).unwrap();
+
+        // Attacker pre-plants a symlink in the export dir that points outside.
+        let target = outside_dir.join("victim.json");
+        symlink(&target, export_dir.join("chat.json")).unwrap();
+
+        let mut used = std::collections::HashSet::new();
+        let name = write_export_file(&export_dir, "chat.json", b"payload", &mut used)
+            .expect("symlink collision is skipped");
+
+        // The symlinked target outside the folder must never be written.
+        assert!(!target.exists());
+        // The write lands on a fresh, suffixed name inside the folder.
+        assert_eq!(name, "chat-2.json");
+        assert_eq!(
+            fs::read(export_dir.join("chat-2.json")).unwrap(),
+            b"payload"
+        );
     }
 }
