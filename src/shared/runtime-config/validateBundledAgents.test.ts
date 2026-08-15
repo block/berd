@@ -13,6 +13,7 @@ description: Answers support questions.
 avatar: app-avatar:gloopies-19
 metadata:
   berdBundled: true
+  berdBundledSource: support-bot
 ---
 
 Agent instructions.
@@ -129,6 +130,7 @@ description: ""
 avatar: app-avatar:gloopies-19
 metadata:
   berdBundled: true
+  berdBundledSource: support-bot
 ---
 `,
     );
