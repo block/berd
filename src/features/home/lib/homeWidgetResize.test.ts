@@ -92,6 +92,6 @@ describe("resolveWidgetResize — clock profiles", () => {
       requestedSize: { width: 360, height: 360 },
     });
     expect(resolved.width).toBe(360);
-    expect(resolved.height).toBeCloseTo(360 * (104 / 264), 5);
+    expect(resolved.height).toBeCloseTo(360 * (88 / 224), 5);
   });
 });

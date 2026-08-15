@@ -27,7 +27,7 @@ function isFinitePositive(value: unknown): value is number {
 }
 
 const CLOCK_ANALOG_PROFILE: WidgetSizeProfile = {
-  defaultSize: { width: 240, height: 240 },
+  defaultSize: { width: 173, height: 173 },
   sizeBounds: {
     minWidth: 168,
     maxWidth: 360,
@@ -37,10 +37,10 @@ const CLOCK_ANALOG_PROFILE: WidgetSizeProfile = {
   },
 };
 
-// Landscape readout sized to hug the digits. Aspect 104/264 ≈ 0.394; bounds are
-// exact 0.75x/1.5x multiples of the default so the locked ratio stays clean.
+// Landscape readout uses rounded dimensions near 85% of its former default
+// footprint so cleanup and persistence remain stable.
 const CLOCK_DIGITAL_PROFILE: WidgetSizeProfile = {
-  defaultSize: { width: 264, height: 104 },
+  defaultSize: { width: 224, height: 88 },
   sizeBounds: {
     minWidth: 198,
     maxWidth: 396,
@@ -75,6 +75,7 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
     descriptionKey: "widgets.clock.description",
     defaultSize: CLOCK_ANALOG_PROFILE.defaultSize,
     sizeBounds: CLOCK_ANALOG_PROFILE.sizeBounds,
+    preserveSizeOnCleanUp: true,
     resolveProfile: (instance) =>
       clockModeOf(instance) === "digital"
         ? CLOCK_DIGITAL_PROFILE
@@ -207,7 +208,8 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
     category: "project",
     labelKey: "widgets.projectArtifactPin.label",
     descriptionKey: "widgets.projectArtifactPin.description",
-    defaultSize: { width: 400, height: 400 },
+    defaultSize: { width: 440, height: 440 },
+    preserveSizeOnCleanUp: true,
     sizeBounds: {
       minWidth: 140,
       maxWidth: 1000,
@@ -225,7 +227,8 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
     labelKey: "widgets.projectArtifactPin.label",
     descriptionKey: "widgets.projectArtifactPin.description",
     // Square hit target; label + resize handle overlay the cube bottom (see widget).
-    defaultSize: { width: 200, height: 200 },
+    defaultSize: { width: 220, height: 220 },
+    preserveSizeOnCleanUp: true,
     sizeBounds: {
       minWidth: 140,
       maxWidth: 1000,
@@ -237,7 +240,7 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
       instance.state?.onboardingStarterProject === true ||
       instance.state?.projectId === "onboarding-starter-project"
         ? {
-            defaultSize: { width: 400, height: 400 },
+            defaultSize: { width: 440, height: 440 },
             sizeBounds: {
               minWidth: 140,
               maxWidth: 1000,
@@ -247,7 +250,7 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
             },
           }
         : {
-            defaultSize: { width: 200, height: 200 },
+            defaultSize: { width: 220, height: 220 },
             sizeBounds: {
               minWidth: 140,
               maxWidth: 1000,

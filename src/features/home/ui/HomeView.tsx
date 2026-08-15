@@ -33,7 +33,9 @@ import {
   STARTER_TASKS_NOTE_ID,
 } from "@/features/home/onboarding/starterTasks";
 import {
+  clearStarterHomeLayoutEligibility,
   getStarterTasksHeight,
+  isStarterHomeLayoutEligible,
   starterLayoutCenter,
   STARTER_HOME_LAYOUT,
 } from "@/features/home/onboarding/starterHomeLayout";
@@ -143,6 +145,64 @@ export function HomeView({
         if (didPersist) markStarterAgentPinsSeeded();
       });
   }, [loadStatus, personas, personasLoading]);
+
+  useEffect(() => {
+    if (loadStatus !== "ready" || !isStarterHomeLayoutEligible()) return;
+    const starterPersonas = selectStarterAgentPersonas(personas);
+    const starterAgentIds = new Set(starterPersonas.map(({ id }) => id));
+    const hasCompleteStarterSet =
+      starterPersonas.length === STARTER_HOME_LAYOUT.agents.length &&
+      instances.some((instance) => instance.type === "onboardingTour") &&
+      instances.some((instance) => instance.type === "clock") &&
+      instances.some(
+        (instance) => instance.state?.noteId === STARTER_TASKS_NOTE_ID,
+      ) &&
+      instances.some(
+        (instance) => instance.type === "onboardingProjectArtifact",
+      );
+    if (!hasCompleteStarterSet) return;
+
+    const maxZ = Math.max(0, ...instances.map((instance) => instance.z));
+    const arranged = instances.map((instance) => {
+      if (instance.type === "clock") return { ...instance, ...STARTER_HOME_LAYOUT.clock };
+      if (instance.type === "onboardingTour") {
+        return { ...instance, ...STARTER_HOME_LAYOUT.berdy, z: maxZ + 1 };
+      }
+      if (
+        instance.type === "agentPin" &&
+        typeof instance.state?.agentId === "string" &&
+        starterAgentIds.has(instance.state.agentId)
+      ) {
+        const index = starterPersonas.findIndex(
+          ({ id }) => id === instance.state?.agentId,
+        );
+        return { ...instance, ...STARTER_HOME_LAYOUT.agents[index] };
+      }
+      if (instance.state?.noteId === STARTER_TASKS_NOTE_ID) {
+        return {
+          ...instance,
+          ...STARTER_HOME_LAYOUT.tasks,
+          height: starterTasksHeight,
+        };
+      }
+      if (instance.type === "onboardingProjectArtifact") {
+        return { ...instance, ...STARTER_HOME_LAYOUT.project };
+      }
+      return instance;
+    });
+    widgetMutations.applyStarterLayout(arranged);
+    if (camera) {
+      saveCamera({ ...camera, centerX: 80, centerY: 44, zoomBps: 9_000 });
+    }
+  }, [
+    camera,
+    instances,
+    loadStatus,
+    personas,
+    saveCamera,
+    starterTasksHeight,
+    widgetMutations,
+  ]);
 
   const experimentVisibleInstances = useMemo(
     () =>
@@ -354,6 +414,7 @@ export function HomeView({
       return;
     }
 
+    clearStarterHomeLayoutEligibility();
     setLayoutMotionActive(true);
     const nextCamera = {
       centerX: recenterTarget.x,
@@ -366,6 +427,7 @@ export function HomeView({
   }, [camera, constraints, recenterTarget, saveCamera]);
 
   const handleCleanUp = useCallback(() => {
+    clearStarterHomeLayoutEligibility();
     setLayoutMotionActive(true);
     toggleCleanUpWidgets(constraints ?? undefined);
   }, [constraints, toggleCleanUpWidgets]);
@@ -538,6 +600,9 @@ function useHomeWidgetLayoutController() {
   const moveWidget = useHomeWidgetStore((state) => state.moveWidget);
   const resizeWidget = useHomeWidgetStore((state) => state.resizeWidget);
   const bumpZ = useHomeWidgetStore((state) => state.bumpZ);
+  const applyStarterLayout = useHomeWidgetStore(
+    (state) => state.applyStarterLayout,
+  );
   const cleanUpSnapshot = useHomeWidgetStore((state) => state.cleanUpSnapshot);
   const toggleCleanUpWidgets = useHomeWidgetStore(
     (state) => state.toggleCleanUpWidgets,
@@ -563,6 +628,7 @@ function useHomeWidgetLayoutController() {
       moveWidget,
       resizeWidget,
       bumpZ,
+      applyStarterLayout,
       removeWidget,
       updateWidgetState,
     }),
@@ -571,6 +637,7 @@ function useHomeWidgetLayoutController() {
       moveWidget,
       resizeWidget,
       bumpZ,
+      applyStarterLayout,
       removeWidget,
       updateWidgetState,
     ],

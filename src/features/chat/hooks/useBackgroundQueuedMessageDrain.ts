@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { toast } from "sonner";
 import { i18n } from "@/shared/i18n";
 
 import {
@@ -11,6 +12,11 @@ import {
   becameQueuedMessageTargetAttemptable,
   isQueuedMessageTargetAttemptable,
 } from "@/features/chat/lib/queuedMessageAttemptOwnership";
+import {
+  hasForegroundQueueOwner,
+  subscribeForegroundQueueOwnership,
+} from "@/features/chat/lib/foregroundQueueOwnership";
+import { isBerdctlCrossSessionQueuedMessage } from "@/features/chat/lib/queuedMessageOrigin";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import {
   type QueuedMessageRecord,
@@ -18,6 +24,11 @@ import {
 } from "@/features/chat/stores/chatStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { SessionDispatchContentionError } from "@/features/chat/lib/sessionDispatchAcquisition";
+import {
+  isReclaimedQueueReconciliationPending,
+  requestReclaimedQueueReconciliation,
+  subscribeReclaimedQueueReconciliation,
+} from "@/features/chat/lib/reclaimedQueueReconciliation";
 import { sendQueuedPromptToExistingSessionInBackground } from "@/features/chat/lib/queuedSessionSend";
 
 const drainingSessionIds = new Set<string>();
@@ -33,10 +44,95 @@ type ContentionWaiter = {
 
 const contentionWaiters = new Map<string, ContentionWaiter>();
 
+// Record ids observed with `restored: true` this app run, per session. The
+// flag itself is cleared by `markQueuedMessagesReady` during any session
+// load — including loads the user did not initiate (e.g. a berdctl
+// cross-session send touching the session) — so the flag alone cannot
+// guarantee "the user reopened this chat". A session's exclusions lift only
+// when a foreground owner registers for it, which is the user actually
+// opening the chat.
+const restoredExclusionsBySession = new Map<string, Set<string>>();
+
+function noteRestoredRecords(
+  queuedMessageBySession: Record<string, QueuedMessageRecord[]>,
+): void {
+  for (const [sessionId, records] of Object.entries(queuedMessageBySession)) {
+    if (hasForegroundQueueOwner(sessionId)) continue;
+    for (const record of records) {
+      if (!record.restored) continue;
+      let exclusions = restoredExclusionsBySession.get(sessionId);
+      if (!exclusions) {
+        exclusions = new Set();
+        restoredExclusionsBySession.set(sessionId, exclusions);
+      }
+      exclusions.add(record.recordId);
+    }
+  }
+}
+
+function liftRestoredExclusionsForOwnedSessions(): void {
+  for (const sessionId of restoredExclusionsBySession.keys()) {
+    if (hasForegroundQueueOwner(sessionId)) {
+      restoredExclusionsBySession.delete(sessionId);
+    }
+  }
+}
+
+function isRestoredExcluded(
+  sessionId: string,
+  record: QueuedMessageRecord & { kind: "transport-ready" },
+): boolean {
+  return (
+    record.restored === true ||
+    (restoredExclusionsBySession.get(sessionId)?.has(record.recordId) ?? false)
+  );
+}
+
 function ownerIdFor(scopedSessionId?: string): string {
   return scopedSessionId ? `session:${scopedSessionId}` : "global";
 }
 
+export function resetBackgroundQueueDrainStateForTesting(): void {
+  restoredExclusionsBySession.clear();
+}
+
+/**
+ * The background drain claims a queued head when either
+ * - it was released from a deferred workspace send (the foreground queue never
+ *   claims released heads), or
+ * - no mounted foreground chat currently owns the session's queue, so nothing
+ *   else will send it (the user queued a message and left the chat).
+ *
+ * berdctl cross-session sends are excluded; they have a dedicated drain.
+ * Ordinary heads restored from persistence are excluded so an app relaunch
+ * does not fire stale prompts without the user reopening the chat; the
+ * exclusion is tracked per record id so an incidental session load clearing
+ * the `restored` flag cannot lift it.
+ */
+function isBackgroundDrainableHead(
+  record: QueuedMessageRecord & { kind: "transport-ready" },
+  sessionId: string,
+): boolean {
+  if (isBerdctlCrossSessionQueuedMessage(record)) {
+    return false;
+  }
+  if (record.releasedFromDeferred) {
+    return true;
+  }
+  return (
+    !isRestoredExcluded(sessionId, record) &&
+    !hasForegroundQueueOwner(sessionId)
+  );
+}
+
+/**
+ * A session window keeps the authoritative queue while its session is open;
+ * this renderer's in-memory copy goes stale. When windows close, reload the
+ * reclaimed sessions' queues from persistence before draining so a stale
+ * head that the window already sent, edited, or dismissed cannot fire again.
+ * Reconciled records arrive `restored: true`, which the background drain
+ * refuses to claim.
+ */
 function reconcileContentionWaiters(scopedSessionId?: string): void {
   const sessionStore = useChatSessionStore.getState();
   const queue = useChatStore.getState().queuedMessageBySession;
@@ -72,11 +168,12 @@ function scheduleContentionResume(
   }
   waiter.resumeScheduled = true;
   contentionWaiters.delete(sessionId);
-  queueMicrotask(() => drainReleasedQueuedMessage(sessionId, waiter.ownerId));
+  queueMicrotask(() => drainQueuedMessage(sessionId, waiter.ownerId));
 }
 
-function drainReleasedQueuedMessage(sessionId: string, ownerId: string): void {
+function drainQueuedMessage(sessionId: string, ownerId: string): void {
   if (!activeOwners.has(ownerId)) return;
+  if (isReclaimedQueueReconciliationPending(sessionId)) return;
   const sessionExists = Boolean(
     useChatSessionStore.getState().getSession(sessionId),
   );
@@ -106,7 +203,7 @@ function drainReleasedQueuedMessage(sessionId: string, ownerId: string): void {
       queuedMessage,
       sessionStore.getSession(sessionId),
     ) ||
-    !queuedMessage.releasedFromDeferred ||
+    !isBackgroundDrainableHead(queuedMessage, sessionId) ||
     !isQueuedSessionReady(runtime)
   ) {
     return;
@@ -161,9 +258,9 @@ function drainReleasedQueuedMessage(sessionId: string, ownerId: string): void {
         return;
       }
       if (error instanceof PreCommitSendRejectedError) return;
-      const message = i18n.t("chat:queue.releasedSendFailed");
+      const message = i18n.t("chat:queue.backgroundSendFailed");
       console.error(
-        `[released-queue] failed to send queued prompt for session ${sessionId}`,
+        `[background-queue] failed to send queued prompt for session ${sessionId}`,
         error,
       );
       const current =
@@ -176,6 +273,17 @@ function drainReleasedQueuedMessage(sessionId: string, ownerId: string): void {
             status: "failed",
             error: message,
           });
+        // The user is not viewing this chat (the background drain only
+        // claims unowned sessions), so a parked failure would otherwise be
+        // invisible until they reopen it. Surface it where they are now.
+        const sessionTitle = useChatSessionStore
+          .getState()
+          .getSession(sessionId)
+          ?.title?.trim();
+        toast.error(
+          sessionTitle || i18n.t("chat:queue.backgroundSendFailedTitle"),
+          { description: message },
+        );
       }
     })
     .finally(() => {
@@ -186,10 +294,10 @@ function drainReleasedQueuedMessage(sessionId: string, ownerId: string): void {
           waiter.attemptSettled = true;
           scheduleContentionResume(sessionId, waiter);
         } else {
-          queueMicrotask(() => drainReleasedQueuedMessage(sessionId, ownerId));
+          queueMicrotask(() => drainQueuedMessage(sessionId, ownerId));
         }
       } else {
-        drainReleasedQueuedMessage(sessionId, ownerId);
+        drainQueuedMessage(sessionId, ownerId);
       }
     });
 }
@@ -206,20 +314,21 @@ function getOwnedSessionIds(
   );
 }
 
-function drainReadyReleasedMessages(scopedSessionId?: string): void {
+function drainReadyQueuedMessages(scopedSessionId?: string): void {
   const ownerId = ownerIdFor(scopedSessionId);
   if (!activeOwners.has(ownerId)) return;
   reconcileContentionWaiters(scopedSessionId);
   const { queuedMessageBySession } = useChatStore.getState();
+  noteRestoredRecords(queuedMessageBySession);
   for (const sessionId of getOwnedSessionIds(
     queuedMessageBySession,
     scopedSessionId,
   )) {
-    drainReleasedQueuedMessage(sessionId, ownerId);
+    drainQueuedMessage(sessionId, ownerId);
   }
 }
 
-export function useReleasedQueuedMessageDrain(
+export function useBackgroundQueuedMessageDrain(
   scopedSessionId?: string,
   ownerReady = true,
 ): void {
@@ -227,7 +336,7 @@ export function useReleasedQueuedMessageDrain(
     if (!ownerReady) return;
     const ownerId = ownerIdFor(scopedSessionId);
     activeOwners.add(ownerId);
-    drainReadyReleasedMessages(scopedSessionId);
+    drainReadyQueuedMessages(scopedSessionId);
     const unsubscribeWindowStore = scopedSessionId
       ? undefined
       : useSessionWindowStore.subscribe((state, previousState) => {
@@ -236,9 +345,30 @@ export function useReleasedQueuedMessageDrain(
             (!previousState.hasLoadedSnapshot ||
               state.openSessions !== previousState.openSessions)
           ) {
-            drainReadyReleasedMessages();
+            if (
+              !previousState.hasLoadedSnapshot ||
+              !requestReclaimedQueueReconciliation(
+                previousState.openSessions,
+                state.openSessions,
+              )
+            ) {
+              drainReadyQueuedMessages();
+            }
           }
         });
+    // When a foreground chat releases queue ownership (the user left the
+    // chat), any ready queued head it never sent becomes ours to send.
+    // Registration also lifts restored-head exclusions: the user reopening
+    // the chat is the signal that a persisted head is theirs to send again.
+    const unsubscribeForegroundOwnership = subscribeForegroundQueueOwnership(
+      () => {
+        liftRestoredExclusionsForOwnedSessions();
+        drainReadyQueuedMessages(scopedSessionId);
+      },
+    );
+    const unsubscribeReclaimedQueues = subscribeReclaimedQueueReconciliation(
+      () => drainReadyQueuedMessages(scopedSessionId),
+    );
     const unsubscribeSessionStore = useChatSessionStore.subscribe(
       (state, previousState) => {
         reconcileContentionWaiters(scopedSessionId);
@@ -258,17 +388,18 @@ export function useReleasedQueuedMessageDrain(
               ),
             )
           ) {
-            drainReleasedQueuedMessage(sessionId, ownerId);
+            drainQueuedMessage(sessionId, ownerId);
           }
         }
         if (state.hasHydratedSessions && !previousState.hasHydratedSessions) {
-          drainReadyReleasedMessages(scopedSessionId);
+          drainReadyQueuedMessages(scopedSessionId);
         }
       },
     );
     const unsubscribeChatStore = useChatStore.subscribe(
       (state, previousState) => {
         reconcileContentionWaiters(scopedSessionId);
+        noteRestoredRecords(state.queuedMessageBySession);
         for (const sessionId of getOwnedSessionIds(
           state.queuedMessageBySession,
           scopedSessionId,
@@ -276,7 +407,7 @@ export function useReleasedQueuedMessageDrain(
           const queuedMessage = state.queuedMessageBySession[sessionId]?.[0];
           if (
             queuedMessage?.kind !== "transport-ready" ||
-            !queuedMessage.releasedFromDeferred
+            !isBackgroundDrainableHead(queuedMessage, sessionId)
           ) {
             continue;
           }
@@ -294,13 +425,15 @@ export function useReleasedQueuedMessageDrain(
             !currentBlocked &&
             (previousBlocked || becameTransportReady)
           ) {
-            drainReleasedQueuedMessage(sessionId, ownerId);
+            drainQueuedMessage(sessionId, ownerId);
           }
         }
       },
     );
     return () => {
       unsubscribeWindowStore?.();
+      unsubscribeReclaimedQueues();
+      unsubscribeForegroundOwnership();
       unsubscribeSessionStore();
       unsubscribeChatStore();
       activeOwners.delete(ownerId);

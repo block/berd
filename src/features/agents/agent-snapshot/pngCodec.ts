@@ -60,6 +60,21 @@ function crc32(bytes: Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
+export function getPngDimensions(bytes: Uint8Array): {
+  width: number;
+  height: number;
+} {
+  const chunks = parseChunks(bytes);
+  const ihdr = chunks[0];
+  if (!ihdr || ihdr.type !== "IHDR") {
+    throw new AgentSnapshotError("PNG must begin with IHDR", "invalid-png");
+  }
+  return {
+    width: readU32(ihdr.data, 0),
+    height: readU32(ihdr.data, 4),
+  };
+}
+
 function parseChunks(bytes: Uint8Array): Chunk[] {
   if (bytes.length > MAX_SNAPSHOT_PNG_BYTES) {
     throw new AgentSnapshotError(

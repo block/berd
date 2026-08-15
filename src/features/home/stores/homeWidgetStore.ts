@@ -218,6 +218,7 @@ interface HomeWidgetStore extends HomeWidgetState {
     options?: MoveWidgetOptions,
   ) => void;
   bumpZ: (id: string) => void;
+  applyStarterLayout: (instances: WidgetInstance[]) => void;
   toggleCleanUpWidgets: (bounds?: WidgetPlacementInput) => void;
   syncOnboardingExperiment: (enabled: boolean) => void;
   resetOnboardingTour: () => Promise<boolean>;
@@ -513,6 +514,9 @@ function createHomeWidgetStore() {
       },
       bumpZ: (id) => {
         applyMutation((instances) => bumpZMutation(instances, id));
+      },
+      applyStarterLayout: (instances) => {
+        applyMutation(() => instances);
       },
       toggleCleanUpWidgets: (bounds) => {
         const state = get();

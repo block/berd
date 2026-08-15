@@ -101,15 +101,15 @@ describe("main entrypoint berdctl bridge loading", () => {
     const sessionBranch = mainSource.slice(sessionBranchStart, mainBranchStart);
     const mainBranch = mainSource.slice(mainBranchStart);
     expect(sessionBranch).not.toContain("<OptionalBerdctlBridge />");
-    expect(mainBranch).toContain("<ReleasedQueuedMessageDrain />");
+    expect(mainBranch).toContain("<BackgroundQueuedMessageDrain />");
     expect(mainBranch).toContain("<OptionalBerdctlBridge />");
   });
 
-  it("mounts the released queued-message drain unconditionally", () => {
+  it("mounts the background queued-message drain unconditionally", () => {
     expect(mainSource).toContain(
-      'import { ReleasedQueuedMessageDrain } from "@/features/chat/ui/ReleasedQueuedMessageDrain"',
+      'import { BackgroundQueuedMessageDrain } from "@/features/chat/ui/BackgroundQueuedMessageDrain"',
     );
-    expect(mainSource).not.toContain("OptionalReleasedQueuedMessageDrain");
+    expect(mainSource).not.toContain("OptionalBackgroundQueuedMessageDrain");
   });
 
   it("reports a failed dynamic bridge import without boot-failing the app", () => {

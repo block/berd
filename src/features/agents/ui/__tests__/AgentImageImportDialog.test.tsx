@@ -109,6 +109,22 @@ describe("AgentImageImportDialog", () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
+  it("closes from the dialog x button", async () => {
+    const onCancel = vi.fn();
+    render(
+      <AgentImageImportDialog
+        snapshot={snapshot()}
+        imageBytes={new Uint8Array([1])}
+        onCancel={onCancel}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
   it("does not persist when canceled", async () => {
     const onCancel = vi.fn();
     const onConfirm = vi.fn();

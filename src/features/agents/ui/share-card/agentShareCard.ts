@@ -1,23 +1,26 @@
+import cardFoil from "@/features/agents/assets/share-card/card-foil.png";
+import berdCardLogo from "@/features/agents/assets/share-card/berd-card-logo.svg";
 import type { ResolvedAvatarMedia } from "@/shared/avatars/catalog";
 import type { Persona } from "@/shared/types/agents";
-import { agentShareCardBases } from "./shareCardArtworks";
+import {
+  fallbackAgentCardColor,
+  sampleAgentAvatarColor,
+} from "./agentCardColor";
+import { AGENT_CARD_HEIGHT, AGENT_CARD_WIDTH } from "./agentShareCardSpec";
+import {
+  deriveAgentCardTraitLines,
+  deriveAgentShareCardTextLayout,
+  wrapAgentCardText,
+} from "./agentShareCardLayout";
+import { loadAgentCardFonts } from "./agentShareCardFonts";
+import type { AgentShareCardCopy } from "./agentShareCardCopy";
+import { AGENT_CARD_GEOMETRY } from "./agentShareCardGeometry";
 
-const CARD_WIDTH = 642;
-const CARD_HEIGHT = 898;
 export const AVATAR_VIDEO_LOAD_TIMEOUT_MS = 10_000;
 export const SHARE_CARD_IMAGE_LOAD_TIMEOUT_MS = 10_000;
-function stableIndex(value: string, length: number): number {
-  let hash = 5381;
-  for (let index = 0; index < value.length; index += 1) {
-    hash = ((hash << 5) + hash + value.charCodeAt(index)) | 0;
-  }
-  return Math.abs(hash) % length;
-}
 
-export function getAgentShareCardBase(personaId: string): string {
-  return agentShareCardBases[
-    stableIndex(personaId, agentShareCardBases.length)
-  ];
+export function getAgentShareCardBase(_personaId: string): string {
+  return cardFoil;
 }
 
 export function getAgentShareDescription(persona: Persona): string {
@@ -174,83 +177,18 @@ export function loadShareCardImage(src: string): Promise<HTMLImageElement> {
   });
 }
 
-function fitText(
-  context: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-  addEllipsis = false,
-): string {
-  const suffix = addEllipsis ? "…" : "";
-  if (context.measureText(`${text}${suffix}`).width <= maxWidth) {
-    return `${text}${suffix}`;
-  }
-
-  let fitted = text;
-  while (fitted && context.measureText(`${fitted}${suffix}`).width > maxWidth) {
-    fitted = fitted.slice(0, -1);
-  }
-  return `${fitted}${suffix}`;
-}
-
 export function wrapShareCardText(
   context: CanvasRenderingContext2D,
   text: string,
   maxWidth: number,
   maxLines: number,
 ): string[] {
-  const words = text.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let line = "";
-
-  for (const word of words) {
-    const fittedWord =
-      context.measureText(word).width > maxWidth
-        ? fitText(context, word, maxWidth, true)
-        : word;
-    const candidate = line ? `${line} ${fittedWord}` : fittedWord;
-    if (context.measureText(candidate).width <= maxWidth) {
-      line = candidate;
-      continue;
-    }
-
-    lines.push(line);
-    if (lines.length === maxLines) {
-      lines[maxLines - 1] = fitText(
-        context,
-        lines[maxLines - 1],
-        maxWidth,
-        true,
-      );
-      return lines;
-    }
-    line = fittedWord;
-  }
-
-  if (line) lines.push(line);
-  if (lines.length > maxLines) {
-    const clamped = lines.slice(0, maxLines);
-    clamped[maxLines - 1] = fitText(
-      context,
-      clamped[maxLines - 1],
-      maxWidth,
-      true,
-    );
-    return clamped;
-  }
-  return lines;
-}
-
-function drawCenteredLines(
-  context: CanvasRenderingContext2D,
-  lines: string[],
-  centerX: number,
-  centerY: number,
-  lineHeight: number,
-): void {
-  const firstLineY = centerY - ((lines.length - 1) * lineHeight) / 2;
-  lines.forEach((line, index) => {
-    context.fillText(line, centerX, firstLineY + index * lineHeight);
-  });
+  return wrapAgentCardText(
+    text,
+    maxWidth,
+    maxLines,
+    (value) => context.measureText(value).width,
+  );
 }
 
 function drawContainedImage(
@@ -261,12 +199,11 @@ function drawContainedImage(
   width: number,
   height: number,
 ): void {
-  const scale = Math.min(
-    width / image.naturalWidth,
-    height / image.naturalHeight,
-  );
-  const drawnWidth = image.naturalWidth * scale;
-  const drawnHeight = image.naturalHeight * scale;
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const scale = Math.min(width / sourceWidth, height / sourceHeight);
+  const drawnWidth = sourceWidth * scale;
+  const drawnHeight = sourceHeight * scale;
   context.drawImage(
     image,
     x + (width - drawnWidth) / 2,
@@ -279,67 +216,142 @@ function drawContainedImage(
 export async function renderAgentShareCard(
   persona: Persona,
   avatarSrc: string,
-  cardBase = getAgentShareCardBase(persona.id),
+  cardBase: string,
+  copy: AgentShareCardCopy,
+  locale: string,
 ): Promise<Blob> {
-  const [base, avatar] = await Promise.all([
+  const [base, avatar, berdMark] = await Promise.all([
     loadShareCardImage(cardBase),
     loadShareCardImage(avatarSrc),
+    loadShareCardImage(berdCardLogo),
   ]);
   const canvas = document.createElement("canvas");
-  canvas.width = CARD_WIDTH;
-  canvas.height = CARD_HEIGHT;
+  canvas.width = AGENT_CARD_WIDTH;
+  canvas.height = AGENT_CARD_HEIGHT;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Card rendering is unavailable");
 
-  context.drawImage(base, 0, 0, CARD_WIDTH, CARD_HEIGHT);
-  context.fillStyle = "#43005c";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.font = "700 60px Inter, sans-serif";
-  const headerLines = wrapShareCardText(context, persona.displayName, 510, 2);
-  const headerLineHeight = 62;
-  const headerCenterY = 105;
-  drawCenteredLines(
+  context.drawImage(base, 0, 0, AGENT_CARD_WIDTH, AGENT_CARD_HEIGHT);
+  const accentColor =
+    sampleAgentAvatarColor(avatar) ?? fallbackAgentCardColor(persona.id);
+  context.save();
+  context.globalCompositeOperation = "color";
+  context.globalAlpha = 0.34;
+  context.fillStyle = accentColor;
+  drawAgentCardFrame(context);
+  context.fill("evenodd");
+  context.restore();
+  context.save();
+  context.globalAlpha = 0.95;
+  context.fillStyle = "white";
+  const { panel } = AGENT_CARD_GEOMETRY;
+  roundedRect(
     context,
-    headerLines,
-    CARD_WIDTH / 2,
-    headerCenterY,
-    headerLineHeight,
+    panel.x,
+    panel.y,
+    panel.width,
+    panel.height,
+    panel.radius,
   );
+  context.fill();
+  context.restore();
 
-  // The preview uses 12 CSS pixels at roughly half the native card width.
-  context.font = "400 24px Inter, sans-serif";
-  const descriptionLines = wrapShareCardText(
-    context,
-    getAgentShareDescription(persona),
-    500,
-    4,
-  );
-  const descriptionLineHeight = 31;
-  const descriptionBottom = 826;
-  const descriptionHeight = Math.max(
-    descriptionLineHeight,
-    descriptionLines.length * descriptionLineHeight,
-  );
-  const descriptionCenterY = descriptionBottom - descriptionHeight / 2;
-  drawCenteredLines(
-    context,
-    descriptionLines,
-    CARD_WIDTH / 2,
-    descriptionCenterY,
-    descriptionLineHeight,
-  );
+  const {
+    logo,
+    brand,
+    avatar: avatarGeometry,
+    title: titleGeometry,
+    description: descriptionGeometry,
+  } = AGENT_CARD_GEOMETRY;
+  context.drawImage(berdMark, logo.x, logo.y, logo.width, logo.height);
 
-  const headerBottom =
-    headerCenterY + (headerLines.length * headerLineHeight) / 2 + 28;
-  const descriptionTop = descriptionBottom - descriptionHeight - 28;
+  await loadAgentCardFonts();
+  context.fillStyle = "black";
+  context.textBaseline = "alphabetic";
+  context.font = "600 36px Inter, sans-serif";
+  context.textAlign = "right";
+  context.fillText("BERD AGENT", brand.x, brand.y);
+
+  // Berd avatars are character illustrations, not portrait photographs. Keep
+  // the full artwork visible instead of applying Buzz's circular cover crop.
   drawContainedImage(
     context,
     avatar,
-    112,
-    headerBottom,
-    418,
-    Math.max(1, descriptionTop - headerBottom),
+    avatarGeometry.x,
+    avatarGeometry.y,
+    avatarGeometry.width,
+    avatarGeometry.height,
+  );
+
+  context.fillStyle = "black";
+  context.textAlign = "left";
+  const description = getAgentShareDescription(persona);
+  const measureTitle = (value: string) => {
+    context.font = "600 64px Inter, sans-serif";
+    return context.measureText(value).width;
+  };
+  const measureDescription = (value: string) => {
+    context.font = "600 42px Inter, sans-serif";
+    return context.measureText(value).width;
+  };
+  const { title, descriptionLines, contentShift } =
+    deriveAgentShareCardTextLayout(
+      persona.displayName,
+      description,
+      measureTitle,
+      measureDescription,
+      locale,
+    );
+
+  context.font = "600 64px Inter, sans-serif";
+  context.fillText(title, titleGeometry.x, titleGeometry.y - contentShift);
+
+  context.font = "600 42px Inter, sans-serif";
+  descriptionLines.forEach((line, index) => {
+    context.fillText(
+      line,
+      descriptionGeometry.x,
+      descriptionGeometry.y -
+        contentShift +
+        index * descriptionGeometry.lineHeight,
+    );
+  });
+
+  const { goodFor, vibes, traitRule, traitCopyY } = AGENT_CARD_GEOMETRY;
+  context.lineWidth = traitRule.width;
+  context.strokeStyle = "black";
+  context.beginPath();
+  context.moveTo(goodFor.ruleX, traitRule.y1);
+  context.lineTo(goodFor.ruleX, traitRule.y2);
+  context.moveTo(vibes.ruleX, traitRule.y1);
+  context.lineTo(vibes.ruleX, traitRule.y2);
+  context.stroke();
+
+  context.font = "600 42px Inter, sans-serif";
+  const measureTrait = (value: string) => context.measureText(value).width;
+  drawAgentCardTraitLines(
+    context,
+    deriveAgentCardTraitLines(
+      copy.goodForLabel,
+      copy.goodFor,
+      goodFor.width,
+      measureTrait,
+      locale,
+    ),
+    goodFor.copyX,
+    traitCopyY,
+  );
+  drawAgentCardTraitLines(
+    context,
+    deriveAgentCardTraitLines(
+      copy.vibesLabel,
+      copy.vibes,
+      vibes.width,
+      measureTrait,
+      locale,
+    ),
+    vibes.copyX,
+    traitCopyY,
   );
 
   return new Promise((resolve, reject) => {
@@ -349,6 +361,69 @@ export async function renderAgentShareCard(
       "image/png",
     );
   });
+}
+
+function drawAgentCardTraitLines(
+  context: CanvasRenderingContext2D,
+  lines: readonly string[],
+  x: number,
+  y: number,
+): void {
+  context.font = "600 42px Inter, sans-serif";
+  lines.forEach((line, index) => {
+    context.fillText(line, x, y + index * 50);
+  });
+}
+
+function drawAgentCardFrame(context: CanvasRenderingContext2D): void {
+  const { width, height, panel } = AGENT_CARD_GEOMETRY;
+  context.beginPath();
+  context.rect(0, 0, width, height);
+  addRoundedRectPath(
+    context,
+    panel.x,
+    panel.y,
+    panel.width,
+    panel.height,
+    panel.radius,
+  );
+}
+
+function roundedRect(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+): void {
+  context.beginPath();
+  addRoundedRectPath(context, x, y, width, height, radius);
+}
+
+function addRoundedRectPath(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+): void {
+  context.moveTo(x + radius, y);
+  context.lineTo(x + width - radius, y);
+  context.quadraticCurveTo(x + width, y, x + width, y + radius);
+  context.lineTo(x + width, y + height - radius);
+  context.quadraticCurveTo(
+    x + width,
+    y + height,
+    x + width - radius,
+    y + height,
+  );
+  context.lineTo(x + radius, y + height);
+  context.quadraticCurveTo(x, y + height, x, y + height - radius);
+  context.lineTo(x, y + radius);
+  context.quadraticCurveTo(x, y, x + radius, y);
+  context.closePath();
 }
 
 export async function blobToBytes(blob: Blob): Promise<Uint8Array> {

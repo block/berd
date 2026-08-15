@@ -237,7 +237,7 @@ export function AgentImageImportDialog({
       <DialogContent
         size="lg"
         surface="solid"
-        className="bg-card"
+        className="bg-card [&_[data-slot=dialog-close]]:z-20"
         aria-describedby={undefined}
       >
         <DialogHeader

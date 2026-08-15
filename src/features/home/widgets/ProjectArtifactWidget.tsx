@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -49,6 +50,7 @@ function getPointerVelocityBoost(
 export function ProjectArtifactWidget({
   instance,
   canvasGestureActive = false,
+  canvasGestureKind,
   widgetResizePreviewActive = false,
   renderPaused = false,
   shouldIgnoreActivation,
@@ -115,18 +117,37 @@ export function ProjectArtifactWidget({
   const [motionImpulse, setMotionImpulse] =
     useState<ProjectArtifactMotionImpulse>();
   const glCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const captureGestureSnapshot = useCallback(() => {
+  const pointerDownSnapshotRef = useRef<string | null>(null);
+  const captureCanvasSnapshot = useCallback(() => {
     const canvas = glCanvasRef.current;
     if (!canvas) {
       return null;
     }
     try {
-      return canvas.toDataURL("image/png");
+      const snapshot = canvas.toDataURL("image/png");
+      return snapshot && snapshot !== "data:," ? snapshot : null;
     } catch {
       return null;
     }
   }, []);
+  const captureGestureSnapshot = useCallback(() => {
+    if (canvasGestureKind === "drag") {
+      const pointerDownSnapshot = pointerDownSnapshotRef.current;
+      pointerDownSnapshotRef.current = null;
+      return pointerDownSnapshot ?? captureCanvasSnapshot();
+    }
+
+    // Resize begins from sibling chrome, not the project button. Always capture
+    // the current canvas instead of borrowing a snapshot prepared for a click
+    // or an earlier drag.
+    return captureCanvasSnapshot();
+  }, [canvasGestureKind, captureCanvasSnapshot]);
   const shouldFreezeVisual = canvasGestureActive && !widgetResizePreviewActive;
+  useLayoutEffect(() => {
+    if (!canvasGestureActive) {
+      pointerDownSnapshotRef.current = null;
+    }
+  }, [canvasGestureActive]);
   const gestureSnapshot = useWidgetGestureFreeze(
     shouldFreezeVisual,
     captureGestureSnapshot,
@@ -157,11 +178,15 @@ export function ProjectArtifactWidget({
   };
 
   const handlePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
+    // Capture before the canvas starts moving. WKWebView can briefly expose a
+    // blank WebGL backing surface after the widget's compositor position
+    // changes, which made the delayed drag snapshot intermittently invisible.
+    pointerDownSnapshotRef.current = captureCanvasSnapshot();
     rememberPointerPosition(event);
   };
 
   const handlePointerMove = (event: PointerEvent<HTMLButtonElement>) => {
-    if (!project || shouldIgnoreActivation?.()) {
+    if ((!project && !isStarterProject) || canvasGestureActive) {
       lastPointerPosition.current = null;
       return;
     }
@@ -198,12 +223,18 @@ export function ProjectArtifactWidget({
   const handlePointerLeave = () => {
     lastPointerPosition.current = null;
   };
+  const clearPreparedSnapshot = () => {
+    pointerDownSnapshotRef.current = null;
+  };
 
   return (
     <button
       type="button"
       onClick={handleClick}
       onPointerDown={handlePointerDown}
+      onPointerUp={clearPreparedSnapshot}
+      onPointerCancel={clearPreparedSnapshot}
+      onPointerEnter={rememberPointerPosition}
       onPointerLeave={handlePointerLeave}
       onPointerMove={handlePointerMove}
       disabled={!project && !isStarterProject}

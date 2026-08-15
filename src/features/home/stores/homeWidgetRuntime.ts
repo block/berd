@@ -17,6 +17,7 @@ import {
   getPendingStarterHomeCamera,
   markStarterHomeArranged,
   markStarterHomeCameraPending,
+  markStarterHomeLayoutEligible,
 } from "@/features/home/onboarding/starterHomeLayout";
 import { createStarterHomeWidgets } from "@/features/home/onboarding/createStarterHomeWidgets";
 import {
@@ -561,6 +562,7 @@ export function createHomeWidgetRuntime({
         }
 
         markStarterAgentPinsEligible();
+        markStarterHomeLayoutEligible();
 
         const starterCamera = {
           ...result.layout.camera,

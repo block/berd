@@ -174,7 +174,7 @@ export function StarterTaskList({
       data-starter-task-list="true"
       style={overlayStyle}
       className={cn(
-        "h-full w-full overflow-hidden rounded-xs bg-sticky-note-blue px-4 pb-4 pt-2 text-sm text-sticky-note-foreground shadow-sticky-note",
+        "h-full w-full overflow-hidden rounded-xs bg-sticky-note-blue px-4 pb-4 pt-2 text-[12px] text-sticky-note-foreground shadow-sticky-note",
         mode === "overlay" &&
           "pointer-events-auto fixed right-4 bottom-28 z-[55] max-h-[min(24rem,calc(100dvh-8rem))] h-auto w-[min(16rem,calc(100vw-2rem))] overflow-y-auto smooth-shadow-sm motion-safe:animate-in motion-safe:slide-in-from-right-8 motion-safe:fade-in-0 motion-safe:duration-500 motion-safe:ease-[cubic-bezier(0.19,1,0.22,1)] motion-safe:will-change-transform motion-reduce:animate-none",
         mode === "overlay" &&
@@ -231,7 +231,7 @@ export function StarterTaskList({
                 </Button>
               ) : null}
               {!selectedTask ? (
-                <h2 className="min-w-0 flex-1 text-sm font-semibold">
+                <h2 className="min-w-0 flex-1 text-[12px] font-semibold">
                   {labels.title}
                 </h2>
               ) : (
@@ -261,7 +261,7 @@ export function StarterTaskList({
 
             {selectedTask ? (
               <div className="mt-0.5 flex min-h-32 flex-col">
-                <h2 className="text-sm font-semibold">
+                <h2 className="text-[12px] font-semibold">
                   {labels.tasks[selectedTask.id]}
                 </h2>
                 <p className="mt-1 whitespace-pre-line leading-5">
@@ -293,7 +293,7 @@ export function StarterTaskList({
                     <li key={task.id}>
                       <div
                         className={cn(
-                          "group/task grid min-h-8 w-full grid-cols-[16px_minmax(0,1fr)_16px] items-center gap-2 px-1 text-left text-sm",
+                          "group/task grid min-h-7 w-full grid-cols-[16px_minmax(0,1fr)_16px] items-center gap-2 px-1 text-left text-[12px]",
                           completed && "text-sticky-note-muted",
                         )}
                       >

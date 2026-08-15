@@ -15,13 +15,17 @@ import {
   useChatStore,
 } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
-import { loadPersistedMessageQueues } from "@/features/chat/stores/queuePersistence";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import {
   isBerdctlCrossSessionQueuedMessage,
   sendPromptToExistingSessionInBackground,
 } from "@/features/berdctl/commands/runtime/sessionSend";
 import { SessionDispatchContentionError } from "@/features/chat/lib/sessionDispatchAcquisition";
+import {
+  isReclaimedQueueReconciliationPending,
+  requestReclaimedQueueReconciliation,
+  subscribeReclaimedQueueReconciliation,
+} from "@/features/chat/lib/reclaimedQueueReconciliation";
 
 const drainingSessionIds = new Set<string>();
 const activeOwners = new Set<string>();
@@ -35,7 +39,6 @@ type ContentionWaiter = {
 };
 
 const contentionWaiters = new Map<string, ContentionWaiter>();
-let ownershipRefreshSequence = 0;
 
 function ownerIdFor(scopedSessionId?: string): string {
   return scopedSessionId ? `session:${scopedSessionId}` : "global";
@@ -63,28 +66,9 @@ function scheduleContentionResume(
   queueMicrotask(() => drainQueuedMessage(sessionId, waiter.ownerId));
 }
 
-async function refreshReclaimedQueues(
-  previousOpenSessions: Record<string, string>,
-  openSessions: Record<string, string>,
-): Promise<void> {
-  const reclaimedSessionIds = Object.keys(previousOpenSessions).filter(
-    (sessionId) => !(sessionId in openSessions),
-  );
-  if (reclaimedSessionIds.length === 0) {
-    drainReadyQueuedMessages();
-    return;
-  }
-  const sequence = ++ownershipRefreshSequence;
-  const persistedQueues = await loadPersistedMessageQueues();
-  if (sequence !== ownershipRefreshSequence) return;
-  useChatStore
-    .getState()
-    .reconcileQueuedMessages(persistedQueues, reclaimedSessionIds);
-  drainReadyQueuedMessages();
-}
-
 function drainQueuedMessage(queuedSessionId: string, ownerId: string): void {
   if (!activeOwners.has(ownerId)) return;
+  if (isReclaimedQueueReconciliationPending(queuedSessionId)) return;
   const sessionExists = Boolean(
     useChatSessionStore.getState().getSession(queuedSessionId),
   );
@@ -251,16 +235,20 @@ export function useBerdctlQueuedMessageDrain(
             (!previousState.hasLoadedSnapshot ||
               state.openSessions !== previousState.openSessions)
           ) {
-            if (!previousState.hasLoadedSnapshot) {
-              drainReadyQueuedMessages();
-            } else {
-              void refreshReclaimedQueues(
+            if (
+              !previousState.hasLoadedSnapshot ||
+              !requestReclaimedQueueReconciliation(
                 previousState.openSessions,
                 state.openSessions,
-              );
+              )
+            ) {
+              drainReadyQueuedMessages();
             }
           }
         });
+    const unsubscribeReclaimedQueues = subscribeReclaimedQueueReconciliation(
+      () => drainReadyQueuedMessages(queuedSessionId),
+    );
     const unsubscribeSessionStore = useChatSessionStore.subscribe(
       (state, previousState) => {
         reconcileContentionWaiters(queuedSessionId);
@@ -343,6 +331,7 @@ export function useBerdctlQueuedMessageDrain(
     );
     return () => {
       unsubscribeWindowStore?.();
+      unsubscribeReclaimedQueues();
       unsubscribeSessionStore();
       unsubscribeChatStore();
       activeOwners.delete(ownerId);
