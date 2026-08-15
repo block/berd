@@ -479,20 +479,20 @@ pub async fn save_exported_session_files(
         .map_err(|_| "Selected folder path is not available".to_string())?;
 
     // Pin the selected directory by an open handle immediately after the
-    // picker returns. Every subsequent write is performed relative to this
-    // handle (see `write_export_file`), so an attacker who renames the
-    // selected directory and drops a symlink/reparse point in its place
-    // afterwards cannot redirect writes: the handle still refers to the
-    // originally selected inode. Re-resolving `folder_path` per write would
-    // reopen the ambient path and reintroduce that TOCTOU escape.
-    let dir = cap_std::fs::Dir::open_ambient_dir(&folder_path, cap_std::ambient_authority())
-        .map_err(|e| {
-            format!(
-                "Failed to open selected folder '{}': {}",
-                folder_path.display(),
-                e
-            )
-        })?;
+    // picker returns, and open it *without following symlinks* on the final
+    // component. Tauri's folder picker returns only a path (`FilePath` ->
+    // `PathBuf`), not an OS handle or security-scoped object, so a returned
+    // path alone cannot prove the identity of the picked directory. The
+    // narrow residual is the picker->open window: an attacker who renames the
+    // selected directory and drops a symlink/reparse point in its place before
+    // this open runs. Opening no-follow makes that swap *fail closed* (the open
+    // errors) rather than silently attaching the handle to a redirect target.
+    // Every subsequent write is then handle-relative (see `write_export_file`),
+    // so once acquired the handle cannot be redirected. This does not defend
+    // against a swap of an ancestor *above* the selected directory during the
+    // same window — that cannot be closed from a path-only picker API and would
+    // require an identity-bearing handle from the selection boundary itself.
+    let dir = open_selected_export_dir(&folder_path)?;
 
     let mut used: HashSet<String> = HashSet::new();
     let mut written: Vec<String> = Vec::with_capacity(items.len());
@@ -509,13 +509,73 @@ pub async fn save_exported_session_files(
     }))
 }
 
-/// Windows reserved device names. A file name is unsafe if its stem (the part
-/// before the first `.`) matches one of these case-insensitively, with or
-/// without an extension (e.g. `CON`, `con.json`).
-const WINDOWS_RESERVED_FILE_NAMES: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+/// Open the user-selected export directory into a cap-std `Dir` handle without
+/// following a symlink/reparse point on the final path component.
+///
+/// This closes the picker->open swap of the selected directory itself: if the
+/// selection path has been replaced by a symlink/reparse point, the open fails
+/// instead of attaching to the redirect target. Once the handle is held, all
+/// writes are performed relative to it inside cap-std's sandbox.
+fn open_selected_export_dir(folder_path: &Path) -> Result<cap_std::fs::Dir, String> {
+    let map_err = |e: io::Error| {
+        format!(
+            "Failed to open selected folder '{}': {}",
+            folder_path.display(),
+            e
+        )
+    };
+
+    #[cfg(unix)]
+    let std_dir = {
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .read(true)
+            // O_NOFOLLOW: fail if the final component is a symlink.
+            // O_DIRECTORY: fail if it is not a directory.
+            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
+            .open(folder_path)
+            .map_err(map_err)?
+    };
+
+    #[cfg(windows)]
+    let std_dir = {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_FLAG_BACKUP_SEMANTICS is required to obtain a handle to a
+        // directory; FILE_FLAG_OPEN_REPARSE_POINT opens the reparse point
+        // itself rather than following it, so a swapped symlink/junction fails
+        // the subsequent directory-handle use instead of redirecting.
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(folder_path)
+            .map_err(map_err)?
+    };
+
+    #[cfg(not(any(unix, windows)))]
+    let std_dir = fs::File::open(folder_path).map_err(map_err)?;
+
+    Ok(cap_std::fs::Dir::from_std_file(std_dir))
+}
+
+/// Windows reserved device names. A file name is unsafe if its base name (the
+/// part before the first `.`, with trailing spaces stripped as Windows does)
+/// matches one of these case-insensitively, with or without an extension
+/// (e.g. `CON`, `con.json`, `CON .json`). Includes the superscript-digit forms
+/// Windows also reserves. See
+/// <https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file>.
+const WINDOWS_RESERVED_DEVICE_NAMES: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+    "COM8", "COM9", "COM¹", "COM²", "COM³", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6",
+    "LPT7", "LPT8", "LPT9", "LPT¹", "LPT²", "LPT³",
 ];
+
+/// Characters Windows forbids in a file name, rejected on every OS so a batch
+/// validates identically everywhere and cannot partially succeed then abort on
+/// a name only Windows refuses. The path separators `/`, `\`, and the drive /
+/// alternate-data-stream separator `:` are handled separately.
+const WINDOWS_FORBIDDEN_CHARS: &[char] = &['<', '>', '"', '|', '?', '*'];
 
 /// Validate a renderer-supplied export filename and return a safe leaf name.
 ///
@@ -527,12 +587,18 @@ const WINDOWS_RESERVED_FILE_NAMES: &[&str] = &[
 /// - empty or whitespace-only names,
 /// - the path separators `/`, `\`, and the Windows drive / alternate-data-
 ///   stream separator `:`, plus embedded NUL,
+/// - ASCII/Unicode control characters and the Windows-reserved punctuation
+///   `< > " | ? *`,
 /// - anything that does not parse to exactly one `Component::Normal` (absolute
 ///   paths, drive/UNC prefixes, root, `.` and `..`),
 /// - dot-only names (`.`, `..`, `...`),
 /// - trailing `.` or space (silently stripped by Windows, which would change
 ///   the target),
-/// - Windows reserved device names.
+/// - Windows reserved device names (incl. superscript-digit forms), matched on
+///   the base name before the first `.` with trailing spaces stripped.
+///
+/// Windows rules are enforced on all platforms so validation does not depend on
+/// the host filesystem and CI is deterministic.
 fn sanitize_export_leaf_filename(filename: &str) -> Result<String, String> {
     let reject = || format!("Unsafe export filename: {filename:?}");
 
@@ -543,6 +609,15 @@ fn sanitize_export_leaf_filename(filename: &str) -> Result<String, String> {
         || filename.contains('/')
         || filename.contains('\\')
         || filename.contains(':')
+    {
+        return Err(reject());
+    }
+
+    // Control characters and the Windows-reserved punctuation set are illegal
+    // in file names on Windows; reject everywhere for identical validation.
+    if filename
+        .chars()
+        .any(|c| c.is_control() || WINDOWS_FORBIDDEN_CHARS.contains(&c))
     {
         return Err(reject());
     }
@@ -566,10 +641,13 @@ fn sanitize_export_leaf_filename(filename: &str) -> Result<String, String> {
         return Err(reject());
     }
 
-    let stem = filename.split('.').next().unwrap_or(filename);
-    if WINDOWS_RESERVED_FILE_NAMES
+    // Reserved device names apply to the base name before the first '.', after
+    // trailing spaces are stripped (Windows ignores them): "CON", "con.json",
+    // and "CON .json" all resolve to the CON device.
+    let base = filename.split('.').next().unwrap_or(filename).trim_end();
+    if WINDOWS_RESERVED_DEVICE_NAMES
         .iter()
-        .any(|reserved| stem.eq_ignore_ascii_case(reserved))
+        .any(|reserved| base.eq_ignore_ascii_case(reserved))
     {
         return Err(reject());
     }
@@ -2002,7 +2080,7 @@ mod tests {
         build_file_mention_index, build_file_tree_entry, ensure_directory_path,
         get_or_build_file_mention_index_from_cache, inspect_attachment_path,
         inspect_attachment_paths, normalize_attachment_paths, normalize_roots,
-        read_directory_entries, read_image_attachment, read_text_file,
+        open_selected_export_dir, read_directory_entries, read_image_attachment, read_text_file,
         sanitize_export_leaf_filename, search_file_mentions_blocking, validate_external_url,
         write_agent_image_atomically, write_export_file, write_sibling_then_replace,
         FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
@@ -3059,6 +3137,14 @@ mod tests {
         assert!(sanitize_export_leaf_filename("NUL.txt").is_err());
         assert!(sanitize_export_leaf_filename("Com1").is_err());
         assert!(sanitize_export_leaf_filename("lpt9.json").is_err());
+        assert!(sanitize_export_leaf_filename("COM0").is_err());
+        assert!(sanitize_export_leaf_filename("LPT0.txt").is_err());
+        // Superscript-digit device forms Windows also reserves.
+        assert!(sanitize_export_leaf_filename("COM¹").is_err());
+        assert!(sanitize_export_leaf_filename("COM².json").is_err());
+        assert!(sanitize_export_leaf_filename("lpt³.txt").is_err());
+        // Trailing spaces before the extension still resolve to the device.
+        assert!(sanitize_export_leaf_filename("CON .json").is_err());
         // Trailing dot or space are stripped by Windows.
         assert!(sanitize_export_leaf_filename("session.json.").is_err());
         assert!(sanitize_export_leaf_filename("session ").is_err());
@@ -3066,6 +3152,34 @@ mod tests {
         assert_eq!(
             sanitize_export_leaf_filename("console.json").unwrap(),
             "console.json"
+        );
+    }
+
+    #[test]
+    fn export_filename_rejects_windows_forbidden_chars_and_controls() {
+        // Windows-reserved punctuation, rejected on every OS.
+        for name in [
+            "bad?.json",
+            "bad*.json",
+            "bad|name.json",
+            "bad<name.json",
+            "bad>name.json",
+            "bad\"name.json",
+        ] {
+            assert!(
+                sanitize_export_leaf_filename(name).is_err(),
+                "expected reject: {name:?}"
+            );
+        }
+        // ASCII control characters (1..=31), e.g. tab, newline, and a raw
+        // control byte.
+        assert!(sanitize_export_leaf_filename("bad\tname.json").is_err());
+        assert!(sanitize_export_leaf_filename("bad\nname.json").is_err());
+        assert!(sanitize_export_leaf_filename("bad\u{001f}name.json").is_err());
+        // A comparable safe name with none of the above is accepted.
+        assert_eq!(
+            sanitize_export_leaf_filename("badname.json").unwrap(),
+            "badname.json"
         );
     }
 
@@ -3169,8 +3283,8 @@ mod tests {
         );
     }
 
-    /// Regression for the parent-directory TOCTOU: after the picker returns and
-    /// the directory handle is opened, an attacker renames the selected
+    /// Regression for the parent-directory TOCTOU: after the handle to the
+    /// selected directory is acquired, an attacker renames the selected
     /// directory and replaces its path with a symlink pointing outside. Writes
     /// must stay attached to the originally selected inode (via the pinned
     /// handle) and must never land in the attacker-controlled location.
@@ -3185,9 +3299,9 @@ mod tests {
         fs::create_dir(&selected).unwrap();
         fs::create_dir(&outside).unwrap();
 
-        // Handle is pinned to the originally selected directory.
-        let handle =
-            cap_std::fs::Dir::open_ambient_dir(&selected, cap_std::ambient_authority()).unwrap();
+        // Handle is acquired via the real acquisition path, pinned to the
+        // originally selected directory.
+        let handle = open_selected_export_dir(&selected).expect("acquire handle");
 
         // Attacker swaps the selected path for a symlink to `outside`.
         fs::rename(&selected, root.path().join("selected-old")).unwrap();
@@ -3205,5 +3319,43 @@ mod tests {
             b"payload"
         );
         assert!(!outside.join("chat.json").exists());
+    }
+
+    /// Acquisition fails closed: if the selected path is (or is swapped to) a
+    /// symlink before the handle is opened, `open_selected_export_dir` errors
+    /// rather than attaching the handle to the symlink's redirect target. This
+    /// bounds the picker->open race for a swap of the selected directory
+    /// itself.
+    #[cfg(unix)]
+    #[test]
+    fn open_selected_export_dir_rejects_symlinked_selection() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempdir().expect("tempdir");
+        let outside = root.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        let selected = root.path().join("selected");
+        // The selection path is a symlink to another directory.
+        symlink(&outside, &selected).unwrap();
+
+        let err =
+            open_selected_export_dir(&selected).expect_err("symlinked selection must fail closed");
+        assert!(err.contains("Failed to open selected folder"));
+        // Nothing was written through the redirect.
+        assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    }
+
+    /// A real (non-symlink) selected directory is accepted by the acquisition
+    /// path and writes land inside it.
+    #[test]
+    fn open_selected_export_dir_accepts_real_directory() {
+        let dir = tempdir().expect("tempdir");
+        let handle = open_selected_export_dir(dir.path()).expect("acquire handle");
+        let mut used = std::collections::HashSet::new();
+
+        let name =
+            write_export_file(&handle, "session.json", b"hi", &mut used).expect("valid export");
+        assert_eq!(name, "session.json");
+        assert_eq!(fs::read(dir.path().join("session.json")).unwrap(), b"hi");
     }
 }
