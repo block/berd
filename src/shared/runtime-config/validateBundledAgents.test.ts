@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   validateBundledAgent,
   validateBundledAgentFile,
+  validateBundledAgentSet,
 } from "../../../scripts/validate-bundled-agents";
 
 const VALID_AGENT = `---
@@ -105,6 +106,20 @@ describe("validateBundledAgent", () => {
     expect(errors).toContain(
       "support-bot.md: frontmatter `avatar` is required and must be an `app-avatar:<id>` ref",
     );
+  });
+
+  it("rejects duplicate and reserved source identities across a bundle", () => {
+    const dir = mkdtempSync(join(tmpdir(), "bundled-agent-set-"));
+    tempDirs.push(dir);
+    const canonical = join(dir, "tinker.md");
+    const duplicate = join(dir, "custom.md");
+    writeFileSync(canonical, VALID_AGENT.replace("support-bot", "tinker"));
+    writeFileSync(duplicate, VALID_AGENT.replace("support-bot", "tinker"));
+
+    expect(validateBundledAgentSet([canonical, duplicate])).toEqual([
+      expect.stringContaining("already owned by tinker.md"),
+      expect.stringContaining("must be owned by tinker.md"),
+    ]);
   });
 
   it("rejects invalid UTF-8 files", () => {

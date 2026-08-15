@@ -135,6 +135,55 @@ export function validateBundledAgent(
   return errors;
 }
 
+function bundledSourceId(filePath: string): string | undefined {
+  try {
+    const contents = new TextDecoder("utf-8", { fatal: true }).decode(
+      readFileSync(filePath),
+    );
+    const match = FRONTMATTER_RE.exec(contents);
+    if (!match) return undefined;
+    const frontmatter = YAML.parse(match[1]) as BundledAgentFrontmatter;
+    return typeof frontmatter.metadata?.berdBundledSource === "string"
+      ? frontmatter.metadata.berdBundledSource
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function validateBundledAgentSet(paths: string[]): string[] {
+  const errors: string[] = [];
+  const sourceOwners = new Map<string, string>();
+  for (const filePath of paths) {
+    const sourceId = bundledSourceId(filePath);
+    if (!sourceId) continue;
+    const existing = sourceOwners.get(sourceId);
+    if (existing) {
+      errors.push(
+        error(
+          `bundled source id \`${sourceId}\` is already owned by ${basename(existing)}`,
+          filePath,
+        ),
+      );
+    } else {
+      sourceOwners.set(sourceId, filePath);
+    }
+    const canonicalFileName = `${sourceId}.md`;
+    if (
+      ["berdy", "tinker", "wildcard"].includes(sourceId) &&
+      basename(filePath) !== canonicalFileName
+    ) {
+      errors.push(
+        error(
+          `reserved bundled source id \`${sourceId}\` must be owned by ${canonicalFileName}`,
+          filePath,
+        ),
+      );
+    }
+  }
+  return errors;
+}
+
 export function validateBundledAgentFile(filePath: string): string[] {
   try {
     const contents = new TextDecoder("utf-8", { fatal: true }).decode(
@@ -152,7 +201,7 @@ function main(paths: string[]): number {
     return 2;
   }
 
-  const allErrors: string[] = [];
+  const allErrors: string[] = validateBundledAgentSet(paths);
 
   for (const filePath of paths) {
     const errors = validateBundledAgentFile(filePath);

@@ -461,9 +461,12 @@ fn seed_bundled_agents_from_dir(
         let mut existing_allocation = marker.allocations.get(&file_name).cloned();
         if let Some(allocation) = existing_allocation.as_ref() {
             let target = target_root.join(&allocation.target_file_name);
-            let modified = allocation.installed_digest.as_ref().is_some_and(|digest| {
-                target.exists() && digest_file(&target).ok().as_ref() != Some(digest)
-            });
+            let modified = match allocation.installed_digest.as_ref() {
+                Some(digest) => {
+                    target.exists() && digest_file(&target).ok().as_ref() != Some(digest)
+                }
+                None => target.exists() && !files_are_equal(&source, &target).unwrap_or(false),
+            };
             if modified {
                 // Keep the edited target claimed so the allocator preserves it
                 // and installs the current bundled source at a distinct path.
@@ -1212,6 +1215,35 @@ mod tests {
         assert_eq!(
             fs::read_to_string(target.path().join("builderbot2.md")).unwrap(),
             "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  berdBundled: true\n---\nOriginal."
+        );
+    }
+
+    #[test]
+    fn preserves_a_digestless_legacy_edit_and_allocates_current_bundle() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let bundled = "---\nname: Builderbot\nmetadata:\n  berdBundled: true\n---\nCurrent.";
+        let edited = "---\nname: Builderbot\nmetadata:\n  berdBundled: true\n---\nUser edited.";
+        write_agent(source.path(), "builderbot.md", bundled);
+        write_agent(target.path(), "builderbot.md", edited);
+        fs::write(
+            marker_path(target.path()),
+            r#"{
+              "seededFiles": ["builderbot.md"],
+              "allocations": { "builderbot.md": "builderbot.md" }
+            }"#,
+        )
+        .unwrap();
+
+        seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(target.path().join("builderbot.md")).unwrap(),
+            edited
+        );
+        assert_eq!(
+            fs::read_to_string(target.path().join("builderbot2.md")).unwrap(),
+            bundled
         );
     }
 
