@@ -211,19 +211,24 @@ fn repair_bundled_agent_from_dir(
             );
         }
     }
-    let mut claimed_targets = marker
+    let claimed_targets = marker
         .allocations
-        .iter()
-        .filter(|(source, _)| source.as_str() != file_name)
-        .map(|(_, allocation)| allocation.target_file_name.clone())
+        .values()
+        .map(|allocation| allocation.target_file_name.clone())
         .collect::<BTreeSet<_>>();
     let target_file_name = match marker.allocations.get(file_name) {
         Some(allocation) => {
             let allocated_target = target_root.join(&allocation.target_file_name);
-            let digest_changed = allocation.installed_digest.as_ref().is_some_and(|digest| {
-                allocated_target.exists()
-                    && digest_file(&allocated_target).ok().as_ref() != Some(digest)
-            });
+            let digest_changed = match allocation.installed_digest.as_ref() {
+                Some(digest) => {
+                    allocated_target.exists()
+                        && digest_file(&allocated_target).ok().as_ref() != Some(digest)
+                }
+                None => {
+                    allocated_target.exists()
+                        && !files_are_equal(&source, &allocated_target).unwrap_or(false)
+                }
+            };
             if digest_changed {
                 allocate_agent_target(file_name, &source_names, &claimed_targets, target_root)?
                     .ok_or_else(|| {
@@ -255,7 +260,6 @@ fn repair_bundled_agent_from_dir(
                 format!("Cannot restore bundled agent '{file_name}': no safe target is available")
             })?,
     };
-    claimed_targets.insert(target_file_name.clone());
     let target = target_root.join(&target_file_name);
     install_agent_file(&source, &target)?;
     marker.allocations.insert(
@@ -344,11 +348,11 @@ fn allocate_agent_target(
         {
             continue;
         }
-        match installed_agent_path_state(&target_root.join(&candidate))? {
-            InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
-                return Ok(Some(candidate));
-            }
-            InstalledAgentPathState::UserOwned => {}
+        if matches!(
+            installed_agent_path_state(&target_root.join(&candidate))?,
+            InstalledAgentPathState::Missing
+        ) {
+            return Ok(Some(candidate));
         }
     }
     Ok(None)
@@ -981,6 +985,58 @@ mod tests {
         assert_eq!(
             fs::read_to_string(target.path().join("berdy2.md")).unwrap(),
             "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nBundled."
+        );
+    }
+
+    #[test]
+    fn explicit_repair_preserves_a_digestless_legacy_edit() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let bundled = "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nCurrent.";
+        let edited = "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nEdited.";
+        write_agent(source.path(), "berdy.md", bundled);
+        write_agent(target.path(), "berdy.md", edited);
+        fs::write(
+            marker_path(target.path()),
+            r#"{ "allocations": { "berdy.md": "berdy.md" } }"#,
+        )
+        .unwrap();
+
+        repair_bundled_agent_from_dir(source.path(), target.path(), "berdy.md").unwrap();
+
+        assert_eq!(
+            fs::read_to_string(target.path().join("berdy.md")).unwrap(),
+            edited
+        );
+        assert_eq!(
+            fs::read_to_string(target.path().join("berdy2.md")).unwrap(),
+            bundled
+        );
+    }
+
+    #[test]
+    fn unallocated_marker_bearing_fallback_is_never_adopted() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let bundled = "---\nname: Tinker\nmetadata:\n  berdBundled: true\n---\nCurrent.";
+        let copied = "---\nname: Copy\nmetadata:\n  berdBundled: true\n---\nCustomized.";
+        write_agent(source.path(), "tinker.md", bundled);
+        write_agent(
+            target.path(),
+            "tinker.md",
+            "---\nname: Mine\n---\nPersonal.",
+        );
+        write_agent(target.path(), "tinker2.md", copied);
+
+        seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(target.path().join("tinker2.md")).unwrap(),
+            copied
+        );
+        assert_eq!(
+            fs::read_to_string(target.path().join("tinker3.md")).unwrap(),
+            bundled
         );
     }
 
