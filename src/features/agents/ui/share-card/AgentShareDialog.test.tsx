@@ -150,6 +150,42 @@ describe("AgentShareDialog", () => {
     await waitFor(() => expect(button).not.toBeDisabled());
   });
 
+  it("uses viewport-safe geometry for loading and unavailable states", async () => {
+    const { rerender } = render(
+      <AgentShareDialog
+        open
+        persona={persona}
+        onOpenChange={vi.fn()}
+        onDownloadAgent={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByLabelText("share.loadingCard").parentElement,
+    ).toHaveClass("max-w-[min(19rem,calc((100dvh-18rem)*0.6667))]");
+
+    fireEvent.error(screen.getByTestId("agent-card-avatar-preload"));
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-card-avatar-preload")).toHaveAttribute(
+        "src",
+        expect.not.stringContaining("example.com"),
+      ),
+    );
+    fireEvent.error(screen.getByTestId("agent-card-avatar-preload"));
+    expect(await screen.findByRole("status")).toHaveClass(
+      "max-w-[min(19rem,calc((100dvh-18rem)*0.6667))]",
+    );
+
+    rerender(
+      <AgentShareDialog
+        open={false}
+        persona={persona}
+        onOpenChange={vi.fn()}
+        onDownloadAgent={vi.fn()}
+      />,
+    );
+  });
+
   it("uses a generated avatar poster when composing the card", async () => {
     avatarHookMocks.image = undefined;
     avatarHookMocks.media = {

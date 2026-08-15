@@ -374,7 +374,7 @@ export function AgentShareDialog({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
-                className="flex aspect-[1227/1839] w-full max-w-[19rem] items-center justify-center rounded-[6.5%] bg-card text-sm text-muted-foreground shadow-sm"
+                className="flex aspect-[1227/1839] w-full max-w-[min(19rem,calc((100dvh-18rem)*0.6667))] items-center justify-center rounded-[6.5%] bg-card text-sm text-muted-foreground shadow-sm"
                 role="status"
               >
                 {t("share.avatarUnavailable")}
@@ -386,7 +386,7 @@ export function AgentShareDialog({
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
-                className="flex aspect-[1227/1839] w-full max-w-[19rem] items-center justify-center"
+                className="flex aspect-[1227/1839] w-full max-w-[min(19rem,calc((100dvh-18rem)*0.6667))] items-center justify-center"
               >
                 <Loader2
                   aria-label={t("share.loadingCard")}
