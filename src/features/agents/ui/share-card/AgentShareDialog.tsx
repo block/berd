@@ -104,6 +104,7 @@ export function AgentShareDialog({
     avatar: Persona["avatar"];
     src: string;
   } | null>(null);
+  const avatarPreloadRef = useRef<HTMLImageElement>(null);
   const cardDownloadInFlightRef = useRef(false);
   const agentDownloadInFlightRef = useRef(false);
   const cardOperationGenerationRef = useRef(0);
@@ -320,6 +321,19 @@ export function AgentShareDialog({
     t,
   ]);
 
+  const handleAvatarPreloadRef = useCallback(
+    (node: HTMLImageElement | null) => {
+      avatarPreloadRef.current = node;
+      if (!node || !avatarSrc) return;
+      // Run after layout effects reset readiness for changed card content.
+      queueMicrotask(() => {
+        if (avatarPreloadRef.current !== node || !node.complete) return;
+        if (node.naturalWidth > 0) setAvatarReadySrc(avatarSrc);
+      });
+    },
+    [avatarSrc],
+  );
+
   const handleDownloadAgent = useCallback(async () => {
     if (agentDownloadInFlightRef.current) return;
     agentDownloadInFlightRef.current = true;
@@ -349,6 +363,7 @@ export function AgentShareDialog({
         <div className="relative flex min-h-0 justify-center py-2 [perspective:1200px]">
           {avatarSrc ? (
             <img
+              ref={handleAvatarPreloadRef}
               key={`preload:${avatarSrc}`}
               src={avatarSrc}
               alt=""

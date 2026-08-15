@@ -150,6 +150,62 @@ describe("AgentShareDialog", () => {
     await waitFor(() => expect(button).not.toBeDisabled());
   });
 
+  it("recognizes an avatar that completed before its load handler attached", async () => {
+    const originalComplete = Object.getOwnPropertyDescriptor(
+      HTMLImageElement.prototype,
+      "complete",
+    );
+    const originalNaturalWidth = Object.getOwnPropertyDescriptor(
+      HTMLImageElement.prototype,
+      "naturalWidth",
+    );
+    Object.defineProperty(HTMLImageElement.prototype, "complete", {
+      configurable: true,
+      get: () => true,
+    });
+    Object.defineProperty(HTMLImageElement.prototype, "naturalWidth", {
+      configurable: true,
+      get: () => 400,
+    });
+
+    try {
+      render(
+        <AgentShareDialog
+          open
+          persona={persona}
+          onOpenChange={vi.fn()}
+          onDownloadAgent={vi.fn()}
+        />,
+      );
+
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "share.downloadCard" }),
+        ).not.toBeDisabled(),
+      );
+      await waitFor(() =>
+        expect(
+          screen.queryByLabelText("share.loadingCard"),
+        ).not.toBeInTheDocument(),
+      );
+    } finally {
+      if (originalComplete) {
+        Object.defineProperty(
+          HTMLImageElement.prototype,
+          "complete",
+          originalComplete,
+        );
+      }
+      if (originalNaturalWidth) {
+        Object.defineProperty(
+          HTMLImageElement.prototype,
+          "naturalWidth",
+          originalNaturalWidth,
+        );
+      }
+    }
+  });
+
   it("keeps the modal out of scroll containment for the refraction halo", () => {
     render(
       <AgentShareDialog
