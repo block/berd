@@ -40,6 +40,7 @@ import * as api from "@/shared/api/agents";
 
 // Import the hook after mocks are set up
 import { usePersonas } from "../usePersonas";
+import { resetPersonaRequestCoordinatorForTests } from "../../services/personaRequestCoordinator";
 
 // ── helpers ──────────────────────────────────────────────────────────
 
@@ -60,6 +61,7 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
 
 describe("usePersonas", () => {
   beforeEach(() => {
+    resetPersonaRequestCoordinatorForTests();
     // Re-establish default mock implementations (clearAllMocks would wipe them)
     avatarApiMocks.deleteUserAvatar.mockReset().mockResolvedValue(undefined);
     vi.mocked(api.listPersonas).mockReset().mockResolvedValue([]);
@@ -149,8 +151,10 @@ describe("usePersonas", () => {
             resolveList = resolve;
           }),
       );
+      const existing = makePersona({ id: "existing" });
       const created = makePersona({ id: "created-during-load" });
       vi.mocked(api.createPersona).mockResolvedValueOnce(created);
+      vi.mocked(api.refreshPersonas).mockResolvedValueOnce([existing, created]);
 
       renderHook(() => usePersonas());
       const mutatingConsumer = renderHook(() => usePersonas());
@@ -162,9 +166,12 @@ describe("usePersonas", () => {
           systemPrompt: "Help.",
         });
       });
-      await act(async () => resolveList([]));
+      await act(async () => resolveList([existing]));
 
-      expect(useAgentStore.getState().personas).toContainEqual(created);
+      await waitFor(() => {
+        expect(useAgentStore.getState().personas).toEqual([existing, created]);
+      });
+      expect(api.refreshPersonas).toHaveBeenCalledOnce();
     });
 
     it("sets loading state correctly", async () => {
@@ -419,6 +426,42 @@ describe("usePersonas", () => {
       expect(result.current.personas).toEqual(refreshed);
     });
 
+    it("waits for a trailing refresh requested during an active load", async () => {
+      const imported = makePersona({ id: "imported" });
+      let resolveList!: (value: Persona[]) => void;
+      let resolveTrailing!: (value: Persona[]) => void;
+      vi.mocked(api.listPersonas).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveList = resolve;
+          }),
+      );
+      vi.mocked(api.refreshPersonas).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveTrailing = resolve;
+          }),
+      );
+
+      const first = renderHook(() => usePersonas());
+      const second = renderHook(() => usePersonas());
+      await waitFor(() => expect(api.listPersonas).toHaveBeenCalledOnce());
+
+      let refreshSettled = false;
+      const refresh = second.result.current.refreshFromDisk().then(() => {
+        refreshSettled = true;
+      });
+      await act(async () => resolveList([]));
+      expect(refreshSettled).toBe(false);
+      expect(api.refreshPersonas).toHaveBeenCalledOnce();
+
+      await act(async () => {
+        resolveTrailing([imported]);
+        await refresh;
+      });
+      expect(first.result.current.personas).toEqual([imported]);
+    });
+
     it("does not start overlapping refresh requests", async () => {
       let resolveRefresh!: (value: Persona[]) => void;
       vi.mocked(api.refreshPersonas).mockImplementationOnce(
@@ -450,13 +493,15 @@ describe("usePersonas", () => {
       const stalePersona = makePersona({ id: "stale" });
       const createdPersona = makePersona({ id: "created" });
       let resolveRefresh!: (value: Persona[]) => void;
-      vi.mocked(api.refreshPersonas).mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveRefresh = resolve;
-          }),
-      );
       vi.mocked(api.createPersona).mockResolvedValueOnce(createdPersona);
+      vi.mocked(api.refreshPersonas)
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveRefresh = resolve;
+            }),
+        )
+        .mockResolvedValueOnce([createdPersona]);
 
       const { result } = renderHook(() => usePersonas());
 
@@ -477,7 +522,10 @@ describe("usePersonas", () => {
         await refresh;
       });
 
-      expect(result.current.personas).toEqual([createdPersona]);
+      await waitFor(() => {
+        expect(result.current.personas).toEqual([createdPersona]);
+      });
+      expect(api.refreshPersonas).toHaveBeenCalledTimes(2);
     });
   });
 });
