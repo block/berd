@@ -81,10 +81,10 @@ async function avatarSourceToDataUrl(source: string): Promise<string | null> {
 
 export const AVATAR_ANIMATION_EMBED_TIMEOUT_MS = 5_000;
 
-async function fetchAvatarAnimation(
-  source: string,
+async function withAnimationEmbedDeadline<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs = AVATAR_ANIMATION_EMBED_TIMEOUT_MS,
-): Promise<Blob> {
+): Promise<T> {
   const controller = new AbortController();
   let timeout: number | undefined;
   const deadline = new Promise<never>((_, reject) => {
@@ -94,13 +94,7 @@ async function fetchAvatarAnimation(
     }, timeoutMs);
   });
   try {
-    return await Promise.race([
-      fetch(source, { signal: controller.signal }).then(async (response) => {
-        if (!response.ok) throw new Error("Avatar animation request failed");
-        return await response.blob();
-      }),
-      deadline,
-    ]);
+    return await Promise.race([operation(controller.signal), deadline]);
   } finally {
     if (timeout !== undefined) window.clearTimeout(timeout);
   }
@@ -269,9 +263,10 @@ export function AgentShareDialog({
             /^asset:/u.test(cachedAvatar.src) &&
             typeof persona.avatar === "string"
           ) {
-            const cachedAnimation = await readCachedAvatarAnimation({
-              avatarRef: persona.avatar,
-            });
+            const avatarRef = persona.avatar;
+            const cachedAnimation = await withAnimationEmbedDeadline(() =>
+              readCachedAvatarAnimation({ avatarRef }),
+            );
             if (cachedAnimation) {
               animation = {
                 bytes: new Uint8Array(cachedAnimation.bytes),
@@ -283,7 +278,12 @@ export function AgentShareDialog({
               };
             }
           } else if (/^(?:https?:|blob:|data:)/u.test(cachedAvatar.src)) {
-            const blob = await fetchAvatarAnimation(cachedAvatar.src);
+            const blob = await withAnimationEmbedDeadline(async (signal) => {
+              const response = await fetch(cachedAvatar.src, { signal });
+              if (!response.ok)
+                throw new Error("Avatar animation request failed");
+              return await response.blob();
+            });
             if (blob.type !== "video/mp4" && blob.type !== "video/webm") {
               throw new Error("Avatar animation has an unsupported media type");
             }

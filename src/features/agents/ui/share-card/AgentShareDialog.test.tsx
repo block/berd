@@ -905,4 +905,61 @@ describe("AgentShareDialog", () => {
     });
     await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
   });
+
+  it("falls back when cached animation IPC stalls and ignores late bytes", async () => {
+    vi.useFakeTimers();
+    avatarHookMocks.image = undefined;
+    avatarHookMocks.media = {
+      src: "asset://generated-avatar.webm",
+      mediaType: "video",
+      posterSrc: "asset://generated-avatar.png",
+    };
+    const cachedAnimation = deferred<{
+      bytes: number[];
+      mimeType: string;
+    } | null>();
+    vi.mocked(readCachedAvatarAnimation).mockReturnValue(
+      cachedAnimation.promise,
+    );
+    vi.mocked(renderAgentShareCard).mockResolvedValue(
+      new Blob(["card"], { type: "image/png" }),
+    );
+
+    let unmount: () => void = () => undefined;
+    try {
+      ({ unmount } = render(
+        <AgentShareDialog
+          open
+          persona={{ ...persona, avatar: "user-avatar:generated" }}
+          onOpenChange={vi.fn()}
+          onDownloadAgent={vi.fn()}
+        />,
+      ));
+      fireEvent.load(screen.getByTestId("agent-card-avatar-preload"));
+      fireEvent.click(
+        screen.getByRole("button", { name: "share.downloadCard" }),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(AVATAR_ANIMATION_EMBED_TIMEOUT_MS);
+        await vi.runAllTimersAsync();
+      });
+
+      expect(encodeAgentImage).toHaveBeenCalledTimes(1);
+      expect(encodeAgentImage).toHaveBeenCalledWith(
+        expect.any(Uint8Array),
+        expect.anything(),
+        null,
+      );
+      expect(downloadBlob).toHaveBeenCalledTimes(1);
+
+      cachedAnimation.resolve({ bytes: [1, 2, 3], mimeType: "video/webm" });
+      await cachedAnimation.promise;
+      await Promise.resolve();
+      expect(encodeAgentImage).toHaveBeenCalledTimes(1);
+      expect(downloadBlob).toHaveBeenCalledTimes(1);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
 });
