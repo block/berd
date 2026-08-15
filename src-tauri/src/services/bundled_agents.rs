@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -28,7 +28,10 @@ pub struct SeedBundledAgentsResult {
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SeedMarker {
+    #[serde(default)]
     seeded_files: BTreeSet<String>,
+    #[serde(default)]
+    allocations: BTreeMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -87,6 +90,27 @@ pub fn repair_bundled_agent(
     )
 }
 
+fn bundled_source_names(source_root: &Path) -> Result<BTreeSet<String>, String> {
+    let mut names = BTreeSet::new();
+    for entry in fs::read_dir(source_root).map_err(|error| {
+        format!(
+            "Failed to read bundled agents directory '{}': {error}",
+            source_root.display()
+        )
+    })? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) == Some("md") {
+            let name = entry
+                .file_name()
+                .into_string()
+                .map_err(|_| "Bundled agent filenames must be valid UTF-8".to_string())?;
+            names.insert(name);
+        }
+    }
+    Ok(names)
+}
+
 fn repair_bundled_agent_from_dir(
     source_root: &Path,
     target_root: &Path,
@@ -120,47 +144,56 @@ fn repair_bundled_agent_from_dir(
     }
 
     let mut marker = read_seed_marker(target_root)?;
-    let primary_target = target_root.join(file_name);
-    let fallback_file_name = fallback_file_name(file_name)?;
-    let fallback_target = target_root.join(&fallback_file_name);
-    let has_seeded_fallback = marker.seeded_files.contains(&fallback_file_name)
-        && matches!(
-            installed_agent_path_state(&fallback_target)?,
-            InstalledAgentPathState::Bundled
-        );
-    let target = if has_seeded_fallback {
-        fallback_target
-    } else {
-        match installed_agent_path_state(&primary_target)? {
-            InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => primary_target,
-            InstalledAgentPathState::UserOwned => {
-                match installed_agent_path_state(&fallback_target)? {
-                    InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
-                        fallback_target
-                    }
-                    InstalledAgentPathState::UserOwned => {
-                        return Err(format!(
-                            "Cannot restore bundled agent because '{}' and '{}' are owned by the user",
-                            primary_target.display(),
-                            fallback_target.display()
-                        ));
-                    }
-                }
-            }
+    let source_names = bundled_source_names(source_root)?;
+    if marker.allocations.is_empty() {
+        for source_name in &source_names {
+            let fallback_name = fallback_file_name(source_name)?;
+            let target_name = if marker.seeded_files.contains(&fallback_name)
+                && matches!(
+                    installed_agent_path_state(&target_root.join(&fallback_name))?,
+                    InstalledAgentPathState::Bundled
+                ) {
+                fallback_name
+            } else if marker.seeded_files.contains(source_name) {
+                source_name.clone()
+            } else {
+                continue;
+            };
+            marker.allocations.insert(source_name.clone(), target_name);
         }
-    };
-
-    install_agent_file(&source, &target)?;
-    marker.seeded_files.insert(file_name.to_string());
-    if target.file_name().and_then(|name| name.to_str()) != Some(file_name) {
-        marker.seeded_files.insert(
-            target
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| "Bundled agent target is missing a valid filename".to_string())?
-                .to_string(),
-        );
     }
+    let mut claimed_targets = marker
+        .allocations
+        .iter()
+        .filter(|(source, _)| source.as_str() != file_name)
+        .map(|(_, target)| target.clone())
+        .collect::<BTreeSet<_>>();
+    let target_file_name = match marker.allocations.get(file_name) {
+        Some(target) => match installed_agent_path_state(&target_root.join(target))? {
+            InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => target.clone(),
+            InstalledAgentPathState::UserOwned => allocate_agent_target(
+                file_name,
+                &source_names,
+                &claimed_targets,
+                target_root,
+            )?
+            .ok_or_else(|| {
+                format!("Cannot restore bundled agent '{file_name}': no safe target is available")
+            })?,
+        },
+        None => allocate_agent_target(file_name, &source_names, &claimed_targets, target_root)?
+            .ok_or_else(|| {
+                format!("Cannot restore bundled agent '{file_name}': no safe target is available")
+            })?,
+    };
+    claimed_targets.insert(target_file_name.clone());
+    let target = target_root.join(&target_file_name);
+    install_agent_file(&source, &target)?;
+    marker
+        .allocations
+        .insert(file_name.to_string(), target_file_name.clone());
+    marker.seeded_files.insert(file_name.to_string());
+    marker.seeded_files.insert(target_file_name);
     write_seed_marker(target_root, &marker)
 }
 
@@ -198,6 +231,36 @@ fn fallback_file_name(file_name: &str) -> Result<String, String> {
         .strip_suffix(".md")
         .map(|stem| format!("{stem}2.md"))
         .ok_or_else(|| "Bundled agent filename must end in .md".to_string())
+}
+
+fn allocate_agent_target(
+    source_name: &str,
+    source_names: &BTreeSet<String>,
+    claimed_targets: &BTreeSet<String>,
+    target_root: &Path,
+) -> Result<Option<String>, String> {
+    let stem = source_name
+        .strip_suffix(".md")
+        .ok_or_else(|| "Bundled agent filename must end in .md".to_string())?;
+    for suffix in 1..=1_000 {
+        let candidate = if suffix == 1 {
+            source_name.to_string()
+        } else {
+            format!("{stem}{suffix}.md")
+        };
+        if claimed_targets.contains(&candidate)
+            || (candidate != source_name && source_names.contains(&candidate))
+        {
+            continue;
+        }
+        match installed_agent_path_state(&target_root.join(&candidate))? {
+            InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
+                return Ok(Some(candidate));
+            }
+            InstalledAgentPathState::UserOwned => {}
+        }
+    }
+    Ok(None)
 }
 
 /// Extracts an agent file's `app-avatar:*` ref from its raw contents, if the
@@ -239,6 +302,34 @@ fn seed_bundled_agents_from_dir(
     entries.sort_by_key(|entry| entry.file_name());
 
     let mut marker = read_seed_marker(target_root)?;
+    let source_names = entries
+        .iter()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.ends_with(".md"))
+        .collect::<BTreeSet<_>>();
+    if marker.allocations.is_empty() {
+        for source_name in &source_names {
+            let fallback_name = fallback_file_name(source_name)?;
+            let fallback_path = target_root.join(&fallback_name);
+            let target_name = if marker.seeded_files.contains(&fallback_name)
+                && matches!(
+                    installed_agent_path_state(&fallback_path)?,
+                    InstalledAgentPathState::Bundled
+                ) {
+                fallback_name
+            } else if marker.seeded_files.contains(source_name) {
+                source_name.clone()
+            } else {
+                continue;
+            };
+            marker.allocations.insert(source_name.clone(), target_name);
+        }
+    }
+    let mut claimed_targets = marker
+        .allocations
+        .values()
+        .cloned()
+        .collect::<BTreeSet<_>>();
     let mut seeded_count = 0usize;
     let mut avatar_refs_to_warm = BTreeSet::new();
 
@@ -261,33 +352,27 @@ fn seed_bundled_agents_from_dir(
             continue;
         }
 
-        let file_name = entry.file_name().to_string_lossy().into_owned();
-        let primary_target = target_root.join(&file_name);
-        let fallback_name = fallback_file_name(&file_name)?;
-        let fallback_target = target_root.join(&fallback_name);
-        let has_seeded_fallback = marker.seeded_files.contains(&fallback_name)
-            && matches!(
-                installed_agent_path_state(&fallback_target)?,
-                InstalledAgentPathState::Bundled
-            );
-        let (target, target_file_name) = if has_seeded_fallback {
-            (fallback_target, fallback_name)
-        } else {
-            match installed_agent_path_state(&primary_target)? {
-                InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
-                    (primary_target, file_name.clone())
-                }
-                InstalledAgentPathState::UserOwned => {
-                    match installed_agent_path_state(&fallback_target)? {
-                        InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
-                            (fallback_target, fallback_name)
-                        }
-                        InstalledAgentPathState::UserOwned => continue,
-                    }
-                }
-            }
+        let file_name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| "Bundled agent filenames must be valid UTF-8".to_string())?;
+        let existing_allocation = marker.allocations.get(&file_name).cloned();
+        let target_file_name = match existing_allocation.as_ref() {
+            Some(target) => target.clone(),
+            None => match allocate_agent_target(
+                &file_name,
+                &source_names,
+                &claimed_targets,
+                target_root,
+            )? {
+                Some(target) => target,
+                None => continue,
+            },
         };
-        let was_previously_seeded = marker.seeded_files.contains(&target_file_name);
+        claimed_targets.insert(target_file_name.clone());
+        let target = target_root.join(&target_file_name);
+        let was_previously_seeded =
+            existing_allocation.is_some() || marker.seeded_files.contains(&target_file_name);
         let installed_or_refreshed =
             if should_install_agent(&source, &target, was_previously_seeded)? {
                 install_agent_file(&source, &target)?;
@@ -304,6 +389,9 @@ fn seed_bundled_agents_from_dir(
             }
         }
         if target_is_bundled {
+            marker
+                .allocations
+                .insert(file_name.clone(), target_file_name.clone());
             marker.seeded_files.insert(file_name);
             marker.seeded_files.insert(target_file_name);
         }
@@ -620,7 +708,39 @@ mod tests {
     }
 
     #[test]
-    fn does_not_mark_an_agent_seeded_when_both_names_are_user_owned() {
+    fn allocates_distinct_targets_when_a_fallback_matches_another_source() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let foo = "---\nname: Foo\nmetadata:\n  berdBundled: true\n---\nFoo bundled.";
+        let foo_two = "---\nname: Foo Two\nmetadata:\n  berdBundled: true\n---\nFoo two bundled.";
+        write_agent(source.path(), "foo.md", foo);
+        write_agent(source.path(), "foo2.md", foo_two);
+        write_agent(target.path(), "foo.md", "---\nname: Mine\n---\nPersonal.");
+
+        let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(result.seeded_count, 2);
+        assert_eq!(
+            fs::read_to_string(target.path().join("foo2.md")).unwrap(),
+            foo_two
+        );
+        assert_eq!(
+            fs::read_to_string(target.path().join("foo3.md")).unwrap(),
+            foo
+        );
+        let marker = read_seed_marker(target.path()).unwrap();
+        assert_eq!(
+            marker.allocations.get("foo.md").map(String::as_str),
+            Some("foo3.md")
+        );
+        assert_eq!(
+            marker.allocations.get("foo2.md").map(String::as_str),
+            Some("foo2.md")
+        );
+    }
+
+    #[test]
+    fn allocates_the_next_safe_name_when_earlier_names_are_user_owned() {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         let bundled = "---\nname: Tinker\nmetadata:\n  berdBundled: true\n---\nBundled.";
@@ -638,17 +758,19 @@ mod tests {
 
         let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
 
-        assert_eq!(result.seeded_count, 0);
+        assert_eq!(result.seeded_count, 1);
         let marker = read_seed_marker(target.path()).unwrap();
-        assert!(!marker.seeded_files.contains("tinker.md"));
-        assert!(!marker.seeded_files.contains("tinker2.md"));
-
-        fs::remove_file(target.path().join("tinker2.md")).unwrap();
-        let retry = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
-        assert_eq!(retry.seeded_count, 1);
+        assert_eq!(
+            marker.allocations.get("tinker.md").map(String::as_str),
+            Some("tinker3.md")
+        );
+        assert_eq!(
+            fs::read_to_string(target.path().join("tinker3.md")).unwrap(),
+            bundled
+        );
         assert_eq!(
             fs::read_to_string(target.path().join("tinker2.md")).unwrap(),
-            bundled
+            "---\nname: Mine 2\n---\nPersonal."
         );
     }
 
