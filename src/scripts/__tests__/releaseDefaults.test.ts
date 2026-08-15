@@ -44,10 +44,23 @@ describe("release bundled-agent defaults", () => {
     expect(tauriConfig.bundle.resources["../distro"]).toBe("distro");
     expect(readdirSync(agentDirectory).sort()).toEqual(starterAgentFiles);
     for (const fileName of starterAgentFiles) {
-      expect(readFileSync(resolve(agentDirectory, fileName), "utf8")).toContain(
-        "berdBundled: true",
-      );
+      const contents = readFileSync(resolve(agentDirectory, fileName), "utf8");
+      expect(contents).toContain("berdBundled: true");
+      expect(contents).not.toMatch(/`shared-voice\.md`|shared-voice\.md rule/);
     }
+  });
+
+  it("requires explicit bounded consent before Copycat reads an inbox", () => {
+    const contents = readFileSync(
+      resolve(repoRoot, "distro/agents/copycat.md"),
+      "utf8",
+    );
+
+    expect(contents).toContain("Before any inbox tool call");
+    expect(contents).toContain("bounded date range or message-count limit");
+    expect(contents).toContain("wait for explicit confirmation");
+    expect(contents).toContain("contains named profiles");
+    expect(contents).toContain("never replaces or blends another one");
   });
 
   it("rejects an invalid build kind", () => {
