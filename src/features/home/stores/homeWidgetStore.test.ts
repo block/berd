@@ -347,7 +347,10 @@ describe("homeWidgetStore", () => {
       }),
     });
 
-    await expect(resetPromise).resolves.toBe(true);
+    await expect(resetPromise).resolves.toEqual({
+      itemsConfirmed: true,
+      cameraConfirmed: true,
+    });
     expect(saveLayoutItems).toHaveBeenCalledTimes(2);
     expect(vi.mocked(saveLayoutItems).mock.calls[1][0].expectedRevision).toBe(
       5,
@@ -386,7 +389,7 @@ describe("homeWidgetStore", () => {
 
     await expect(
       useHomeWidgetStore.getState().resetHomeForOnboarding(),
-    ).resolves.toBe(true);
+    ).resolves.toEqual({ itemsConfirmed: true, cameraConfirmed: true });
 
     expect(listPersonas).not.toHaveBeenCalled();
     expect(
@@ -417,7 +420,7 @@ describe("homeWidgetStore", () => {
 
     await expect(
       useHomeWidgetStore.getState().resetHomeForOnboarding(),
-    ).resolves.toBe(false);
+    ).resolves.toEqual({ itemsConfirmed: false, cameraConfirmed: false });
 
     expect(useHomeWidgetStore.getState()).toMatchObject({
       instances: originalInstances,
@@ -457,7 +460,7 @@ describe("homeWidgetStore", () => {
 
     await expect(
       useHomeWidgetStore.getState().resetHomeForOnboarding(),
-    ).resolves.toBe(true);
+    ).resolves.toEqual({ itemsConfirmed: true, cameraConfirmed: true });
 
     expect(saveLayoutItems).toHaveBeenCalledTimes(2);
     expect(vi.mocked(saveLayoutItems).mock.calls[1][0]).toMatchObject({
@@ -494,7 +497,7 @@ describe("homeWidgetStore", () => {
 
     await expect(
       useHomeWidgetStore.getState().resetHomeForOnboarding(),
-    ).resolves.toBe(true);
+    ).resolves.toEqual({ itemsConfirmed: true, cameraConfirmed: true });
 
     expect(
       useHomeWidgetStore
@@ -530,7 +533,7 @@ describe("homeWidgetStore", () => {
 
     await expect(
       useHomeWidgetStore.getState().resetHomeForOnboarding(),
-    ).resolves.toBe(true);
+    ).resolves.toEqual({ itemsConfirmed: true, cameraConfirmed: true });
 
     const instances = useHomeWidgetStore.getState().instances;
     expect(instances.map((instance) => instance.type)).toEqual([
@@ -566,7 +569,7 @@ describe("homeWidgetStore", () => {
 
     await expect(
       useHomeWidgetStore.getState().resetHomeForOnboarding(),
-    ).resolves.toBe(true);
+    ).resolves.toEqual({ itemsConfirmed: true, cameraConfirmed: false });
     expect(localStorage.getItem("goose:home:starter-layout-v18")).toBeNull();
     expect(toast.warning).toHaveBeenCalledWith(
       "home:widgetLayer.toasts.cameraSaveFailed",

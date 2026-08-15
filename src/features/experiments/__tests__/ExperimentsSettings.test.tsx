@@ -20,7 +20,7 @@ import { i18n } from "@/shared/i18n";
 import { renderWithProviders } from "@/test/render";
 
 const resetHomeForOnboardingExperienceMock = vi.hoisted(() =>
-  vi.fn(async () => true),
+  vi.fn(async () => ({ itemsConfirmed: true, cameraConfirmed: true })),
 );
 const syncOnboardingExperimentStateMock = vi.hoisted(() =>
   vi.fn(async () => {}),
@@ -194,9 +194,39 @@ describe("ExperimentsSettings", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("does not report full reset success when camera persistence fails", async () => {
+    vi.stubEnv("DEV", true);
+    resetHomeForOnboardingExperienceMock.mockResolvedValueOnce({
+      itemsConfirmed: true,
+      cameraConfirmed: false,
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<ExperimentsSettings />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: i18n.t("experiments.onboarding.resetAll", { ns: "settings" }),
+      }),
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: i18n.t("experiments.onboarding.confirm", { ns: "settings" }),
+      }),
+    );
+
+    expect(
+      screen.queryByText(
+        i18n.t("experiments.onboarding.resetAllSuccess", { ns: "settings" }),
+      ),
+    ).not.toBeInTheDocument();
+  });
+
   it("preserves first-run state when reset-all preparation fails", async () => {
     vi.stubEnv("DEV", true);
-    resetHomeForOnboardingExperienceMock.mockResolvedValueOnce(false);
+    resetHomeForOnboardingExperienceMock.mockResolvedValueOnce({
+      itemsConfirmed: false,
+      cameraConfirmed: false,
+    });
     const user = userEvent.setup();
     renderWithProviders(<ExperimentsSettings />);
 

@@ -4,7 +4,10 @@ import {
   resetStarterAgentPinsSeeded,
 } from "@/features/home/onboarding/starterAgents";
 import { STARTER_HOME_LAYOUT } from "@/features/home/onboarding/starterHomeLayout";
-import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
+import {
+  useHomeWidgetStore,
+  type OnboardingHomeResetResult,
+} from "@/features/home/stores/homeWidgetStore";
 
 async function initializeHomeWidgets(): Promise<void> {
   const state = useHomeWidgetStore.getState();
@@ -25,10 +28,10 @@ export async function resetStarterTasksExperience(): Promise<boolean> {
   return useHomeWidgetStore.getState().resetStarterTasks();
 }
 
-export async function resetHomeForOnboardingExperience(): Promise<boolean> {
+export async function resetHomeForOnboardingExperience(): Promise<OnboardingHomeResetResult> {
   await initializeHomeWidgets();
-  const didReset = await useHomeWidgetStore.getState().resetHomeForOnboarding();
-  if (didReset) {
+  const result = await useHomeWidgetStore.getState().resetHomeForOnboarding();
+  if (result.itemsConfirmed) {
     resetStarterAgentPinsSeeded();
     const starterAgentPinCount = useHomeWidgetStore
       .getState()
@@ -39,7 +42,7 @@ export async function resetHomeForOnboardingExperience(): Promise<boolean> {
       markStarterAgentPinsEligible();
     }
   }
-  return didReset;
+  return result;
 }
 
 export async function resetOnboardingTourExperience(): Promise<boolean> {

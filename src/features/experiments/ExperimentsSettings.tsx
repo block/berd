@@ -220,13 +220,15 @@ export function ExperimentsSettings({
       if (!starterTasksEnabled || !berdyEnabled) {
         throw new Error("Unable to enable onboarding experiments");
       }
-      const didReset = await resetHomeForOnboardingExperience();
-      if (didReset) {
+      const resetResult = await resetHomeForOnboardingExperience();
+      if (resetResult.itemsConfirmed) {
         resetAssistiveUxMoment("home.starterTasks");
         window.dispatchEvent(new Event("starter-tasks-state-reset"));
         setResetAllConfirmationOpen(false);
         resetSucceeded = true;
-        toast.success(t("experiments.onboarding.resetAllSuccess"));
+        if (resetResult.cameraConfirmed) {
+          toast.success(t("experiments.onboarding.resetAllSuccess"));
+        }
       } else {
         toast.error(t("experiments.onboarding.resetAllError"));
       }

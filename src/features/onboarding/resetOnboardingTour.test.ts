@@ -7,7 +7,10 @@ const storeMocks = vi.hoisted(() => {
     loadStatus = "ready";
   });
   const resetOnboardingTour = vi.fn(async () => true);
-  const resetHomeForOnboarding = vi.fn(async () => true);
+  const resetHomeForOnboarding = vi.fn(async () => ({
+    itemsConfirmed: true,
+    cameraConfirmed: true,
+  }));
   const resetStarterTasks = vi.fn(async () => true);
   const syncOnboardingExperiment = vi.fn();
 
@@ -69,7 +72,10 @@ describe("onboarding tour experience controls", () => {
   });
 
   it("initializes before resetting the whole Home onboarding canvas", async () => {
-    await expect(resetHomeForOnboardingExperience()).resolves.toBe(true);
+    await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
+      itemsConfirmed: true,
+      cameraConfirmed: true,
+    });
 
     expect(storeMocks.initialize).toHaveBeenCalledOnce();
     expect(storeMocks.resetHomeForOnboarding).toHaveBeenCalledOnce();
@@ -77,9 +83,15 @@ describe("onboarding tour experience controls", () => {
 
   it("preserves starter-agent markers when the Home reset fails", async () => {
     localStorage.setItem("goose:home:starter-agent-pins-seeded-v5", "1");
-    storeMocks.resetHomeForOnboarding.mockResolvedValueOnce(false);
+    storeMocks.resetHomeForOnboarding.mockResolvedValueOnce({
+      itemsConfirmed: false,
+      cameraConfirmed: false,
+    });
 
-    await expect(resetHomeForOnboardingExperience()).resolves.toBe(false);
+    await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
+      itemsConfirmed: false,
+      cameraConfirmed: false,
+    });
 
     expect(haveStarterAgentPinsBeenSeeded()).toBe(true);
     expect(areStarterAgentPinsEligible()).toBe(false);
@@ -88,7 +100,10 @@ describe("onboarding tour experience controls", () => {
   it("keeps a partial reset eligible for starter-agent recovery", async () => {
     storeMocks.setInstances([]);
 
-    await expect(resetHomeForOnboardingExperience()).resolves.toBe(true);
+    await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
+      itemsConfirmed: true,
+      cameraConfirmed: true,
+    });
 
     expect(haveStarterAgentPinsBeenSeeded()).toBe(false);
     expect(areStarterAgentPinsEligible()).toBe(true);

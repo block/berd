@@ -184,6 +184,11 @@ function createAddedCleanUpSnapshotItem(
   };
 }
 
+export type OnboardingHomeResetResult = {
+  itemsConfirmed: boolean;
+  cameraConfirmed: boolean;
+};
+
 interface HomeWidgetStore extends HomeWidgetState {
   cleanUpSnapshot: WidgetLayoutSnapshotItem[] | null;
   initialize: () => Promise<void>;
@@ -216,7 +221,7 @@ interface HomeWidgetStore extends HomeWidgetState {
   syncOnboardingExperiment: (enabled: boolean) => void;
   resetOnboardingTour: () => Promise<boolean>;
   resetStarterTasks: () => Promise<boolean>;
-  resetHomeForOnboarding: () => Promise<boolean>;
+  resetHomeForOnboarding: () => Promise<OnboardingHomeResetResult>;
   addMissingStarterAgentPins: (agentIds: readonly string[]) => Promise<boolean>;
   reloadOnboardingTourForDev: () => void;
   removeWidget: (id: string) => void;
@@ -656,7 +661,7 @@ function createHomeWidgetStore() {
         await runtime.waitForPendingSaves();
         const state = get();
         if (!canMutateWidgets(state) || state.itemRevision === null) {
-          return false;
+          return { itemsConfirmed: false, cameraConfirmed: false };
         }
         const initialItemRevision = state.itemRevision;
         const initialCameraRevision = state.cameraRevision;
@@ -703,7 +708,7 @@ function createHomeWidgetStore() {
           persistCleanUpSnapshot(previousState.cleanUpSnapshot);
           set(previousState);
           console.error("Failed to reset Home for onboarding:", error);
-          return false;
+          return { itemsConfirmed: false, cameraConfirmed: false };
         }
         if (!itemResult.ok) {
           set({
@@ -712,7 +717,7 @@ function createHomeWidgetStore() {
             instances: layoutItemsToHomeWidgets(itemResult.layout.items),
             loadStatus: "ready",
           });
-          return false;
+          return { itemsConfirmed: false, cameraConfirmed: false };
         }
         set({
           instances: layoutItemsToHomeWidgets(itemResult.layout.items),
@@ -741,7 +746,7 @@ function createHomeWidgetStore() {
         } else if (itemsConfirmed) {
           toast.warning(i18n.t("home:widgetLayer.toasts.cameraSaveFailed"));
         }
-        return itemsConfirmed;
+        return { itemsConfirmed, cameraConfirmed };
       },
       reloadOnboardingTourForDev: () => {
         if (!import.meta.env.DEV) return;
