@@ -37,12 +37,6 @@ type WidgetCanvasProps = ComponentProps<
 const widgetCanvasMock = vi.hoisted(() =>
   vi.fn((_props: WidgetCanvasProps) => <div>widget canvas</div>),
 );
-const usePersonasMock = vi.hoisted(() => vi.fn());
-
-vi.mock("@/features/agents/hooks/usePersonas", () => ({
-  usePersonas: usePersonasMock,
-}));
-
 vi.mock("@/shared/api/agents", () => ({
   listPersonas: vi.fn(async () => useAgentStore.getState().personas),
 }));
@@ -142,10 +136,6 @@ beforeEach(() => {
   localStorage.clear();
   localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "6");
   useAgentStore.setState({ personas: [], personasLoading: false });
-  usePersonasMock.mockImplementation(() => ({
-    personas: useAgentStore.getState().personas,
-    isLoading: useAgentStore.getState().personasLoading,
-  }));
   setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, false);
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,

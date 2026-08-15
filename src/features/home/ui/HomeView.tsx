@@ -6,7 +6,7 @@ import { OnboardingTourDialog } from "@/features/onboarding/ui/OnboardingTourDia
 import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
-import { usePersonas } from "@/features/agents/hooks/usePersonas";
+import { useAgentStore } from "@/features/agents/stores/agentStore";
 import {
   areStarterAgentPinsEligible,
   markStarterAgentPinsSeeded,
@@ -86,7 +86,8 @@ export function HomeView({
   const starterTasksHeight = getStarterTasksHeight(
     starterTasks?.omittedTaskIds.size ?? 0,
   );
-  const { personas, isLoading: personasLoading } = usePersonas();
+  const personas = useAgentStore((state) => state.personas);
+  const personasLoading = useAgentStore((state) => state.personasLoading);
   const setTopBarActions = useSetTopBarActions();
   useInvalidateHomeWidgetSkillsOnChange();
   const [layoutMotionActive, setLayoutMotionActive] = useState(false);
