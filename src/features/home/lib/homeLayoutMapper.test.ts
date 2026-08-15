@@ -328,10 +328,10 @@ describe("homeLayoutMapper", () => {
     expect(item).toMatchObject({
       kind: "project",
       targetId: "project-1",
-      centerX: 120,
-      centerY: 130,
-      width: 200,
-      height: 200,
+      centerX: 130,
+      centerY: 140,
+      width: 220,
+      height: 220,
       zIndex: 4,
     });
 
@@ -383,8 +383,8 @@ describe("homeLayoutMapper", () => {
 
     expect(widget).toMatchObject({
       type: "clock",
-      x: 768,
-      y: 24,
+      x: 816,
+      y: 48,
       z: 1,
     });
     expect(widget.id).toMatch(
@@ -393,8 +393,8 @@ describe("homeLayoutMapper", () => {
     expect(item).toMatchObject({
       kind: "clock",
       targetId: `widget:${item.id}`,
-      centerX: 888,
-      centerY: 144,
+      centerX: 902.5,
+      centerY: 134.5,
     });
   });
 
@@ -415,7 +415,7 @@ describe("homeLayoutMapper", () => {
     expect(
       widgets.slice(0, 6).map((widget) => ({ x: widget.x, y: widget.y })),
     ).toEqual([
-      { x: 664, y: 288 },
+      { x: 678.5, y: 245 },
       { x: -96, y: -240 },
       { x: 168, y: -240 },
       { x: -360, y: 0 },
@@ -445,7 +445,7 @@ describe("homeLayoutMapper", () => {
   it("locates Berdy's avatar for initial camera centering", () => {
     const widget = createDefaultOnboardingTourWidget();
 
-    expect(onboardingTourAvatarCenter(widget)).toEqual({ x: 736, y: 378 });
+    expect(onboardingTourAvatarCenter(widget)).toEqual({ x: 750.5, y: 335 });
   });
 
   it("persists the completed welcome callout for Berdy", () => {
@@ -474,7 +474,7 @@ describe("homeLayoutMapper", () => {
     const onboardingTour = createDefaultOnboardingTourWidget();
     const clock = createDefaultClockWidget();
 
-    expect(onboardingTour.x + (onboardingTour.width ?? 0) / 2).toBe(
+    expect(onboardingTour.x + (onboardingTour.width ?? 0) / 2).toBeCloseTo(
       clock.x + (clock.width ?? 0) / 2,
     );
     expect(onboardingTour.y - (clock.y + (clock.height ?? 0))).toBe(24);
@@ -497,12 +497,12 @@ describe("homeLayoutMapper", () => {
       expect(item.kind).toBe("clock");
       expect(item.targetId.endsWith(":digital")).toBe(true);
       expect(item.width).toBe(264);
-      expect(item.height).toBe(104);
+      expect(item.height).toBeCloseTo(264 * (88 / 224));
 
       const [restored] = layoutItemsToHomeWidgets([item]);
       expect(restored.state).toEqual({ mode: "digital" });
       expect(restored.width).toBe(264);
-      expect(restored.height).toBe(104);
+      expect(restored.height).toBeCloseTo(264 * (88 / 224));
     });
 
     it("leaves an analog clock with a plain synthetic target and no state", () => {
@@ -542,11 +542,11 @@ describe("homeLayoutMapper", () => {
       const [restored] = layoutItemsToHomeWidgets([storedDigital]);
       expect(restored.state).toEqual({ mode: "digital" });
       expect(restored.width).toBe(264);
-      expect(restored.height).toBe(104);
+      expect(restored.height).toBeCloseTo(264 * (88 / 224));
     });
 
     it("round-trips clock per-mode sizes through persisted widget state", () => {
-      const digitalHeight = 360 * (104 / 264);
+      const digitalHeight = 360 * (88 / 224);
       const analogClock: WidgetInstance = {
         id: "00000000-0000-0000-0000-000000000004",
         type: "clock",
@@ -612,8 +612,8 @@ describe("homeLayoutMapper", () => {
           },
         },
         width: 360,
-        height: digitalHeight,
       });
+      expect(restoredDigital.height).toBeCloseTo(digitalHeight);
     });
   });
 

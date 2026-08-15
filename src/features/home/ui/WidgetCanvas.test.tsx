@@ -20,6 +20,10 @@ import type {
   WidgetNavigationHandlers,
 } from "../widgets/types";
 import { HOME_WIDGET_NODE_ATTR, WidgetCanvas } from "./WidgetCanvas";
+import {
+  isStarterHomeLayoutEligible,
+  markStarterHomeLayoutEligible,
+} from "@/features/home/onboarding/starterHomeLayout";
 
 const HOME_WIDGET_NODE_SELECTOR = `[${HOME_WIDGET_NODE_ATTR}]`;
 
@@ -336,6 +340,7 @@ async function openPickerPanel(
 describe("WidgetCanvas", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
     vi.useRealTimers();
     mocks.homeWidgetState.camera = { centerX: 0, centerY: 0, zoomBps: 10_000 };
     mocks.homeWidgetState.constraints = null;
@@ -418,7 +423,7 @@ describe("WidgetCanvas", () => {
     setDevicePixelRatio(2);
 
     const { container } = renderCanvas({
-      instances: [widget({ x: 20.25, y: 30.25 })],
+      instances: [widget({ x: 20.25, y: 30.25, width: 240, height: 240 })],
     });
     const world = widgetWorld(container);
     const widgetNode = container.querySelector(
@@ -433,9 +438,9 @@ describe("WidgetCanvas", () => {
     expect(widgetNode.style.top).toBe("63px");
     expect(widgetNode.style.width).toBe("300px");
     expect(widgetNode.style.height).toBe("300px");
-    expect(widgetNode.style.getPropertyValue("--widget-text-scale")).toBe(
-      "1.08",
-    );
+    expect(
+      Number(widgetNode.style.getPropertyValue("--widget-text-scale")),
+    ).toBeCloseTo((240 / 173) * 1.08);
     expect(widgetContent.style.transform).toBe("scale(1.25)");
     expect(widgetContent.style.transformOrigin).toBe("top left");
     expect(widgetContent.style.width).toBe("240px");
@@ -766,6 +771,31 @@ describe("WidgetCanvas", () => {
     expect(screen.queryByRole("button", { name: /make home/i })).toBeNull();
   });
 
+  it("cancels pending starter arrangement when a user drags a widget", async () => {
+    const user = userEvent.setup();
+    markStarterHomeLayoutEligible();
+
+    const { container } = renderCanvas({ instances: [stickyNoteWidget()] });
+    const canvas = container.firstElementChild as Element;
+    const stickyNode = container.querySelector(HOME_WIDGET_NODE_SELECTOR);
+
+    await user.pointer([
+      {
+        keys: "[MouseLeft>]",
+        target: stickyNode as Element,
+        coords: { clientX: 24, clientY: 34 },
+      },
+      { target: canvas, coords: { clientX: 54, clientY: 82 } },
+      {
+        keys: "[/MouseLeft]",
+        target: canvas,
+        coords: { clientX: 54, clientY: 82 },
+      },
+    ]);
+
+    expect(isStarterHomeLayoutEligible()).toBe(false);
+  });
+
   it("drags sticky note widgets through the same widget frame pipeline", async () => {
     const user = userEvent.setup();
     const moveWidget = vi.fn();
@@ -948,7 +978,7 @@ describe("WidgetCanvas", () => {
     mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
 
     const { container } = renderCanvas({
-      instances: [widget()],
+      instances: [widget({ width: 240, height: 240 })],
       mutations: { resizeWidget },
     });
 
@@ -1091,6 +1121,21 @@ describe("WidgetCanvas", () => {
     expect(
       screen.queryByRole("button", { name: PANEL_LABELS.widgets }),
     ).not.toBeInTheDocument();
+  });
+
+  it("cancels pending starter arrangement when the user pans the canvas", async () => {
+    const user = userEvent.setup();
+    markStarterHomeLayoutEligible();
+    const { container } = renderCanvas({ instances: [] });
+    const canvas = container.firstElementChild as Element;
+
+    await user.pointer({
+      keys: "[MouseLeft>]",
+      target: canvas,
+      coords: { clientX: 100, clientY: 100 },
+    });
+
+    expect(isStarterHomeLayoutEligible()).toBe(false);
   });
 
   it("saves the camera after panning the canvas background", async () => {

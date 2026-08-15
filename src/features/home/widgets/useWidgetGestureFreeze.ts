@@ -5,6 +5,9 @@ const GESTURE_END_HOLD_MS = 480;
 /**
  * Captures a static image when a home-canvas drag/resize starts so heavy widget
  * content (WebGL, large avatars) does not flash blank while the container moves.
+ * If the current capture fails, intentionally reuse the previous successful
+ * frame: avoiding a transparent compositor flash takes precedence over briefly
+ * showing an older frame during the gesture.
  */
 export function useWidgetGestureFreeze(
   gestureActive: boolean,
@@ -24,7 +27,6 @@ export function useWidgetGestureFreeze(
         setSnapshotUrl(lastGoodSnapshotRef.current);
       }
 
-      let frameId = 0;
       const capture = () => {
         const url = captureRef.current();
         if (url && url !== "data:,") {
@@ -33,7 +35,12 @@ export function useWidgetGestureFreeze(
         }
       };
 
-      frameId = requestAnimationFrame(() => {
+      // Prefer a snapshot captured before the widget moved. Layout effects run
+      // before paint, so consumers can swap it in without exposing a relocated
+      // WebGL surface that WKWebView may briefly composite as transparent.
+      capture();
+
+      let frameId = requestAnimationFrame(() => {
         frameId = requestAnimationFrame(capture);
       });
 

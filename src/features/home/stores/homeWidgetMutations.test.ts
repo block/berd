@@ -38,15 +38,28 @@ describe("homeWidgetMutations", () => {
     expect(widget).toMatchObject({
       id: "00000000-0000-4000-8000-000000000001",
       type: "clock",
-      x: -240,
-      y: 120,
+      x: -206.5,
+      y: 153.5,
     });
   });
 
   it("moves widgets with snapped top-left coordinates clamped by layout center constraints", () => {
     expect(
       moveWidgetMutation([clockWidget()], "w1", 1000, -1000, CONSTRAINTS),
-    ).toEqual([clockWidget({ x: 120, y: -240 })]);
+    ).toEqual([clockWidget({ x: 153.5, y: -206.5 })]);
+  });
+
+  it("can preserve an exact fractional position for initial layout placement", () => {
+    expect(
+      moveWidgetMutation(
+        [clockWidget({ width: 173, height: 173 })],
+        "w1",
+        533.5,
+        -266.5,
+        undefined,
+        { snapToGrid: false },
+      ),
+    ).toEqual([clockWidget({ x: 533.5, y: -266.5, width: 173, height: 173 })]);
   });
 
   it("moves widgets and brings them to the front in one mutation", () => {
@@ -111,7 +124,7 @@ describe("homeWidgetMutations", () => {
       clockWidget({
         id: "agent",
         type: "agentPin",
-        x: 384,
+        x: 336,
         y: 0,
         z: 2,
         width: 200,
@@ -122,13 +135,13 @@ describe("homeWidgetMutations", () => {
         x: 0,
         y: 0,
         z: 1,
-        width: 240,
-        height: 240,
+        width: 173,
+        height: 173,
       }),
       clockWidget({
         id: "chat",
         type: "chatPin",
-        x: 744,
+        x: 696,
         y: 0,
         z: 3,
         width: 188,
@@ -137,7 +150,7 @@ describe("homeWidgetMutations", () => {
       clockWidget({
         id: "skill",
         type: "skillPin",
-        x: 1080,
+        x: 1032,
         y: 0,
         z: 4,
         width: 240,
@@ -192,11 +205,11 @@ describe("homeWidgetMutations", () => {
 
   it("skips no-op cleanup mutations when widgets are already organized", () => {
     const widgets: WidgetInstance[] = [
-      clockWidget({ id: "clock", x: 0, y: 0, z: 1, width: 240, height: 240 }),
+      clockWidget({ id: "clock", x: 0, y: 0, z: 1, width: 173, height: 173 }),
       clockWidget({
         id: "agent",
         type: "agentPin",
-        x: 384,
+        x: 336,
         y: 0,
         z: 2,
         width: 200,
@@ -205,7 +218,7 @@ describe("homeWidgetMutations", () => {
       clockWidget({
         id: "chat",
         type: "chatPin",
-        x: 744,
+        x: 696,
         y: 0,
         z: 3,
         width: 188,
@@ -214,7 +227,7 @@ describe("homeWidgetMutations", () => {
       clockWidget({
         id: "skill",
         type: "skillPin",
-        x: 1080,
+        x: 1032,
         y: 0,
         z: 4,
         width: 240,
@@ -315,8 +328,8 @@ describe("updateWidgetStateMutation — clock mode resize", () => {
       mode: "digital",
     });
     expect(next?.[0]).toMatchObject({
-      width: 264,
-      height: 104,
+      width: 224,
+      height: 88,
       state: { mode: "digital" },
     });
   });
@@ -329,13 +342,13 @@ describe("updateWidgetStateMutation — clock mode resize", () => {
     );
 
     expect(next?.[0]).toMatchObject({
-      x: 138,
-      y: 248,
-      width: 264,
-      height: 104,
+      x: 158,
+      y: 256,
+      width: 224,
+      height: 88,
     });
-    expect((next?.[0]?.x ?? 0) + (next?.[0]?.width ?? 0) / 2).toBe(270);
-    expect((next?.[0]?.y ?? 0) + (next?.[0]?.height ?? 0) / 2).toBe(300);
+    expect((next?.[0]?.x ?? 0) + (next?.[0]?.width ?? 0) / 2).toBeCloseTo(270);
+    expect((next?.[0]?.y ?? 0) + (next?.[0]?.height ?? 0) / 2).toBeCloseTo(300);
   });
 
   it("clamps a center-preserving toggle within layout bounds", () => {
@@ -347,24 +360,44 @@ describe("updateWidgetStateMutation — clock mode resize", () => {
     );
 
     expect(next?.[0]).toMatchObject({
-      x: 108,
-      y: 188,
-      width: 264,
-      height: 104,
+      x: 128,
+      y: 196,
+      width: 224,
+      height: 88,
     });
+  });
+
+  it("restores custom clock sizes stored under legacy profile keys", () => {
+    const digitalWithLegacyMemory: WidgetInstance = {
+      ...analogClock,
+      width: 224,
+      height: 88,
+      state: {
+        mode: "digital",
+        __sizeByProfile: {
+          "240x240": { width: 300, height: 300 },
+        },
+      },
+    };
+
+    const next = updateWidgetStateMutation([digitalWithLegacyMemory], "c1", {
+      mode: "analog",
+    });
+
+    expect(next?.[0]).toMatchObject({ width: 300, height: 300 });
   });
 
   it("snaps back to the analog profile size when toggled to analog", () => {
     const digital: WidgetInstance = {
       ...analogClock,
-      width: 264,
-      height: 104,
+      width: 224,
+      height: 88,
       state: { mode: "digital" },
     };
     const next = updateWidgetStateMutation([digital], "c1", { mode: "analog" });
     expect(next?.[0]).toMatchObject({
-      width: 240,
-      height: 240,
+      width: 173,
+      height: 173,
       state: { mode: "analog" },
     });
   });
@@ -396,7 +429,7 @@ describe("updateWidgetStateMutation — clock mode resize", () => {
     const toDigital = updateWidgetStateMutation([resizedAnalog], "c1", {
       mode: "digital",
     });
-    expect(toDigital?.[0]).toMatchObject({ width: 264, height: 104 });
+    expect(toDigital?.[0]).toMatchObject({ width: 224, height: 88 });
 
     // The user then resizes the digital readout (committed via resize mutation).
     const resizedDigital: WidgetInstance = {

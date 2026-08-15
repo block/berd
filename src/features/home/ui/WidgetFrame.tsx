@@ -13,6 +13,7 @@ import {
   consumeFreshWidgetPlacement,
   hasFreshWidgetPlacement,
 } from "../lib/freshWidgetPlacements";
+import { clearStarterHomeLayoutEligibility } from "@/features/home/onboarding/starterHomeLayout";
 import { HOME_WIDGET_CATALOG_BY_ID } from "../widgets/catalog";
 import type {
   WidgetInstance,
@@ -28,6 +29,7 @@ interface WidgetFrameProps extends WidgetNavigationHandlers {
   mutations: WidgetMutationHandlers;
   constraints?: LayoutConstraints | null;
   canvasGestureActive?: boolean;
+  canvasGestureKind?: "drag" | "resize";
   canvasDragPosition?: { x: number; y: number };
   widgetResizePreviewActive?: boolean;
   renderPaused?: boolean;
@@ -57,6 +59,7 @@ export function WidgetFrame({
   mutations,
   constraints,
   canvasGestureActive = false,
+  canvasGestureKind,
   canvasDragPosition,
   widgetResizePreviewActive = false,
   renderPaused = false,
@@ -109,12 +112,15 @@ export function WidgetFrame({
   );
 
   const handleUpdateState = useCallback(
-    (next: Record<string, unknown>) =>
-      updateWidgetState(instance.id, next, constraints ?? undefined),
+    (next: Record<string, unknown>) => {
+      clearStarterHomeLayoutEligibility();
+      updateWidgetState(instance.id, next, constraints ?? undefined);
+    },
     [constraints, instance.id, updateWidgetState],
   );
 
   const handleRemove = useCallback(() => {
+    clearStarterHomeLayoutEligibility();
     removeWidget(instance.id);
   }, [instance.id, removeWidget]);
 
@@ -198,6 +204,7 @@ export function WidgetFrame({
         <Component
           instance={instance}
           canvasGestureActive={canvasGestureActive}
+          canvasGestureKind={canvasGestureKind}
           canvasDragPosition={canvasDragPosition}
           widgetResizePreviewActive={widgetResizePreviewActive}
           renderPaused={renderPaused}

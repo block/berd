@@ -12,6 +12,7 @@ import {
 } from "@/features/layout/api/layout";
 import { i18n } from "@/shared/i18n";
 import { markStarterAgentPinsEligible } from "@/features/home/onboarding/starterAgents";
+import { markStarterHomeLayoutEligible } from "@/features/home/onboarding/starterHomeLayout";
 import {
   notifyHomeCameraSaveConfirmed,
   notifyHomeCameraSaveDiscarded,
@@ -527,16 +528,27 @@ export function createHomeWidgetRuntime({
           return;
         }
         markStarterAgentPinsEligible();
+        if (berdyOnboardingEnabled) {
+          markStarterHomeLayoutEligible();
+        }
 
+        const seededCamera = {
+          ...result.layout.camera,
+          zoomBps: 9_000,
+        };
         if (!berdyOnboardingEnabled) {
-          setReadyLayout(result.layout, generation);
+          setReadyLayout(
+            { ...result.layout, camera: seededCamera },
+            generation,
+          );
+          enqueueCameraSave(seededCamera);
           return;
         }
 
         const onboardingTour = createDefaultOnboardingTourWidget();
         const avatarCenter = onboardingTourAvatarCenter(onboardingTour);
         const centeredCamera = {
-          ...result.layout.camera,
+          ...seededCamera,
           centerX: avatarCenter.x,
           centerY: avatarCenter.y,
         };

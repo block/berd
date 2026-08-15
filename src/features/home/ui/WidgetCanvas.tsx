@@ -14,6 +14,7 @@ import {
   hasStarterWidgetPickerRequest,
   OPEN_STARTER_WIDGET_PICKER_EVENT,
 } from "@/features/home/onboarding/starterWidgetTask";
+import { clearStarterHomeLayoutEligibility } from "@/features/home/onboarding/starterHomeLayout";
 import {
   hasVisibleHomeCanvasWidget,
   isHomeCanvasPointInsideViewport,
@@ -85,7 +86,7 @@ const PICKER_VIEWPORT_EDGE_PADDING = 16;
 const DEFAULT_CAMERA: LayoutCamera = {
   centerX: 0,
   centerY: 0,
-  zoomBps: 10_000,
+  zoomBps: 9_000,
 };
 
 const DEFAULT_CONSTRAINTS: LayoutConstraints = {
@@ -355,12 +356,14 @@ export function WidgetCanvas({
     constraints: viewportConstraints,
     saveCamera,
     onViewportGestureStart: (kind) => {
+      clearStarterHomeLayoutEligibility();
       if (kind !== "pan") closePicker();
     },
     onViewportPanEnd: (moved) => {
       if (!moved) closePicker();
     },
     onWidgetDragStart: (instance) => {
+      clearStarterHomeLayoutEligibility();
       handleVisualLift(instance.id, currentMaxZ + 1);
     },
     onWidgetDragEnd: ({ id, position, offset }) => {
@@ -371,6 +374,7 @@ export function WidgetCanvas({
       });
     },
     onWidgetResizeStart: (instance) => {
+      clearStarterHomeLayoutEligibility();
       handleVisualLift(instance.id, currentMaxZ + 1);
     },
     onWidgetResizeEnd: ({ id, bounds, offset }) => {
@@ -681,6 +685,13 @@ export function WidgetCanvas({
                   instance={renderInstance}
                   constraints={constraints}
                   canvasGestureActive={canvasGestureActive}
+                  canvasGestureKind={
+                    isResizePreview
+                      ? "resize"
+                      : dragPositions[instance.id]
+                        ? "drag"
+                        : undefined
+                  }
                   canvasDragPosition={dragPositions[instance.id]}
                   widgetResizePreviewActive={isResizePreview}
                   renderPaused={!widgetInViewport}
@@ -785,6 +796,7 @@ export function WidgetCanvas({
         starterTasksAvailable={starterTasksAvailable}
         onClose={closePicker}
         onSelect={(type, state) => {
+          clearStarterHomeLayoutEligibility();
           mutations.addWidget(
             type,
             picker.worldX,

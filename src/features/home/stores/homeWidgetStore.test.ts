@@ -341,15 +341,15 @@ describe("homeWidgetStore", () => {
       .instances.filter((instance) => instance.type === "onboardingTour");
     expect(onboardingWidgets).toHaveLength(1);
     expect(onboardingWidgets[0]).toMatchObject({
-      x: -104,
-      y: 272,
+      x: -137.5,
+      y: 205,
       state: { noteId: "onboarding:tour" },
       z: 2,
     });
     expect(onboardingWidgets[0].state?.welcomeDismissed).toBeUndefined();
     expect(useHomeWidgetStore.getState().camera).toMatchObject({
-      centerX: -32,
-      centerY: 362,
+      centerX: -65.5,
+      centerY: 295,
     });
   });
 
@@ -459,12 +459,12 @@ describe("homeWidgetStore", () => {
     expect(saveLayoutCamera).toHaveBeenCalledWith({
       layoutId: HOME_LAYOUT_ID,
       expectedRevision: 1,
-      camera: { centerX: 736, centerY: 378, zoomBps: 10_000 },
+      camera: { centerX: 750.5, centerY: 335, zoomBps: 9_000 },
     });
     expect(useHomeWidgetStore.getState().camera).toEqual({
-      centerX: 736,
-      centerY: 378,
-      zoomBps: 10_000,
+      centerX: 750.5,
+      centerY: 335,
+      zoomBps: 9_000,
     });
     expect(useHomeWidgetStore.getState().loadStatus).toBe("ready");
     expect(useHomeWidgetStore.getState().itemRevision).toBe(8);
@@ -493,8 +493,15 @@ describe("homeWidgetStore", () => {
         expect.objectContaining({ targetId: "onboarding:tour" }),
       ]),
     );
-    expect(saveLayoutCamera).not.toHaveBeenCalled();
-    expect(useHomeWidgetStore.getState().camera).toEqual(INITIAL_CAMERA);
+    expect(saveLayoutCamera).toHaveBeenCalledWith({
+      layoutId: HOME_LAYOUT_ID,
+      expectedRevision: 1,
+      camera: { ...INITIAL_CAMERA, zoomBps: 9_000 },
+    });
+    expect(useHomeWidgetStore.getState().camera).toEqual({
+      ...INITIAL_CAMERA,
+      zoomBps: 9_000,
+    });
   });
 
   it("backfills onboarding sticky notes into existing layouts once", async () => {
@@ -657,8 +664,8 @@ describe("homeWidgetStore", () => {
       },
       {
         targetId: "onboarding:tour",
-        centerX: 888,
-        centerY: 378,
+        centerX: 902.5,
+        centerY: 335,
       },
     ]);
     expect(useHomeWidgetStore.getState()).toMatchObject({
@@ -1636,8 +1643,8 @@ describe("homeWidgetStore", () => {
     const secondRequest = vi.mocked(saveLayoutItems).mock.calls[1][0];
     expect(secondRequest.expectedRevision).toBe(5);
     expect(secondRequest.items[0]).toMatchObject({
-      centerX: 168,
-      centerY: 168,
+      centerX: 134.5,
+      centerY: 134.5,
       zIndex: 1,
     });
     expect(secondRequest.items).toHaveLength(1);
