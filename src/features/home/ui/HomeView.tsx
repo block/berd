@@ -4,13 +4,16 @@ import { useTranslation } from "react-i18next";
 import { prefetchProjectArtifactRenderer } from "@/features/projects/artifact/prefetchProjectArtifactRenderer";
 import { OnboardingTourDialog } from "@/features/onboarding/ui/OnboardingTourDialog";
 import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { findBerdyPersonaId } from "@/features/onboarding/berdyAgent";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import {
   areStarterAgentPinsEligible,
+  markStarterAgentPinsEligible,
   markStarterAgentPinsSeeded,
   selectStarterAgentPersonas,
+  shouldRemoveLegacyBerdyPin,
 } from "@/features/home/onboarding/starterAgents";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
@@ -116,6 +119,8 @@ export function HomeView({
   } = useHomeWidgetLayoutController();
 
   useEffect(() => {
+    const shouldMigrateLegacyPins = shouldRemoveLegacyBerdyPin();
+    if (shouldMigrateLegacyPins) markStarterAgentPinsEligible();
     if (
       loadStatus !== "ready" ||
       personasLoading ||
@@ -125,9 +130,15 @@ export function HomeView({
     }
     const starterPersonas = selectStarterAgentPersonas(personas);
     if (starterPersonas.length !== STARTER_HOME_LAYOUT.agents.length) return;
+    const legacyBerdyAgentId = shouldMigrateLegacyPins
+      ? findBerdyPersonaId(personas)
+      : null;
     void useHomeWidgetStore
       .getState()
-      .addMissingStarterAgentPins(starterPersonas.map(({ id }) => id))
+      .addMissingStarterAgentPins(
+        starterPersonas.map(({ id }) => id),
+        legacyBerdyAgentId,
+      )
       .then((didPersist) => {
         if (didPersist) markStarterAgentPinsSeeded();
       });

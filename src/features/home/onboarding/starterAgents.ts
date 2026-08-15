@@ -4,8 +4,12 @@ import type { Persona } from "@/shared/types/agents";
 // additional agent pins that complete the three-agent starter Home.
 export const STARTER_AGENT_NAMES = ["Tinker", "Wildcard"] as const;
 const STARTER_AGENT_FILE_NAMES = ["tinker.md", "wildcard.md"] as const;
-const LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEY =
-  "goose:home:starter-agent-pins-seeded";
+const LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEYS = [
+  "goose:home:starter-agent-pins-seeded",
+  "goose:home:starter-agent-pins-seeded-v2",
+  "goose:home:starter-agent-pins-seeded-v3",
+  "goose:home:starter-agent-pins-seeded-v4",
+] as const;
 const SEEDED_STARTER_AGENTS_STORAGE_KEY =
   "goose:home:starter-agent-pins-seeded-v5";
 const STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY =
@@ -66,8 +70,9 @@ export function markStarterAgentPinsEligible(): void {
 export function shouldRemoveLegacyBerdyPin(): boolean {
   try {
     return (
-      localStorage.getItem(LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEY) === "1" &&
-      !haveStarterAgentPinsBeenSeeded()
+      LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEYS.some(
+        (key) => localStorage.getItem(key) === "1",
+      ) && !haveStarterAgentPinsBeenSeeded()
     );
   } catch {
     return false;
@@ -78,10 +83,9 @@ export function resetStarterAgentPinsSeeded(): void {
   starterAgentPinsEligibleForCurrentRun = false;
   try {
     localStorage.removeItem(SEEDED_STARTER_AGENTS_STORAGE_KEY);
-    localStorage.removeItem("goose:home:starter-agent-pins-seeded-v4");
-    localStorage.removeItem("goose:home:starter-agent-pins-seeded-v3");
-    localStorage.removeItem("goose:home:starter-agent-pins-seeded-v2");
-    localStorage.removeItem(LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEY);
+    for (const key of LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEYS) {
+      localStorage.removeItem(key);
+    }
     localStorage.removeItem(STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY);
   } catch {
     // Home remains usable when localStorage is unavailable.
@@ -92,10 +96,9 @@ export function markStarterAgentPinsSeeded(): void {
   starterAgentPinsEligibleForCurrentRun = false;
   try {
     localStorage.setItem(SEEDED_STARTER_AGENTS_STORAGE_KEY, "1");
-    localStorage.removeItem("goose:home:starter-agent-pins-seeded-v4");
-    localStorage.removeItem("goose:home:starter-agent-pins-seeded-v3");
-    localStorage.removeItem("goose:home:starter-agent-pins-seeded-v2");
-    localStorage.removeItem(LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEY);
+    for (const key of LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEYS) {
+      localStorage.removeItem(key);
+    }
     localStorage.removeItem(STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY);
   } catch {
     // Home remains usable when localStorage is unavailable.
