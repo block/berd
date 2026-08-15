@@ -164,7 +164,8 @@ export function HomeView({
 
     const maxZ = Math.max(0, ...instances.map((instance) => instance.z));
     const arranged = instances.map((instance) => {
-      if (instance.type === "clock") return { ...instance, ...STARTER_HOME_LAYOUT.clock };
+      if (instance.type === "clock")
+        return { ...instance, ...STARTER_HOME_LAYOUT.clock };
       if (instance.type === "onboardingTour") {
         return { ...instance, ...STARTER_HOME_LAYOUT.berdy, z: maxZ + 1 };
       }
