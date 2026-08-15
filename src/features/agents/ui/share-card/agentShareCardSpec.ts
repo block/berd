@@ -131,6 +131,61 @@ const TRAIT_RULES: readonly TraitRule[] = [
   },
 ];
 
+const SPANISH_TRAIT_KEYWORDS: Readonly<
+  Partial<Record<Exclude<AgentCardTraitId, "default">, readonly string[]>>
+> = {
+  software: [
+    "código",
+    "programación",
+    "software",
+    "desarrollador",
+    "implementar",
+    "depurar",
+  ],
+  review: [
+    "revisión",
+    "auditoría",
+    "riesgo",
+    "calidad",
+    "seguridad",
+    "crítica",
+  ],
+  research: [
+    "investigar",
+    "investigación",
+    "buscar",
+    "fuente",
+    "evidencia",
+    "descubrir",
+  ],
+  writing: [
+    "escribir",
+    "redacción",
+    "borrador",
+    "editar",
+    "contenido",
+    "resumir",
+  ],
+  design: [
+    "diseño",
+    "visual",
+    "interfaz",
+    "experiencia",
+    "prototipo",
+    "creativo",
+  ],
+  planning: ["plan", "planificación", "estrategia", "organizar", "coordinar"],
+  automation: [
+    "automatizar",
+    "automatización",
+    "flujo",
+    "repetitivo",
+    "programar",
+  ],
+  data: ["datos", "analizar", "análisis", "métrica", "informe", "perspectiva"],
+  support: ["ayuda", "soporte", "solucionar", "guiar", "explicar", "enseñar"],
+};
+
 /** Returns a stable semantic id; localized presentation copy is resolved later. */
 export function classifyAgentCardTraits(
   instructions: string,
@@ -140,7 +195,11 @@ export function classifyAgentCardTraits(
   let bestScore = 0;
 
   for (const rule of TRAIT_RULES) {
-    const score = rule.keywords.reduce((total, keyword) => {
+    const keywords = [
+      ...rule.keywords,
+      ...(SPANISH_TRAIT_KEYWORDS[rule.id] ?? []),
+    ];
+    const score = keywords.reduce((total, keyword) => {
       const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       return (
         total + (new RegExp(`\\b${escaped}\\b`, "u").test(normalized) ? 1 : 0)

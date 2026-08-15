@@ -32,6 +32,27 @@ describe("agentShareCardSpec", () => {
     ).toBe("software");
   });
 
+  it("maps equivalent English and Spanish instructions to the same traits", () => {
+    expect(classifyAgentCardTraits("Research evidence and sources")).toBe(
+      "research",
+    );
+    expect(classifyAgentCardTraits("Investigar evidencia y fuentes")).toBe(
+      "research",
+    );
+    expect(classifyAgentCardTraits("Design an interface prototype")).toBe(
+      "design",
+    );
+    expect(classifyAgentCardTraits("Diseño de una interfaz y prototipo")).toBe(
+      "design",
+    );
+    expect(classifyAgentCardTraits("Automate repetitive workflows")).toBe(
+      "automation",
+    );
+    expect(
+      classifyAgentCardTraits("Automatización de flujos repetitivos"),
+    ).toBe("automation");
+  });
+
   it("uses explicit casing independent of the host locale", () => {
     expect(truncateAgentCardTitle("mini", "en")).toBe("MINI");
     expect(classifyAgentCardTraits("INTERFACE designer")).toBe("design");
