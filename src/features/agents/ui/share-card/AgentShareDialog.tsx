@@ -79,6 +79,33 @@ async function avatarSourceToDataUrl(source: string): Promise<string | null> {
   }
 }
 
+export const AVATAR_ANIMATION_EMBED_TIMEOUT_MS = 5_000;
+
+async function fetchAvatarAnimation(
+  source: string,
+  timeoutMs = AVATAR_ANIMATION_EMBED_TIMEOUT_MS,
+): Promise<Blob> {
+  const controller = new AbortController();
+  let timeout: number | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timeout = window.setTimeout(() => {
+      controller.abort();
+      reject(new Error("Avatar animation request timed out"));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([
+      fetch(source, { signal: controller.signal }).then(async (response) => {
+        if (!response.ok) throw new Error("Avatar animation request failed");
+        return await response.blob();
+      }),
+      deadline,
+    ]);
+  } finally {
+    if (timeout !== undefined) window.clearTimeout(timeout);
+  }
+}
+
 interface AgentShareDialogProps {
   open: boolean;
   persona: Persona;
@@ -256,10 +283,7 @@ export function AgentShareDialog({
               };
             }
           } else if (/^(?:https?:|blob:|data:)/u.test(cachedAvatar.src)) {
-            const response = await fetch(cachedAvatar.src);
-            if (!response.ok)
-              throw new Error("Avatar animation request failed");
-            const blob = await response.blob();
+            const blob = await fetchAvatarAnimation(cachedAvatar.src);
             if (blob.type !== "video/mp4" && blob.type !== "video/webm") {
               throw new Error("Avatar animation has an unsupported media type");
             }

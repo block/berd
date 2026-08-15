@@ -15,7 +15,10 @@ import {
   MAX_SNAPSHOT_AVATAR_ANIMATION_BYTES,
 } from "@/features/agents/agent-snapshot";
 import { readCachedAvatarAnimation } from "@/shared/api/avatars";
-import { AgentShareDialog } from "./AgentShareDialog";
+import {
+  AgentShareDialog,
+  AVATAR_ANIMATION_EMBED_TIMEOUT_MS,
+} from "./AgentShareDialog";
 import { downloadBlob, renderAgentShareCard } from "./agentShareCard";
 
 const avatarHookMocks = vi.hoisted(() => ({
@@ -446,6 +449,63 @@ describe("AgentShareDialog", () => {
     }
   });
 
+  it("falls back to a still card when animation fetching stalls", async () => {
+    vi.useFakeTimers();
+    avatarHookMocks.image = undefined;
+    avatarHookMocks.media = {
+      src: "https://example.com/generated-avatar.webm",
+      mediaType: "video",
+      posterSrc: "https://example.com/generated-avatar.png",
+    };
+    vi.mocked(renderAgentShareCard).mockResolvedValue(
+      new Blob(["card"], { type: "image/png" }),
+    );
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn((input: string | URL | Request) => {
+      if (String(input).endsWith(".png")) {
+        const bytes = Uint8Array.from([137, 80, 78, 71]);
+        return Promise.resolve({
+          ok: true,
+          headers: new Headers(),
+          blob: async () => new Blob([bytes], { type: "image/png" }),
+        } as Response);
+      }
+      return new Promise<Response>(() => undefined);
+    }) as typeof fetch;
+
+    try {
+      render(
+        <AgentShareDialog
+          open
+          persona={{ ...persona, avatar: "user-avatar:generated" }}
+          onOpenChange={vi.fn()}
+          onDownloadAgent={vi.fn()}
+        />,
+      );
+      fireEvent.load(screen.getByTestId("agent-card-avatar-preload"));
+      fireEvent.click(
+        screen.getByRole("button", { name: "share.downloadCard" }),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(AVATAR_ANIMATION_EMBED_TIMEOUT_MS);
+        await vi.runAllTimersAsync();
+      });
+
+      expect(encodeAgentImage).toHaveBeenCalledWith(
+        expect.any(Uint8Array),
+        expect.anything(),
+        null,
+      );
+      expect(downloadBlob).toHaveBeenCalledTimes(1);
+      expect(
+        screen.getByRole("button", { name: "share.downloadCard" }),
+      ).not.toBeDisabled();
+    } finally {
+      vi.useRealTimers();
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("does not embed failed or non-video animation responses", async () => {
     avatarHookMocks.image = undefined;
     avatarHookMocks.media = {
@@ -679,19 +739,17 @@ describe("AgentShareDialog", () => {
       />,
     );
 
-    const fallback = document.querySelector<HTMLImageElement>(
-      'img[src*="goose-avatar"]',
+    const fallback = screen.getByTestId("agent-card-avatar-preload");
+    expect(fallback).toHaveAttribute(
+      "src",
+      expect.stringContaining("goose-avatar"),
     );
-    expect(fallback).not.toBeNull();
-    fireEvent.load(fallback as HTMLImageElement);
+    fireEvent.load(fallback);
     await waitFor(() =>
       expect(
-        screen.queryByLabelText("share.loadingCard"),
-      ).not.toBeInTheDocument(),
+        screen.getByRole("button", { name: "share.downloadCard" }),
+      ).toBeEnabled(),
     );
-    expect(
-      screen.getByRole("button", { name: "share.downloadCard" }),
-    ).toBeEnabled();
   });
 
   it("suppresses an in-flight card when the avatar changes", async () => {
