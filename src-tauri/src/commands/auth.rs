@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use builderbot_auth::auth_login::{
-    build_auth_http_client, exchange_login_code_and_verify, login_url, logout_session_credential,
-    verify_session_credential, AuthMeResponse,
+    build_auth_http_client, logout_session_credential, verify_session_credential, AuthMeResponse,
+    OAuthCallback, OAuthCallbackRejection, OAuthLoginAttempt,
 };
 use builderbot_auth::auth_storage::{
     default_session_storage_for_bb_home,
@@ -40,9 +40,12 @@ const KGOOSE_PLAYPEN_ENV_VAR: &str = "KGOOSE_PLAYPEN";
 const BB_SKILLS_CONFIG_ENV_VAR: &str = "BB_SKILLS_CONFIG";
 const SKILLS_CONFIG_FILE_NAME: &str = "skills.yaml";
 const CALLBACK_PATH: &str = "/callback";
-const CANCEL_CALLBACK_PATH: &str = "/cancel";
 const AUTH_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
-const LOOPBACK_CONNECT_TIMEOUT: Duration = Duration::from_secs(1);
+const LOGIN_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const LOOPBACK_IO_TIMEOUT: Duration = Duration::from_secs(1);
+const MAX_LOOPBACK_REQUEST_LINE_BYTES: usize = 4 * 1024;
+const MAX_LOOPBACK_HEADER_LINE_BYTES: usize = 8 * 1024;
+const MAX_LOOPBACK_HEADER_COUNT: usize = 64;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -123,8 +126,15 @@ struct SkillsFileConfig {
 struct LoginAttempt {
     id: u64,
     callback_addr: SocketAddr,
-    callback_received: bool,
     canceled: bool,
+}
+
+struct LoginAttemptGuard(u64);
+
+impl Drop for LoginAttemptGuard {
+    fn drop(&mut self) {
+        clear_login_attempt_if_current(self.0);
+    }
 }
 
 fn login_attempt_state() -> &'static Mutex<Option<LoginAttempt>> {
@@ -213,17 +223,20 @@ fn auth_status_blocking() -> Result<AuthStatus> {
     status_for_context(&context)
 }
 
-fn register_login_attempt(callback_addr: SocketAddr) -> u64 {
+fn register_login_attempt(callback_addr: SocketAddr) -> Result<u64> {
     let id = next_login_attempt_id();
-    *login_attempt_state()
+    let mut current = login_attempt_state()
         .lock()
-        .expect("login attempt state mutex poisoned") = Some(LoginAttempt {
+        .expect("login attempt state mutex poisoned");
+    if current.is_some() {
+        return Err(anyhow!("BuilderBot auth login is already in progress"));
+    }
+    *current = Some(LoginAttempt {
         id,
         callback_addr,
-        callback_received: false,
         canceled: false,
     });
-    id
+    Ok(id)
 }
 
 fn clear_login_attempt_if_current(id: u64) {
@@ -235,20 +248,19 @@ fn clear_login_attempt_if_current(id: u64) {
     }
 }
 
-fn mark_login_attempt_callback_received(id: u64) {
-    let mut current = login_attempt_state()
-        .lock()
-        .expect("login attempt state mutex poisoned");
-    if let Some(attempt) = current.as_mut().filter(|attempt| attempt.id == id) {
-        attempt.callback_received = true;
-    }
-}
-
 fn is_login_attempt_canceled(id: u64) -> bool {
     login_attempt_state()
         .lock()
         .expect("login attempt state mutex poisoned")
         .is_some_and(|attempt| attempt.id == id && attempt.canceled)
+}
+
+fn current_login_attempt_id_for(callback_addr: SocketAddr) -> Option<u64> {
+    login_attempt_state()
+        .lock()
+        .expect("login attempt state mutex poisoned")
+        .filter(|attempt| attempt.callback_addr == callback_addr)
+        .map(|attempt| attempt.id)
 }
 
 fn complete_login_attempt_if_not_canceled(id: u64) -> bool {
@@ -267,20 +279,10 @@ fn complete_login_attempt_if_not_canceled(id: u64) -> bool {
 }
 
 fn cancel_login_blocking() -> Result<()> {
-    let Some(attempt) = mark_login_attempt_canceled() else {
-        return Ok(());
-    };
-
-    if attempt.callback_received {
-        return Ok(());
-    }
-
-    let stream = TcpStream::connect_timeout(&attempt.callback_addr, LOOPBACK_CONNECT_TIMEOUT)
-        .with_context(|| format!("connect to auth callback at {}", attempt.callback_addr))?;
-    stream
-        .set_write_timeout(Some(LOOPBACK_CONNECT_TIMEOUT))
-        .context("set auth cancel write timeout")?;
-    write_cancel_request(stream)
+    // Cancellation is an in-process command, not a loopback HTTP capability.
+    // The nonblocking login worker polls this state at least every 25 ms.
+    mark_login_attempt_canceled();
+    Ok(())
 }
 
 fn mark_login_attempt_canceled() -> Option<LoginAttempt> {
@@ -314,10 +316,15 @@ fn login_blocking(app_handle: AppHandle, org: Option<String>) -> Result<AuthStat
     }
 
     let listener = TcpListener::bind("127.0.0.1:0").context("listen on loopback callback port")?;
+    listener
+        .set_nonblocking(true)
+        .context("configure loopback callback listener")?;
     let callback_addr = listener.local_addr()?;
-    let attempt_id = register_login_attempt(callback_addr);
+    let mut oauth_attempt = OAuthLoginAttempt::generate()?;
     let callback_url = format!("http://{}{}", callback_addr, CALLBACK_PATH);
-    let login_url = login_url(&context.kgoose_service_url, &callback_url)?;
+    let login_url = oauth_attempt.login_url(&context.kgoose_service_url, &callback_url)?;
+    let attempt_id = register_login_attempt(callback_addr)?;
+    let _attempt_guard = LoginAttemptGuard(attempt_id);
     if let Err(error) = app_handle
         .opener()
         .open_url(login_url.as_str(), None::<&str>)
@@ -327,19 +334,18 @@ fn login_blocking(app_handle: AppHandle, org: Option<String>) -> Result<AuthStat
         return Err(error);
     }
 
-    let code = match receive_exchange_code(listener) {
+    let code = match receive_exchange_code(listener, &mut oauth_attempt) {
         Ok(code) => code,
         Err(error) => {
             clear_login_attempt_if_current(attempt_id);
             return Err(error);
         }
     };
-    mark_login_attempt_callback_received(attempt_id);
     if is_login_attempt_canceled(attempt_id) {
         clear_login_attempt_if_current(attempt_id);
         return Err(anyhow!("BuilderBot auth login was canceled"));
     }
-    let verified = match exchange_login_code_and_verify(
+    let verified = match oauth_attempt.exchange_login_code_and_verify(
         &client,
         context.playpen.as_deref(),
         &context.kgoose_service_url,
@@ -659,84 +665,209 @@ fn session_storage_key(context: &AuthContext) -> SessionStorageKey {
     )
 }
 
-fn receive_exchange_code(listener: TcpListener) -> Result<String> {
-    for stream in listener.incoming() {
-        let stream = stream.context("accept loopback auth callback")?;
-        if let Some(code) = handle_callback_stream(stream)? {
-            return Ok(code);
+fn receive_exchange_code(listener: TcpListener, attempt: &mut OAuthLoginAttempt) -> Result<String> {
+    let deadline = std::time::Instant::now() + LOGIN_ATTEMPT_TIMEOUT;
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return Err(anyhow!(
+                "BuilderBot auth login expired before receiving a valid callback"
+            ));
+        }
+        if let Some(attempt_id) = current_login_attempt_id_for(listener.local_addr()?) {
+            if is_login_attempt_canceled(attempt_id) {
+                return Err(anyhow!("BuilderBot auth login was canceled"));
+            }
+        } else {
+            return Err(anyhow!("BuilderBot auth login attempt is no longer active"));
+        }
+
+        match listener.accept() {
+            Ok((stream, _)) => {
+                if let Some(code) = handle_callback_stream(stream, attempt)? {
+                    return Ok(code);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(error) => return Err(error).context("accept loopback auth callback"),
         }
     }
-
-    Err(anyhow!(
-        "loopback auth server stopped without receiving a callback"
-    ))
 }
 
-fn handle_callback_stream(mut stream: TcpStream) -> Result<Option<String>> {
-    let mut reader = BufReader::new(stream.try_clone().context("clone callback stream")?);
-    let mut request_line = String::new();
-    reader
-        .read_line(&mut request_line)
-        .context("read callback request line")?;
-    while {
-        let mut header = String::new();
-        reader
-            .read_line(&mut header)
-            .context("read callback header")?;
-        header != "\r\n" && !header.is_empty()
-    } {}
+fn handle_callback_stream(
+    mut stream: TcpStream,
+    attempt: &mut OAuthLoginAttempt,
+) -> Result<Option<String>> {
+    if let Err(error) = stream.set_read_timeout(Some(LOOPBACK_IO_TIMEOUT)) {
+        log::debug!("ignoring loopback auth connection with no read timeout: {error}");
+        return Ok(None);
+    }
+    if let Err(error) = stream.set_write_timeout(Some(LOOPBACK_IO_TIMEOUT)) {
+        log::debug!("ignoring loopback auth connection with no write timeout: {error}");
+        return Ok(None);
+    }
+    let outcome = read_callback_stream(&stream, attempt);
+    match outcome {
+        Err(error) => {
+            let _ = write_loopback_response(
+                &mut stream,
+                400,
+                "BuilderBot auth ignored an invalid callback request. The valid login is still waiting.",
+            );
+            log::debug!("ignoring invalid loopback auth connection: {error:#}");
+            Ok(None)
+        }
+        Ok(CallbackReadOutcome::WrongPath) => {
+            let _ = write_loopback_response(
+                &mut stream,
+                404,
+                "BuilderBot auth is waiting for the callback.",
+            );
+            Ok(None)
+        }
+        Ok(CallbackReadOutcome::InvalidMethod) => {
+            let _ = write_loopback_response(
+                &mut stream,
+                400,
+                "BuilderBot auth ignored an invalid callback request. The valid login is still waiting.",
+            );
+            Ok(None)
+        }
+        Ok(CallbackReadOutcome::Callback(OAuthCallback::Code(code))) => {
+            let _ = write_loopback_response(
+                &mut stream,
+                200,
+                "BuilderBot auth complete. Return to Goose.",
+            );
+            Ok(Some(code))
+        }
+        Ok(CallbackReadOutcome::Callback(OAuthCallback::Error(error))) => {
+            let _ = write_loopback_response(
+                &mut stream,
+                400,
+                "BuilderBot auth failed. Return to Goose.",
+            );
+            Err(anyhow!("auth callback returned error: {error}"))
+        }
+        Ok(CallbackReadOutcome::Callback(OAuthCallback::Rejected(rejection))) => {
+            let _ =
+                write_loopback_response(&mut stream, 400, callback_rejection_message(rejection));
+            Ok(None)
+        }
+    }
+}
 
-    let request_target = request_line
-        .split_whitespace()
-        .nth(1)
+enum CallbackReadOutcome {
+    Callback(OAuthCallback),
+    WrongPath,
+    InvalidMethod,
+}
+
+fn read_callback_stream(
+    stream: &TcpStream,
+    attempt: &mut OAuthLoginAttempt,
+) -> Result<CallbackReadOutcome> {
+    let mut reader = BufReader::new(stream.try_clone().context("clone callback stream")?);
+    let request_line = read_bounded_http_line(
+        &mut reader,
+        MAX_LOOPBACK_REQUEST_LINE_BYTES,
+        "callback request line",
+    )?;
+    if request_line.is_empty() {
+        return Err(anyhow!("auth callback request line was empty"));
+    }
+
+    let mut headers_complete = false;
+    for _ in 0..MAX_LOOPBACK_HEADER_COUNT {
+        let header = read_bounded_http_line(
+            &mut reader,
+            MAX_LOOPBACK_HEADER_LINE_BYTES,
+            "callback header",
+        )?;
+        if header == "\r\n" {
+            headers_complete = true;
+            break;
+        }
+        if header.is_empty() {
+            return Err(anyhow!("auth callback request ended before its headers"));
+        }
+    }
+    if !headers_complete {
+        return Err(anyhow!(
+            "auth callback request exceeded {MAX_LOOPBACK_HEADER_COUNT} headers"
+        ));
+    }
+
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts
+        .next()
+        .ok_or_else(|| anyhow!("auth callback request did not include a method"))?;
+    let request_target = request_parts
+        .next()
         .ok_or_else(|| anyhow!("auth callback request did not include a path"))?;
+    let version = request_parts
+        .next()
+        .ok_or_else(|| anyhow!("auth callback request did not include an HTTP version"))?;
+    if request_parts.next().is_some() || !matches!(version, "HTTP/1.0" | "HTTP/1.1") {
+        return Err(anyhow!("auth callback request line was malformed"));
+    }
+
     let parsed = Url::parse(&format!("http://127.0.0.1{request_target}"))
         .context("parse loopback callback URL")?;
 
-    if parsed.path() == CANCEL_CALLBACK_PATH {
-        write_loopback_response(&mut stream, 200, "BuilderBot auth canceled.")?;
-        return Err(anyhow!("BuilderBot auth login was canceled"));
-    }
-
     if parsed.path() != CALLBACK_PATH {
-        write_loopback_response(
-            &mut stream,
-            404,
-            "BuilderBot auth is waiting for the callback.",
-        )?;
-        return Ok(None);
+        return Ok(CallbackReadOutcome::WrongPath);
     }
 
-    if let Some(error) = parsed
-        .query_pairs()
-        .find(|(key, _)| key == "error")
-        .map(|(_, value)| value.into_owned())
-    {
-        write_loopback_response(&mut stream, 400, "BuilderBot auth failed. Return to Goose.")?;
-        return Err(anyhow!("auth callback returned error: {error}"));
+    if method != "GET" {
+        return Ok(CallbackReadOutcome::InvalidMethod);
     }
 
-    let code = parsed
-        .query_pairs()
-        .find(|(key, _)| key == "code")
-        .map(|(_, value)| value.into_owned())
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| anyhow!("auth callback did not include an exchange code"))?;
-    write_loopback_response(
-        &mut stream,
-        200,
-        "BuilderBot auth complete. Return to Goose.",
-    )?;
-    Ok(Some(code))
+    Ok(CallbackReadOutcome::Callback(
+        attempt.parse_callback(&parsed),
+    ))
 }
 
-fn write_cancel_request(mut stream: TcpStream) -> Result<()> {
-    let request = format!(
-        "GET {CANCEL_CALLBACK_PATH} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
-    );
-    stream
-        .write_all(request.as_bytes())
-        .context("write auth cancel request")
+fn read_bounded_http_line(
+    reader: &mut BufReader<TcpStream>,
+    max_bytes: usize,
+    description: &str,
+) -> Result<String> {
+    let mut bytes = Vec::new();
+    let read = reader
+        .take((max_bytes + 1) as u64)
+        .read_until(b'\n', &mut bytes)
+        .with_context(|| format!("read {description}"))?;
+    if read == 0 {
+        return Ok(String::new());
+    }
+    if bytes.len() > max_bytes || !bytes.ends_with(b"\n") {
+        return Err(anyhow!("{description} exceeded {max_bytes} bytes"));
+    }
+    String::from_utf8(bytes).with_context(|| format!("{description} was not valid UTF-8"))
+}
+
+fn callback_rejection_message(rejection: OAuthCallbackRejection) -> &'static str {
+    match rejection {
+        OAuthCallbackRejection::MissingState => {
+            "BuilderBot auth ignored a callback with missing state. The valid login is still waiting."
+        }
+        OAuthCallbackRejection::StateMismatch => {
+            "BuilderBot auth ignored a callback for another login. The valid login is still waiting."
+        }
+        OAuthCallbackRejection::MissingCode => {
+            "BuilderBot auth ignored a callback with no exchange code. The valid login is still waiting."
+        }
+        OAuthCallbackRejection::InvalidState
+        | OAuthCallbackRejection::InvalidCode
+        | OAuthCallbackRejection::InvalidError => {
+            "BuilderBot auth ignored a callback with an invalid parameter. The valid login is still waiting."
+        }
+        OAuthCallbackRejection::DuplicateParameter | OAuthCallbackRejection::ConflictingOutcome => {
+            "BuilderBot auth ignored an ambiguous callback. The valid login is still waiting."
+        }
+    }
 }
 
 fn write_loopback_response(stream: &mut TcpStream, status: u16, body: &str) -> Result<()> {
@@ -993,12 +1124,173 @@ mod tests {
     }
 
     #[test]
-    fn receive_exchange_code_stops_on_cancel_callback() {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind callback server");
-        let addr = listener.local_addr().expect("local addr");
-        let handle = thread::spawn(move || receive_exchange_code(listener));
+    fn concurrent_login_attempt_is_rejected_without_replacing_the_active_attempt() {
+        let _guard = env_lock().lock().expect("login attempt lock");
+        let first_listener = TcpListener::bind("127.0.0.1:0").expect("bind first callback server");
+        let first_addr = first_listener.local_addr().expect("first local addr");
+        let first_attempt_id =
+            register_login_attempt(first_addr).expect("register first login attempt");
+        let second_listener =
+            TcpListener::bind("127.0.0.1:0").expect("bind second callback server");
+        let second_addr = second_listener.local_addr().expect("second local addr");
 
-        send_cancel_request(addr);
+        let error =
+            register_login_attempt(second_addr).expect_err("reject concurrent login attempt");
+
+        assert!(
+            format!("{error:#}").contains("already in progress"),
+            "unexpected error: {error:#}"
+        );
+        assert_eq!(
+            current_login_attempt_id_for(first_addr),
+            Some(first_attempt_id)
+        );
+        assert_eq!(current_login_attempt_id_for(second_addr), None);
+        clear_login_attempt_if_current(first_attempt_id);
+    }
+
+    #[test]
+    fn rejected_callbacks_do_not_terminate_the_valid_attempt() {
+        let _guard = env_lock().lock().expect("login attempt lock");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind callback server");
+        listener
+            .set_nonblocking(true)
+            .expect("configure callback server");
+        let addr = listener.local_addr().expect("local addr");
+        let attempt_id = register_login_attempt(addr).expect("register login attempt");
+        let mut attempt = OAuthLoginAttempt::generate().expect("OAuth attempt");
+        let login_url = attempt
+            .login_url(
+                "https://example.com/cash-app/goose",
+                &format!("http://{addr}{CALLBACK_PATH}"),
+            )
+            .expect("login URL");
+        let login_url = Url::parse(&login_url).expect("parse login URL");
+        let expected_state = login_url
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .map(|(_, value)| value.into_owned())
+            .expect("state query parameter");
+        let handle = thread::spawn(move || receive_exchange_code(listener, &mut attempt));
+
+        for target in [
+            format!("{CALLBACK_PATH}?code=missing-state"),
+            format!("{CALLBACK_PATH}?code=wrong-state&state={}", "x".repeat(43)),
+            format!("{CALLBACK_PATH}?state={expected_state}"),
+            format!("{CALLBACK_PATH}?code=first&code=second&state={expected_state}"),
+        ] {
+            assert_eq!(send_callback_request(addr, "GET", &target), 400);
+        }
+        assert_eq!(
+            send_callback_request(
+                addr,
+                "GET",
+                &format!("{CALLBACK_PATH}?code=valid-code&state={expected_state}"),
+            ),
+            200
+        );
+
+        assert_eq!(
+            handle
+                .join()
+                .expect("join callback server")
+                .expect("valid callback"),
+            "valid-code"
+        );
+        clear_login_attempt_if_current(attempt_id);
+    }
+
+    #[test]
+    fn cross_attempt_and_replayed_callbacks_are_rejected() {
+        let mut first = OAuthLoginAttempt::generate().expect("first OAuth attempt");
+        let mut second = OAuthLoginAttempt::generate().expect("second OAuth attempt");
+        let first_state = attempt_state(&first);
+        let second_state = attempt_state(&second);
+
+        assert_eq!(
+            second.parse_callback(
+                &Url::parse(&format!(
+                    "http://127.0.0.1{CALLBACK_PATH}?code=cross-attempt&state={first_state}"
+                ))
+                .expect("cross-attempt callback")
+            ),
+            OAuthCallback::Rejected(OAuthCallbackRejection::StateMismatch)
+        );
+        assert_eq!(
+            first.parse_callback(
+                &Url::parse(&format!(
+                    "http://127.0.0.1{CALLBACK_PATH}?code=valid&state={first_state}"
+                ))
+                .expect("valid callback")
+            ),
+            OAuthCallback::Code("valid".to_string())
+        );
+        assert_eq!(
+            first.parse_callback(
+                &Url::parse(&format!(
+                    "http://127.0.0.1{CALLBACK_PATH}?code=replay&state={first_state}"
+                ))
+                .expect("replayed callback")
+            ),
+            OAuthCallback::Rejected(OAuthCallbackRejection::StateMismatch)
+        );
+        assert_eq!(
+            second.parse_callback(
+                &Url::parse(&format!(
+                    "http://127.0.0.1{CALLBACK_PATH}?code=second&state={second_state}"
+                ))
+                .expect("second valid callback")
+            ),
+            OAuthCallback::Code("second".to_string())
+        );
+    }
+
+    #[test]
+    fn unsolicited_cancel_path_does_not_terminate_the_valid_attempt() {
+        let _guard = env_lock().lock().expect("login attempt lock");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind callback server");
+        listener
+            .set_nonblocking(true)
+            .expect("configure callback server");
+        let addr = listener.local_addr().expect("local addr");
+        let attempt_id = register_login_attempt(addr).expect("register login attempt");
+        let mut attempt = OAuthLoginAttempt::generate().expect("OAuth attempt");
+        let expected_state = attempt_state(&attempt);
+        let handle = thread::spawn(move || receive_exchange_code(listener, &mut attempt));
+
+        assert_eq!(send_callback_request(addr, "GET", "/cancel"), 404);
+        assert_eq!(
+            send_callback_request(
+                addr,
+                "GET",
+                &format!("{CALLBACK_PATH}?code=valid-code&state={expected_state}"),
+            ),
+            200
+        );
+
+        assert_eq!(
+            handle
+                .join()
+                .expect("join callback server")
+                .expect("valid callback"),
+            "valid-code"
+        );
+        clear_login_attempt_if_current(attempt_id);
+    }
+
+    #[test]
+    fn cancel_login_command_stops_the_registered_attempt() {
+        let _guard = env_lock().lock().expect("login attempt lock");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind callback server");
+        listener
+            .set_nonblocking(true)
+            .expect("configure callback server");
+        let addr = listener.local_addr().expect("local addr");
+        let attempt_id = register_login_attempt(addr).expect("register login attempt");
+        let mut attempt = OAuthLoginAttempt::generate().expect("OAuth attempt");
+        let handle = thread::spawn(move || receive_exchange_code(listener, &mut attempt));
+
+        cancel_login_blocking().expect("cancel login");
 
         let error = handle
             .join()
@@ -1008,6 +1300,57 @@ mod tests {
             format!("{error:#}").contains("canceled"),
             "unexpected error: {error:#}"
         );
+        clear_login_attempt_if_current(attempt_id);
+    }
+
+    #[test]
+    fn malformed_and_slow_connections_do_not_terminate_the_valid_attempt() {
+        let _guard = env_lock().lock().expect("login attempt lock");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind callback server");
+        listener
+            .set_nonblocking(true)
+            .expect("configure callback server");
+        let addr = listener.local_addr().expect("local addr");
+        let attempt_id = register_login_attempt(addr).expect("register login attempt");
+        let mut attempt = OAuthLoginAttempt::generate().expect("OAuth attempt");
+        let expected_state = attempt_state(&attempt);
+        let handle = thread::spawn(move || receive_exchange_code(listener, &mut attempt));
+
+        let mut slow_stream = TcpStream::connect(addr).expect("connect slow callback request");
+        slow_stream
+            .write_all(b"GET /callback")
+            .expect("write incomplete callback request");
+        let mut status_line = String::new();
+        BufReader::new(slow_stream)
+            .read_line(&mut status_line)
+            .expect("read slow callback response");
+        assert!(status_line.starts_with("HTTP/1.1 400 "), "{status_line:?}");
+
+        let oversized_target = format!("/{}", "x".repeat(MAX_LOOPBACK_REQUEST_LINE_BYTES));
+        assert_eq!(send_callback_request(addr, "GET", &oversized_target), 400);
+        assert_eq!(
+            send_callback_request(
+                addr,
+                "GET",
+                &format!("{CALLBACK_PATH}?code=valid-code&state={expected_state}"),
+            ),
+            200
+        );
+
+        assert_eq!(
+            handle
+                .join()
+                .expect("join callback server")
+                .expect("valid callback"),
+            "valid-code"
+        );
+        clear_login_attempt_if_current(attempt_id);
+    }
+
+    #[test]
+    fn cancel_login_without_an_active_attempt_is_a_no_op() {
+        let _guard = env_lock().lock().expect("login attempt lock");
+        cancel_login_blocking().expect("cancel without active login");
     }
 
     #[test]
@@ -1116,9 +1459,38 @@ mod tests {
         clear_auth_env();
     }
 
-    fn send_cancel_request(addr: SocketAddr) {
-        let stream = TcpStream::connect(addr).expect("connect cancel request");
-        write_cancel_request(stream).expect("write cancel request");
+    fn attempt_state(attempt: &OAuthLoginAttempt) -> String {
+        let login_url = attempt
+            .login_url(
+                "https://example.com/cash-app/goose",
+                "http://127.0.0.1:49152/callback",
+            )
+            .expect("login URL");
+        let login_url = Url::parse(&login_url).expect("parse login URL");
+        login_url
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .map(|(_, value)| value.into_owned())
+            .expect("state query parameter")
+    }
+
+    fn send_callback_request(addr: SocketAddr, method: &str, target: &str) -> u16 {
+        let mut stream = TcpStream::connect(addr).expect("connect callback request");
+        write!(
+            stream,
+            "{method} {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+        )
+        .expect("write callback request");
+        let mut status_line = String::new();
+        BufReader::new(stream)
+            .read_line(&mut status_line)
+            .expect("read callback response");
+        status_line
+            .split_whitespace()
+            .nth(1)
+            .expect("callback response status")
+            .parse()
+            .expect("numeric callback response status")
     }
 
     struct RecordedAuthRequest {

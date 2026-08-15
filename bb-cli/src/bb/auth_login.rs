@@ -2,12 +2,12 @@
 
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use builderbot_auth::auth_login::{
-    build_auth_http_client, exchange_login_code_and_verify, login_url, logout_session_credential,
-    verify_session_credential, AuthMeResponse,
+    build_auth_http_client, logout_session_credential, verify_session_credential, AuthMeResponse,
+    OAuthCallback, OAuthLoginAttempt,
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -18,6 +18,8 @@ use super::auth_storage::{session_storage_key_from_config, SessionCredentialStor
 use super::skills_config::{kgoose_service_url, SkillsConfig};
 
 const CALLBACK_PATH: &str = "/callback";
+const LOGIN_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const CALLBACK_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Copy)]
 enum AuthCallbackPage {
@@ -103,17 +105,14 @@ pub fn run_browser_login(
     let server = Server::http("127.0.0.1:0")
         .map_err(|error| anyhow!("listen on loopback callback port: {error}"))?;
     let callback_url = format!("http://{}{}", server.server_addr(), CALLBACK_PATH);
-    let login_url = login_url(&service_url, &callback_url)?;
+    let oauth_attempt = OAuthLoginAttempt::generate()?;
+    let login_url = oauth_attempt.login_url(&service_url, &callback_url)?;
 
     let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        let result = receive_exchange_code(server);
-        let _ = tx.send(result);
-    });
 
     if !config.json {
         println!("Opening BuilderBot auth login in your browser:");
-        println!("{login_url}");
+        println!("{}", login_url.as_str());
     }
     if let Err(error) = webbrowser::open(login_url.as_str()) {
         if config.json {
@@ -124,11 +123,20 @@ pub fn run_browser_login(
         println!("Could not open a browser automatically. Open the URL above manually.");
     }
 
-    let code = rx
+    thread::spawn(move || {
+        let result = receive_exchange_code(server, oauth_attempt);
+        let _ = tx.send(result);
+    });
+
+    let (code, mut oauth_attempt) = rx
         .recv()
         .context("loopback auth server stopped before login completed")??;
-    let verified =
-        exchange_login_code_and_verify(&client, config.playpen.as_deref(), &service_url, &code)?;
+    let verified = oauth_attempt.exchange_login_code_and_verify(
+        &client,
+        config.playpen.as_deref(),
+        &service_url,
+        &code,
+    )?;
     let stored = verified.credential;
     let me = verified.me;
     let workspace_name = me.active_workspace_name()?.to_string();
@@ -181,42 +189,71 @@ pub fn logout_stored_session(
     logout_session_credential(&client, config.playpen.as_deref(), &service_url, &stored)
 }
 
-fn receive_exchange_code(server: Server) -> Result<String> {
-    for request in server.incoming_requests() {
+fn receive_exchange_code(
+    server: Server,
+    mut attempt: OAuthLoginAttempt,
+) -> Result<(String, OAuthLoginAttempt)> {
+    let deadline = Instant::now() + LOGIN_ATTEMPT_TIMEOUT;
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(anyhow!(
+                "BuilderBot CLI auth login expired before receiving a valid callback"
+            ));
+        }
+        let Some(request) = server
+            .recv_timeout(remaining.min(CALLBACK_POLL_INTERVAL))
+            .context("receive loopback auth callback")?
+        else {
+            continue;
+        };
         let url = request.url().to_string();
-        let parsed =
-            Url::parse(&format!("http://127.0.0.1{url}")).context("parse loopback callback URL")?;
+        let parsed = match Url::parse(&format!("http://127.0.0.1{url}")) {
+            Ok(parsed) => parsed,
+            Err(_) => {
+                let _ = respond_text(
+                    request,
+                    StatusCode(400),
+                    "BuilderBot CLI auth ignored an invalid callback request. The valid login is still waiting.",
+                );
+                continue;
+            }
+        };
         if parsed.path() != CALLBACK_PATH {
-            respond_text(
+            let _ = respond_text(
                 request,
                 StatusCode(404),
                 "BuilderBot CLI auth is waiting for the callback.",
-            )?;
+            );
+            continue;
+        }
+        if request.method() != &tiny_http::Method::Get {
+            let _ = respond_text(
+                request,
+                StatusCode(400),
+                "BuilderBot CLI auth ignored an invalid callback request. The valid login is still waiting.",
+            );
             continue;
         }
 
-        let error = parsed
-            .query_pairs()
-            .find(|(key, _)| key == "error")
-            .map(|(_, value)| value.into_owned());
-        if let Some(error) = error {
-            respond_auth_page(request, StatusCode(400), AuthCallbackPage::Failure)?;
-            return Err(anyhow!("auth callback returned error: {error}"));
+        match attempt.parse_callback(&parsed) {
+            OAuthCallback::Code(code) => {
+                let _ = respond_auth_page(request, StatusCode(200), AuthCallbackPage::Success);
+                return Ok((code, attempt));
+            }
+            OAuthCallback::Error(error) => {
+                respond_auth_page(request, StatusCode(400), AuthCallbackPage::Failure)?;
+                return Err(anyhow!("auth callback returned error: {error}"));
+            }
+            OAuthCallback::Rejected(_) => {
+                let _ = respond_text(
+                    request,
+                    StatusCode(400),
+                    "BuilderBot CLI auth ignored an uncorrelated callback. The valid login is still waiting.",
+                );
+            }
         }
-
-        let code = parsed
-            .query_pairs()
-            .find(|(key, _)| key == "code")
-            .map(|(_, value)| value.into_owned())
-            .filter(|value| !value.trim().is_empty())
-            .ok_or_else(|| anyhow!("auth callback did not include an exchange code"))?;
-        respond_auth_page(request, StatusCode(200), AuthCallbackPage::Success)?;
-        return Ok(code);
     }
-
-    Err(anyhow!(
-        "loopback auth server stopped without receiving a callback"
-    ))
 }
 
 fn respond_text(request: tiny_http::Request, status: StatusCode, body: &str) -> Result<()> {

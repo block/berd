@@ -694,14 +694,18 @@ name = "builderbot-auth"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "core-foundation 0.10.1",
+ "getrandom 0.4.3",
  "reqwest 0.12.28",
  "security-framework-sys",
  "serde",
  "serde_json",
  "serde_yaml",
  "sha2",
+ "subtle",
  "url",
+ "zeroize",
 ]
 
 [[package]]
