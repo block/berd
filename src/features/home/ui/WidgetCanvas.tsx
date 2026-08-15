@@ -685,6 +685,13 @@ export function WidgetCanvas({
                   instance={renderInstance}
                   constraints={constraints}
                   canvasGestureActive={canvasGestureActive}
+                  canvasGestureKind={
+                    isResizePreview
+                      ? "resize"
+                      : dragPositions[instance.id]
+                        ? "drag"
+                        : undefined
+                  }
                   canvasDragPosition={dragPositions[instance.id]}
                   widgetResizePreviewActive={isResizePreview}
                   renderPaused={!widgetInViewport}

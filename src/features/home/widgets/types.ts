@@ -75,6 +75,8 @@ export interface WidgetRenderProps {
   onRemoveWidget?: () => void;
   /** True while this widget is being dragged or resized on the home canvas. */
   canvasGestureActive?: boolean;
+  /** Identifies which gesture owns transient visual state such as snapshots. */
+  canvasGestureKind?: "drag" | "resize";
   /** Live world position while this widget is being dragged. */
   canvasDragPosition?: { x: number; y: number };
   /** True while live resize is previewing new bounds (content is CSS-scaled). */

@@ -28,10 +28,12 @@ vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
     input,
     motionImpulse,
     renderPaused,
+    onGlCanvasReady,
   }: {
     input: { artifact?: { seed: number } | null; name: string };
     motionImpulse?: { deltaX: number; deltaY: number; sequence: number };
     renderPaused?: boolean;
+    onGlCanvasReady?: (canvas: HTMLCanvasElement | null) => void;
   }) => (
     <div
       data-artifact-seed={input.artifact?.seed ?? ""}
@@ -41,6 +43,7 @@ vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
       data-render-paused={String(renderPaused ?? false)}
       data-testid="project-artifact-preview"
     >
+      <canvas ref={onGlCanvasReady} data-testid="project-artifact-canvas" />
       {input.name}
     </div>
   ),
@@ -79,6 +82,8 @@ function renderWidget(
     onTagProjectInComposer?: (projectId: string) => void;
     renderPaused?: boolean;
     canvasGestureActive?: boolean;
+    canvasGestureKind?: "drag" | "resize";
+    widgetResizePreviewActive?: boolean;
     shouldIgnoreActivation?: () => boolean;
   } = {},
 ) {
@@ -93,6 +98,9 @@ function renderWidget(
 
 describe("ProjectArtifactWidget", () => {
   beforeEach(() => {
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue(
+      "data:,",
+    );
     state.projects = [project()];
     state.sessions = [];
     vi.clearAllMocks();
@@ -321,6 +329,89 @@ describe("ProjectArtifactWidget", () => {
     expect(screen.getByTestId("project-artifact-preview")).toHaveAttribute(
       "data-motion-sequence",
       "1",
+    );
+  });
+
+  it.each([
+    "pointerUp",
+    "pointerCancel",
+  ] as const)("does not reuse a %s snapshot for a later resize gesture", (releaseEvent) => {
+    const view = renderWidget();
+    const button = screen.getByRole("button", {
+      name: "Start chat in Alpha Project",
+    });
+    const canvas = screen.getByTestId(
+      "project-artifact-canvas",
+    ) as HTMLCanvasElement;
+    const toDataURL = vi
+      .spyOn(canvas, "toDataURL")
+      .mockReturnValue("data:image/png;base64,frame-a");
+
+    fireEvent.pointerDown(button);
+    fireEvent[releaseEvent](button);
+    toDataURL.mockReturnValue("data:image/png;base64,frame-b");
+
+    view.rerender(
+      <ProjectArtifactWidget
+        instance={instance}
+        onUpdateState={vi.fn()}
+        canvasGestureActive
+        canvasGestureKind="resize"
+      />,
+    );
+
+    expect(document.querySelector('img[aria-hidden="true"]')).toHaveAttribute(
+      "src",
+      "data:image/png;base64,frame-b",
+    );
+  });
+
+  it("consumes a prepared frame for its drag without leaking it to resize", () => {
+    const view = renderWidget();
+    const button = screen.getByRole("button", {
+      name: "Start chat in Alpha Project",
+    });
+    const canvas = screen.getByTestId(
+      "project-artifact-canvas",
+    ) as HTMLCanvasElement;
+    const toDataURL = vi
+      .spyOn(canvas, "toDataURL")
+      .mockReturnValue("data:image/png;base64,frame-a");
+
+    fireEvent.pointerDown(button);
+    view.rerender(
+      <ProjectArtifactWidget
+        instance={instance}
+        onUpdateState={vi.fn()}
+        canvasGestureActive
+        canvasGestureKind="drag"
+      />,
+    );
+    expect(document.querySelector('img[aria-hidden="true"]')).toHaveAttribute(
+      "src",
+      "data:image/png;base64,frame-a",
+    );
+
+    view.rerender(
+      <ProjectArtifactWidget
+        instance={instance}
+        onUpdateState={vi.fn()}
+        canvasGestureKind="drag"
+      />,
+    );
+    toDataURL.mockReturnValue("data:image/png;base64,frame-b");
+    view.rerender(
+      <ProjectArtifactWidget
+        instance={instance}
+        onUpdateState={vi.fn()}
+        canvasGestureActive
+        canvasGestureKind="resize"
+      />,
+    );
+
+    expect(document.querySelector('img[aria-hidden="true"]')).toHaveAttribute(
+      "src",
+      "data:image/png;base64,frame-b",
     );
   });
 

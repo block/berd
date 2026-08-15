@@ -29,6 +29,7 @@ interface WidgetFrameProps extends WidgetNavigationHandlers {
   mutations: WidgetMutationHandlers;
   constraints?: LayoutConstraints | null;
   canvasGestureActive?: boolean;
+  canvasGestureKind?: "drag" | "resize";
   canvasDragPosition?: { x: number; y: number };
   widgetResizePreviewActive?: boolean;
   renderPaused?: boolean;
@@ -58,6 +59,7 @@ export function WidgetFrame({
   mutations,
   constraints,
   canvasGestureActive = false,
+  canvasGestureKind,
   canvasDragPosition,
   widgetResizePreviewActive = false,
   renderPaused = false,
@@ -202,6 +204,7 @@ export function WidgetFrame({
         <Component
           instance={instance}
           canvasGestureActive={canvasGestureActive}
+          canvasGestureKind={canvasGestureKind}
           canvasDragPosition={canvasDragPosition}
           widgetResizePreviewActive={widgetResizePreviewActive}
           renderPaused={renderPaused}

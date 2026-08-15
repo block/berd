@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -49,6 +50,7 @@ function getPointerVelocityBoost(
 export function ProjectArtifactWidget({
   instance,
   canvasGestureActive = false,
+  canvasGestureKind,
   widgetResizePreviewActive = false,
   renderPaused = false,
   shouldIgnoreActivation,
@@ -128,11 +130,24 @@ export function ProjectArtifactWidget({
       return null;
     }
   }, []);
-  const captureGestureSnapshot = useCallback(
-    () => pointerDownSnapshotRef.current ?? captureCanvasSnapshot(),
-    [captureCanvasSnapshot],
-  );
+  const captureGestureSnapshot = useCallback(() => {
+    if (canvasGestureKind === "drag") {
+      const pointerDownSnapshot = pointerDownSnapshotRef.current;
+      pointerDownSnapshotRef.current = null;
+      return pointerDownSnapshot ?? captureCanvasSnapshot();
+    }
+
+    // Resize begins from sibling chrome, not the project button. Always capture
+    // the current canvas instead of borrowing a snapshot prepared for a click
+    // or an earlier drag.
+    return captureCanvasSnapshot();
+  }, [canvasGestureKind, captureCanvasSnapshot]);
   const shouldFreezeVisual = canvasGestureActive && !widgetResizePreviewActive;
+  useLayoutEffect(() => {
+    if (!canvasGestureActive) {
+      pointerDownSnapshotRef.current = null;
+    }
+  }, [canvasGestureActive]);
   const gestureSnapshot = useWidgetGestureFreeze(
     shouldFreezeVisual,
     captureGestureSnapshot,
@@ -208,12 +223,17 @@ export function ProjectArtifactWidget({
   const handlePointerLeave = () => {
     lastPointerPosition.current = null;
   };
+  const clearPreparedSnapshot = () => {
+    pointerDownSnapshotRef.current = null;
+  };
 
   return (
     <button
       type="button"
       onClick={handleClick}
       onPointerDown={handlePointerDown}
+      onPointerUp={clearPreparedSnapshot}
+      onPointerCancel={clearPreparedSnapshot}
       onPointerEnter={rememberPointerPosition}
       onPointerLeave={handlePointerLeave}
       onPointerMove={handlePointerMove}
