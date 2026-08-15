@@ -578,12 +578,38 @@ fn open_selected_export_dir(folder_path: &Path) -> Result<cap_std::fs::Dir, Stri
         // mode explicitly, excluding DELETE.
         const FILE_SHARE_READ: u32 = 0x0000_0001;
         const FILE_SHARE_WRITE: u32 = 0x0000_0002;
-        fs::OpenOptions::new()
+        let std_dir = fs::OpenOptions::new()
             .read(true)
             .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
             .open(folder_path)
-            .map_err(map_err)?
+            .map_err(map_err)?;
+        // FILE_FLAG_OPEN_REPARSE_POINT does not make the open fail on a
+        // junction/symlink; it returns a handle to the reparse object itself,
+        // and cap-std's `Dir::from_std_file` performs no type or attribute
+        // validation. Without the check below, a reparse point swapped into the
+        // selected path would become the capability root and later
+        // handle-relative writes would land on its target. Query the handle's
+        // own attributes (GetFileInformationByHandle, not a second path lookup)
+        // and reject a reparse point or a non-directory so acquisition fails
+        // closed on the selected final component.
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x0000_0010;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        let attributes = std_dir.metadata().map_err(map_err)?.file_attributes();
+        if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(format!(
+                "Selected folder '{}' is a reparse point (symlink/junction); refusing to export through it",
+                folder_path.display()
+            ));
+        }
+        if attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+            return Err(format!(
+                "Selected path '{}' is not a directory",
+                folder_path.display()
+            ));
+        }
+        std_dir
     };
 
     #[cfg(not(any(unix, windows)))]
@@ -3455,6 +3481,32 @@ mod tests {
         let err =
             open_selected_export_dir(&selected).expect_err("symlinked selection must fail closed");
         assert!(err.contains("Failed to open selected folder"));
+        // Nothing was written through the redirect.
+        assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    }
+
+    /// Windows acquisition fails closed on a reparse point. Opening with
+    /// `FILE_FLAG_OPEN_REPARSE_POINT` returns a handle to the reparse object
+    /// itself, and `Dir::from_std_file` does not validate it, so acquisition
+    /// must reject the reparse handle before wrapping it as the capability
+    /// root. Requires privilege to create a directory symlink; run when a
+    /// Windows environment with that capability is available.
+    #[cfg(windows)]
+    #[test]
+    fn open_selected_export_dir_rejects_reparse_point_selection() {
+        use std::os::windows::fs::symlink_dir;
+
+        let root = tempdir().expect("tempdir");
+        let outside = root.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        let selected = root.path().join("selected");
+        // The selection path is a directory symlink (a reparse point) to
+        // another directory.
+        symlink_dir(&outside, &selected).expect("create directory symlink");
+
+        let err = open_selected_export_dir(&selected)
+            .expect_err("reparse-point selection must fail closed");
+        assert!(err.contains("reparse point"));
         // Nothing was written through the redirect.
         assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
     }
