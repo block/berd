@@ -597,22 +597,86 @@ fn resolve_update_command(
     })
 }
 
+/// The sign-in capability the pinned doctor crate declares for a check, read
+/// from the backend-owned `AI_AGENT_CHECKS` table — never renderer input. It is
+/// the authorization oracle for [`authorize_auth`]: "currently offers `Auth`"
+/// is only valid for agents Doctor can actually probe.
+#[derive(Debug, PartialEq, Eq)]
+enum AuthCapability {
+    /// No `auth_command` (goose, pi): the agent has no sign-in flow, so a
+    /// renderer-requested `Auth` is never authorized.
+    None,
+    /// Both a login command and a status probe (claude, codex, amp, cursor):
+    /// Doctor reports `Auth` when installed-but-signed-out, so authorize a
+    /// sign-in only when the check currently offers it.
+    Probeable,
+    /// A login command but no status probe (copilot): Doctor can't observe the
+    /// auth state, so it reports `Pass`/no fix even when a sign-in is needed.
+    /// Authorize the registered login for the installed agent directly.
+    Unprobeable,
+}
+
+/// The sign-in capability the pinned crate declares for a crate check id
+/// (`ai-agent-*`). Resolved from the static `AI_AGENT_CHECKS` table so the auth
+/// gate authorizes against backend-owned recipe metadata, not a renderer claim.
+/// An unknown id has no capability, so auth is never authorized for it.
+fn auth_capability(check_id: &str) -> AuthCapability {
+    doctor::agents::AI_AGENT_CHECKS
+        .iter()
+        .find(|info| info.id == check_id)
+        .map(|info| {
+            match (
+                info.auth_command.is_some(),
+                info.auth_status_command.is_some(),
+            ) {
+                (false, _) => AuthCapability::None,
+                (true, true) => AuthCapability::Probeable,
+                (true, false) => AuthCapability::Unprobeable,
+            }
+        })
+        .unwrap_or(AuthCapability::None)
+}
+
 /// Authorize a renderer-requested `Auth` action against the provider's current
-/// doctor state (`offered` = the fix the check actually offers now). Sign-in is
-/// only authorized when the check currently offers `Auth` (installed but not
-/// authenticated); a request against a check that offers a different fix
-/// (missing install → `Command`/`Bridge`) or no fix at all (already
-/// authenticated, or auth status unknown) fails closed before the auth shell
-/// command runs. Pure so the boundary is unit-testable without a Tauri handle.
-fn authorize_auth(provider_id: &str, offered: Option<FixType>) -> Result<(), String> {
-    match offered {
-        Some(FixType::Auth) => Ok(()),
-        Some(offered) => Err(format!(
-            "'{provider_id}' currently offers the '{offered:?}' fix, not sign-in"
-        )),
-        None => Err(format!(
-            "'{provider_id}' offers no sign-in in its current state"
-        )),
+/// doctor `check` and its backend-owned [`AuthCapability`]. Sign-in fails closed
+/// unless the pinned crate declares a login flow for the check:
+///
+/// - `None` (no `auth_command`): never authorized.
+/// - `Probeable` (has an auth-status probe): authorized only when the check
+///   currently offers `Auth` (installed but not authenticated); a check that
+///   offers an install fix or is already authenticated (no fix) rejects.
+/// - `Unprobeable` (a login command but no status probe, e.g. Copilot): Doctor
+///   can't report `Auth`, so authorize the registered login when the agent is
+///   installed (`path`/`bridge_path` resolved) and offers no install fix. A
+///   not-installed provider still offers `Command`, so a forged sign-in against
+///   it rejects.
+///
+/// Pure so the boundary is unit-testable without a Tauri handle.
+fn authorize_auth(provider_id: &str, check: &doctor::DoctorCheck) -> Result<(), String> {
+    match auth_capability(&check.id) {
+        AuthCapability::None => Err(format!("'{provider_id}' has no sign-in flow")),
+        AuthCapability::Probeable => match &check.fix_type {
+            Some(FixType::Auth) => Ok(()),
+            Some(offered) => Err(format!(
+                "'{provider_id}' currently offers the '{offered:?}' fix, not sign-in"
+            )),
+            None => Err(format!(
+                "'{provider_id}' offers no sign-in in its current state"
+            )),
+        },
+        AuthCapability::Unprobeable => {
+            if check.path.is_none() && check.bridge_path.is_none() {
+                return Err(format!(
+                    "'{provider_id}' is not installed, so sign-in is unavailable"
+                ));
+            }
+            match &check.fix_type {
+                None => Ok(()),
+                Some(offered) => Err(format!(
+                    "'{provider_id}' currently offers the '{offered:?}' fix, not sign-in"
+                )),
+            }
+        }
     }
 }
 
@@ -823,13 +887,14 @@ async fn run_auth(
 ) -> Result<(), String> {
     // The renderer only names the *action*; before running the auth shell
     // command we re-read the provider's doctor check and authorize `Auth`
-    // against the fix it currently offers. A forged/stale sign-in for a
-    // provider that is missing (offers `Command`/`Bridge`), already
-    // authenticated, or has an unknown auth state (offers no fix) rejects here
-    // rather than executing the static `<agent> login` command on demand.
-    // `find_check` also fails closed on an unknown provider.
+    // against its backend-owned sign-in capability (see [`authorize_auth`]). A
+    // forged/stale sign-in rejects here — for a probe-capable agent unless it
+    // currently offers `Auth`, and for an unprobeable one (Copilot) unless the
+    // agent is installed and offers no install fix — rather than executing the
+    // static `<agent> login` command on demand. `find_check` also fails closed
+    // on an unknown provider.
     let check = find_check(app, provider_id).await?;
-    authorize_auth(provider_id, check.fix_type)?;
+    authorize_auth(provider_id, &check)?;
     set_phase(app, registry, provider_id, SetupPhase::Authenticating);
     run_fix(app, registry, provider_id, FixType::Auth, None).await?;
 
@@ -1283,21 +1348,74 @@ mod tests {
     }
 
     #[test]
-    fn authorize_auth_rejects_a_forged_sign_in_against_a_non_auth_state() {
-        // Regression for the auth bypass: `run_auth` re-reads the provider check
-        // and authorizes `Auth` against its current offered fix. A provider that
-        // is missing (offers `Command`/`Bridge`) or already authenticated
-        // (offers no fix) must reject before the `<agent> login` command runs.
-        assert!(authorize_auth("copilot-acp", Some(FixType::Command)).is_err());
-        assert!(authorize_auth("amp-acp", Some(FixType::Bridge)).is_err());
-        assert!(authorize_auth("copilot-acp", None).is_err());
+    fn authorize_auth_rejects_forged_sign_in_for_a_probeable_agent() {
+        // Probe-capable agents (claude/codex/amp/cursor) report `Auth` only when
+        // installed-but-signed-out, so a forged sign-in against a missing
+        // (offers `Command`/`Bridge`) or already-authenticated (no fix) codex
+        // check must reject before the `<agent> login` command runs.
+        let mut check = check_with_fix(Some(FixType::Command)); // id = ai-agent-codex
+        assert!(authorize_auth("codex-acp", &check).is_err());
+        check.fix_type = Some(FixType::Bridge);
+        assert!(authorize_auth("codex-acp", &check).is_err());
+        check.fix_type = None;
+        assert!(authorize_auth("codex-acp", &check).is_err());
     }
 
     #[test]
-    fn authorize_auth_allows_a_currently_offered_sign_in() {
-        // Installed-but-signed-out is exactly the state that offers `Auth`, so a
-        // legitimate sign-in is authorized and reaches the auth command.
-        assert!(authorize_auth("copilot-acp", Some(FixType::Auth)).is_ok());
+    fn authorize_auth_allows_a_currently_offered_sign_in_for_a_probeable_agent() {
+        // Installed-but-signed-out is the state a probe-capable agent reports as
+        // offering `Auth`, so a legitimate sign-in is authorized.
+        let check = check_with_fix(Some(FixType::Auth)); // id = ai-agent-codex
+        assert!(authorize_auth("codex-acp", &check).is_ok());
+    }
+
+    #[test]
+    fn authorize_auth_allows_installed_copilot_despite_no_offered_fix() {
+        // Regression for the Copilot auth-gate defect: Copilot declares an
+        // `auth_command` but no `auth_status_command`, so Doctor reports
+        // `Pass`/`fix_type = None` even when a sign-in is needed. The gate must
+        // authorize the registered login for the *installed* agent (resolved
+        // `path`) rather than blocking its only sign-in path.
+        let mut check = check_with_fix(None);
+        check.id = "ai-agent-copilot".into();
+        check.path = Some("/opt/homebrew/bin/copilot".into());
+        assert!(authorize_auth("copilot-acp", &check).is_ok());
+    }
+
+    #[test]
+    fn authorize_auth_rejects_copilot_sign_in_when_not_installed() {
+        // A not-installed Copilot still offers a `Command` install fix and has no
+        // resolved binary, so a forged sign-in against it must reject — the
+        // unprobeable capability authorizes login only for an installed agent.
+        let mut check = check_with_fix(Some(FixType::Command));
+        check.id = "ai-agent-copilot".into();
+        check.path = None;
+        check.bridge_path = None;
+        assert!(authorize_auth("copilot-acp", &check).is_err());
+    }
+
+    #[test]
+    fn authorize_auth_rejects_sign_in_for_an_agent_with_no_login_flow() {
+        // Goose declares no `auth_command`, so a renderer-requested sign-in is
+        // never authorized regardless of the reported check state.
+        let mut check = check_with_fix(None);
+        check.id = "ai-agent-goose".into();
+        check.path = Some("/usr/local/bin/goose".into());
+        assert!(authorize_auth("goose", &check).is_err());
+    }
+
+    #[test]
+    fn auth_capability_reflects_the_pinned_crate_table() {
+        // The gate's oracle is the backend-owned `AI_AGENT_CHECKS` table, not a
+        // renderer claim: probe-capable agents, the unprobeable Copilot, the
+        // no-login goose, and an unknown id each resolve to their capability.
+        assert_eq!(auth_capability("ai-agent-codex"), AuthCapability::Probeable);
+        assert_eq!(
+            auth_capability("ai-agent-copilot"),
+            AuthCapability::Unprobeable
+        );
+        assert_eq!(auth_capability("ai-agent-goose"), AuthCapability::None);
+        assert_eq!(auth_capability("ai-agent-nope"), AuthCapability::None);
     }
 
     #[test]
