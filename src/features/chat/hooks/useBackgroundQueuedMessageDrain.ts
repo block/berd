@@ -22,14 +22,17 @@ import {
   type QueuedMessageRecord,
   useChatStore,
 } from "@/features/chat/stores/chatStore";
-import { loadPersistedMessageQueues } from "@/features/chat/stores/queuePersistence";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { SessionDispatchContentionError } from "@/features/chat/lib/sessionDispatchAcquisition";
+import {
+  isReclaimedQueueReconciliationPending,
+  requestReclaimedQueueReconciliation,
+  subscribeReclaimedQueueReconciliation,
+} from "@/features/chat/lib/reclaimedQueueReconciliation";
 import { sendQueuedPromptToExistingSessionInBackground } from "@/features/chat/lib/queuedSessionSend";
 
 const drainingSessionIds = new Set<string>();
 const activeOwners = new Set<string>();
-let ownershipRefreshSequence = 0;
 type ContentionWaiter = {
   ownerId: string;
   record: QueuedMessageRecord;
@@ -130,26 +133,6 @@ function isBackgroundDrainableHead(
  * Reconciled records arrive `restored: true`, which the background drain
  * refuses to claim.
  */
-async function refreshReclaimedQueues(
-  previousOpenSessions: Record<string, string>,
-  openSessions: Record<string, string>,
-): Promise<void> {
-  const reclaimedSessionIds = Object.keys(previousOpenSessions).filter(
-    (sessionId) => !(sessionId in openSessions),
-  );
-  if (reclaimedSessionIds.length === 0) {
-    drainReadyQueuedMessages();
-    return;
-  }
-  const sequence = ++ownershipRefreshSequence;
-  const persistedQueues = await loadPersistedMessageQueues();
-  if (sequence !== ownershipRefreshSequence) return;
-  useChatStore
-    .getState()
-    .reconcileQueuedMessages(persistedQueues, reclaimedSessionIds);
-  drainReadyQueuedMessages();
-}
-
 function reconcileContentionWaiters(scopedSessionId?: string): void {
   const sessionStore = useChatSessionStore.getState();
   const queue = useChatStore.getState().queuedMessageBySession;
@@ -190,6 +173,7 @@ function scheduleContentionResume(
 
 function drainQueuedMessage(sessionId: string, ownerId: string): void {
   if (!activeOwners.has(ownerId)) return;
+  if (isReclaimedQueueReconciliationPending(sessionId)) return;
   const sessionExists = Boolean(
     useChatSessionStore.getState().getSession(sessionId),
   );
@@ -361,13 +345,14 @@ export function useBackgroundQueuedMessageDrain(
             (!previousState.hasLoadedSnapshot ||
               state.openSessions !== previousState.openSessions)
           ) {
-            if (!previousState.hasLoadedSnapshot) {
-              drainReadyQueuedMessages();
-            } else {
-              void refreshReclaimedQueues(
+            if (
+              !previousState.hasLoadedSnapshot ||
+              !requestReclaimedQueueReconciliation(
                 previousState.openSessions,
                 state.openSessions,
-              );
+              )
+            ) {
+              drainReadyQueuedMessages();
             }
           }
         });
@@ -380,6 +365,9 @@ export function useBackgroundQueuedMessageDrain(
         liftRestoredExclusionsForOwnedSessions();
         drainReadyQueuedMessages(scopedSessionId);
       },
+    );
+    const unsubscribeReclaimedQueues = subscribeReclaimedQueueReconciliation(
+      () => drainReadyQueuedMessages(scopedSessionId),
     );
     const unsubscribeSessionStore = useChatSessionStore.subscribe(
       (state, previousState) => {
@@ -444,6 +432,7 @@ export function useBackgroundQueuedMessageDrain(
     );
     return () => {
       unsubscribeWindowStore?.();
+      unsubscribeReclaimedQueues();
       unsubscribeForegroundOwnership();
       unsubscribeSessionStore();
       unsubscribeChatStore();

@@ -9,6 +9,7 @@ import {
   registerForegroundQueueOwner,
   resetForegroundQueueOwnershipForTesting,
 } from "@/features/chat/lib/foregroundQueueOwnership";
+import { resetReclaimedQueueReconciliationForTesting } from "@/features/chat/lib/reclaimedQueueReconciliation";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import * as queuePersistence from "@/features/chat/stores/queuePersistence";
@@ -101,6 +102,7 @@ describe("useBackgroundQueuedMessageDrain", () => {
     vi.clearAllMocks();
     resetForegroundQueueOwnershipForTesting();
     resetBackgroundQueueDrainStateForTesting();
+    resetReclaimedQueueReconciliationForTesting();
     vi.spyOn(queuePersistence, "loadPersistedMessageQueues").mockResolvedValue(
       {},
     );
@@ -827,6 +829,73 @@ describe("useBackgroundQueuedMessageDrain", () => {
     expect(
       useChatStore.getState().queuedMessageBySession["session-1"],
     ).toBeUndefined();
+  });
+
+  it("serializes overlapping reclaims without draining either stale queue", async () => {
+    const staleA = { ...ordinaryRecord(), recordId: "stale-a" };
+    const staleB = { ...ordinaryRecord(), recordId: "stale-b" };
+    useChatStore.setState({
+      queuedMessageBySession: {
+        "session-1": [staleA],
+        "detached-session": [staleB],
+      },
+    });
+    useSessionWindowStore.setState({
+      openSessions: {
+        "session-1": "window-1",
+        "detached-session": "window-2",
+      },
+    });
+    let resolveFirst!: (queues: Record<string, QueuedMessageRecord[]>) => void;
+    let resolveSecond!: (queues: Record<string, QueuedMessageRecord[]>) => void;
+    vi.spyOn(queuePersistence, "loadPersistedMessageQueues")
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecond = resolve;
+          }),
+      );
+
+    render(<DrainHarness />);
+    act(() =>
+      useSessionWindowStore.setState({
+        openSessions: { "detached-session": "window-2" },
+      }),
+    );
+    await waitFor(() =>
+      expect(queuePersistence.loadPersistedMessageQueues).toHaveBeenCalledTimes(
+        1,
+      ),
+    );
+    act(() => useSessionWindowStore.setState({ openSessions: {} }));
+
+    resolveFirst({});
+    await waitFor(() =>
+      expect(queuePersistence.loadPersistedMessageQueues).toHaveBeenCalledTimes(
+        2,
+      ),
+    );
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+    resolveSecond({});
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().queuedMessageBySession["session-1"],
+      ).toBeUndefined();
+      expect(
+        useChatStore.getState().queuedMessageBySession["detached-session"],
+      ).toBeUndefined();
+    });
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
   });
 
   it("does not fire a reclaimed head that persistence marks restored", async () => {

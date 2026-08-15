@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionDispatchContentionError } from "@/features/chat/lib/sessionDispatchAcquisition";
 import type { SessionDispatchReleaseWaiter } from "@/features/chat/lib/sessionTargetCoordinator";
 import { QueuedMessageOwnershipLostError } from "@/features/chat/lib/preCommitSendRejection";
+import { resetReclaimedQueueReconciliationForTesting } from "@/features/chat/lib/reclaimedQueueReconciliation";
 import {
   type QueuedMessageRecord,
   useChatStore,
@@ -80,6 +81,7 @@ function resetChatStore(): void {
 describe("useBerdctlQueuedMessageDrain", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetReclaimedQueueReconciliationForTesting();
     mocks.sendPromptToExistingSessionInBackground.mockResolvedValue(undefined);
     mocks.sendQueuedPromptToExistingSessionInBackground.mockResolvedValue(
       undefined,
