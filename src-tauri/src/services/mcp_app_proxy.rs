@@ -1087,6 +1087,14 @@ fn build_outer_csp(config: &McpAppProxyConfig, guest_origin: &str) -> String {
     )
 }
 
+// The pinned Goose `/mcp-app-proxy` GET authenticates only via the `secret`
+// query parameter (`crates/goose/src/acp/mcp_app_proxy.rs` at the locked
+// commit reads `Query(params).secret` and offers no header extractor), so the
+// host secret is unavoidably in this URL. Unlike the guest POST — where Goose
+// reads the secret from the JSON body and the broker keeps it out of the URL —
+// there is no header-only path here without an upstream Goose change. This hop
+// is trusted host code to the trusted Goose backend over loopback and carries
+// no untrusted-document exposure; the renderer-facing boundary is unaffected.
 fn build_upstream_proxy_url(
     base_url: &str,
     secret: &str,
