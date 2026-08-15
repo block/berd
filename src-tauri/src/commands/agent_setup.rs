@@ -137,6 +137,29 @@ impl From<InstallFixType> for FixType {
     }
 }
 
+/// The narrow wire type for a per-readout update slot. Only the two update
+/// families deserialize here; a forged `command`/`bridge`/`auth` fix can't cross
+/// the wire in the update list, and — combined with [`authorize_update_fixes`]'s
+/// duplicate rejection — a compromised renderer can't submit the same slot N
+/// times to rerun the trusted update command N times off one freshness
+/// snapshot. Mirrors [`InstallFixType`]: the narrow wire type, not the TS
+/// `Extract<>`, is the security boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateFixType {
+    UpdateMain,
+    UpdateBridge,
+}
+
+impl From<UpdateFixType> for FixType {
+    fn from(value: UpdateFixType) -> Self {
+        match value {
+            UpdateFixType::UpdateMain => FixType::UpdateMain,
+            UpdateFixType::UpdateBridge => FixType::UpdateBridge,
+        }
+    }
+}
+
 /// The execution recipe captured at click time. Keeping readout *derivation* in
 /// TS (it already has the doctor report) avoids porting `actionableReadouts`
 /// into Rust; the backend just runs the recipe autonomously so the chain
@@ -152,11 +175,14 @@ pub struct SetupPlan {
     #[serde(default)]
     install_fix_type: Option<InstallFixType>,
     /// Per-readout update fix identities to run after the install loop. Only
-    /// `updateMain` / `updateBridge` are valid; the exact source-aware command
-    /// is resolved by the backend from the crate's trusted freshness readout,
-    /// never supplied verbatim by the renderer.
+    /// `updateMain` / `updateBridge` are valid (enforced by the narrow
+    /// [`UpdateFixType`] wire type); the exact source-aware command is resolved
+    /// by the backend from the crate's trusted freshness readout, never supplied
+    /// verbatim by the renderer. Duplicate slots are rejected before dispatch
+    /// (see [`authorize_update_fixes`]) so a compromised renderer can't rerun the
+    /// trusted update command N times off one freshness snapshot.
     #[serde(default)]
-    update_fix_types: Vec<FixType>,
+    update_fix_types: Vec<UpdateFixType>,
     /// Whether the post-fix step probes PATH to confirm the agent resolved on
     /// disk. The frontend sends `hasBinary && !isBuiltIn`: a built-in or
     /// binary-less provider has nothing to resolve, so a clean fix run is taken
@@ -500,6 +526,30 @@ async fn verify_installed(
     }
 }
 
+/// Authorize the renderer-requested update slots before any executor runs.
+/// Rejects a list with a duplicate slot: `run_install` runs each entry against
+/// one freshness snapshot, so N copies of `updateMain` would rerun the trusted
+/// update command N times through a single IPC request. The card only ever
+/// names each slot at most once (`buildUpdateFixTypes` derives from distinct
+/// readouts), so a duplicate is a forged/replayed request. Returns the
+/// authorized `FixType` list on success. Pure so the boundary is unit-testable
+/// without a Tauri handle.
+fn authorize_update_fixes(
+    provider_id: &str,
+    requested: &[UpdateFixType],
+) -> Result<Vec<FixType>, String> {
+    let mut seen: Vec<UpdateFixType> = Vec::with_capacity(requested.len());
+    for slot in requested {
+        if seen.contains(slot) {
+            return Err(format!(
+                "duplicate '{slot:?}' update slot requested for '{provider_id}'"
+            ));
+        }
+        seen.push(*slot);
+    }
+    Ok(seen.into_iter().map(FixType::from).collect())
+}
+
 /// Resolve the exact, source-aware update command for a requested update fix
 /// from the crate's freshness readout — the trusted source of truth. The
 /// renderer names only the readout slot (`updateMain` / `updateBridge`); the
@@ -740,9 +790,13 @@ async fn run_install(
     // readouts to update (`updateMain` / `updateBridge`); the exact source-aware
     // command is resolved here from the crate's trusted freshness readout, so a
     // compromised renderer can't smuggle an arbitrary shell command through.
-    if !plan.update_fix_types.is_empty() {
+    // Authorize the slot list first — reject a duplicate slot before any
+    // executor runs, so a replayed slot can't rerun the update command N times
+    // off one freshness snapshot.
+    let update_fixes = authorize_update_fixes(provider_id, &plan.update_fix_types)?;
+    if !update_fixes.is_empty() {
         let fresh = find_check_fresh(app, provider_id).await?;
-        for fix_type in &plan.update_fix_types {
+        for fix_type in &update_fixes {
             let command = resolve_update_command(&fresh, fix_type)?;
             run_fix(app, registry, provider_id, fix_type.clone(), Some(command)).await?;
         }
@@ -1106,6 +1160,48 @@ mod tests {
             ..Default::default()
         });
         assert!(resolve_update_command(&check, &FixType::UpdateMain).is_err());
+    }
+
+    #[test]
+    fn authorize_update_fixes_rejects_duplicate_slots_before_dispatch() {
+        // Regression: `run_install` runs each slot against one freshness
+        // snapshot, so a duplicate `updateMain` would rerun the trusted update
+        // command twice through one IPC request. A duplicate must reject before
+        // any executor target is produced.
+        assert!(authorize_update_fixes(
+            "claude",
+            &[UpdateFixType::UpdateMain, UpdateFixType::UpdateMain]
+        )
+        .is_err());
+        assert!(authorize_update_fixes(
+            "claude",
+            &[
+                UpdateFixType::UpdateBridge,
+                UpdateFixType::UpdateMain,
+                UpdateFixType::UpdateBridge,
+            ]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn authorize_update_fixes_allows_at_most_one_of_each_slot() {
+        // The card only ever names each slot once. An empty list, a single
+        // slot, and one of each (in either order) all authorize and map to the
+        // corresponding `FixType`.
+        assert_eq!(authorize_update_fixes("claude", &[]).unwrap(), Vec::new());
+        assert_eq!(
+            authorize_update_fixes("claude", &[UpdateFixType::UpdateMain]).unwrap(),
+            vec![FixType::UpdateMain]
+        );
+        assert_eq!(
+            authorize_update_fixes(
+                "claude",
+                &[UpdateFixType::UpdateBridge, UpdateFixType::UpdateMain]
+            )
+            .unwrap(),
+            vec![FixType::UpdateBridge, FixType::UpdateMain]
+        );
     }
 
     #[test]

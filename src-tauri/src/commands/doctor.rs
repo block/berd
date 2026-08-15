@@ -1564,9 +1564,24 @@ pub async fn run_doctor_fresh(
 #[tauri::command]
 pub async fn run_doctor_fix(
     app_handle: AppHandle,
+    distro_state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
     check_id: String,
     fix_type: FixType,
 ) -> Result<(), String> {
+    // Feature-policy gate: when Doctor is disabled by runtime config,
+    // `run_doctor`/`run_doctor_fresh` return an empty report, so no check is
+    // offered — but this command never loaded that config, so a renderer could
+    // invoke it directly and drive a native/managed/local/crate fix. Enforce the
+    // same policy here, before resolving offered state or any side effect.
+    // Hiding Doctor in the frontend is not a backend authorization boundary.
+    let runtime_config = runtime_config_state
+        .ready_config(distro_state.inner())
+        .await?;
+    if !doctor_enabled(&runtime_config) {
+        return Err("Doctor is disabled by runtime configuration".to_string());
+    }
+
     // Resolve the fix the check *currently offers* from trusted state, then let
     // the pure planner authorize the request and pick the dispatch target in
     // one step. A forged, stale, or mismatched `(check_id, fix_type)` pair (an
@@ -2025,6 +2040,31 @@ mod tests {
         assert!(text.contains("  details:\n    exit status: 0"));
         // Category headers appear before the checks that belong to them.
         assert!(text.find("== Tools ==").unwrap() < text.find("(git)").unwrap());
+    }
+
+    #[test]
+    fn run_doctor_fix_policy_gate_rejects_when_doctor_disabled() {
+        // `run_doctor_fix` guards on `doctor_enabled(&runtime_config)` before it
+        // resolves offered state or dispatches any fix. This pins the decision
+        // core of that guard: a config that disables Doctor selects no dispatch
+        // (the command returns `Err` before `offered_fix_for_check`), while the
+        // default (absent config) keeps fixes runnable.
+        let disabled = runtime_config_with_doctor(Some(RuntimeDoctorConfig {
+            enabled: Some(false),
+            kgoose_connectivity: None,
+            internal_tooling_checks: None,
+        }));
+        assert!(!doctor_enabled(&disabled));
+
+        let explicitly_enabled = runtime_config_with_doctor(Some(RuntimeDoctorConfig {
+            enabled: Some(true),
+            kgoose_connectivity: None,
+            internal_tooling_checks: None,
+        }));
+        assert!(doctor_enabled(&explicitly_enabled));
+
+        // Absent config defaults to enabled so the fix path keeps working.
+        assert!(doctor_enabled(&runtime_config_with_doctor(None)));
     }
 
     #[test]
