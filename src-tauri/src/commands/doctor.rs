@@ -1554,16 +1554,18 @@ pub async fn run_doctor_fresh(
 
 /// Run a fix command for a doctor check, identified by check ID and fix type.
 ///
-/// `command_override` lets the frontend pass a verbatim shell command (used by
-/// the per-readout Update affordances, whose source-aware commands aren't in
-/// the crate's static lookup table); `None` falls back to the crate's
-/// `lookup_fix_command`. The npm registry override is still applied either way.
+/// The renderer sends only the typed `(check_id, fix_type)` identity; the exact
+/// command (or native operation) is resolved here from trusted backend state —
+/// the managed installer, the local check registry, or the crate's static
+/// `lookup_fix_command`. There is no renderer-supplied command string: an
+/// unknown check id or a check/fix-type combination with no registered fix is
+/// rejected by the crate with an `Unknown check …` error rather than executing
+/// arbitrary text.
 #[tauri::command]
 pub async fn run_doctor_fix(
     app_handle: AppHandle,
     check_id: String,
     fix_type: FixType,
-    command_override: Option<String>,
 ) -> Result<(), String> {
     // The node-runtime fix is native — (re)install the pinned managed
     // runtime — not a shell command.
@@ -1573,7 +1575,7 @@ pub async fn run_doctor_fix(
     // Managed bridge installs (claude, codex) go through the managed installer
     // so the floating `<pkg>@latest` install lands in `packages/tools` with an
     // absolute-path shim, rather than the crate's `npm install -g`.
-    if command_override.is_none() && matches!(fix_type, FixType::Command | FixType::Bridge) {
+    if matches!(fix_type, FixType::Command | FixType::Bridge) {
         if let Some(provider_id) = managed_provider_for_check(&check_id) {
             let log_prefix = format!("[doctor fix {check_id}]");
             return managed_acp_tools::install_managed_tool(&app_handle, provider_id, &|line| {
@@ -1585,16 +1587,12 @@ pub async fn run_doctor_fix(
     }
     let captured_shell_env = dir_env::capture_home_interactive_env().await;
     let prepend_dirs = doctor_prepend_dirs(&app_handle);
-    if command_override.is_none() {
-        if let Some(fix) = find_local_fix(&LOCAL_DOCTOR_REGISTRY, &check_id, &fix_type) {
-            return execute_local_fix(fix.command, &captured_shell_env, &prepend_dirs).await;
-        }
+    if let Some(fix) = find_local_fix(&LOCAL_DOCTOR_REGISTRY, &check_id, &fix_type) {
+        return execute_local_fix(fix.command, &captured_shell_env, &prepend_dirs).await;
     }
     // npm-backed fixes run the managed npm into the private prefix, so the
     // managed runtime must exist before the command does.
-    let resolved_command = command_override
-        .clone()
-        .or_else(|| doctor::agents::lookup_fix_command(&check_id, &fix_type));
+    let resolved_command = doctor::agents::lookup_fix_command(&check_id, &fix_type);
     if resolved_command
         .as_deref()
         .is_some_and(managed_acp_tools::is_npm_backed_command)
@@ -1613,7 +1611,7 @@ pub async fn run_doctor_fix(
         check_id,
         fix_type,
         doctor::ExecuteFixOptions {
-            command_override,
+            command_override: None,
             npm_registry: crate::commands::agent_setup::npm_registry(&app_handle),
             env: None,
         }
@@ -1907,6 +1905,41 @@ mod tests {
         assert!(text.contains("  details:\n    exit status: 0"));
         // Category headers appear before the checks that belong to them.
         assert!(text.find("== Tools ==").unwrap() < text.find("(git)").unwrap());
+    }
+
+    #[test]
+    fn run_doctor_fix_cannot_resolve_update_fix_types_without_an_override() {
+        // Regression for the renderer-command-override removal: `run_doctor_fix`
+        // no longer accepts a command string, so the only command source for an
+        // agent check is the crate's static table. Update fixes are derived
+        // per-readout and are intentionally absent from that table, so a forged
+        // `updateMain` / `updateBridge` request resolves to nothing and the
+        // executor rejects it rather than running arbitrary text.
+        for check_id in ["ai-agent-claude", "ai-agent-codex", "ai-agent-amp"] {
+            assert_eq!(
+                doctor::agents::lookup_fix_command(check_id, &FixType::UpdateMain),
+                None
+            );
+            assert_eq!(
+                doctor::agents::lookup_fix_command(check_id, &FixType::UpdateBridge),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn run_doctor_fix_rejects_unknown_check_ids() {
+        // An unknown check id has no static fix and no local-registry fix, so
+        // there is nothing for the renderer to trigger — the executor path
+        // resolves `None` and fails closed.
+        assert_eq!(
+            doctor::agents::lookup_fix_command("totally-made-up-check", &FixType::Command),
+            None
+        );
+        assert!(
+            find_local_fix(&LOCAL_DOCTOR_REGISTRY, "totally-made-up-check", &FixType::Command)
+                .is_none()
+        );
     }
 
     #[test]

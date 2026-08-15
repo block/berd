@@ -53,7 +53,6 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
   const [activeFix, setActiveFix] = useState<{
     fixType: FixType;
     command: string;
-    commandOverride: string | null;
   } | null>(null);
 
   const Icon = STATUS_ICON[check.status];
@@ -65,7 +64,6 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
     setActiveFix({
       fixType: check.fixType,
       command: check.fixCommand,
-      commandOverride: null,
     });
     setShowFixDialog(true);
   }
@@ -75,11 +73,7 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
     setFixing(true);
     setFixError(null);
     try {
-      await runDoctorFix(
-        check.id,
-        activeFix.fixType,
-        activeFix.commandOverride ?? undefined,
-      );
+      await runDoctorFix(check.id, activeFix.fixType);
       setShowFixDialog(false);
       onFixed?.();
     } catch (e) {

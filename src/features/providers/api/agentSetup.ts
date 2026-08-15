@@ -34,11 +34,10 @@ export interface AgentSetupOperation {
   error: string | null;
 }
 
-export interface AgentSetupUpdateCommand {
-  // `'updateMain'` or `'updateBridge'`, paired with the readout's command.
-  fixType: Extract<FixType, "updateMain" | "updateBridge">;
-  command: string;
-}
+export type AgentSetupUpdateFixType = Extract<
+  FixType,
+  "updateMain" | "updateBridge"
+>;
 
 // The execution recipe captured at click time. The card derives this from the
 // doctor report's actionable readouts, so the backend never has to re-derive
@@ -47,7 +46,11 @@ export interface AgentSetupPlan {
   // The install recipe to seed the install loop with, or null for a pure
   // update / auth.
   installFixType: Extract<FixType, "command" | "bridge"> | null;
-  updateCommands: AgentSetupUpdateCommand[];
+  // Which per-readout updates to run after the install loop (`updateMain` /
+  // `updateBridge`). The card names only the readout slot; the backend resolves
+  // the exact source-aware command from the crate's trusted freshness readout,
+  // so no renderer-supplied shell command crosses the wire.
+  updateFixTypes: AgentSetupUpdateFixType[];
   // Whether the backend probes PATH after the fix to confirm the agent landed.
   // `hasBinary && !isBuiltIn`: a built-in or binary-less provider has nothing to
   // resolve on disk, so the backend skips verification and takes a clean run as

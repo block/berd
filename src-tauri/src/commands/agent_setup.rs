@@ -126,9 +126,12 @@ pub struct SetupPlan {
     /// CLI, `bridge` for a missing ACP bridge). `null` for a pure update/auth.
     #[serde(default)]
     install_fix_type: Option<FixType>,
-    /// Per-readout source-aware update commands to run after the install loop.
+    /// Per-readout update fix identities to run after the install loop. Only
+    /// `updateMain` / `updateBridge` are valid; the exact source-aware command
+    /// is resolved by the backend from the crate's trusted freshness readout,
+    /// never supplied verbatim by the renderer.
     #[serde(default)]
-    update_commands: Vec<UpdateCommand>,
+    update_fix_types: Vec<FixType>,
     /// Whether the post-fix step probes PATH to confirm the agent resolved on
     /// disk. The frontend sends `hasBinary && !isBuiltIn`: a built-in or
     /// binary-less provider has nothing to resolve, so a clean fix run is taken
@@ -148,15 +151,6 @@ pub struct SetupPlan {
     /// to not_installed, an install-succeeds/still-broken loop.
     #[serde(default)]
     bundled_bridge: bool,
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UpdateCommand {
-    /// `updateMain` or `updateBridge`.
-    fix_type: FixType,
-    /// The readout's `updateCommand`, run verbatim as `command_override`.
-    command: String,
 }
 
 /// Managed Tauri state: `providerId -> SetupOperation`. Keying by provider lets
@@ -343,13 +337,32 @@ async fn setup_env_vars(app: &AppHandle) -> Vec<(String, String)> {
 }
 
 async fn find_check(app: &AppHandle, provider_id: &str) -> Result<doctor::DoctorCheck, String> {
+    find_check_with_options(app, provider_id, false).await
+}
+
+/// Like [`find_check`], but runs the crate's freshness pass so the returned
+/// check carries populated per-readout `update_command` / `update_fix_type`
+/// fields. Used to resolve the source-aware update command for a requested
+/// update fix from trusted crate state, rather than trusting a renderer string.
+async fn find_check_fresh(
+    app: &AppHandle,
+    provider_id: &str,
+) -> Result<doctor::DoctorCheck, String> {
+    find_check_with_options(app, provider_id, true).await
+}
+
+async fn find_check_with_options(
+    app: &AppHandle,
+    provider_id: &str,
+    check_freshness: bool,
+) -> Result<doctor::DoctorCheck, String> {
     let target = crate_check_id(provider_id);
     let env_vars = setup_env_vars(app).await;
     let bundled_tools_dir = managed_acp_tools::bundled_tools_dir_for_checks(app);
     let mut report = doctor::run_checks_with_options(
         doctor::RunChecksOptions {
             npm_registry: npm_registry(app),
-            check_freshness: false,
+            check_freshness,
             offline: false,
             env: None,
             // The crate labels binaries resolving from this dir as bundled and
@@ -430,6 +443,53 @@ async fn verify_installed(
         // Sentinel the card localizes via `providers.agents.errors.*`.
         Err("installVerificationFailed".to_string())
     }
+}
+
+/// Resolve the exact, source-aware update command for a requested update fix
+/// from the crate's freshness readout — the trusted source of truth. The
+/// renderer names only the readout slot (`updateMain` / `updateBridge`); the
+/// command string never crosses the wire.
+///
+/// Rejects (returns `Err`) when:
+/// - `fix_type` is not one of the two update slots (a forged/mismatched fix);
+/// - the addressed readout is absent (`main` / `bridge` is `None`);
+/// - the readout reports no actionable update (`update_command` is `None`), or
+///   its own `update_fix_type` doesn't match the requested slot.
+fn resolve_update_command(
+    check: &doctor::DoctorCheck,
+    fix_type: &FixType,
+) -> Result<String, String> {
+    let readout = match fix_type {
+        FixType::UpdateMain => check.main.as_ref(),
+        FixType::UpdateBridge => check.bridge.as_ref(),
+        other => {
+            return Err(format!(
+                "unsupported update fix type '{other:?}' for '{}'",
+                check.id
+            ));
+        }
+    };
+    let readout = readout.ok_or_else(|| {
+        format!(
+            "no '{fix_type:?}' readout available for '{}' to resolve an update command",
+            check.id
+        )
+    })?;
+    // Both fields are set together by the crate's freshness pass, and only when
+    // the update is actionable; a mismatched slot means the requested update
+    // isn't the one the readout offers.
+    if readout.update_fix_type.as_ref() != Some(fix_type) {
+        return Err(format!(
+            "'{fix_type:?}' does not match the actionable update for '{}'",
+            check.id
+        ));
+    }
+    readout.update_command.clone().ok_or_else(|| {
+        format!(
+            "no actionable '{fix_type:?}' update command for '{}'",
+            check.id
+        )
+    })
 }
 
 /// The install recipe a check still needs, if any. Only the two *install* fix
@@ -552,16 +612,16 @@ async fn run_install(
 
     // Update-after-install: a partial install with stale binaries (the "Fix"
     // state) is brought fully current in the same pass; for a plain install this
-    // list is empty and the loop is a no-op.
-    for update in &plan.update_commands {
-        run_fix(
-            app,
-            registry,
-            provider_id,
-            update.fix_type.clone(),
-            Some(update.command.clone()),
-        )
-        .await?;
+    // list is empty and the loop is a no-op. The renderer only names *which*
+    // readouts to update (`updateMain` / `updateBridge`); the exact source-aware
+    // command is resolved here from the crate's trusted freshness readout, so a
+    // compromised renderer can't smuggle an arbitrary shell command through.
+    if !plan.update_fix_types.is_empty() {
+        let fresh = find_check_fresh(app, provider_id).await?;
+        for fix_type in &plan.update_fix_types {
+            let command = resolve_update_command(&fresh, fix_type)?;
+            run_fix(app, registry, provider_id, fix_type.clone(), Some(command)).await?;
+        }
     }
 
     // Only enter the visible Checking phase when there's a binary to probe;
@@ -831,6 +891,87 @@ mod tests {
         }
     }
 
+    /// Build a readout with a paired `(update_command, update_fix_type)`, as
+    /// the crate's freshness pass emits for an actionable update.
+    fn readout_with_update(command: &str, fix_type: FixType) -> doctor::types::AgentVersionInfo {
+        doctor::types::AgentVersionInfo {
+            update_command: Some(command.to_string()),
+            update_fix_type: Some(fix_type),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn resolve_update_command_returns_the_trusted_readout_command() {
+        let mut check = check_with_fix(None);
+        check.main = Some(readout_with_update(
+            "npm install -g @anthropic-ai/claude-code@latest",
+            FixType::UpdateMain,
+        ));
+        check.bridge = Some(readout_with_update(
+            "npm install -g claude-agent-acp@latest",
+            FixType::UpdateBridge,
+        ));
+
+        assert_eq!(
+            resolve_update_command(&check, &FixType::UpdateMain).unwrap(),
+            "npm install -g @anthropic-ai/claude-code@latest"
+        );
+        assert_eq!(
+            resolve_update_command(&check, &FixType::UpdateBridge).unwrap(),
+            "npm install -g claude-agent-acp@latest"
+        );
+    }
+
+    #[test]
+    fn resolve_update_command_rejects_non_update_fix_types() {
+        // A forged plan naming an install/auth fix as an "update" must never
+        // resolve to a command — those are not update slots.
+        let mut check = check_with_fix(None);
+        check.main = Some(readout_with_update("brew upgrade codex", FixType::UpdateMain));
+
+        for forged in [FixType::Command, FixType::Bridge, FixType::Auth] {
+            assert!(
+                resolve_update_command(&check, &forged).is_err(),
+                "{forged:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_update_command_rejects_absent_readout() {
+        // No `main` / `bridge` readout means there is no trusted command to run.
+        let check = check_with_fix(None);
+        assert!(resolve_update_command(&check, &FixType::UpdateMain).is_err());
+        assert!(resolve_update_command(&check, &FixType::UpdateBridge).is_err());
+    }
+
+    #[test]
+    fn resolve_update_command_rejects_mismatched_slot() {
+        // The bridge readout carries a bridge update; requesting `updateMain`
+        // against it (a mismatched slot) must fail rather than run the bridge
+        // command under the wrong identity.
+        let mut check = check_with_fix(None);
+        check.main = Some(readout_with_update(
+            "npm install -g claude-agent-acp@latest",
+            FixType::UpdateBridge,
+        ));
+        assert!(resolve_update_command(&check, &FixType::UpdateMain).is_err());
+    }
+
+    #[test]
+    fn resolve_update_command_rejects_readout_without_actionable_command() {
+        // A readout with no derived update command (e.g. a self-updating or
+        // opaque install source) offers nothing to run, even for a valid slot.
+        let mut check = check_with_fix(None);
+        check.main = Some(doctor::types::AgentVersionInfo {
+            update_command: None,
+            update_fix_type: None,
+            ..Default::default()
+        });
+        assert!(resolve_update_command(&check, &FixType::UpdateMain).is_err());
+    }
+
     #[test]
     fn install_fix_for_check_returns_the_two_install_recipes() {
         assert_eq!(
@@ -1040,7 +1181,7 @@ mod tests {
     fn plan_with_requirements(verify_install: bool, bundled_bridge: bool) -> SetupPlan {
         SetupPlan {
             install_fix_type: None,
-            update_commands: Vec::new(),
+            update_fix_types: Vec::new(),
             verify_install,
             bundled_bridge,
         }
