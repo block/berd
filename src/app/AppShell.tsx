@@ -142,9 +142,9 @@ import {
 } from "@/features/chat/stores/chatSessionOperations";
 import {
   activateSession as activateChatSession,
-  hasConversationMessages,
   loadSessionMessagesAndPrepare,
 } from "@/features/chat/lib/sessionActivation";
+import { hasConversationMessages } from "@/features/chat/lib/sessionReplayReplacement";
 import {
   focusSessionWindow,
   releaseSession,

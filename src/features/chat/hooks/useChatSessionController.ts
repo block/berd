@@ -1952,7 +1952,10 @@ export function useChatSessionController({
               }
             : undefined,
         );
-        if (compactionResult !== "completed") {
+        if (
+          compactionResult !== "completed" &&
+          compactionResult !== "completed-with-refresh-warning"
+        ) {
           return false;
         }
 

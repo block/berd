@@ -1,5 +1,8 @@
 import { clearReplayBuffer } from "@/features/chat/hooks/replayBuffer";
-import { replaceMessagesFromSessionReplay } from "@/features/chat/lib/sessionReplayReplacement";
+import {
+  hasConversationMessages,
+  replaceMessagesFromSessionReplay,
+} from "@/features/chat/lib/sessionReplayReplacement";
 import { completeReplayAssistantMessage } from "@/features/chat/acp/acpReplayAssistant";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
@@ -202,18 +205,6 @@ export function clearSessionLoadWarningNotice(sessionId: string): void {
     .removeMessage(sessionId, loaderNoticeMessageId(sessionId, "warning"));
 }
 
-/**
- * True when the session holds replayed conversation history. Loader-added
- * system notifications don't count: treating them as "loaded" would make a
- * single failed load (whose error notification is the only message)
- * permanently block retries through the has-messages skip guard.
- */
-export function hasConversationMessages(
-  messages: Message[] | undefined,
-): boolean {
-  return messages?.some((message) => message.role !== "system") ?? false;
-}
-
 const sessionLoadPromises = new Map<string, Promise<boolean>>();
 
 export async function loadSessionMessagesAndPrepare(
@@ -304,7 +295,6 @@ async function performSessionMessagesLoad(
 
   const sessionStore = useChatSessionStore.getState();
   const sessionAtRequest = sessionStore.getSession(sessionId);
-  const messageCountAtRequest = sessionAtRequest?.messageCount;
   if (sessionAtRequest?.creationState === "pending") {
     perfLog(`[perf:load] ${sid} skip — session creation pending`);
     useChatStore.getState().setSessionLoading(sessionId, false);
@@ -401,8 +391,19 @@ async function performSessionMessagesLoad(
     const latestSessionBeforeReplay = useChatSessionStore
       .getState()
       .getSession(sessionId);
+    const historyExpectation = sessionAtRequest?.pinnedLoadState
+      ? sessionInfo
+        ? sessionInfo.messageCount > 0
+          ? "nonempty"
+          : "empty"
+        : "unknown"
+      : latestSessionBeforeReplay?.messageCount === undefined
+        ? "unknown"
+        : latestSessionBeforeReplay.messageCount > 0
+          ? "nonempty"
+          : "empty";
     const replayResult = replaceMessagesFromSessionReplay(sessionId, {
-      conversationRequired: (latestSessionBeforeReplay?.messageCount ?? 0) > 0,
+      historyExpectation,
     });
     const replayStats = getReplayPerf(sessionId);
     clearReplayPerf(sessionId);
@@ -418,12 +419,9 @@ async function performSessionMessagesLoad(
         ...createSystemNotificationMessage(errorMessage, "error"),
         id: loaderNoticeMessageId(sessionId, "error"),
       });
-      useChatSessionStore.getState().patchSession(sessionId, {
-        pinnedLoadState: undefined,
-        ...(messageCountAtRequest !== undefined
-          ? { messageCount: messageCountAtRequest }
-          : {}),
-      });
+      useChatSessionStore
+        .getState()
+        .patchSession(sessionId, { pinnedLoadState: undefined });
       clearIdleStreamingMessageAfterReplay(sessionId);
       perfLog(
         `[perf:load] ${sid} replay invalid: reason=${replayResult.reason} notifs=${replayStats?.count ?? 0}`,
@@ -436,9 +434,7 @@ async function performSessionMessagesLoad(
       completeReplayAssistantMessage(sessionId);
     }
     const latestSession = useChatSessionStore.getState().getSession(sessionId);
-    const sessionPatch: Partial<ChatSession> = {
-      messageCount: replayMessages.length,
-    };
+    const sessionPatch: Partial<ChatSession> = {};
     if (
       latestSession &&
       !latestSession.userSetName &&

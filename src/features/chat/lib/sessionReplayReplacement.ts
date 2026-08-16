@@ -8,8 +8,10 @@ export type SessionReplayReplacementResult =
   | { status: "not-required"; messages: [] }
   | { status: "invalid"; reason: "missing" | "empty" };
 
-function hasConversationMessages(messages: Message[]): boolean {
-  return messages.some((message) => message.role !== "system");
+export function hasConversationMessages(
+  messages: Message[] | undefined,
+): boolean {
+  return messages?.some((message) => message.role !== "system") ?? false;
 }
 
 /**
@@ -21,16 +23,19 @@ function hasConversationMessages(messages: Message[]): boolean {
 export function replaceMessagesFromSessionReplay(
   sessionId: string,
   options: {
-    conversationRequired?: boolean;
+    historyExpectation?: "empty" | "nonempty" | "unknown";
     trailingMessages?: Message[];
   } = {},
 ): SessionReplayReplacementResult {
   const existingMessages =
     useChatStore.getState().messagesBySession[sessionId] ?? [];
   const existingConversation = hasConversationMessages(existingMessages);
+  const historyExpectation = options.historyExpectation ?? "unknown";
+  const replacementRequired =
+    historyExpectation !== "empty" || existingConversation;
   const buffer = getAndDeleteReplayBuffer(sessionId);
   if (!buffer) {
-    if (options.conversationRequired || existingConversation) {
+    if (replacementRequired) {
       return { status: "invalid", reason: "missing" };
     }
     useChatStore.getState().setMessages(sessionId, []);
@@ -39,7 +44,7 @@ export function replaceMessagesFromSessionReplay(
 
   const messages = sanitizeReplayMessages(buffer);
   if (!hasConversationMessages(messages)) {
-    if (options.conversationRequired || existingConversation) {
+    if (replacementRequired) {
       return { status: "invalid", reason: "empty" };
     }
     useChatStore.getState().setMessages(sessionId, []);

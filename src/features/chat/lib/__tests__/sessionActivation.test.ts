@@ -578,8 +578,8 @@ describe("loadSessionMessages", () => {
     );
   });
 
-  it("loads a session without a stored session record", async () => {
-    await expect(loadSessionMessages("unknown-session")).resolves.toBe(true);
+  it("rejects missing replay when session history is unknown", async () => {
+    await expect(loadSessionMessages("unknown-session")).resolves.toBe(false);
 
     expect(checkDirectoriesExist).not.toHaveBeenCalled();
     expect(acpLoadSession).toHaveBeenCalledWith(
@@ -874,9 +874,72 @@ describe("loadSessionMessages", () => {
         workingDir: "/Users/morganm/goose artifacts",
         updatedAt: "2026-06-25T00:45:04.000Z",
         lastMessageAt: "2026-06-19T06:59:21.000Z",
+        messageCount: 1143,
         pinnedLoadState: undefined,
       },
     );
+  });
+
+  it("rejects empty pinned replay when authoritative metadata refresh fails", async () => {
+    acpGetSessionInfo.mockRejectedValue(new Error("metadata unavailable"));
+    seedSession(
+      {
+        id: "s-pinned-unknown",
+        messageCount: 0,
+        pinnedLoadState: "loading",
+      },
+      { replay: false },
+    );
+    acpLoadSession.mockImplementation(async (sessionId: string) => {
+      ensureReplayBuffer(sessionId);
+    });
+
+    await expect(loadSessionMessages("s-pinned-unknown")).resolves.toBe(false);
+    expect(notificationFromLastMessage("s-pinned-unknown")).toMatchObject({
+      notificationType: "error",
+    });
+  });
+
+  it("keeps refreshed pinned history metadata across invalid replay retries", async () => {
+    acpGetSessionInfo.mockResolvedValue({
+      sessionId: "s-pinned-empty",
+      title: "Existing session",
+      updatedAt: "2026-06-25T00:45:04.000Z",
+      createdAt: "2026-06-19T03:43:17.000Z",
+      lastMessageAt: "2026-06-19T06:59:21.000Z",
+      archivedAt: null,
+      userSetName: false,
+      messageCount: 9,
+      subtitle: null,
+      workingDir: null,
+      projectId: null,
+      providerId: "goose",
+      modelId: "claude-sonnet-4",
+      personaId: null,
+    });
+    seedSession(
+      {
+        id: "s-pinned-empty",
+        messageCount: 0,
+        pinnedLoadState: "loading",
+      },
+      { replay: false },
+    );
+    acpLoadSession.mockImplementation(async (sessionId: string) => {
+      ensureReplayBuffer(sessionId);
+    });
+
+    await expect(loadSessionMessages("s-pinned-empty")).resolves.toBe(false);
+    expect(
+      useChatSessionStore.getState().getSession("s-pinned-empty")?.messageCount,
+    ).toBe(9);
+
+    await expect(loadSessionMessages("s-pinned-empty")).resolves.toBe(false);
+    expect(acpGetSessionInfo).toHaveBeenCalledTimes(1);
+    expect(
+      useChatSessionStore.getState().getSession("s-pinned-empty")?.messageCount,
+    ).toBe(9);
+    expect(messagesFor("s-pinned-empty")).toHaveLength(1);
   });
 
   it("does not let pinned metadata replace a newer UI model selection", async () => {

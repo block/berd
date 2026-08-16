@@ -376,6 +376,28 @@ describe("useChatSessionController compaction behavior", () => {
     );
   });
 
+  it("continues the queued send when compaction commits but transcript refresh is incomplete", async () => {
+    mockTokenState = {
+      ...INITIAL_TOKEN_STATE,
+      accumulatedTotal: 8_500,
+      contextLimit: 10_000,
+    };
+    useChatStore
+      .getState()
+      .replaceTokenState("session-1", mockTokenState, true);
+    mockCompactConversation.mockResolvedValue("completed-with-refresh-warning");
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    expect(capturedQueuedSend).not.toBeNull();
+    await act(async () => {
+      await capturedQueuedSend?.("hello");
+    });
+
+    expect(mockCompactConversation).toHaveBeenCalledOnce();
+    expect(mockSendMessage).toHaveBeenCalledWith("hello", undefined, undefined);
+  });
+
   it("keeps compaction enabled for goose agent sessions backed by model providers", async () => {
     mockTokenState = {
       ...INITIAL_TOKEN_STATE,

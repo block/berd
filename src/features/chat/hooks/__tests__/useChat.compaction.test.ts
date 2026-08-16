@@ -171,7 +171,7 @@ describe("useChat compaction", () => {
     ).toBe(false);
   });
 
-  it("keeps the transcript and reports failure when compacted replay is invalid", async () => {
+  it("keeps the transcript and warns when compacted replay is invalid", async () => {
     mockAcpLoadSession.mockImplementation(async (sessionId: string) => {
       ensureReplayBuffer(sessionId).push(
         createTextMessage("compact-1", "user", "/compact/compact"),
@@ -190,7 +190,7 @@ describe("useChat compaction", () => {
       compactResult = await result.current.compactConversation();
     });
 
-    expect(compactResult).toBe("failed");
+    expect(compactResult).toBe("completed-with-refresh-warning");
     const messages = useChatStore.getState().messagesBySession["session-1"];
     expect(messages.map((message) => message.id)).toEqual([
       "user-1",
@@ -213,9 +213,38 @@ describe("useChat compaction", () => {
         text: "Couldn't verify the compacted conversation because refreshed history wasn't received. Your previous messages are still shown. Try reloading the session.",
       },
     ]);
-    expect(useChatStore.getState().getSessionRuntime("session-1").error).toBe(
-      "Couldn't verify the compacted conversation because refreshed history wasn't received. Your previous messages are still shown. Try reloading the session.",
-    );
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").error,
+    ).toBeNull();
+  });
+
+  it("warns but reports committed when transcript refresh throws after compaction", async () => {
+    mockAcpLoadSession.mockRejectedValue(new Error("refresh failed"));
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        createTextMessage("user-1", "user", "Before compact"),
+      ]);
+
+    const { result } = renderHook(() => useChat("session-1"));
+    let compactResult: unknown;
+    await act(async () => {
+      compactResult = await result.current.compactConversation();
+    });
+
+    expect(compactResult).toBe("completed-with-refresh-warning");
+    expect(
+      useChatStore
+        .getState()
+        .messagesBySession["session-1"].map((message) =>
+          message.content[0]?.type === "systemNotification"
+            ? message.content[0].notificationType
+            : message.id,
+        ),
+    ).toEqual(["user-1", "error"]);
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").error,
+    ).toBeNull();
   });
 
   it("prepares and compacts the override persona session", async () => {

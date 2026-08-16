@@ -38,7 +38,11 @@ const MANUAL_COMPACT_TRIGGER = "/compact";
 const EMPTY_MESSAGES: Message[] = [];
 const cancellationOwnerBySession = new Map<string, symbol>();
 const cancellationPromiseBySession = new Map<string, Promise<boolean>>();
-type CompactConversationResult = "completed" | "failed" | "skipped";
+type CompactConversationResult =
+  | "completed"
+  | "completed-with-refresh-warning"
+  | "failed"
+  | "skipped";
 type EnsurePrepared = (
   personaId?: string,
   sessionSelection?: ChatSendOptions["sessionSelection"],
@@ -436,11 +440,13 @@ export function useChat(
       setSessionLoading(sessionId, true);
       clearReplayBuffer(sessionId);
 
+      let compactionCommitted = false;
       try {
         const sendOptions = effectivePersonaInfo?.id
           ? { personaId: effectivePersonaInfo.id }
           : undefined;
         await acpSendMessage(sessionId, MANUAL_COMPACT_TRIGGER, sendOptions);
+        compactionCommitted = true;
 
         // Command responses are streamed via prompt notifications, but the ACP
         // layer does not currently forward history replacement events. Drop those
@@ -453,7 +459,7 @@ export function useChat(
         setSessionLoading(sessionId, false);
 
         const replayResult = replaceMessagesFromSessionReplay(sessionId, {
-          conversationRequired: true,
+          historyExpectation: "nonempty",
           trailingMessages: [createCompactionConfirmationMessage()],
         });
         if (replayResult.status === "invalid") {
@@ -464,13 +470,23 @@ export function useChat(
             sessionId,
             createSystemNotificationMessage(errorMessage, "error"),
           );
-          setError(sessionId, errorMessage);
-          return "failed" as CompactConversationResult;
+          return "completed-with-refresh-warning" as CompactConversationResult;
         }
         return "completed" as CompactConversationResult;
       } catch (err) {
         clearReplayBuffer(sessionId);
         setSessionLoading(sessionId, false);
+
+        if (compactionCommitted) {
+          const errorMessage = i18n.t(
+            "chat:notifications.compactionReplayIncomplete",
+          );
+          addMessage(
+            sessionId,
+            createSystemNotificationMessage(errorMessage, "error"),
+          );
+          return "completed-with-refresh-warning" as CompactConversationResult;
+        }
 
         const errorMessage = formatAcpErrorMessage(err);
         addMessage(
