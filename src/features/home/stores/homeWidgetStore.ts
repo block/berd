@@ -250,6 +250,7 @@ function createHomeWidgetStore() {
     UNCHANGED_SNAPSHOT;
   let starterWidgetCompletionPending = false;
   let starterAgentRecoveryPromise: Promise<boolean> | null = null;
+  let onboardingResetInFlight = false;
 
   function applyPendingCleanUpSnapshot(snapshot: PendingCleanUpSnapshot): void {
     if (snapshot === UNCHANGED_SNAPSHOT) {
@@ -306,7 +307,7 @@ function createHomeWidgetStore() {
       ) => HomeWidgetState["instances"] | null,
     ): void {
       const state = get();
-      if (!canMutateWidgets(state)) {
+      if (onboardingResetInFlight || !canMutateWidgets(state)) {
         return;
       }
 
@@ -680,99 +681,107 @@ function createHomeWidgetStore() {
         );
       },
       resetHomeForOnboarding: async () => {
-        await runtime.waitForPendingSaves();
-        const state = get();
-        if (!canMutateWidgets(state) || state.itemRevision === null) {
+        if (onboardingResetInFlight) {
           return { itemsConfirmed: false, cameraConfirmed: false };
         }
-        const initialItemRevision = state.itemRevision;
-        const initialCameraRevision = state.cameraRevision;
-
-        resetStarterHomeArrangement();
-        const nextInstances = createStarterHomeWidgets([]);
-
-        const expectedCamera = state.camera
-          ? {
-              ...state.camera,
-              centerX: 0,
-              centerY: 40,
-              zoomBps: 10_000,
-            }
-          : null;
-        const previousState = {
-          instances: state.instances,
-          itemRevision: state.itemRevision,
-          camera: state.camera,
-          cameraRevision: state.cameraRevision,
-          lastConfirmedLayout: state.lastConfirmedLayout,
-          cleanUpSnapshot: state.cleanUpSnapshot,
-        };
-        persistCleanUpSnapshot(null);
-        clearPendingCleanUpSaveOutcomes();
-        set({ instances: nextInstances, cleanUpSnapshot: null });
-        let itemResult: LayoutMutationResult;
+        onboardingResetInFlight = true;
         try {
-          itemResult = await saveLayoutItems({
-            layoutId: HOME_LAYOUT_ID,
-            expectedRevision: initialItemRevision,
-            replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
-            items: homeWidgetsToLayoutItems(nextInstances),
-          });
-          if (!itemResult.ok) {
+          await runtime.waitForPendingSaves();
+          const state = get();
+          if (!canMutateWidgets(state) || state.itemRevision === null) {
+            return { itemsConfirmed: false, cameraConfirmed: false };
+          }
+          const initialItemRevision = state.itemRevision;
+          const initialCameraRevision = state.cameraRevision;
+
+          resetStarterHomeArrangement();
+          const nextInstances = createStarterHomeWidgets([]);
+
+          const expectedCamera = state.camera
+            ? {
+                ...state.camera,
+                centerX: 0,
+                centerY: 40,
+                zoomBps: 10_000,
+              }
+            : null;
+          const previousState = {
+            instances: state.instances,
+            itemRevision: state.itemRevision,
+            camera: state.camera,
+            cameraRevision: state.cameraRevision,
+            lastConfirmedLayout: state.lastConfirmedLayout,
+            cleanUpSnapshot: state.cleanUpSnapshot,
+          };
+          persistCleanUpSnapshot(null);
+          clearPendingCleanUpSaveOutcomes();
+          set({ instances: nextInstances, cleanUpSnapshot: null });
+          let itemResult: LayoutMutationResult;
+          try {
             itemResult = await saveLayoutItems({
               layoutId: HOME_LAYOUT_ID,
-              expectedRevision: itemResult.layout.itemRevision,
+              expectedRevision: initialItemRevision,
               replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
               items: homeWidgetsToLayoutItems(nextInstances),
             });
+            if (!itemResult.ok) {
+              itemResult = await saveLayoutItems({
+                layoutId: HOME_LAYOUT_ID,
+                expectedRevision: itemResult.layout.itemRevision,
+                replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
+                items: homeWidgetsToLayoutItems(nextInstances),
+              });
+            }
+          } catch (error) {
+            persistCleanUpSnapshot(previousState.cleanUpSnapshot);
+            set(previousState);
+            console.error("Failed to reset Home for onboarding:", error);
+            return { itemsConfirmed: false, cameraConfirmed: false };
           }
-        } catch (error) {
-          persistCleanUpSnapshot(previousState.cleanUpSnapshot);
-          set(previousState);
-          console.error("Failed to reset Home for onboarding:", error);
-          return { itemsConfirmed: false, cameraConfirmed: false };
-        }
-        if (!itemResult.ok) {
+          if (!itemResult.ok) {
+            set({
+              ...initialHomeWidgetState,
+              ...itemResult.layout,
+              instances: layoutItemsToHomeWidgets(itemResult.layout.items),
+              loadStatus: "ready",
+            });
+            return { itemsConfirmed: false, cameraConfirmed: false };
+          }
           set({
-            ...initialHomeWidgetState,
-            ...itemResult.layout,
             instances: layoutItemsToHomeWidgets(itemResult.layout.items),
-            loadStatus: "ready",
+            itemRevision: itemResult.layout.itemRevision,
+            lastConfirmedLayout: itemResult.layout,
           });
-          return { itemsConfirmed: false, cameraConfirmed: false };
-        }
-        set({
-          instances: layoutItemsToHomeWidgets(itemResult.layout.items),
-          itemRevision: itemResult.layout.itemRevision,
-          lastConfirmedLayout: itemResult.layout,
-        });
-        if (expectedCamera) get().saveCamera(expectedCamera);
-        await runtime.waitForPendingSaves();
+          if (expectedCamera) get().saveCamera(expectedCamera);
+          await runtime.waitForPendingSaves();
 
-        const latest = get();
-        const confirmedIds = new Set(
-          latest.instances.map((instance) => instance.id),
-        );
-        const itemsConfirmed =
-          latest.itemRevision !== initialItemRevision &&
-          latest.instances.length === nextInstances.length &&
-          nextInstances.every((instance) => confirmedIds.has(instance.id));
-        const cameraConfirmed =
-          !expectedCamera ||
-          (latest.cameraRevision !== initialCameraRevision &&
-            latest.camera?.centerX === expectedCamera.centerX &&
-            latest.camera.centerY === expectedCamera.centerY &&
-            latest.camera.zoomBps === expectedCamera.zoomBps);
-        if (itemsConfirmed && cameraConfirmed) {
-          markStarterHomeArranged();
-        } else if (itemsConfirmed && expectedCamera) {
-          markStarterHomeCameraPending({
-            expectedRevision: initialCameraRevision ?? 0,
-            camera: expectedCamera,
-          });
-          toast.warning(i18n.t("home:widgetLayer.toasts.cameraSaveFailed"));
+          const latest = get();
+          const confirmedIds = new Set(
+            latest.instances.map((instance) => instance.id),
+          );
+          const itemsConfirmed =
+            latest.itemRevision !== initialItemRevision &&
+            latest.instances.length === nextInstances.length &&
+            nextInstances.every((instance) => confirmedIds.has(instance.id));
+          const cameraConfirmed =
+            !expectedCamera ||
+            (latest.cameraRevision !== initialCameraRevision &&
+              latest.camera?.centerX === expectedCamera.centerX &&
+              latest.camera.centerY === expectedCamera.centerY &&
+              latest.camera.zoomBps === expectedCamera.zoomBps);
+          if (itemsConfirmed && cameraConfirmed) {
+            markStarterHomeArranged();
+          } else if (itemsConfirmed && expectedCamera) {
+            markStarterHomeCameraPending({
+              expectedRevision: initialCameraRevision ?? 0,
+              camera: expectedCamera,
+            });
+            toast.warning(i18n.t("home:widgetLayer.toasts.cameraSaveFailed"));
+          }
+          return { itemsConfirmed, cameraConfirmed };
+        } finally {
+          onboardingResetInFlight = false;
         }
-        return { itemsConfirmed, cameraConfirmed };
       },
       reloadOnboardingTourForDev: () => {
         if (!import.meta.env.DEV) return;

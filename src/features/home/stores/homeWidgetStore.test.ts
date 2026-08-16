@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
@@ -224,6 +225,14 @@ beforeEach(() => {
   vi.mocked(getLayout).mockReset();
   vi.mocked(saveLayoutCamera).mockReset();
   vi.mocked(saveLayoutItems).mockReset();
+  vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+    ok: true,
+    layout: layout({ itemRevision: 5, items: request.items }),
+  }));
+  vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
+    ok: true,
+    layout: layout({ camera: request.camera, cameraRevision: 2 }),
+  }));
   vi.mocked(toast.error).mockClear();
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.warning).mockClear();
@@ -280,6 +289,36 @@ describe("homeWidgetStore", () => {
         }),
       ]),
     );
+  });
+
+  it("rejects widget mutations while a full onboarding reset is in flight", async () => {
+    const resetSave = deferred<SaveItemsResult>();
+    setReadyHomeState({
+      camera: INITIAL_CAMERA,
+      cameraRevision: 1,
+      itemRevision: 4,
+      instances: [clockWidget()],
+    });
+    vi.mocked(saveLayoutItems).mockReturnValueOnce(resetSave.promise);
+
+    const reset = useHomeWidgetStore.getState().resetHomeForOnboarding();
+    useHomeWidgetStore
+      .getState()
+      .addWidget("agentPin", 10, 10, { agentId: "concurrent" }, CANVAS_BOUNDS);
+
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.some((instance) => instance.state?.agentId === "concurrent"),
+    ).toBe(false);
+
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledOnce());
+    const requestedItems = vi.mocked(saveLayoutItems).mock.calls[0][0].items;
+    resetSave.resolve({
+      ok: true,
+      layout: layout({ itemRevision: 5, items: requestedItems }),
+    });
+    await reset;
   });
 
   it("keeps a confirmed onboarding canvas when camera recentering fails", async () => {
