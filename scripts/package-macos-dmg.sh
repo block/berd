@@ -64,60 +64,102 @@ func color(_ hex: UInt32) -> NSColor {
   )
 }
 
+func bezierPoint(
+  from start: NSPoint,
+  controlPoint1: NSPoint,
+  controlPoint2: NSPoint,
+  to end: NSPoint,
+  progress: CGFloat
+) -> NSPoint {
+  let inverse = 1 - progress
+  return NSPoint(
+    x: inverse * inverse * inverse * start.x
+      + 3 * inverse * inverse * progress * controlPoint1.x
+      + 3 * inverse * progress * progress * controlPoint2.x
+      + progress * progress * progress * end.x,
+    y: inverse * inverse * inverse * start.y
+      + 3 * inverse * inverse * progress * controlPoint1.y
+      + 3 * inverse * progress * progress * controlPoint2.y
+      + progress * progress * progress * end.y
+  )
+}
+
+func drawBrushStroke(
+  from start: NSPoint,
+  controlPoint1: NSPoint,
+  controlPoint2: NSPoint,
+  to end: NSPoint,
+  width: CGFloat,
+  seed: Int
+) {
+  let stampCount = 76
+  for index in 0..<stampCount {
+    let progress = CGFloat(index) / CGFloat(stampCount - 1)
+    let point = bezierPoint(
+      from: start,
+      controlPoint1: controlPoint1,
+      controlPoint2: controlPoint2,
+      to: end,
+      progress: progress
+    )
+    let edgeNoise = CGFloat((index * 37 + seed * 19) % 100) / 100
+    let sideNoise = CGFloat((index * 53 + seed * 31) % 100) / 100 - 0.5
+    let radius = width * (0.41 + edgeNoise * 0.11)
+    NSBezierPath(
+      ovalIn: NSRect(
+        x: point.x + sideNoise * 2.5 - radius,
+        y: point.y + (edgeNoise - 0.5) * 2.5 - radius,
+        width: radius * 2,
+        height: radius * 2
+      )
+    ).fill()
+  }
+}
+
 image.lockFocus()
-NSColor.white.setFill()
+
+let paper = color(0xe4e4e0)
+let ink = color(0x050505)
+let dot = color(0xc9cac4)
+
+paper.setFill()
 NSRect(origin: .zero, size: canvas).fill()
 
-let ink = color(0x050505)
-let gold = color(0xffd43b)
+dot.setFill()
+for y in stride(from: 16, through: 384, by: 32) {
+  for x in stride(from: 16, through: 784, by: 32) {
+    NSBezierPath(ovalIn: NSRect(x: x - 1, y: y - 1, width: 2, height: 2)).fill()
+  }
+}
 
-let arrow = NSBezierPath()
-arrow.move(to: NSPoint(x: 326, y: 178))
-arrow.curve(
-  to: NSPoint(x: 464, y: 178),
-  controlPoint1: NSPoint(x: 372, y: 202),
-  controlPoint2: NSPoint(x: 420, y: 202)
+ink.setFill()
+
+// Keep the shaft and arrowhead as distinct brush gestures. The small paper gap
+// stops the upper arrowhead stroke from visually merging into the curved line.
+drawBrushStroke(
+  from: NSPoint(x: 285, y: 232),
+  controlPoint1: NSPoint(x: 340, y: 270),
+  controlPoint2: NSPoint(x: 420, y: 270),
+  to: NSPoint(x: 473, y: 236),
+  width: 13,
+  seed: 2
 )
-arrow.lineCapStyle = .round
-arrow.lineJoinStyle = .round
-arrow.lineWidth = 6
-ink.setStroke()
-arrow.stroke()
-
-let head = NSBezierPath()
-head.move(to: NSPoint(x: 464, y: 178))
-head.line(to: NSPoint(x: 438, y: 155))
-head.move(to: NSPoint(x: 464, y: 178))
-head.line(to: NSPoint(x: 438, y: 201))
-head.lineCapStyle = .round
-head.lineJoinStyle = .round
-head.lineWidth = 6
-ink.setStroke()
-head.stroke()
-
-let burstA = NSBezierPath(roundedRect: NSRect(x: 642, y: 250, width: 10, height: 28), xRadius: 3, yRadius: 3)
-var transformA = AffineTransform()
-transformA.translate(x: 647, y: 264)
-transformA.rotate(byDegrees: -6)
-transformA.translate(x: -647, y: -264)
-burstA.transform(using: transformA)
-gold.setFill()
-burstA.fill()
-ink.setStroke()
-burstA.lineWidth = 3
-burstA.stroke()
-
-let burstB = NSBezierPath(roundedRect: NSRect(x: 664, y: 236, width: 10, height: 32), xRadius: 3, yRadius: 3)
-var transformB = AffineTransform()
-transformB.translate(x: 669, y: 252)
-transformB.rotate(byDegrees: 42)
-transformB.translate(x: -669, y: -252)
-burstB.transform(using: transformB)
-gold.setFill()
-burstB.fill()
-ink.setStroke()
-burstB.lineWidth = 3
-burstB.stroke()
+drawBrushStroke(
+  from: NSPoint(x: 489, y: 259),
+  controlPoint1: NSPoint(x: 496, y: 250),
+  controlPoint2: NSPoint(x: 503, y: 241),
+  to: NSPoint(x: 510, y: 232),
+  width: 13,
+  seed: 3
+)
+drawBrushStroke(
+  from: NSPoint(x: 466, y: 202),
+  controlPoint1: NSPoint(x: 480, y: 211),
+  controlPoint2: NSPoint(x: 495, y: 222),
+  to: NSPoint(x: 510, y: 232),
+  width: 13,
+  seed: 4
+)
 
 image.unlockFocus()
 
@@ -188,8 +230,8 @@ on run argv
     set icon size of opts to 128
     set text size of opts to 12
     set background picture of opts to file ".background:background.png" of dmgRoot
-    set position of item appName of dmgRoot to {190, 210}
-    set position of item "Applications" of dmgRoot to {590, 210}
+    set position of item appName of dmgRoot to {190, 170}
+    set position of item "Applications" of dmgRoot to {610, 170}
     set the extension hidden of item appName of dmgRoot to true
     delay 1
     close dmgWindow
