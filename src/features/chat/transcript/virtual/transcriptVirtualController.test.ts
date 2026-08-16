@@ -130,6 +130,62 @@ describe("transcript virtual controller", () => {
     expect(controller.getDiagnostics().bottomFollowExits).toBe(0);
   });
 
+  it("keeps a newer pending proposal when an older browser acknowledgement arrives late", () => {
+    const controller = createController({ viewportHeight: 500 });
+    acknowledge(controller, controller.setRows(makeRows(20, 100)).correction);
+    const older = { generation: 1, cause: "geometry" } as const;
+    const newer = {
+      generation: 2,
+      cause: "user-input",
+      userInputKind: "wheel",
+    } as const;
+
+    const first = controller.syncViewport(
+      {
+        scrollTop: 1500,
+        viewportHeight: 400,
+        widthScope: WIDTH_SCOPE,
+      },
+      { source: "programmatic", operation: older },
+    );
+    expect(first.correction).toMatchObject({
+      nextScrollTop: 1600,
+      operation: older,
+    });
+
+    const superseding = controller.syncViewport(
+      {
+        scrollTop: 1500,
+        viewportHeight: 300,
+        widthScope: WIDTH_SCOPE,
+      },
+      { source: "programmatic", operation: newer },
+    );
+    expect(superseding.correction).toMatchObject({
+      nextScrollTop: 1700,
+      operation: newer,
+    });
+
+    const late = controller.syncViewport(
+      {
+        scrollTop: 1600,
+        viewportHeight: 300,
+        widthScope: WIDTH_SCOPE,
+      },
+      { source: "browser", operation: older },
+    );
+
+    expect(late.correction).toBeNull();
+    expect(controller.getPendingScrollCorrection()).toMatchObject({
+      nextScrollTop: 1700,
+      operation: newer,
+    });
+    expect(controller.getState()).toMatchObject({
+      scrollTop: 1500,
+      anchor: { type: "bottom" },
+    });
+  });
+
   it("keeps the captured row anchored while a width change rewraps row heights", () => {
     const controller = createController({ viewportHeight: 300 });
     controller.setRows(makeRows(10, 100));

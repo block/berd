@@ -32,6 +32,7 @@ import {
   type TranscriptScrollAnchor,
   type TranscriptScrollCorrection,
   type TranscriptScrollDirection,
+  type TranscriptScrollOperation,
   type TranscriptSessionGeometry,
   type TranscriptViewportGeometry,
   type TranscriptVirtualControllerOptions,
@@ -66,6 +67,7 @@ type PendingScrollAnchor =
 interface ReconcileOptions {
   reason: TranscriptCorrectionReason;
   updateAnchorOnStale?: boolean;
+  operation?: TranscriptScrollOperation;
 }
 
 const TRANSCRIPT_VIEWPORT_GEOMETRY_EPSILON_PX = 1;
@@ -198,6 +200,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     options: {
       source?: "browser" | "programmatic" | "correction";
       userScrollIntent?: boolean;
+      operation?: TranscriptScrollOperation;
       preserveScrollPosition?: boolean;
     } = {},
   ): TranscriptViewportUpdateResult {
@@ -226,6 +229,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       type: "observe",
       scrollTop: geometry.scrollTop,
       maxScrollTop: this.getBottomScrollTop(),
+      operation: options.operation,
     }).state;
     this.lastRange = null;
     this.diagnostics.viewportUpdates += 1;
@@ -275,6 +279,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     const correction = this.reconcileAnchor({
       reason: this.anchor.type === "bottom" ? "bottom-anchor" : "row-anchor",
       updateAnchorOnStale: true,
+      operation: options.operation,
     });
     return { correction };
   }
@@ -547,6 +552,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       return this.applyScrollCorrection({
         reason: "bottom-anchor",
         nextScrollTop: this.getBottomScrollTop(),
+        operation: options.operation,
       });
     }
 
@@ -554,6 +560,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       return this.applyScrollCorrection({
         reason: "row-anchor",
         nextScrollTop: resolution.anchor.scrollTop,
+        operation: options.operation,
       });
     }
 
@@ -571,6 +578,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
           ? "stale-anchor-clamp"
           : "missing-anchor-clamp",
         nextScrollTop: clamped,
+        operation: options.operation,
       });
       if (options.updateAnchorOnStale) {
         this.captureViewportAnchor();
@@ -585,6 +593,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     return this.applyScrollCorrection({
       reason: options.reason,
       nextScrollTop: targetTop,
+      operation: options.operation,
     });
   }
 
@@ -764,9 +773,11 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
   private applyScrollCorrection({
     reason,
     nextScrollTop,
+    operation,
   }: {
     reason: TranscriptCorrectionReason;
     nextScrollTop: number;
+    operation?: TranscriptScrollOperation;
   }): TranscriptScrollCorrection | null {
     const transition = transitionTranscriptGeometryViewport(this.viewport, {
       type: "propose",
@@ -774,6 +785,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       scrollTop: nextScrollTop,
       maxScrollTop: this.getBottomScrollTop(),
       epsilon: this.measurementEpsilonPx,
+      operation,
     });
     this.viewport = transition.state;
     if (transition.effect) {
