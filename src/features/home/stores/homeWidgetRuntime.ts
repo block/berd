@@ -458,22 +458,20 @@ export function createHomeWidgetRuntime({
       clearPendingStarterHomeCamera();
       return;
     }
-    void saveLayoutCamera({
-      layoutId: HOME_LAYOUT_ID,
-      expectedRevision: pending.expectedRevision,
-      camera: pending.camera,
-    })
-      .then((result) => {
-        if (generation !== runtime.generation || !result.ok) return;
-        setState((current) => ({
-          ...adoptLayoutCamera(result.layout, current),
-          error: null,
-        }));
+    setState({ camera: pending.camera });
+    enqueueCameraSave(pending.camera);
+    void waitForPendingSaves().then(() => {
+      if (generation !== runtime.generation) return;
+      const latest = getState();
+      if (
+        latest.cameraRevision !== pending.expectedRevision &&
+        latest.camera?.centerX === pending.camera.centerX &&
+        latest.camera.centerY === pending.camera.centerY &&
+        latest.camera.zoomBps === pending.camera.zoomBps
+      ) {
         markStarterHomeArranged();
-      })
-      .catch((error) => {
-        console.warn("Failed to recover starter Home camera:", error);
-      });
+      }
+    });
   }
 
   async function loadFromBackend(generation: number): Promise<void> {

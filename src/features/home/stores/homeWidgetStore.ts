@@ -14,6 +14,7 @@ import {
 import {
   markStarterHomeArranged,
   markStarterHomeCameraPending,
+  isStarterHomeLayoutEligible,
   resetStarterHomeArrangement,
   STARTER_HOME_LAYOUT,
 } from "@/features/home/onboarding/starterHomeLayout";
@@ -218,7 +219,10 @@ interface HomeWidgetStore extends HomeWidgetState {
     options?: MoveWidgetOptions,
   ) => void;
   bumpZ: (id: string) => void;
-  applyStarterLayout: (instances: WidgetInstance[]) => void;
+  applyStarterLayout: (
+    instances: WidgetInstance[],
+    camera: LayoutCamera | null,
+  ) => Promise<boolean>;
   toggleCleanUpWidgets: (bounds?: WidgetPlacementInput) => void;
   syncOnboardingExperiment: (enabled: boolean) => void;
   resetOnboardingTour: () => Promise<boolean>;
@@ -516,8 +520,31 @@ function createHomeWidgetStore() {
       bumpZ: (id) => {
         applyMutation((instances) => bumpZMutation(instances, id));
       },
-      applyStarterLayout: (instances) => {
-        applyMutation(() => instances);
+      applyStarterLayout: async (instances, camera) => {
+        const state = get();
+        if (!canMutateWidgets(state)) return false;
+        const initialItemRevision = state.itemRevision;
+        const initialCameraRevision = state.cameraRevision;
+        set({ instances, ...(camera ? { camera } : {}) });
+        runtime.enqueueSave(instances);
+        if (camera) runtime.enqueueCameraSave(camera);
+        await runtime.waitForPendingSaves();
+        const latest = get();
+        const itemsConfirmed = latest.itemRevision !== initialItemRevision;
+        const cameraConfirmed =
+          !camera ||
+          (latest.cameraRevision !== initialCameraRevision &&
+            latest.camera?.centerX === camera.centerX &&
+            latest.camera.centerY === camera.centerY &&
+            latest.camera.zoomBps === camera.zoomBps);
+        if (
+          itemsConfirmed &&
+          cameraConfirmed &&
+          isStarterHomeLayoutEligible()
+        ) {
+          markStarterHomeArranged();
+        }
+        return itemsConfirmed && cameraConfirmed;
       },
       toggleCleanUpWidgets: (bounds) => {
         const state = get();
