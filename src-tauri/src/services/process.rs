@@ -155,7 +155,7 @@ pub(crate) unsafe fn process_identity_from_handle(
 
 /// # Safety
 /// `handle` must remain a valid process handle with terminate and synchronize access.
-#[cfg(windows)]
+#[cfg(all(windows, not(feature = "berdctl")))]
 pub(crate) unsafe fn terminate_process_handle(
     handle: *mut std::ffi::c_void,
     wait: std::time::Duration,
