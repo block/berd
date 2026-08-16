@@ -443,13 +443,13 @@ fn resume_process_main_thread(
     let mut thread_id = None;
     let mut current = unsafe { Thread32First(snapshot, &mut entry) };
     while current != 0 {
-        if entry.th32OwnerProcessID == expected_pid {
-            if thread_id.replace(entry.th32ThreadID).is_some() {
-                unsafe { CloseHandle(snapshot) };
-                return Err(io::Error::other(
-                    "suspended goosed unexpectedly has multiple threads",
-                ));
-            }
+        if entry.th32OwnerProcessID == expected_pid
+            && thread_id.replace(entry.th32ThreadID).is_some()
+        {
+            unsafe { CloseHandle(snapshot) };
+            return Err(io::Error::other(
+                "suspended goosed unexpectedly has multiple threads",
+            ));
         }
         current = unsafe { Thread32Next(snapshot, &mut entry) };
     }
