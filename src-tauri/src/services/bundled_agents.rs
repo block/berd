@@ -19,6 +19,10 @@ const BERDY_AGENT_FILE_NAME: &str = "berdy.md";
 #[cfg(test)]
 const BERDY_FALLBACK_FILE_NAME: &str = "berdy2.md";
 static INSTALL_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+const KNOWN_LEGACY_BUNDLED_DIGESTS: &[&str] = &[
+    // Berdy shipped before allocation digests were recorded.
+    "sha256:326302ecd09ba0e720f33537848900d0399e7c33098d3a10ca0596697952afce",
+];
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct SeedBundledAgentsResult {
@@ -227,6 +231,9 @@ fn repair_bundled_agent_from_dir(
                 None => {
                     allocated_target.exists()
                         && !files_are_equal(&source, &allocated_target).unwrap_or(false)
+                        && digest_file(&allocated_target).ok().is_none_or(|digest| {
+                            !KNOWN_LEGACY_BUNDLED_DIGESTS.contains(&digest.as_str())
+                        })
                 }
             };
             if digest_changed {
@@ -469,7 +476,13 @@ fn seed_bundled_agents_from_dir(
                 Some(digest) => {
                     target.exists() && digest_file(&target).ok().as_ref() != Some(digest)
                 }
-                None => target.exists() && !files_are_equal(&source, &target).unwrap_or(false),
+                None => {
+                    target.exists()
+                        && !files_are_equal(&source, &target).unwrap_or(false)
+                        && digest_file(&target).ok().is_none_or(|digest| {
+                            !KNOWN_LEGACY_BUNDLED_DIGESTS.contains(&digest.as_str())
+                        })
+                }
             };
             if modified {
                 // Keep the edited target claimed so the allocator preserves it
