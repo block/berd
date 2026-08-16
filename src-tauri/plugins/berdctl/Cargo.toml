@@ -15,14 +15,24 @@ hex = { version = "0.4", optional = true }
 log = "0.4"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+interprocess = { version = "2.4.3", features = ["tokio"] }
 subtle = { version = "2", optional = true }
 tauri = { version = "2", default-features = false }
-tokio = { version = "1", features = ["sync", "time", "rt", "net"] }
+tokio = { version = "1", features = ["sync", "time", "rt", "net", "io-util", "process"] }
 uuid = { version = "1", features = ["v4"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2", optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
 
 [features]
 # Without `server` the crate compiles to an inert stub: permissions are still

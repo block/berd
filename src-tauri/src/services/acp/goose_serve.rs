@@ -262,6 +262,9 @@ impl GooseServeProcess {
         );
 
         crate::services::process::apply_no_window_async(&mut command);
+        #[cfg(feature = "berdctl")]
+        let berdctl_authorization = tauri_plugin_berdctl::prepare_goosed(&mut command)
+            .map_err(|error| format!("Failed to prepare berdctl process authorization: {error}"))?;
         let mut child = command.spawn().map_err(|error| {
             diagnostic_log::record_event(
                 DiagnosticLevel::Error,
@@ -282,6 +285,11 @@ impl GooseServeProcess {
             )
         })?;
         let pid = child.id();
+        #[cfg(feature = "berdctl")]
+        if let Err(error) = berdctl_authorization.admit(&child) {
+            let _ = child.kill().await;
+            return Err(format!("Failed to authorize goosed for berdctl: {error}"));
+        }
         diagnostic_log::record_event(
             DiagnosticLevel::Info,
             DiagnosticCategory::GooseServe,

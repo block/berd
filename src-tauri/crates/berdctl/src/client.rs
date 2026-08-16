@@ -2,6 +2,9 @@
 //! mapping from HTTP outcomes to the CLI's exit-code contract:
 //! 0 ok, 1 command error, 2 transport, 3 environment/reachability/version.
 
+#[cfg(windows)]
+use interprocess::local_socket::{prelude::*, GenericNamespaced, Stream, ToNsName};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::time::Duration;
 
@@ -15,6 +18,7 @@ pub const EXIT_TRANSPORT: u8 = 2;
 pub const EXIT_ENV: u8 = 3;
 
 const PING_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_BOOTSTRAP_RESPONSE_BYTES: u64 = 4096;
 /// Above the broker's 900s command-timeout ceiling, so the broker's
 /// structured 504 always arrives before this client-side timeout fires.
 const CALL_TIMEOUT: Duration = Duration::from_secs(910);
@@ -147,6 +151,58 @@ fn ping(port: u16, capability: &str) -> Result<PingResponse, PingFailure> {
         })
 }
 
+fn bootstrap(file: &discovery::DiscoveryFile) -> Result<Endpoint, Failure> {
+    #[cfg(unix)]
+    let stream = std::os::unix::net::UnixStream::connect(&file.bootstrap_endpoint).map_err(|error| Failure::env(format!("the Berd desktop app's authenticated control bootstrap is unavailable ({error}); {CONTROL_REMEDIATION}")))?;
+    #[cfg(windows)]
+    let stream = {
+        let name = file
+            .bootstrap_endpoint
+            .to_string_lossy()
+            .to_string()
+            .to_ns_name::<GenericNamespaced>()
+            .map_err(|error| {
+                Failure::env(format!("invalid Berd control bootstrap endpoint: {error}"))
+            })?;
+        Stream::connect(name).map_err(|error| Failure::env(format!("the Berd desktop app's authenticated control bootstrap is unavailable ({error}); {CONTROL_REMEDIATION}")))?
+    };
+    let mut response = String::new();
+    BufReader::new(stream)
+        .take(MAX_BOOTSTRAP_RESPONSE_BYTES + 1)
+        .read_line(&mut response)
+        .map_err(|error| Failure::env(format!("the Berd desktop app's authenticated control bootstrap failed ({error}); {CONTROL_REMEDIATION}")))?;
+    if response.len() as u64 > MAX_BOOTSTRAP_RESPONSE_BYTES {
+        return Err(Failure::env(
+            "the Berd control bootstrap returned an unexpectedly large response",
+        ));
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct BootstrapResponse {
+        port: u16,
+        generation: u64,
+        protocol_version: u32,
+        capability: String,
+    }
+    let response: BootstrapResponse = serde_json::from_str(&response).map_err(|error| {
+        Failure::env(format!(
+            "the Berd control bootstrap returned invalid data ({error})"
+        ))
+    })?;
+    if response.port != file.port
+        || response.generation != file.generation
+        || response.protocol_version != PROTOCOL_VERSION
+    {
+        return Err(Failure::env(
+            "the Berd desktop app restarted its control endpoint; retry the command",
+        ));
+    }
+    Ok(Endpoint {
+        port: response.port,
+        capability: response.capability,
+    })
+}
+
 /// Read the discovery file and verify the broker behind it echoes the file's
 /// generation and this binary's protocol version. A generation mismatch or
 /// authentication failure can mean the file was read across a broker restart:
@@ -157,7 +213,8 @@ pub fn handshake(lock_path: &Path) -> Result<Endpoint, Failure> {
         if file.protocol_version != PROTOCOL_VERSION {
             return Err(Failure::env(APP_UPDATED));
         }
-        let ping = match ping(file.port, &file.capability) {
+        let endpoint = bootstrap(&file)?;
+        let ping = match ping(endpoint.port, &endpoint.capability) {
             Ok(ping) => ping,
             Err(failure) if failure.status == Some(403) => {
                 if attempt == 0 {
@@ -191,10 +248,7 @@ pub fn handshake(lock_path: &Path) -> Result<Endpoint, Failure> {
             return Err(Failure::env(APP_UPDATED));
         }
         if ping.generation == file.generation {
-            return Ok(Endpoint {
-                port: file.port,
-                capability: file.capability,
-            });
+            return Ok(endpoint);
         }
         if attempt == 0 {
             file = discovery::load(lock_path).map_err(|err| {
@@ -322,335 +376,176 @@ fn error_parts(value: &Value) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{BufRead, BufReader, Read, Write};
+    #[cfg(unix)]
+    use std::io::Write;
+    #[cfg(unix)]
     use std::net::{TcpListener, TcpStream};
+    #[cfg(unix)]
     use std::path::PathBuf;
-    use std::sync::{mpsc, Arc};
+    #[cfg(unix)]
+    use std::sync::mpsc;
+    #[cfg(unix)]
     use std::thread;
 
-    const CURRENT_CAPABILITY: &str =
+    #[cfg(unix)]
+    const TEST_CAPABILITY: &str =
         "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    const STALE_CAPABILITY: &str =
-        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
-    struct TempDiscoveryFile(PathBuf);
+    #[cfg(unix)]
+    struct TempDiscoveryFile {
+        path: PathBuf,
+        bootstrap_endpoint: PathBuf,
+    }
 
+    #[cfg(unix)]
     impl TempDiscoveryFile {
-        fn new(label: &str, port: u16, capability: &str) -> Self {
+        fn new(port: u16, generation: u64) -> Self {
+            use std::os::unix::fs::PermissionsExt;
             let base = std::env::temp_dir().join(format!(
-                "berdctl-client-auth-{}-{label}-{port}",
+                "berdctl-client-bootstrap-{}-{port}",
                 std::process::id()
             ));
             std::fs::remove_dir_all(&base).ok();
-            std::fs::create_dir(&base).expect("create discovery directory");
+            std::fs::create_dir(&base).unwrap();
+            std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)).unwrap();
             let path = base.join("control.json");
+            let bootstrap_endpoint = base.join("bootstrap.sock");
             std::fs::write(
                 &path,
                 format!(
-                    r#"{{"port":{port},"pid":4242,"generation":7,"protocolVersion":{PROTOCOL_VERSION},"capability":"{capability}"}}"#
+                    r#"{{"port":{port},"pid":4242,"generation":{generation},"protocolVersion":{PROTOCOL_VERSION},"bootstrapEndpoint":"{}"}}"#,
+                    bootstrap_endpoint.display()
                 ),
             )
-            .expect("write discovery file");
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(
-                    path.parent().expect("test discovery has a parent"),
-                    std::fs::Permissions::from_mode(0o700),
-                )
-                .expect("make discovery directory private");
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-                    .expect("make discovery file private");
+            .unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+            Self {
+                path,
+                bootstrap_endpoint,
             }
-            Self(path)
         }
     }
 
+    #[cfg(unix)]
     impl Drop for TempDiscoveryFile {
         fn drop(&mut self) {
-            if let Some(parent) = self.0.parent() {
+            if let Some(parent) = self.path.parent() {
                 std::fs::remove_dir_all(parent).ok();
             }
         }
     }
 
-    struct RecordedRequest {
-        request_line: String,
-        authorization: Option<String>,
-        body: String,
-    }
-
-    fn read_request(stream: &mut TcpStream) -> RecordedRequest {
-        let mut reader = BufReader::new(stream.try_clone().expect("clone request stream"));
+    #[cfg(unix)]
+    fn read_request(stream: &mut TcpStream) -> (String, Option<String>, String) {
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
         let mut request_line = String::new();
-        reader
-            .read_line(&mut request_line)
-            .expect("read request line");
+        reader.read_line(&mut request_line).unwrap();
         let mut authorization = None;
         let mut content_length = 0;
         loop {
             let mut line = String::new();
-            reader.read_line(&mut line).expect("read request header");
+            reader.read_line(&mut line).unwrap();
             if line == "\r\n" {
                 break;
             }
-            let Some((name, value)) = line.trim_end().split_once(':') else {
-                continue;
-            };
-            if name.eq_ignore_ascii_case("authorization") {
-                authorization = Some(value.trim().to_string());
-            }
-            if name.eq_ignore_ascii_case("content-length") {
-                content_length = value.trim().parse().expect("valid content length");
+            if let Some((name, value)) = line.trim_end().split_once(':') {
+                if name.eq_ignore_ascii_case("authorization") {
+                    authorization = Some(value.trim().to_string());
+                }
+                if name.eq_ignore_ascii_case("content-length") {
+                    content_length = value.trim().parse().unwrap();
+                }
             }
         }
         let mut body = vec![0; content_length];
-        reader.read_exact(&mut body).expect("read request body");
-        RecordedRequest {
-            request_line: request_line.trim_end().to_string(),
+        reader.read_exact(&mut body).unwrap();
+        (
+            request_line.trim_end().to_string(),
             authorization,
-            body: String::from_utf8(body).expect("request body is UTF-8"),
-        }
+            String::from_utf8(body).unwrap(),
+        )
     }
 
-    fn write_response(stream: &mut TcpStream, status: &str, body: &str) {
+    #[cfg(unix)]
+    fn write_response(stream: &mut TcpStream, body: &str) {
         write!(
             stream,
-            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
-        )
-        .expect("write test response");
+        ).unwrap();
     }
 
-    fn spawn_broker_sequence(
-        expected_requests: Vec<(&'static str, BrokerResponse)>,
-    ) -> (u16, mpsc::Receiver<RecordedRequest>, thread::JoinHandle<()>) {
-        spawn_broker_responses(expected_requests)
-    }
-
-    #[derive(Clone, Copy)]
-    enum BrokerResponse {
-        Ping { generation: u64 },
-        Call,
-    }
-
-    fn spawn_broker_responses(
-        expected_requests: Vec<(&'static str, BrokerResponse)>,
-    ) -> (u16, mpsc::Receiver<RecordedRequest>, thread::JoinHandle<()>) {
-        spawn_broker_responses_with_sync(expected_requests, None)
-    }
-
-    fn spawn_broker_responses_with_sync(
-        expected_requests: Vec<(&'static str, BrokerResponse)>,
-        first_response_sync: Option<(Arc<std::sync::Barrier>, Arc<std::sync::Barrier>)>,
-    ) -> (u16, mpsc::Receiver<RecordedRequest>, thread::JoinHandle<()>) {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind test broker");
-        let port = listener.local_addr().expect("test broker address").port();
+    #[cfg(unix)]
+    #[test]
+    fn handshake_bootstraps_capability_and_call_reuses_it() {
+        let broker = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = broker.local_addr().unwrap().port();
+        let discovery = TempDiscoveryFile::new(port, 7);
+        let bootstrap =
+            std::os::unix::net::UnixListener::bind(&discovery.bootstrap_endpoint).unwrap();
         let (requests_tx, requests_rx) = mpsc::channel();
-        let handle = thread::spawn(move || {
-            for (request_number, (expected_capability, response)) in
-                expected_requests.into_iter().enumerate()
-            {
-                let (mut stream, _) = listener.accept().expect("accept client request");
-                let request = read_request(&mut stream);
-                let authorized = request.authorization.as_deref()
-                    == Some(&format!("Bearer {expected_capability}"));
-                requests_tx.send(request).expect("record client request");
-                if request_number == 0 {
-                    if let Some((request_seen, response_ready)) = &first_response_sync {
-                        request_seen.wait();
-                        response_ready.wait();
-                    }
-                }
-                match (authorized, response) {
-                    (true, BrokerResponse::Ping { generation }) => write_response(
-                        &mut stream,
-                        "200 OK",
-                        &format!(
-                            r#"{{"generation":{generation},"protocolVersion":{PROTOCOL_VERSION}}}"#
-                        ),
-                    ),
-                    (true, BrokerResponse::Call) => {
-                        write_response(&mut stream, "200 OK", r#"{"ok":true,"result":"ok"}"#)
-                    }
-                    (false, _) => write_response(
-                        &mut stream,
-                        "403 Forbidden",
-                        r#"{"ok":false,"error":{"code":"forbidden","message":"valid bearer capability required"}}"#,
-                    ),
-                }
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = bootstrap.accept().unwrap();
+            writeln!(stream, r#"{{"port":{port},"generation":7,"protocolVersion":{PROTOCOL_VERSION},"capability":"{TEST_CAPABILITY}"}}"#).unwrap();
+            for response in [
+                format!(r#"{{"generation":7,"protocolVersion":{PROTOCOL_VERSION}}}"#),
+                r#"{"ok":true,"result":"ok"}"#.to_string(),
+            ] {
+                let (mut stream, _) = broker.accept().unwrap();
+                requests_tx.send(read_request(&mut stream)).unwrap();
+                write_response(&mut stream, &response);
             }
         });
-        (port, requests_rx, handle)
-    }
 
-    fn spawn_broker(
-        expected_capability: &'static str,
-        request_count: usize,
-    ) -> (u16, mpsc::Receiver<RecordedRequest>, thread::JoinHandle<()>) {
-        spawn_broker_responses(
-            (0..request_count)
-                .map(|request_number| {
-                    let response = if request_number == 0 {
-                        BrokerResponse::Ping { generation: 7 }
-                    } else {
-                        BrokerResponse::Call
-                    };
-                    (expected_capability, response)
-                })
-                .collect(),
-        )
-    }
-
-    #[test]
-    fn handshake_and_call_send_current_capability() {
-        let (port, requests, broker) = spawn_broker(CURRENT_CAPABILITY, 2);
-        let lock_file = TempDiscoveryFile::new("current", port, CURRENT_CAPABILITY);
-
-        let endpoint = handshake(&lock_file.0).expect("current capability handshakes");
+        let endpoint = handshake(&discovery.path).unwrap();
         assert_eq!(
             format!("{endpoint:?}"),
-            format!("Endpoint {{ port: {port}, capability: \"[redacted]\" }}"),
-            "debug output must not disclose the bearer capability"
+            format!("Endpoint {{ port: {port}, capability: \"[redacted]\" }}")
         );
-        let result = call(
-            &endpoint,
-            "sessions",
-            Map::from_iter([("action".to_string(), Value::String("list".to_string()))]),
-            None,
-        )
-        .expect("current capability calls");
-        assert_eq!(result, Value::String("ok".to_string()));
-
-        let ping = requests.recv().expect("record ping");
-        assert_eq!(ping.request_line, "GET /v1/ping HTTP/1.1");
         assert_eq!(
-            ping.authorization.as_deref(),
-            Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
-        );
-        assert!(ping.body.is_empty());
-
-        let call = requests.recv().expect("record call");
-        assert_eq!(call.request_line, "POST /v1/call HTTP/1.1");
-        assert_eq!(
-            call.authorization.as_deref(),
-            Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
-        );
-        let call_body: Value = serde_json::from_str(&call.body).expect("call body is JSON");
-        assert_eq!(call_body["command"], "sessions");
-        assert_eq!(call_body["args"]["action"], "list");
-
-        broker.join().expect("test broker exits");
-    }
-
-    #[test]
-    fn handshake_recovers_when_capability_rotates_after_discovery_read() {
-        let first_request = Arc::new(std::sync::Barrier::new(2));
-        let response_ready = Arc::new(std::sync::Barrier::new(2));
-        let (port, requests, broker) = spawn_broker_responses_with_sync(
-            vec![
-                (CURRENT_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
-                (CURRENT_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
-            ],
-            Some((first_request.clone(), response_ready.clone())),
-        );
-        let lock_file = TempDiscoveryFile::new("rotating", port, STALE_CAPABILITY);
-        let path = lock_file.0.clone();
-        let rewrite_first_request = first_request.clone();
-        let rewrite_response_ready = response_ready.clone();
-        let rewrite = thread::spawn(move || {
-            rewrite_first_request.wait();
-            std::fs::write(
-                &path,
-                format!(
-                    r#"{{"port":{port},"pid":4242,"generation":7,"protocolVersion":{PROTOCOL_VERSION},"capability":"{CURRENT_CAPABILITY}"}}"#
-                ),
+            call(
+                &endpoint,
+                "sessions",
+                Map::from_iter([("action".into(), Value::String("list".into()))]),
+                None
             )
-            .expect("publish rotated discovery capability");
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-                    .expect("keep rewritten discovery private");
-            }
-            rewrite_response_ready.wait();
-            let stale_ping = requests.recv().expect("record stale ping");
-            assert_eq!(
-                stale_ping.authorization.as_deref(),
-                Some(format!("Bearer {STALE_CAPABILITY}").as_str())
-            );
-            requests.recv().expect("record retried current ping")
-        });
-
-        let endpoint = handshake(&lock_file.0).expect("rotated capability retries successfully");
-        assert_eq!(endpoint.port, port);
-        let current_ping = rewrite.join().expect("discovery rewrite exits");
-        assert_eq!(
-            current_ping.authorization.as_deref(),
-            Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
+            .unwrap(),
+            Value::String("ok".into())
         );
-        broker.join().expect("test broker exits");
+
+        let ping = requests_rx.recv().unwrap();
+        assert_eq!(ping.0, "GET /v1/ping HTTP/1.1");
+        assert_eq!(
+            ping.1.as_deref(),
+            Some(format!("Bearer {TEST_CAPABILITY}").as_str())
+        );
+        let call = requests_rx.recv().unwrap();
+        assert_eq!(call.0, "POST /v1/call HTTP/1.1");
+        assert_eq!(
+            call.1.as_deref(),
+            Some(format!("Bearer {TEST_CAPABILITY}").as_str())
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&call.2).unwrap()["command"],
+            "sessions"
+        );
+        worker.join().unwrap();
     }
 
+    #[cfg(unix)]
     #[test]
-    fn handshake_retries_generation_mismatch_with_rotated_capability() {
-        let (port, requests, broker) = spawn_broker_sequence(vec![
-            (STALE_CAPABILITY, BrokerResponse::Ping { generation: 6 }),
-            (CURRENT_CAPABILITY, BrokerResponse::Ping { generation: 7 }),
-        ]);
-        let lock_file = TempDiscoveryFile::new("generation-race", port, STALE_CAPABILITY);
-        let path = lock_file.0.clone();
-        let rewrite = thread::spawn(move || {
-            let stale_ping = requests.recv().expect("record old-generation ping");
-            assert_eq!(
-                stale_ping.authorization.as_deref(),
-                Some(format!("Bearer {STALE_CAPABILITY}").as_str())
-            );
-            std::fs::write(
-                &path,
-                format!(
-                    r#"{{"port":{port},"pid":4242,"generation":7,"protocolVersion":{PROTOCOL_VERSION},"capability":"{CURRENT_CAPABILITY}"}}"#
-                ),
-            )
-            .expect("publish new generation and capability");
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-                    .expect("keep rewritten discovery private");
-            }
-            requests.recv().expect("record new-generation ping")
+    fn bootstrap_rejects_mismatched_discovery_generation() {
+        let discovery = TempDiscoveryFile::new(43123, 7);
+        let bootstrap =
+            std::os::unix::net::UnixListener::bind(&discovery.bootstrap_endpoint).unwrap();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = bootstrap.accept().unwrap();
+            writeln!(stream, r#"{{"port":43123,"generation":6,"protocolVersion":{PROTOCOL_VERSION},"capability":"{TEST_CAPABILITY}"}}"#).unwrap();
         });
-
-        let endpoint = handshake(&lock_file.0).expect("generation mismatch retries successfully");
-        assert_eq!(endpoint.port, port);
-        let current_ping = rewrite.join().expect("discovery rewrite exits");
-        assert_eq!(
-            current_ping.authorization.as_deref(),
-            Some(format!("Bearer {CURRENT_CAPABILITY}").as_str())
-        );
-        broker.join().expect("test broker exits");
-    }
-
-    #[test]
-    fn handshake_rejects_stale_capability() {
-        // The first 403 triggers the one permitted discovery re-read; an
-        // unchanged stale record must still fail closed on the second probe.
-        let (port, requests, broker) = spawn_broker(CURRENT_CAPABILITY, 2);
-        let lock_file = TempDiscoveryFile::new("stale", port, STALE_CAPABILITY);
-
-        let failure = handshake(&lock_file.0).expect_err("stale capability fails closed");
+        let failure = handshake(&discovery.path).expect_err("mismatched generation fails closed");
         assert_eq!(failure.exit, EXIT_ENV);
-        assert!(failure.message.contains("ping returned status 403"));
-        for _ in 0..2 {
-            let ping = requests.recv().expect("record stale ping");
-            assert_eq!(
-                ping.authorization.as_deref(),
-                Some(format!("Bearer {STALE_CAPABILITY}").as_str())
-            );
-        }
-
-        broker.join().expect("test broker exits");
+        assert!(failure.message.contains("restarted its control endpoint"));
+        worker.join().unwrap();
     }
 
     #[test]

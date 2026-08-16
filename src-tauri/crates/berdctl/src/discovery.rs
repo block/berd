@@ -20,7 +20,6 @@ pub const NOT_UNDER_APP: &str =
     "berdctl must run inside a Berd desktop app session (the app sets this up automatically)";
 
 const REREAD_DELAY: Duration = Duration::from_millis(200);
-const CAPABILITY_HEX_LEN: usize = 64;
 
 /// Shape of the discovery file the berdctl broker writes on start
 /// (`<app-data>/berdctl/control-<app-pid>.json`). Duplicated by hand from
@@ -32,7 +31,7 @@ pub struct DiscoveryFile {
     pub pid: u32,
     pub generation: u64,
     pub protocol_version: u32,
-    pub capability: String,
+    pub bootstrap_endpoint: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -42,27 +41,21 @@ struct RawDiscoveryFile {
     pid: u32,
     generation: u64,
     protocol_version: u32,
-    capability: String,
+    bootstrap_endpoint: PathBuf,
 }
 
 impl TryFrom<RawDiscoveryFile> for DiscoveryFile {
     type Error = String;
-
     fn try_from(raw: RawDiscoveryFile) -> Result<Self, Self::Error> {
-        if raw.capability.len() != CAPABILITY_HEX_LEN
-            || !raw
-                .capability
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        {
-            return Err("capability must be a 256-bit hexadecimal value".to_string());
+        if raw.bootstrap_endpoint.as_os_str().is_empty() {
+            return Err("bootstrap endpoint must not be empty".to_string());
         }
         Ok(Self {
             port: raw.port,
             pid: raw.pid,
             generation: raw.generation,
             protocol_version: raw.protocol_version,
-            capability: raw.capability,
+            bootstrap_endpoint: raw.bootstrap_endpoint,
         })
     }
 }
@@ -181,8 +174,7 @@ pub fn load_with_retry(path: &Path) -> Result<DiscoveryFile, Failure> {
 mod tests {
     use super::*;
 
-    const CAPABILITY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-    const VALID: &str = r#"{"port":52341,"pid":4242,"generation":3,"protocolVersion":1,"capability":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}"#;
+    const VALID: &str = r#"{"port":52341,"pid":4242,"generation":3,"protocolVersion":1,"bootstrapEndpoint":"/tmp/berdctl.sock"}"#;
 
     #[test]
     fn parses_a_valid_discovery_file() {
@@ -194,7 +186,7 @@ mod tests {
                 pid: 4242,
                 generation: 3,
                 protocol_version: 1,
-                capability: CAPABILITY.to_string(),
+                bootstrap_endpoint: PathBuf::from("/tmp/berdctl.sock"),
             }
         );
     }
@@ -202,7 +194,7 @@ mod tests {
     #[test]
     fn tolerates_unknown_fields_for_forward_compat() {
         let file = parse(
-            r#"{"port":1,"pid":2,"generation":3,"protocolVersion":1,"capability":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","future":"x"}"#,
+            r#"{"port":1,"pid":2,"generation":3,"protocolVersion":1,"bootstrapEndpoint":"/tmp/berdctl.sock","future":"x"}"#,
         )
         .expect("unknown fields are ignored");
         assert_eq!(file.port, 1);
@@ -219,7 +211,7 @@ mod tests {
         assert!(parse(r#"{"port":52341,"pid":4242}"#).is_err());
         assert!(
             parse(r#"{"port":52341,"pid":4242,"generation":3,"protocolVersion":1}"#).is_err(),
-            "legacy discovery without a capability must fail closed"
+            "legacy discovery without a bootstrap endpoint must fail closed"
         );
         assert!(parse(r#"{}"#).is_err());
     }
@@ -227,27 +219,17 @@ mod tests {
     #[test]
     fn rejects_wrongly_typed_or_malformed_fields() {
         assert!(parse(
-            r#"{"port":"not-a-port","pid":1,"generation":1,"protocolVersion":1,"capability":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}"#
+            r#"{"port":"not-a-port","pid":1,"generation":1,"protocolVersion":1,"bootstrapEndpoint":"/tmp/berdctl.sock"}"#
         )
         .is_err());
-        assert!(
-            parse(r#"{"port":1,"pid":1,"generation":1,"protocolVersion":1,"capability":123}"#)
-                .is_err()
-        );
-        for capability in [
-            "",
-            "short",
-            "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
-            "0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF",
-        ] {
-            let contents = format!(
-                r#"{{"port":1,"pid":1,"generation":1,"protocolVersion":1,"capability":"{capability}"}}"#
-            );
-            assert!(
-                parse(&contents).is_err(),
-                "malformed capability {capability:?} must fail closed"
-            );
-        }
+        assert!(parse(
+            r#"{"port":1,"pid":1,"generation":1,"protocolVersion":1,"bootstrapEndpoint":123}"#
+        )
+        .is_err());
+        assert!(parse(
+            r#"{"port":1,"pid":1,"generation":1,"protocolVersion":1,"bootstrapEndpoint":""}"#
+        )
+        .is_err());
     }
 
     #[test]
@@ -303,7 +285,7 @@ mod tests {
         std::fs::write(&path, VALID).unwrap();
         std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
-        let error = load(&path).expect_err("world-readable capability must fail closed");
+        let error = load(&path).expect_err("permissive discovery file must fail closed");
         assert!(error.contains("accessible by other users"));
         std::fs::remove_dir_all(base).ok();
     }

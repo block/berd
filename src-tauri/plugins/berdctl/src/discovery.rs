@@ -1,6 +1,6 @@
-//! Per-instance discovery ("lock") file the berdctl CLI reads to find and
-//! authenticate to the running broker: `{port, pid, generation,
-//! protocolVersion, capability}`.
+//! Per-instance discovery ("lock") file the berdctl CLI reads to find the
+//! running broker and its authenticated-bootstrap endpoint. The record contains
+//! no bearer credential.
 //!
 //! The path formula and protocol version are exported unconditionally (not
 //! behind the `server` feature) so the app crate can compute the path for the
@@ -36,6 +36,23 @@ pub fn discovery_file_path(app_data_dir: &Path, pid: u32) -> PathBuf {
     app_data_dir.join(DISCOVERY_DIR_NAME).join(format!(
         "{DISCOVERY_FILE_PREFIX}{pid}{DISCOVERY_FILE_SUFFIX}"
     ))
+}
+
+/// Per-instance authenticated bootstrap endpoint. This value is an address,
+/// not a credential; the listener authorizes the kernel-reported peer process.
+#[cfg(feature = "server")]
+pub(crate) fn bootstrap_endpoint(app_data_dir: &Path, pid: u32) -> PathBuf {
+    let nonce = uuid::Uuid::new_v4().simple();
+    #[cfg(unix)]
+    {
+        let _ = app_data_dir;
+        std::env::temp_dir().join(format!("bctl-{pid}-{nonce}.sock"))
+    }
+    #[cfg(windows)]
+    {
+        let _ = app_data_dir;
+        PathBuf::from(format!("berdctl-bootstrap-{pid}-{nonce}"))
+    }
 }
 
 /// Owning app pid encoded in a discovery file name. Recognized forms are the
@@ -103,17 +120,31 @@ fn private_discovery_directory(dir: &Path) -> std::io::Result<()> {
     }
 }
 
+#[cfg(feature = "server")]
+pub(crate) fn prepare_discovery_directory(app_data_dir: &Path) -> std::io::Result<PathBuf> {
+    let dir = app_data_dir.join(DISCOVERY_DIR_NAME);
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(&dir)?;
+    private_discovery_directory(&dir)?;
+    Ok(dir)
+}
+
 /// Atomically write the discovery file: private dir + temp file + fsync +
-/// rename, so a CLI reading mid-write never sees partial JSON. The capability
-/// is sensitive to other users on the host, so Unix paths are tightened to
-/// owner-only access even when they predate this write.
+/// rename, so a CLI reading mid-write never sees partial JSON. Unix paths stay
+/// owner-only to prevent other users from redirecting the bootstrap address.
 #[cfg(feature = "server")]
 pub(crate) fn write_discovery_file(
     path: &Path,
     port: u16,
     pid: u32,
     generation: u64,
-    capability: &str,
+    bootstrap_endpoint: &Path,
 ) -> std::io::Result<()> {
     use std::io::Write;
 
@@ -135,7 +166,7 @@ pub(crate) fn write_discovery_file(
         "pid": pid,
         "generation": generation,
         "protocolVersion": PROTOCOL_VERSION,
-        "capability": capability,
+        "bootstrapEndpoint": bootstrap_endpoint.to_string_lossy(),
     });
 
     // Use a unique adjacent path for each write. A stale fixed-name temp file
@@ -308,14 +339,8 @@ mod tests {
         symlink(&target, &link).unwrap();
         let path = link.join("control-4242.json");
 
-        let error = write_discovery_file(
-            &path,
-            8080,
-            4242,
-            7,
-            "1111111111111111111111111111111111111111111111111111111111111111",
-        )
-        .expect_err("symlinked discovery directory must fail closed");
+        let error = write_discovery_file(&path, 8080, 4242, 7, Path::new("/tmp/bootstrap.sock"))
+            .expect_err("symlinked discovery directory must fail closed");
         assert!(!target.join("control-4242.json").exists());
         assert_ne!(error.kind(), std::io::ErrorKind::NotFound);
 
@@ -325,23 +350,24 @@ mod tests {
     #[cfg(feature = "server")]
     #[test]
     fn write_and_remove_lifecycle() {
-        const FIRST_CAPABILITY: &str =
-            "1111111111111111111111111111111111111111111111111111111111111111";
-        const ROTATED_CAPABILITY: &str =
-            "2222222222222222222222222222222222222222222222222222222222222222";
+        let first_endpoint = Path::new("/tmp/bootstrap-first.sock");
+        let rotated_endpoint = Path::new("/tmp/bootstrap-rotated.sock");
         let base =
             std::env::temp_dir().join(format!("berdctl-discovery-test-{}", std::process::id()));
         std::fs::remove_dir_all(&base).ok();
         let path = discovery_file_path(&base, 4242);
 
-        write_discovery_file(&path, 8080, 4242, 7, FIRST_CAPABILITY).unwrap();
+        write_discovery_file(&path, 8080, 4242, 7, first_endpoint).unwrap();
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed["port"], 8080);
         assert_eq!(parsed["pid"], 4242);
         assert_eq!(parsed["generation"], 7);
         assert_eq!(parsed["protocolVersion"], PROTOCOL_VERSION);
-        assert_eq!(parsed["capability"], FIRST_CAPABILITY);
+        assert_eq!(
+            parsed["bootstrapEndpoint"],
+            first_endpoint.to_string_lossy().as_ref()
+        );
         // The temp file is renamed away, never left behind.
         let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
             .unwrap()
@@ -377,13 +403,16 @@ mod tests {
             std::fs::set_permissions(&path, unix_permissions(0o644)).unwrap();
         }
 
-        // Restart case: an atomic rewrite rotates both generation and secret.
-        write_discovery_file(&path, 9090, 4242, 8, ROTATED_CAPABILITY).unwrap();
+        // Restart case: an atomic rewrite rotates both generation and endpoint.
+        write_discovery_file(&path, 9090, 4242, 8, rotated_endpoint).unwrap();
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed["port"], 9090);
         assert_eq!(parsed["generation"], 8);
-        assert_eq!(parsed["capability"], ROTATED_CAPABILITY);
+        assert_eq!(
+            parsed["bootstrapEndpoint"],
+            rotated_endpoint.to_string_lossy().as_ref()
+        );
         assert_eq!(std::fs::read_to_string(&legacy_tmp).unwrap(), "stale");
 
         #[cfg(unix)]

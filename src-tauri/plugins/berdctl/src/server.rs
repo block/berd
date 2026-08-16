@@ -2,7 +2,7 @@
 //!
 //! Serves `GET /v1/ping` (generation/protocol handshake) and `POST /v1/call`
 //! (command dispatch over the renderer bridge). Every route requires the
-//! per-server bearer capability published in the private discovery file. The
+//! per-server bearer capability released by authenticated local bootstrap. The
 //! existing Origin, Sec-Fetch, and literal Host checks remain a separate
 //! defense against browser-JS-to-localhost and DNS rebinding.
 
@@ -137,14 +137,14 @@ impl<D: CommandDispatcher> ServerContext<D> {
         timeouts: Arc<TimeoutStore>,
         inflight: Arc<Semaphore>,
         generation: u64,
-        capability: String,
     ) -> Self {
         Self {
             dispatcher,
             timeouts,
             inflight,
             generation,
-            capability,
+            capability: generate_capability()
+                .expect("operating-system randomness is required for berdctl"),
             port: OnceLock::new(),
         }
     }
@@ -155,11 +155,15 @@ impl<D: CommandDispatcher> ServerContext<D> {
 pub struct ServerHandle {
     pub port: u16,
     shutdown: oneshot::Sender<()>,
+    bootstrap: Option<crate::bootstrap::BootstrapHandle>,
 }
 
 impl ServerHandle {
     pub fn shutdown(self) {
         let _ = self.shutdown.send(());
+        if let Some(bootstrap) = self.bootstrap {
+            bootstrap.shutdown();
+        }
     }
 }
 
@@ -183,7 +187,32 @@ pub async fn start_server<D: CommandDispatcher>(
     Ok(ServerHandle {
         port,
         shutdown: shutdown_tx,
+        bootstrap: None,
     })
+}
+
+pub async fn start_server_with_bootstrap<D: CommandDispatcher>(
+    ctx: Arc<ServerContext<D>>,
+    endpoint: &std::path::Path,
+    authorizer: crate::authorization::ProcessAuthorizer,
+) -> std::io::Result<ServerHandle> {
+    let mut handle = start_server(ctx.clone()).await?;
+    match crate::bootstrap::start(
+        endpoint,
+        handle.port,
+        ctx.generation,
+        ctx.capability.clone(),
+        authorizer,
+    ) {
+        Ok(bootstrap) => {
+            handle.bootstrap = Some(bootstrap);
+            Ok(handle)
+        }
+        Err(error) => {
+            handle.shutdown();
+            Err(error)
+        }
+    }
 }
 
 pub fn build_router<D: CommandDispatcher>(ctx: Arc<ServerContext<D>>) -> Router {
@@ -484,8 +513,11 @@ mod tests {
             timeouts,
             Arc::new(Semaphore::new(limits.permits)),
             TEST_GENERATION,
-            TEST_CAPABILITY.to_string(),
         ));
+        // Tests pin a known capability while production generates one.
+        let mut ctx = Arc::try_unwrap(ctx).ok().unwrap();
+        ctx.capability = TEST_CAPABILITY.to_string();
+        let ctx = Arc::new(ctx);
         let handle = start_server(ctx).await.unwrap();
         TestServer {
             base: format!("http://127.0.0.1:{}", handle.port),
