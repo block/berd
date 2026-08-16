@@ -6,7 +6,9 @@ use serde::Serialize;
 use std::io;
 use std::path::Path;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Semaphore};
+
+const ADMISSION_IN_FLIGHT_LIMIT: usize = 4;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,6 +67,7 @@ pub(crate) fn start(
     };
 
     let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
+    let admission_slots = std::sync::Arc::new(Semaphore::new(ADMISSION_IN_FLIGHT_LIMIT));
     #[cfg(unix)]
     let endpoint_for_cleanup = endpoint.to_path_buf();
     tokio::spawn(async move {
@@ -85,9 +88,14 @@ pub(crate) fn start(
                     Err(error) => { log::warn!("[berdctl] bootstrap accept failed: {error}"); continue; }
                 }
             };
+            let Ok(admission_slot) = admission_slots.clone().try_acquire_owned() else {
+                log::warn!("[berdctl] rejected bootstrap peer: admission limit reached");
+                continue;
+            };
             let authorizer = authorizer.clone();
             let capability = capability.clone();
             tokio::spawn(async move {
+                let _admission_slot = admission_slot;
                 #[cfg(unix)]
                 let peer_pid = stream
                     .peer_cred()

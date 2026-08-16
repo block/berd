@@ -64,6 +64,14 @@ impl PlatformRoot {
     }
 
     fn authorize(&self, peer_pid: u32) -> io::Result<bool> {
+        self.authorize_with(peer_pid, process_snapshot)
+    }
+
+    fn authorize_with(
+        &self,
+        peer_pid: u32,
+        mut snapshot_for: impl FnMut(u32) -> io::Result<ProcessSnapshot>,
+    ) -> io::Result<bool> {
         const MAX_DEPTH: usize = 128;
         let mut pid = peer_pid;
         let mut chain = Vec::new();
@@ -75,13 +83,13 @@ impl PlatformRoot {
             {
                 return Ok(false);
             }
-            let snapshot = process_snapshot(pid)?;
+            let snapshot = snapshot_for(pid)?;
             chain.push(snapshot);
             if snapshot == self.0 {
                 // Re-read every hop after reaching the root. Any PID reuse or
                 // parent mutation observed during the walk fails closed.
                 for expected in &chain {
-                    if process_snapshot(expected.pid)? != *expected {
+                    if snapshot_for(expected.pid)? != *expected {
                         return Ok(false);
                     }
                 }
@@ -340,6 +348,15 @@ fn resume_process_main_thread(pid: u32) -> io::Result<()> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    fn snapshot(pid: u32, parent_pid: u32, started_at: u64) -> ProcessSnapshot {
+        ProcessSnapshot {
+            pid,
+            parent_pid,
+            started_at,
+        }
+    }
 
     #[test]
     fn admits_descendant_and_rejects_sibling_of_root() {
@@ -362,5 +379,60 @@ mod tests {
         assert!(!matches!(isolated.authorize(std::process::id()), Ok(true)));
         let _ = fake_root.kill();
         let _ = fake_root.wait();
+    }
+
+    #[test]
+    fn admits_multi_hop_descendant() {
+        let root = snapshot(10, 1, 100);
+        let snapshots = HashMap::from([
+            (10, root),
+            (20, snapshot(20, 10, 200)),
+            (30, snapshot(30, 20, 300)),
+        ]);
+
+        assert!(PlatformRoot(root)
+            .authorize_with(30, |pid| Ok(snapshots[&pid]))
+            .unwrap());
+    }
+
+    #[test]
+    fn rejects_when_mid_chain_snapshot_changes_during_revalidation() {
+        let root = snapshot(10, 1, 100);
+        let original_mid = snapshot(20, 10, 200);
+        let reused_mid = snapshot(20, 10, 201);
+        let leaf = snapshot(30, 20, 300);
+        let mut mid_reads = 0;
+
+        let admitted = PlatformRoot(root)
+            .authorize_with(30, |pid| match pid {
+                10 => Ok(root),
+                20 => {
+                    mid_reads += 1;
+                    Ok(if mid_reads == 1 {
+                        original_mid
+                    } else {
+                        reused_mid
+                    })
+                }
+                30 => Ok(leaf),
+                _ => Err(io::Error::new(io::ErrorKind::NotFound, "unknown pid")),
+            })
+            .unwrap();
+
+        assert!(!admitted);
+        assert_eq!(mid_reads, 2);
+    }
+
+    #[test]
+    fn rejects_cycles_and_chains_over_depth_limit() {
+        let root = snapshot(10, 1, 100);
+        let cycle = HashMap::from([(20, snapshot(20, 30, 200)), (30, snapshot(30, 20, 300))]);
+        assert!(!PlatformRoot(root)
+            .authorize_with(30, |pid| Ok(cycle[&pid]))
+            .unwrap());
+
+        assert!(!PlatformRoot(root)
+            .authorize_with(1_000, |pid| Ok(snapshot(pid, pid + 1, u64::from(pid))))
+            .unwrap());
     }
 }

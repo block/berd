@@ -18,6 +18,7 @@ pub const EXIT_TRANSPORT: u8 = 2;
 pub const EXIT_ENV: u8 = 3;
 
 const PING_TIMEOUT: Duration = Duration::from_secs(2);
+const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_BOOTSTRAP_RESPONSE_BYTES: u64 = 4096;
 /// Above the broker's 900s command-timeout ceiling, so the broker's
 /// structured 504 always arrives before this client-side timeout fires.
@@ -166,11 +167,28 @@ fn bootstrap(file: &discovery::DiscoveryFile) -> Result<Endpoint, Failure> {
             })?;
         Stream::connect(name).map_err(|error| Failure::env(format!("the Berd desktop app's authenticated control bootstrap is unavailable ({error}); {CONTROL_REMEDIATION}")))?
     };
+    #[cfg(unix)]
+    stream
+        .set_read_timeout(Some(BOOTSTRAP_TIMEOUT))
+        .map_err(|error| {
+            Failure::env(format!(
+                "the Berd desktop app's authenticated control bootstrap could not set a read timeout ({error}); {CONTROL_REMEDIATION}"
+            ))
+        })?;
+    #[cfg(windows)]
+    stream.set_nonblocking(true).map_err(|error| {
+        Failure::env(format!(
+            "the Berd desktop app's authenticated control bootstrap could not set nonblocking mode ({error}); {CONTROL_REMEDIATION}"
+        ))
+    })?;
     let mut response = String::new();
+    #[cfg(unix)]
     BufReader::new(stream)
         .take(MAX_BOOTSTRAP_RESPONSE_BYTES + 1)
         .read_line(&mut response)
         .map_err(|error| Failure::env(format!("the Berd desktop app's authenticated control bootstrap failed ({error}); {CONTROL_REMEDIATION}")))?;
+    #[cfg(windows)]
+    read_bootstrap_response_with_deadline(&mut BufReader::new(stream), &mut response)?;
     if response.len() as u64 > MAX_BOOTSTRAP_RESPONSE_BYTES {
         return Err(Failure::env(
             "the Berd control bootstrap returned an unexpectedly large response",
@@ -201,6 +219,36 @@ fn bootstrap(file: &discovery::DiscoveryFile) -> Result<Endpoint, Failure> {
         port: response.port,
         capability: response.capability,
     })
+}
+
+#[cfg(windows)]
+fn read_bootstrap_response_with_deadline<R: BufRead>(
+    reader: &mut R,
+    response: &mut String,
+) -> Result<(), Failure> {
+    let deadline = std::time::Instant::now() + BOOTSTRAP_TIMEOUT;
+    loop {
+        let remaining = (MAX_BOOTSTRAP_RESPONSE_BYTES + 1).saturating_sub(response.len() as u64);
+        if remaining == 0 {
+            return Ok(());
+        }
+        match (&mut *reader).take(remaining).read_line(response) {
+            Ok(_) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    return Err(Failure::env(format!(
+                        "the Berd desktop app's authenticated control bootstrap timed out; {CONTROL_REMEDIATION}"
+                    )));
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => {
+                return Err(Failure::env(format!(
+                    "the Berd desktop app's authenticated control bootstrap failed ({error}); {CONTROL_REMEDIATION}"
+                )));
+            }
+        }
+    }
 }
 
 /// Read the discovery file and verify the broker behind it echoes the file's
@@ -401,8 +449,11 @@ mod tests {
     impl TempDiscoveryFile {
         fn new(port: u16, generation: u64) -> Self {
             use std::os::unix::fs::PermissionsExt;
+            static NEXT_DISCOVERY: std::sync::atomic::AtomicU64 =
+                std::sync::atomic::AtomicU64::new(0);
+            let nonce = NEXT_DISCOVERY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let base = std::env::temp_dir().join(format!(
-                "berdctl-client-bootstrap-{}-{port}",
+                "berdctl-client-bootstrap-{}-{port}-{nonce}",
                 std::process::id()
             ));
             std::fs::remove_dir_all(&base).ok();
@@ -545,6 +596,27 @@ mod tests {
         let failure = handshake(&discovery.path).expect_err("mismatched generation fails closed");
         assert_eq!(failure.exit, EXIT_ENV);
         assert!(failure.message.contains("restarted its control endpoint"));
+        worker.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_stall_times_out_as_environment_failure() {
+        let discovery = TempDiscoveryFile::new(43123, 7);
+        let bootstrap =
+            std::os::unix::net::UnixListener::bind(&discovery.bootstrap_endpoint).unwrap();
+        let worker = thread::spawn(move || {
+            let (_stream, _) = bootstrap.accept().unwrap();
+            thread::sleep(BOOTSTRAP_TIMEOUT + Duration::from_secs(1));
+        });
+
+        let started = std::time::Instant::now();
+        let failure = handshake(&discovery.path).expect_err("stalled bootstrap must time out");
+        assert_eq!(failure.exit, EXIT_ENV);
+        assert!(failure
+            .message
+            .contains("authenticated control bootstrap failed"));
+        assert!(started.elapsed() < BOOTSTRAP_TIMEOUT + Duration::from_secs(1));
         worker.join().unwrap();
     }
 
