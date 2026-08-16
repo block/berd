@@ -941,16 +941,27 @@ mod tests {
 
     /// The non-test portion of a plugin source file: everything before its
     /// `mod tests` module, which must be unique and must run to end-of-file
-    /// so no scannable code can hide after it. The brace walk is naive about
-    /// braces inside test string literals, but that confusion fails CLOSED
-    /// (the gate then scans test code too and trips loudly).
+    /// so no scannable code can hide after it. Both LF and CRLF are accepted
+    /// because `include_str!` preserves the checkout's line endings. The brace
+    /// walk is naive about braces inside test string literals, but that confusion
+    /// fails CLOSED (the gate then scans test code too and trips loudly).
     fn non_test_source<'a>(name: &str, source: &'a str) -> &'a str {
-        const MARKER: &str = "#[cfg(test)]\nmod tests {";
-        match source.matches(MARKER).count() {
+        const MARKERS: &[&str] = &["#[cfg(test)]\nmod tests {", "#[cfg(test)]\r\nmod tests {"];
+        let mut matches = Vec::new();
+        for marker in MARKERS {
+            matches.extend(
+                source
+                    .match_indices(marker)
+                    .map(|(start, _)| (start, *marker)),
+            );
+        }
+
+        match matches.len() {
             0 => source,
             1 => {
-                let head = source.split(MARKER).next().unwrap();
-                let tail = &source[head.len() + MARKER.len()..];
+                let (start, marker) = matches[0];
+                let head = &source[..start];
+                let tail = &source[start + marker.len()..];
                 let mut depth: i64 = 1;
                 let mut after = "";
                 for (i, c) in tail.char_indices() {
@@ -975,6 +986,23 @@ mod tests {
             }
             n => panic!("{name}: expected at most one `mod tests` marker, found {n}"),
         }
+    }
+
+    #[test]
+    fn non_test_source_accepts_crlf_checkouts() {
+        let source = [
+            "const LIVE: &str = \"transport\";",
+            "#[cfg(test)]",
+            "mod tests {",
+            "    const TEST_ONLY: &str = \"create\";",
+            "}",
+            "",
+        ]
+        .join("\r\n");
+        let non_test = non_test_source("fixture.rs", &source);
+
+        assert_eq!(non_test, "const LIVE: &str = \"transport\";\r\n");
+        assert!(!non_test.contains("\"create\""));
     }
 
     /// Invariant #1 of the berdctl architecture
