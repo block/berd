@@ -132,17 +132,6 @@ for y in stride(from: 16, through: 384, by: 32) {
   }
 }
 
-let heading = "Drag Berd into Applications" as NSString
-let headingAttributes: [NSAttributedString.Key: Any] = [
-  .font: NSFont.systemFont(ofSize: 20, weight: .semibold),
-  .foregroundColor: ink,
-]
-let headingSize = heading.size(withAttributes: headingAttributes)
-heading.draw(
-  at: NSPoint(x: (canvas.width - headingSize.width) / 2, y: 338),
-  withAttributes: headingAttributes
-)
-
 ink.setFill()
 
 // Keep the shaft and arrowhead as distinct brush gestures. The small paper gap
