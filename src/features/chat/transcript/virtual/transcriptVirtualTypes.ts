@@ -20,6 +20,31 @@ export type TranscriptScrollAnchor =
 
 export type TranscriptScrollSource = "browser" | "programmatic" | "correction";
 
+export type TranscriptScrollCause =
+  | "user-input"
+  | "follow"
+  | "jump"
+  | "target"
+  | "geometry"
+  | "recovery";
+
+export type TranscriptUserInputKind = "wheel" | "touch" | "key" | "pointer";
+
+/** Identity retained from a scroll request through browser acknowledgement. */
+export interface TranscriptScrollOperation {
+  generation: number;
+  cause: TranscriptScrollCause;
+  userInputKind?: TranscriptUserInputKind;
+}
+
+export function isExplicitTranscriptUserInput(
+  operation: TranscriptScrollOperation,
+): boolean {
+  return (
+    operation.cause === "user-input" && operation.userInputKind !== undefined
+  );
+}
+
 export type TranscriptScrollDirection = "up" | "down" | "none";
 
 export type TranscriptScrollAlign = "start" | "center" | "end" | "auto";
@@ -76,6 +101,7 @@ export interface TranscriptScrollCorrection {
   previousScrollTop: number;
   nextScrollTop: number;
   delta: number;
+  operation?: TranscriptScrollOperation;
 }
 
 export interface TranscriptAnchorResolution {

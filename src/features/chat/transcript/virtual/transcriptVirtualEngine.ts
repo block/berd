@@ -2,6 +2,7 @@ import type { TranscriptRowDescriptor } from "../projection/transcriptItemTypes"
 import type {
   TranscriptScrollAlign,
   TranscriptScrollCorrection,
+  TranscriptScrollOperation,
   TranscriptSessionGeometry,
   TranscriptViewportGeometry,
   TranscriptVirtualControllerState,
@@ -43,6 +44,7 @@ export interface TranscriptVirtualEngine {
     options?: {
       source?: "browser" | "programmatic" | "correction";
       userScrollIntent?: boolean;
+      operation?: TranscriptScrollOperation;
       preserveScrollPosition?: boolean;
       /** Recovery-only escape hatch that invalidates and recomputes a stale range. */
       forceRangeRefresh?: boolean;
@@ -70,6 +72,7 @@ export interface TranscriptVirtualEngine {
       behavior?: ScrollBehavior;
       source?: "browser" | "programmatic" | "correction";
       userScrollIntent?: boolean;
+      operation?: TranscriptScrollOperation;
       preserveScrollPosition?: boolean;
     },
   ): unknown;

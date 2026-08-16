@@ -97,7 +97,7 @@ describe("TranscriptViewportCoordinator", () => {
     expect(container.scrollTop).toBe(900);
     expect(engine.syncViewport).toHaveBeenLastCalledWith(
       expect.objectContaining({ scrollTop: 900 }),
-      expect.objectContaining({ source: "browser" }),
+      expect.objectContaining({ source: "browser", userScrollIntent: false }),
     );
   });
 
@@ -171,6 +171,53 @@ describe("TranscriptViewportCoordinator", () => {
     coordinator.setRows([]);
 
     expect(container.scrollTop).toBe(100);
+  });
+
+  it("preserves a programmatic cause through browser clamp without creating user intent", () => {
+    const { container, coordinator, engine } = createHarness();
+    const operation = coordinator.beginScrollOperation("target");
+
+    coordinator.writeScrollTop(4000, { operation });
+
+    expect(container.scrollTop).toBe(1600);
+    expect(engine.syncViewport).toHaveBeenLastCalledWith(
+      expect.objectContaining({ scrollTop: 1600 }),
+      expect.objectContaining({
+        source: "browser",
+        userScrollIntent: false,
+        operation,
+      }),
+    );
+  });
+
+  it("creates user intent only for an explicitly typed physical input", () => {
+    const { coordinator, engine } = createHarness();
+    const operation = coordinator.beginScrollOperation("user-input", "wheel");
+
+    coordinator.syncViewport(
+      {
+        scrollTop: 200,
+        viewportHeight: 400,
+        widthScope: "w:800",
+      },
+      { source: "browser", operation },
+    );
+
+    expect(engine.syncViewport).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ userScrollIntent: true, operation }),
+    );
+  });
+
+  it("ignores an acknowledgement from an operation superseded by user input", () => {
+    const { container, coordinator, engine } = createHarness();
+    const target = coordinator.beginScrollOperation("target");
+    coordinator.beginScrollOperation("user-input", "touch");
+
+    coordinator.writeScrollTop(900, { operation: target });
+
+    expect(container.scrollTop).toBe(100);
+    expect(engine.syncViewport).not.toHaveBeenCalled();
   });
 
   it("reads browser clamping back into the engine", () => {

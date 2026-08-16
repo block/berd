@@ -35,6 +35,7 @@ export type {
   TranscriptViewportUpdateResult,
   TranscriptVirtualEngine,
 } from "./transcriptVirtualEngine";
+export { isExplicitTranscriptUserInput } from "./transcriptVirtualTypes";
 export type {
   TranscriptAnchorResolution,
   TranscriptCorrectionReason,
@@ -43,10 +44,13 @@ export type {
   TranscriptRenderRange,
   TranscriptScrollAlign,
   TranscriptScrollAnchor,
+  TranscriptScrollCause,
   TranscriptScrollCorrection,
   TranscriptScrollDirection,
+  TranscriptScrollOperation,
   TranscriptScrollSource,
   TranscriptSessionGeometry,
+  TranscriptUserInputKind,
   TranscriptViewportGeometry,
   TranscriptVirtualControllerOptions,
   TranscriptVirtualControllerState,
