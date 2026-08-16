@@ -390,6 +390,7 @@ export type StreamingMessageUpdateMode = "active-stream" | "settled-stream";
 
 interface ChatStoreState {
   messagesBySession: Record<string, Message[]>;
+  loadedTranscriptEpochBySession: Record<string, number>;
   sessionStateById: Record<string, SessionChatRuntime>;
   queuedMessageBySession: Record<string, QueuedMessageRecord[]>;
   hasHydratedMessageQueues: boolean;
@@ -421,6 +422,7 @@ interface ChatStoreActions {
   ) => void;
   removeMessage: (sessionId: string, messageId: string) => void;
   setMessages: (sessionId: string, messages: Message[]) => void;
+  replaceMessagesFromReplay: (sessionId: string, messages: Message[]) => void;
   clearMessages: (sessionId: string) => void;
   getActiveMessages: () => Message[];
   getSessionRuntime: (sessionId: string) => SessionChatRuntime;
@@ -541,6 +543,7 @@ const createChatStore: StateCreator<
 > = (set, get) => ({
   // State
   messagesBySession: {},
+  loadedTranscriptEpochBySession: {},
   sessionStateById: buildInitialSessionStateById(),
   queuedMessageBySession: cachedMessageQueues,
   hasHydratedMessageQueues: false,
@@ -760,6 +763,48 @@ const createChatStore: StateCreator<
       return {
         messagesBySession: trimmedCache.messagesBySession,
         recentMessageSessionIds,
+      };
+    });
+    evictedSessionIds.forEach(clearReplayBuffer);
+  },
+
+  /**
+   * The replay commit is a transcript replacement boundary, distinct from
+   * ordinary streaming/store updates. Consumers use this epoch to discard
+   * work captured against the prior loaded transcript.
+   */
+  replaceMessagesFromReplay: (sessionId, messages) => {
+    let evictedSessionIds: string[] = [];
+    set((state) => {
+      const recentMessageSessionIds =
+        state.activeSessionId === sessionId
+          ? updateRecentMessageSessionIds(
+              state.recentMessageSessionIds,
+              sessionId,
+            )
+          : state.recentMessageSessionIds;
+      const nextMessagesBySession = {
+        ...state.messagesBySession,
+        [sessionId]: preserveLocalSpeechState(
+          state.messagesBySession[sessionId],
+          messages,
+        ),
+      };
+      const trimmedCache = trimMessageSessionCache(
+        { ...state, messagesBySession: nextMessagesBySession },
+        recentMessageSessionIds,
+        [sessionId],
+      );
+      evictedSessionIds = trimmedCache.evictedSessionIds;
+
+      return {
+        messagesBySession: trimmedCache.messagesBySession,
+        recentMessageSessionIds,
+        loadedTranscriptEpochBySession: {
+          ...state.loadedTranscriptEpochBySession,
+          [sessionId]:
+            (state.loadedTranscriptEpochBySession[sessionId] ?? 0) + 1,
+        },
       };
     });
     evictedSessionIds.forEach(clearReplayBuffer);
@@ -1796,6 +1841,10 @@ const createChatStore: StateCreator<
     set((state) => {
       const { [draftSessionId]: messages, ...remainingMessages } =
         state.messagesBySession;
+      const {
+        [draftSessionId]: loadedTranscriptEpoch,
+        ...remainingLoadedTranscriptEpochs
+      } = state.loadedTranscriptEpochBySession;
       const { [draftSessionId]: runtime, ...remainingRuntime } =
         state.sessionStateById;
       const { [draftSessionId]: queuedMessage, ...remainingQueued } =
@@ -1825,6 +1874,13 @@ const createChatStore: StateCreator<
         messagesBySession: messages
           ? { ...remainingMessages, [backendSessionId]: messages }
           : remainingMessages,
+        loadedTranscriptEpochBySession:
+          loadedTranscriptEpoch !== undefined
+            ? {
+                ...remainingLoadedTranscriptEpochs,
+                [backendSessionId]: loadedTranscriptEpoch,
+              }
+            : remainingLoadedTranscriptEpochs,
         sessionStateById: runtime
           ? { ...remainingRuntime, [backendSessionId]: runtime }
           : remainingRuntime,
@@ -1881,11 +1937,14 @@ const createChatStore: StateCreator<
     const previousSessionStateById = get().sessionStateById;
     set((state) => {
       const { [sessionId]: _, ...rest } = state.messagesBySession;
-      const { [sessionId]: __, ...remainingSessionState } =
+      const { [sessionId]: __, ...remainingLoadedTranscriptEpochs } =
+        state.loadedTranscriptEpochBySession;
+      const { [sessionId]: ___, ...remainingSessionState } =
         state.sessionStateById;
-      const { [sessionId]: ___, ...remainingQueued } =
+      const { [sessionId]: removedQueued, ...remainingQueued } =
         state.queuedMessageBySession;
-      const { [sessionId]: ____, ...remainingDrafts } = state.draftsBySession;
+      const { [sessionId]: removedDraft, ...remainingDrafts } =
+        state.draftsBySession;
       const nonEmptyDraftSessionIds = new Set(state.nonEmptyDraftSessionIds);
       nonEmptyDraftSessionIds.delete(sessionId);
       const { [sessionId]: removedSkillDrafts, ...remainingSkillDrafts } =
@@ -1901,6 +1960,7 @@ const createChatStore: StateCreator<
       void removedTarget;
       return {
         messagesBySession: rest,
+        loadedTranscriptEpochBySession: remainingLoadedTranscriptEpochs,
         sessionStateById: remainingSessionState,
         queuedMessageBySession: remainingQueued,
         draftsBySession: remainingDrafts,

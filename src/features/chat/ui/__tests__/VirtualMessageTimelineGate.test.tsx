@@ -8,6 +8,7 @@ import {
 } from "@/features/experiments/experimentPreferences";
 import type { Message } from "@/shared/types/messages";
 import { VirtualMessageTimelineGate } from "../VirtualMessageTimelineGate";
+import { useChatStore } from "../../stores/chatStore";
 import type { MessageTimelineBubbleCallbacks } from "../messageTimelineShared";
 
 const mocks = vi.hoisted(() => ({
@@ -64,6 +65,7 @@ describe("VirtualMessageTimelineGate", () => {
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
     mocks.legacyTimelineSpy.mockClear();
     mocks.virtualTimelineSpy.mockClear();
+    useChatStore.setState({ loadedTranscriptEpochBySession: {} });
   });
 
   afterEach(() => {
@@ -141,6 +143,34 @@ describe("VirtualMessageTimelineGate", () => {
       }),
     );
     expect(mocks.legacyTimelineSpy).not.toHaveBeenCalled();
+  });
+
+  it("replaces the loaded transcript when replay commits, but not for ordinary updates", () => {
+    render(
+      <VirtualMessageTimelineGate
+        sessionId="session-1"
+        messages={[message("user-1")]}
+      />,
+    );
+    const initialTranscript =
+      mocks.virtualTimelineSpy.mock.lastCall?.[0].loadedTranscript;
+
+    act(() => {
+      useChatStore.getState().setMessages("session-1", [message("ordinary")]);
+    });
+    expect(mocks.virtualTimelineSpy.mock.lastCall?.[0].loadedTranscript).toBe(
+      initialTranscript,
+    );
+
+    act(() => {
+      useChatStore
+        .getState()
+        .replaceMessagesFromReplay("session-1", [message("replay")]);
+    });
+    const replayTranscript =
+      mocks.virtualTimelineSpy.mock.lastCall?.[0].loadedTranscript;
+    expect(replayTranscript).not.toBe(initialTranscript);
+    expect(replayTranscript).toMatchObject({ sessionEpoch: 1 });
   });
 
   it("replaces loaded transcript state when the virtual renderer is toggled", () => {

@@ -53,6 +53,9 @@ export function replaceMessagesFromSessionReplay(
 
   useChatStore
     .getState()
-    .setMessages(sessionId, [...messages, ...(options.trailingMessages ?? [])]);
+    .replaceMessagesFromReplay(sessionId, [
+      ...messages,
+      ...(options.trailingMessages ?? []),
+    ]);
   return { status: "replaced", messages };
 }
