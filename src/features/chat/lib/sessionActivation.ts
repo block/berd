@@ -419,9 +419,12 @@ async function performSessionMessagesLoad(
         ...createSystemNotificationMessage(errorMessage, "error"),
         id: loaderNoticeMessageId(sessionId, "error"),
       });
-      useChatSessionStore
-        .getState()
-        .patchSession(sessionId, { pinnedLoadState: undefined });
+      useChatSessionStore.getState().patchSession(sessionId, {
+        pinnedLoadState:
+          sessionAtRequest?.pinnedLoadState && !sessionInfo
+            ? "failed"
+            : undefined,
+      });
       clearIdleStreamingMessageAfterReplay(sessionId);
       perfLog(
         `[perf:load] ${sid} replay invalid: reason=${replayResult.reason} notifs=${replayStats?.count ?? 0}`,

@@ -895,6 +895,13 @@ describe("loadSessionMessages", () => {
     });
 
     await expect(loadSessionMessages("s-pinned-unknown")).resolves.toBe(false);
+    await expect(loadSessionMessages("s-pinned-unknown")).resolves.toBe(false);
+
+    expect(acpGetSessionInfo).toHaveBeenCalledTimes(2);
+    expect(
+      useChatSessionStore.getState().getSession("s-pinned-unknown")
+        ?.pinnedLoadState,
+    ).toBe("failed");
     expect(notificationFromLastMessage("s-pinned-unknown")).toMatchObject({
       notificationType: "error",
     });
