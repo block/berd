@@ -2407,6 +2407,160 @@ describe("ChatInput", () => {
     expect(onSteerQueuedMessage).not.toHaveBeenCalled();
   });
 
+  it("does not flash a newly queued message that sends during the visibility grace period", async () => {
+    vi.useFakeTimers();
+    try {
+      const queueProps = {
+        onEditQueue: vi.fn(() => true),
+        onCancelQueueEdit: vi.fn(() => true),
+        onDismissQueue: vi.fn(),
+        onUpdateQueue: vi.fn(() => true),
+      };
+      const { rerender } = render(
+        <ChatInput onSend={vi.fn()} queuedMessages={[]} {...queueProps} />,
+      );
+
+      rerender(
+        <ChatInput
+          onSend={vi.fn()}
+          queuedMessages={[
+            {
+              recordId: "immediate-send",
+              payload: { persona: { kind: "none" }, text: "send now" },
+            },
+          ]}
+          {...queueProps}
+        />,
+      );
+      expect(screen.queryByText("send now")).not.toBeInTheDocument();
+
+      rerender(
+        <ChatInput onSend={vi.fn()} queuedMessages={[]} {...queueProps} />,
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(screen.queryByText("send now")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps an idle send hidden when its dispatch flips the session to streaming", async () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(
+        <ChatInput onSend={vi.fn()} queuedMessages={[]} />,
+      );
+
+      // The record enters the queue while idle, then dispatch starts the run
+      // before the record is dismissed. Streaming must not upgrade a record
+      // already in its grace period to immediate visibility.
+      rerender(
+        <ChatInput
+          onSend={vi.fn()}
+          queuedMessages={[
+            {
+              recordId: "dispatching",
+              payload: { persona: { kind: "none" }, text: "on its way" },
+            },
+          ]}
+        />,
+      );
+      rerender(
+        <ChatInput
+          onSend={vi.fn()}
+          isStreaming
+          queuedMessages={[
+            {
+              recordId: "dispatching",
+              payload: { persona: { kind: "none" }, text: "on its way" },
+            },
+          ]}
+        />,
+      );
+      expect(screen.queryByText("on its way")).not.toBeInTheDocument();
+
+      rerender(<ChatInput onSend={vi.fn()} isStreaming queuedMessages={[]} />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(200);
+      });
+      expect(screen.queryByText("on its way")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a newly queued message immediately while the agent is responding", () => {
+    const { rerender } = render(
+      <ChatInput onSend={vi.fn()} queuedMessages={[]} isStreaming />,
+    );
+
+    rerender(
+      <ChatInput
+        onSend={vi.fn()}
+        isStreaming
+        queuedMessages={[
+          {
+            recordId: "responding-queue",
+            payload: { persona: { kind: "none" }, text: "queue this" },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("queue this")).toBeInTheDocument();
+  });
+
+  it("reveals a newly queued message when it remains after the grace period", async () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(
+        <ChatInput onSend={vi.fn()} queuedMessages={[]} />,
+      );
+
+      rerender(
+        <ChatInput
+          onSend={vi.fn()}
+          queuedMessages={[
+            {
+              recordId: "waiting",
+              payload: { persona: { kind: "none" }, text: "still waiting" },
+            },
+          ]}
+        />,
+      );
+      expect(screen.queryByText("still waiting")).not.toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(199);
+      });
+      expect(screen.queryByText("still waiting")).not.toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(screen.getByText("still waiting")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a queue that already exists when the composer mounts", () => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        queuedMessages={[
+          {
+            recordId: "existing",
+            payload: { persona: { kind: "none" }, text: "already waiting" },
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("already waiting")).toBeInTheDocument();
+  });
+
   it("hides the queued pill for the record being edited", async () => {
     const onUpdateQueue = vi.fn(() => true);
     const user = userEvent.setup();

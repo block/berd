@@ -196,6 +196,76 @@ function getAgentToolsTipPresentation({
   };
 }
 
+const QUEUED_MESSAGE_VISIBILITY_DELAY_MS = 200;
+
+/**
+ * Presentation-only gate for queued-message pills. Every composer send passes
+ * through the queue (LAWS/CHAT.md), so an ordinary send on an idle session
+ * briefly exists as a queue record before dispatch. Holding new records back
+ * for a short grace period keeps that pass-through invisible, while records
+ * queued during an active response (`revealImmediately`) and records that
+ * already exist on mount show at once. Records that leave the queue during
+ * the grace period never render. Queue behavior itself is unaffected.
+ */
+function useVisibleQueuedMessageIds(
+  recordIds: string[],
+  revealImmediately: boolean,
+): ReadonlySet<string> {
+  const [visibleIds, setVisibleIds] = useState<ReadonlySet<string>>(
+    () => new Set(recordIds),
+  );
+  const timersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  useEffect(() => {
+    const currentIds = new Set(recordIds);
+
+    for (const [recordId, timer] of timersRef.current) {
+      if (!currentIds.has(recordId)) {
+        clearTimeout(timer);
+        timersRef.current.delete(recordId);
+      }
+    }
+
+    setVisibleIds((current) => {
+      const retained = new Set(
+        [...current].filter((recordId) => currentIds.has(recordId)),
+      );
+      const unchanged =
+        retained.size === current.size &&
+        [...retained].every((recordId) => current.has(recordId));
+      return unchanged ? current : retained;
+    });
+
+    for (const recordId of recordIds) {
+      if (visibleIds.has(recordId)) continue;
+      // A record already inside its grace period keeps its timer even if the
+      // session starts responding: an ordinary idle send often flips the
+      // session to streaming while its record is still being dismissed, and
+      // upgrading it to immediate visibility would reintroduce the flash.
+      if (timersRef.current.has(recordId)) continue;
+      if (revealImmediately) {
+        setVisibleIds((current) => new Set(current).add(recordId));
+        continue;
+      }
+      const timer = setTimeout(() => {
+        timersRef.current.delete(recordId);
+        setVisibleIds((current) => new Set(current).add(recordId));
+      }, QUEUED_MESSAGE_VISIBILITY_DELAY_MS);
+      timersRef.current.set(recordId, timer);
+    }
+  }, [recordIds, revealImmediately, visibleIds]);
+
+  useEffect(
+    () => () => {
+      for (const timer of timersRef.current.values()) clearTimeout(timer);
+      timersRef.current.clear();
+    },
+    [],
+  );
+
+  return visibleIds;
+}
+
 export function ChatInput({
   composerActions,
   initialValue = "",
@@ -486,13 +556,24 @@ export function ChatInput({
   const allQueuedMessages =
     queuedMessages ??
     (queuedMessage ? [{ recordId: "legacy", payload: queuedMessage }] : []);
+  const queuedRecordIds = useMemo(
+    () => allQueuedMessages.map(({ recordId }) => recordId),
+    [allQueuedMessages],
+  );
+  const visibleQueuedMessageIds = useVisibleQueuedMessageIds(
+    queuedRecordIds,
+    isStreaming,
+  );
   const visibleQueuedMessages = allQueuedMessages.filter(
     ({ payload }) => payload.showInComposer !== false,
+  );
+  const presentedQueuedMessages = visibleQueuedMessages.filter(({ recordId }) =>
+    visibleQueuedMessageIds.has(recordId),
   );
   // A record being edited lives in the composer, so its pill is hidden to
   // avoid showing the same message both queued and in the composer. Queue
   // positions (head-only actions) still come from the unfiltered list.
-  const queuedMessagePills = visibleQueuedMessages
+  const queuedMessagePills = presentedQueuedMessages
     .map((entry, index) => ({ ...entry, index }))
     .filter(({ recordId }) => recordId !== editingQueuedRecordId);
   useLayoutEffect(() => {
