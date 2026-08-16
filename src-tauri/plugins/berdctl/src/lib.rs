@@ -24,7 +24,7 @@ mod discovery;
 mod server;
 
 #[cfg(feature = "server")]
-pub use authorization::{prepare_goosed, GoosedAuthorization};
+pub use authorization::{prepare_goosed, GoosedAdmission, GoosedAuthorization};
 pub use discovery::{discovery_file_path, owner_pid_from_discovery_file_name, DISCOVERY_DIR_NAME};
 
 #[cfg(feature = "server")]

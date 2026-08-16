@@ -143,6 +143,123 @@ pub(crate) fn start(
     })
 }
 
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use interprocess::local_socket::{prelude::*, GenericNamespaced, Stream, ToNsName};
+    use std::io::{BufRead, BufReader};
+
+    const HELPER_ENDPOINT_ENV: &str = "BERDCTL_BOOTSTRAP_TEST_ENDPOINT";
+    const HELPER_LEAF_ENV: &str = "BERDCTL_BOOTSTRAP_TEST_LEAF";
+    const HELPER_READY_ENV: &str = "BERDCTL_BOOTSTRAP_TEST_READY";
+
+    fn connect(endpoint: &str) -> String {
+        let name = endpoint
+            .to_ns_name::<GenericNamespaced>()
+            .expect("valid test pipe name");
+        let stream = Stream::connect(name).expect("connect to test bootstrap");
+        let mut response = String::new();
+        BufReader::new(stream)
+            .read_line(&mut response)
+            .expect("read test bootstrap response");
+        response
+    }
+
+    #[test]
+    fn bootstrap_helper_connects_from_admitted_child() {
+        let Ok(endpoint) = std::env::var(HELPER_ENDPOINT_ENV) else {
+            return;
+        };
+        if std::env::var_os(HELPER_LEAF_ENV).is_none() {
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "bootstrap::windows_tests::bootstrap_helper_connects_from_admitted_child",
+                    "--nocapture",
+                ])
+                .env(HELPER_LEAF_ENV, "1")
+                .spawn()
+                .unwrap();
+            let ready = std::path::PathBuf::from(std::env::var_os(HELPER_READY_ENV).unwrap());
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while !ready.exists() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            assert!(ready.exists());
+            assert!(child.wait().unwrap().success());
+            return;
+        }
+        let ready = std::path::PathBuf::from(std::env::var_os(HELPER_READY_ENV).unwrap());
+        let response = connect(&endpoint);
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["capability"], "test-capability");
+        std::fs::write(&ready, b"ready").unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(30));
+    }
+
+    #[tokio::test]
+    async fn exact_job_child_receives_capability_and_unrelated_process_does_not() {
+        let endpoint = format!(
+            "berdctl-bootstrap-test-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        );
+        let endpoint_path = Path::new(&endpoint);
+        let authorizer = ProcessAuthorizer::default();
+        let handle = start(
+            endpoint_path,
+            43123,
+            7,
+            "test-capability".into(),
+            authorizer.clone(),
+        )
+        .unwrap();
+
+        let unrelated_response = tokio::task::spawn_blocking({
+            let endpoint = endpoint.clone();
+            move || connect(&endpoint)
+        })
+        .await
+        .unwrap();
+        assert!(unrelated_response.is_empty());
+
+        let ready_path = std::env::temp_dir().join(format!(
+            "berdctl-bootstrap-ready-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4().simple()
+        ));
+        let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "bootstrap::windows_tests::bootstrap_helper_connects_from_admitted_child",
+                "--nocapture",
+            ])
+            .env(HELPER_ENDPOINT_ENV, &endpoint)
+            .env(HELPER_READY_ENV, &ready_path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        let authorization =
+            crate::authorization::prepare_goosed_authorization(authorizer.clone(), &mut command)
+                .unwrap();
+        let mut child = command.spawn().unwrap();
+        let admission = authorization.admit(&child).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !ready_path.exists() && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert!(ready_path.exists());
+        let child_pid = child.id().unwrap();
+        admission
+            .terminate(&child, std::time::Duration::from_secs(5))
+            .unwrap();
+        child.wait().await.unwrap();
+        assert!(!authorizer.authorize(child_pid).unwrap());
+        assert!(!ready_path.exists() || std::fs::remove_file(&ready_path).is_ok());
+        handle.shutdown();
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;

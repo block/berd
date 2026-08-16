@@ -43,6 +43,17 @@ impl ProcessAuthorizer {
     fn install_job(&self, job: Arc<WindowsJob>) {
         *self.root.write().unwrap() = Some(PlatformRoot { job });
     }
+
+    #[cfg(windows)]
+    fn revoke_job(&self, job: &Arc<WindowsJob>) {
+        let mut root = self.root.write().unwrap();
+        if root
+            .as_ref()
+            .is_some_and(|root| Arc::ptr_eq(&root.job, job))
+        {
+            *root = None;
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -212,25 +223,62 @@ pub(crate) fn prepare_goosed_authorization(
 }
 
 impl GoosedAuthorization {
-    pub fn admit(self, child: &tokio::process::Child) -> io::Result<()> {
+    pub fn admit(self, child: &tokio::process::Child) -> io::Result<GoosedAdmission> {
         let pid = child
             .id()
             .ok_or_else(|| io::Error::other("goosed child has no process id"))?;
         #[cfg(unix)]
         {
-            self.authorizer.install_root(pid)
+            self.authorizer.install_root(pid)?;
+            Ok(GoosedAdmission {})
         }
         #[cfg(windows)]
         {
-            let result = self
-                .job
-                .assign_pid(pid)
-                .and_then(|()| resume_process_main_thread(pid));
-            if result.is_ok() {
-                self.authorizer.install_job(self.job);
-            }
-            result
+            let process = child
+                .raw_handle()
+                .ok_or_else(|| io::Error::other("goosed child has no process handle"))?;
+            self.job.assign_handle(process.cast(), pid)?;
+            resume_process_main_thread(process.cast(), pid)?;
+            self.authorizer.install_job(Arc::clone(&self.job));
+            Ok(GoosedAdmission {
+                authorizer: self.authorizer,
+                job: self.job,
+            })
         }
+    }
+}
+
+/// Revocable ownership of the process tree admitted for berdctl bootstrap.
+///
+/// On Windows this lease retains the exact Job Object installed as the
+/// authorization root. Dropping it revokes admission and closes the Job; call
+/// `terminate` when shutdown must synchronously confirm the tree is gone.
+pub struct GoosedAdmission {
+    #[cfg(windows)]
+    authorizer: ProcessAuthorizer,
+    #[cfg(windows)]
+    job: Arc<WindowsJob>,
+}
+
+impl GoosedAdmission {
+    #[cfg(windows)]
+    pub fn terminate(
+        &self,
+        child: &tokio::process::Child,
+        timeout: std::time::Duration,
+    ) -> io::Result<()> {
+        let process = child
+            .raw_handle()
+            .ok_or_else(|| io::Error::other("goosed child has no process handle"))?;
+        self.authorizer.revoke_job(&self.job);
+        self.job.terminate_and_wait(process.cast(), timeout)
+    }
+}
+
+#[cfg(windows)]
+impl Drop for GoosedAdmission {
+    fn drop(&mut self) {
+        self.authorizer.revoke_job(&self.job);
     }
 }
 
@@ -268,20 +316,77 @@ impl WindowsJob {
         Ok(job)
     }
 
-    fn assign_pid(&self, pid: u32) -> io::Result<()> {
-        use windows_sys::Win32::Foundation::CloseHandle;
+    fn assign_handle(
+        &self,
+        process: windows_sys::Win32::Foundation::HANDLE,
+        expected_pid: u32,
+    ) -> io::Result<()> {
+        use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
         use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
-        use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
-        };
-        let process = unsafe { OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid) };
-        if process.is_null() {
+        use windows_sys::Win32::System::Threading::{GetProcessId, WaitForSingleObject};
+        let actual_pid = unsafe { GetProcessId(process) };
+        if actual_pid == 0 {
             return Err(io::Error::last_os_error());
         }
+        if actual_pid != expected_pid {
+            return Err(io::Error::other("goosed process handle PID changed"));
+        }
+        if unsafe { WaitForSingleObject(process, 0) } != WAIT_TIMEOUT {
+            return Err(io::Error::other("goosed exited before Job assignment"));
+        }
         let ok = unsafe { AssignProcessToJobObject(self.handle, process) };
-        let error = (ok == 0).then(io::Error::last_os_error);
-        unsafe { CloseHandle(process) };
-        error.map_or(Ok(()), Err)
+        if ok == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn terminate_and_wait(
+        &self,
+        process: windows_sys::Win32::Foundation::HANDLE,
+        timeout: std::time::Duration,
+    ) -> io::Result<()> {
+        use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+        use windows_sys::Win32::System::JobObjects::{
+            JobObjectBasicAccountingInformation, QueryInformationJobObject, TerminateJobObject,
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+        };
+        use windows_sys::Win32::System::Threading::WaitForSingleObject;
+
+        if unsafe { TerminateJobObject(self.handle, 1) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = unsafe { std::mem::zeroed() };
+            let queried = unsafe {
+                QueryInformationJobObject(
+                    self.handle,
+                    JobObjectBasicAccountingInformation,
+                    (&mut info as *mut JOBOBJECT_BASIC_ACCOUNTING_INFORMATION).cast(),
+                    std::mem::size_of_val(&info) as u32,
+                    std::ptr::null_mut(),
+                )
+            };
+            if queried == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            let child_wait = unsafe { WaitForSingleObject(process, 0) };
+            if info.ActiveProcesses == 0 && child_wait == WAIT_OBJECT_0 {
+                return Ok(());
+            }
+            if child_wait != WAIT_OBJECT_0 && child_wait != WAIT_TIMEOUT {
+                return Err(io::Error::last_os_error());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "timed out waiting for goosed Job to become empty",
+                ));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 
     fn contains_pid(&self, pid: u32) -> io::Result<bool> {
@@ -310,38 +415,98 @@ impl Drop for WindowsJob {
 }
 
 #[cfg(windows)]
-fn resume_process_main_thread(pid: u32) -> io::Result<()> {
-    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+fn resume_process_main_thread(
+    process: windows_sys::Win32::Foundation::HANDLE,
+    expected_pid: u32,
+) -> io::Result<()> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE, WAIT_TIMEOUT};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
     };
-    use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+    use windows_sys::Win32::System::Threading::{
+        GetProcessId, GetProcessIdOfThread, OpenThread, ResumeThread, WaitForSingleObject,
+        THREAD_QUERY_LIMITED_INFORMATION, THREAD_SUSPEND_RESUME,
+    };
+    if unsafe { GetProcessId(process) } != expected_pid
+        || unsafe { WaitForSingleObject(process, 0) } != WAIT_TIMEOUT
+    {
+        return Err(io::Error::other(
+            "goosed process identity or liveness changed before resume",
+        ));
+    }
     let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
     if snapshot == INVALID_HANDLE_VALUE {
         return Err(io::Error::last_os_error());
     }
     let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
     entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
-    let mut found = false;
+    let mut thread_id = None;
     let mut current = unsafe { Thread32First(snapshot, &mut entry) };
     while current != 0 {
-        if entry.th32OwnerProcessID == pid {
-            let thread = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID) };
-            if !thread.is_null() {
-                found = unsafe { ResumeThread(thread) } != u32::MAX;
-                unsafe { CloseHandle(thread) };
-                if found {
-                    break;
-                }
+        if entry.th32OwnerProcessID == expected_pid {
+            if thread_id.replace(entry.th32ThreadID).is_some() {
+                unsafe { CloseHandle(snapshot) };
+                return Err(io::Error::other(
+                    "suspended goosed unexpectedly has multiple threads",
+                ));
             }
         }
         current = unsafe { Thread32Next(snapshot, &mut entry) };
     }
     unsafe { CloseHandle(snapshot) };
-    if found {
-        Ok(())
-    } else {
-        Err(io::Error::other("could not resume goosed main thread"))
+    let thread_id = thread_id.ok_or_else(|| io::Error::other("goosed main thread not found"))?;
+    let thread = unsafe {
+        OpenThread(
+            THREAD_SUSPEND_RESUME | THREAD_QUERY_LIMITED_INFORMATION,
+            0,
+            thread_id,
+        )
+    };
+    if thread.is_null() {
+        return Err(io::Error::last_os_error());
+    }
+    let owner_pid = unsafe { GetProcessIdOfThread(thread) };
+    if owner_pid != expected_pid {
+        unsafe { CloseHandle(thread) };
+        return Err(io::Error::other("goosed main thread identity changed"));
+    }
+    let previous_suspend_count = unsafe { ResumeThread(thread) };
+    unsafe { CloseHandle(thread) };
+    if previous_suspend_count != 1 {
+        return Err(io::Error::other(format!(
+            "goosed main thread had unexpected suspend count {previous_suspend_count}"
+        )));
+    }
+    if unsafe { GetProcessId(process) } != expected_pid {
+        return Err(io::Error::other(
+            "goosed process identity changed after resume",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn suspended_child_is_assigned_resumed_revoked_and_terminated() {
+        let authorizer = ProcessAuthorizer::default();
+        let mut command = tokio::process::Command::new("cmd.exe");
+        command.args(["/d", "/c", "ping -t 127.0.0.1 > nul"]);
+        let authorization = prepare_goosed_authorization(authorizer.clone(), &mut command).unwrap();
+        let mut child = command.spawn().unwrap();
+        let pid = child.id().unwrap();
+
+        let admission = authorization.admit(&child).unwrap();
+        assert!(authorizer.authorize(pid).unwrap());
+        assert!(!authorizer.authorize(std::process::id()).unwrap());
+
+        admission
+            .terminate(&child, std::time::Duration::from_secs(5))
+            .unwrap();
+        child.wait().await.unwrap();
+        assert!(!authorizer.authorize(pid).unwrap());
     }
 }
 

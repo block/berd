@@ -58,6 +58,8 @@ pub struct GooseServeProcess {
     secret_key: String,
     process_record_dir: PathBuf,
     _child: Child,
+    #[cfg(all(windows, feature = "berdctl"))]
+    berdctl_admission: tauri_plugin_berdctl::GoosedAdmission,
 }
 
 /// Global singleton — initialised once at app startup.
@@ -106,25 +108,47 @@ impl GooseServeProcess {
         }
 
         #[cfg(windows)]
-        let remove_process_record = if let Some(handle) = self._child.raw_handle() {
-            log::info!("Killing goose serve child through its retained process handle");
-            // SAFETY: Tokio owns this process handle for the lifetime of `_child`.
-            match unsafe {
-                crate::services::process::terminate_process_handle(handle, Duration::from_secs(5))
-            } {
-                Ok(()) => true,
-                Err(error) => {
-                    log::warn!(
-                        "Failed to stop goose serve child: {error}; keeping process record for recovery"
-                    );
-                    false
+        let remove_process_record = {
+            #[cfg(feature = "berdctl")]
+            {
+                log::info!("Killing goose serve process tree through its retained Job");
+                match self
+                    .berdctl_admission
+                    .terminate(&self._child, Duration::from_secs(5))
+                {
+                    Ok(()) => true,
+                    Err(error) => {
+                        log::warn!(
+                            "Failed to stop goose serve process tree: {error}; keeping process record for recovery"
+                        );
+                        false
+                    }
                 }
             }
-        } else {
-            log::warn!(
-                "Cannot stop goose serve child through its retained handle; keeping process record for recovery"
-            );
-            false
+            #[cfg(not(feature = "berdctl"))]
+            if let Some(handle) = self._child.raw_handle() {
+                log::info!("Killing goose serve child through its retained process handle");
+                // SAFETY: Tokio owns this process handle for the lifetime of `_child`.
+                match unsafe {
+                    crate::services::process::terminate_process_handle(
+                        handle,
+                        Duration::from_secs(5),
+                    )
+                } {
+                    Ok(()) => true,
+                    Err(error) => {
+                        log::warn!(
+                            "Failed to stop goose serve child: {error}; keeping process record for recovery"
+                        );
+                        false
+                    }
+                }
+            } else {
+                log::warn!(
+                    "Cannot stop goose serve child through its retained handle; keeping process record for recovery"
+                );
+                false
+            }
         };
 
         #[cfg(unix)]
@@ -286,10 +310,16 @@ impl GooseServeProcess {
         })?;
         let pid = child.id();
         #[cfg(feature = "berdctl")]
-        if let Err(error) = berdctl_authorization.admit(&child) {
-            let _ = child.kill().await;
-            return Err(format!("Failed to authorize goosed for berdctl: {error}"));
-        }
+        let berdctl_admission = match berdctl_authorization.admit(&child) {
+            Ok(admission) => admission,
+            Err(error) => {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return Err(format!("Failed to authorize goosed for berdctl: {error}"));
+            }
+        };
+        #[cfg(all(feature = "berdctl", not(windows)))]
+        let _ = &berdctl_admission;
         diagnostic_log::record_event(
             DiagnosticLevel::Info,
             DiagnosticCategory::GooseServe,
@@ -303,16 +333,40 @@ impl GooseServeProcess {
             log::warn!(
                 "Failed to publish goose serve recovery record: {error}; stopping child and failing startup"
             );
-            if let Some(handle) = child.raw_handle() {
+            #[cfg(all(feature = "berdctl", windows))]
+            let stopped = match berdctl_admission.terminate(&child, Duration::from_secs(5)) {
+                Ok(()) => match child.wait().await {
+                    Ok(_) => true,
+                    Err(stop_error) => {
+                        log::warn!("Failed to reap recordless goose serve child: {stop_error}");
+                        false
+                    }
+                },
+                Err(stop_error) => {
+                    log::warn!("Failed to stop recordless goose serve Job: {stop_error}");
+                    false
+                }
+            };
+            #[cfg(all(not(feature = "berdctl"), windows))]
+            let stopped = if let Some(handle) = child.raw_handle() {
                 // SAFETY: Tokio owns this process handle for the lifetime of `child`.
-                if let Err(stop_error) = unsafe {
+                match unsafe {
                     crate::services::process::terminate_process_handle(
                         handle,
                         Duration::from_secs(5),
                     )
                 } {
-                    log::warn!("Failed to stop recordless goose serve child: {stop_error}");
+                    Ok(()) => true,
+                    Err(stop_error) => {
+                        log::warn!("Failed to stop recordless goose serve child: {stop_error}");
+                        false
+                    }
                 }
+            } else {
+                false
+            };
+            if stopped {
+                let _ = std::fs::remove_file(process_record_path(&process_record_dir));
             }
             return Err(format!(
                 "Failed to publish goose serve recovery record: {error}"
@@ -348,6 +402,25 @@ impl GooseServeProcess {
                         ("port", port.into()),
                     ]),
                 );
+                #[cfg(all(feature = "berdctl", windows))]
+                let rollback_result =
+                    match berdctl_admission.terminate(&child, Duration::from_secs(5)) {
+                        Ok(()) => child
+                            .wait()
+                            .await
+                            .map(|_| ())
+                            .map_err(std::io::Error::other),
+                        Err(error) => Err(error),
+                    };
+                #[cfg(all(feature = "berdctl", windows))]
+                if let Err(stop_error) = rollback_result {
+                    log::warn!(
+                        "Failed to roll back unready goose serve Job: {stop_error}; keeping process record for recovery"
+                    );
+                } else {
+                    #[cfg(all(feature = "berdctl", windows))]
+                    let _ = std::fs::remove_file(process_record_path(&process_record_dir));
+                }
                 return Err(error);
             }
         }
@@ -364,6 +437,8 @@ impl GooseServeProcess {
             secret_key,
             process_record_dir,
             _child: child,
+            #[cfg(all(windows, feature = "berdctl"))]
+            berdctl_admission,
         })
     }
 }
