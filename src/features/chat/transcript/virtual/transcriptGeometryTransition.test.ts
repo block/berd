@@ -72,6 +72,41 @@ describe("transitionTranscriptGeometryViewport", () => {
     ).toBeNull();
   });
 
+  it("rejects a stale acknowledgement while retaining the newer proposal", () => {
+    const newer = { generation: 2, cause: "jump" } as const;
+    const pending = apply(initial, {
+      type: "propose",
+      reason: "scroll-to-row",
+      scrollTop: 900,
+      maxScrollTop: 1000,
+      epsilon: 1,
+      operation: newer,
+    }).state;
+
+    expect(
+      apply(pending, {
+        type: "observe",
+        scrollTop: 450,
+        maxScrollTop: 1000,
+        operation: { generation: 1, cause: "target" },
+      }).state,
+    ).toEqual(pending);
+  });
+
+  it("retains operation identity on a proposal", () => {
+    const operation = { generation: 4, cause: "geometry" } as const;
+    expect(
+      apply(initial, {
+        type: "propose",
+        reason: "row-anchor",
+        scrollTop: 450,
+        maxScrollTop: 1000,
+        epsilon: 1,
+        operation,
+      }).effect?.operation,
+    ).toEqual(operation);
+  });
+
   it("coalesces equivalent pending proposals across reasons and subpixels", () => {
     const first = apply(initial, {
       type: "propose",

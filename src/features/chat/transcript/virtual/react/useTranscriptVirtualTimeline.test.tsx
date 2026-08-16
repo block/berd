@@ -442,9 +442,8 @@ describe("useTranscriptVirtualTimeline", () => {
       bottomScrollTop: 700,
       distanceFromBottom: 700,
     });
-    expect(result.current.snapshot.controllerState.anchor).toMatchObject({
-      type: "row",
-      rowId: "row-0",
+    expect(result.current.snapshot.controllerState.anchor).toEqual({
+      type: "bottom",
     });
 
     act(() => {

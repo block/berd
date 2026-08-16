@@ -1,4 +1,7 @@
-import type { TranscriptScrollCorrection } from "./transcriptVirtualTypes";
+import type {
+  TranscriptScrollCorrection,
+  TranscriptScrollOperation,
+} from "./transcriptVirtualTypes";
 
 /**
  * Browser-independent viewport state used by transcript geometry.
@@ -14,13 +17,19 @@ export interface TranscriptGeometryViewportState {
 }
 
 export type TranscriptGeometryViewportEvent =
-  | { type: "observe"; scrollTop: number; maxScrollTop: number }
+  | {
+      type: "observe";
+      scrollTop: number;
+      maxScrollTop: number;
+      operation?: TranscriptScrollOperation;
+    }
   | {
       type: "propose";
       reason: TranscriptScrollCorrection["reason"];
       scrollTop: number;
       maxScrollTop: number;
       epsilon: number;
+      operation?: TranscriptScrollOperation;
     };
 
 export interface TranscriptGeometryViewportTransition {
@@ -34,6 +43,13 @@ export function transitionTranscriptGeometryViewport(
 ): TranscriptGeometryViewportTransition {
   const maxScrollTop = finiteNonNegative(event.maxScrollTop);
   if (event.type === "observe") {
+    if (
+      state.pendingScroll?.operation &&
+      event.operation &&
+      event.operation.generation < state.pendingScroll.operation.generation
+    ) {
+      return { state, effect: null };
+    }
     return {
       state: {
         observedScrollTop: clampFinite(event.scrollTop, maxScrollTop),
@@ -41,6 +57,14 @@ export function transitionTranscriptGeometryViewport(
       },
       effect: null,
     };
+  }
+
+  if (
+    event.operation &&
+    state.pendingScroll?.operation &&
+    event.operation.generation < state.pendingScroll.operation.generation
+  ) {
+    return { state, effect: null };
   }
 
   if (
@@ -64,6 +88,7 @@ export function transitionTranscriptGeometryViewport(
     previousScrollTop: state.observedScrollTop,
     nextScrollTop,
     delta: nextScrollTop - state.observedScrollTop,
+    ...(event.operation ? { operation: event.operation } : {}),
   };
   if (
     state.pendingScroll &&

@@ -12,15 +12,18 @@ import type {
   TranscriptViewportUpdateResult,
   TranscriptVirtualEngine,
 } from "./transcriptVirtualEngine";
-import type {
-  TranscriptScrollAlign,
-  TranscriptScrollCorrection,
-  TranscriptSessionGeometry,
-  TranscriptViewportGeometry,
-  TranscriptVirtualControllerState,
-  TranscriptVirtualDiagnostics,
-  TranscriptVirtualMeasurementToken,
-  TranscriptVirtualRangeSnapshot,
+import {
+  isExplicitTranscriptUserInput,
+  type TranscriptScrollAlign,
+  type TranscriptScrollCause,
+  type TranscriptScrollCorrection,
+  type TranscriptScrollOperation,
+  type TranscriptSessionGeometry,
+  type TranscriptViewportGeometry,
+  type TranscriptVirtualControllerState,
+  type TranscriptVirtualDiagnostics,
+  type TranscriptVirtualMeasurementToken,
+  type TranscriptVirtualRangeSnapshot,
 } from "./transcriptVirtualTypes";
 
 export interface TranscriptViewportCoordinatorOptions {
@@ -34,6 +37,7 @@ export interface TranscriptViewportWriteOptions {
   behavior?: ScrollBehavior;
   source?: "browser" | "programmatic" | "correction";
   userScrollIntent?: boolean;
+  operation?: TranscriptScrollOperation;
   preserveScrollPosition?: boolean;
   /** Recovery-only escape hatch forwarded to the geometry engine. */
   forceRangeRefresh?: boolean;
@@ -55,6 +59,7 @@ export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
   private readonly getFooterHeight: () => number;
   private transactionWriteSuspensionDepth = 0;
   private footerHeightOverride: number | null = null;
+  private operationGeneration = 0;
 
   constructor(options: TranscriptViewportCoordinatorOptions) {
     this.engine = options.engine;
@@ -194,6 +199,18 @@ export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
     return this.browser.readRealRowCoverage(transcriptRoot ?? undefined);
   }
 
+  beginScrollOperation(
+    cause: TranscriptScrollCause,
+    userInputKind?: TranscriptScrollOperation["userInputKind"],
+  ): TranscriptScrollOperation {
+    const operation = {
+      generation: ++this.operationGeneration,
+      cause,
+      userInputKind,
+    };
+    return operation;
+  }
+
   setScrollWritesSuspended(suspended: boolean): void {
     // This controls coordinator transaction commits only; the wrapped geometry
     // adapter remains permanently suspended from direct live-DOM writes.
@@ -227,11 +244,18 @@ export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
     syncBeforeMutation = true,
   ): TranscriptBrowserViewportSnapshot {
     const before = this.browser.read();
+    const operation = this.resolveOperation(options);
+    if (this.isStale(operation)) {
+      return before;
+    }
     let syncCorrection: TranscriptScrollCorrection | null = null;
     if (syncBeforeMutation) {
       syncCorrection = this.engine.syncViewport(this.toGeometry(before), {
         source: options.source ?? "programmatic",
-        userScrollIntent: options.userScrollIntent,
+        userScrollIntent:
+          options.userScrollIntent === true ||
+          isExplicitTranscriptUserInput(operation),
+        operation,
         preserveScrollPosition: options.preserveScrollPosition,
       }).correction;
     }
@@ -240,6 +264,10 @@ export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
     const correction =
       mutationCorrection ??
       (this.engine.getPendingScrollCorrection() ? syncCorrection : null);
+    const committedOperation = correction?.operation ?? operation;
+    if (this.isStale(committedOperation)) {
+      return before;
+    }
     const acceptedEngineScrollTop = this.engine.getState().scrollTop;
     const proposedScrollTop =
       correction?.nextScrollTop ?? acceptedEngineScrollTop;
@@ -268,11 +296,30 @@ export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
       // both the write and this publish until the new DOM has committed.
       this.engine.syncViewport(this.toGeometry(accepted), {
         source: "browser",
-        userScrollIntent: true,
+        userScrollIntent: isExplicitTranscriptUserInput(committedOperation),
+        operation: committedOperation,
         preserveScrollPosition: options.preserveScrollPosition,
       });
     }
     return accepted;
+  }
+
+  private resolveOperation(
+    options: TranscriptViewportWriteOptions,
+  ): TranscriptScrollOperation {
+    if (options.operation) {
+      if (options.operation.generation > this.operationGeneration) {
+        this.operationGeneration = options.operation.generation;
+      }
+      return options.operation;
+    }
+    // Untagged compatibility calls are geometry operations. Legacy intent may
+    // affect the initiating observation, but never its browser acceptance.
+    return this.beginScrollOperation("geometry");
+  }
+
+  private isStale(operation: TranscriptScrollOperation): boolean {
+    return operation.generation < this.operationGeneration;
   }
 
   private readGeometry(): TranscriptViewportGeometry {
