@@ -17,6 +17,7 @@ description: Answers questions from a custom support runbook.
 avatar: app-avatar:<pack>-<id>
 metadata:
   berdBundled: true
+  berdBundledSource: support-bot
 ---
 
 Your agent instructions go here.
@@ -27,8 +28,9 @@ Requirements:
 - `name` and `description` are required strings.
 - `avatar` must be an `app-avatar:<pack>-<id>` reference so the avatar cache
   is warmed at startup.
-- `metadata.berdBundled` must be `true`. This makes the runtime treat the file
-  as bundled, so it gets refreshed when the bundled source changes.
+- `metadata.berdBundled` must be `true`.
+- `metadata.berdBundledSource` must be a unique lowercase source ID. It must
+  not reuse the reserved `berdy`, `tinker`, or `wildcard` IDs.
 - The filename must be a lowercase slug matching `^[a-z0-9][a-z0-9-]*$`.
 
 ## Selecting bundled agents
