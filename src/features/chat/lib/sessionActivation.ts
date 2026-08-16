@@ -405,7 +405,9 @@ async function performSessionMessagesLoad(
     const replayStats = getReplayPerf(sessionId);
     clearReplayPerf(sessionId);
     if (replayMessages) {
-      useChatStore.getState().setMessages(sessionId, replayMessages);
+      useChatStore
+        .getState()
+        .replaceMessagesFromReplay(sessionId, replayMessages);
       if (sessionInfo?.activeRunId === null) {
         completeReplayAssistantMessage(sessionId);
       }

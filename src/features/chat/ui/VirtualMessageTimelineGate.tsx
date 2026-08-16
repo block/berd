@@ -5,6 +5,7 @@ import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSear
 import { MessageTimeline } from "./MessageTimeline";
 import { VirtualMessageTimeline } from "./VirtualMessageTimeline";
 import { createLoadedTranscriptState } from "../transcript/virtual/react/useTranscriptVirtualTimeline";
+import { useChatStore } from "../stores/chatStore";
 
 type MessageTimelineProps = ComponentProps<typeof MessageTimeline>;
 
@@ -26,10 +27,15 @@ export function VirtualMessageTimelineGate({
   );
 
   const virtualRendererEnabled = virtualRendererExperiment?.enabled ?? false;
+  const loadedTranscriptEpoch = useChatStore(
+    (state) => state.loadedTranscriptEpochBySession[sessionId] ?? 0,
+  );
   const loadedTranscript = useMemo(
     () =>
-      virtualRendererEnabled ? createLoadedTranscriptState(sessionId) : null,
-    [sessionId, virtualRendererEnabled],
+      virtualRendererEnabled
+        ? createLoadedTranscriptState(sessionId, loadedTranscriptEpoch)
+        : null,
+    [loadedTranscriptEpoch, sessionId, virtualRendererEnabled],
   );
 
   if (!loadedTranscript) {

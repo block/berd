@@ -26,6 +26,7 @@ describe("chatStore", () => {
     window.localStorage.removeItem("goose:chat-message-queues:v1");
     useChatStore.setState({
       messagesBySession: {},
+      loadedTranscriptEpochBySession: {},
       sessionStateById: {},
       queuedMessageBySession: {},
       draftsBySession: {},
@@ -79,6 +80,38 @@ describe("chatStore", () => {
     expect(useChatStore.getState().messagesBySession.s1?.[0]?.content).toEqual(
       withSpeech.content,
     );
+  });
+
+  it("increments the loaded transcript epoch exactly once for each replay replacement", () => {
+    const store = useChatStore.getState();
+    store.setMessages("s1", [makeMessage({ id: "streaming-update" })]);
+
+    store.replaceMessagesFromReplay("s1", [makeMessage({ id: "replay-1" })]);
+
+    expect(useChatStore.getState()).toMatchObject({
+      messagesBySession: {
+        s1: [expect.objectContaining({ id: "replay-1" })],
+      },
+      loadedTranscriptEpochBySession: { s1: 1 },
+    });
+
+    store.addMessage("s1", makeMessage({ id: "ordinary-update" }));
+    expect(useChatStore.getState().loadedTranscriptEpochBySession.s1).toBe(1);
+
+    store.replaceMessagesFromReplay("s1", [makeMessage({ id: "replay-2" })]);
+    expect(useChatStore.getState().loadedTranscriptEpochBySession.s1).toBe(2);
+  });
+
+  it("keeps loaded transcript epochs isolated and removes them with their session", () => {
+    const store = useChatStore.getState();
+    store.replaceMessagesFromReplay("s1", [makeMessage({ id: "replay-s1" })]);
+    store.replaceMessagesFromReplay("s2", [makeMessage({ id: "replay-s2" })]);
+
+    store.cleanupSession("s1");
+
+    expect(useChatStore.getState().loadedTranscriptEpochBySession).toEqual({
+      s2: 1,
+    });
   });
 
   it("keeps the 10 most recently active message sessions", () => {

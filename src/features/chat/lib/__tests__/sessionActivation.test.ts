@@ -167,6 +167,16 @@ describe("loadSessionMessages", () => {
     useProjectStore.setState({ projects: [] });
   });
 
+  it("creates one new loaded-transcript epoch when replay commits", async () => {
+    seedSession({ id: "replay-epoch" });
+
+    await expect(loadSessionMessages("replay-epoch")).resolves.toBe(true);
+
+    expect(
+      useChatStore.getState().loadedTranscriptEpochBySession["replay-epoch"],
+    ).toBe(1);
+  });
+
   it("uses the leased target when ACP load returns a divergent target", async () => {
     const targetA = {
       harnessId: "goose",
