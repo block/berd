@@ -136,6 +136,7 @@ export function HomeView({
     const legacyBerdyAgentId = shouldMigrateLegacyPins
       ? findBerdyPersonaId(personas)
       : null;
+    if (shouldMigrateLegacyPins && !legacyBerdyAgentId) return;
     void useHomeWidgetStore
       .getState()
       .addMissingStarterAgentPins(
@@ -205,16 +206,15 @@ export function HomeView({
       }
       return instance;
     });
-    widgetMutations.applyStarterLayout(arranged);
-    if (camera) {
-      saveCamera({ ...camera, centerX: 80, centerY: 44, zoomBps: 9_000 });
-    }
+    void widgetMutations.applyStarterLayout(
+      arranged,
+      camera ? { ...camera, centerX: 80, centerY: 44, zoomBps: 9_000 } : null,
+    );
   }, [
     camera,
     instances,
     loadStatus,
     personas,
-    saveCamera,
     starterTasksHeight,
     widgetMutations,
   ]);

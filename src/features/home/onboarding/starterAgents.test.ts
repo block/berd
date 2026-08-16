@@ -84,6 +84,28 @@ describe("starter agents", () => {
     ]);
   });
 
+  it("prefers verified managed copies over preserved edits", () => {
+    const edited = persona("Tinker edited", {
+      id: "/Users/test/.agents/agents/tinker.md",
+      sourceId: "tinker",
+    });
+    const managed = persona("Tinker", {
+      id: "/Users/test/.agents/agents/tinker2.md",
+      sourceId: "tinker",
+    });
+    managed.sourceProperties = {
+      metadata: {
+        berdBundled: true,
+        berdBundledSource: "tinker",
+        berdManagedBundledCopy: true,
+        berdBundledAllocationSource: "tinker",
+      },
+    };
+
+    expect(selectStarterAgentPersonas([edited, managed])).toEqual([managed]);
+    expect(selectStarterAgentPersonas([managed, edited])).toEqual([managed]);
+  });
+
   it("clears recovery eligibility after starter pins are seeded", () => {
     markStarterAgentPinsEligible();
     expect(areStarterAgentPinsEligible()).toBe(true);

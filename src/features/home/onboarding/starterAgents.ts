@@ -16,11 +16,23 @@ const STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY =
   "goose:home:starter-agent-pins-eligible-v1";
 let starterAgentPinsEligibleForCurrentRun = false;
 
-function bundledSourceId(persona: Persona): string | undefined {
+function metadataFor(persona: Persona): Record<string, unknown> | undefined {
   const metadata = persona.sourceProperties?.metadata;
-  if (typeof metadata !== "object" || metadata === null) return undefined;
-  const source = Reflect.get(metadata, "berdBundledSource");
+  return typeof metadata === "object" && metadata !== null
+    ? (metadata as Record<string, unknown>)
+    : undefined;
+}
+
+function bundledSourceId(persona: Persona): string | undefined {
+  const metadata = metadataFor(persona);
+  const managedSource = metadata?.berdBundledAllocationSource;
+  if (typeof managedSource === "string") return managedSource;
+  const source = metadata?.berdBundledSource;
   return typeof source === "string" ? source : undefined;
+}
+
+function isManagedBundledCopy(persona: Persona): boolean {
+  return metadataFor(persona)?.berdManagedBundledCopy === true;
 }
 
 export function starterAgentIndex(persona: Persona): number {
@@ -112,8 +124,15 @@ export function selectStarterAgentPersonas(
   const selected: Array<Persona | undefined> = STARTER_AGENT_FILE_NAMES.map(
     () => undefined,
   );
+  const haveManagedCopies = personas.some(isManagedBundledCopy);
   for (const persona of personas) {
-    if (!isBundledPersona(persona)) continue;
+    if (
+      haveManagedCopies
+        ? !isManagedBundledCopy(persona)
+        : !isBundledPersona(persona)
+    ) {
+      continue;
+    }
     const index = starterAgentIndex(persona);
     if (index < 0) continue;
     if (!selected[index]) selected[index] = persona;

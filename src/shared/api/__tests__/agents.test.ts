@@ -172,7 +172,10 @@ describe("agents API", () => {
     const { listPersonas } = await import("../agents");
     await listPersonas();
 
-    expect(mockedInvoke).not.toHaveBeenCalled();
+    expect(mockedInvoke).toHaveBeenCalledOnce();
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      "list_managed_bundled_agent_allocations",
+    );
   });
 
   it("hydrates writable listed personas from markdown frontmatter", async () => {
@@ -241,7 +244,10 @@ describe("agents API", () => {
     const { listPersonas } = await import("../agents");
     await listPersonas();
 
-    expect(mockedInvoke).not.toHaveBeenCalled();
+    expect(mockedInvoke).toHaveBeenCalledOnce();
+    expect(mockedInvoke).toHaveBeenCalledWith(
+      "list_managed_bundled_agent_allocations",
+    );
   });
 
   it("marks read-only agent sources as built in personas", async () => {

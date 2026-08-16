@@ -45,6 +45,23 @@ describe("findBerdyPersonaId", () => {
     ).toBeNull();
   });
 
+  it("prefers the verified managed Berdy copy over a preserved edit", () => {
+    const edited = persona({ id: "/Users/test/.agents/agents/berdy.md" });
+    const managed = persona({
+      id: "/Users/test/.agents/agents/berdy2.md",
+      sourceProperties: {
+        metadata: {
+          berdBundled: true,
+          berdBundledSource: "berdy",
+          berdManagedBundledCopy: true,
+          berdBundledAllocationSource: "berdy",
+        },
+      },
+    });
+
+    expect(findBerdyPersonaId([edited, managed])).toBe(managed.id);
+  });
+
   it("ignores a project agent impersonating Berdy before the bundled agent", () => {
     const bundled = persona();
     const projectAgent = persona({

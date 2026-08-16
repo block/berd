@@ -30,6 +30,34 @@ pub struct SeedBundledAgentsResult {
     pub avatar_refs_to_warm: Vec<String>,
 }
 
+pub fn verified_managed_agent_allocations(
+    target_root: Option<&Path>,
+) -> Result<BTreeMap<String, String>, String> {
+    let target_root = match target_root {
+        Some(root) => root.to_path_buf(),
+        None => dirs::home_dir()
+            .ok_or_else(|| "Failed to resolve home directory for bundled agents".to_string())?
+            .join(GLOBAL_AGENTS_DIR_NAME)
+            .join(AGENTS_DIR_NAME),
+    };
+    let marker = read_seed_marker(&target_root)?;
+    let mut verified = BTreeMap::new();
+    for (source_file_name, allocation) in marker.allocations {
+        let Some(expected_digest) = allocation.installed_digest else {
+            continue;
+        };
+        let target = target_root.join(&allocation.target_file_name);
+        if target.exists() && digest_file(&target)? == expected_digest {
+            let source_id = source_file_name
+                .strip_suffix(".md")
+                .unwrap_or(&source_file_name)
+                .to_string();
+            verified.insert(target.to_string_lossy().into_owned(), source_id);
+        }
+    }
+    Ok(verified)
+}
+
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SeedMarker {
