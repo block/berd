@@ -137,26 +137,26 @@ ink.setFill()
 // Keep the shaft and arrowhead as distinct brush gestures. The small paper gap
 // stops the upper arrowhead stroke from visually merging into the curved line.
 drawBrushStroke(
-  from: NSPoint(x: 285, y: 184),
-  controlPoint1: NSPoint(x: 340, y: 222),
-  controlPoint2: NSPoint(x: 420, y: 222),
-  to: NSPoint(x: 473, y: 188),
+  from: NSPoint(x: 285, y: 232),
+  controlPoint1: NSPoint(x: 340, y: 270),
+  controlPoint2: NSPoint(x: 420, y: 270),
+  to: NSPoint(x: 473, y: 236),
   width: 13,
   seed: 2
 )
 drawBrushStroke(
-  from: NSPoint(x: 489, y: 211),
-  controlPoint1: NSPoint(x: 496, y: 202),
-  controlPoint2: NSPoint(x: 503, y: 193),
-  to: NSPoint(x: 510, y: 184),
+  from: NSPoint(x: 489, y: 259),
+  controlPoint1: NSPoint(x: 496, y: 250),
+  controlPoint2: NSPoint(x: 503, y: 241),
+  to: NSPoint(x: 510, y: 232),
   width: 13,
   seed: 3
 )
 drawBrushStroke(
-  from: NSPoint(x: 466, y: 154),
-  controlPoint1: NSPoint(x: 480, y: 163),
-  controlPoint2: NSPoint(x: 495, y: 174),
-  to: NSPoint(x: 510, y: 184),
+  from: NSPoint(x: 466, y: 202),
+  controlPoint1: NSPoint(x: 480, y: 211),
+  controlPoint2: NSPoint(x: 495, y: 222),
+  to: NSPoint(x: 510, y: 232),
   width: 13,
   seed: 4
 )
@@ -230,8 +230,8 @@ on run argv
     set icon size of opts to 128
     set text size of opts to 12
     set background picture of opts to file ".background:background.png" of dmgRoot
-    set position of item appName of dmgRoot to {190, 210}
-    set position of item "Applications" of dmgRoot to {610, 210}
+    set position of item appName of dmgRoot to {190, 170}
+    set position of item "Applications" of dmgRoot to {610, 170}
     set the extension hidden of item appName of dmgRoot to true
     delay 1
     close dmgWindow
