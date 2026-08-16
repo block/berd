@@ -235,6 +235,10 @@ const TANSTACK_UI_OVERSCAN_AFTER_PX = 1200;
 const MAX_CONTROLLER_MEASUREMENT_UPDATES_PER_BATCH = 24;
 const TRANSCRIPT_MEASUREMENT_STABILITY_EPSILON_PX = 2;
 const TRANSCRIPT_LAYOUT_SYNC_EPSILON_PX = 1;
+// Animation frames are the fast path, but WKWebView can withhold them while a
+// window is occluded or transitioning. This fallback guarantees delivery
+// without moving measurement work into a second scheduler.
+export const MEASUREMENT_FLUSH_FALLBACK_MS = 80;
 const EMPTY_PROTECTED_ROW_IDS: readonly string[] = [];
 let nextLoadedTranscriptStateId = 0;
 
@@ -270,6 +274,7 @@ export interface TranscriptVirtualTimelineState {
   readonly deferredMeasurementByToken: Set<string>;
   measurementFlushScheduled: boolean;
   visibleMeasurementFrame: number | null;
+  visibleMeasurementTimeout: number | null;
   deferDomCorrections: boolean;
   controllerScrollWritesSuspended: boolean;
   deferredCorrection: DeferredTranscriptCorrection | null;
@@ -298,6 +303,7 @@ function createTranscriptVirtualTimelineState(): TranscriptVirtualTimelineState 
     deferredMeasurementByToken: new Set(),
     measurementFlushScheduled: false,
     visibleMeasurementFrame: null,
+    visibleMeasurementTimeout: null,
     deferDomCorrections: false,
     controllerScrollWritesSuspended: false,
     deferredCorrection: null,
@@ -369,6 +375,10 @@ export function useTranscriptVirtualTimeline({
       if (runtime.visibleMeasurementFrame !== null) {
         cancelAnimationFrame(runtime.visibleMeasurementFrame);
         runtime.visibleMeasurementFrame = null;
+      }
+      if (runtime.visibleMeasurementTimeout !== null) {
+        window.clearTimeout(runtime.visibleMeasurementTimeout);
+        runtime.visibleMeasurementTimeout = null;
       }
       runtime.measurementFlushScheduled = false;
       runtime.measurementScheduler?.cancelPendingWork(sessionId, sessionEpoch);
@@ -999,10 +1009,20 @@ export function useTranscriptVirtualTimeline({
   ]);
 
   const flushPendingMeasurementsInner = useCallback(() => {
-    runtimeRef.current.measurementFlushScheduled = false;
-    runtimeRef.current.visibleMeasurementFrame = null;
+    const runtime = runtimeRef.current;
+    runtime.measurementFlushScheduled = false;
+    // Either delivery may win. Cancel both handles before reading queued work
+    // so a late callback cannot flush the same batch twice.
+    if (runtime.visibleMeasurementFrame !== null) {
+      cancelAnimationFrame(runtime.visibleMeasurementFrame);
+      runtime.visibleMeasurementFrame = null;
+    }
+    if (runtime.visibleMeasurementTimeout !== null) {
+      window.clearTimeout(runtime.visibleMeasurementTimeout);
+      runtime.visibleMeasurementTimeout = null;
+    }
 
-    const controller = runtimeRef.current.controller;
+    const controller = runtime.controller;
     if (!controller) {
       runtimeRef.current.pendingVisibleMeasurementElements.clear();
       runtimeRef.current.pendingOffscreenShellMeasurementElements.clear();
@@ -1296,6 +1316,10 @@ export function useTranscriptVirtualTimeline({
     runtimeRef.current.visibleMeasurementFrame = requestAnimationFrame(
       flushPendingMeasurements,
     );
+    runtimeRef.current.visibleMeasurementTimeout = window.setTimeout(
+      flushPendingMeasurements,
+      MEASUREMENT_FLUSH_FALLBACK_MS,
+    );
   }, [flushPendingMeasurements]);
 
   const measureRowElement = useCallback(
@@ -1344,11 +1368,8 @@ export function useTranscriptVirtualTimeline({
       return;
     }
 
-    if (runtimeRef.current.visibleMeasurementFrame !== null) {
-      cancelAnimationFrame(runtimeRef.current.visibleMeasurementFrame);
-      runtimeRef.current.visibleMeasurementFrame = null;
-    }
-    runtimeRef.current.measurementFlushScheduled = false;
+    // The synchronous flush cancels any pending frame and timer itself, using
+    // the same first-delivery-wins lifecycle as an async flush.
     flushPendingMeasurements();
   }, [flushPendingMeasurements]);
 

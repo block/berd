@@ -12,7 +12,10 @@ import {
   type TranscriptDiagnostics,
 } from "../../transcript/diagnostics";
 import type { TranscriptRowDescriptor } from "../../transcript/projection";
-import { createLoadedTranscriptState } from "../../transcript/virtual/react/useTranscriptVirtualTimeline";
+import {
+  createLoadedTranscriptState,
+  MEASUREMENT_FLUSH_FALLBACK_MS,
+} from "../../transcript/virtual/react/useTranscriptVirtualTimeline";
 import {
   TRANSCRIPT_SELECTION_SURFACE_ATTRIBUTE,
   TRANSCRIPT_SELECTION_SURFACE_VALUE,
@@ -138,6 +141,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -365,6 +369,31 @@ function mockRequestAnimationFrame() {
   });
   vi.spyOn(window, "cancelAnimationFrame").mockImplementation((frameId) => {
     callbacks.delete(frameId);
+  });
+
+  // Timeline tests explicitly deliver animation frames. Swallow only the
+  // measurement scheduler's timer fallback so wall-clock stalls cannot flush
+  // rows at nondeterministic points; hook tests exercise the real fallback.
+  const realSetTimeout = window.setTimeout.bind(window);
+  const realClearTimeout = window.clearTimeout.bind(window);
+  const swallowedTimeoutIds = new Set<number>();
+  let nextSwallowedTimeoutId = 0x40000000;
+  vi.stubGlobal("setTimeout", (...args: Parameters<typeof realSetTimeout>) => {
+    if (args[1] === MEASUREMENT_FLUSH_FALLBACK_MS) {
+      nextSwallowedTimeoutId += 1;
+      swallowedTimeoutIds.add(nextSwallowedTimeoutId);
+      return nextSwallowedTimeoutId;
+    }
+    return realSetTimeout(...args);
+  });
+  vi.stubGlobal("clearTimeout", (timeoutId?: unknown) => {
+    if (
+      typeof timeoutId === "number" &&
+      swallowedTimeoutIds.delete(timeoutId)
+    ) {
+      return;
+    }
+    realClearTimeout(timeoutId as Parameters<typeof realClearTimeout>[0]);
   });
 
   return {
@@ -1575,6 +1604,86 @@ describe("VirtualMessageTimeline", () => {
     expect(animationFrame.run(1001)).toBe(true);
   });
 
+  it("releases the live-tail scroll-height floor after restoring a detached reader", async () => {
+    mockTranscriptElementMeasurements();
+    const messages = [
+      ...Array.from({ length: 160 }, (_, index) =>
+        textMessage(
+          `message-${index}`,
+          index % 2 === 0 ? "user" : "assistant",
+          `Message ${index}`,
+        ),
+      ),
+      textMessage(
+        "streaming-tail",
+        "assistant",
+        `${longText("streaming fragment", 120)}\n[height:650]`,
+      ),
+    ];
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        streamingMessageId="streaming-tail"
+      />,
+    );
+    const list = screen.getByTestId("virtual-message-timeline-list");
+    await waitFor(() =>
+      expect(list).toHaveAttribute(
+        "data-virtual-render-mode",
+        "bounded-controller",
+      ),
+    );
+
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    attachScrollTo(scroller);
+    const capturedDomScrollHeight = 80000;
+    setScrollMetrics(scroller, {
+      scrollTop: 100,
+      scrollHeight: capturedDomScrollHeight,
+      clientHeight: 300,
+    });
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    fireEvent.scroll(scroller);
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        streamingMessageId={null}
+      />,
+    );
+
+    await waitFor(() => {
+      const trailingSpacer = screen
+        .getAllByTestId("virtual-message-timeline-flow-spacer")
+        .at(-1) as HTMLElement;
+      expect(readPixelStyleValue(trailingSpacer, "height")).toBeLessThan(
+        capturedDomScrollHeight / 2,
+      );
+      expect(scroller.scrollTop).toBeLessThan(capturedDomScrollHeight / 2);
+    });
+    const restoredDetachedScrollTop = scroller.scrollTop;
+
+    // Render the completed state once more. The restore cleared its handoff,
+    // so this explicitly exercises the no-handoff cleanup path and proves the
+    // released floor cannot return on a later render.
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        streamingMessageId={null}
+      />,
+    );
+    const trailingSpacer = screen
+      .getAllByTestId("virtual-message-timeline-flow-spacer")
+      .at(-1) as HTMLElement;
+    expect(readPixelStyleValue(trailingSpacer, "height")).toBeLessThan(
+      capturedDomScrollHeight / 2,
+    );
+    expect(scroller.scrollTop).toBe(restoredDetachedScrollTop);
+  });
+
   it("does not auto-scroll again for the same latest user message after detaching", async () => {
     mockTranscriptElementMeasurements();
     const latestUser = textMessage("user-latest", "user", "Follow up");
@@ -2214,6 +2323,9 @@ describe("VirtualMessageTimeline", () => {
     );
     expect(offscreenRealHost).toHaveAttribute("aria-hidden", "true");
     expect(offscreenRealHost.style.userSelect).toBe("none");
+    expect(offscreenRealHost.style.height).toBe("0px");
+    expect(offscreenRealHost.style.overflow).toBe("clip");
+    expect(offscreenRealHost.style.transform).toBe("");
     const offscreenRealRow = offscreenRealHost.querySelector<HTMLElement>(
       "[data-virtual-row-offscreen-real-id]",
     );
@@ -2223,9 +2335,13 @@ describe("VirtualMessageTimeline", () => {
       "false",
     );
     expect((offscreenRealRow as HTMLElement).style.userSelect).toBe("none");
-    expect(
-      screen.getByTestId("virtual-offscreen-measurement-host"),
-    ).toHaveAttribute("aria-hidden", "true");
+    const offscreenShellHost = screen.getByTestId(
+      "virtual-offscreen-measurement-host",
+    );
+    expect(offscreenShellHost).toHaveAttribute("aria-hidden", "true");
+    expect(offscreenShellHost.style.height).toBe("0px");
+    expect(offscreenShellHost.style.overflow).toBe("clip");
+    expect(offscreenShellHost.style.transform).toBe("");
     await waitFor(() =>
       expect(transcriptDiagnosticsSpy).toHaveBeenCalledWith(
         expect.objectContaining({

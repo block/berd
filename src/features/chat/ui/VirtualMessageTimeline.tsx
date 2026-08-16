@@ -351,11 +351,15 @@ function TranscriptOffscreenShellMeasurementHost({
       data-virtual-offscreen-shell-row-count={rows.length}
       style={{
         contain: "layout style paint",
+        // A fixed transform can leak content taller than its hoist into the
+        // scroll range. A zero-height clipped host contains any content size
+        // while its children still lay out for measurement.
+        height: 0,
         insetInlineStart: 0,
+        overflow: "clip",
         pointerEvents: "none",
         position: "absolute",
         top: 0,
-        transform: "translateY(-100000px)",
         userSelect: "none",
         visibility: "hidden",
         WebkitUserSelect: "none",
@@ -392,11 +396,13 @@ function TranscriptOffscreenRealMeasurementHost({
       data-virtual-offscreen-real-row-count={rowCount}
       style={{
         contain: "layout style paint",
+        // Match the shell host's content-height-independent containment.
+        height: 0,
         insetInlineStart: 0,
+        overflow: "clip",
         pointerEvents: "none",
         position: "absolute",
         top: 0,
-        transform: "translateY(-100000px)",
         userSelect: "none",
         visibility: "hidden",
         WebkitUserSelect: "none",
@@ -3716,10 +3722,10 @@ function VirtualMessageTimelineSession({
 
     const handoff = liveTailHandoffRef.current;
     if (!handoff || streamingMessageId) {
-      if (
-        liveTailScrollHeightFloorPx > 0 &&
-        measuredEffectiveVirtualScrollHeight >= liveTailScrollHeightFloorPx
-      ) {
+      // Once no handoff remains, the temporary DOM-height floor has no owner
+      // and must not survive as permanent empty space. This also covers a
+      // handoff cleared by a prior restore before this effect runs again.
+      if (!handoff && liveTailScrollHeightFloorPx > 0) {
         setLiveTailScrollHeightFloorPx(0);
       }
       return;
@@ -3732,6 +3738,11 @@ function VirtualMessageTimelineSession({
     }
 
     liveTailHandoffRef.current = null;
+    // The restore below reads the still-floored DOM geometry in this layout
+    // pass. Release the floor for the next render after it has served that
+    // purpose; detached readers keep their restored scrollTop, while the
+    // existing height-change effect re-pins readers following latest.
+    setLiveTailScrollHeightFloorPx(0);
 
     const nextBottomScrollTop = getBottomScrollTop(container);
     const wasNearLatest =
@@ -3768,7 +3779,6 @@ function VirtualMessageTimelineSession({
     isBoundedVirtualMode,
     liveTailScrollHeightFloorPx,
     markPendingScrollOwnership,
-    measuredEffectiveVirtualScrollHeight,
     setDetachedFromLatest,
     streamingMessageId,
     syncJumpToLatestVisibility,

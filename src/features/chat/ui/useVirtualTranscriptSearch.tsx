@@ -605,10 +605,10 @@ interface TranscriptSearchHarvestHostProps {
 
 /**
  * Renders unmounted rows offscreen — through the real message renderer — and
- * harvests their searchable text. Hidden via transform only: visibility or
- * display hiding would (correctly) make the collector treat the content as
- * unrendered. Each batch is released after its DOM settles, so async content
- * (code highlighting) lands in the harvested text.
+ * harvests their searchable text. The host collapses to zero height and clips
+ * overflow; visibility or display hiding would (correctly) make the collector
+ * treat the content as unrendered. Each batch is released after its DOM
+ * settles, so async content (code highlighting) lands in the harvested text.
  */
 export function TranscriptSearchHarvestHost({
   requests,
@@ -701,11 +701,14 @@ export function TranscriptSearchHarvestHost({
       data-testid="transcript-search-harvest-host"
       style={{
         contain: "layout style",
+        // Searchable content must remain rendered, but its height must never
+        // extend the transcript's scroll range.
+        height: 0,
         insetInlineStart: 0,
+        overflow: "clip",
         pointerEvents: "none",
         position: "absolute",
         top: 0,
-        transform: "translateY(-100000px)",
         width: "100%",
       }}
     >
