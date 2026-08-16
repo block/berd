@@ -31,8 +31,8 @@ describe("createStarterHomeWidgets", () => {
   });
 
   it.each([
-    ["tinker.md", 10, -394],
-    ["wildcard.md", -310, 310],
+    ["tinker.md", 228, -380],
+    ["wildcard.md", -292, 260],
   ] as const)("keeps %s in its stable slot when it is the only available agent", (fileName, x, y) => {
     const widgets = createStarterHomeWidgets([starterPersona(fileName)]);
 
@@ -86,10 +86,10 @@ describe("createStarterHomeWidgets", () => {
 
     expect(widgets).not.toBeNull();
     expect(widgets?.find((widget) => widget.type === "clock")).toMatchObject({
-      x: 390,
-      y: -210,
-      width: 192,
-      height: 192,
+      x: 533.5,
+      y: -266.5,
+      width: 173,
+      height: 173,
     });
     expect(
       widgets
@@ -98,13 +98,13 @@ describe("createStarterHomeWidgets", () => {
     ).toEqual([
       {
         agentId: "/Users/test/.agents/agents/tinker.md",
-        x: 10,
-        y: -394,
+        x: 228,
+        y: -380,
       },
       {
         agentId: "/Users/test/.agents/agents/wildcard.md",
-        x: -310,
-        y: 310,
+        x: -292,
+        y: 260,
       },
     ]);
   });

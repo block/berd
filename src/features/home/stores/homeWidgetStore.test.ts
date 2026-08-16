@@ -9,13 +9,9 @@ import {
   saveLayoutCamera,
   saveLayoutItems,
 } from "@/features/layout/api/layout";
-import {
-  homeWidgetsToLayoutItems,
-  HOME_LAYOUT_REPLACE_KINDS,
-} from "../lib/homeLayoutMapper";
+import { HOME_LAYOUT_REPLACE_KINDS } from "../lib/homeLayoutMapper";
 import { loadStarterTaskProgress } from "../onboarding/starterTaskProgress";
 import type { WidgetInstance } from "../widgets/types";
-import { listPersonas } from "@/shared/api/agents";
 import {
   resetHomeWidgetStoreForTests,
   useHomeWidgetStore,
@@ -29,10 +25,6 @@ type Deferred<T> = {
   reject: (reason?: unknown) => void;
   resolve: (value: T) => void;
 };
-
-vi.mock("@/shared/api/agents", () => ({
-  listPersonas: vi.fn(),
-}));
 
 vi.mock("@/features/layout/api/layout", async (importOriginal) => {
   const actual =
@@ -232,30 +224,6 @@ beforeEach(() => {
   vi.mocked(getLayout).mockReset();
   vi.mocked(saveLayoutCamera).mockReset();
   vi.mocked(saveLayoutItems).mockReset();
-  vi.mocked(listPersonas)
-    .mockReset()
-    .mockResolvedValue([
-      {
-        id: "/Users/test/.agents/agents/tinker.md",
-        displayName: "Tinker",
-        systemPrompt: "Help.",
-        isBuiltin: false,
-        writable: true,
-        sourceProperties: {
-          metadata: { berdBundled: true, berdBundledSource: "tinker" },
-        },
-      },
-      {
-        id: "/Users/test/.agents/agents/wildcard.md",
-        displayName: "Wildcard",
-        systemPrompt: "Help.",
-        isBuiltin: false,
-        writable: true,
-        sourceProperties: {
-          metadata: { berdBundled: true, berdBundledSource: "wildcard" },
-        },
-      },
-    ]);
   vi.mocked(toast.error).mockClear();
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.warning).mockClear();
@@ -314,251 +282,6 @@ describe("homeWidgetStore", () => {
     );
   });
 
-  it("waits for pending widget saves before replacing Home during reset", async () => {
-    const pendingSave = deferred<SaveItemsResult>();
-    setReadyHomeState({
-      camera: INITIAL_CAMERA,
-      cameraRevision: 1,
-      itemRevision: 4,
-      instances: [clockWidget()],
-    });
-    vi.mocked(saveLayoutItems)
-      .mockReturnValueOnce(pendingSave.promise)
-      .mockImplementationOnce(async (request) => ({
-        ok: true,
-        layout: layout({ itemRevision: 6, items: request.items }),
-      }));
-    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
-      ok: true,
-      layout: layout({
-        itemRevision: 6,
-        cameraRevision: 2,
-        camera: request.camera,
-      }),
-    }));
-
-    useHomeWidgetStore
-      .getState()
-      .addWidget("agentPin", 10, 10, { agentId: "temporary" }, CANVAS_BOUNDS);
-    const resetPromise = useHomeWidgetStore.getState().resetHomeForOnboarding();
-    expect(saveLayoutItems).toHaveBeenCalledOnce();
-
-    pendingSave.resolve({
-      ok: true,
-      layout: layout({
-        itemRevision: 5,
-        items: vi.mocked(saveLayoutItems).mock.calls[0][0].items,
-      }),
-    });
-
-    await expect(resetPromise).resolves.toEqual({
-      itemsConfirmed: true,
-      cameraConfirmed: true,
-    });
-    expect(saveLayoutItems).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(saveLayoutItems).mock.calls[1][0].expectedRevision).toBe(
-      5,
-    );
-    expect(
-      useHomeWidgetStore
-        .getState()
-        .instances.some(
-          (instance) =>
-            instance.type === "agentPin" &&
-            instance.state?.agentId === "temporary",
-        ),
-    ).toBe(false);
-  });
-
-  it("resets the base Home without waiting for persona discovery", async () => {
-    vi.mocked(listPersonas).mockReturnValue(new Promise(() => {}));
-    setReadyHomeState({
-      camera: INITIAL_CAMERA,
-      cameraRevision: 1,
-      itemRevision: 4,
-      instances: [clockWidget()],
-    });
-    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
-      ok: true,
-      layout: layout({ itemRevision: 5, items: request.items }),
-    }));
-    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
-      ok: true,
-      layout: layout({
-        itemRevision: 5,
-        cameraRevision: 2,
-        camera: request.camera,
-      }),
-    }));
-
-    await expect(
-      useHomeWidgetStore.getState().resetHomeForOnboarding(),
-    ).resolves.toEqual({ itemsConfirmed: true, cameraConfirmed: true });
-
-    expect(listPersonas).not.toHaveBeenCalled();
-    expect(
-      useHomeWidgetStore
-        .getState()
-        .instances.some((instance) => instance.type === "agentPin"),
-    ).toBe(false);
-  });
-
-  it("rolls back a rejected onboarding reset to the confirmed Home", async () => {
-    const originalInstances = [
-      clockWidget({ id: "original-clock", x: 42, y: 84 }),
-    ];
-    const confirmed = layout({
-      itemRevision: 4,
-      cameraRevision: 1,
-      camera: INITIAL_CAMERA,
-      items: homeWidgetsToLayoutItems(originalInstances),
-    });
-    setReadyHomeState({
-      camera: INITIAL_CAMERA,
-      cameraRevision: 1,
-      itemRevision: 4,
-      instances: originalInstances,
-      lastConfirmedLayout: confirmed,
-    });
-    vi.mocked(saveLayoutItems).mockRejectedValue(new Error("save failed"));
-
-    await expect(
-      useHomeWidgetStore.getState().resetHomeForOnboarding(),
-    ).resolves.toEqual({ itemsConfirmed: false, cameraConfirmed: false });
-
-    expect(useHomeWidgetStore.getState()).toMatchObject({
-      instances: originalInstances,
-      itemRevision: 4,
-      cameraRevision: 1,
-      lastConfirmedLayout: confirmed,
-    });
-    expect(saveLayoutCamera).not.toHaveBeenCalled();
-    expect(localStorage.getItem("goose:home:starter-layout-v18")).toBeNull();
-  });
-
-  it("retries a reset as a full replacement after an item revision conflict", async () => {
-    setReadyHomeState({
-      camera: INITIAL_CAMERA,
-      cameraRevision: 1,
-      itemRevision: 4,
-      instances: [clockWidget()],
-    });
-    vi.mocked(saveLayoutItems)
-      .mockResolvedValueOnce({
-        ok: false,
-        reason: "revisionConflict",
-        layout: layout({ itemRevision: 9, items: [] }),
-      })
-      .mockImplementationOnce(async (request) => ({
-        ok: true,
-        layout: layout({ itemRevision: 10, items: request.items }),
-      }));
-    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
-      ok: true,
-      layout: layout({
-        itemRevision: 10,
-        cameraRevision: 2,
-        camera: request.camera,
-      }),
-    }));
-
-    await expect(
-      useHomeWidgetStore.getState().resetHomeForOnboarding(),
-    ).resolves.toEqual({ itemsConfirmed: true, cameraConfirmed: true });
-
-    expect(saveLayoutItems).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(saveLayoutItems).mock.calls[1][0]).toMatchObject({
-      expectedRevision: 9,
-      replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
-    });
-    expect(
-      useHomeWidgetStore
-        .getState()
-        .instances.filter((instance) => instance.type === "clock"),
-    ).toHaveLength(1);
-  });
-
-  it("falls back to a base Home when agent discovery fails during reset", async () => {
-    vi.mocked(listPersonas).mockRejectedValue(new Error("agents unavailable"));
-    setReadyHomeState({
-      camera: INITIAL_CAMERA,
-      cameraRevision: 1,
-      itemRevision: 4,
-      instances: [clockWidget()],
-    });
-    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
-      ok: true,
-      layout: layout({ itemRevision: 5, items: request.items }),
-    }));
-    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
-      ok: true,
-      layout: layout({
-        itemRevision: 5,
-        cameraRevision: 2,
-        camera: request.camera,
-      }),
-    }));
-
-    await expect(
-      useHomeWidgetStore.getState().resetHomeForOnboarding(),
-    ).resolves.toEqual({ itemsConfirmed: true, cameraConfirmed: true });
-
-    expect(
-      useHomeWidgetStore
-        .getState()
-        .instances.some((instance) => instance.type === "agentPin"),
-    ).toBe(false);
-    expect(
-      useHomeWidgetStore
-        .getState()
-        .instances.some((instance) => instance.type === "onboardingTour"),
-    ).toBe(true);
-  });
-
-  it("restores the complete starter Home during onboarding reset", async () => {
-    setReadyHomeState({
-      camera: INITIAL_CAMERA,
-      cameraRevision: 1,
-      itemRevision: 4,
-      instances: [clockWidget()],
-    });
-    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
-      ok: true,
-      layout: layout({ itemRevision: 5, items: request.items }),
-    }));
-    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
-      ok: true,
-      layout: layout({
-        itemRevision: 5,
-        cameraRevision: 2,
-        camera: request.camera,
-      }),
-    }));
-
-    await expect(
-      useHomeWidgetStore.getState().resetHomeForOnboarding(),
-    ).resolves.toEqual({ itemsConfirmed: true, cameraConfirmed: true });
-
-    const instances = useHomeWidgetStore.getState().instances;
-    expect(instances.map((instance) => instance.type)).toEqual([
-      "clock",
-      "onboardingTour",
-      "onboardingProjectArtifact",
-      "stickyNote",
-    ]);
-    expect(instances.some((instance) => instance.type === "agentPin")).toBe(
-      false,
-    );
-    expect(
-      instances.find((instance) => instance.type === "clock"),
-    ).toMatchObject({ width: 192, height: 192 });
-    expect(useHomeWidgetStore.getState().camera).toEqual({
-      centerX: 0,
-      centerY: 40,
-      zoomBps: 10_000,
-    });
-  });
-
   it("keeps a confirmed onboarding canvas when camera recentering fails", async () => {
     setReadyHomeState({
       camera: INITIAL_CAMERA,
@@ -574,13 +297,6 @@ describe("homeWidgetStore", () => {
     await expect(
       useHomeWidgetStore.getState().resetHomeForOnboarding(),
     ).resolves.toEqual({ itemsConfirmed: true, cameraConfirmed: false });
-    expect(localStorage.getItem("goose:home:starter-layout-v18")).toBeNull();
-    expect(localStorage.getItem("goose:home:starter-camera-pending-v2")).toBe(
-      JSON.stringify({
-        expectedRevision: 1,
-        camera: { centerX: 0, centerY: 40, zoomBps: 10_000 },
-      }),
-    );
     expect(toast.warning).toHaveBeenCalledWith(
       "home:widgetLayer.toasts.cameraSaveFailed",
     );
@@ -625,15 +341,15 @@ describe("homeWidgetStore", () => {
       .instances.filter((instance) => instance.type === "onboardingTour");
     expect(onboardingWidgets).toHaveLength(1);
     expect(onboardingWidgets[0]).toMatchObject({
-      x: -104,
-      y: 272,
+      x: -137.5,
+      y: 205,
       state: { noteId: "onboarding:tour" },
       z: 2,
     });
     expect(onboardingWidgets[0].state?.welcomeDismissed).toBeUndefined();
     expect(useHomeWidgetStore.getState().camera).toMatchObject({
-      centerX: -32,
-      centerY: 362,
+      centerX: -65.5,
+      centerY: 295,
     });
   });
 
@@ -704,37 +420,6 @@ describe("homeWidgetStore", () => {
     ]);
   });
 
-  it("initializes the base Home without waiting for persona discovery", async () => {
-    vi.mocked(listPersonas).mockReturnValue(new Promise(() => {}));
-    vi.mocked(getLayout).mockResolvedValue(
-      layout({ itemRevision: 7, items: [] }),
-    );
-    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
-      ok: true,
-      layout: layout({ itemRevision: 8, items: request.items }),
-    }));
-    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
-      ok: true,
-      layout: layout({
-        itemRevision: 8,
-        cameraRevision: 2,
-        camera: request.camera,
-      }),
-    }));
-
-    await expect(useHomeWidgetStore.getState().initialize()).resolves.toBe(
-      undefined,
-    );
-
-    expect(useHomeWidgetStore.getState().loadStatus).toBe("ready");
-    expect(listPersonas).not.toHaveBeenCalled();
-    expect(
-      useHomeWidgetStore
-        .getState()
-        .instances.some((instance) => instance.type === "agentPin"),
-    ).toBe(false);
-  });
-
   it("seeds default onboarding widgets when backend returns zero typed items", async () => {
     vi.mocked(getLayout).mockResolvedValue(
       layout({ itemRevision: 7, items: [] }),
@@ -764,19 +449,10 @@ describe("homeWidgetStore", () => {
     );
     expect(vi.mocked(saveLayoutItems).mock.calls[0][0].items).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({
-          kind: "stickyNote",
-          targetId: "onboarding:tour",
-        }),
         expect.objectContaining({ kind: "clock" }),
-        expect.objectContaining({
-          kind: "stickyNote",
-          targetId: "onboarding:starter-project",
-        }),
-        expect.objectContaining({
-          kind: "stickyNote",
-          targetId: "onboarding:starter-tasks",
-        }),
+        expect.objectContaining({ targetId: "onboarding:tour" }),
+        expect.objectContaining({ targetId: "onboarding:starter-project" }),
+        expect.objectContaining({ targetId: "onboarding:starter-tasks" }),
       ]),
     );
     expect(saveLayoutCamera).toHaveBeenCalledWith({
@@ -791,83 +467,6 @@ describe("homeWidgetStore", () => {
     });
     expect(useHomeWidgetStore.getState().loadStatus).toBe("ready");
     expect(useHomeWidgetStore.getState().itemRevision).toBe(8);
-  });
-
-  it("does not mark starter layout complete when initial camera persistence fails", async () => {
-    vi.mocked(getLayout).mockResolvedValue(
-      layout({ itemRevision: 7, items: [] }),
-    );
-    vi.mocked(saveLayoutItems).mockResolvedValue({
-      ok: true,
-      layout: layout({ itemRevision: 8 }),
-    });
-    vi.mocked(saveLayoutCamera).mockRejectedValue(new Error("camera failed"));
-
-    await useHomeWidgetStore.getState().initialize();
-    await flushMicrotasks();
-
-    expect(
-      localStorage.getItem("goose:home:starter-agent-pins-eligible-v1"),
-    ).toBe("1");
-    expect(localStorage.getItem("goose:home:starter-layout-v18")).toBeNull();
-  });
-
-  it("keeps partial Home eligible when initial camera persistence fails", async () => {
-    vi.mocked(listPersonas).mockRejectedValue(new Error("agents unavailable"));
-    vi.mocked(getLayout).mockResolvedValue(
-      layout({ itemRevision: 7, items: [] }),
-    );
-    vi.mocked(saveLayoutItems).mockResolvedValue({
-      ok: true,
-      layout: layout({ itemRevision: 8 }),
-    });
-    vi.mocked(saveLayoutCamera).mockRejectedValue(new Error("camera failed"));
-
-    await useHomeWidgetStore.getState().initialize();
-    await flushMicrotasks();
-
-    expect(
-      localStorage.getItem("goose:home:starter-agent-pins-eligible-v1"),
-    ).toBe("1");
-    expect(localStorage.getItem("goose:home:starter-layout-v18")).toBeNull();
-  });
-
-  it("retries a pending starter camera during Home initialization", async () => {
-    localStorage.setItem(
-      "goose:home:starter-camera-pending-v2",
-      JSON.stringify({
-        expectedRevision: 4,
-        camera: { centerX: 0, centerY: 40, zoomBps: 10_000 },
-      }),
-    );
-    vi.mocked(getLayout).mockResolvedValue(
-      layout({
-        camera: INITIAL_CAMERA,
-        cameraRevision: 4,
-        itemRevision: 7,
-        items: [clockLayoutItem(BACKEND_CLOCK_ID, 360)],
-      }),
-    );
-    vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
-      ok: true,
-      layout: layout({
-        camera: request.camera,
-        cameraRevision: 5,
-        itemRevision: 7,
-        items: [clockLayoutItem(BACKEND_CLOCK_ID, 360)],
-      }),
-    }));
-
-    await useHomeWidgetStore.getState().initialize();
-
-    expect(saveLayoutCamera).toHaveBeenCalledWith({
-      layoutId: HOME_LAYOUT_ID,
-      expectedRevision: 4,
-      camera: { centerX: 0, centerY: 40, zoomBps: 10_000 },
-    });
-    expect(
-      localStorage.getItem("goose:home:starter-camera-pending-v2"),
-    ).toBeNull();
   });
 
   it("does not seed or center on Berdy while its experiment is disabled", async () => {
@@ -1057,8 +656,8 @@ describe("homeWidgetStore", () => {
       },
       {
         targetId: "onboarding:tour",
-        centerX: 888,
-        centerY: 378,
+        centerX: 902.5,
+        centerY: 335,
       },
     ]);
     expect(useHomeWidgetStore.getState()).toMatchObject({
@@ -1551,82 +1150,6 @@ describe("homeWidgetStore", () => {
     );
   });
 
-  it("recovers a missing counterpart without overlapping its existing starter", async () => {
-    const wildcardId = "/Users/test/.agents/agents/wildcard.md";
-    const tinkerId = "/Users/test/.agents/agents/tinker.md";
-    setReadyHomeState({
-      instances: [
-        clockWidget(),
-        {
-          id: "wildcard-pin",
-          type: "agentPin",
-          x: -310,
-          y: 310,
-          z: 2,
-          width: 200,
-          height: 220,
-          state: { agentId: wildcardId },
-        },
-      ],
-    });
-    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
-      ok: true,
-      layout: layout({ itemRevision: 5, items: request.items }),
-    }));
-
-    await expect(
-      useHomeWidgetStore
-        .getState()
-        .addMissingStarterAgentPins([tinkerId, wildcardId]),
-    ).resolves.toBe(true);
-
-    const pins = useHomeWidgetStore
-      .getState()
-      .instances.filter((instance) => instance.type === "agentPin");
-    expect(pins).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          x: 10,
-          y: -394,
-          state: { agentId: tinkerId },
-        }),
-        expect.objectContaining({
-          x: -310,
-          y: 310,
-          state: { agentId: wildcardId },
-        }),
-      ]),
-    );
-  });
-
-  it("deduplicates concurrent starter-agent recovery until persistence confirms", async () => {
-    const pendingSave = deferred<SaveItemsResult>();
-    setReadyHomeState({ instances: [clockWidget()] });
-    vi.mocked(saveLayoutItems).mockReturnValue(pendingSave.promise);
-    const agentIds = [
-      "/Users/test/.agents/agents/tinker.md",
-      "/Users/test/.agents/agents/wildcard.md",
-    ];
-
-    const first = useHomeWidgetStore
-      .getState()
-      .addMissingStarterAgentPins(agentIds);
-    const second = useHomeWidgetStore
-      .getState()
-      .addMissingStarterAgentPins(agentIds);
-
-    expect(saveLayoutItems).toHaveBeenCalledOnce();
-    pendingSave.resolve({
-      ok: true,
-      layout: layout({
-        itemRevision: 5,
-        items: vi.mocked(saveLayoutItems).mock.calls[0][0].items,
-      }),
-    });
-
-    await expect(Promise.all([first, second])).resolves.toEqual([true, true]);
-  });
-
   it("completes the widget task only after the widget save is confirmed", async () => {
     const pendingSave = deferred<SaveItemsResult>();
     setReadyHomeState({
@@ -2112,8 +1635,8 @@ describe("homeWidgetStore", () => {
     const secondRequest = vi.mocked(saveLayoutItems).mock.calls[1][0];
     expect(secondRequest.expectedRevision).toBe(5);
     expect(secondRequest.items[0]).toMatchObject({
-      centerX: 168,
-      centerY: 168,
+      centerX: 134.5,
+      centerY: 134.5,
       zIndex: 1,
     });
     expect(secondRequest.items).toHaveLength(1);

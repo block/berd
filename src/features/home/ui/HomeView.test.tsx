@@ -156,7 +156,13 @@ beforeEach(() => {
   vi.mocked(saveLayoutCamera).mockReset();
   vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
     ok: true,
-    layout: layout({ camera: request.camera, cameraRevision: 2 }),
+    layout: layout({
+      camera: request.camera,
+      cameraRevision: 2,
+      items:
+        useHomeWidgetStore.getState().lastConfirmedLayout?.items ??
+        layout().items,
+    }),
   }));
   localStorage.clear();
   localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "6");
@@ -232,9 +238,14 @@ describe("HomeView", () => {
       systemPrompt: "Help.",
       isBuiltin: false,
       writable: true,
-      sourceProperties: { metadata: { berdBundled: true } },
+      sourceProperties: {
+        metadata: {
+          berdBundled: true,
+          berdBundledSource: displayName.toLowerCase(),
+        },
+      },
     });
-    const personas = [bundledPersona("block.md"), bundledPersona("Builderbot")];
+    const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
     useAgentStore.setState({ personas, personasLoading: false });
     const existingItems: Layout["items"] = [
       ...layout().items,
@@ -312,9 +323,14 @@ describe("HomeView", () => {
       systemPrompt: "Help.",
       isBuiltin: false,
       writable: true,
-      sourceProperties: { metadata: { berdBundled: true } },
+      sourceProperties: {
+        metadata: {
+          berdBundled: true,
+          berdBundledSource: displayName.toLowerCase(),
+        },
+      },
     });
-    const personas = [bundledPersona("block.md"), bundledPersona("Builderbot")];
+    const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
     useAgentStore.setState({ personas, personasLoading: false });
     markStarterHomeLayoutEligible();
     const existingItems: Layout["items"] = [
@@ -571,8 +587,6 @@ describe("HomeView", () => {
     });
     const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
     useAgentStore.setState({ personas, personasLoading: false });
-    markStarterAgentPinsEligible();
-
     renderHomeView();
 
     await waitFor(() =>

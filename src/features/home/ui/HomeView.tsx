@@ -96,6 +96,7 @@ export function HomeView({
   const setTopBarActions = useSetTopBarActions();
   useInvalidateHomeWidgetSkillsOnChange();
   const [layoutMotionActive, setLayoutMotionActive] = useState(false);
+  const starterLayoutArrangementAttemptedRef = useRef(false);
 
   const [tourOpen, setTourOpen] = useState(false);
   const tourCompleteRef = useRef<(() => void) | null>(null);
@@ -147,11 +148,23 @@ export function HomeView({
   }, [loadStatus, personas, personasLoading]);
 
   useEffect(() => {
-    if (loadStatus !== "ready" || !isStarterHomeLayoutEligible()) return;
+    if (
+      loadStatus !== "ready" ||
+      !isStarterHomeLayoutEligible() ||
+      starterLayoutArrangementAttemptedRef.current
+    )
+      return;
     const starterPersonas = selectStarterAgentPersonas(personas);
     const starterAgentIds = new Set(starterPersonas.map(({ id }) => id));
+    const haveAllStarterPins = starterPersonas.every(({ id }) =>
+      instances.some(
+        (instance) =>
+          instance.type === "agentPin" && instance.state?.agentId === id,
+      ),
+    );
     const hasCompleteStarterSet =
       starterPersonas.length === STARTER_HOME_LAYOUT.agents.length &&
+      haveAllStarterPins &&
       instances.some((instance) => instance.type === "onboardingTour") &&
       instances.some((instance) => instance.type === "clock") &&
       instances.some(
@@ -161,6 +174,7 @@ export function HomeView({
         (instance) => instance.type === "onboardingProjectArtifact",
       );
     if (!hasCompleteStarterSet) return;
+    starterLayoutArrangementAttemptedRef.current = true;
 
     const maxZ = Math.max(0, ...instances.map((instance) => instance.z));
     const arranged = instances.map((instance) => {
