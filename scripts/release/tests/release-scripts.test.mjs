@@ -495,10 +495,28 @@ describe("development Block-feature resources", () => {
       `[[ "\${VITE_FEEDBACK:-0}" == "1" ]] && BERDCTL_FEATURES+=(--features block-feedback)`,
     );
     expect(source).toContain(
+      `[[ "\${VITE_AUTOMATIONS:-0}" == "1" ]] && BERDCTL_FEATURES+=(--features block-automations)`,
+    );
+    expect(source).toContain(
       `cargo build -p berdctl \${BERDCTL_FEATURES[@]+"\${BERDCTL_FEATURES[@]}"}`,
     );
     expect(source).toContain(`[[ "\${VITE_AGENT_TOOLS:-0}" == "1" ]]`);
     expect(source).toContain("prepare-bb-cli-resource.sh");
+  });
+});
+
+describe("Windows sidecar staging Block-feature seam", () => {
+  it("maps each gated CLI family onto the berdctl.exe build args", async () => {
+    const script = await readFile(
+      join(repo, "scripts/windows/Stage-Sidecar-Windows.ps1"),
+      "utf8",
+    );
+    expect(script).toContain('if ($env:VITE_FEEDBACK -eq "1") {');
+    expect(script).toContain('$cargoArgs += @("--features", "block-feedback")');
+    expect(script).toContain('if ($env:VITE_AUTOMATIONS -eq "1") {');
+    expect(script).toContain(
+      '$cargoArgs += @("--features", "block-automations")',
+    );
   });
 });
 
