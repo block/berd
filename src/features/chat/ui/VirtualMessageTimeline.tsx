@@ -3799,7 +3799,11 @@ function VirtualMessageTimelineSession({
     ) {
       return;
     }
-    if (resolvedScrollTargetMessageId || userDetachedRef.current) {
+    if (
+      resolvedScrollTargetMessageId ||
+      userDetachedRef.current ||
+      virtualTimelineSnapshot.controllerState.anchor.type !== "bottom"
+    ) {
       return;
     }
     requestBottomScroll();
@@ -3809,6 +3813,7 @@ function VirtualMessageTimelineSession({
     requestBottomScroll,
     resolvedScrollTargetMessageId,
     streamingMessageId,
+    virtualTimelineSnapshot.controllerState.anchor.type,
   ]);
 
   const messageList = (

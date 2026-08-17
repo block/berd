@@ -409,6 +409,25 @@ describe("ToolCallAdapter — expanded body", () => {
     renderAdapter({ open: true, isError: true, result: "Boom" });
     expect(screen.getByText("Boom")).toHaveClass("text-destructive");
   });
+
+  it("caps and scrolls an inner details viewport in the agent work layout", () => {
+    const { container } = renderAdapter({ open: true, agentWorkLayout: true });
+
+    expect(
+      container.querySelector('[data-role="agent-work-tool-details"]'),
+    ).toHaveClass("max-h-48", "overflow-y-auto", "overscroll-contain");
+    expect(
+      container.querySelector('[data-role="tool-call-content"]'),
+    ).not.toHaveClass("max-h-48", "overflow-y-auto");
+  });
+
+  it("does not add a capped details viewport outside the agent work layout", () => {
+    const { container } = renderAdapter({ open: true });
+
+    expect(
+      container.querySelector('[data-role="agent-work-tool-details"]'),
+    ).not.toBeInTheDocument();
+  });
 });
 
 describe("ToolCallAdapter — text + structured de-dupe matrix", () => {

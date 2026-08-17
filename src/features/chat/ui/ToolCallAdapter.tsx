@@ -593,7 +593,10 @@ export function ToolCallAdapter({
           className="text-muted-foreground [&_button]:text-muted-foreground [&_code]:text-muted-foreground [&_dd]:text-muted-foreground [&_dt]:text-muted-foreground [&_span]:text-muted-foreground"
         >
           {agentWorkLayout ? (
-            <div className="space-y-3 py-1">
+            <div
+              data-role="agent-work-tool-details"
+              className="max-h-48 space-y-3 overflow-y-auto overscroll-contain py-1"
+            >
               <AgentWorkToolSection
                 label={t("tools.inputSummary.command")}
                 value={commandRow?.value ?? null}
