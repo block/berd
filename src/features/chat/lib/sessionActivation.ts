@@ -1,8 +1,8 @@
+import { clearReplayBuffer } from "@/features/chat/hooks/replayBuffer";
 import {
-  clearReplayBuffer,
-  getAndDeleteReplayBuffer,
-} from "@/features/chat/hooks/replayBuffer";
-import { sanitizeReplayMessages } from "@/features/chat/lib/replaySanitizer";
+  hasConversationMessages,
+  replaceMessagesFromSessionReplay,
+} from "@/features/chat/lib/sessionReplayReplacement";
 import { completeReplayAssistantMessage } from "@/features/chat/acp/acpReplayAssistant";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
@@ -205,18 +205,6 @@ export function clearSessionLoadWarningNotice(sessionId: string): void {
     .removeMessage(sessionId, loaderNoticeMessageId(sessionId, "warning"));
 }
 
-/**
- * True when the session holds replayed conversation history. Loader-added
- * system notifications don't count: treating them as "loaded" would make a
- * single failed load (whose error notification is the only message)
- * permanently block retries through the has-messages skip guard.
- */
-export function hasConversationMessages(
-  messages: Message[] | undefined,
-): boolean {
-  return messages?.some((message) => message.role !== "system") ?? false;
-}
-
 const sessionLoadPromises = new Map<string, Promise<boolean>>();
 
 export async function loadSessionMessagesAndPrepare(
@@ -400,34 +388,67 @@ async function performSessionMessagesLoad(
       hydrateSessionTarget(sessionId, loadedTarget);
     }
     const tFlush = performance.now();
-    const buffer = getAndDeleteReplayBuffer(sessionId);
-    const replayMessages = buffer ? sanitizeReplayMessages(buffer) : undefined;
+    const latestSessionBeforeReplay = useChatSessionStore
+      .getState()
+      .getSession(sessionId);
+    const historyExpectation = sessionAtRequest?.pinnedLoadState
+      ? sessionInfo
+        ? sessionInfo.messageCount > 0
+          ? "nonempty"
+          : "empty"
+        : "unknown"
+      : latestSessionBeforeReplay?.messageCount === undefined
+        ? "unknown"
+        : latestSessionBeforeReplay.messageCount > 0
+          ? "nonempty"
+          : "empty";
+    const replayResult = replaceMessagesFromSessionReplay(sessionId, {
+      historyExpectation,
+    });
     const replayStats = getReplayPerf(sessionId);
     clearReplayPerf(sessionId);
-    if (replayMessages) {
-      useChatStore.getState().setMessages(sessionId, replayMessages);
-      if (sessionInfo?.activeRunId === null) {
-        completeReplayAssistantMessage(sessionId);
-      }
-      const latestSession = useChatSessionStore
-        .getState()
-        .getSession(sessionId);
-      const sessionPatch: Partial<ChatSession> = {
-        messageCount: replayMessages.length,
-      };
-      if (
-        latestSession &&
-        !latestSession.userSetName &&
-        isDefaultChatTitle(latestSession.title)
-      ) {
-        const fallbackTitle = fallbackTitleFromReplay(replayMessages);
-        if (fallbackTitle) {
-          sessionPatch.title = fallbackTitle;
-        }
-      }
-      useChatSessionStore.getState().patchSession(sessionId, sessionPatch);
-    }
     const chatStore = useChatStore.getState();
+    if (replayResult.status === "invalid") {
+      const errorMessage = i18n.t("chat:toolbar.sessionReplayIncomplete");
+      chatStore.setSessionLoading(sessionId, false);
+      chatStore.removeMessage(
+        sessionId,
+        loaderNoticeMessageId(sessionId, "error"),
+      );
+      chatStore.addMessage(sessionId, {
+        ...createSystemNotificationMessage(errorMessage, "error"),
+        id: loaderNoticeMessageId(sessionId, "error"),
+      });
+      useChatSessionStore.getState().patchSession(sessionId, {
+        pinnedLoadState:
+          sessionAtRequest?.pinnedLoadState && !sessionInfo
+            ? "failed"
+            : undefined,
+      });
+      clearIdleStreamingMessageAfterReplay(sessionId);
+      perfLog(
+        `[perf:load] ${sid} replay invalid: reason=${replayResult.reason} notifs=${replayStats?.count ?? 0}`,
+      );
+      return false;
+    }
+
+    const replayMessages = replayResult.messages;
+    if (sessionInfo?.activeRunId === null) {
+      completeReplayAssistantMessage(sessionId);
+    }
+    const latestSession = useChatSessionStore.getState().getSession(sessionId);
+    const sessionPatch: Partial<ChatSession> = {};
+    if (
+      latestSession &&
+      !latestSession.userSetName &&
+      isDefaultChatTitle(latestSession.title)
+    ) {
+      const fallbackTitle = fallbackTitleFromReplay(replayMessages);
+      if (fallbackTitle) {
+        sessionPatch.title = fallbackTitle;
+      }
+    }
+    useChatSessionStore.getState().patchSession(sessionId, sessionPatch);
     const sessionStore = useChatSessionStore.getState();
     chatStore.removeMessage(
       sessionId,

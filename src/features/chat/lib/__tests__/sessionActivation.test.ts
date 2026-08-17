@@ -281,6 +281,54 @@ describe("loadSessionMessages", () => {
     ).toBe("assistant-1");
   });
 
+  it("preserves a populated transcript when a forced replay is invalid", async () => {
+    seedSession(
+      { id: "empty-forced-replay", messageCount: 2 },
+      { replay: false },
+    );
+    useChatStore
+      .getState()
+      .setMessages("empty-forced-replay", [replayUserMessage("existing-1")]);
+    ensureReplayBuffer("empty-forced-replay");
+
+    await expect(
+      loadSessionMessages("empty-forced-replay", { force: true }),
+    ).resolves.toBe(false);
+
+    expect(
+      messagesFor("empty-forced-replay").map((message) => message.id),
+    ).toEqual(["existing-1", "session-load-error:empty-forced-replay"]);
+    expect(notificationFromLastMessage("empty-forced-replay")).toMatchObject({
+      notificationType: "error",
+      text: "Couldn't refresh this conversation. Your previous messages are still shown.",
+    });
+    expect(
+      useChatSessionStore.getState().getSession("empty-forced-replay")
+        ?.messageCount,
+    ).toBe(2);
+    expect(
+      useChatStore.getState().loadingSessionIds.has("empty-forced-replay"),
+    ).toBe(false);
+  });
+
+  it("rejects an empty cold replay when session metadata expects history", async () => {
+    seedSession(
+      { id: "cold-empty-replay", messageCount: 3 },
+      { replay: false },
+    );
+    ensureReplayBuffer("cold-empty-replay");
+
+    await expect(loadSessionMessages("cold-empty-replay")).resolves.toBe(false);
+
+    expect(notificationFromLastMessage("cold-empty-replay")).toMatchObject({
+      notificationType: "error",
+    });
+    expect(
+      useChatSessionStore.getState().getSession("cold-empty-replay")
+        ?.messageCount,
+    ).toBe(3);
+  });
+
   it("clears replay loading before publishing error-to-idle", async () => {
     seedSession({ id: "error-replay" });
     useChatStore.getState().setError("error-replay", "stale error");
@@ -530,8 +578,8 @@ describe("loadSessionMessages", () => {
     );
   });
 
-  it("loads a session without a stored session record", async () => {
-    await expect(loadSessionMessages("unknown-session")).resolves.toBe(true);
+  it("rejects missing replay when session history is unknown", async () => {
+    await expect(loadSessionMessages("unknown-session")).resolves.toBe(false);
 
     expect(checkDirectoriesExist).not.toHaveBeenCalled();
     expect(acpLoadSession).toHaveBeenCalledWith(
@@ -826,9 +874,79 @@ describe("loadSessionMessages", () => {
         workingDir: "/Users/morganm/goose artifacts",
         updatedAt: "2026-06-25T00:45:04.000Z",
         lastMessageAt: "2026-06-19T06:59:21.000Z",
+        messageCount: 1143,
         pinnedLoadState: undefined,
       },
     );
+  });
+
+  it("rejects empty pinned replay when authoritative metadata refresh fails", async () => {
+    acpGetSessionInfo.mockRejectedValue(new Error("metadata unavailable"));
+    seedSession(
+      {
+        id: "s-pinned-unknown",
+        messageCount: 0,
+        pinnedLoadState: "loading",
+      },
+      { replay: false },
+    );
+    acpLoadSession.mockImplementation(async (sessionId: string) => {
+      ensureReplayBuffer(sessionId);
+    });
+
+    await expect(loadSessionMessages("s-pinned-unknown")).resolves.toBe(false);
+    await expect(loadSessionMessages("s-pinned-unknown")).resolves.toBe(false);
+
+    expect(acpGetSessionInfo).toHaveBeenCalledTimes(2);
+    expect(
+      useChatSessionStore.getState().getSession("s-pinned-unknown")
+        ?.pinnedLoadState,
+    ).toBe("failed");
+    expect(notificationFromLastMessage("s-pinned-unknown")).toMatchObject({
+      notificationType: "error",
+    });
+  });
+
+  it("keeps refreshed pinned history metadata across invalid replay retries", async () => {
+    acpGetSessionInfo.mockResolvedValue({
+      sessionId: "s-pinned-empty",
+      title: "Existing session",
+      updatedAt: "2026-06-25T00:45:04.000Z",
+      createdAt: "2026-06-19T03:43:17.000Z",
+      lastMessageAt: "2026-06-19T06:59:21.000Z",
+      archivedAt: null,
+      userSetName: false,
+      messageCount: 9,
+      subtitle: null,
+      workingDir: null,
+      projectId: null,
+      providerId: "goose",
+      modelId: "claude-sonnet-4",
+      personaId: null,
+    });
+    seedSession(
+      {
+        id: "s-pinned-empty",
+        messageCount: 0,
+        pinnedLoadState: "loading",
+      },
+      { replay: false },
+    );
+    acpLoadSession.mockImplementation(async (sessionId: string) => {
+      ensureReplayBuffer(sessionId);
+    });
+
+    await expect(loadSessionMessages("s-pinned-empty")).resolves.toBe(false);
+    expect(
+      useChatSessionStore.getState().getSession("s-pinned-empty")?.messageCount,
+    ).toBe(9);
+
+    await expect(loadSessionMessages("s-pinned-empty")).resolves.toBe(false);
+    expect(acpGetSessionInfo).toHaveBeenCalledTimes(1);
+    expect(
+      useChatSessionStore.getState().getSession("s-pinned-empty")?.messageCount,
+    ).toBe(9);
+    expect(messagesFor("s-pinned-empty")).toHaveLength(1);
   });
 
   it("does not let pinned metadata replace a newer UI model selection", async () => {

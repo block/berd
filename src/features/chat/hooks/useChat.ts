@@ -1,7 +1,7 @@
 import { useCallback, useRef } from "react";
 import { useChatStore } from "../stores/chatStore";
 import { useChatSessionStore } from "../stores/chatSessionStore";
-import { clearReplayBuffer, getAndDeleteReplayBuffer } from "./replayBuffer";
+import { clearReplayBuffer } from "./replayBuffer";
 import {
   type ChatAttachmentDraft,
   type Message,
@@ -22,7 +22,7 @@ import {
   resolveAssistantCancellation,
 } from "../lib/sendCore";
 import { perfLog } from "@/shared/lib/perfLog";
-import { sanitizeReplayMessages } from "../lib/replaySanitizer";
+import { replaceMessagesFromSessionReplay } from "../lib/sessionReplayReplacement";
 import { i18n } from "@/shared/i18n";
 import type { ChatSendOptions } from "../types";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
@@ -38,7 +38,11 @@ const MANUAL_COMPACT_TRIGGER = "/compact";
 const EMPTY_MESSAGES: Message[] = [];
 const cancellationOwnerBySession = new Map<string, symbol>();
 const cancellationPromiseBySession = new Map<string, Promise<boolean>>();
-type CompactConversationResult = "completed" | "failed" | "skipped";
+type CompactConversationResult =
+  | "completed"
+  | "completed-with-refresh-warning"
+  | "failed"
+  | "skipped";
 type EnsurePrepared = (
   personaId?: string,
   sessionSelection?: ChatSendOptions["sessionSelection"],
@@ -119,7 +123,6 @@ export function useChat(
   );
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const addMessage = useChatStore((s) => s.addMessage);
-  const setMessages = useChatStore((s) => s.setMessages);
   const clearMessages = useChatStore((s) => s.clearMessages);
   const setChatState = useChatStore((s) => s.setChatState);
   const setError = useChatStore((s) => s.setError);
@@ -437,11 +440,13 @@ export function useChat(
       setSessionLoading(sessionId, true);
       clearReplayBuffer(sessionId);
 
+      let compactionCommitted = false;
       try {
         const sendOptions = effectivePersonaInfo?.id
           ? { personaId: effectivePersonaInfo.id }
           : undefined;
         await acpSendMessage(sessionId, MANUAL_COMPACT_TRIGGER, sendOptions);
+        compactionCommitted = true;
 
         // Command responses are streamed via prompt notifications, but the ACP
         // layer does not currently forward history replacement events. Drop those
@@ -453,19 +458,35 @@ export function useChat(
 
         setSessionLoading(sessionId, false);
 
-        const buffer = getAndDeleteReplayBuffer(sessionId);
-        if (buffer) {
-          setMessages(sessionId, [
-            ...sanitizeReplayMessages(buffer),
-            createCompactionConfirmationMessage(),
-          ]);
-        } else {
-          addMessage(sessionId, createCompactionConfirmationMessage());
+        const replayResult = replaceMessagesFromSessionReplay(sessionId, {
+          historyExpectation: "nonempty",
+          trailingMessages: [createCompactionConfirmationMessage()],
+        });
+        if (replayResult.status === "invalid") {
+          const errorMessage = i18n.t(
+            "chat:notifications.compactionReplayIncomplete",
+          );
+          addMessage(
+            sessionId,
+            createSystemNotificationMessage(errorMessage, "error"),
+          );
+          return "completed-with-refresh-warning" as CompactConversationResult;
         }
         return "completed" as CompactConversationResult;
       } catch (err) {
         clearReplayBuffer(sessionId);
         setSessionLoading(sessionId, false);
+
+        if (compactionCommitted) {
+          const errorMessage = i18n.t(
+            "chat:notifications.compactionReplayIncomplete",
+          );
+          addMessage(
+            sessionId,
+            createSystemNotificationMessage(errorMessage, "error"),
+          );
+          return "completed-with-refresh-warning" as CompactConversationResult;
+        }
 
         const errorMessage = formatAcpErrorMessage(err);
         addMessage(
@@ -492,7 +513,6 @@ export function useChat(
       setError,
       addMessage,
       setSessionLoading,
-      setMessages,
       setPendingAssistantProvider,
     ],
   );

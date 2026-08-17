@@ -18,6 +18,8 @@ import { getAppNavigationController } from "@/features/berdctl/navigation";
 import { resetAgentBuilderSourceLifecycleForTests } from "@/features/agents/lib/agentBuilderSourceLifecycle";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { ensureReplayBuffer } from "@/features/chat/hooks/replayBuffer";
+import { createUserMessage } from "@/shared/types/messages";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { Message } from "@/shared/types/messages";
@@ -1770,6 +1772,11 @@ describe("AppShell global navigation", () => {
       activeSessionId: null,
     });
     mockCheckDirectoriesExist.mockResolvedValue(["/missing/session"]);
+    mockAcpLoadSession.mockImplementationOnce(async () => {
+      ensureReplayBuffer("missing-session").push(
+        createUserMessage("Existing history"),
+      );
+    });
 
     renderAppShell();
 
@@ -1787,8 +1794,8 @@ describe("AppShell global navigation", () => {
 
     const messages =
       useChatStore.getState().messagesBySession["missing-session"] ?? [];
-    expect(messages).toHaveLength(1);
-    expect(messages[0]?.content[0]).toMatchObject({
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.content[0]).toMatchObject({
       type: "systemNotification",
       notificationType: "warning",
       action: { type: "openContextPanel" },
