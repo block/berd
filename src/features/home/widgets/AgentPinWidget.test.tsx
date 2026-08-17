@@ -54,9 +54,11 @@ function persona(overrides: Partial<Persona> = {}): Persona {
 function renderPin({
   onOpenAgent = vi.fn(),
   onTagAgentInComposer,
+  canvasGestureActive = false,
 }: {
   onOpenAgent?: (agentId: string) => void;
   onTagAgentInComposer?: (agentId: string) => void;
+  canvasGestureActive?: boolean;
 } = {}) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -75,6 +77,7 @@ function renderPin({
     <AgentPinWidget
       instance={instance}
       onUpdateState={vi.fn()}
+      canvasGestureActive={canvasGestureActive}
       onOpenAgent={onOpenAgent}
       onTagAgentInComposer={onTagAgentInComposer}
     />,
@@ -155,7 +158,7 @@ describe("AgentPinWidget", () => {
     expect(screen.queryByText("A")).not.toBeInTheDocument();
   });
 
-  it("keeps the decoded avatar node mounted across rerenders", async () => {
+  it("uses the pre-move avatar frame while dragging", async () => {
     state.personas = [
       persona({ avatar: "https://example.test/berdy-drag-frame.png" }),
     ];
@@ -172,26 +175,25 @@ describe("AgentPinWidget", () => {
         ),
       ).toBeInTheDocument(),
     );
-    const avatarBeforeDrag = view.container.querySelector(
-      'img[src="https://example.test/berdy-drag-frame.png"]',
-    );
-    expect(avatarBeforeDrag).toBeInTheDocument();
     fireEvent.pointerDown(button);
 
     view.rerender(
       <AgentPinWidget
-        instance={{ ...instance }}
+        instance={instance}
+        canvasGestureActive
         onUpdateState={vi.fn()}
         onOpenAgent={onOpenAgent}
       />,
     );
 
-    const matchingImages = view.container.querySelectorAll(
-      'img[src="https://example.test/berdy-drag-frame.png"]',
-    );
-    expect(matchingImages).toHaveLength(1);
-    expect(matchingImages[0]).toBe(avatarBeforeDrag);
-    expect(matchingImages[0]?.parentElement).not.toHaveClass("invisible");
+    await waitFor(() => {
+      const matchingImages = view.container.querySelectorAll(
+        'img[src="https://example.test/berdy-drag-frame.png"]',
+      );
+      expect(matchingImages).toHaveLength(2);
+      expect(matchingImages[0]).toHaveAttribute("aria-hidden", "true");
+      expect(matchingImages[1]?.parentElement).toHaveClass("invisible");
+    });
   });
 
   it("keeps the label always visible when the home pin labels preference is enabled", () => {
