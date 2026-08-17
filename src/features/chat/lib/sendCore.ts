@@ -16,6 +16,7 @@ import {
   clearLiveSubtitleUpdate,
   flushBufferedStreamingUpdatesForSession,
 } from "@/features/chat/acp/liveStreamingUpdates";
+import { scheduleNoticerPass } from "@/features/me/lib/noticerTrigger";
 import { acpSendMessage } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import {
@@ -350,6 +351,13 @@ export async function dispatchPrompt(
       if (isCurrent()) {
         setChatState(sessionId, "idle");
       }
+      // Memory noticer: after a completed turn, schedule the debounced
+      // idle extraction pass over the user's new messages. Best-effort
+      // and gated on the memory toggle inside the pass itself.
+      scheduleNoticerPass(
+        sessionId,
+        () => useChatStore.getState().messagesBySession[sessionId] ?? [],
+      );
     }
   } catch (err) {
     preCommitRejected = err instanceof PreCommitSendRejectedError;

@@ -408,6 +408,59 @@
     },
     "title": "General"
   },
+  "me": {
+    "addTopic": "Añadir tema",
+    "addTopicLabel": "Nuevo tema",
+    "cancel": "Cancelar",
+    "closeTopic": "Cerrar",
+    "create": "Crear mi archivo",
+    "description": "Información general y preferencias sobre cómo quieres que funcione Berd. Berdy puede ayudarte a completarlo con el tiempo a medida que trabajan juntos.",
+    "editTab": "Editar",
+    "editorLabel": "Editar tu me.md",
+    "emptyHint": "Tu archivo vivirá en ~/.me/me.md — un archivo markdown en tu computadora. No se agrega nada sin tu aprobación.",
+    "loadError": "No se pudo leer tu archivo. Es posible que se haya movido o eliminado.",
+    "newTopicDescription": "Un tema es su propio documento: los agentes lo leen solo cuando esa parte de tu vida es la que está en juego.",
+    "newTopicError": "No se pudo crear ese tema. Puede que ya exista un tema con un nombre similar.",
+    "newTopicLabel": "Nombra tu tema",
+    "newTopicPlaceholder": "Estilo, Familia, Viajes…",
+    "noTopics": "Aún no hay temas. Los temas guardan conocimiento más profundo — estilo, familia, trabajo, lo que encaje con tu vida — que solo se carga cuando es relevante.",
+    "offBanner": {
+      "description": "Los agentes y otras herramientas no accederán a estos archivos a través de Berd. Los chats y el historial siguen funcionando con normalidad.",
+      "link": "Ver archivos de memoria.",
+      "title": "Berd no está leyendo ni escribiendo archivos de memoria"
+    },
+    "openTopic": "Ver",
+    "ownership": "Es tuyo. Léelo, edítalo o elimínalo cuando quieras.",
+    "path": "Vive en {{path}}.",
+    "previewTab": "Vista previa",
+    "proposalCard": {
+      "approved": "Añadido a la memoria",
+      "dismissed": "Descartado",
+      "reviewed": "Ya revisado",
+      "title": "¿Recordar esto?"
+    },
+    "proposals": {
+      "approve": "Aprobar",
+      "description": "Cosas que los agentes notaron y pidieron recordar. No se guarda nada a menos que lo apruebes.",
+      "dismiss": "Descartar",
+      "generalLabel": "Preferencia general",
+      "title": "Memorias propuestas",
+      "topicLabel": "Para el tema: {{topic}}"
+    },
+    "refresh": "Actualizar",
+    "reveal": "Ir al archivo.",
+    "save": "Guardar",
+    "saveError": "No se pudieron guardar los cambios. Tus ediciones siguen aquí; inténtalo de nuevo.",
+    "spineTitle": "Sobre ti",
+    "title": "Memoria",
+    "toggle": {
+      "description": "Berd usa archivos de memoria para guardar la información, instrucciones y preferencias que le das. Nunca se añade nada sin tu aprobación.",
+      "label": "Usar memoria"
+    },
+    "topicsHint": "Los temas guardan conocimiento más profundo que solo se carga cuando es relevante; los agentes proponen nuevos a medida que te conocen, y nada se guarda sin tu aprobación.",
+    "topicsTitle": "Temas",
+    "unsavedChanges": "Cambios sin guardar"
+  },
   "nav": {
     "appearance": "Apariencia",
     "archive": "Archivo",
@@ -418,6 +471,8 @@
     "experiments": "Experimentos",
     "extensions": "Extensiones",
     "general": "General",
+    "me": "Memoria",
+    "memoryProposalsPending": "{{count}} memorias por revisar",
     "notifications": "Notificaciones",
     "providers": "Proveedores de IA",
     "providersUpdateAvailable": "Actualización disponible",

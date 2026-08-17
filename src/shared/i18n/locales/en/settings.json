@@ -408,6 +408,59 @@
     },
     "title": "General"
   },
+  "me": {
+    "addTopic": "Add topic",
+    "addTopicLabel": "New topic",
+    "cancel": "Cancel",
+    "closeTopic": "Close",
+    "create": "Create my file",
+    "description": "General information and preferences about how you want Berd to work. Berdy can help fill this out over time as you work together.",
+    "editTab": "Edit",
+    "editorLabel": "Edit your me.md",
+    "emptyHint": "Your file will live at ~/.me/me.md — a plain markdown file on your computer. Nothing is added without your say-so.",
+    "loadError": "Couldn't read your file. It may have been moved or deleted.",
+    "newTopicDescription": "A topic is its own document — agents read it only when that part of your life is what's going on.",
+    "newTopicError": "Couldn't create that topic. A topic with a similar name may already exist.",
+    "newTopicLabel": "Name your topic",
+    "newTopicPlaceholder": "Style, Family, Travel…",
+    "noTopics": "No topics yet. Topics hold deeper knowledge — style, family, work, whatever fits your life — that only loads when it's relevant.",
+    "offBanner": {
+      "description": "Agents and other tools won't access these files through Berd. Chats and session history still work normally.",
+      "link": "View memory files.",
+      "title": "Berd isn't reading or writing memory files"
+    },
+    "openTopic": "View",
+    "ownership": "You own this. Read it, edit it, delete it anytime.",
+    "path": "Lives at {{path}}.",
+    "previewTab": "Preview",
+    "proposalCard": {
+      "approved": "Added to memory",
+      "dismissed": "Dismissed",
+      "reviewed": "Already reviewed",
+      "title": "Remember this?"
+    },
+    "proposals": {
+      "approve": "Approve",
+      "description": "Things agents noticed and asked to remember. Nothing is saved unless you approve it.",
+      "dismiss": "Dismiss",
+      "generalLabel": "General preference",
+      "title": "Proposed memories",
+      "topicLabel": "For topic: {{topic}}"
+    },
+    "refresh": "Refresh",
+    "reveal": "Go to file.",
+    "save": "Save",
+    "saveError": "Couldn't save your changes. Your edits are still here — try again.",
+    "spineTitle": "About you",
+    "title": "Memory",
+    "toggle": {
+      "description": "Berd uses memory files to store information, instructions, and preferences you give it. Nothing is ever added without your okay.",
+      "label": "Use memory"
+    },
+    "topicsHint": "Topics hold deeper knowledge that only loads when it's relevant — agents propose new ones as they get to know you, and nothing is saved without your okay.",
+    "topicsTitle": "Topics",
+    "unsavedChanges": "Unsaved changes"
+  },
   "nav": {
     "appearance": "Appearance",
     "archive": "Archive",
@@ -418,6 +471,8 @@
     "experiments": "Experiments",
     "extensions": "Extensions",
     "general": "General",
+    "me": "Memory",
+    "memoryProposalsPending": "{{count}} memories to review",
     "notifications": "Notifications",
     "providers": "AI providers",
     "providersUpdateAvailable": "Update available",

@@ -32,6 +32,8 @@ import { resolveManagedGooseProviderSelection } from "@/shared/runtime-config/mo
 import { getStyleGuidelinesPrompt } from "@/shared/preferences/styleGuidelinesPreference";
 import { getBerdctlPreamble } from "@/features/berdctl/appPreamble";
 import { INTERACTION_NORMS_PREAMBLE } from "@/shared/api/interactionNorms";
+import { getMePreamble } from "@/features/me/lib/mePreamble";
+import { getAgentsFilePreamble } from "@/features/me/lib/agentsFilePreamble";
 import { perfLog } from "@/shared/lib/perfLog";
 import {
   applySessionConfigOptionsSnapshot,
@@ -117,6 +119,8 @@ function resolveProvidersCatalog(providers: AcpProvider[]): AcpProvider[] {
 
 const BERD_INTERACTION_NORMS_SYSTEM_PROMPT_KEY = "berd_interaction_norms";
 const BERD_APP_CONTEXT_SYSTEM_PROMPT_KEY = "berd_app_context";
+const BERD_ME_FILE_SYSTEM_PROMPT_KEY = "berd_me_file";
+const BERD_USER_AGENTS_FILE_SYSTEM_PROMPT_KEY = "berd_user_agents_file";
 const BERD_STYLE_GUIDELINES_SYSTEM_PROMPT_KEY = "berd_style_guidelines";
 const LEGACY_STYLE_GUIDELINES_SYSTEM_PROMPT_KEY =
   "goose_internal_style_guidelines";
@@ -182,6 +186,8 @@ async function acpSendMessageNow(
   // in-band on the first prompt under that agent instead. See acpPersonaHandoff.
   const isGooseManaged = !providerId || isGooseManagedProvider(providerId);
   const berdctlPreamble = await getBerdctlPreamble();
+  const mePreamble = await getMePreamble();
+  const agentsFilePreamble = await getAgentsFilePreamble();
   let personaHandoffClaim: PersonaHandoffClaim | null = null;
   if (isGooseManaged) {
     await appendBerdStyleGuidelinesPrompt(
@@ -203,15 +209,38 @@ async function acpSendMessageNow(
       BERD_APP_CONTEXT_SYSTEM_PROMPT_KEY,
       berdctlPreamble ?? "",
     );
+    // The user's me.md, re-read on every send so edits (by the user or an
+    // approved agent write) apply from the next message onward. Empty when
+    // the file is absent, so deleting the file also deletes its influence.
+    await directAcp.appendSessionSystemPrompt(
+      sessionId,
+      BERD_ME_FILE_SYSTEM_PROMPT_KEY,
+      mePreamble ?? "",
+    );
+    // The user's own global agents file (~/.agents/AGENTS.md), with our
+    // published block stripped so the me file never arrives twice.
+    // Independent of the memory toggle: these are the user's instructions,
+    // not Berd's memory.
+    await directAcp.appendSessionSystemPrompt(
+      sessionId,
+      BERD_USER_AGENTS_FILE_SYSTEM_PROMPT_KEY,
+      agentsFilePreamble ?? "",
+    );
     await directAcp.appendSessionSystemPrompt(
       sessionId,
       "client_system_prompt",
       systemPrompt?.trim() ? systemPrompt : "",
     );
   } else {
-    const appPreamble = [INTERACTION_NORMS_PREAMBLE, berdctlPreamble]
-      .filter((part): part is string => Boolean(part?.trim()))
-      .join("\n\n");
+    const appPreamble =
+      [
+        INTERACTION_NORMS_PREAMBLE,
+        berdctlPreamble,
+        mePreamble,
+        agentsFilePreamble,
+      ]
+        .filter((part): part is string => Boolean(part?.trim()))
+        .join("\n\n") || null;
     personaHandoffClaim = preparePersonaHandoff(
       sessionId,
       providerId,

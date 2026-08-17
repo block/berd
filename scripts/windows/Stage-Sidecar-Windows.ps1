@@ -87,5 +87,21 @@ $berdctlSource = Join-Path $berdctlReleaseDir (Get-WindowsExeName "berdctl")
 $staged = Stage-WindowsSidecar -SourcePath $berdctlSource -Triple $Triple -Stem "berdctl" -BinDir $binDir
 Write-WindowsDevInfo "Staged berdctl sidecar: $staged"
 
+# ── berd-memory-mcp ──────────────────────────────────────────
+# Same story as berdctl: a workspace crate in externalBin, so the release
+# build needs it staged for the target triple or Tauri fails before bundling.
+$memoryCargoArgs = @("build", "-p", "berd-memory", "--release")
+if (-not [string]::IsNullOrWhiteSpace($hostTriple) -and $Triple -ne $hostTriple) {
+    $memoryCargoArgs += @("--target", $Triple)
+    $memoryReleaseDir = Join-Path (Join-Path $tauriTargetDir $Triple) "release"
+} else {
+    $memoryReleaseDir = Join-Path $tauriTargetDir "release"
+}
+Invoke-CheckedCommand -FilePath "cargo" -ArgumentList $memoryCargoArgs `
+    -WorkingDirectory (Join-Path (Get-BerdRepoRoot) "src-tauri") -Label "cargo build -p berd-memory --release"
+$memorySource = Join-Path $memoryReleaseDir (Get-WindowsExeName "berd-memory-mcp")
+$staged = Stage-WindowsSidecar -SourcePath $memorySource -Triple $Triple -Stem "berd-memory-mcp" -BinDir $binDir
+Write-WindowsDevInfo "Staged memory MCP sidecar: $staged"
+
 # Catch is deliberately not staged on Windows (see header).
 Write-WindowsDevInfo "Skipping Catch sidecar: unsupported on Windows (excluded from externalBin)."

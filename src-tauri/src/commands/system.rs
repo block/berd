@@ -898,6 +898,53 @@ pub fn read_text_file(path: String) -> Result<TextFilePayload, String> {
     })
 }
 
+/// Create a UTF-8 text file (and any missing parent directories) only if it
+/// does not already exist. Used to seed user-owned starter files like me.md;
+/// refusing to overwrite keeps existing user content safe.
+#[tauri::command]
+pub fn create_text_file(path: String, contents: String) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("File path cannot be empty".to_string());
+    }
+
+    let target = Path::new(trimmed);
+    if target.exists() {
+        return Err(format!("File already exists: {}", target.display()));
+    }
+
+    if let Some(parent) = target.parent() {
+        ensure_directory_path(parent)?;
+    }
+
+    fs::write(target, contents)
+        .map_err(|error| format!("Failed to write '{}': {}", target.display(), error))
+}
+
+/// Overwrite a UTF-8 text file, creating parent directories as needed.
+/// Used for user-owned files edited directly in the app (the Settings → Me
+/// editor): the user's own hand on their own file, so overwriting is the
+/// point. Agent-initiated writes must not route through this command.
+#[tauri::command]
+pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("File path cannot be empty".to_string());
+    }
+
+    let target = Path::new(trimmed);
+    if target.is_dir() {
+        return Err(format!("Path is a directory: {}", target.display()));
+    }
+
+    if let Some(parent) = target.parent() {
+        ensure_directory_path(parent)?;
+    }
+
+    fs::write(target, contents)
+        .map_err(|error| format!("Failed to write '{}': {}", target.display(), error))
+}
+
 fn normalize_roots(roots: Vec<String>) -> Vec<PathBuf> {
     let mut dedup = HashSet::new();
     let mut normalized = Vec::new();

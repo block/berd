@@ -31,6 +31,7 @@ pub(crate) mod log_export;
 pub(crate) mod log_redaction;
 pub(crate) mod managed_acp_tools;
 pub(crate) mod managed_node;
+pub(crate) mod memory_mcp;
 pub mod path_env;
 pub(crate) mod process;
 pub mod renderer_monitor;

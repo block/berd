@@ -20,6 +20,7 @@ import {
   useTranscriptRowStateAdapter,
 } from "@/features/chat/transcript/row-state";
 import { ToolCallAdapter } from "./ToolCallAdapter";
+import { isMemoryProposalTool, MemoryProposalCard } from "./MemoryProposalCard";
 import {
   getChainAggregateStatus,
   getToolItemName,
@@ -257,14 +258,38 @@ export function ToolChainCards({
 }) {
   const prefersReducedMotion = useReducedMotion();
   const { t } = useTranslation("chat");
+  // Completed `propose_memory` calls are hoisted out of the chain steps and
+  // rendered as persistent approval cards — same contract as ArtifactChips:
+  // they must survive collapse. Nested in the step list they only existed
+  // while the chain was expanded, and chains auto-collapse on completion,
+  // so the card flashed and vanished before anyone could act on it.
+  const { proposalItems, chainItems } = useMemo(() => {
+    const proposals: ToolChainItem[] = [];
+    const rest: ToolChainItem[] = [];
+    for (const item of toolItems) {
+      // Only *successful* proposals become cards. A refused call (memory
+      // turned off mid-session, for example) has no queued proposal, so a
+      // card would render "Already reviewed" and hide the refusal text —
+      // failures stay in the normal tool UI where the error is visible.
+      if (
+        isMemoryProposalTool(getToolItemName(item)) &&
+        getToolItemStatus(item) === "completed"
+      ) {
+        proposals.push(item);
+      } else {
+        rest.push(item);
+      }
+    }
+    return { proposalItems: proposals, chainItems: rest };
+  }, [toolItems]);
   // Every viewable file this chain touched. Chips are the single way back into
   // the viewer for a chain: they render for any count and stay put when the
   // chain collapses. The old header "View" action only appeared for exactly
   // one file, so the same document surfaced as a different-looking control
   // depending on how the run happened to group — chips replace it outright.
   const chainArtifacts = useMemo(
-    () => viewableArtifacts(toolItems.map((item) => item.request)),
-    [toolItems],
+    () => viewableArtifacts(chainItems.map((item) => item.request)),
+    [chainItems],
   );
   const { rowState, updateRowState, markRowInteracted } =
     useTranscriptRowStateAdapter();
@@ -279,11 +304,11 @@ export function ToolChainCards({
     () => new Set(durableToolChainState?.expandedToolKeys ?? []),
   );
   const { primaryItems, hiddenItems } = partitionToolSteps(
-    toolItems,
+    chainItems,
     expandedKeys,
   );
-  const grouped = shouldRenderAsGroupedChain(toolItems);
-  const aggregateStatus = getChainAggregateStatus(toolItems);
+  const grouped = shouldRenderAsGroupedChain(chainItems);
+  const aggregateStatus = getChainAggregateStatus(chainItems);
   const summary = summarizeToolChainSteps(primaryItems);
   const isActiveChain =
     aggregateStatus === "in_progress" || aggregateStatus === "pending";
@@ -302,7 +327,7 @@ export function ToolChainCards({
   const userInteractedRef = useRef(
     durableToolChainState?.userInteracted ?? false,
   );
-  const hasExpandedToolItem = toolItems.some((item) =>
+  const hasExpandedToolItem = chainItems.some((item) =>
     expandedKeys.has(item.key),
   );
   useTranscriptActiveToolProtection(isActiveChain);
@@ -486,10 +511,33 @@ export function ToolChainCards({
     );
   };
 
+  // Hoisted `propose_memory` approval cards: rendered outside the step
+  // list so they survive chain collapse, exactly like ArtifactChips.
+  const proposalCards =
+    proposalItems.length > 0 ? (
+      <div className="flex w-full min-w-0 max-w-full flex-col gap-1.5">
+        {proposalItems.map((item) => (
+          <div
+            key={item.key}
+            data-role="memory-proposal"
+            className="max-w-full py-0.5"
+          >
+            <MemoryProposalCard arguments={item.request?.arguments ?? {}} />
+          </div>
+        ))}
+      </div>
+    ) : null;
+
+  // A chain that was nothing but memory proposals has no steps left to
+  // group — the cards are the whole rendering.
+  if (chainItems.length === 0) {
+    return proposalCards;
+  }
+
   // Detail-only mode: render only the expanded step list, no header.
   if (detailOnly) {
     if (!chainExpanded) {
-      return null;
+      return proposalCards;
     }
     // Single-tool items use ungrouped rendering (no rail) in the detail row.
     if (!grouped) {
@@ -501,6 +549,7 @@ export function ToolChainCards({
           {primaryItems.map((item) =>
             renderToolItem(item, { withRail: false }),
           )}
+          {proposalCards}
         </div>
       );
     }
@@ -591,6 +640,7 @@ export function ToolChainCards({
         {chainArtifacts.length > 0 ? (
           <ArtifactChips artifacts={chainArtifacts} />
         ) : null}
+        {proposalCards}
       </div>
     );
   }
@@ -600,8 +650,9 @@ export function ToolChainCards({
   // attached after every step in the chain has completed, so it's only
   // available for finished chains; while the chain is still active, fall back
   // to the deterministic phrase.
-  const firstChainSummary = toolItems.find((item) => item.request?.chainSummary)
-    ?.request?.chainSummary;
+  const firstChainSummary = chainItems.find(
+    (item) => item.request?.chainSummary,
+  )?.request?.chainSummary;
   const labelText =
     !isActiveChain && firstChainSummary
       ? firstChainSummary.summary
@@ -609,10 +660,10 @@ export function ToolChainCards({
         ? t("tool_chain.summary.active")
         : t(summary.titleKey);
   const headerText = isActiveChain
-    ? t("tool_chain.title.active", { count: toolItems.length })
+    ? t("tool_chain.title.active", { count: chainItems.length })
     : t("tool_chain.title.labeled", {
         label: labelText,
-        count: toolItems.length,
+        count: chainItems.length,
       });
 
   const hasHiddenDisclosure = hiddenItems.length > 0;
@@ -661,6 +712,13 @@ export function ToolChainCards({
       {chainArtifacts.length > 0 ? (
         <ArtifactChips artifacts={chainArtifacts} className="pt-0.5 pb-1" />
       ) : null}
+
+      {/*
+        Memory proposal cards hold the same contract as the chips: they
+        persist outside the collapsing step list so an approval is never
+        hidden by the chain auto-collapsing on completion.
+      */}
+      {proposalCards}
 
       {chainExpanded && !hasDetailRow && (
         <div className="relative flex flex-col gap-1 pt-1.5">

@@ -15,6 +15,7 @@ import { ChatSearchBar } from "./ChatSearchBar";
 import { WorkspaceSetupChoice } from "./WorkspaceSetupChoice";
 import { summarizeProjectWorkspaceStartup } from "@/features/projects/lib/projectChatWorkspaces";
 import { ChatInput } from "./ChatInput";
+import { MemoryProposalPanel } from "./MemoryProposalPanel";
 import { LoadingBerd } from "./LoadingBerd";
 import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
 import { ConversationEmptyAvatar } from "./ConversationEmptyAvatar";
@@ -743,6 +744,7 @@ export function ChatView({
         )}
       >
         <SecurityConfirmationPanel sessionId={sessionId} />
+        <MemoryProposalPanel sessionId={sessionId} />
         <ChatInput
           className={hasPendingSecurityConfirmation ? "hidden" : undefined}
           surface="bare"
