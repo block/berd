@@ -174,12 +174,15 @@ stage_custom_bundled_agents() {
   local raw
   raw="$(trim_whitespace "$CUSTOM_BUNDLED_AGENTS_VALUE")"
 
+  local src_dir="$REPO_ROOT/release-agents"
+  local dest_dir="$REPO_ROOT/distro/agents"
+
+  echo "+++ :robot: Validating bundled agents"
+  pnpm exec tsx scripts/validate-bundled-agents.ts "$dest_dir"/*.md
+
   if [[ -z "$raw" ]]; then
     return 0
   fi
-
-  local src_dir="$REPO_ROOT/release-agents"
-  local dest_dir="$REPO_ROOT/distro/agents"
 
   if [[ ! -d "$src_dir" ]]; then
     echo "custom agents source directory missing: $src_dir" >&2
