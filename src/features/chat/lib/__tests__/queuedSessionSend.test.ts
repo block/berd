@@ -123,6 +123,52 @@ describe("acquireExistingSessionForBackgroundSend", () => {
     retry.release?.();
   });
 
+  it("hydrates first and leases the replayed target when the session has none yet", async () => {
+    seedSession();
+    useChatSessionStore.setState((state) => ({
+      sessions: state.sessions.map((session) => ({
+        ...session,
+        executionTarget: undefined,
+      })),
+    }));
+    // berdctl can address a session this renderer has never activated; its
+    // execution target arrives with the `session/load` replay itself.
+    mocks.loadSessionMessages.mockImplementation(async () => {
+      useChatSessionStore.setState((state) => ({
+        sessions: state.sessions.map((session) => ({
+          ...session,
+          executionTarget: { harnessId: "goose" },
+        })),
+      }));
+      return true;
+    });
+
+    const acquisition =
+      await acquireExistingSessionForBackgroundSend(SESSION_ID);
+
+    expect(acquisition).toMatchObject({
+      status: "acquired",
+      target: { harnessId: "goose" },
+    });
+    expect(mocks.loadSessionMessages).toHaveBeenCalledWith(SESSION_ID);
+    if (acquisition.status === "acquired") acquisition.release();
+  });
+
+  it("reports unresolved only after hydration had its chance to supply a target", async () => {
+    seedSession();
+    useChatSessionStore.setState((state) => ({
+      sessions: state.sessions.map((session) => ({
+        ...session,
+        executionTarget: undefined,
+      })),
+    }));
+
+    await expect(
+      acquireExistingSessionForBackgroundSend(SESSION_ID),
+    ).resolves.toEqual({ status: "unresolved" });
+    expect(mocks.loadSessionMessages).toHaveBeenCalledWith(SESSION_ID);
+  });
+
   it("releases the dispatch target when the session disappears during hydration", async () => {
     seedSession();
     mocks.loadSessionMessages.mockImplementation(async () => {

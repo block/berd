@@ -95,6 +95,17 @@ export {
   SessionDispatchUnresolvedError,
 } from "@/features/chat/lib/sessionDispatchAcquisition";
 
+async function hydrateSessionForBackgroundSend(
+  sessionId: string,
+): Promise<boolean> {
+  const loaded = await loadSessionMessages(sessionId);
+  if (!loaded) {
+    throw new Error("Failed to load the target session before sending.");
+  }
+  await applyPendingSessionWorkspaceActivation(sessionId);
+  return Boolean(useChatSessionStore.getState().getSession(sessionId));
+}
+
 export async function acquireExistingSessionForBackgroundSend(
   sessionId: string,
 ) {
@@ -121,16 +132,23 @@ export async function acquireExistingSessionForBackgroundSend(
   // dispatching into it. Hydration under a held lease is expected — the target
   // coordinator either absorbs a matching observation or defers it to release.
   const acquisition = acquireSessionDispatchTarget(sessionId);
+  if (acquisition.status === "unresolved") {
+    // The store holds no execution target yet, so there is nothing to lease:
+    // the `session/load` replay is what hydrates the target for a session
+    // this renderer has never activated (berdctl can address one directly).
+    // Hydrate first and lease the replayed target. The unleased load this
+    // reopens covers only targetless sessions, which no queued drain attempts
+    // — `isQueuedMessageTargetAttemptable` requires an execution target.
+    if (!(await hydrateSessionForBackgroundSend(sessionId))) {
+      return { status: "session-missing" } as const;
+    }
+    return acquireSessionDispatchTarget(sessionId);
+  }
   if (acquisition.status !== "acquired") {
     return acquisition;
   }
   try {
-    const loaded = await loadSessionMessages(sessionId);
-    if (!loaded) {
-      throw new Error("Failed to load the target session before sending.");
-    }
-    await applyPendingSessionWorkspaceActivation(sessionId);
-    if (!useChatSessionStore.getState().getSession(sessionId)) {
+    if (!(await hydrateSessionForBackgroundSend(sessionId))) {
       acquisition.release();
       return { status: "session-missing" } as const;
     }
