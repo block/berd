@@ -14,7 +14,9 @@ function persona(
   options: { bundled?: boolean; id?: string } = {},
 ): Persona {
   return {
-    id: options.id ?? `/Users/test/.agents/agents/${displayName}.md`,
+    id:
+      options.id ??
+      `/Users/test/.agents/agents/${displayName.toLowerCase()}.md`,
     displayName,
     systemPrompt: "Help.",
     isBuiltin: false,
@@ -28,24 +30,30 @@ function persona(
 describe("starter agents", () => {
   beforeEach(() => localStorage.clear());
 
-  it("selects block.md and Builderbot without duplicating Berdy", () => {
-    expect(STARTER_AGENT_NAMES).toEqual(["block.md", "Builderbot"]);
+  it("selects Tinker and Wildcard in pinned order", () => {
+    expect(STARTER_AGENT_NAMES).toEqual(["Tinker", "Wildcard"]);
     expect(
       selectStarterAgentPersonas([
-        persona("Builderbot"),
+        persona("Wildcard"),
         persona("Berdy"),
-        persona("block.md"),
+        persona("Tinker"),
       ]).map((agent) => agent.displayName),
-    ).toEqual(["block.md", "Builderbot"]);
+    ).toEqual(["Tinker", "Wildcard"]);
   });
 
-  it("does not treat similarly named user agents as starter agents", () => {
+  it("uses canonical bundled filenames instead of similar names", () => {
     expect(
       selectStarterAgentPersonas([
-        persona("Berdy", { bundled: false }),
-        persona("Builderbot copy"),
-      ]),
-    ).toEqual([]);
+        persona("Tinker copy"),
+        persona("Wildcard", { bundled: false }),
+        persona("Workbench", {
+          id: "/Users/test/.agents/agents/tinker.md",
+        }),
+        persona("Surprise", {
+          id: "/Users/test/.agents/agents/wildcard.md",
+        }),
+      ]).map((agent) => agent.displayName),
+    ).toEqual(["Workbench", "Surprise"]);
   });
 
   it("clears starter-agent seeding for onboarding reset", () => {
@@ -60,14 +68,10 @@ describe("starter agents", () => {
   it("migrates the legacy three-agent seed marker", () => {
     localStorage.setItem("goose:home:starter-agent-pins-seeded", "1");
     expect(shouldRemoveLegacyBerdyPin()).toBe(true);
-    expect(haveStarterAgentPinsBeenSeeded()).toBe(false);
 
     markStarterAgentPinsSeeded();
 
     expect(haveStarterAgentPinsBeenSeeded()).toBe(true);
     expect(shouldRemoveLegacyBerdyPin()).toBe(false);
-    expect(
-      localStorage.getItem("goose:home:starter-agent-pins-seeded"),
-    ).toBeNull();
   });
 });

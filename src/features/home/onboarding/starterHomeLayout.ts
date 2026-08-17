@@ -34,7 +34,6 @@ export const STARTER_HOME_LAYOUT = {
   agents: [
     { x: 228, y: -380, width: 200, height: 220 },
     { x: -292, y: 260, width: 200, height: 220 },
-    { x: 348, y: 300, width: 200, height: 220 },
   ],
 } as const;
 

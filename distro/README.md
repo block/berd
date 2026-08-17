@@ -65,7 +65,7 @@ When bundled defaults are present, the Tauri shell:
 
 Bundled skills reinstall existing copies only when the installed `SKILL.md` frontmatter has the `metadata.berdBundled: true` marker. For existing installs, the app still recognizes the legacy `metadata.gooseInternalBundled: true` marker. After the new Berd-owned copy is verified, marker-owned legacy copies under `~/.agents/skills` move to the platform app-data `recovery/skills-migration-v1` directory; existing recovery data and all unmarked Personal skills are left untouched.
 
-Bundled agents use the `metadata.berdBundled: true` marker. The app records seeded files in `.berd-bundled-agents.json` so deleted starter agents do not reappear on later launches, and migrates the legacy `.goose-internal-bundled-agents.json` marker when present. For existing installs, the app still recognizes legacy `metadata.gooseInternalBundled: true` agent frontmatter. Existing unmarked user agents are left untouched.
+Bundled agents use the `metadata.berdBundled: true` marker. The app records seeded files in `.berd-bundled-agents.json` so deleted starter agents do not reappear on later launches, and migrates the legacy `.goose-internal-bundled-agents.json` marker when present. Existing unmarked user agents are left untouched. This starter set is guaranteed for clean installs; this release does not retrofit filename collisions or customized bundled files on existing installations.
 
 ## Scope guidance
 

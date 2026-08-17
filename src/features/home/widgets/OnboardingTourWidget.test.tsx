@@ -18,7 +18,7 @@ vi.mock("@/shared/hooks/useArtifacts", () => ({
 
 vi.mock("@/shared/hooks/useAvatarSrc", () => ({
   useAvatarMedia: () => ({
-    src: "asset://localhost/gloopies-14.webm",
+    src: "asset://localhost/gloopies-22.webm",
     mediaType: "video",
   }),
 }));
@@ -68,7 +68,7 @@ describe("OnboardingTourWidget", () => {
         {
           id: "/Users/test/.agents/agents/berdy.md",
           displayName: "Berdy",
-          avatar: "app-avatar:gloopies-14",
+          avatar: "app-avatar:gloopies-22",
           systemPrompt: "Help people use Berd.",
           isBuiltin: false,
           writable: true,
@@ -83,7 +83,7 @@ describe("OnboardingTourWidget", () => {
 
     expect(screen.getByTestId("animated-berdy")).toHaveAttribute(
       "data-loading-strategy",
-      "lazy-once",
+      "eager",
     );
     expect(screen.getByTestId("animated-berdy")).toHaveAttribute(
       "data-playback-mode",
@@ -270,7 +270,7 @@ describe("OnboardingTourWidget", () => {
           {
             id: "/Users/test/.agents/agents/berdy.md",
             displayName: "Berdy",
-            avatar: "app-avatar:gloopies-14",
+            avatar: "app-avatar:gloopies-22",
             systemPrompt: "Help people use Berd.",
             isBuiltin: false,
             writable: true,

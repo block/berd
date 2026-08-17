@@ -1,16 +1,15 @@
 import type { Persona } from "@/shared/types/agents";
 
-export const STARTER_AGENT_NAMES = ["block.md", "Builderbot"] as const;
+// Berdy is already featured by the onboarding tour widget. These two pins
+// complete the three-agent starter Home.
+export const STARTER_AGENT_NAMES = ["Tinker", "Wildcard"] as const;
+const STARTER_AGENT_FILE_NAMES = ["tinker.md", "wildcard.md"] as const;
 const LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEY =
   "goose:home:starter-agent-pins-seeded";
 const SEEDED_STARTER_AGENTS_STORAGE_KEY =
-  "goose:home:starter-agent-pins-seeded-v2";
+  "goose:home:starter-agent-pins-seeded-v3";
 const STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY =
   "goose:home:starter-agent-pins-eligible-v1";
-
-const STARTER_AGENT_NAME_ORDER = new Map(
-  STARTER_AGENT_NAMES.map((name, index) => [name.toLowerCase(), index]),
-);
 
 function isBundledPersona(persona: Persona): boolean {
   const metadata = persona.sourceProperties?.metadata;
@@ -19,6 +18,13 @@ function isBundledPersona(persona: Persona): boolean {
     metadata !== null &&
     "berdBundled" in metadata &&
     metadata.berdBundled === true
+  );
+}
+
+function starterAgentIndex(persona: Persona): number {
+  const normalizedPath = persona.id.replaceAll("\\", "/").toLowerCase();
+  return STARTER_AGENT_FILE_NAMES.findIndex((fileName) =>
+    normalizedPath.endsWith(`/.agents/agents/${fileName}`),
   );
 }
 
@@ -79,21 +85,19 @@ export function markStarterAgentPinsSeeded(): void {
   }
 }
 
-/** Returns the two pinned starter agents in their Home canvas order. */
+/** Returns Tinker and Wildcard in their Home canvas order. */
 export function selectStarterAgentPersonas(
   personas: readonly Persona[],
 ): Persona[] {
-  return personas
-    .filter(
-      (persona) =>
-        isBundledPersona(persona) &&
-        STARTER_AGENT_NAME_ORDER.has(persona.displayName.trim().toLowerCase()),
-    )
-    .sort(
-      (left, right) =>
-        (STARTER_AGENT_NAME_ORDER.get(left.displayName.trim().toLowerCase()) ??
-          Number.MAX_SAFE_INTEGER) -
-        (STARTER_AGENT_NAME_ORDER.get(right.displayName.trim().toLowerCase()) ??
-          Number.MAX_SAFE_INTEGER),
-    );
+  const selected: Array<Persona | undefined> = STARTER_AGENT_FILE_NAMES.map(
+    () => undefined,
+  );
+  for (const persona of personas) {
+    if (!isBundledPersona(persona)) continue;
+    const index = starterAgentIndex(persona);
+    if (index >= 0 && !selected[index]) selected[index] = persona;
+  }
+  return selected.filter(
+    (persona): persona is Persona => persona !== undefined,
+  );
 }

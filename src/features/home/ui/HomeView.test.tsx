@@ -231,7 +231,7 @@ describe("HomeView", () => {
       writable: true,
       sourceProperties: { metadata: { berdBundled: true } },
     });
-    const personas = [bundledPersona("block.md"), bundledPersona("Builderbot")];
+    const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
     useAgentStore.setState({ personas, personasLoading: false });
     const existingItems: Layout["items"] = [
       ...layout().items,
@@ -311,7 +311,7 @@ describe("HomeView", () => {
       writable: true,
       sourceProperties: { metadata: { berdBundled: true } },
     });
-    const personas = [bundledPersona("block.md"), bundledPersona("Builderbot")];
+    const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
     useAgentStore.setState({ personas, personasLoading: false });
     markStarterHomeLayoutEligible();
     const existingItems: Layout["items"] = [
@@ -480,9 +480,9 @@ describe("HomeView", () => {
     });
     useAgentStore.setState({
       personas: [
-        bundledPersona("Builderbot"),
+        bundledPersona("Wildcard"),
         bundledPersona("Berdy"),
-        bundledPersona("block.md"),
+        bundledPersona("Tinker"),
       ],
       personasLoading: false,
     });
@@ -496,7 +496,7 @@ describe("HomeView", () => {
         .instances.filter((instance) => instance.type === "agentPin"),
     ).toHaveLength(0);
     expect(
-      localStorage.getItem("goose:home:starter-agent-pins-seeded-v2"),
+      localStorage.getItem("goose:home:starter-agent-pins-seeded-v3"),
     ).toBe("1");
   });
 
@@ -510,7 +510,7 @@ describe("HomeView", () => {
       writable: true,
       sourceProperties: { metadata: { berdBundled: true } },
     });
-    const personas = [bundledPersona("block.md"), bundledPersona("Builderbot")];
+    const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
     useAgentStore.setState({ personas, personasLoading: false });
     markStarterAgentPinsEligible();
 
