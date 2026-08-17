@@ -8,6 +8,7 @@ import { CodeBlock } from "@/shared/ui/ai-elements/code-block";
 import {
   Tool,
   ToolContent,
+  ToolDetailsViewport,
   ToolHeader,
   ToolInput,
   ToolOutput,
@@ -593,8 +594,9 @@ export function ToolCallAdapter({
           className="text-muted-foreground [&_button]:text-muted-foreground [&_code]:text-muted-foreground [&_dd]:text-muted-foreground [&_dt]:text-muted-foreground [&_span]:text-muted-foreground"
         >
           {agentWorkLayout ? (
-            <div
+            <ToolDetailsViewport
               data-role="agent-work-tool-details"
+              aria-label={t("tools.details")}
               className="max-h-48 space-y-3 overflow-y-auto overscroll-contain py-1"
             >
               <AgentWorkToolSection
@@ -614,7 +616,7 @@ export function ToolCallAdapter({
                 label={t("tools.structuredContent")}
                 value={structuredDetails}
               />
-            </div>
+            </ToolDetailsViewport>
           ) : showCombinedSurface ? (
             <ToolSurface tone="muted" className="bg-muted">
               <ToolInput

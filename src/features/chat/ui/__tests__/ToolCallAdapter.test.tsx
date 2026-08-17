@@ -413,9 +413,13 @@ describe("ToolCallAdapter — expanded body", () => {
   it("caps and scrolls an inner details viewport in the agent work layout", () => {
     const { container } = renderAdapter({ open: true, agentWorkLayout: true });
 
-    expect(
-      container.querySelector('[data-role="agent-work-tool-details"]'),
-    ).toHaveClass("max-h-48", "overflow-y-auto", "overscroll-contain");
+    const details = screen.getByRole("region", { name: "Tool details" });
+    expect(details).toHaveAttribute("tabindex", "0");
+    expect(details).toHaveClass(
+      "max-h-48",
+      "overflow-y-auto",
+      "overscroll-contain",
+    );
     expect(
       container.querySelector('[data-role="tool-call-content"]'),
     ).not.toHaveClass("max-h-48", "overflow-y-auto");
