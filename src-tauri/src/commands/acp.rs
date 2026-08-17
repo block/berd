@@ -1,16 +1,8 @@
 use std::env;
 
 use crate::services::acp::GooseServeProcess;
-use serde::Serialize;
 
 const GOOSE_SERVE_URL_ENV: &str = "GOOSE_SERVE_URL";
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GooseServeHostInfo {
-    pub http_base_url: String,
-    pub secret_key: String,
-}
 
 #[tauri::command]
 pub async fn get_goose_serve_url(app_handle: tauri::AppHandle) -> Result<String, String> {
@@ -19,26 +11,6 @@ pub async fn get_goose_serve_url(app_handle: tauri::AppHandle) -> Result<String,
     }
     let process = GooseServeProcess::get(app_handle).await?;
     Ok(process.ws_url())
-}
-
-#[tauri::command]
-pub async fn get_goose_serve_host_info(
-    app_handle: tauri::AppHandle,
-) -> Result<GooseServeHostInfo, String> {
-    if let Some(url) = configured_goose_serve_url() {
-        let secret_key = goose_serve_url_token(&url)?;
-        ensure_configured_goose_serve_supports_inline_apps(&url)?;
-        return Ok(GooseServeHostInfo {
-            http_base_url: goose_serve_http_base_url(&url)?,
-            secret_key,
-        });
-    }
-
-    let process = GooseServeProcess::get(app_handle).await?;
-    Ok(GooseServeHostInfo {
-        http_base_url: process.http_base_url(),
-        secret_key: process.secret_key().to_string(),
-    })
 }
 
 fn configured_goose_serve_url() -> Option<String> {
@@ -59,7 +31,7 @@ fn parse_goose_serve_url(goose_serve_url: &str) -> Result<reqwest::Url, String> 
         .map_err(|error| format!("Invalid {GOOSE_SERVE_URL_ENV}: {error}"))
 }
 
-fn goose_serve_url_token(goose_serve_url: &str) -> Result<String, String> {
+pub(crate) fn goose_serve_url_token(goose_serve_url: &str) -> Result<String, String> {
     let parsed = parse_goose_serve_url(goose_serve_url)?;
     parsed
         .query_pairs()
@@ -90,7 +62,7 @@ fn missing_goose_serve_url_token_error() -> String {
     format!("{GOOSE_SERVE_URL_ENV} must include a non-empty token query parameter")
 }
 
-fn goose_serve_http_base_url(goose_serve_url: &str) -> Result<String, String> {
+pub(crate) fn goose_serve_http_base_url(goose_serve_url: &str) -> Result<String, String> {
     let (scheme, rest) = goose_serve_url
         .trim()
         .split_once("://")
@@ -133,7 +105,9 @@ fn goose_serve_http_path_prefix(path: &str) -> String {
     path.to_string()
 }
 
-fn ensure_configured_goose_serve_supports_inline_apps(goose_serve_url: &str) -> Result<(), String> {
+pub(crate) fn ensure_configured_goose_serve_supports_inline_apps(
+    goose_serve_url: &str,
+) -> Result<(), String> {
     if !goose_serve_url_uses_plaintext_http(goose_serve_url)? {
         return Err(format!(
             "{GOOSE_SERVE_URL_ENV} must use ws or http for inline MCP apps because the app guest origin is served over local http"

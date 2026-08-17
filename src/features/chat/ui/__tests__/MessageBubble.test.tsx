@@ -61,10 +61,15 @@ vi.mock("@mcp-ui/client", () => ({
   ),
 }));
 
+Object.defineProperty(window, "__BERD_MCP_SANDBOX_IPC_NONCE__", {
+  configurable: true,
+  value: "IIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIIII",
+});
+
 vi.mock("@/shared/api/gooseServeHost", () => ({
-  getGooseServeHostInfo: vi.fn().mockResolvedValue({
-    httpBaseUrl: "http://127.0.0.1:4242",
-    secretKey: "test-secret",
+  createMcpAppSandbox: vi.fn().mockResolvedValue({
+    proxyUrl:
+      "http://127.0.0.1:4243/mcp-app-sandbox/proxy/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA#document=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
   }),
 }));
 
