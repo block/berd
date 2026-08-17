@@ -2,9 +2,10 @@
 #
 # Runs the Rust checks that only a real Windows host can exercise: the
 # `managed_node` / `managed_acp_tools` module tests (including the native gate
-# that downloads and executes the real pinned Node ZIP), plus Windows clippy in
-# the default and app-feature configurations. Invoked through `just ci-windows`
-# for local and release validation.
+# that downloads and executes the real pinned Node ZIP), security-sensitive
+# Windows process-launch tests, plus Windows clippy in the default and
+# app-feature configurations. Invoked through `just ci-windows` for local and
+# release validation.
 $ErrorActionPreference = "Stop"
 trap {
     Write-Host $_.Exception.Message -ForegroundColor Red
@@ -49,6 +50,13 @@ Invoke-CargoCheck -ArgumentList @(
     "test", "--lib", "services::managed_", "--", "--skip",
     "native_gate_installs_and_launches_a_bridge_by_bare_name"
 ) -Label "cargo test managed services"
+
+# Keep shell-free process-launch regressions on the native Windows lane. These
+# tests inspect the exact executable/argv boundary that cannot be compiled into
+# the macOS/Linux test binary.
+Invoke-CargoCheck -ArgumentList @(
+    "test", "--lib", "commands::system::tests::windows_chrome_launch_"
+) -Label "cargo test Windows Chrome launch"
 
 # Clippy compiles both configurations, so separate `cargo check` calls only
 # repeat the same compile coverage.
