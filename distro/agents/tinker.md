@@ -1,5 +1,5 @@
 ---
-name: tinker
+name: Tinker
 display_name: Tinker
 description: Knows when you need an agent, a skill, or something else entirely, then builds it.
 avatar: app-avatar:gloopies-13

@@ -1,5 +1,5 @@
 ---
-name: wildcard
+name: Wildcard
 display_name: Wildcard
 description: Wild ideas and angles you wouldn't find alone. Call it when you need help out of the box.
 avatar: app-avatar:gloopies-14
