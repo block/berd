@@ -10,20 +10,23 @@
 //!   env pairs in [`managed_npm_env`].
 //! - **Managed bridges** (`packages/tools` + `packages/bin`): the claude/codex
 //!   ACP bridges in [`MANAGED_TOOLS`]. Each bridge is pinned to a checked-in
-//!   immutable version; `acp-tools.lock.json` is the release-controlled source
-//!   of truth for its full resolved dependency graph (every transitive
-//!   package's version and npm SRI integrity).
-//!   [`install_managed_tool`] installs the exact pinned `<pkg>@<version>` with
-//!   `npm install <pkg>@<version> --prefix` on the managed runtime, verifies
-//!   the resolved `package-lock.json` graph — every package's version and
-//!   integrity — against the checked-in graph, and only then writes an
-//!   absolute-path shim into `packages/bin` (no host `node` on PATH required)
-//!   and records the installed version in `packages/state.json`. The startup
-//!   reconciler (`acp_tools_reconciler`) runs this for every managed bridge on
-//!   launch, so a new bridge release ships to users — after a pin bump — the
-//!   next time Berd starts. A publisher/registry compromise cannot alter any
-//!   resolved package (root or transitive) without failing graph verification
-//!   before the transactional upgrade commits.
+//!   immutable version, and `acp-tools.lock.json` carries the two npm
+//!   documents that pin its complete transitive graph: a `package.json` naming
+//!   the exact bridge version and npm's own `package-lock.json` for it.
+//!   [`install_managed_tool`] seeds a staged tree with those two documents and
+//!   runs `npm ci --prefix` on the managed runtime, so npm resolves *to* the
+//!   release-controlled graph and refuses, at fetch time, any tarball whose
+//!   integrity differs from the one checked in — rather than re-resolving
+//!   every `^` range from the registry and being graded after the fact. It
+//!   then re-reads the replayed `package-lock.json` as a post-condition,
+//!   requires the target's native executable to physically exist, and only
+//!   then writes an absolute-path shim into `packages/bin` (no host `node` on
+//!   PATH required) and records the installed version in `packages/state.json`.
+//!   The startup reconciler (`acp_tools_reconciler`) runs this for every
+//!   managed bridge on launch, so a new bridge release ships to users — after
+//!   a pin bump — the next time Berd starts. A publisher/registry compromise
+//!   cannot substitute any package, root or transitive, without failing npm's
+//!   own integrity check against the checked-in lockfile.
 //!
 //! `BERD_ACP_TOOLS_DIR` stays honored as a dev/bridge-developer override: when
 //! set, managed resolution short-circuits (no managed tools, no shim dir, no
@@ -50,16 +53,17 @@ pub const ACP_TOOLS_DIR_ENV: &str = "BERD_ACP_TOOLS_DIR";
 /// registry; a hung npm must not wedge the install mutex forever.
 const NPM_INSTALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
-/// The checked-in, release-controlled resolved dependency graph for every
-/// managed bridge. Each tool maps to the full set of `node_modules/<path>`
-/// entries npm resolves for its pinned version, with the exact version and npm
-/// SRI integrity of every transitive package (all platform-native optional
-/// variants included — the graph is platform-portable). This is the trust
-/// boundary: [`verify_pinned_install`] compares the post-install
-/// `package-lock.json` against it and rejects any missing, extra, or differing
-/// entry before the transactional upgrade commits, so a compromised registry
-/// cannot substitute a malicious in-range transitive version even with forged
-/// integrity metadata. Regenerate and review on any version bump.
+/// The checked-in, release-controlled npm documents for every managed bridge:
+/// per tool, the `package.json` naming its exact pinned version and npm's own
+/// `package-lock.json` for that resolution — every transitive package's
+/// version, npm SRI integrity, `resolved` URL, and platform metadata, with all
+/// platform-native optional variants included so the documents are portable.
+/// This is the trust boundary, and it is npm's *input*: the installer writes
+/// both documents into the staged tree and replays them with `npm ci`, so npm
+/// itself refuses any tarball that does not match the checked-in integrity,
+/// and no `^` range is ever re-resolved against the live registry.
+/// Regenerate with `scripts/update-acp-tools-lock.mjs` and review every
+/// changed version on any bump; nothing here is hand-editable.
 const ACP_TOOLS_LOCK_JSON: &str = include_str!("../../../acp-tools.lock.json");
 
 /// `<app-data>/packages` — the root every Berd-managed npm asset (node
@@ -249,22 +253,22 @@ pub fn is_npm_backed_command(command: &str) -> bool {
 // The managed bridge set — installed and upgraded from the private npm registry
 // ---------------------------------------------------------------------------
 
-/// A Berd-managed ACP bridge: installed at a checked-in immutable version and
-/// verified against its checked-in resolved dependency graph
-/// (`acp-tools.lock.json`, see [`install_managed_tool`]) rather than floating
-/// on `@latest` or bundled.
+/// A Berd-managed ACP bridge: installed by replaying its checked-in npm
+/// documents (`acp-tools.lock.json`, see [`install_managed_tool`]) rather than
+/// floating on `@latest` or bundled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ManagedTool {
     /// The frontend provider id (e.g. `claude-acp`). Also the key into
-    /// `acp-tools.lock.json`'s `tools` map for this bridge's resolved graph.
+    /// `acp-tools.lock.json`'s `tools` map for this bridge's install documents.
     pub id: &'static str,
     /// The bin name the shim is written under and that goosed resolves.
     pub binary: &'static str,
     /// The npm package installed from the private registry.
     pub package: &'static str,
-    /// The immutable version installed — the exact `<pkg>@<version>` spec, not
-    /// a floating range. Bump this together with the matching entry in
-    /// `acp-tools.lock.json` to ship a new release.
+    /// The immutable version installed — an exact version, not a floating
+    /// range. Bump this together with the matching entry in
+    /// `acp-tools.lock.json` (`scripts/update-acp-tools-lock.mjs`) to ship a
+    /// new release.
     pub version: &'static str,
 }
 
@@ -272,10 +276,9 @@ pub struct ManagedTool {
 /// their agent's full CLI (Claude Code, `codex`) inside the npm package, so
 /// no separate main-CLI install is needed. This table pins each bridge's
 /// package and immutable version; `acp-tools.lock.json` is the checked-in
-/// source of truth for the full resolved dependency graph (every transitive
-/// package's version and npm integrity) the installer verifies against. Bump
-/// `version` here and regenerate the matching lock entry together to ship a
-/// new release.
+/// source of truth for the npm documents the installer replays to reach it.
+/// Bump `version` here and regenerate the matching lock entry together to ship
+/// a new release.
 pub const MANAGED_TOOLS: &[ManagedTool] = &[
     ManagedTool {
         id: "claude-acp",
@@ -402,15 +405,19 @@ pub enum ManagedToolError {
     NotManaged(String),
     Node(managed_node::ManagedNodeError),
     NpmInstall(String),
-    /// The install exited cleanly but produced no runnable bridge — a floor
-    /// check replacing the old lock's integrity validation.
+    /// `npm ci` exited cleanly but produced no runnable bridge: a missing
+    /// entrypoint, or a missing platform-native executable (npm's optional
+    /// fetch/extract failures stay non-fatal, so this is a flaky download far
+    /// more often than anything else). Also covers a target the checked-in
+    /// lock maps no native executable for.
     Incomplete(String),
-    /// The staged install's resolved dependency graph did not match the
-    /// release-controlled `acp-tools.lock.json` graph for this bridge — a
-    /// missing, extra, or differing package (version or npm integrity),
-    /// including the pinned bridge root itself. The install is rejected before
-    /// the transactional upgrade commits, so the previous working bridge stays
-    /// in place.
+    /// The lockfile the staged install left behind is not the one
+    /// `acp-tools.lock.json` seeded — a missing, extra, or differing package
+    /// (version or npm integrity), including the pinned bridge root. `npm ci`
+    /// replays the seeded document without rewriting it, so this means npm did
+    /// not behave as an `npm ci`, not that upstream moved. The install is
+    /// rejected before the transactional upgrade commits, so the previous
+    /// working bridge stays in place.
     IntegrityMismatch(String),
     Io(String),
 }
@@ -450,13 +457,14 @@ fn tool_install_lock() -> &'static tokio::sync::Mutex<()> {
 }
 
 /// Install (or upgrade) one managed bridge to its checked-in pinned version:
-/// ensure the managed Node runtime, run `npm install <pkg>@<version> --prefix`,
-/// verify the resolved dependency graph — every package's version and npm
-/// integrity — against the checked-in `acp-tools.lock.json` graph, write
-/// the absolute-path shim, and record the installed version in `state.json`.
-/// Safe to call concurrently — provider installs, doctor fixes, and the startup
-/// reconciler all serialize on one process-wide install mutex. A failed or
-/// verification-rejected install leaves any previously installed version in
+/// ensure the managed Node runtime, seed a staged tree with the bridge's
+/// release-controlled `package.json` + `package-lock.json` from
+/// `acp-tools.lock.json` and replay them with `npm ci --prefix`, re-read the
+/// replayed lockfile and require the target's native executable to exist,
+/// write the absolute-path shim, and record the installed version in
+/// `state.json`. Safe to call concurrently — provider installs, doctor fixes,
+/// and the startup reconciler all serialize on one process-wide install mutex.
+/// A failed or rejected install leaves any previously installed version in
 /// place — including the Node runtime its shim execs, since superseded runtimes
 /// are pruned only after a fully-successful reconcile — so an offline launch or
 /// a tampered registry never removes a working bridge.
@@ -504,8 +512,8 @@ pub async fn install_managed_tool(
 
 /// The install body, path-parameterized so tests drive it with a fixture
 /// `npm`. Caller holds the install mutex, has ensured the runtime, and passes
-/// the release-controlled resolved graph the staged install is verified
-/// against.
+/// the release-controlled documents the staged install replays and is then
+/// checked against.
 #[allow(clippy::too_many_arguments)]
 async fn install_npm_tool(
     packages_root: &Path,
@@ -526,7 +534,7 @@ async fn install_npm_tool(
     })?;
 
     on_line(&format!(
-        "Installing {}@{} into Berd's app data",
+        "Installing {}@{} into Berd's app data from the checked-in lockfile",
         tool.package, tool.version
     ));
     let install_result = run_pinned_npm_install(
@@ -534,7 +542,7 @@ async fn install_npm_tool(
         node_install_dir,
         layout,
         &transaction.staged_tree,
-        tool,
+        expected,
         target,
         registry,
         on_line,
@@ -554,12 +562,11 @@ async fn install_npm_tool(
             staged_entrypoint.display()
         )));
     }
-    // Verify the resolved package against the checked-in pin before anything
-    // is promoted: the install's complete resolved graph must match the
-    // release-controlled `acp-tools.lock.json` graph for this bridge (every
-    // transitive package's version and integrity), so the registry cannot
-    // substitute an in-range transitive dependency. Any drift rejects the
-    // install and keeps the previous working bridge in place.
+    // Check the replayed install's post-conditions before anything is
+    // promoted: the lockfile npm left behind must still be the checked-in
+    // graph (a tautology unless npm misbehaved), and the target's native
+    // executable must physically exist. Either failure rejects the install and
+    // keeps the previous working bridge in place.
     if let Err(error) = verify_pinned_install(&transaction.staged_tree, tool, expected, target) {
         transaction.cleanup_staged();
         return Err(error);
@@ -936,10 +943,24 @@ struct ResolvedPackage {
     integrity: String,
 }
 
-/// One managed bridge's release-controlled resolved dependency graph.
+/// One managed bridge's release-controlled npm documents, as checked in.
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ToolLockDocument {
+    package: String,
+    version: String,
+    native_executables: BTreeMap<String, String>,
+    package_json: serde_json::Value,
+    package_lock: serde_json::Value,
+}
+
+/// One managed bridge's release-controlled install input: the two npm
+/// documents the staged tree is seeded with, plus the resolved graph derived
+/// from `package_lock` for the post-install check.
+#[derive(Clone, Debug)]
 struct ToolLockEntry {
+    /// Read only by the test that pins the lock to `MANAGED_TOOLS`; the
+    /// install path takes both from [`ManagedTool`].
     #[allow(dead_code)]
     package: String,
     #[allow(dead_code)]
@@ -947,67 +968,92 @@ struct ToolLockEntry {
     /// Berd target triple → the `node_modules/<path>` of the native executable
     /// that target's bridge must run. npm records every platform's optional
     /// package in `package-lock.json` but materializes only the compatible one
-    /// — and an optional fetch/extract failure is non-fatal — so a lockfile can
-    /// match the full graph while the executable this host needs is absent.
-    /// [`verify_pinned_install`] requires this file to physically exist in the
-    /// staged install before the transaction commits.
+    /// — and an optional fetch/extract failure is non-fatal, even under
+    /// `npm ci` — so a replayed lockfile can match while the executable this
+    /// host needs is absent. [`verify_pinned_install`] requires this file to
+    /// physically exist in the staged install before the transaction commits.
     native_executables: BTreeMap<String, String>,
+    /// The `package.json` written into the staged tree: names the pinned
+    /// bridge as an exact dependency so `npm ci` accepts the lockfile.
+    package_json: serde_json::Value,
+    /// The `package-lock.json` written into the staged tree — npm's own
+    /// document, which `npm ci` replays exactly and never rewrites.
+    package_lock: serde_json::Value,
     /// `node_modules/<path>` → resolved version + integrity for every package
-    /// npm resolves for the pinned install (the lockfile's `packages` map
-    /// minus its root `""` entry).
+    /// in `package_lock` (its `packages` map minus the root `""` entry),
+    /// derived by the same parser that reads the post-install lockfile.
     graph: BTreeMap<String, ResolvedPackage>,
 }
 
-/// The checked-in resolved graphs, keyed by [`ManagedTool::id`]. Extra
+/// The checked-in install documents, keyed by [`ManagedTool::id`]. Extra
 /// top-level fields (e.g. `$comment`) are ignored.
 #[derive(Clone, Debug, serde::Deserialize)]
+struct AcpToolsLockDocument {
+    tools: BTreeMap<String, ToolLockDocument>,
+}
+
 struct AcpToolsLock {
     tools: BTreeMap<String, ToolLockEntry>,
 }
 
-/// The parsed embedded `acp-tools.lock.json`. A parse failure is a build-time
-/// mistake in the checked-in lock, so panicking on first use is correct.
+/// The parsed embedded `acp-tools.lock.json`. A parse failure — or a
+/// `packageLock` whose entries lack the version/integrity the installer
+/// verifies against — is a build-time mistake in the checked-in artifact, so
+/// panicking on first use is correct.
 fn acp_tools_lock() -> &'static AcpToolsLock {
     static LOCK: OnceLock<AcpToolsLock> = OnceLock::new();
     LOCK.get_or_init(|| {
-        serde_json::from_str(ACP_TOOLS_LOCK_JSON).expect("embedded acp-tools.lock.json must parse")
+        let document: AcpToolsLockDocument = serde_json::from_str(ACP_TOOLS_LOCK_JSON)
+            .expect("embedded acp-tools.lock.json must parse");
+        let tools = document
+            .tools
+            .into_iter()
+            .map(|(id, document)| {
+                let graph = graph_from_lockfile_value(&document.package_lock)
+                    .unwrap_or_else(|error| panic!("acp-tools.lock.json {id}: {error}"));
+                (
+                    id,
+                    ToolLockEntry {
+                        package: document.package,
+                        version: document.version,
+                        native_executables: document.native_executables,
+                        package_json: document.package_json,
+                        package_lock: document.package_lock,
+                        graph,
+                    },
+                )
+            })
+            .collect();
+        AcpToolsLock { tools }
     })
 }
 
-/// The release-controlled resolved graph for a managed bridge. Missing means
-/// the lock has no entry for this bridge — a checked-in mistake surfaced
+/// The release-controlled install documents for a managed bridge. Missing
+/// means the lock has no entry for this bridge — a checked-in mistake surfaced
 /// before any install can commit.
 fn tool_lock_entry(id: &str) -> Result<&'static ToolLockEntry, ManagedToolError> {
     acp_tools_lock().tools.get(id).ok_or_else(|| {
         ManagedToolError::IntegrityMismatch(format!(
-            "acp-tools.lock.json has no resolved graph for '{id}'"
+            "acp-tools.lock.json has no install documents for '{id}'"
         ))
     })
 }
 
-/// The resolved graph npm recorded in the just-installed `package-lock.json`:
-/// every `node_modules/<path>` entry's version + integrity (lockfileVersion
-/// 2/3 `packages` map), excluding the root `""` prefix entry. A missing
-/// lockfile, a non-root entry without a version, or a non-root entry without
-/// an integrity is rejected — the install cannot be proven against the pin.
-fn lockfile_graph(
-    install_dir: &Path,
-) -> Result<BTreeMap<String, ResolvedPackage>, ManagedToolError> {
-    let json = std::fs::read_to_string(install_dir.join("package-lock.json")).map_err(|_| {
-        ManagedToolError::IntegrityMismatch(
-            "could not read package-lock.json to verify the resolved graph".to_string(),
-        )
-    })?;
-    let value: serde_json::Value = serde_json::from_str(&json).map_err(|error| {
-        ManagedToolError::IntegrityMismatch(format!("package-lock.json is not valid JSON: {error}"))
-    })?;
+/// The resolved graph a `package-lock.json` document records: every
+/// `node_modules/<path>` entry's version + integrity (lockfileVersion 2/3
+/// `packages` map), excluding the root `""` prefix entry. An entry without a
+/// version or without an integrity is rejected — such a graph cannot be
+/// proven, whether it came from the checked-in lock or from a staged install.
+/// One parser for both sides, so the checked-in documents and the post-install
+/// lockfile are read identically.
+fn graph_from_lockfile_value(
+    value: &serde_json::Value,
+) -> Result<BTreeMap<String, ResolvedPackage>, String> {
     let packages = value
         .get("packages")
         .and_then(|p| p.as_object())
         .ok_or_else(|| {
-            ManagedToolError::IntegrityMismatch(
-                "package-lock.json has no `packages` map (unexpected lockfile version)".to_string(),
-            )
+            "package-lock.json has no `packages` map (unexpected lockfile version)".to_string()
         })?;
     let mut graph = BTreeMap::new();
     for (key, entry) in packages {
@@ -1019,19 +1065,11 @@ fn lockfile_graph(
         let version = entry
             .get("version")
             .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| {
-                ManagedToolError::IntegrityMismatch(format!(
-                    "package-lock.json entry {key} has no version"
-                ))
-            })?;
+            .ok_or_else(|| format!("package-lock.json entry {key} has no version"))?;
         let integrity = entry
             .get("integrity")
             .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| {
-                ManagedToolError::IntegrityMismatch(format!(
-                    "package-lock.json entry {key} has no integrity"
-                ))
-            })?;
+            .ok_or_else(|| format!("package-lock.json entry {key} has no integrity"))?;
         graph.insert(
             key.clone(),
             ResolvedPackage {
@@ -1043,22 +1081,43 @@ fn lockfile_graph(
     Ok(graph)
 }
 
-/// Verify the staged install's complete resolved graph matches the checked-in
-/// release-controlled graph for this bridge. The post-install
-/// `package-lock.json` must record exactly the set of packages in
-/// `expected.graph`, each at the identical version and npm integrity — no
-/// missing, extra, or differing entry — and the pinned bridge package itself
-/// must resolve to [`ManagedTool::version`]. `target` is the Berd target
-/// triple the install was materialized for; the native executable the bridge
-/// needs on that target must physically exist in the staged tree, because npm
-/// records every platform's optional package in the lockfile while
-/// materializing only the compatible one (and an optional fetch/extract
-/// failure is non-fatal), so a graph match alone does not prove the bridge can
-/// run. Any discrepancy means the registry re-resolved a transitive range to
-/// something other than the reviewed release (a supply-chain substitution) or
-/// the required executable is missing, so the install is rejected before the
-/// transactional upgrade commits and the previous working bridge stays in
-/// place.
+/// The resolved graph the staged install's `package-lock.json` records. A
+/// missing or unparseable lockfile is rejected: `npm ci` replays the seeded
+/// document and leaves it in place, so its absence means npm did something
+/// other than what was asked.
+fn lockfile_graph(
+    install_dir: &Path,
+) -> Result<BTreeMap<String, ResolvedPackage>, ManagedToolError> {
+    let json = std::fs::read_to_string(install_dir.join("package-lock.json")).map_err(|_| {
+        ManagedToolError::IntegrityMismatch(
+            "could not read package-lock.json to verify the resolved graph".to_string(),
+        )
+    })?;
+    let value: serde_json::Value = serde_json::from_str(&json).map_err(|error| {
+        ManagedToolError::IntegrityMismatch(format!("package-lock.json is not valid JSON: {error}"))
+    })?;
+    graph_from_lockfile_value(&value).map_err(ManagedToolError::IntegrityMismatch)
+}
+
+/// The post-condition of a replayed install, checked before anything is
+/// promoted.
+///
+/// The graph half is expected to be a tautology: [`run_pinned_npm_install`]
+/// seeds the staged tree with the checked-in `package-lock.json` and `npm ci`
+/// replays it without rewriting it, so the post-install lockfile must record
+/// exactly the packages in `expected.graph` at identical versions and npm
+/// integrities, with the pinned bridge root at [`ManagedTool::version`]. A
+/// mismatch therefore means npm did not behave as an `npm ci` — a substituted
+/// or misbehaving npm — rather than upstream drift, which the replay makes
+/// impossible to reach here.
+///
+/// The native-executable half keeps all its teeth. `target` is the Berd target
+/// triple the install was materialized for; npm records every platform's
+/// optional package in the lockfile while materializing only the compatible
+/// one, and an optional fetch/extract failure stays non-fatal under `npm ci`,
+/// so a clean exit and a matching graph still do not prove the bridge can run.
+/// Either failure rejects the install before the transactional upgrade
+/// commits, so the previous working bridge stays in place.
 fn verify_pinned_install(
     install_dir: &Path,
     tool: &ManagedTool,
@@ -1122,16 +1181,19 @@ fn verify_pinned_install(
     // the compatible one, and an optional fetch/extract failure is non-fatal.
     // Require the release-controlled native executable for this target to
     // physically exist so a graph-matching-but-unrunnable install cannot
-    // replace the previous working bridge.
+    // replace the previous working bridge. Both failures are `Incomplete`, not
+    // `IntegrityMismatch`: nothing here disagrees with the pin — the install
+    // produced no runnable bridge (overwhelmingly, a flaky optional download),
+    // or the checked-in lock never mapped this target.
     let native_rel = expected.native_executables.get(target).ok_or_else(|| {
-        ManagedToolError::IntegrityMismatch(format!(
+        ManagedToolError::Incomplete(format!(
             "{}: acp-tools.lock.json has no native executable mapping for target {target}",
             tool.package
         ))
     })?;
     let native_path = install_dir.join(native_rel);
     if !native_path.is_file() {
-        return Err(ManagedToolError::IntegrityMismatch(format!(
+        return Err(ManagedToolError::Incomplete(format!(
             "{}: required native executable {native_rel} for target {target} is missing from the install",
             tool.package
         )));
@@ -1143,9 +1205,10 @@ fn verify_pinned_install(
 /// target triple. These are passed on the npm command line, which outranks
 /// both process-environment `npm_config_*` and any `os`/`cpu`/`libc` set in a
 /// user/global npmrc, so npm materializes the current target's native package
-/// regardless of inherited npm configuration. `None` for a triple with no
-/// mapping — a target the installer never reaches, since verification requires
-/// a native-executable mapping for it. Pure so tests can assert the vector.
+/// regardless of inherited npm configuration. `None` for a triple Berd manages
+/// no runtime for — a target the installer never reaches (a unit test pins
+/// this to `managed_node`'s target set, which is also the set
+/// `nativeExecutables` must cover). Pure so tests can assert the vector.
 fn npm_target_selectors(target: &str) -> Option<Vec<String>> {
     let (os, cpu, libc) = match target {
         "aarch64-apple-darwin" => ("darwin", "arm64", None),
@@ -1169,22 +1232,24 @@ fn npm_target_selectors(target: &str) -> Option<Vec<String>> {
 }
 
 /// The exact npm arguments (after any runtime-specific leading args) for a
-/// pinned bridge install: `install --prefix <dir> --omit=dev
-/// --include=optional --ignore-scripts --no-audit --no-fund --os <os> --cpu
-/// <cpu> [--libc <libc>] [--registry <r>] <pkg>@<version>`.
-/// `--include=optional` keeps the platform-native optional dependency; the
-/// `--os`/`--cpu`/`--libc` selectors are derived from the trusted `target` and
-/// outrank any inherited npmrc/env target configuration; `@<version>` installs
-/// the exact checked-in release rather than a floating range. Pure so tests can
-/// assert the argument vector directly.
-fn npm_install_args(
-    install_dir: &Path,
-    tool: &ManagedTool,
-    target: &str,
-    registry: Option<&str>,
-) -> Vec<String> {
+/// pinned bridge install: `ci --prefix <dir> --omit=dev --include=optional
+/// --ignore-scripts --no-audit --no-fund --replace-registry-host=npmjs --os
+/// <os> --cpu <cpu> [--libc <libc>] [--registry <r>]` — deliberately with **no
+/// package spec**. `ci` installs the `package-lock.json`
+/// [`run_pinned_npm_install`] seeded the staged tree with, so npm resolves *to*
+/// the checked-in pin and rejects any tarball whose integrity differs, instead
+/// of re-resolving every `^` range from the registry and being graded
+/// afterwards. `--include=optional` keeps the platform-native optional
+/// dependency; the `--os`/`--cpu`/`--libc` selectors are derived from the
+/// trusted `target` and outrank any inherited npmrc/env target configuration.
+/// `--replace-registry-host=npmjs` is npm's default, passed explicitly for the
+/// same reason: the checked-in lock's `resolved` URLs all point at
+/// registry.npmjs.org, and an inherited `replace-registry-host=never` would
+/// otherwise send every fetch straight past a configured mirror. Pure so tests
+/// can assert the argument vector directly.
+fn npm_ci_args(install_dir: &Path, target: &str, registry: Option<&str>) -> Vec<String> {
     let mut args = vec![
-        "install".to_string(),
+        "ci".to_string(),
         "--prefix".to_string(),
         install_dir.to_string_lossy().into_owned(),
         "--omit=dev".to_string(),
@@ -1192,6 +1257,7 @@ fn npm_install_args(
         "--ignore-scripts".to_string(),
         "--no-audit".to_string(),
         "--no-fund".to_string(),
+        "--replace-registry-host=npmjs".to_string(),
     ];
     if let Some(selectors) = npm_target_selectors(target) {
         args.extend(selectors);
@@ -1200,8 +1266,28 @@ fn npm_install_args(
         args.push("--registry".to_string());
         args.push(registry.to_string());
     }
-    args.push(format!("{}@{}", tool.package, tool.version));
     args
+}
+
+/// Seed the staged tree with the release-controlled `package.json` and
+/// `package-lock.json` the following `npm ci` replays. Written before npm is
+/// spawned and never afterwards: `npm ci` clears `node_modules` itself and
+/// leaves both documents untouched, which is what makes the post-install graph
+/// comparison a post-condition instead of a race against upstream publishes.
+fn write_staged_npm_documents(
+    install_dir: &Path,
+    expected: &ToolLockEntry,
+) -> Result<(), ManagedToolError> {
+    for (name, document) in [
+        ("package.json", &expected.package_json),
+        ("package-lock.json", &expected.package_lock),
+    ] {
+        let json = serde_json::to_string_pretty(document)
+            .map_err(|error| ManagedToolError::Io(format!("serialize staged {name}: {error}")))?;
+        std::fs::write(install_dir.join(name), format!("{json}\n"))
+            .map_err(|error| ManagedToolError::Io(format!("write staged {name}: {error}")))?;
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1210,11 +1296,13 @@ async fn run_pinned_npm_install(
     node_install_dir: &Path,
     layout: &managed_node::RuntimeLayout,
     install_dir: &Path,
-    tool: &ManagedTool,
+    expected: &ToolLockEntry,
     target: &str,
     registry: Option<&str>,
     on_line: &InstallLineFn<'_>,
 ) -> Result<(), ManagedToolError> {
+    write_staged_npm_documents(install_dir, expected)?;
+
     let node_bin_dir = layout.bin_dir(node_install_dir);
     // On Windows npm is driven through `node.exe <npm-cli.js>` so no `cmd.exe`
     // batch/`PATHEXT` resolution is involved; on Unix the `bin/npm` shim is
@@ -1223,7 +1311,7 @@ async fn run_pinned_npm_install(
     let mut command = tokio::process::Command::new(&npm.program);
     command
         .args(&npm.leading_args)
-        .args(npm_install_args(install_dir, tool, target, registry));
+        .args(npm_ci_args(install_dir, target, registry));
 
     // npm's own `#!/usr/bin/env node` shebang (Unix) or its child `node`
     // lookups must resolve the managed node first.
@@ -1302,7 +1390,7 @@ async fn run_pinned_npm_install(
         Ok(())
     } else {
         Err(ManagedToolError::NpmInstall(format!(
-            "npm install exited with {status}"
+            "npm ci exited with {status}"
         )))
     }
 }
@@ -1508,12 +1596,15 @@ mod tests {
         }
     }
 
-    /// The checked-in `acp-tools.lock.json` is the release-controlled resolved
-    /// graph the installer verifies against, so it must parse, cover every
-    /// managed bridge, and pin the bridge root to the same immutable version as
-    /// `MANAGED_TOOLS`. Every graph entry must carry an exact version (no
-    /// floating range) and an SRI integrity (`sha512-`, or `sha1-` for legacy
-    /// npm packages) — the properties `verify_pinned_install` relies on.
+    /// The checked-in `acp-tools.lock.json` is what the installer feeds npm, so
+    /// it must parse, cover every managed bridge, and agree with
+    /// `MANAGED_TOOLS` on the immutable version in all three places `npm ci`
+    /// cross-checks: the `package.json` dependency, the lockfile root's
+    /// dependency, and the bridge's own resolved entry. `npm ci` aborts on any
+    /// desync between the first two. Every resolved entry must carry an exact
+    /// version (no floating range) and an SRI integrity (`sha512-`, or `sha1-`
+    /// for legacy npm packages) — the properties the replay and the
+    /// post-condition both rely on.
     #[test]
     fn embedded_acp_tools_lock_covers_every_bridge_with_exact_pins() {
         let lock = acp_tools_lock();
@@ -1524,6 +1615,43 @@ mod tests {
                 .unwrap_or_else(|| panic!("lock has no entry for {}", tool.id));
             assert_eq!(entry.package, tool.package, "{} package", tool.id);
             assert_eq!(entry.version, tool.version, "{} version", tool.id);
+
+            // `npm ci` refuses to run when package.json and the lockfile root
+            // disagree, so both must name the exact pin.
+            let dependency = |document: &serde_json::Value| {
+                document
+                    .get("dependencies")
+                    .and_then(|deps| deps.get(tool.package))
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string)
+            };
+            assert_eq!(
+                dependency(&entry.package_json).as_deref(),
+                Some(tool.version),
+                "{} packageJson dependency",
+                tool.id
+            );
+            assert_eq!(
+                entry
+                    .package_lock
+                    .pointer("/packages/")
+                    .and_then(|root| dependency(root))
+                    .as_deref(),
+                Some(tool.version),
+                "{} packageLock root dependency",
+                tool.id
+            );
+            // lockfileVersion 1 has no `packages` map to replay.
+            assert!(
+                entry
+                    .package_lock
+                    .get("lockfileVersion")
+                    .and_then(serde_json::Value::as_u64)
+                    .is_some_and(|version| version >= 2),
+                "{} lockfileVersion must be >= 2",
+                tool.id
+            );
+
             let root_key = format!("node_modules/{}", tool.package);
             let root = entry
                 .graph
@@ -1544,10 +1672,9 @@ mod tests {
                     pkg.integrity
                 );
             }
-            // The native-executable check needs a mapping for the current
-            // target; every mapping must point under a reviewed package in the
-            // graph, and every Berd-supported target must be covered (which
-            // includes whatever host this build runs on).
+            // Every native-executable mapping must point under a reviewed
+            // package in the graph. Target coverage is pinned separately, in
+            // `every_managed_target_has_selectors_and_a_native_executable`.
             for (target, native_rel) in &entry.native_executables {
                 assert!(
                     entry
@@ -1555,13 +1682,6 @@ mod tests {
                         .keys()
                         .any(|key| native_rel.starts_with(&format!("{key}/"))),
                     "{} native executable {native_rel} for {target} is not under any pinned package",
-                    tool.id
-                );
-            }
-            for target in SUPPORTED_TARGETS {
-                assert!(
-                    entry.native_executables.contains_key(*target),
-                    "{} is missing a native executable mapping for {target}",
                     tool.id
                 );
             }
@@ -1706,17 +1826,6 @@ mod tests {
 
     // -- fixtures -----------------------------------------------------------
 
-    /// The Berd target triples every managed bridge's lock must map a native
-    /// executable for — the same set [`managed_node::current_target_triple`]
-    /// recognizes.
-    const SUPPORTED_TARGETS: &[&str] = &[
-        "aarch64-apple-darwin",
-        "x86_64-apple-darwin",
-        "aarch64-unknown-linux-gnu",
-        "x86_64-unknown-linux-gnu",
-        "x86_64-pc-windows-msvc",
-    ];
-
     const TEST_PACKAGE: &str = "@agentclientprotocol/claude-agent-acp";
     /// The pinned bridge version the install-flow fixtures resolve to.
     const TEST_VERSION: &str = "1.2.3";
@@ -1746,10 +1855,43 @@ mod tests {
         }
     }
 
-    /// The release-controlled resolved graph the install-flow fixtures are
-    /// verified against: the pinned bridge root plus one transitive
-    /// dependency, each with an exact version and SRI integrity, and a native
-    /// executable mapping for the host target.
+    /// A `package-lock.json` document whose `packages` map is `graph` plus the
+    /// root `""` prefix entry npm always emits — the shape both the checked-in
+    /// documents and a post-install lockfile have.
+    fn test_lock_document(graph: &BTreeMap<String, ResolvedPackage>) -> serde_json::Value {
+        let mut packages = serde_json::Map::new();
+        packages.insert(
+            String::new(),
+            serde_json::json!({
+                "name": "berd-managed-acp-install",
+                "version": "0.0.0",
+                "dependencies": { TEST_PACKAGE: TEST_VERSION },
+            }),
+        );
+        for (key, pkg) in graph {
+            packages.insert(
+                key.clone(),
+                serde_json::json!({
+                    "version": pkg.version,
+                    "resolved": format!("https://registry.npmjs.org/{key}/-/tarball.tgz"),
+                    "integrity": pkg.integrity,
+                }),
+            );
+        }
+        serde_json::json!({
+            "name": "berd-managed-acp-install",
+            "version": "0.0.0",
+            "lockfileVersion": 3,
+            "requires": true,
+            "packages": serde_json::Value::Object(packages),
+        })
+    }
+
+    /// The release-controlled documents the install-flow fixtures replay: a
+    /// `package.json` naming the exact pin, and a lockfile resolving the
+    /// pinned bridge root plus one transitive dependency, each with an exact
+    /// version and SRI integrity, with a native executable mapping for the
+    /// host target.
     fn test_lock_entry() -> ToolLockEntry {
         let mut graph = BTreeMap::new();
         graph.insert(
@@ -1772,7 +1914,30 @@ mod tests {
             package: TEST_PACKAGE.to_string(),
             version: TEST_VERSION.to_string(),
             native_executables,
+            package_json: serde_json::json!({
+                "name": "berd-managed-acp-install",
+                "version": "0.0.0",
+                "private": true,
+                "dependencies": { TEST_PACKAGE: TEST_VERSION },
+            }),
+            package_lock: test_lock_document(&graph),
             graph,
+        }
+    }
+
+    /// The same entry with `graph` (and the `packageLock` it derives from)
+    /// mutated — the shape a checked-in-lock variation or a lockfile npm
+    /// rewrote takes.
+    fn with_graph(
+        entry: &ToolLockEntry,
+        mutate: impl FnOnce(&mut BTreeMap<String, ResolvedPackage>),
+    ) -> ToolLockEntry {
+        let mut graph = entry.graph.clone();
+        mutate(&mut graph);
+        ToolLockEntry {
+            package_lock: test_lock_document(&graph),
+            graph,
+            ..entry.clone()
         }
     }
 
@@ -1787,35 +1952,12 @@ mod tests {
         std::fs::write(path, serde_json::to_string_pretty(value).unwrap()).unwrap();
     }
 
-    /// Write a `package-lock.json` whose `packages` map is `graph` (plus the
-    /// root `""` prefix entry npm always emits) — the resolved graph
-    /// `verify_pinned_install` reads.
-    fn write_fixture_lockfile(install_dir: &Path, graph: &BTreeMap<String, ResolvedPackage>) {
-        let mut packages = serde_json::Map::new();
-        packages.insert(
-            String::new(),
-            serde_json::json!({ "name": "berd-managed-acp-install", "lockfileVersion": 3 }),
-        );
-        for (key, pkg) in graph {
-            packages.insert(
-                key.clone(),
-                serde_json::json!({ "version": pkg.version, "integrity": pkg.integrity }),
-            );
-        }
-        write_json(
-            &install_dir.join("package-lock.json"),
-            &serde_json::json!({
-                "lockfileVersion": 3,
-                "packages": serde_json::Value::Object(packages),
-            }),
-        );
-    }
-
-    /// A fixture install tree: the package's `package.json`, its
-    /// `dist/index.js` entrypoint, a `package-lock.json` whose resolved graph
-    /// is `entry.graph`, and the host target's required native executable so a
-    /// matching graph also satisfies the native-executable check.
-    fn write_fixture_install(install_dir: &Path, tool: &ManagedTool, entry: &ToolLockEntry) {
+    /// The `node_modules` half of an install tree: the package's
+    /// `package.json`, its `dist/index.js` entrypoint, and the host target's
+    /// required native executable. No lockfile — this is what a fake `npm ci`
+    /// materializes on top of the documents the installer seeded, which it
+    /// must leave in place.
+    fn write_fixture_tree(install_dir: &Path, tool: &ManagedTool, entry: &ToolLockEntry) {
         let root_key = format!("node_modules/{}", tool.package);
         let root_version = entry
             .graph
@@ -1826,7 +1968,6 @@ mod tests {
             &package_dir(install_dir, tool.package).join("package.json"),
             &serde_json::json!({ "name": tool.package, "version": root_version }),
         );
-        write_fixture_lockfile(install_dir, &entry.graph);
         let entrypoint = npm_entrypoint(install_dir, tool.package);
         std::fs::create_dir_all(entrypoint.parent().unwrap()).unwrap();
         std::fs::write(&entrypoint, "// bridge\n").unwrap();
@@ -1835,6 +1976,15 @@ mod tests {
             std::fs::create_dir_all(native.parent().unwrap()).unwrap();
             std::fs::write(&native, "// native\n").unwrap();
         }
+    }
+
+    /// A complete fixture install: the materialized tree plus the
+    /// `package-lock.json` recording `entry.graph`. Used where a finished
+    /// install is needed without running npm — the verifier's own tests, and
+    /// the previously-installed bridge an upgrade must preserve.
+    fn write_fixture_install(install_dir: &Path, tool: &ManagedTool, entry: &ToolLockEntry) {
+        write_fixture_tree(install_dir, tool, entry);
+        write_json(&install_dir.join("package-lock.json"), &entry.package_lock);
     }
 
     // -- shims --------------------------------------------------------------
@@ -1944,23 +2094,68 @@ mod tests {
 
     // -- install flow (fake npm) --------------------------------------------
 
-    /// A fake managed-node install dir whose `npm` copies a pre-built fixture
-    /// tree into the `--prefix` dir, standing in for a real floating install.
+    /// A fake managed-node install dir: `node` prints a version, `npm` runs
+    /// `body` (which sees `$prefix`, the `--prefix` it was passed).
     #[cfg(unix)]
-    fn write_fake_node_with_npm(node_install_dir: &Path, template: &Path, exit_code: i32) {
+    fn write_fake_node(node_install_dir: &Path, body: &str) {
         let bin = node_install_dir.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::write(bin.join("node"), "#!/bin/sh\necho v9.9.9\n").unwrap();
-        let npm = format!(
-            "#!/bin/sh\nprefix=\"\"\nprev=\"\"\nfor arg in \"$@\"; do\n  if [ \"$prev\" = \"--prefix\" ]; then prefix=\"$arg\"; fi\n  prev=\"$arg\"\ndone\ncp -R '{}/.' \"$prefix/\"\necho \"added 3 packages\"\nexit {exit_code}\n",
-            template.display()
-        );
-        std::fs::write(bin.join("npm"), npm).unwrap();
+        std::fs::write(bin.join("npm"), body).unwrap();
         use std::os::unix::fs::PermissionsExt;
         for name in ["node", "npm"] {
             std::fs::set_permissions(bin.join(name), std::fs::Permissions::from_mode(0o755))
                 .unwrap();
         }
+    }
+
+    /// The shared body of every fake npm: parse `--prefix`, then behave like
+    /// `npm ci` — refuse to run unless the installer seeded both documents
+    /// (copying them aside as `seeded-*` so a test can compare them against
+    /// the checked-in ones), and materialize `template` over the prefix. A
+    /// template containing its own `package-lock.json` therefore models an npm
+    /// that rewrote the seeded lock.
+    #[cfg(unix)]
+    fn fake_npm_prelude(template: &Path) -> String {
+        format!(
+            r#"#!/bin/sh
+prefix=""
+prev=""
+os="<unset>"
+cpu="<unset>"
+libc="<unset>"
+for arg in "$@"; do
+  case "$prev" in
+    --prefix) prefix="$arg" ;;
+    --os) os="$arg" ;;
+    --cpu) cpu="$arg" ;;
+    --libc) libc="$arg" ;;
+  esac
+  prev="$arg"
+done
+for doc in package.json package-lock.json; do
+  if [ ! -f "$prefix/$doc" ]; then
+    echo "npm ci: $prefix/$doc was not seeded" >&2
+    exit 66
+  fi
+  cp "$prefix/$doc" "$prefix/seeded-$doc"
+done
+cp -R '{}/.' "$prefix/"
+"#,
+            template.display()
+        )
+    }
+
+    /// A fake npm that installs `template` and exits with `exit_code`.
+    #[cfg(unix)]
+    fn write_fake_node_with_npm(node_install_dir: &Path, template: &Path, exit_code: i32) {
+        write_fake_node(
+            node_install_dir,
+            &format!(
+                "{}echo \"added 3 packages\"\nexit {exit_code}\n",
+                fake_npm_prelude(template)
+            ),
+        );
     }
 
     /// A fake npm that records the npm target-selector env vars it observed
@@ -1970,19 +2165,23 @@ mod tests {
     /// flow succeeds.
     #[cfg(unix)]
     fn write_fake_node_recording_target_selectors(node_install_dir: &Path, template: &Path) {
-        let bin = node_install_dir.join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        std::fs::write(bin.join("node"), "#!/bin/sh\necho v9.9.9\n").unwrap();
-        let npm = format!(
-            "#!/bin/sh\nprefix=\"\"\nprev=\"\"\nfor arg in \"$@\"; do\n  if [ \"$prev\" = \"--prefix\" ]; then prefix=\"$arg\"; fi\n  prev=\"$arg\"\ndone\ncp -R '{}/.' \"$prefix/\"\n{{\n  echo \"npm_config_os=${{npm_config_os:-<unset>}}\"\n  echo \"NPM_CONFIG_OS=${{NPM_CONFIG_OS:-<unset>}}\"\n  echo \"npm_config_cpu=${{npm_config_cpu:-<unset>}}\"\n  echo \"NPM_CONFIG_CPU=${{NPM_CONFIG_CPU:-<unset>}}\"\n  echo \"npm_config_libc=${{npm_config_libc:-<unset>}}\"\n  echo \"NPM_CONFIG_LIBC=${{NPM_CONFIG_LIBC:-<unset>}}\"\n}} > \"$prefix/env-selectors.txt\"\necho \"added 3 packages\"\nexit 0\n",
-            template.display()
+        write_fake_node(
+            node_install_dir,
+            &format!(
+                r#"{}{{
+  echo "npm_config_os=${{npm_config_os:-<unset>}}"
+  echo "NPM_CONFIG_OS=${{NPM_CONFIG_OS:-<unset>}}"
+  echo "npm_config_cpu=${{npm_config_cpu:-<unset>}}"
+  echo "NPM_CONFIG_CPU=${{NPM_CONFIG_CPU:-<unset>}}"
+  echo "npm_config_libc=${{npm_config_libc:-<unset>}}"
+  echo "NPM_CONFIG_LIBC=${{NPM_CONFIG_LIBC:-<unset>}}"
+}} > "$prefix/env-selectors.txt"
+echo "added 3 packages"
+exit 0
+"#,
+                fake_npm_prelude(template)
+            ),
         );
-        std::fs::write(bin.join("npm"), npm).unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        for name in ["node", "npm"] {
-            std::fs::set_permissions(bin.join(name), std::fs::Permissions::from_mode(0o755))
-                .unwrap();
-        }
     }
 
     /// A fake npm that records the `--os`/`--cpu`/`--libc` values it received on
@@ -1992,19 +2191,21 @@ mod tests {
     /// produces a passing fixture install so the whole flow succeeds.
     #[cfg(unix)]
     fn write_fake_node_recording_cli_selectors(node_install_dir: &Path, template: &Path) {
-        let bin = node_install_dir.join("bin");
-        std::fs::create_dir_all(&bin).unwrap();
-        std::fs::write(bin.join("node"), "#!/bin/sh\necho v9.9.9\n").unwrap();
-        let npm = format!(
-            "#!/bin/sh\nprefix=\"\"\nprev=\"\"\nos=\"<unset>\"\ncpu=\"<unset>\"\nlibc=\"<unset>\"\nfor arg in \"$@\"; do\n  case \"$prev\" in\n    --prefix) prefix=\"$arg\" ;;\n    --os) os=\"$arg\" ;;\n    --cpu) cpu=\"$arg\" ;;\n    --libc) libc=\"$arg\" ;;\n  esac\n  prev=\"$arg\"\ndone\ncp -R '{}/.' \"$prefix/\"\n{{\n  echo \"os=$os\"\n  echo \"cpu=$cpu\"\n  echo \"libc=$libc\"\n  echo \"userconfig=${{NPM_CONFIG_USERCONFIG:-<unset>}}\"\n}} > \"$prefix/cli-selectors.txt\"\necho \"added 3 packages\"\nexit 0\n",
-            template.display()
+        write_fake_node(
+            node_install_dir,
+            &format!(
+                r#"{}{{
+  echo "os=$os"
+  echo "cpu=$cpu"
+  echo "libc=$libc"
+  echo "userconfig=${{NPM_CONFIG_USERCONFIG:-<unset>}}"
+}} > "$prefix/cli-selectors.txt"
+echo "added 3 packages"
+exit 0
+"#,
+                fake_npm_prelude(template)
+            ),
         );
-        std::fs::write(bin.join("npm"), npm).unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        for name in ["node", "npm"] {
-            std::fs::set_permissions(bin.join(name), std::fs::Permissions::from_mode(0o755))
-                .unwrap();
-        }
     }
 
     /// Inherited `npm_config_os` / `_cpu` / `_libc` (either spelling) must be
@@ -2032,7 +2233,7 @@ mod tests {
         let tool = test_tool();
         let template = dir.path().join("template");
         std::fs::create_dir_all(&template).unwrap();
-        write_fixture_install(&template, &tool, &test_lock_entry());
+        write_fixture_tree(&template, &tool, &test_lock_entry());
         write_fake_node_recording_target_selectors(&node_install_dir, &template);
 
         install_npm_tool(
@@ -2094,7 +2295,7 @@ mod tests {
         let tool = test_tool();
         let template = dir.path().join("template");
         std::fs::create_dir_all(&template).unwrap();
-        write_fixture_install(&template, &tool, &test_lock_entry());
+        write_fixture_tree(&template, &tool, &test_lock_entry());
         write_fake_node_recording_cli_selectors(&node_install_dir, &template);
 
         let target = test_target();
@@ -2156,7 +2357,7 @@ mod tests {
         let template = dir.path().join("template");
         std::fs::create_dir_all(&template).unwrap();
         let expected = test_lock_entry();
-        write_fixture_install(&template, &tool, &expected);
+        write_fixture_tree(&template, &tool, &expected);
         write_fake_node_with_npm(&node_install_dir, &template, 0);
 
         // A per-version dir left behind by the old lock-pinned layout.
@@ -2208,6 +2409,49 @@ mod tests {
         assert!(recorded.iter().any(|line| line.contains("1.2.3 is ready")));
     }
 
+    /// npm is handed the release-controlled documents, not a package spec: both
+    /// must be on disk in the staged tree before npm is spawned, with exactly
+    /// the checked-in content. Every fake npm copies what it found aside as
+    /// `seeded-*` (and refuses to run if either is absent), so this reads back
+    /// what the real npm would have replayed.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn install_seeds_the_staged_tree_with_the_checked_in_documents() {
+        let dir = tempfile::tempdir().unwrap();
+        let packages_root = dir.path().join("packages");
+        let node_install_dir = packages_root.join("node").join("v9.9.9").join("plat");
+        let tool = test_tool();
+        let expected = test_lock_entry();
+
+        let template = dir.path().join("template");
+        std::fs::create_dir_all(&template).unwrap();
+        write_fixture_tree(&template, &tool, &expected);
+        write_fake_node_with_npm(&node_install_dir, &template, 0);
+
+        install_npm_tool(
+            &packages_root,
+            &node_install_dir,
+            &test_layout(),
+            &tool,
+            &expected,
+            test_target(),
+            None,
+            &|_| {},
+        )
+        .await
+        .unwrap();
+
+        let install_dir = tool_install_dir(&packages_root, tool.id);
+        let read = |name: &str| -> serde_json::Value {
+            serde_json::from_str(&std::fs::read_to_string(install_dir.join(name)).unwrap()).unwrap()
+        };
+        assert_eq!(read("seeded-package.json"), expected.package_json);
+        assert_eq!(read("seeded-package-lock.json"), expected.package_lock);
+        // And `npm ci` leaves both in place, which is what makes the
+        // post-install graph comparison a post-condition.
+        assert_eq!(read("package-lock.json"), expected.package_lock);
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn failed_npm_install_preserves_the_previous_tree_shim_and_state() {
@@ -2224,7 +2468,7 @@ mod tests {
 
         let template = dir.path().join("template");
         std::fs::create_dir_all(&template).unwrap();
-        write_fixture_install(&template, &tool, &test_lock_entry());
+        write_fixture_tree(&template, &tool, &test_lock_entry());
         write_fake_node_with_npm(&node_install_dir, &template, 7);
 
         let error = install_npm_tool(
@@ -2298,14 +2542,19 @@ mod tests {
 
     // -- pin verification ---------------------------------------------------
 
+    /// The install replays the seeded lockfile rather than resolving a spec:
+    /// the verb is `ci`, there is no `<pkg>@<version>` argument for npm to
+    /// re-resolve, and `--replace-registry-host=npmjs` is explicit so an
+    /// inherited `never` cannot send the lock's npmjs.org `resolved` URLs past
+    /// a configured mirror.
     #[test]
-    fn npm_install_args_pins_the_exact_version_and_keeps_optional_deps() {
-        let tool = test_tool();
+    fn npm_ci_args_replays_the_lockfile_with_no_package_spec() {
         let install_dir = Path::new("/data/packages/tools/claude-acp");
+        let args = npm_ci_args(install_dir, "aarch64-apple-darwin", None);
         assert_eq!(
-            npm_install_args(install_dir, &tool, "aarch64-apple-darwin", None),
+            args,
             vec![
-                "install".to_string(),
+                "ci".to_string(),
                 "--prefix".to_string(),
                 "/data/packages/tools/claude-acp".to_string(),
                 "--omit=dev".to_string(),
@@ -2313,24 +2562,20 @@ mod tests {
                 "--ignore-scripts".to_string(),
                 "--no-audit".to_string(),
                 "--no-fund".to_string(),
+                "--replace-registry-host=npmjs".to_string(),
                 "--os".to_string(),
                 "darwin".to_string(),
                 "--cpu".to_string(),
                 "arm64".to_string(),
-                format!("{}@{}", tool.package, tool.version),
             ]
         );
-        // No floating range: the spec is the exact checked-in version.
+        // Nothing npm could resolve against the live registry: no package
+        // spec, floating or exact.
         assert!(
-            npm_install_args(install_dir, &tool, "aarch64-apple-darwin", None)
-                .last()
-                .unwrap()
-                .ends_with(&format!("@{}", tool.version))
-        );
-        assert!(
-            !npm_install_args(install_dir, &tool, "aarch64-apple-darwin", None)
+            !args
                 .iter()
-                .any(|arg| arg.ends_with("@latest"))
+                .any(|arg| arg.contains('@') && !arg.starts_with("--")),
+            "{args:?}"
         );
     }
 
@@ -2338,11 +2583,10 @@ mod tests {
     /// derived from the target triple and outrank inherited npmrc/env target
     /// configuration, so cross-target materialization cannot be steered.
     #[test]
-    fn npm_install_args_derives_the_target_selectors_from_the_triple() {
-        let tool = test_tool();
+    fn npm_ci_args_derives_the_target_selectors_from_the_triple() {
         let install_dir = Path::new("/data/tools/claude-acp");
 
-        let linux = npm_install_args(install_dir, &tool, "x86_64-unknown-linux-gnu", None);
+        let linux = npm_ci_args(install_dir, "x86_64-unknown-linux-gnu", None);
         let os_at = linux.iter().position(|arg| arg == "--os").unwrap();
         assert_eq!(linux[os_at + 1], "linux");
         let cpu_at = linux.iter().position(|arg| arg == "--cpu").unwrap();
@@ -2351,7 +2595,7 @@ mod tests {
         assert_eq!(linux[libc_at + 1], "glibc");
 
         // Non-Linux targets omit `--libc` (npm treats it as Linux-only).
-        let windows = npm_install_args(install_dir, &tool, "x86_64-pc-windows-msvc", None);
+        let windows = npm_ci_args(install_dir, "x86_64-pc-windows-msvc", None);
         assert_eq!(
             windows[windows.iter().position(|a| a == "--os").unwrap() + 1],
             "win32"
@@ -2364,25 +2608,50 @@ mod tests {
     }
 
     #[test]
-    fn npm_install_args_appends_the_registry_before_the_spec() {
-        let tool = test_tool();
-        let args = npm_install_args(
+    fn npm_ci_args_appends_the_registry_last() {
+        let args = npm_ci_args(
             Path::new("/data/tools/claude-acp"),
-            &tool,
             "aarch64-apple-darwin",
             Some("https://registry.example.test/"),
         );
         let registry_at = args.iter().position(|arg| arg == "--registry").unwrap();
         assert_eq!(args[registry_at + 1], "https://registry.example.test/");
-        // The registry pair follows the target selectors.
+        // The registry pair follows the target selectors and closes the vector.
         let cpu_at = args.iter().position(|arg| arg == "--cpu").unwrap();
         assert!(registry_at > cpu_at);
-        // The package spec is last, after the registry pair.
-        assert_eq!(
-            args.last().unwrap(),
-            &format!("{}@{}", tool.package, tool.version)
+        assert_eq!(registry_at + 2, args.len());
+    }
+
+    /// `npm_target_selectors` and every bridge's `nativeExecutables` map must
+    /// cover exactly the targets Berd manages a Node runtime for. Adding a
+    /// triple to one and not the others is the asymmetric failure this pins:
+    /// a missing `nativeExecutables` entry rejects *every* install on that
+    /// target.
+    #[test]
+    fn every_managed_target_has_selectors_and_a_native_executable() {
+        let targets: Vec<&str> = managed_node::supported_target_triples().collect();
+        assert!(!targets.is_empty());
+        for target in &targets {
+            assert!(
+                npm_target_selectors(target).is_some(),
+                "npm_target_selectors has no mapping for {target}"
+            );
+        }
+        assert!(
+            targets.contains(&test_target()),
+            "this host's target {} is not in the managed set",
+            test_target()
         );
-        assert!(registry_at + 2 == args.len() - 1);
+        for entry in acp_tools_lock().tools.values() {
+            let mapped: Vec<&str> = entry
+                .native_executables
+                .keys()
+                .map(String::as_str)
+                .collect();
+            let mut expected = targets.clone();
+            expected.sort_unstable();
+            assert_eq!(mapped, expected, "{}", entry.package);
+        }
     }
 
     #[test]
@@ -2394,20 +2663,25 @@ mod tests {
         assert!(verify_pinned_install(dir.path(), &tool, &expected, test_target()).is_ok());
     }
 
+    // The graph-divergence cases below can no longer be reached by upstream
+    // drift — `npm ci` replays the seeded lockfile — so each models an npm
+    // that rewrote it, i.e. a substituted or misbehaving npm.
+
     #[test]
     fn verify_pinned_install_rejects_a_root_version_mismatch() {
         let dir = tempfile::tempdir().unwrap();
         let tool = test_tool();
         let expected = test_lock_entry();
         // The install's root package resolves to a version other than the pin.
-        let mut installed = expected.clone();
-        installed.graph.insert(
-            format!("node_modules/{}", tool.package),
-            ResolvedPackage {
-                version: "9.9.9".to_string(),
-                integrity: TEST_ROOT_INTEGRITY.to_string(),
-            },
-        );
+        let installed = with_graph(&expected, |graph| {
+            graph.insert(
+                format!("node_modules/{}", tool.package),
+                ResolvedPackage {
+                    version: "9.9.9".to_string(),
+                    integrity: TEST_ROOT_INTEGRITY.to_string(),
+                },
+            );
+        });
         write_fixture_install(dir.path(), &tool, &installed);
         let error = verify_pinned_install(dir.path(), &tool, &expected, test_target()).unwrap_err();
         assert!(
@@ -2423,14 +2697,15 @@ mod tests {
         let tool = test_tool();
         let expected = test_lock_entry();
         // Correct root version, tampered tarball → different lockfile integrity.
-        let mut installed = expected.clone();
-        installed.graph.insert(
-            format!("node_modules/{}", tool.package),
-            ResolvedPackage {
-                version: tool.version.to_string(),
-                integrity: "sha512-tamperedTAMPEREDtamperedTAMPEREDtamperedTAMPEREDtamperedTAMPEREDtamperedTAMPEREDtamperedTAMPERED==".to_string(),
-            },
-        );
+        let installed = with_graph(&expected, |graph| {
+            graph.insert(
+                format!("node_modules/{}", tool.package),
+                ResolvedPackage {
+                    version: tool.version.to_string(),
+                    integrity: "sha512-tamperedTAMPEREDtamperedTAMPEREDtamperedTAMPEREDtamperedTAMPEREDtamperedTAMPEREDtamperedTAMPERED==".to_string(),
+                },
+            );
+        });
         write_fixture_install(dir.path(), &tool, &installed);
         let error = verify_pinned_install(dir.path(), &tool, &expected, test_target()).unwrap_err();
         assert!(
@@ -2445,19 +2720,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let tool = test_tool();
         let expected = test_lock_entry();
-        // The root matches the pin exactly, but a transitive dependency resolved
-        // to a different in-range version — the registry-substitution attack the
-        // whole-graph check defends against.
-        let mut installed = expected.clone();
-        installed.graph.insert(
-            TEST_DEP_KEY.to_string(),
-            ResolvedPackage {
-                version: "9.9.9".to_string(),
-                integrity:
-                    "sha512-evilEVILevilEVILevilEVILevilEVILevilEVILevilEVILevilEVILevilEV=="
-                        .to_string(),
-            },
-        );
+        // The root matches the pin exactly, but a transitive dependency landed
+        // at a different in-range version — the registry-substitution shape the
+        // whole-graph check still backstops.
+        let installed = with_graph(&expected, |graph| {
+            graph.insert(
+                TEST_DEP_KEY.to_string(),
+                ResolvedPackage {
+                    version: "9.9.9".to_string(),
+                    integrity:
+                        "sha512-evilEVILevilEVILevilEVILevilEVILevilEVILevilEVILevilEVILevilEV=="
+                            .to_string(),
+                },
+            );
+        });
         write_fixture_install(dir.path(), &tool, &installed);
         let error = verify_pinned_install(dir.path(), &tool, &expected, test_target()).unwrap_err();
         assert!(
@@ -2473,8 +2749,9 @@ mod tests {
         let tool = test_tool();
         let expected = test_lock_entry();
         // The install is missing a pinned transitive dependency entirely.
-        let mut installed = expected.clone();
-        installed.graph.remove(TEST_DEP_KEY);
+        let installed = with_graph(&expected, |graph| {
+            graph.remove(TEST_DEP_KEY);
+        });
         write_fixture_install(dir.path(), &tool, &installed);
         let error = verify_pinned_install(dir.path(), &tool, &expected, test_target()).unwrap_err();
         assert!(
@@ -2490,16 +2767,17 @@ mod tests {
         let tool = test_tool();
         let expected = test_lock_entry();
         // The install contains a package not in the release-controlled graph.
-        let mut installed = expected.clone();
-        installed.graph.insert(
-            "node_modules/sneaky-dep".to_string(),
-            ResolvedPackage {
-                version: "0.0.1".to_string(),
-                integrity:
-                    "sha512-sneakySNEAKYsneakySNEAKYsneakySNEAKYsneakySNEAKYsneakySNEAKYsn=="
-                        .to_string(),
-            },
-        );
+        let installed = with_graph(&expected, |graph| {
+            graph.insert(
+                "node_modules/sneaky-dep".to_string(),
+                ResolvedPackage {
+                    version: "0.0.1".to_string(),
+                    integrity:
+                        "sha512-sneakySNEAKYsneakySNEAKYsneakySNEAKYsneakySNEAKYsneakySNEAKYsn=="
+                            .to_string(),
+                },
+            );
+        });
         write_fixture_install(dir.path(), &tool, &installed);
         let error = verify_pinned_install(dir.path(), &tool, &expected, test_target()).unwrap_err();
         assert!(
@@ -2560,9 +2838,10 @@ mod tests {
     /// The graph can match in full while the current target's native
     /// executable was never materialized (npm records every platform's
     /// optional package in the lockfile but installs only the compatible one,
-    /// and an optional fetch/extract failure is non-fatal). Verification must
-    /// reject that install so it cannot replace a working bridge with one that
-    /// cannot run.
+    /// and an optional fetch/extract failure stays non-fatal under `npm ci`).
+    /// That install must be rejected so it cannot replace a working bridge
+    /// with one that cannot run — as `Incomplete`, since nothing disagreed
+    /// with the pin; a flaky download is the overwhelmingly likely cause.
     #[test]
     fn verify_pinned_install_rejects_a_missing_native_executable() {
         let dir = tempfile::tempdir().unwrap();
@@ -2572,16 +2851,14 @@ mod tests {
         // Remove only the native executable — the graph and entrypoint stay.
         std::fs::remove_file(dir.path().join(TEST_NATIVE_REL)).unwrap();
         let error = verify_pinned_install(dir.path(), &tool, &expected, test_target()).unwrap_err();
-        assert!(
-            matches!(error, ManagedToolError::IntegrityMismatch(_)),
-            "{error}"
-        );
+        assert!(matches!(error, ManagedToolError::Incomplete(_)), "{error}");
         assert!(error.to_string().contains(TEST_NATIVE_REL), "{error}");
     }
 
     /// The lock must map a native executable for the target being installed.
     /// An install for a target with no mapping is rejected rather than
-    /// committing an unverifiable tree.
+    /// committing an unverifiable tree — a checked-in-data mistake, not a
+    /// disagreement with the pin.
     #[test]
     fn verify_pinned_install_rejects_an_unmapped_target() {
         let dir = tempfile::tempdir().unwrap();
@@ -2590,10 +2867,7 @@ mod tests {
         write_fixture_install(dir.path(), &tool, &expected);
         let error = verify_pinned_install(dir.path(), &tool, &expected, "sparc64-unknown-unknown")
             .unwrap_err();
-        assert!(
-            matches!(error, ManagedToolError::IntegrityMismatch(_)),
-            "{error}"
-        );
+        assert!(matches!(error, ManagedToolError::Incomplete(_)), "{error}");
         assert!(
             error.to_string().contains("sparc64-unknown-unknown"),
             "{error}"
@@ -2614,18 +2888,19 @@ mod tests {
         let old_shim = std::fs::read(shim_bin_dir(&packages_root).join(tool.binary)).unwrap();
         let old_state = std::fs::read(state_path(&packages_root)).unwrap();
 
-        // npm exits cleanly but resolves the root package to a version other
-        // than the pin.
+        // npm exits cleanly but rewrites the seeded lockfile so the root
+        // package resolves to a version other than the pin.
         let template = dir.path().join("template");
         std::fs::create_dir_all(&template).unwrap();
-        let mut installed = test_lock_entry();
-        installed.graph.insert(
-            format!("node_modules/{}", tool.package),
-            ResolvedPackage {
-                version: "9.9.9".to_string(),
-                integrity: TEST_ROOT_INTEGRITY.to_string(),
-            },
-        );
+        let installed = with_graph(&test_lock_entry(), |graph| {
+            graph.insert(
+                format!("node_modules/{}", tool.package),
+                ResolvedPackage {
+                    version: "9.9.9".to_string(),
+                    integrity: TEST_ROOT_INTEGRITY.to_string(),
+                },
+            );
+        });
         write_fixture_install(&template, &tool, &installed);
         write_fake_node_with_npm(&node_install_dir, &template, 0);
 
@@ -2680,22 +2955,23 @@ mod tests {
         let old_shim = std::fs::read(shim_bin_dir(&packages_root).join(tool.binary)).unwrap();
         let old_state = std::fs::read(state_path(&packages_root)).unwrap();
 
-        // npm resolves the pinned root version and root integrity exactly, but
-        // a transitive dependency resolves to a different in-range version with
-        // its own forged integrity — the registry-substitution attack the
-        // whole-graph verification defends against. The root-only check would
-        // have passed this; the graph check must reject it and keep the
-        // previous working bridge.
+        // npm leaves the pinned root version and root integrity alone but
+        // rewrites the seeded lockfile so a transitive dependency lands at a
+        // different in-range version with its own forged integrity — the
+        // registry-substitution shape the graph post-condition backstops. A
+        // root-only check would have passed this; the whole-graph check must
+        // reject it and keep the previous working bridge.
         let template = dir.path().join("template");
         std::fs::create_dir_all(&template).unwrap();
-        let mut installed = test_lock_entry();
-        installed.graph.insert(
-            TEST_DEP_KEY.to_string(),
-            ResolvedPackage {
-                version: "9.9.9".to_string(),
-                integrity: "sha512-swappedSWAPPEDswappedSWAPPEDswappedSWAPPEDswappedSWAPPEDswappedSWAPPEDswappedSW==".to_string(),
-            },
-        );
+        let installed = with_graph(&test_lock_entry(), |graph| {
+            graph.insert(
+                TEST_DEP_KEY.to_string(),
+                ResolvedPackage {
+                    version: "9.9.9".to_string(),
+                    integrity: "sha512-swappedSWAPPEDswappedSWAPPEDswappedSWAPPEDswappedSWAPPEDswappedSWAPPEDswappedSW==".to_string(),
+                },
+            );
+        });
         write_fixture_install(&template, &tool, &installed);
         std::fs::write(
             npm_entrypoint(&template, tool.package),
@@ -2761,12 +3037,12 @@ mod tests {
         let old_shim = std::fs::read(shim_bin_dir(&packages_root).join(tool.binary)).unwrap();
         let old_state = std::fs::read(state_path(&packages_root)).unwrap();
 
-        // The fixture install has a full-matching graph and entrypoint, then
-        // the native executable is removed to model npm's non-fatal optional
-        // package failure.
+        // The replayed install leaves the seeded lockfile intact and writes the
+        // entrypoint, then the native executable is removed to model npm's
+        // non-fatal optional package failure.
         let template = dir.path().join("template");
         std::fs::create_dir_all(&template).unwrap();
-        write_fixture_install(&template, &tool, &test_lock_entry());
+        write_fixture_tree(&template, &tool, &test_lock_entry());
         std::fs::remove_file(template.join(TEST_NATIVE_REL)).unwrap();
         write_fake_node_with_npm(&node_install_dir, &template, 0);
 
@@ -2783,10 +3059,7 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert!(
-            matches!(error, ManagedToolError::IntegrityMismatch(_)),
-            "{error}"
-        );
+        assert!(matches!(error, ManagedToolError::Incomplete(_)), "{error}");
         assert!(error.to_string().contains(TEST_NATIVE_REL), "{error}");
         assert_eq!(
             std::fs::read_to_string(old_entrypoint).unwrap(),
@@ -3253,14 +3526,17 @@ mod tests {
             managed_node::pinned_install_dir(&node_root).expect("windows target is pinned");
         let layout = runtime_layout().expect("windows layout resolves");
 
-        // Install a real managed bridge into the private prefix.
-        let tool = test_tool();
+        // Install a real managed bridge into the private prefix, from its real
+        // checked-in documents — the fixture pin has no registry to replay
+        // from.
+        let tool = MANAGED_TOOLS[0];
+        let expected = tool_lock_entry(tool.id).expect("the lock covers every managed bridge");
         install_npm_tool(
             &packages_root,
             &node_install_dir,
             &layout,
             &tool,
-            &test_lock_entry(),
+            expected,
             test_target(),
             None,
             &|_| {},
@@ -3275,7 +3551,7 @@ mod tests {
             &node_install_dir,
             &layout,
             &tool,
-            &test_lock_entry(),
+            expected,
             test_target(),
             None,
             &|_| {},

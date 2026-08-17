@@ -3,14 +3,16 @@
 //! Spawned from app setup (same pattern as `app_data_migration`): installs or
 //! upgrades every managed bridge ([`managed_acp_tools::MANAGED_TOOLS`]) to its
 //! checked-in pinned version on launch, so a new bridge release ships to users
-//! — after a pin bump — the next time Berd starts. Each install runs
-//! `npm install <pkg>@<version>` onto the Berd-managed Node runtime in app data
-//! and verifies the resolved dependency graph — every package's version and
-//! integrity — against the checked-in `acp-tools.lock.json` before
-//! committing. Failures (including verification rejections) are logged,
-//! recorded in `packages/state.json`, and retried on the next launch; a
-//! previously installed version keeps working in the meantime, so an offline
-//! launch or a tampered registry never removes a working bridge. Superseded
+//! — after a pin bump — the next time Berd starts. Each install replays the
+//! bridge's release-controlled `package.json` + `package-lock.json` from
+//! `acp-tools.lock.json` with `npm ci` onto the Berd-managed Node runtime in
+//! app data — npm resolves to the checked-in graph and refuses any tarball
+//! whose integrity differs — then re-reads the replayed lockfile and requires
+//! the target's native executable to exist before committing. Failures
+//! (including rejections) are logged, recorded in `packages/state.json`, and
+//! retried on the next launch; a previously installed version keeps working in
+//! the meantime, so an offline launch or a tampered registry never removes a
+//! working bridge. Superseded
 //! managed Node runtimes are pruned only in the epilogue of a fully-successful
 //! run — every bridge shim execs its Node by absolute versioned path, so the
 //! old runtime must outlive the last shim that references it.

@@ -16,7 +16,8 @@
       "!.agents",
       "!.worktrees",
       "!.claude/worktrees",
-      "!justfile"
+      "!justfile",
+      "!acp-tools.lock.json"
     ]
   },
   "formatter": {
