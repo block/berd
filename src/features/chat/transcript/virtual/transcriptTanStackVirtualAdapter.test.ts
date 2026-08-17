@@ -92,6 +92,63 @@ describe("TranscriptTanStackVirtualAdapter", () => {
     expect(updateVirtualizer).toHaveBeenCalled();
   });
 
+  it("forwards a low-generation authority correction after ordinary coordinator traffic", () => {
+    const adapter = createAdapter({ viewportHeight: 200 });
+    adapter.setRows(makeRows(5, 100));
+    const container = document.createElement("div");
+    let scrollTop = 0;
+    const writes: number[] = [];
+    Object.defineProperties(container, {
+      clientHeight: { configurable: true, value: 200 },
+      clientWidth: { configurable: true, value: 720 },
+      scrollHeight: { configurable: true, value: 500 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          writes.push(value);
+          scrollTop = Math.min(300, Math.max(0, value));
+        },
+      },
+    });
+    container.getBoundingClientRect = () =>
+      ({ top: 0, width: 720, height: 200 }) as DOMRect;
+    const coordinator = new TranscriptViewportCoordinator({
+      container,
+      engine: adapter,
+      getFooterHeight: () => 0,
+    });
+    const ordinaryGeometry = () => ({
+      scrollTop: container.scrollTop,
+      viewportHeight: 200,
+      widthScope: WIDTH_SCOPE,
+      browserScrollHeight: 500,
+    });
+
+    coordinator.syncViewport(ordinaryGeometry(), { source: "browser" });
+    coordinator.syncViewport(ordinaryGeometry(), { source: "browser" });
+    writes.length = 0;
+
+    const correction = coordinator.installAuthorityAnchor(
+      {
+        type: "row",
+        rowId: "row-1",
+        offsetWithinRow: 20,
+        anchorRevision: "unused",
+      },
+      { generation: 1, cause: "target" },
+    );
+
+    expect(correction).toMatchObject({
+      nextScrollTop: 120,
+      operation: { generation: 1, cause: "target" },
+    });
+    expect(writes).toEqual([120]);
+    expect(container.scrollTop).toBe(120);
+    expect(adapter.getScrollTop()).toBe(120);
+    expect(adapter.getState().scrollTop).toBe(120);
+  });
+
   it("uses updated TanStack end-anchor APIs while preserving Goose bottom follow", () => {
     const adapter = createAdapter({ viewportHeight: 500 });
     const rows = makeRows(20, 100);

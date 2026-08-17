@@ -239,11 +239,18 @@ export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
       return null;
     }
     let correction: TranscriptScrollCorrection | null = null;
-    this.reconcile(() => {
-      correction =
-        this.engine.installAuthorityAnchor?.(anchor, operation) ?? null;
-      return correction;
-    });
+    // An authority operation is already governed by the external authority;
+    // reconcile it as-is instead of allocating a coordinator-local generation.
+    this.reconcile(
+      () => {
+        correction =
+          this.engine.installAuthorityAnchor?.(anchor, operation) ?? null;
+        return correction;
+      },
+      {},
+      true,
+      operation,
+    );
     return correction;
   }
 
@@ -263,10 +270,12 @@ export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
     mutate: () => TranscriptScrollCorrection | null,
     options: TranscriptViewportWriteOptions = {},
     syncBeforeMutation = true,
+    reconciliationOperation?: TranscriptScrollOperation,
   ): TranscriptBrowserViewportSnapshot {
     const before = this.browser.read();
-    const operation = this.resolveOperation(options);
-    if (this.isStale(operation)) {
+    const operation = reconciliationOperation ?? this.resolveOperation(options);
+    const authorityReconciliation = reconciliationOperation !== undefined;
+    if (!authorityReconciliation && this.isStale(operation)) {
       return before;
     }
     let syncCorrection: TranscriptScrollCorrection | null = null;
@@ -286,7 +295,7 @@ export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
       mutationCorrection ??
       (this.engine.getPendingScrollCorrection() ? syncCorrection : null);
     const committedOperation = correction?.operation ?? operation;
-    if (this.isStale(committedOperation)) {
+    if (!authorityReconciliation && this.isStale(committedOperation)) {
       return before;
     }
     const acceptedEngineScrollTop = this.engine.getState().scrollTop;
