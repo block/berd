@@ -40,6 +40,11 @@ archive_url() {
     "$(release_archive_name "$VERSION" "$platform")"
 }
 
+LATEST_MACOS_DMG_NAME="Berd-latest-darwin-aarch64.dmg"
+LATEST_MACOS_DMG_PATH="$WORK_DIR/$LATEST_MACOS_DMG_NAME"
+LATEST_MACOS_DMG_URL="https://github.com/${REPOSITORY}/releases/download/${ROLLING_TAG}/${LATEST_MACOS_DMG_NAME}"
+LATEST_MACOS_DMG_DIGEST=""
+
 staged_digest() {
   local platform="$1"
   awk 'NR == 1 {print $1}' "$(archive_path "$platform").sha256"
@@ -84,6 +89,18 @@ for PLATFORM in "${RELEASE_PLATFORMS[@]}"; do
   ARCHIVE_URL="$(archive_url "$PLATFORM")"
   MANIFEST_ARGS+=("$PLATFORM" "$WORK_DIR/$ARCHIVE_NAME.sig" "$ARCHIVE_URL")
   SUMMARY_LINES+=("- $PLATFORM updater SHA-256: \`$EXPECTED_DIGEST\`" "- $PLATFORM updater URL: $ARCHIVE_URL")
+  if [[ "$PLATFORM" == "darwin-aarch64" ]]; then
+    VERSIONED_DMG_NAME="Berd_${VERSION}_${PLATFORM}.dmg"
+    gh release download "$TAG" --repo "$REPOSITORY" --dir "$WORK_DIR" \
+      --pattern "$VERSIONED_DMG_NAME"
+    if [[ ! -s "$WORK_DIR/$VERSIONED_DMG_NAME" ]]; then
+      release_error "missing or empty staged input: $VERSIONED_DMG_NAME"
+      exit 1
+    fi
+    mv "$WORK_DIR/$VERSIONED_DMG_NAME" "$LATEST_MACOS_DMG_PATH"
+    LATEST_MACOS_DMG_DIGEST="$(shasum -a 256 "$LATEST_MACOS_DMG_PATH" | awk '{print $1}')"
+    SUMMARY_LINES+=("- macOS installer SHA-256: \`$LATEST_MACOS_DMG_DIGEST\`" "- macOS installer URL: $LATEST_MACOS_DMG_URL")
+  fi
 done
 
 if [[ -n "${BERD_RELEASE_CHANNEL_ID:-}" ]]; then
@@ -171,6 +188,9 @@ for PLATFORM in "${RELEASE_PLATFORMS[@]}"; do
   ARCHIVE_NAME="$(release_archive_name "$VERSION" "$PLATFORM")"
   UPLOADS+=("$WORK_DIR/$ARCHIVE_NAME" "$WORK_DIR/$ARCHIVE_NAME.sig" "$WORK_DIR/$ARCHIVE_NAME.sha256")
 done
+if [[ -n "$LATEST_MACOS_DMG_DIGEST" ]]; then
+  UPLOADS+=("$LATEST_MACOS_DMG_PATH")
+fi
 gh release upload "$ROLLING_TAG" --repo "$REPOSITORY" --clobber "${UPLOADS[@]}"
 
 # Confirm every updater payload is anonymously available before mutating the feed.
@@ -199,6 +219,29 @@ for PLATFORM in "${RELEASE_PLATFORMS[@]}"; do
     exit 1
   fi
 done
+
+if [[ -n "$LATEST_MACOS_DMG_DIGEST" ]]; then
+  accessible=false
+  for attempt in 1 2 3 4 5; do
+    if curl \
+      --fail \
+      --location \
+      --retry 2 \
+      --retry-all-errors \
+      -H 'Cache-Control: no-cache' \
+      -o "$WORK_DIR/public-$LATEST_MACOS_DMG_NAME" \
+      "${LATEST_MACOS_DMG_URL}?run=${GITHUB_RUN_ID:-manual}-${attempt}" \
+      && [[ "$(shasum -a 256 "$WORK_DIR/public-$LATEST_MACOS_DMG_NAME" | awk '{print $1}')" == "$LATEST_MACOS_DMG_DIGEST" ]]; then
+      accessible=true
+      break
+    fi
+    sleep "${BERD_PROMOTION_RETRY_DELAY_SECONDS:-10}"
+  done
+  if [[ "$accessible" != true ]]; then
+    release_error "rolling macOS installer was not publicly accessible: $LATEST_MACOS_DMG_URL"
+    exit 1
+  fi
+fi
 
 RECHECK_MANIFEST="$WORK_DIR/rechecked-latest.json"
 fetch_manifest "$RECHECK_MANIFEST" "${MANIFEST_URL}?run=${GITHUB_RUN_ID:-manual}-recheck" recheck
