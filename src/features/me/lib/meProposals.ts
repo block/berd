@@ -108,7 +108,7 @@ export async function listProposals(): Promise<MemoryProposal[]> {
  * Rewrite the queue without the given proposal, matched by id — so two
  * identical proposals stay distinct and resolving one leaves the other.
  */
-async function removeFromQueue(proposal: MemoryProposal): Promise<void> {
+export async function removeFromQueue(proposal: MemoryProposal): Promise<void> {
   const homeDir = await getHomeDir();
   const path = queuePath(homeDir);
   if (!(await pathExists(path))) return;
@@ -153,6 +153,28 @@ export function appendBullet(contents: string, entry: string): string {
   const bullet = `- ${entry}`;
   const trimmed = contents.replace(/\s+$/, "");
   return trimmed ? `${trimmed}\n${bullet}\n` : `${bullet}\n`;
+}
+
+/**
+ * Remove the bullet matching `entry` from a doc.
+ *
+ * The undo path for an auto-added memory, so it has to be conservative:
+ * only a line that is exactly this bullet is removed, and only the first
+ * one. Anything the user has since reworded stays put — a delete that
+ * quietly took out a nearby line the user wrote themselves would be much
+ * worse than a delete that no-ops.
+ */
+export function removeBullet(contents: string, entry: string): string {
+  const wanted = entry.trim();
+  const lines = contents.split("\n");
+  const index = lines.findIndex((line) => {
+    const text = line.trim();
+    if (!text.startsWith("- ")) return false;
+    return text.slice(2).trim() === wanted;
+  });
+  if (index === -1) return contents;
+  lines.splice(index, 1);
+  return lines.join("\n");
 }
 
 /**

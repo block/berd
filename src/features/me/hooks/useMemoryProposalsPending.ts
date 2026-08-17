@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import { listProposals } from "../lib/meProposals";
+
+import { listAddedEntries } from "../lib/meMemoryWrites";
 
 /**
- * Pending memory-proposal count for the settings nav badge.
+ * Count of recently added memories, for the Memory nav badge.
  *
- * Proposals arrive when the user isn't looking — the noticer queues them
- * after a conversation goes idle — so the Memory row needs a quiet
- * indicator or the consent queue is functionally invisible. Polling is
- * deliberately lazy (the queue is a tiny local file); a focus listener
+ * Memory is written automatically, so the badge isn't a to-do list — it's
+ * how the user finds out something landed while they were elsewhere. The
+ * count clears as they acknowledge or delete entries, and unreviewed ones
+ * age out on their own so this can't become a permanent chore.
+ *
+ * Polling is deliberately lazy (a tiny local file); a focus listener
  * catches the common "came back to the app" moment.
  */
 const POLL_INTERVAL_MS = 30_000;
@@ -17,8 +20,7 @@ export function useMemoryProposalsPending(): number {
 
   const refresh = useCallback(async () => {
     try {
-      const proposals = await listProposals();
-      setCount(proposals.length);
+      setCount((await listAddedEntries()).length);
     } catch {
       // Badge is best-effort; a read failure just means no badge.
       setCount(0);

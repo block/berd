@@ -344,7 +344,7 @@ fn propose_memory(content: &str, topic: Option<&str>) -> Result<String, String> 
     file.write_all(line.as_bytes())
         .map_err(|e| format!("Couldn't queue the proposal: {e}"))?;
 
-    Ok("Proposed. The user will review this in Berd — nothing is saved unless they approve it. Mention the proposal briefly and move on; don't re-propose it this conversation.".to_string())
+    Ok("Recorded. Berd adds this to the user's memory and shows them what it added, so they can delete it if they don't want it. Mention briefly that you'll remember it, then move on; don't record the same thing twice this conversation.".to_string())
 }
 
 /// Unique-enough proposal id without a uuid dependency: epoch nanos plus

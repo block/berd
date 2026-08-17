@@ -30,12 +30,8 @@ import {
 } from "../lib/meTopics";
 import { getMemoryPrefs, setMemoryPrefs } from "../lib/memoryPrefs";
 import { setMemoryMcpEnabled } from "@/shared/api/system";
-import {
-  approveProposal,
-  dismissProposal,
-  listProposals,
-  type MemoryProposal,
-} from "../lib/meProposals";
+import { useAddedMemories } from "../hooks/useAddedMemories";
+import type { AddedMemoryEntry } from "../lib/meMemoryWrites";
 import { publishMeFile } from "../lib/mePublish";
 
 type LoadState = { status: "loading" } | { status: "error" } | MeFileState;
@@ -193,7 +189,11 @@ export function MeSettings() {
   const [memoryEnabled, setMemoryEnabled] = useState(
     () => getMemoryPrefs().enabled,
   );
-  const [proposals, setProposals] = useState<MemoryProposal[]>([]);
+  const {
+    entries: added,
+    acknowledge: acknowledgeAdded,
+    remove: removeAdded,
+  } = useAddedMemories();
 
   const refresh = useCallback(async () => {
     try {
@@ -208,7 +208,6 @@ export function MeSettings() {
       // rather than breaking the page.
       setTopics([]);
     }
-    setProposals(await listProposals());
   }, []);
 
   useEffect(() => {
@@ -223,21 +222,13 @@ export function MeSettings() {
     }
   };
 
-  const handleApproveProposal = async (proposal: MemoryProposal) => {
-    try {
-      await approveProposal(proposal);
-    } catch {
-      // The proposal stays in the queue; refresh below re-reads reality.
-    }
-    await refresh();
+  const handleAcknowledgeAdded = async (entry: AddedMemoryEntry) => {
+    await acknowledgeAdded(entry);
   };
 
-  const handleDismissProposal = async (proposal: MemoryProposal) => {
-    try {
-      await dismissProposal(proposal);
-    } catch {
-      // Same: never let a queue hiccup break the page.
-    }
+  const handleDeleteAdded = async (entry: AddedMemoryEntry) => {
+    await removeAdded(entry);
+    // The entry left a memory file, so re-read the docs behind the cards.
     await refresh();
   };
 
@@ -325,43 +316,39 @@ export function MeSettings() {
           </Alert>
         )}
 
-        {memoryEnabled && proposals.length > 0 && (
-          <SettingsSection title={t("me.proposals.title")}>
+        {memoryEnabled && added.length > 0 && (
+          <SettingsSection title={t("me.added.title")}>
             <p className="text-xs text-muted-foreground">
-              {t("me.proposals.description")}
+              {t("me.added.description")}
             </p>
             <div className="mt-3 space-y-2">
-              {proposals.map((proposal) => (
+              {added.map((entry) => (
                 <div
-                  key={proposal.id}
+                  key={entry.id}
                   className="flex items-start justify-between gap-4 rounded-md border bg-muted/50 px-4 py-3"
                 >
                   <div className="min-w-0">
-                    <p className="text-xs text-foreground">
-                      {proposal.content}
-                    </p>
+                    <p className="text-xs text-foreground">{entry.content}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      {proposal.topic
-                        ? t("me.proposals.topicLabel", {
-                            topic: proposal.topic,
-                          })
-                        : t("me.proposals.generalLabel")}
+                      {entry.topic
+                        ? t("me.added.inTopic", { topic: entry.topic })
+                        : t("me.added.inGeneral")}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <Button
                       size="xs"
                       variant="ghost"
-                      onClick={() => void handleDismissProposal(proposal)}
+                      onClick={() => void handleDeleteAdded(entry)}
                     >
-                      {t("me.proposals.dismiss")}
+                      {t("me.added.delete")}
                     </Button>
                     <Button
                       size="xs"
-                      variant="primary"
-                      onClick={() => void handleApproveProposal(proposal)}
+                      variant="ghost"
+                      onClick={() => void handleAcknowledgeAdded(entry)}
                     >
-                      {t("me.proposals.approve")}
+                      {t("me.added.ok")}
                     </Button>
                   </div>
                 </div>

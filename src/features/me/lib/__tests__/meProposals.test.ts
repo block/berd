@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { appendBullet, insertIntoSection } from "../meProposals";
+import { appendBullet, insertIntoSection, removeBullet } from "../meProposals";
 import { vocabularyTopicName } from "../memoryTopicVocabulary";
 
 describe("appendBullet", () => {
@@ -62,5 +62,36 @@ describe("vocabularyTopicName", () => {
     expect(vocabularyTopicName("Soccer")).toBeNull();
     expect(vocabularyTopicName("Jazz")).toBeNull();
     expect(vocabularyTopicName("family")).toBeNull();
+  });
+});
+
+describe("removeBullet", () => {
+  const DOC = [
+    "# Home",
+    "",
+    "*What goes here.*",
+    "",
+    "- Kids' soccer is Mondays.",
+    "- Wife works late Tuesdays.",
+    "",
+  ].join("\n");
+
+  it("removes the matching bullet and leaves the rest", () => {
+    const next = removeBullet(DOC, "Wife works late Tuesdays.");
+    expect(next).not.toContain("Wife works late Tuesdays.");
+    expect(next).toContain("- Kids' soccer is Mondays.");
+    expect(next).toContain("*What goes here.*");
+  });
+
+  it("no-ops when the entry was reworded or already gone", () => {
+    // Deleting a nearby line the user wrote themselves would be far worse
+    // than a delete that does nothing, so matching is exact.
+    expect(removeBullet(DOC, "Wife works late on Tuesdays")).toBe(DOC);
+    expect(removeBullet(DOC, "Never mentioned.")).toBe(DOC);
+  });
+
+  it("removes only the first match", () => {
+    const doubled = "- Same fact.\n- Same fact.\n";
+    expect(removeBullet(doubled, "Same fact.")).toBe("- Same fact.\n");
   });
 });

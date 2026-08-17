@@ -1,5 +1,6 @@
 import { logRendererEvent } from "@/shared/api/rendererTelemetry";
 import { isTextContent, type Message } from "@/shared/types/messages";
+import { drainMemoryQueue } from "./memoryAutoApply";
 import { noticeFromTranscript } from "./memoryNoticer";
 
 /**
@@ -88,8 +89,18 @@ async function runPass(
     const queued = await noticeFromTranscript(transcript, sessionId);
     void logRendererEvent(
       "info",
-      `[me:noticer] pass finished for ${sessionId}: queued ${queued} proposal(s)`,
+      `[me:noticer] pass finished for ${sessionId}: queued ${queued} candidate(s)`,
     );
+    // Apply straight away rather than waiting for a surface to poll: the
+    // card that discloses the write should appear while the person is
+    // still in the conversation that produced it.
+    if (queued > 0) {
+      const added = await drainMemoryQueue().catch(() => []);
+      void logRendererEvent(
+        "info",
+        `[me:noticer] added ${added.length} entr${added.length === 1 ? "y" : "ies"} to memory`,
+      );
+    }
   } catch (error) {
     void logRendererEvent("warn", `[me:noticer] pass failed: ${error}`);
     console.warn("[me] noticer pass failed", error);

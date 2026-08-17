@@ -65,23 +65,23 @@
     }
   },
   "archive": {
-    "title": "Archivo",
     "autoArchive": {
-      "sectionTitle": "Archivado automático",
-      "label": "Archivar chats inactivos",
-      "description": "Archiva automáticamente los chats después de este tiempo sin mensajes. Los chats fijados en Inicio nunca se archivan automáticamente.",
-      "confirmTitle": "¿Activar el archivado automático?",
-      "confirmDescription": "Berd archivará los chats no fijados {{duration}} sin volver a preguntar. Puedes restaurarlos desde Archivo o desactivar esta opción cuando quieras.",
       "confirmAction": "Activar",
+      "confirmDescription": "Berd archivará los chats no fijados {{duration}} sin volver a preguntar. Puedes restaurarlos desde Archivo o desactivar esta opción cuando quieras.",
+      "confirmTitle": "¿Activar el archivado automático?",
+      "description": "Archiva automáticamente los chats después de este tiempo sin mensajes. Los chats fijados en Inicio nunca se archivan automáticamente.",
+      "label": "Archivar chats inactivos",
       "options": {
-        "never": "Nunca",
         "1-day": "Después de 1 día",
-        "7-days": "Después de 7 días",
         "14-days": "Después de 14 días",
         "30-days": "Después de 30 días",
-        "90-days": "Después de 90 días"
-      }
-    }
+        "7-days": "Después de 7 días",
+        "90-days": "Después de 90 días",
+        "never": "Nunca"
+      },
+      "sectionTitle": "Archivado automático"
+    },
+    "title": "Archivo"
   },
   "chats": {
     "empty": "No hay chats archivados.",
@@ -411,6 +411,14 @@
   "me": {
     "addTopic": "Añadir tema",
     "addTopicLabel": "Nuevo tema",
+    "added": {
+      "delete": "Eliminar",
+      "description": "Berd agregó esto desde tus chats recientes. Elimina lo que prefieras que no guarde.",
+      "inGeneral": "Preferencia general",
+      "inTopic": "En {{topic}}",
+      "ok": "OK",
+      "title": "Agregado a la memoria"
+    },
     "cancel": "Cancelar",
     "closeTopic": "Cerrar",
     "create": "Crear mi archivo",
@@ -433,20 +441,6 @@
     "ownership": "Es tuyo. Léelo, edítalo o elimínalo cuando quieras.",
     "path": "Vive en {{path}}.",
     "previewTab": "Vista previa",
-    "proposalCard": {
-      "approved": "Añadido a la memoria",
-      "dismissed": "Descartado",
-      "reviewed": "Ya revisado",
-      "title": "¿Recordar esto?"
-    },
-    "proposals": {
-      "approve": "Aprobar",
-      "description": "Cosas que los agentes notaron y pidieron recordar. No se guarda nada a menos que lo apruebes.",
-      "dismiss": "Descartar",
-      "generalLabel": "Preferencia general",
-      "title": "Memorias propuestas",
-      "topicLabel": "Para el tema: {{topic}}"
-    },
     "refresh": "Actualizar",
     "reveal": "Ir al archivo.",
     "save": "Guardar",
@@ -454,10 +448,10 @@
     "spineTitle": "Sobre ti",
     "title": "Memoria",
     "toggle": {
-      "description": "Berd usa archivos de memoria para guardar la información, instrucciones y preferencias que le das. Nunca se añade nada sin tu aprobación.",
+      "description": "Berd usa archivos de memoria para guardar información, instrucciones y preferencias que le das. Todo lo que agrega aparece aquí y puedes eliminarlo.",
       "label": "Usar memoria"
     },
-    "topicsHint": "Los temas guardan conocimiento más profundo que solo se carga cuando es relevante; los agentes proponen nuevos a medida que te conocen, y nada se guarda sin tu aprobación.",
+    "topicsHint": "Los temas guardan conocimiento más profundo que solo se carga cuando es relevante: los agentes los amplían al conocerte y puedes eliminar lo que agreguen.",
     "topicsTitle": "Temas",
     "unsavedChanges": "Cambios sin guardar"
   },

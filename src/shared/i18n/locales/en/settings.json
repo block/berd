@@ -65,23 +65,23 @@
     }
   },
   "archive": {
-    "title": "Archive",
     "autoArchive": {
-      "sectionTitle": "Automatic archiving",
-      "label": "Archive inactive chats",
-      "description": "Automatically archive chats after this much time without a message. Chats pinned to Home are never archived automatically.",
-      "confirmTitle": "Turn on automatic archiving?",
-      "confirmDescription": "Berd will archive unpinned chats {{duration}} without another prompt. You can restore them from Archive or turn this off at any time.",
       "confirmAction": "Turn on",
+      "confirmDescription": "Berd will archive unpinned chats {{duration}} without another prompt. You can restore them from Archive or turn this off at any time.",
+      "confirmTitle": "Turn on automatic archiving?",
+      "description": "Automatically archive chats after this much time without a message. Chats pinned to Home are never archived automatically.",
+      "label": "Archive inactive chats",
       "options": {
-        "never": "Never",
         "1-day": "After 1 day",
-        "7-days": "After 7 days",
         "14-days": "After 14 days",
         "30-days": "After 30 days",
-        "90-days": "After 90 days"
-      }
-    }
+        "7-days": "After 7 days",
+        "90-days": "After 90 days",
+        "never": "Never"
+      },
+      "sectionTitle": "Automatic archiving"
+    },
+    "title": "Archive"
   },
   "chats": {
     "empty": "Archived chats will show here.",
@@ -411,6 +411,14 @@
   "me": {
     "addTopic": "Add topic",
     "addTopicLabel": "New topic",
+    "added": {
+      "delete": "Delete",
+      "description": "Berd added these from your recent chats. Delete anything you'd rather it not keep.",
+      "inGeneral": "General preference",
+      "inTopic": "In {{topic}}",
+      "ok": "OK",
+      "title": "Added to memory"
+    },
     "cancel": "Cancel",
     "closeTopic": "Close",
     "create": "Create my file",
@@ -433,20 +441,6 @@
     "ownership": "You own this. Read it, edit it, delete it anytime.",
     "path": "Lives at {{path}}.",
     "previewTab": "Preview",
-    "proposalCard": {
-      "approved": "Added to memory",
-      "dismissed": "Dismissed",
-      "reviewed": "Already reviewed",
-      "title": "Remember this?"
-    },
-    "proposals": {
-      "approve": "Approve",
-      "description": "Things agents noticed and asked to remember. Nothing is saved unless you approve it.",
-      "dismiss": "Dismiss",
-      "generalLabel": "General preference",
-      "title": "Proposed memories",
-      "topicLabel": "For topic: {{topic}}"
-    },
     "refresh": "Refresh",
     "reveal": "Go to file.",
     "save": "Save",
@@ -454,10 +448,10 @@
     "spineTitle": "About you",
     "title": "Memory",
     "toggle": {
-      "description": "Berd uses memory files to store information, instructions, and preferences you give it. Nothing is ever added without your okay.",
+      "description": "Berd uses memory files to store information, instructions, and preferences you give it. Anything it adds shows up here, and you can delete it.",
       "label": "Use memory"
     },
-    "topicsHint": "Topics hold deeper knowledge that only loads when it's relevant — agents propose new ones as they get to know you, and nothing is saved without your okay.",
+    "topicsHint": "Topics hold deeper knowledge that only loads when it's relevant — agents add to them as they get to know you, and you can delete anything they add.",
     "topicsTitle": "Topics",
     "unsavedChanges": "Unsaved changes"
   },

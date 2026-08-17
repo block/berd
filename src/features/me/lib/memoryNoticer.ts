@@ -29,7 +29,7 @@ import { listTopics } from "./meTopics";
  * over the user's own messages and appends candidates to the same
  * consent queue the MCP server writes. Consent is unchanged: proposals
  * surface in Settings → Memory (and the in-chat card), and nothing
- * becomes memory until the user approves it.
+ * is added automatically and shown to the user, who can delete it.
  *
  * The extractor has zero tools (it can only emit text we parse), its
  * output lands in the queue (never memory files), and the memory toggle
@@ -42,7 +42,7 @@ const MAX_PROPOSALS_PER_PASS = 3;
 
 /**
  * The broad life areas a *new* topic may be named after. Shared with the
- * approval path so both proposal doors are bound by the same list — see
+ * write path so both memory doors are bound by the same list — see
  * `memoryTopicVocabulary`.
  */
 export const NOTICER_VOCABULARY = MEMORY_TOPIC_VOCABULARY;
