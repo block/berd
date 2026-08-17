@@ -1163,6 +1163,7 @@ function PrototypeCube({
   const contentLag = useRef({ x: 0, y: 0, z: 0 });
   const contentDrift = useRef({ x: 0, y: 0, z: 0 });
   const hoverSpin = useRef({ x: 0, y: 0 });
+  const hoverTarget = useRef({ x: 0, y: 0 });
   const hoverSpinVelocity = useRef({ x: 0, y: 0 });
   const previousHoverSpin = useRef({ x: 0, y: 0 });
   const dragVisualAmount = useRef(0);
@@ -1189,6 +1190,16 @@ function PrototypeCube({
     if (motionImpulse.sequence === lastMotionImpulse.current) return;
 
     lastMotionImpulse.current = motionImpulse.sequence;
+    hoverTarget.current.x = THREE.MathUtils.clamp(
+      -(motionImpulse.hoverY ?? 0) * 0.3,
+      -0.3,
+      0.3,
+    );
+    hoverTarget.current.y = THREE.MathUtils.clamp(
+      (motionImpulse.hoverX ?? 0) * 0.38,
+      -0.38,
+      0.38,
+    );
     hoverSpinVelocity.current.x = THREE.MathUtils.clamp(
       hoverSpinVelocity.current.x + motionImpulse.deltaY * 11.5,
       -5,
@@ -1270,8 +1281,10 @@ function PrototypeCube({
       const spinDelta = Math.min(delta, 1 / 30);
       const spring = 8.2;
       const damping = 0.965 ** (spinDelta * 60);
-      hoverSpinVelocity.current.x += -hoverSpin.current.x * spring * spinDelta;
-      hoverSpinVelocity.current.y += -hoverSpin.current.y * spring * spinDelta;
+      hoverSpinVelocity.current.x +=
+        (hoverTarget.current.x - hoverSpin.current.x) * spring * spinDelta;
+      hoverSpinVelocity.current.y +=
+        (hoverTarget.current.y - hoverSpin.current.y) * spring * spinDelta;
       hoverSpinVelocity.current.x *= damping;
       hoverSpinVelocity.current.y *= damping;
       hoverSpin.current.x = THREE.MathUtils.clamp(
@@ -1293,6 +1306,8 @@ function PrototypeCube({
         hoverSpinVelocity.current.y = 0;
       }
     } else {
+      hoverTarget.current.x = 0;
+      hoverTarget.current.y = 0;
       hoverSpin.current.x = 0;
       hoverSpin.current.y = 0;
       hoverSpinVelocity.current.x = 0;

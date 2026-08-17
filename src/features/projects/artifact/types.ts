@@ -44,6 +44,9 @@ export interface ProjectArtifactMotionImpulse {
   sequence: number;
   deltaX: number;
   deltaY: number;
+  /** Normalized pointer position over a tile, used for a persistent hover tilt. */
+  hoverX?: number;
+  hoverY?: number;
 }
 
 export interface ProjectArtifactRendererProps {

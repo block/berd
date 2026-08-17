@@ -221,6 +221,10 @@ impl GooseServeProcess {
             Ok(runtime_config) => apply_runtime_goose_provider_env(&mut command, &runtime_config),
             Err(error) => log::warn!("failed to load runtime config for goose serve env: {error}"),
         }
+        // A launcher may intentionally isolate an ordinary (non-E2E) app. The
+        // login-shell capture can contain same-named values, so restore these
+        // process-level boundaries after every inherited/runtime env layer.
+        apply_process_goose_isolation_env(&mut command);
         // This must be the final environment layer. Captured shell and runtime
         // provider values are intentionally unable to redirect an E2E child
         // back into a normal Goose root or keyring.
@@ -1068,6 +1072,29 @@ fn apply_shell_env_with_extended_path_inner(
     command.env("PATH", extended_path);
 }
 
+fn apply_process_goose_isolation_env(command: &mut Command) {
+    apply_goose_isolation_values(
+        command,
+        std::env::var_os("GOOSE_PATH_ROOT").as_deref(),
+        std::env::var_os("GOOSE_DISABLE_KEYRING").as_deref(),
+    );
+}
+
+fn apply_goose_isolation_values(
+    command: &mut Command,
+    path_root: Option<&std::ffi::OsStr>,
+    disable_keyring: Option<&std::ffi::OsStr>,
+) {
+    for (key, value) in [
+        ("GOOSE_PATH_ROOT", path_root),
+        ("GOOSE_DISABLE_KEYRING", disable_keyring),
+    ] {
+        if let Some(value) = value {
+            command.env(key, value);
+        }
+    }
+}
+
 fn apply_goose_search_paths_env(
     command: &mut Command,
     shell_env: &HashMap<String, String>,
@@ -1168,9 +1195,10 @@ fn reserve_free_port() -> Result<u16, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        acp_websocket_url, add_release_webview_origin_arg, apply_goose_search_paths_env,
-        apply_runtime_goose_provider_env, apply_shell_env_with_extended_path,
-        apply_shell_env_with_extended_path_inner, DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
+        acp_websocket_url, add_release_webview_origin_arg, apply_goose_isolation_values,
+        apply_goose_search_paths_env, apply_runtime_goose_provider_env,
+        apply_shell_env_with_extended_path, apply_shell_env_with_extended_path_inner,
+        DATABRICKS_HOST_ENV, TAURI_WEBVIEW_ORIGIN,
     };
     use crate::commands::runtime_config::default_runtime_config;
     use std::collections::HashMap;
@@ -1186,6 +1214,29 @@ mod tests {
                 None
             }
         })
+    }
+
+    #[test]
+    fn launcher_isolation_values_override_inherited_goose_state() {
+        let mut command = Command::new("goose");
+        command
+            .env("GOOSE_PATH_ROOT", "/normal/goose")
+            .env("GOOSE_DISABLE_KEYRING", "0");
+
+        apply_goose_isolation_values(
+            &mut command,
+            Some(std::ffi::OsStr::new("/isolated/demo/goose")),
+            Some(std::ffi::OsStr::new("1")),
+        );
+
+        assert_eq!(
+            env_value(&command, "GOOSE_PATH_ROOT"),
+            Some(OsString::from("/isolated/demo/goose"))
+        );
+        assert_eq!(
+            env_value(&command, "GOOSE_DISABLE_KEYRING"),
+            Some(OsString::from("1"))
+        );
     }
 
     #[test]

@@ -34,6 +34,11 @@ function clampPointerImpulse(value: number) {
   return Math.max(-0.3, Math.min(0.3, value));
 }
 
+function clampPointerPosition(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(-1, Math.min(1, value));
+}
+
 function getPointerVelocityBoost(
   deltaX: number,
   deltaY: number,
@@ -130,6 +135,7 @@ export function ProjectArtifactWidget({
       return null;
     }
   }, []);
+
   const captureGestureSnapshot = useCallback(() => {
     if (canvasGestureKind === "drag") {
       const pointerDownSnapshot = pointerDownSnapshotRef.current;
@@ -142,6 +148,7 @@ export function ProjectArtifactWidget({
     // or an earlier drag.
     return captureCanvasSnapshot();
   }, [canvasGestureKind, captureCanvasSnapshot]);
+
   const shouldFreezeVisual = canvasGestureActive && !widgetResizePreviewActive;
   useLayoutEffect(() => {
     if (!canvasGestureActive) {
@@ -177,6 +184,31 @@ export function ProjectArtifactWidget({
     };
   };
 
+  const handlePointerEnter = (event: PointerEvent<HTMLButtonElement>) => {
+    rememberPointerPosition(event);
+    if ((!project && !isStarterProject) || shouldIgnoreActivation?.()) return;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const pointerHoverX = clampPointerPosition(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    );
+    const pointerHoverY = clampPointerPosition(
+      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+    );
+    // A centered pointer would otherwise produce no visual change on enter.
+    // Give hover a small default angle, then let pointer movement take over.
+    const hoverX = Math.abs(pointerHoverX) < 0.08 ? 0.22 : pointerHoverX;
+    const hoverY = Math.abs(pointerHoverY) < 0.08 ? 0.16 : pointerHoverY;
+    setMotionImpulse((previous) => ({
+      sequence: (previous?.sequence ?? 0) + 1,
+      deltaX: 0,
+      deltaY: 0,
+      hoverX,
+      hoverY,
+    }));
+  };
+
   const handlePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
     // Capture before the canvas starts moving. WKWebView can briefly expose a
     // blank WebGL backing surface after the widget's compositor position
@@ -208,6 +240,12 @@ export function ProjectArtifactWidget({
     if (Math.abs(deltaX) < 0.5 && Math.abs(deltaY) < 0.5) return;
     const normalizedDeltaX = deltaX / rect.width;
     const normalizedDeltaY = deltaY / rect.height;
+    const hoverX = clampPointerPosition(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    );
+    const hoverY = clampPointerPosition(
+      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+    );
     const velocityBoost = getPointerVelocityBoost(
       normalizedDeltaX,
       normalizedDeltaY,
@@ -218,10 +256,24 @@ export function ProjectArtifactWidget({
       sequence: (previous?.sequence ?? 0) + 1,
       deltaX: clampPointerImpulse(normalizedDeltaX * velocityBoost),
       deltaY: clampPointerImpulse(normalizedDeltaY * velocityBoost),
+      hoverX,
+      hoverY,
     }));
   };
   const handlePointerLeave = () => {
     lastPointerPosition.current = null;
+    setMotionImpulse((previous) =>
+      previous
+        ? {
+            ...previous,
+            sequence: previous.sequence + 1,
+            deltaX: 0,
+            deltaY: 0,
+            hoverX: 0,
+            hoverY: 0,
+          }
+        : previous,
+    );
   };
   const clearPreparedSnapshot = () => {
     pointerDownSnapshotRef.current = null;
@@ -234,7 +286,7 @@ export function ProjectArtifactWidget({
       onPointerDown={handlePointerDown}
       onPointerUp={clearPreparedSnapshot}
       onPointerCancel={clearPreparedSnapshot}
-      onPointerEnter={rememberPointerPosition}
+      onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
       onPointerMove={handlePointerMove}
       disabled={!project && !isStarterProject}

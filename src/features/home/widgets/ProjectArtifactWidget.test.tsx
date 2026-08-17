@@ -31,7 +31,13 @@ vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
     onGlCanvasReady,
   }: {
     input: { artifact?: { seed: number } | null; name: string };
-    motionImpulse?: { deltaX: number; deltaY: number; sequence: number };
+    motionImpulse?: {
+      deltaX: number;
+      deltaY: number;
+      hoverX?: number;
+      hoverY?: number;
+      sequence: number;
+    };
     renderPaused?: boolean;
     onGlCanvasReady?: (canvas: HTMLCanvasElement | null) => void;
   }) => (
@@ -39,6 +45,8 @@ vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
       data-artifact-seed={input.artifact?.seed ?? ""}
       data-motion-delta-x={motionImpulse?.deltaX ?? ""}
       data-motion-delta-y={motionImpulse?.deltaY ?? ""}
+      data-motion-hover-x={motionImpulse?.hoverX ?? ""}
+      data-motion-hover-y={motionImpulse?.hoverY ?? ""}
       data-motion-sequence={motionImpulse?.sequence ?? ""}
       data-render-paused={String(renderPaused ?? false)}
       data-testid="project-artifact-preview"
@@ -295,43 +303,6 @@ describe("ProjectArtifactWidget", () => {
     );
   });
 
-  it("animates the starter project cube on hover", () => {
-    state.projects = [];
-    render(
-      <ProjectArtifactWidget
-        instance={{
-          ...instance,
-          type: "onboardingProjectArtifact",
-          state: { projectId: "onboarding:starter-project" },
-        }}
-        onUpdateState={vi.fn()}
-      />,
-    );
-
-    const button = screen.getByRole("button", {
-      name: "Name your first project",
-    });
-    vi.spyOn(button, "getBoundingClientRect").mockReturnValue({
-      width: 200,
-      height: 200,
-      left: 0,
-      top: 0,
-      right: 200,
-      bottom: 200,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    });
-
-    fireEvent.pointerEnter(button, { clientX: 20, clientY: 20 });
-    fireEvent.pointerMove(button, { clientX: 80, clientY: 20 });
-
-    expect(screen.getByTestId("project-artifact-preview")).toHaveAttribute(
-      "data-motion-sequence",
-      "1",
-    );
-  });
-
   it.each([
     "pointerUp",
     "pointerCancel",
@@ -415,6 +386,48 @@ describe("ProjectArtifactWidget", () => {
     );
   });
 
+  it("animates the cube from pointer movement while hovering", () => {
+    renderWidget();
+
+    const button = screen.getByRole("button", {
+      name: "Start chat in Alpha Project",
+    });
+    vi.spyOn(button, "getBoundingClientRect").mockReturnValue({
+      width: 200,
+      height: 200,
+      left: 0,
+      top: 0,
+      right: 200,
+      bottom: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerEnter(button, {
+      clientX: 10,
+      clientY: 20,
+      pointerId: 1,
+      pointerType: "mouse",
+    });
+    expect(screen.getByTestId("project-artifact-preview")).toHaveAttribute(
+      "data-motion-sequence",
+      "1",
+    );
+
+    fireEvent.pointerMove(button, {
+      clientX: 80,
+      clientY: 20,
+      pointerId: 1,
+      pointerType: "mouse",
+    });
+
+    expect(screen.getByTestId("project-artifact-preview")).toHaveAttribute(
+      "data-motion-sequence",
+      "2",
+    );
+  });
+
   it("starts cube pointer impulse tracking from each pointerdown", () => {
     renderWidget();
 
@@ -446,6 +459,41 @@ describe("ProjectArtifactWidget", () => {
     const preview = screen.getByTestId("project-artifact-preview");
     expect(preview).toHaveAttribute("data-motion-sequence", "2");
     expect(Number(preview.dataset.motionDeltaX)).toBeLessThan(0.1);
+  });
+
+  it("animates the onboarding starter cube while it has no persisted project", () => {
+    state.projects = [];
+    render(
+      <ProjectArtifactWidget
+        instance={{
+          ...instance,
+          type: "onboardingProjectArtifact",
+          state: { projectId: "onboarding-starter-project" },
+        }}
+        onUpdateState={vi.fn()}
+      />,
+    );
+
+    const button = screen.getByRole("button", {
+      name: "Name your first project",
+    });
+    vi.spyOn(button, "getBoundingClientRect").mockReturnValue({
+      width: 200,
+      height: 200,
+      left: 0,
+      top: 0,
+      right: 200,
+      bottom: 200,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerEnter(button, { clientX: 30, clientY: 30 });
+    expect(screen.getByTestId("project-artifact-preview")).toHaveAttribute(
+      "data-motion-sequence",
+      "1",
+    );
   });
 
   it("renders a non-crashing unavailable state when the project is missing", () => {

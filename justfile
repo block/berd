@@ -475,14 +475,14 @@ dev:
         GOOSE_BUILD_PROFILE=debug just setup
     fi
 
-    VITE_PORT="$(python3 -c "import hashlib,os; h=int(hashlib.sha256(os.getcwd().encode()).hexdigest(),16); print(10000 + h % 55000)")"
+    VITE_PORT="${VITE_PORT:-$(python3 -c "import hashlib,os; h=int(hashlib.sha256(os.getcwd().encode()).hexdigest(),16); print(10000 + h % 55000)")}"
     export VITE_PORT
     # ACP bridges install at runtime onto the Berd-managed Node runtime, the
     # same path dev and release share; set BERD_ACP_TOOLS_DIR by hand to point
     # goosed at a locally built bridge dir instead.
     export VITE_DESIGN_SYSTEM_EXPLORER=1
     export RUST_LOG="${RUST_LOG:-perf=debug,info}"
-    export CARGO_TARGET_DIR="$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)"
+    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$(bash ./scripts/resolve-tauri-cargo-target-dir.sh)}"
     echo "Using Tauri Cargo target dir: ${CARGO_TARGET_DIR}"
 
     # Derive a git-based version so dev builds don't report the 0.1.0
@@ -551,8 +551,47 @@ dev:
         EXTRA_CONFIG_ARGS+=(--config "$DEV_ICON_CONFIG")
     fi
 
-    CARGO_FEATURES="$(./scripts/block-feature-gates.sh "{{ app_features }}")"
+    # Callers such as `dev-demo` may narrow the ordinary dev feature set; the
+    # default preserves the existing developer posture.
+    DEV_APP_FEATURES="${BERD_DEV_APP_FEATURES:-{{ app_features }}}"
+    CARGO_FEATURES="$(./scripts/block-feature-gates.sh "$DEV_APP_FEATURES")"
+
+    # Apply identity last so icon badging and the checked-in dev overlay cannot
+    # replace a launcher's isolated identifier or display name.
+    if [[ -n "${BERD_DEV_IDENTIFIER:-}" || -n "${BERD_DEV_PRODUCT_NAME:-}" ]]; then
+        DEV_IDENTITY_CONFIG="$(node -e '
+          const identifier = process.env.BERD_DEV_IDENTIFIER;
+          const productName = process.env.BERD_DEV_PRODUCT_NAME;
+          const windowTitle = process.env.BERD_DEV_WINDOW_TITLE;
+          const config = {};
+          if (identifier) config.identifier = identifier;
+          if (productName) config.productName = productName;
+          if (windowTitle !== undefined || productName) {
+            config.app = {
+              windows: [{
+                title: windowTitle !== undefined ? windowTitle : productName,
+                titleBarStyle: "Overlay",
+                hiddenTitle: true,
+                trafficLightPosition: { x: 14, y: 28 },
+              }],
+            };
+          }
+          process.stdout.write(JSON.stringify(config));
+        ')"
+        EXTRA_CONFIG_ARGS+=(--config "$DEV_IDENTITY_CONFIG")
+        if [[ -n "${BERD_DEV_PROCESS_NAME:-}" ]]; then
+            export BERD_DEV_APP_NAME="$BERD_DEV_PROCESS_NAME"
+        elif [[ -n "${BERD_DEV_PRODUCT_NAME:-}" ]]; then
+            export BERD_DEV_APP_NAME="$BERD_DEV_PRODUCT_NAME"
+        fi
+    fi
+
     VITE_AUTH_GATE="${VITE_BUILDERBOT:-0}" pnpm tauri dev --features "$CARGO_FEATURES" "${EXTRA_CONFIG_ARGS[@]}"
+
+# Launch a persistent, manually populated demo with isolated Tauri and Goose data.
+[unix]
+dev-demo:
+    ./scripts/dev-demo.sh
 
 [unix]
 dev-debug: dev
