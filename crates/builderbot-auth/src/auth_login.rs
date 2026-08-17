@@ -1,12 +1,17 @@
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use reqwest::blocking::{Client, ClientBuilder};
 use reqwest::header::{ACCEPT, USER_AGENT};
 use reqwest::redirect::Policy;
 use reqwest::StatusCode as HttpStatusCode;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
 use url::Url;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::auth::SESSION_CREDENTIAL_HEADER;
 use crate::auth_storage::StoredSessionCredential;
@@ -54,9 +59,192 @@ pub struct VerifiedLoginSession {
     pub me: AuthMeResponse,
 }
 
+/// Per-login correlation and PKCE material. Keep this value in memory only and
+/// drop it as soon as the login attempt completes, fails, or is canceled.
+pub struct OAuthLoginAttempt {
+    state: Zeroizing<String>,
+    code_verifier: Zeroizing<String>,
+    code_challenge: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum OAuthCallback {
+    Code(String),
+    Error(String),
+    Rejected(OAuthCallbackRejection),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OAuthCallbackRejection {
+    MissingState,
+    StateMismatch,
+    MissingCode,
+    InvalidState,
+    InvalidCode,
+    InvalidError,
+    DuplicateParameter,
+    ConflictingOutcome,
+}
+
+impl OAuthLoginAttempt {
+    pub fn generate() -> Result<Self> {
+        let mut state_bytes = [0_u8; 32];
+        let mut verifier_bytes = [0_u8; 64];
+        getrandom::fill(&mut state_bytes).context("generate OAuth state")?;
+        getrandom::fill(&mut verifier_bytes).context("generate PKCE code verifier")?;
+
+        let state = URL_SAFE_NO_PAD.encode(state_bytes);
+        let code_verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
+        state_bytes.zeroize();
+        verifier_bytes.zeroize();
+
+        Ok(Self::from_parts(state, code_verifier))
+    }
+
+    fn from_parts(state: String, code_verifier: String) -> Self {
+        let code_challenge = pkce_s256_challenge(&code_verifier);
+        Self {
+            state: Zeroizing::new(state),
+            code_verifier: Zeroizing::new(code_verifier),
+            code_challenge,
+        }
+    }
+
+    #[cfg(test)]
+    fn test_state(&self) -> &str {
+        &self.state
+    }
+
+    pub fn login_url(&self, server_url: &str, callback_url: &str) -> Result<Zeroizing<String>> {
+        let callback_url = Url::parse(callback_url).context("callback URL must be absolute")?;
+        if callback_url.scheme() != "http"
+            || callback_url.host_str() != Some("127.0.0.1")
+            || callback_url.port().is_none()
+            || callback_url.cannot_be_a_base()
+            || !callback_url.username().is_empty()
+            || callback_url.password().is_some()
+            || callback_url.query().is_some()
+            || callback_url.fragment().is_some()
+        {
+            return Err(anyhow!(
+                "callback URL must be an absolute HTTP URL on 127.0.0.1 with an explicit port and no userinfo, query, or fragment"
+            ));
+        }
+
+        let mut url = auth_url(server_url, "/v1/auth/login")?;
+        let callback_url = Zeroizing::new(String::from(callback_url));
+        let state = Zeroizing::new(self.state.to_string());
+        url.query_pairs_mut()
+            .append_pair("type", "cli")
+            .append_pair("returnTo", &callback_url)
+            .append_pair("state", &state)
+            .append_pair("code_challenge", &self.code_challenge)
+            .append_pair("code_challenge_method", "S256");
+        Ok(Zeroizing::new(String::from(url)))
+    }
+
+    pub fn state_matches(&self, returned_state: &str) -> bool {
+        if self.state.len() != returned_state.len() {
+            return false;
+        }
+        bool::from(self.state.as_bytes().ct_eq(returned_state.as_bytes()))
+    }
+
+    /// Parse one callback for this attempt. Rejections leave the attempt
+    /// usable; a correlated success or authorization error consumes state.
+    pub fn parse_callback(&mut self, callback_url: &Url) -> OAuthCallback {
+        if self.state.is_empty() {
+            return OAuthCallback::Rejected(OAuthCallbackRejection::StateMismatch);
+        }
+
+        let mut state = None;
+        let mut code = None;
+        let mut error = None;
+        for (key, value) in callback_url.query_pairs() {
+            let slot = match key.as_ref() {
+                "state" => &mut state,
+                "code" => &mut code,
+                "error" => &mut error,
+                _ => continue,
+            };
+            if slot.replace(value.into_owned()).is_some() {
+                return OAuthCallback::Rejected(OAuthCallbackRejection::DuplicateParameter);
+            }
+        }
+
+        let Some(state) = state.filter(|state| !state.is_empty()) else {
+            return OAuthCallback::Rejected(OAuthCallbackRejection::MissingState);
+        };
+        if state.len() > 128 {
+            return OAuthCallback::Rejected(OAuthCallbackRejection::InvalidState);
+        }
+        if !self.state_matches(&state) {
+            return OAuthCallback::Rejected(OAuthCallbackRejection::StateMismatch);
+        }
+        if code.is_some() && error.is_some() {
+            return OAuthCallback::Rejected(OAuthCallbackRejection::ConflictingOutcome);
+        }
+        if let Some(error) = error.filter(|error| !error.trim().is_empty()) {
+            if error.len() > 1024 {
+                return OAuthCallback::Rejected(OAuthCallbackRejection::InvalidError);
+            }
+            self.consume_state();
+            return OAuthCallback::Error(error);
+        }
+        match code.filter(|code| !code.trim().is_empty()) {
+            Some(code) if code.len() <= 1024 => {
+                self.consume_state();
+                OAuthCallback::Code(code)
+            }
+            Some(_) => OAuthCallback::Rejected(OAuthCallbackRejection::InvalidCode),
+            None => OAuthCallback::Rejected(OAuthCallbackRejection::MissingCode),
+        }
+    }
+
+    fn consume_state(&mut self) {
+        self.state.zeroize();
+    }
+
+    pub fn exchange_login_code_and_verify(
+        &mut self,
+        client: &Client,
+        playpen: Option<&str>,
+        server_url: &str,
+        code: &str,
+    ) -> Result<VerifiedLoginSession> {
+        if self.code_verifier.is_empty() {
+            return Err(anyhow!("OAuth login attempt has already been exchanged"));
+        }
+        let result =
+            exchange_login_code_and_verify(client, playpen, server_url, code, &self.code_verifier);
+        self.code_verifier.zeroize();
+        self.code_challenge.zeroize();
+        result
+    }
+}
+
+impl Drop for OAuthLoginAttempt {
+    fn drop(&mut self) {
+        self.state.zeroize();
+        self.code_verifier.zeroize();
+        self.code_challenge.zeroize();
+    }
+}
+
+impl std::fmt::Debug for OAuthLoginAttempt {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("OAuthLoginAttempt { .. }")
+    }
+}
+
+fn pkce_s256_challenge(code_verifier: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()))
+}
+
 #[derive(Debug, Serialize)]
 struct LoginExchangeRequest<'a> {
     code: &'a str,
+    code_verifier: &'a str,
 }
 
 pub fn build_auth_http_client(timeout: Duration) -> Result<Client> {
@@ -72,13 +260,17 @@ pub fn exchange_login_code(
     playpen: Option<&str>,
     server_url: &str,
     code: &str,
+    code_verifier: &str,
 ) -> Result<LoginExchangeResponse> {
     let url = auth_url(server_url, "/v1/auth/login/exchange")?;
     let mut request = client
         .post(url)
         .header(USER_AGENT, CLI_USER_AGENT)
         .header(ACCEPT, "application/json")
-        .json(&LoginExchangeRequest { code });
+        .json(&LoginExchangeRequest {
+            code,
+            code_verifier,
+        });
     if let Some(baggage) = playpen_baggage(playpen) {
         request = request.header("Baggage", baggage);
     }
@@ -98,8 +290,9 @@ pub fn exchange_login_code_and_verify(
     playpen: Option<&str>,
     server_url: &str,
     code: &str,
+    code_verifier: &str,
 ) -> Result<VerifiedLoginSession> {
-    let exchange = exchange_login_code(client, playpen, server_url, code)?;
+    let exchange = exchange_login_code(client, playpen, server_url, code, code_verifier)?;
     let credential = StoredSessionCredential {
         session_credential: exchange.session_credential,
         expires_at: Some(exchange.expires_at),
@@ -176,14 +369,6 @@ pub fn logout_session_credential(
     Ok(true)
 }
 
-pub fn login_url(server_url: &str, callback_url: &str) -> Result<Url> {
-    let mut url = auth_url(server_url, "/v1/auth/login")?;
-    url.query_pairs_mut()
-        .append_pair("type", "cli")
-        .append_pair("returnTo", callback_url);
-    Ok(url)
-}
-
 pub fn auth_url(server_url: &str, path: &str) -> Result<Url> {
     let base = Url::parse(server_url).context("server URL must be absolute")?;
     let path = format!(
@@ -210,6 +395,19 @@ mod tests {
     use std::thread;
 
     use super::*;
+
+    const TEST_STATE: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const TEST_CODE_VERIFIER: &str =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const TEST_CODE_CHALLENGE: &str = "_-BU_nrgy23GXDr5th1SCfQ5hR20PQulmXM33xVGaOs";
+
+    fn test_attempt() -> OAuthLoginAttempt {
+        OAuthLoginAttempt::from_parts(TEST_STATE.to_string(), TEST_CODE_VERIFIER.to_string())
+    }
+
+    fn request_json(request: &RecordedRequest) -> serde_json::Value {
+        serde_json::from_str(&request.body).expect("JSON request body")
+    }
 
     #[test]
     fn verify_session_credential_treats_unauthorized_as_invalid() {
@@ -321,31 +519,187 @@ mod tests {
     }
 
     #[test]
-    fn login_url_uses_v1_route() {
-        let url = login_url(
-            "https://example.com/cash-app/goose",
-            "http://127.0.0.1:1234/callback",
-        )
-        .expect("login URL");
+    fn oauth_login_attempt_builds_correlated_s256_request() {
+        let mut attempt = test_attempt();
+        let url = attempt
+            .login_url(
+                "https://example.com/cash-app/goose",
+                "http://127.0.0.1:1234/callback",
+            )
+            .expect("login URL");
+        let url = Url::parse(&url).expect("parse login URL");
+        let query: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
 
         assert_eq!(url.path(), "/cash-app/goose/v1/auth/login");
+        assert_eq!(query.get("type").map(String::as_str), Some("cli"));
+        assert_eq!(
+            query.get("returnTo").map(String::as_str),
+            Some("http://127.0.0.1:1234/callback")
+        );
+        assert_eq!(query.get("state").map(String::as_str), Some(TEST_STATE));
+        assert_eq!(
+            query.get("code_challenge").map(String::as_str),
+            Some(TEST_CODE_CHALLENGE)
+        );
+        assert_eq!(
+            query.get("code_challenge_method").map(String::as_str),
+            Some("S256")
+        );
+        assert!(attempt.state_matches(TEST_STATE));
+        assert!(!attempt.state_matches(&"c".repeat(43)));
+        assert_eq!(
+            attempt.parse_callback(
+                &Url::parse(&format!(
+                    "http://127.0.0.1/callback?code=exchange&state={TEST_STATE}"
+                ))
+                .expect("callback URL")
+            ),
+            OAuthCallback::Code("exchange".to_string())
+        );
+        assert_eq!(
+            attempt.parse_callback(
+                &Url::parse(&format!(
+                    "http://127.0.0.1/callback?code=replay&state={TEST_STATE}"
+                ))
+                .expect("replay callback URL")
+            ),
+            OAuthCallback::Rejected(OAuthCallbackRejection::StateMismatch)
+        );
+        assert_eq!(
+            attempt.parse_callback(
+                &Url::parse("http://127.0.0.1/callback?code=empty-state-replay&state=")
+                    .expect("empty-state replay callback URL")
+            ),
+            OAuthCallback::Rejected(OAuthCallbackRejection::StateMismatch)
+        );
+        assert!(attempt.test_state().is_empty());
     }
 
     #[test]
-    fn exchange_login_code_uses_v1_route() {
+    fn oauth_login_attempt_rejects_non_loopback_callback_urls() {
+        let attempt = test_attempt();
+
+        for callback_url in [
+            "https://127.0.0.1:1234/callback",
+            "http://localhost:1234/callback",
+            "http://127.0.0.1/callback",
+            "http://user@127.0.0.1:1234/callback",
+            "http://user:password@127.0.0.1:1234/callback",
+            "http://127.0.0.1:1234/callback?existing=query",
+            "http://127.0.0.1:1234/callback#fragment",
+        ] {
+            assert!(
+                attempt
+                    .login_url("https://example.com/cash-app/goose", callback_url)
+                    .is_err(),
+                "accepted invalid callback URL {callback_url}"
+            );
+        }
+    }
+
+    #[test]
+    fn oauth_callback_parser_requires_exact_unambiguous_state() {
+        let mut attempt = test_attempt();
+        for (query, expected) in [
+            (
+                "code=exchange",
+                OAuthCallback::Rejected(OAuthCallbackRejection::MissingState),
+            ),
+            (
+                "code=exchange&state=ccccccccccccccccccccccccccccccccccccccccccc",
+                OAuthCallback::Rejected(OAuthCallbackRejection::StateMismatch),
+            ),
+            (
+                &format!("state={TEST_STATE}"),
+                OAuthCallback::Rejected(OAuthCallbackRejection::MissingCode),
+            ),
+            (
+                &format!("code={}&state={TEST_STATE}", "x".repeat(1025)),
+                OAuthCallback::Rejected(OAuthCallbackRejection::InvalidCode),
+            ),
+            (
+                &format!("code=exchange&state={}", "x".repeat(129)),
+                OAuthCallback::Rejected(OAuthCallbackRejection::InvalidState),
+            ),
+            (
+                &format!("error={}&state={TEST_STATE}", "x".repeat(1025)),
+                OAuthCallback::Rejected(OAuthCallbackRejection::InvalidError),
+            ),
+            (
+                &format!("code=first&code=second&state={TEST_STATE}"),
+                OAuthCallback::Rejected(OAuthCallbackRejection::DuplicateParameter),
+            ),
+            (
+                &format!("code=exchange&error=denied&state={TEST_STATE}"),
+                OAuthCallback::Rejected(OAuthCallbackRejection::ConflictingOutcome),
+            ),
+        ] {
+            let callback =
+                Url::parse(&format!("http://127.0.0.1/callback?{query}")).expect("callback URL");
+            assert_eq!(attempt.parse_callback(&callback), expected);
+        }
+
+        let error_callback = Url::parse(&format!(
+            "http://127.0.0.1/callback?error=access_denied&state={TEST_STATE}"
+        ))
+        .expect("error callback URL");
+        assert_eq!(
+            attempt.parse_callback(&error_callback),
+            OAuthCallback::Error("access_denied".to_string())
+        );
+    }
+
+    #[test]
+    fn generated_oauth_login_attempt_uses_high_entropy_url_safe_material() {
+        let first = OAuthLoginAttempt::generate().expect("first OAuth attempt");
+        let second = OAuthLoginAttempt::generate().expect("second OAuth attempt");
+
+        for attempt in [&first, &second] {
+            assert_eq!(attempt.state.len(), 43);
+            assert_eq!(attempt.code_verifier.len(), 86);
+            assert_eq!(attempt.code_challenge.len(), 43);
+            assert!(attempt
+                .state
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'));
+            assert!(attempt
+                .code_verifier
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'));
+        }
+        assert_ne!(first.state, second.state);
+        assert_ne!(first.code_verifier, second.code_verifier);
+        assert_eq!(format!("{first:?}"), "OAuthLoginAttempt { .. }");
+    }
+
+    #[test]
+    fn exchange_login_code_sends_code_and_verifier() {
         let server = SingleResponseServer::start(
             200,
             r#"{"session_credential":"session","expires_at":"2026-06-15T00:00:00Z"}"#,
         );
         let client = build_auth_http_client(Duration::from_secs(5)).expect("client");
 
-        let exchange = exchange_login_code(&client, None, &server.base_url, "one-time-code")
-            .expect("exchange");
+        let exchange = exchange_login_code(
+            &client,
+            None,
+            &server.base_url,
+            "one-time-code",
+            TEST_CODE_VERIFIER,
+        )
+        .expect("exchange");
         let request = server.finish();
 
         assert_eq!(exchange.session_credential, "session");
         assert_eq!(exchange.expires_at, "2026-06-15T00:00:00Z");
         assert_eq!(request.path, "/v1/auth/login/exchange");
+        assert_eq!(
+            request_json(&request),
+            serde_json::json!({
+                "code": "one-time-code",
+                "code_verifier": TEST_CODE_VERIFIER,
+            })
+        );
     }
 
     #[test]
@@ -362,9 +716,14 @@ mod tests {
         ]);
         let client = build_auth_http_client(Duration::from_secs(5)).expect("client");
 
-        let verified =
-            exchange_login_code_and_verify(&client, None, &server.base_url, "one-time-code")
-                .expect("verified login");
+        let verified = exchange_login_code_and_verify(
+            &client,
+            None,
+            &server.base_url,
+            "one-time-code",
+            TEST_CODE_VERIFIER,
+        )
+        .expect("verified login");
         let requests = server.finish();
 
         assert_eq!(verified.credential.session_credential, "session");
@@ -400,9 +759,14 @@ mod tests {
         ]);
         let client = build_auth_http_client(Duration::from_secs(5)).expect("client");
 
-        let error =
-            exchange_login_code_and_verify(&client, None, &server.base_url, "one-time-code")
-                .expect_err("auth/me rejection fails login");
+        let error = exchange_login_code_and_verify(
+            &client,
+            None,
+            &server.base_url,
+            "one-time-code",
+            TEST_CODE_VERIFIER,
+        )
+        .expect_err("auth/me rejection fails login");
         let requests = server.finish();
 
         assert!(
@@ -416,6 +780,7 @@ mod tests {
 
     struct RecordedRequest {
         path: String,
+        body: String,
         bb_session_credential: Option<String>,
     }
 
@@ -496,6 +861,7 @@ mod tests {
             .to_string();
 
         let mut bb_session_credential = None;
+        let mut content_length = 0;
         loop {
             let mut line = String::new();
             reader.read_line(&mut line).expect("request header");
@@ -505,11 +871,17 @@ mod tests {
             if let Some((name, value)) = line.split_once(':') {
                 if name.eq_ignore_ascii_case(SESSION_CREDENTIAL_HEADER) {
                     bb_session_credential = Some(value.trim().to_string());
+                } else if name.eq_ignore_ascii_case("content-length") {
+                    content_length = value.trim().parse().expect("content length");
                 }
             }
         }
+        let mut request_body = vec![0_u8; content_length];
+        std::io::Read::read_exact(&mut reader, &mut request_body).expect("request body");
+        let request_body = String::from_utf8(request_body).expect("UTF-8 request body");
         *request.lock().expect("request mutex") = Some(RecordedRequest {
             path,
+            body: request_body,
             bb_session_credential,
         });
 

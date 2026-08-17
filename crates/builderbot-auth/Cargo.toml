@@ -12,12 +12,16 @@ blocking-client = ["dep:reqwest"]
 
 [dependencies]
 anyhow = "1"
+base64 = "0.22"
+getrandom = "0.4"
 reqwest = { version = "0.12", optional = true, default-features = false, features = ["blocking", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10"
+subtle = "2.6"
 url = "2.5"
+zeroize = "1.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
