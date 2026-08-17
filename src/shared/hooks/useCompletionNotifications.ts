@@ -1,5 +1,8 @@
 import { useEffect, useRef } from "react";
-import { useChatStore } from "@/features/chat/stores/chatStore";
+import {
+  isSessionActivelyViewed,
+  useChatStore,
+} from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { getNotificationPrefs } from "@/features/settings/lib/notificationPrefs";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
@@ -186,11 +189,10 @@ export function useCompletionNotifications(
             pendingSessions.delete(sessionId);
 
             const chatStoreState = useChatStore.getState();
-            const activeSessionId =
-              useChatSessionStore.getState().activeSessionId;
-            const isViewingThisSession =
-              sessionId === activeSessionId &&
-              chatStoreState.isViewingActiveSession;
+            const isViewingThisSession = isSessionActivelyViewed(
+              chatStoreState,
+              sessionId,
+            );
             // Skip if user is already watching this session in a focused window.
             if (isViewingThisSession && windowFocusedRef.current) continue;
 

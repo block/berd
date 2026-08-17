@@ -44,7 +44,10 @@ import { planProjectChatWorkspacesAsIs } from "@/features/projects/lib/projectCh
 import { ProjectWorkspaceStartupNameDialog } from "@/features/projects/ui/ProjectWorkspaceStartupNameDialog";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 import type { TopBarChromeInsets } from "./ui/TopBar";
-import { useChatStore } from "@/features/chat/stores/chatStore";
+import {
+  isSessionActivelyViewed,
+  useChatStore,
+} from "@/features/chat/stores/chatStore";
 import { useActiveProjectTint } from "@/features/chat/hooks/useActiveProjectTint";
 import { useWorkspaceNameRequestQueue } from "@/features/chat/hooks/useWorkspaceNameRequestQueue";
 import {
@@ -2008,10 +2011,7 @@ export function AppShell({
           // `activeSessionId` pointing here, so the store's viewing flag is
           // what decides whether the in-transcript error is on screen.
           const reportCreationFailureIfHidden = (message: string) => {
-            const isViewingFailedSession =
-              useChatSessionStore.getState().activeSessionId === session.id &&
-              useChatStore.getState().isViewingActiveSession;
-            if (isViewingFailedSession) {
+            if (isSessionActivelyViewed(useChatStore.getState(), session.id)) {
               return;
             }
             toast.error(t("chat:toolbar.sessionStartFailed"), {

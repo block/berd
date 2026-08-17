@@ -50,8 +50,11 @@ export function isSessionRuntimeSettled(runtime: SessionChatRuntime): boolean {
   );
 }
 
-function isSessionActivelyViewed(
-  state: ChatStoreState,
+// Both fields are read from this store on purpose: pairing
+// `isViewingActiveSession` with another store's `activeSessionId` only works
+// while every call site updates both stores in lockstep.
+export function isSessionActivelyViewed(
+  state: Pick<ChatStoreState, "activeSessionId" | "isViewingActiveSession">,
   sessionId: string,
 ): boolean {
   return state.activeSessionId === sessionId && state.isViewingActiveSession;
