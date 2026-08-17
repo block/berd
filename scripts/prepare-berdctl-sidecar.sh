@@ -30,12 +30,14 @@ fi
 
 EXPLICIT_TRIPLE="${1:-${BERDCTL_TRIPLE:-}}"
 CARGO_ARGS=(build -p berdctl --release)
-# The berdctl contract ships as two variants: public, and one "block"
-# variant carrying both gated groups (feedback + automations). Either
-# renderer flag therefore selects the block artifacts; the renderer
-# registry still refuses per-flag at dispatch (the trust boundary).
-if [[ "${VITE_FEEDBACK:-0}" == "1" || "${VITE_AUTOMATIONS:-0}" == "1" ]]; then
-  CARGO_ARGS+=(--features block-feedback)
+# Each renderer gate maps to its own cargo feature so the embedded CLI
+# contract always matches the renderer registry variant it ships with; the
+# renderer registry still refuses at dispatch (the trust boundary).
+BERDCTL_FEATURE_LIST=()
+[[ "${VITE_FEEDBACK:-0}" == "1" ]] && BERDCTL_FEATURE_LIST+=(block-feedback)
+[[ "${VITE_AUTOMATIONS:-0}" == "1" ]] && BERDCTL_FEATURE_LIST+=(block-automations)
+if [[ ${#BERDCTL_FEATURE_LIST[@]} -gt 0 ]]; then
+  CARGO_ARGS+=(--features "$(IFS=,; echo "${BERDCTL_FEATURE_LIST[*]}")")
 fi
 if [[ -n "$EXPLICIT_TRIPLE" ]]; then
   TRIPLE="$EXPLICIT_TRIPLE"

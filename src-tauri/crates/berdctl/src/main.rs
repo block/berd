@@ -772,8 +772,8 @@ Result:
         );
         assert_eq!(
             rendered.contains("automation"),
-            cfg!(feature = "block-feedback"),
-            "the block variant artifacts carry feedback and automations together"
+            cfg!(feature = "block-automations"),
+            "the automation noun tracks its own gate, independent of feedback"
         );
         for command in ["session", "folder", "project", "agent", "skill", "info"] {
             assert!(

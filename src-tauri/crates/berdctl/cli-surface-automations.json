@@ -161,19 +161,29 @@
         }
       }
     },
-    "feedback": {
-      "group": "feedback",
-      "about": "Open or submit an approved Berd feedback report",
+    "automation": {
+      "group": "automations",
+      "about": "Manage scheduled automations: list, get, create, run",
       "verbs": {
-        "open": {
-          "action": "open",
-          "about": "Open the feedback form with a report prefilled",
-          "afterHelp": "Example:\n  berdctl feedback open --title \"Composer loses draft\" \\\n    --description \"Steps to reproduce...\" --include-logs --json\n\nResult:\n  {\"opened\":true,\"include_logs\":true} — the existing feedback form is visible\n  for review and optional image attachments; nothing was submitted."
+        "list": {
+          "action": "list",
+          "about": "List the user's automations",
+          "afterHelp": "Example:\n  berdctl automation list --json\n  berdctl automation list --query \"review\" --json\n\nResult:\n  {\"automations\": [{\"automation_id\": \"...\", \"title\": \"...\",\n                    \"schedule\": \"0 */30 * * * *\", \"time_zone\": \"...\",\n                    \"status\": \"...\", \"latest_run_status\": \"...\",\n                    \"schedule_paused\": false, \"last_success_at\": \"...\"}, ...]}\n  Read one automation's instructions with `berdctl automation get`."
         },
-        "submit": {
-          "action": "submit",
-          "about": "Submit an approved report directly to the Berd team",
-          "afterHelp": "Example:\n  berdctl feedback submit --title \"Composer loses draft\" \\\n    --description \"Steps to reproduce...\" --include-logs --json\n\nResult:\n  {\"submitted\":true,\"include_logs\":true,\"issue_url\":\"https://...\"}\n  issue_url is omitted when the feedback service does not return one."
+        "get": {
+          "action": "get",
+          "about": "Read one automation's full detail",
+          "afterHelp": "Example:\n  berdctl automation get --automation-id <automation-id> --json\n\nResult:\n  {\"automation_id\": \"...\", \"title\": \"...\", \"schedule\": \"0 */30 * * * *\",\n   \"time_zone\": \"...\", \"status\": \"...\", \"latest_run_status\": \"...\",\n   \"schedule_paused\": false, \"instructions\": [\"...\"],\n   \"human_readable_instructions\": [\"...\"],\n   \"latest_chat_session_id\": \"...\", \"created\": \"...\", \"updated\": \"...\"}\n  Find ids with `berdctl automation list`."
+        },
+        "create": {
+          "action": "create",
+          "about": "Create a scheduled automation",
+          "afterHelp": "Example:\n  berdctl automation create --title \"Morning digest\" \\\n    --schedule \"0 0 9 * * *\" --time-zone \"America/New_York\" \\\n    --instruction \"Summarize my unread Slack messages\" \\\n    --instruction \"Post the summary to my notes\" --json\n\nResult:\n  {\"automation_id\": \"...\", \"title\": \"Morning digest\",\n   \"schedule\": \"0 0 9 * * *\"} — visible in the Automations view.\n  Inspect it with `berdctl automation get`; run it now with\n  `berdctl automation run`."
+        },
+        "run": {
+          "action": "run",
+          "about": "Run an automation now, off schedule",
+          "afterHelp": "Example:\n  berdctl automation run --automation-id <automation-id> --json\n\nResult:\n  {\"automation_id\": \"...\", \"run_session_id\": \"...\"} — the run's session id,\n  when the backend reports one. Watch progress in the Automations view or\n  read the result later with `berdctl automation get`."
         }
       }
     },

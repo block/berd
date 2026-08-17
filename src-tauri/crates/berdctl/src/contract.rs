@@ -102,16 +102,31 @@ pub struct Contract {
     pub surface: Surface,
 }
 
-// `block-feedback` selects the Block-variant artifacts, which carry BOTH
-// gated groups (feedback and automations); the renderer's per-flag registry
-// filter remains the trust boundary for whichever is actually enabled.
-pub(crate) const API_SURFACE: &str = if cfg!(feature = "block-feedback") {
+// One artifact variant per gate combination, so the CLI never advertises a
+// group the matching renderer build filters out of TOOL_GROUPS (each VITE_*
+// flag maps to exactly one cargo feature; the renderer registry remains the
+// trust boundary).
+pub(crate) const API_SURFACE: &str = if cfg!(all(
+    feature = "block-feedback",
+    feature = "block-automations"
+)) {
+    include_str!("../api-surface-block.json")
+} else if cfg!(feature = "block-feedback") {
     include_str!("../api-surface-feedback.json")
+} else if cfg!(feature = "block-automations") {
+    include_str!("../api-surface-automations.json")
 } else {
     include_str!("../api-surface.json")
 };
-pub(crate) const CLI_SURFACE: &str = if cfg!(feature = "block-feedback") {
+pub(crate) const CLI_SURFACE: &str = if cfg!(all(
+    feature = "block-feedback",
+    feature = "block-automations"
+)) {
+    include_str!("../cli-surface-block.json")
+} else if cfg!(feature = "block-feedback") {
     include_str!("../cli-surface-feedback.json")
+} else if cfg!(feature = "block-automations") {
+    include_str!("../cli-surface-automations.json")
 } else {
     include_str!("../cli-surface.json")
 };

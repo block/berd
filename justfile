@@ -511,7 +511,8 @@ dev:
     # member needs an explicit build, resolved at runtime via BERDCTL_BIN
     # because tauri.dev.conf.json blanks externalBin.
     BERDCTL_FEATURES=()
-    [[ "${VITE_FEEDBACK:-0}" == "1" || "${VITE_AUTOMATIONS:-0}" == "1" ]] && BERDCTL_FEATURES+=(--features block-feedback)
+    [[ "${VITE_FEEDBACK:-0}" == "1" ]] && BERDCTL_FEATURES+=(--features block-feedback)
+    [[ "${VITE_AUTOMATIONS:-0}" == "1" ]] && BERDCTL_FEATURES+=(--features block-automations)
     # ${arr[@]+...} guards the empty-array expansion, which bash 3.2 (stock
     # macOS) treats as an unbound variable under `set -u`.
     (cd src-tauri && cargo build -p berdctl ${BERDCTL_FEATURES[@]+"${BERDCTL_FEATURES[@]}"})

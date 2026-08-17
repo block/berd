@@ -970,85 +970,100 @@
         }
       }
     },
-    "feedback": {
-      "description": "Open an approved report in Berd's feedback form or submit it directly after explicit user approval.",
+    "automations": {
+      "description": "Manage the user's scheduled automations: list, get, create, run now.",
       "actions": {
-        "open": {
-          "description": "Open Berd's existing feedback form with the supplied title and description ready for optional hand editing. Nothing is submitted. Logs and Doctor diagnostics are selected only when --include-logs is explicitly passed.",
+        "list": {
+          "description": "List the user's scheduled automations (id, title, schedule, status, and last-run info) as the Automations view shows them; does not change anything on screen. Read one automation's full detail with action \"get\".",
           "fields": [
             {
-              "name": "title",
-              "required": true,
+              "name": "query",
+              "required": false,
               "kind": "string",
-              "description": "Report title to prefill in the feedback form (1-200 chars).",
+              "description": "Case-insensitive substring filter on the automation title (1-200 chars).",
               "min": 1,
               "max": 200
-            },
-            {
-              "name": "description",
-              "required": true,
-              "kind": "string",
-              "description": "Report description to prefill in the feedback form (1-50000 chars).",
-              "min": 1,
-              "max": 50000
-            },
-            {
-              "name": "include_logs",
-              "required": false,
-              "kind": "boolean",
-              "description": "Prefill the explicit opt-in to attach sanitized logs and Doctor diagnostics; omitted means false."
             }
           ],
           "schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "type": "object",
             "properties": {
-              "title": {
+              "query": {
+                "description": "Case-insensitive substring filter on the automation title (1-200 chars).",
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 200,
-                "description": "Report title to prefill in the feedback form (1-200 chars)."
-              },
-              "description": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 50000,
-                "description": "Report description to prefill in the feedback form (1-50000 chars)."
-              },
-              "include_logs": {
-                "default": false,
-                "description": "Prefill the explicit opt-in to attach sanitized logs and Doctor diagnostics; omitted means false.",
-                "type": "boolean"
+                "maxLength": 200
               }
             },
-            "required": ["title", "description"],
             "additionalProperties": false
           }
         },
-        "submit": {
-          "description": "Submit the supplied approved report without opening the feedback form. Use this only after the user explicitly asks to file, send, or submit it. Berd immediately shows success or failure in the app. Logs and Doctor diagnostics are attached only when --include-logs is explicitly passed.",
+        "get": {
+          "description": "Read one automation's full detail — title, schedule, time zone, status, pause state, instructions, and latest-run wiring — exactly as the Automations view shows it; does not change anything on screen.",
+          "fields": [
+            {
+              "name": "automation_id",
+              "required": true,
+              "kind": "string",
+              "description": "Automation id, as returned by `berdctl automation list` (1-200 chars).",
+              "min": 1,
+              "max": 200
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "automation_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "Automation id, as returned by `berdctl automation list` (1-200 chars)."
+              }
+            },
+            "required": ["automation_id"],
+            "additionalProperties": false
+          }
+        },
+        "create": {
+          "description": "Create a scheduled automation that runs the given instruction steps on the given cron cadence. The new automation appears in the Automations view immediately and can be edited, paused, or deleted there.",
           "fields": [
             {
               "name": "title",
               "required": true,
               "kind": "string",
-              "description": "Approved report title to submit (1-200 chars).",
+              "description": "Automation title, shown in the Automations view (1-200 chars).",
               "min": 1,
               "max": 200
             },
             {
-              "name": "description",
+              "name": "schedule",
               "required": true,
               "kind": "string",
-              "description": "Approved report description to submit (1-50000 chars).",
+              "description": "Cron schedule for the run cadence (e.g. \"0 */30 * * * *\"); the backend interprets it in --time-zone.",
               "min": 1,
-              "max": 50000
+              "max": 100
             },
             {
-              "name": "include_logs",
+              "name": "instruction",
+              "required": true,
+              "kind": "string_array",
+              "description": "One instruction step the automation runs each time (repeat the flag for multiple steps; 1-50 steps, each 1-10000 chars)."
+            },
+            {
+              "name": "time_zone",
+              "required": false,
+              "kind": "string",
+              "description": "IANA time zone for the schedule (e.g. \"America/New_York\"); defaults to the app's current time zone.",
+              "min": 1,
+              "max": 100
+            },
+            {
+              "name": "enable_notifications",
               "required": false,
               "kind": "boolean",
-              "description": "Explicitly opt in to attach sanitized logs and Doctor diagnostics; omitted means false."
+              "description": "Notify the user when runs complete; omitted means no notifications."
             }
           ],
           "schema": {
@@ -1059,21 +1074,65 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 200,
-                "description": "Approved report title to submit (1-200 chars)."
+                "description": "Automation title, shown in the Automations view (1-200 chars)."
               },
-              "description": {
+              "schedule": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 50000,
-                "description": "Approved report description to submit (1-50000 chars)."
+                "maxLength": 100,
+                "description": "Cron schedule for the run cadence (e.g. \"0 */30 * * * *\"); the backend interprets it in --time-zone."
               },
-              "include_logs": {
+              "instruction": {
+                "minItems": 1,
+                "maxItems": 50,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "description": "One instruction step the automation runs each time (repeat the flag for multiple steps; 1-50 steps, each 1-10000 chars)."
+              },
+              "time_zone": {
+                "description": "IANA time zone for the schedule (e.g. \"America/New_York\"); defaults to the app's current time zone.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "enable_notifications": {
                 "default": false,
-                "description": "Explicitly opt in to attach sanitized logs and Doctor diagnostics; omitted means false.",
+                "description": "Notify the user when runs complete; omitted means no notifications.",
                 "type": "boolean"
               }
             },
-            "required": ["title", "description"],
+            "required": ["title", "schedule", "instruction"],
+            "additionalProperties": false
+          }
+        },
+        "run": {
+          "description": "Trigger one immediate run of an automation without changing its schedule. The run and its output appear in the Automations view like any scheduled run.",
+          "fields": [
+            {
+              "name": "automation_id",
+              "required": true,
+              "kind": "string",
+              "description": "Automation id, as returned by `berdctl automation list` (1-200 chars).",
+              "min": 1,
+              "max": 200
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "automation_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "Automation id, as returned by `berdctl automation list` (1-200 chars)."
+              }
+            },
+            "required": ["automation_id"],
             "additionalProperties": false
           }
         }

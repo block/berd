@@ -453,7 +453,7 @@ echo "+++ :hammer: pnpm tauri build (unsigned)"
 GOOSE_BUILD_PROFILE=release ./scripts/prepare-goose-sidecar.sh
 # ACP bridges are installed into the managed Node runtime on demand; they are
 # no longer staged as build resources.
-VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" ./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"
+VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" VITE_AUTOMATIONS="$VITE_AUTOMATIONS_VALUE" ./scripts/prepare-berdctl-sidecar.sh "$TARGET_TRIPLE"
 if [[ "$VITE_AGENT_TOOLS_VALUE" == "1" ]]; then
   ./scripts/prepare-bb-cli-resource.sh "$TARGET_TRIPLE"
   tmp="$(mktemp)"

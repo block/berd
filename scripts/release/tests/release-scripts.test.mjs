@@ -535,7 +535,7 @@ describe("build-macos Block-service feature seam", () => {
       'jq \'.bundle.resources["../resources/bb"] = "bb"\'',
     );
     expect(script).toContain(
-      'VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" ./scripts/prepare-berdctl-sidecar.sh',
+      'VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" VITE_AUTOMATIONS="$VITE_AUTOMATIONS_VALUE" ./scripts/prepare-berdctl-sidecar.sh',
     );
   });
 

@@ -72,12 +72,21 @@ async function loadContracts({ feedbackEnabled, automationsEnabled }) {
   }
 }
 
+// One variant per gate combination: the gates are independent renderer
+// build flags, and the embedded CLI artifacts must never advertise a group
+// the matching renderer build filters out of TOOL_GROUPS.
 const publicContracts = await loadContracts({
   feedbackEnabled: false,
   automationsEnabled: false,
 });
-// The Block distribution enables Feedback and Automations together, so one
-// "block" variant carries both gated groups; a public build carries neither.
+const feedbackContracts = await loadContracts({
+  feedbackEnabled: true,
+  automationsEnabled: false,
+});
+const automationsContracts = await loadContracts({
+  feedbackEnabled: false,
+  automationsEnabled: true,
+});
 const blockContracts = await loadContracts({
   feedbackEnabled: true,
   automationsEnabled: true,
@@ -115,8 +124,12 @@ let stale = false;
 for (const [fileName, contract] of [
   ["api-surface.json", publicContracts.api],
   ["cli-surface.json", publicContracts.surface],
-  ["api-surface-feedback.json", blockContracts.api],
-  ["cli-surface-feedback.json", blockContracts.surface],
+  ["api-surface-feedback.json", feedbackContracts.api],
+  ["cli-surface-feedback.json", feedbackContracts.surface],
+  ["api-surface-automations.json", automationsContracts.api],
+  ["cli-surface-automations.json", automationsContracts.surface],
+  ["api-surface-block.json", blockContracts.api],
+  ["cli-surface-block.json", blockContracts.surface],
 ]) {
   const target = path.join(crateDir, fileName);
   const rendered = render(fileName, contract);
