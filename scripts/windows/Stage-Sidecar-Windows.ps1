@@ -75,6 +75,9 @@ $cargoArgs = @("build", "-p", "berdctl", "--release")
 if ($env:VITE_FEEDBACK -eq "1") {
     $cargoArgs += @("--features", "block-feedback")
 }
+if ($env:VITE_AUTOMATIONS -eq "1") {
+    $cargoArgs += @("--features", "block-automations")
+}
 if (-not [string]::IsNullOrWhiteSpace($hostTriple) -and $Triple -ne $hostTriple) {
     $cargoArgs += @("--target", $Triple)
     $berdctlReleaseDir = Join-Path (Join-Path $tauriTargetDir $Triple) "release"
