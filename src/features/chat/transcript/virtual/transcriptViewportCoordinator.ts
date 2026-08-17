@@ -15,6 +15,7 @@ import type {
 import {
   isExplicitTranscriptUserInput,
   type TranscriptScrollAlign,
+  type TranscriptScrollAnchor,
   type TranscriptScrollCause,
   type TranscriptScrollCorrection,
   type TranscriptScrollOperation,
@@ -224,6 +225,26 @@ export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
 
   getPendingScrollCorrection(): TranscriptScrollCorrection | null {
     return this.engine.getPendingScrollCorrection();
+  }
+
+  getMeasurementToken(rowId: string): TranscriptVirtualMeasurementToken | null {
+    return this.engine.getMeasurementToken?.(rowId) ?? null;
+  }
+
+  installAuthorityAnchor(
+    anchor: TranscriptScrollAnchor,
+    operation?: TranscriptScrollOperation,
+  ): TranscriptScrollCorrection | null {
+    if (!this.engine.installAuthorityAnchor) {
+      return null;
+    }
+    let correction: TranscriptScrollCorrection | null = null;
+    this.reconcile(() => {
+      correction =
+        this.engine.installAuthorityAnchor?.(anchor, operation) ?? null;
+      return correction;
+    });
+    return correction;
   }
 
   getRange(): TranscriptVirtualRangeSnapshot {

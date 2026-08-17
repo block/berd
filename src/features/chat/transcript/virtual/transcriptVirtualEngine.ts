@@ -84,6 +84,8 @@ export interface TranscriptVirtualEngine {
   getRange(): TranscriptVirtualRangeSnapshot;
   /** Current unacknowledged geometry proposal. */
   getPendingScrollCorrection(): TranscriptScrollCorrection | null;
+  /** Optional row-token access for coordination wrappers. */
+  getMeasurementToken?(rowId: string): TranscriptVirtualMeasurementToken | null;
   /**
    * Narrow escape hatch for an external coordination owner to install an
    * anchor explicitly, without cloning controller/geometry state. Optional

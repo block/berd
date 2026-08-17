@@ -28,6 +28,7 @@ export {
   createTranscriptScrollCoordinationAuthority,
   type TranscriptScrollCoordinationAuthorityOptions,
   type TranscriptScrollCoordinationEngine,
+  type TranscriptScrollOperationResult,
 } from "./transcriptScrollCoordinationAuthority";
 export {
   TranscriptViewportCoordinator,

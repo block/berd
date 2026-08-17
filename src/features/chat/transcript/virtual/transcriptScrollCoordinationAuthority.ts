@@ -11,6 +11,7 @@ import type {
   TranscriptScrollAlign,
   TranscriptScrollAnchor,
   TranscriptScrollCorrection,
+  TranscriptScrollCause,
   TranscriptScrollOperation,
   TranscriptSessionGeometry,
   TranscriptViewportGeometry,
@@ -18,6 +19,7 @@ import type {
   TranscriptVirtualDiagnostics,
   TranscriptVirtualMeasurementToken,
   TranscriptVirtualRangeSnapshot,
+  TranscriptUserInputKind,
 } from "./transcriptVirtualTypes";
 
 /** A survivor engine that also implements the narrow authority-anchor escape hatch. */
@@ -34,20 +36,23 @@ export interface TranscriptScrollCoordinationAuthorityOptions {
   initialOperation?: TranscriptScrollOperation;
 }
 
+export interface TranscriptScrollOperationResult {
+  operation: TranscriptScrollOperation;
+  correction: TranscriptScrollCorrection | null;
+}
+
 /**
  * Owner-driven coordination authority wrapping a TranscriptVirtualEngine
- * survivor. The authority - not the wrapped engine - owns anchor identity
- * across reset/replay and resize: anchor installs are explicit owner
- * proposals carrying generation identity, and acknowledging or superseding
- * an operation retires it so a stale generation can't tag a later reflow.
- *
- * Architectural spike: wraps existing survivors, adds one narrow engine API.
- * Nothing in production wiring constructs or calls this class yet.
+ * survivor. The authority - not the wrapped engine - owns anchor identity and
+ * operation lifecycle across reset/replay and resize. Browser corrections are
+ * effects of an operation, not the operation itself, so an at-anchor request
+ * remains observable and acknowledgeable even when no browser write is needed.
  */
 export class TranscriptScrollCoordinationAuthority {
   private readonly engine: TranscriptScrollCoordinationEngine;
   private pendingOperation: TranscriptScrollOperation | null;
   private trackedAnchor: TranscriptScrollAnchor;
+  private nextGeneration: number;
 
   constructor(
     engine: TranscriptScrollCoordinationEngine,
@@ -56,6 +61,7 @@ export class TranscriptScrollCoordinationAuthority {
     this.engine = engine;
     this.pendingOperation = options.initialOperation ?? null;
     this.trackedAnchor = options.initialAnchor ?? engine.getState().anchor;
+    this.nextGeneration = options.initialOperation?.generation ?? 0;
     if (options.initialAnchor) {
       this.engine.installAuthorityAnchor(
         options.initialAnchor,
@@ -65,17 +71,36 @@ export class TranscriptScrollCoordinationAuthority {
   }
 
   // The engine's own reset seeds an untagged bottom anchor as a scaffold;
-  // overriding it here means no autonomous bottom correction ever reaches
-  // the owner untagged.
+  // overriding it here means no autonomous bottom correction reaches the owner.
   reset(
     geometry: TranscriptSessionGeometry,
     anchor: TranscriptScrollAnchor,
     operation: TranscriptScrollOperation,
   ): TranscriptScrollCorrection | null {
+    this.nextGeneration = Math.max(this.nextGeneration, operation.generation);
     this.engine.reset(geometry);
     this.pendingOperation = operation;
     this.trackedAnchor = anchor;
     return this.engine.installAuthorityAnchor(anchor, operation);
+  }
+
+  /** Start an authority-owned operation and retain it even at the anchor. */
+  startOperation(
+    anchor: TranscriptScrollAnchor,
+    cause: TranscriptScrollCause,
+    userInputKind?: TranscriptUserInputKind,
+  ): TranscriptScrollOperationResult {
+    const operation: TranscriptScrollOperation = {
+      generation: ++this.nextGeneration,
+      cause,
+      ...(userInputKind ? { userInputKind } : {}),
+    };
+    return (
+      this.startWithOperation(anchor, operation) ?? {
+        operation,
+        correction: null,
+      }
+    );
   }
 
   /** Only a strictly newer generation supersedes the pending operation. */
@@ -83,15 +108,12 @@ export class TranscriptScrollCoordinationAuthority {
     anchor: TranscriptScrollAnchor,
     operation: TranscriptScrollOperation,
   ): TranscriptScrollCorrection | null {
-    if (
-      this.pendingOperation &&
-      operation.generation <= this.pendingOperation.generation
-    ) {
-      return null;
-    }
-    this.pendingOperation = operation;
-    this.trackedAnchor = anchor;
-    return this.engine.installAuthorityAnchor(anchor, operation);
+    return this.startWithOperation(anchor, operation)?.correction ?? null;
+  }
+
+  /** Complete is the acknowledgement path used after browser acceptance. */
+  complete(operation: TranscriptScrollOperation): boolean {
+    return this.acknowledge(operation);
   }
 
   // Only an exact generation match retires the pending operation - older,
@@ -104,14 +126,41 @@ export class TranscriptScrollCoordinationAuthority {
     ) {
       return false;
     }
+    return this.retire(operation);
+  }
+
+  /** Retire one exact generation, or all pending work for an external reset. */
+  retire(operation?: TranscriptScrollOperation): boolean {
+    if (!this.pendingOperation) {
+      return false;
+    }
+    if (
+      operation &&
+      operation.generation !== this.pendingOperation.generation
+    ) {
+      return false;
+    }
     this.pendingOperation = null;
     return true;
   }
 
+  /** Physical input interrupts pending work; late completion becomes inert. */
+  interrupt(
+    userInputKind: TranscriptUserInputKind,
+  ): TranscriptScrollOperation | null {
+    // The kind is intentionally part of the authority boundary even though
+    // every explicit physical input has the same retirement effect.
+    void userInputKind;
+    const interrupted = this.pendingOperation;
+    if (interrupted) {
+      this.retire(interrupted);
+    }
+    return interrupted;
+  }
+
   // The wrapped engine may autonomously recapture a different anchor on its
   // own (e.g. a stale row revision forces a recapture); re-target the
-  // authority's own tracked anchor afterward so it survives resize
-  // regardless of the engine's drift.
+  // authority's own tracked anchor afterward so it survives resize.
   reconcileResize(
     geometry: TranscriptViewportGeometry,
   ): TranscriptScrollCorrection | null {
@@ -123,8 +172,7 @@ export class TranscriptScrollCoordinationAuthority {
   }
 
   // Overscroll past the modeled bottom (elastic/rubber-band bounce) is never
-  // forwarded to the engine, so it can't mutate anchor, manufacture
-  // pinned/range intent, or produce a correction.
+  // forwarded to the engine, so it can't mutate anchor or manufacture intent.
   observeScroll(
     geometry: TranscriptViewportGeometry,
     options: { userScrollIntent?: boolean } = {},
@@ -197,6 +245,25 @@ export class TranscriptScrollCoordinationAuthority {
 
   getTrackedAnchor(): TranscriptScrollAnchor {
     return this.trackedAnchor;
+  }
+
+  private startWithOperation(
+    anchor: TranscriptScrollAnchor,
+    operation: TranscriptScrollOperation,
+  ): TranscriptScrollOperationResult | null {
+    if (
+      this.pendingOperation &&
+      operation.generation <= this.pendingOperation.generation
+    ) {
+      return null;
+    }
+    this.nextGeneration = Math.max(this.nextGeneration, operation.generation);
+    this.pendingOperation = operation;
+    this.trackedAnchor = anchor;
+    return {
+      operation,
+      correction: this.engine.installAuthorityAnchor(anchor, operation),
+    };
   }
 }
 

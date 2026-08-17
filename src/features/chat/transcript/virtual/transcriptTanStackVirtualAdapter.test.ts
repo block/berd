@@ -11,6 +11,87 @@ const SESSION_ID = "session-a";
 const WIDTH_SCOPE = "w:720";
 
 describe("TranscriptTanStackVirtualAdapter", () => {
+  it("forwards authority corrections through applyCorrection into the virtualizer", () => {
+    const adapter = createAdapter({ viewportHeight: 200 });
+    adapter.setRows(makeRows(5, 100));
+    const internals = adapter as unknown as {
+      applyCorrection: (correction: unknown) => void;
+      virtualizer: { _willUpdate: () => void; scrollOffset: number | null };
+    };
+    const applyCorrection = vi.spyOn(internals, "applyCorrection");
+    const updateVirtualizer = vi.spyOn(internals.virtualizer, "_willUpdate");
+    const operation = { generation: 9, cause: "target" as const };
+    const correction = adapter.installAuthorityAnchor(
+      {
+        type: "row",
+        rowId: "row-1",
+        offsetWithinRow: 20,
+        anchorRevision: "unused",
+      },
+      operation,
+    );
+
+    expect(correction).toMatchObject({
+      nextScrollTop: 120,
+      operation,
+    });
+    expect(applyCorrection).toHaveBeenCalledWith(correction);
+    expect(adapter.getScrollTop()).toBe(120);
+    expect(internals.virtualizer.scrollOffset).toBe(120);
+    expect(updateVirtualizer).toHaveBeenCalled();
+  });
+
+  it("forwards authority corrections through coordinator and virtualizer", () => {
+    const adapter = createAdapter({ viewportHeight: 200 });
+    adapter.setRows(makeRows(5, 100));
+    const container = document.createElement("div");
+    let scrollTop = 0;
+    Object.defineProperties(container, {
+      clientHeight: { configurable: true, value: 200 },
+      clientWidth: { configurable: true, value: 720 },
+      scrollHeight: { configurable: true, value: 0 },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = Math.max(0, value);
+        },
+      },
+    });
+    container.getBoundingClientRect = () =>
+      ({ top: 0, width: 720, height: 200 }) as DOMRect;
+    const coordinator = new TranscriptViewportCoordinator({
+      container,
+      engine: adapter,
+      getFooterHeight: () => 0,
+    });
+    const internals = adapter as unknown as {
+      applyCorrection: (correction: unknown) => void;
+      virtualizer: { _willUpdate: () => void; scrollOffset: number | null };
+    };
+    const applyCorrection = vi.spyOn(internals, "applyCorrection");
+    const updateVirtualizer = vi.spyOn(internals.virtualizer, "_willUpdate");
+    const operation = { generation: 9, cause: "target" as const };
+    const correction = coordinator.installAuthorityAnchor(
+      {
+        type: "row",
+        rowId: "row-1",
+        offsetWithinRow: 20,
+        anchorRevision: "unused",
+      },
+      operation,
+    );
+
+    expect(correction).toMatchObject({
+      nextScrollTop: 120,
+      operation,
+    });
+    expect(applyCorrection).toHaveBeenCalledWith(correction);
+    expect(adapter.getScrollTop()).toBe(120);
+    expect(internals.virtualizer.scrollOffset).toBe(120);
+    expect(updateVirtualizer).toHaveBeenCalled();
+  });
+
   it("uses updated TanStack end-anchor APIs while preserving Goose bottom follow", () => {
     const adapter = createAdapter({ viewportHeight: 500 });
     const rows = makeRows(20, 100);

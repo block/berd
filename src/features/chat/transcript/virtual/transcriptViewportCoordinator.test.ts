@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { TranscriptVirtualEngine } from "./transcriptVirtualEngine";
 import { TranscriptViewportCoordinator } from "./transcriptViewportCoordinator";
 import type {
+  TranscriptScrollAnchor,
+  TranscriptScrollCorrection,
+  TranscriptScrollOperation,
   TranscriptVirtualControllerState,
   TranscriptVirtualDiagnostics,
   TranscriptVirtualRangeSnapshot,
@@ -61,6 +64,13 @@ function createHarness() {
     scrollToRow: vi.fn(() => ({ found: false, correction: null })),
     getRange: vi.fn(() => ({}) as TranscriptVirtualRangeSnapshot),
     getPendingScrollCorrection,
+    getMeasurementToken: vi.fn(() => null),
+    installAuthorityAnchor: vi.fn(
+      (
+        _anchor: TranscriptScrollAnchor,
+        _operation?: TranscriptScrollOperation,
+      ) => null as TranscriptScrollCorrection | null,
+    ),
     getState: () => state,
     getDiagnostics: vi.fn(() => ({}) as TranscriptVirtualDiagnostics),
   } satisfies TranscriptVirtualEngine;
@@ -218,6 +228,41 @@ describe("TranscriptViewportCoordinator", () => {
 
     expect(container.scrollTop).toBe(100);
     expect(engine.syncViewport).not.toHaveBeenCalled();
+  });
+
+  it("forwards authority anchors to the wrapped engine and commits its correction", () => {
+    const { container, coordinator, engine } = createHarness();
+    const installAuthorityAnchor = vi.fn(
+      (
+        _anchor: TranscriptScrollAnchor,
+        operation?: TranscriptScrollOperation,
+      ) => ({
+        reason: "row-anchor" as const,
+        previousScrollTop: 100,
+        nextScrollTop: 120,
+        delta: 20,
+        operation,
+      }),
+    );
+    (
+      engine.installAuthorityAnchor as ReturnType<typeof vi.fn>
+    ).mockImplementation(installAuthorityAnchor);
+    const anchor: TranscriptScrollAnchor = {
+      type: "row",
+      rowId: "row-1",
+      offsetWithinRow: 20,
+      anchorRevision: "unused",
+    };
+    const operation: TranscriptScrollOperation = {
+      generation: 4,
+      cause: "target",
+    };
+
+    const correction = coordinator.installAuthorityAnchor(anchor, operation);
+
+    expect(installAuthorityAnchor).toHaveBeenCalledWith(anchor, operation);
+    expect(correction).toMatchObject({ nextScrollTop: 120, operation });
+    expect(container.scrollTop).toBe(120);
   });
 
   it("reads browser clamping back into the engine", () => {

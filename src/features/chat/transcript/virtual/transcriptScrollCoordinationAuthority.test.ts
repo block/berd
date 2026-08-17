@@ -253,6 +253,105 @@ describe("TranscriptScrollCoordinationAuthority", () => {
     }
   });
 
+  it("returns an operation for at-anchor and correcting starts through one contract", () => {
+    const engine = createEngine();
+    const authority = new TranscriptScrollCoordinationAuthority(engine);
+    authority.setRows([
+      row("a", 100),
+      row("b", 100),
+      row("c", 100),
+      row("d", 100),
+      row("e", 100),
+    ]);
+    engine.syncViewport(
+      {
+        scrollTop: 100,
+        viewportHeight: 300,
+        footerHeight: 0,
+        widthScope: WIDTH_SCOPE,
+      },
+      { source: "correction" },
+    );
+
+    const atAnchor = authority.startOperation({ type: "bottom" }, "follow");
+    expect(atAnchor).toMatchObject({
+      operation: { generation: 1, cause: "follow" },
+      correction: null,
+    });
+    expect(authority.getPendingOperation()).toEqual(atAnchor.operation);
+    expect(authority.complete(atAnchor.operation)).toBe(true);
+
+    const correcting = authority.startOperation(
+      {
+        type: "row",
+        rowId: "b",
+        offsetWithinRow: 20,
+        anchorRevision: "unused",
+      },
+      "jump",
+    );
+    expect(correcting.operation).toMatchObject({
+      generation: 2,
+      cause: "jump",
+    });
+    expect(correcting.correction).toMatchObject({
+      nextScrollTop: 120,
+      operation: correcting.operation,
+    });
+  });
+
+  it.each([
+    "wheel",
+    "touch",
+    "key",
+    "pointer",
+  ] as const)("interrupts pending work for %s and makes late completion inert", (userInputKind) => {
+    const engine = createEngine();
+    const authority = new TranscriptScrollCoordinationAuthority(engine);
+    const started = authority.startOperation({ type: "bottom" }, "target");
+
+    expect(authority.interrupt(userInputKind)).toEqual(started.operation);
+    expect(authority.getPendingOperation()).toBeNull();
+    expect(authority.complete(started.operation)).toBe(false);
+  });
+
+  it("resets once into replacement ownership and retires prior work", () => {
+    const engine = createEngine();
+    const authority = new TranscriptScrollCoordinationAuthority(engine);
+    const old = authority.startOperation({ type: "bottom" }, "follow");
+    const replacement: TranscriptScrollOperation = {
+      generation: 2,
+      cause: "target",
+    };
+    const anchor: TranscriptScrollAnchor = {
+      type: "row",
+      rowId: "replayed",
+      offsetWithinRow: 0,
+      anchorRevision: "unused",
+    };
+
+    authority.reset(
+      {
+        sessionId: "replayed-session",
+        sessionEpoch: 2,
+        widthScope: WIDTH_SCOPE,
+        viewportHeight: 300,
+        footerHeight: 0,
+        scrollTop: 0,
+      },
+      anchor,
+      replacement,
+    );
+
+    expect(authority.complete(old.operation)).toBe(false);
+    expect(authority.getPendingOperation()).toEqual(replacement);
+    expect(engine.getState().anchor).toMatchObject({
+      type: "row",
+      rowId: "replayed",
+    });
+    expect(authority.complete(replacement)).toBe(true);
+  });
+
   it("retires operation identity on acknowledgement and on supersession", () => {
     const engine = createEngine();
     const authority = new TranscriptScrollCoordinationAuthority(engine);
