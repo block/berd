@@ -36,6 +36,7 @@ import {
   canDeletePersona,
   canEditPersona,
   getPersonaProviderLabel,
+  getRealPersonaDescription,
 } from "@/features/agents/lib/personaPresentation";
 import {
   AGENT_PROFILE_FIELDS_TRANSITION_NAME,
@@ -143,6 +144,7 @@ export function AgentDetailPage({
     !isBundledAvatarRef(normalizedAvatarValue ?? "") &&
     normalizedAvatarValue !== personaAvatarValue &&
     !avatarSavePending;
+  const descriptionValue = getRealPersonaDescription(persona);
   const providerLabel = getPersonaProviderLabel(
     persona.provider,
     acpProviders,
@@ -154,11 +156,22 @@ export function AgentDetailPage({
   const avatarTransitionName = getAgentAvatarTransitionName(persona.id);
   const fallbackAvatarSrc = resolveAgentIcon(persona.id);
   const metadata = [
+    descriptionValue
+      ? {
+          label: t("view.description"),
+          value: descriptionValue,
+          multiline: true,
+        }
+      : null,
     { label: t("editor.provider"), value: providerLabel },
     { label: t("editor.model"), value: modelLabel },
     createdLabel ? { label: t("view.created"), value: createdLabel } : null,
     updatedLabel ? { label: t("view.updated"), value: updatedLabel } : null,
-  ].filter(Boolean) as Array<{ label: string; value: string }>;
+  ].filter(Boolean) as Array<{
+    label: string;
+    value: string;
+    multiline?: boolean;
+  }>;
 
   if (previousPersonaAvatarValue !== personaAvatarValue) {
     setPreviousPersonaAvatarValue(personaAvatarValue);
@@ -274,7 +287,7 @@ export function AgentDetailPage({
             className={AVATAR_CUSTOMIZE_LABEL_CLASS}
             aria-hidden="true"
           >
-            {t("editor.changeAvatar")}
+            {t("builderRail.changeAvatar")}
           </Badge>
         </>
       ) : null}
