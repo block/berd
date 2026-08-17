@@ -1,6 +1,7 @@
 import type { TranscriptRowDescriptor } from "../projection/transcriptItemTypes";
 import type {
   TranscriptScrollAlign,
+  TranscriptScrollAnchor,
   TranscriptScrollCorrection,
   TranscriptScrollOperation,
   TranscriptSessionGeometry,
@@ -83,6 +84,16 @@ export interface TranscriptVirtualEngine {
   getRange(): TranscriptVirtualRangeSnapshot;
   /** Current unacknowledged geometry proposal. */
   getPendingScrollCorrection(): TranscriptScrollCorrection | null;
+  /**
+   * Narrow escape hatch for an external coordination owner to install an
+   * anchor explicitly, without cloning controller/geometry state. Optional
+   * `operation` tags the resulting correction so ownership/generation checks
+   * in the geometry transition still apply.
+   */
+  installAuthorityAnchor?(
+    anchor: TranscriptScrollAnchor,
+    operation?: TranscriptScrollOperation,
+  ): TranscriptScrollCorrection | null;
   getState(): TranscriptVirtualControllerState;
   getDiagnostics(): TranscriptVirtualDiagnostics;
 }

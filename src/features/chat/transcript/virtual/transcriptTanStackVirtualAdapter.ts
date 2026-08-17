@@ -29,7 +29,9 @@ import {
   TRANSCRIPT_DEFAULT_OVERSCAN_BEFORE_ROWS,
   TRANSCRIPT_PINNED_BOTTOM_THRESHOLD_PX,
   type TranscriptScrollAlign,
+  type TranscriptScrollAnchor,
   type TranscriptScrollCorrection,
+  type TranscriptScrollOperation,
   type TranscriptSessionGeometry,
   type TranscriptViewportGeometry,
   type TranscriptVirtualControllerOptions,
@@ -344,6 +346,20 @@ export class TranscriptTanStackVirtualAdapter
 
   getPendingScrollCorrection(): TranscriptScrollCorrection | null {
     return this.controller.getPendingScrollCorrection();
+  }
+
+  installAuthorityAnchor(
+    anchor: TranscriptScrollAnchor,
+    operation?: TranscriptScrollOperation,
+  ): TranscriptScrollCorrection | null {
+    const correction = this.controller.installAuthorityAnchor(
+      anchor,
+      operation,
+    );
+    this.applyCorrection(correction);
+    this.syncVirtualizerOffset();
+    this.virtualizer._willUpdate();
+    return correction;
   }
 
   getRange(): TranscriptVirtualRangeSnapshot {

@@ -415,6 +415,27 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     return this.viewport.pendingScroll;
   }
 
+  installAuthorityAnchor(
+    anchor: TranscriptScrollAnchor,
+    operation?: TranscriptScrollOperation,
+  ): TranscriptScrollCorrection | null {
+    this.setScrollAnchor(
+      anchor.type === "row"
+        ? {
+            type: "row",
+            rowId: anchor.rowId,
+            offsetWithinRow: anchor.offsetWithinRow,
+          }
+        : anchor,
+    );
+    this.lastRange = null;
+    return this.reconcileAnchor({
+      reason: anchor.type === "bottom" ? "bottom-anchor" : "row-anchor",
+      updateAnchorOnStale: false,
+      operation,
+    });
+  }
+
   getState(): TranscriptVirtualControllerState {
     const bottomScrollTop = this.getBottomScrollTop();
     const distanceFromBottom = Math.max(

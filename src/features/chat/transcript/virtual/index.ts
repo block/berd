@@ -24,6 +24,12 @@ export {
   createTranscriptTanStackVirtualAdapter,
 } from "./transcriptTanStackVirtualAdapter";
 export {
+  TranscriptScrollCoordinationAuthority,
+  createTranscriptScrollCoordinationAuthority,
+  type TranscriptScrollCoordinationAuthorityOptions,
+  type TranscriptScrollCoordinationEngine,
+} from "./transcriptScrollCoordinationAuthority";
+export {
   TranscriptViewportCoordinator,
   type TranscriptViewportCoordinatorOptions,
   type TranscriptViewportWriteOptions,
