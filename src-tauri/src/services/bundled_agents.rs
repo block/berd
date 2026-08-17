@@ -476,6 +476,7 @@ fn read_seed_marker(target_root: &Path) -> Result<SeedMarker, String> {
 }
 
 fn read_seed_marker_for_seed(target_root: &Path) -> Result<(SeedMarker, bool), String> {
+    let mut invalid_marker_found = false;
     for path in [marker_path(target_root), legacy_marker_path(target_root)] {
         if !path.exists() {
             continue;
@@ -483,15 +484,17 @@ fn read_seed_marker_for_seed(target_root: &Path) -> Result<(SeedMarker, bool), S
         match read_seed_marker_file(&path) {
             Ok(marker) => return Ok((marker, false)),
             Err(_) => {
-                // Marker files are Berd-owned completion records. Invalid bytes
-                // mean a prior commit was interrupted, not that seeding
-                // completed. Move the bad record aside and resume the same
-                // non-overwriting marker-free pass.
+                // Marker files are Berd-owned completion records. If one is
+                // invalid, we cannot distinguish an interrupted first seed
+                // from an established install with intentional deletions.
+                // Quarantine it for diagnosis and fail closed: the next pass
+                // records handled filenames without recreating missing agents.
                 quarantine_invalid_marker(&path)?;
+                invalid_marker_found = true;
             }
         }
     }
-    Ok((SeedMarker::default(), true))
+    Ok((SeedMarker::default(), !invalid_marker_found))
 }
 
 fn read_seed_marker_file(path: &Path) -> Result<SeedMarker, String> {
@@ -689,13 +692,15 @@ mod tests {
     }
 
     #[test]
-    fn invalid_marker_is_quarantined_and_initial_seed_recovers() {
+    fn invalid_marker_is_quarantined_without_recreating_missing_agents() {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         let berdy = "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nBerdy.";
         let tinker = "---\nname: Tinker\nmetadata:\n  berdBundled: true\n---\nTinker.";
         write_agent(source.path(), "berdy.md", berdy);
         write_agent(source.path(), "tinker.md", tinker);
+        // Established install: both were seeded, then Tinker was intentionally
+        // deleted before the completion marker became unreadable.
         write_agent(target.path(), "berdy.md", berdy);
         write_agent(
             target.path(),
@@ -706,11 +711,8 @@ mod tests {
 
         let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
 
-        assert_eq!(result.seeded_count, 1);
-        assert_eq!(
-            fs::read_to_string(target.path().join("tinker.md")).unwrap(),
-            tinker
-        );
+        assert_eq!(result.seeded_count, 0);
+        assert!(!target.path().join("tinker.md").exists());
         assert_eq!(
             fs::read_to_string(target.path().join("personal.md")).unwrap(),
             "---\nname: Mine\n---\nPersonal."
