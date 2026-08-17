@@ -1362,6 +1362,56 @@ describe("useBerdctlQueuedMessageDrain", () => {
     });
   });
 
+  it("holds a Berdctl head while its session is still being created", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "draft-session",
+          title: "New chat",
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+          messageCount: 0,
+          executionTarget: { harnessId: "goose" },
+          clientSessionId: "draft-session",
+          creationState: "pending" as const,
+        },
+      ],
+      hasHydratedSessions: true,
+    });
+    useChatStore.getState().enqueueTransportReadyMessage("draft-session", {
+      persona: { kind: "inherit" },
+      text: "cross-session prompt",
+      sendOptions: {
+        userMessageMetadata: { origin: "berdctl_cross_session" as const },
+      },
+    });
+
+    render(<DrainHarness />);
+    expect(
+      mocks.sendPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore
+        .getState()
+        .promoteSessionId("draft-session", "backend-session");
+      useChatSessionStore
+        .getState()
+        .promoteDraftSession("draft-session", "backend-session", {});
+    });
+
+    await waitFor(() =>
+      expect(
+        mocks.sendPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledOnce(),
+    );
+    expect(
+      mocks.sendPromptToExistingSessionInBackground.mock.calls.map(
+        (call) => call[0],
+      ),
+    ).toEqual(["backend-session"]);
+  });
+
   it("leaves ordinary queued messages for ChatView-owned queue handling", async () => {
     const chatStore = useChatStore.getState();
     chatStore.setChatState("session-1", "streaming");

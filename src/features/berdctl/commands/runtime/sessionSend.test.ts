@@ -21,6 +21,7 @@ import { beginModelSelectionIntent } from "@/features/chat/model-selection/model
 import {
   sendPromptToExistingSessionInBackground,
   sendQueuedPromptToExistingSessionInBackground,
+  SessionDispatchCreationIncompleteError,
 } from "./sessionSend";
 
 const mocks = vi.hoisted(() => ({
@@ -278,6 +279,28 @@ describe("sendPromptToExistingSessionInBackground", () => {
       nextLease.release?.();
     });
     vi.useRealTimers();
+  });
+
+  it("refuses to reach the wire while the target session is still being created", async () => {
+    const onUserMessageCommitted = vi.fn();
+    useChatSessionStore
+      .getState()
+      .patchSession(SESSION_ID, { creationState: "pending" });
+
+    await expect(
+      sendPromptToExistingSessionInBackground(
+        SESSION_ID,
+        "cross-session prompt",
+        onUserMessageCommitted,
+      ),
+    ).rejects.toBeInstanceOf(SessionDispatchCreationIncompleteError);
+
+    // The id is renderer-local until promotion, so any wire call would be
+    // made against a session the backend never created.
+    expect(mocks.acpLoadSession).not.toHaveBeenCalled();
+    expect(mocks.acpPrepareSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(onUserMessageCommitted).not.toHaveBeenCalled();
   });
 
   it("rejects when ACP setup fails before background transport dispatch", async () => {
@@ -743,7 +766,7 @@ describe("sendPromptToExistingSessionInBackground", () => {
     ).toEqual(UPDATED_TARGET_FROM_ACP);
   });
 
-  it("loads the session before acquiring and retains the lease through transport", async () => {
+  it("holds the lease from before hydration through transport", async () => {
     const order: string[] = [];
     let resolveLoad: (() => void) | undefined;
     let resolveTransport: (() => void) | undefined;
@@ -779,9 +802,12 @@ describe("sendPromptToExistingSessionInBackground", () => {
     });
     await vi.waitFor(() => expect(mocks.acpLoadSession).toHaveBeenCalledOnce());
 
-    const leaseDuringLoad = acquireSessionDispatchTarget(SESSION_ID);
-    expect(leaseDuringLoad).not.toBeNull();
-    leaseDuringLoad.release?.();
+    // The hydration window must already be contended: a prompt dispatched
+    // while `session/load` is in flight has its live turn classified as replay
+    // and then discarded when the load replaces the transcript.
+    expect(acquireSessionDispatchTarget(SESSION_ID)).toMatchObject({
+      status: "contended",
+    });
 
     resolveLoad?.();
     await vi.waitFor(() => expect(mocks.acpSendMessage).toHaveBeenCalledOnce());

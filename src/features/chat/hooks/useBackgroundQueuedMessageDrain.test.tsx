@@ -97,6 +97,38 @@ function ordinaryRecord(): QueuedMessageRecord & { kind: "transport-ready" } {
   };
 }
 
+const DRAFT_SESSION_ID = "draft-session";
+const BACKEND_SESSION_ID = "backend-session";
+
+/** A renderer-local chat whose backend session has not been created yet. */
+function seedDraftSession(creationState: "pending" | "failed" = "pending") {
+  useChatSessionStore.setState((state) => ({
+    sessions: [
+      {
+        id: DRAFT_SESSION_ID,
+        title: "New chat",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        messageCount: 0,
+        executionTarget: { harnessId: "goose" },
+        clientSessionId: DRAFT_SESSION_ID,
+        creationState,
+      },
+      ...state.sessions,
+    ],
+  }));
+}
+
+/** The store writes AppShell makes, in order, when creation completes. */
+function promoteDraft() {
+  useChatStore
+    .getState()
+    .promoteSessionId(DRAFT_SESSION_ID, BACKEND_SESSION_ID);
+  useChatSessionStore
+    .getState()
+    .promoteDraftSession(DRAFT_SESSION_ID, BACKEND_SESSION_ID, {});
+}
+
 describe("useBackgroundQueuedMessageDrain", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1149,6 +1181,115 @@ describe("useBackgroundQueuedMessageDrain", () => {
       expect(
         mocks.sendQueuedPromptToExistingSessionInBackground,
       ).toHaveBeenCalledOnce(),
+    );
+  });
+
+  it("holds a queued head while its session is still being created, then sends it against the promoted id", async () => {
+    seedDraftSession();
+    useChatStore.setState({
+      queuedMessageBySession: { [DRAFT_SESSION_ID]: [ordinaryRecord()] },
+    });
+
+    render(<DrainHarness />);
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+
+    act(() => promoteDraft());
+
+    await waitFor(() =>
+      expect(
+        mocks.sendQueuedPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledOnce(),
+    );
+    // The draft id is renderer-local; sending against it is the reported bug.
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground.mock.calls.map(
+        (call) => call[0],
+      ),
+    ).toEqual([BACKEND_SESSION_ID]);
+  });
+
+  it("keeps a queued head parked without toasting when creation failed", async () => {
+    const ordinary = ordinaryRecord();
+    seedDraftSession("failed");
+    useChatStore.setState({
+      queuedMessageBySession: { [DRAFT_SESSION_ID]: [ordinary] },
+    });
+
+    render(<DrainHarness />);
+    act(() =>
+      useChatSessionStore
+        .getState()
+        .patchSession(DRAFT_SESSION_ID, { title: "Renamed" }),
+    );
+
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+    expect(mocks.toastError).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession[DRAFT_SESSION_ID]?.[0],
+    ).toBe(ordinary);
+  });
+
+  it("leaves a promoted session's queued head to its mounted foreground owner", () => {
+    const ordinary = ordinaryRecord();
+    seedDraftSession();
+    useChatStore.setState({
+      queuedMessageBySession: { [DRAFT_SESSION_ID]: [ordinary] },
+    });
+    // The promoted id is the one that carries the queue after promotion, so
+    // it is the id a mounted ChatView owns once the hand-off settles.
+    const releaseOwner = registerForegroundQueueOwner(BACKEND_SESSION_ID);
+
+    render(<DrainHarness />);
+    act(() => promoteDraft());
+
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession[BACKEND_SESSION_ID]?.[0],
+    ).toBe(ordinary);
+    releaseOwner();
+  });
+
+  it("leaves a just-promoted head to a foreground owner still keyed to the draft id", async () => {
+    const ordinary = ordinaryRecord();
+    seedDraftSession();
+    useChatStore.setState({
+      queuedMessageBySession: { [DRAFT_SESSION_ID]: [ordinary] },
+    });
+    // The real hand-off timeline: the mounted ChatView owns the draft id and
+    // stays registered there until React commits the promoted id, which is
+    // after the synchronous store writes below. Claiming the head in that
+    // window makes this drain's hydration race the foreground send.
+    const releaseOwner = registerForegroundQueueOwner(DRAFT_SESSION_ID);
+
+    render(<DrainHarness />);
+    act(() => promoteDraft());
+
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession[BACKEND_SESSION_ID]?.[0],
+    ).toBe(ordinary);
+
+    // The user leaves before the foreground drain sends it: this drain takes
+    // over, against the promoted id.
+    act(() => releaseOwner());
+
+    await waitFor(() =>
+      expect(
+        mocks.sendQueuedPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledWith(
+        BACKEND_SESSION_ID,
+        ordinary,
+        expect.any(Function),
+        expect.any(Function),
+      ),
     );
   });
 });

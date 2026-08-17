@@ -16,6 +16,7 @@ import { sendPromptInBackground } from "@/features/chat/lib/backgroundSend";
 import { loadSessionMessages } from "@/features/chat/lib/sessionActivation";
 import {
   SessionDispatchContentionError,
+  SessionDispatchCreationIncompleteError,
   SessionDispatchMissingError,
   SessionDispatchUnresolvedError,
 } from "@/features/chat/lib/sessionDispatchAcquisition";
@@ -89,9 +90,21 @@ function hasUiOwnedUnresolvedTarget(session?: ChatSession): boolean {
 
 export {
   SessionDispatchContentionError,
+  SessionDispatchCreationIncompleteError,
   SessionDispatchMissingError,
   SessionDispatchUnresolvedError,
 } from "@/features/chat/lib/sessionDispatchAcquisition";
+
+async function hydrateSessionForBackgroundSend(
+  sessionId: string,
+): Promise<boolean> {
+  const loaded = await loadSessionMessages(sessionId);
+  if (!loaded) {
+    throw new Error("Failed to load the target session before sending.");
+  }
+  await applyPendingSessionWorkspaceActivation(sessionId);
+  return Boolean(useChatSessionStore.getState().getSession(sessionId));
+}
 
 export async function acquireExistingSessionForBackgroundSend(
   sessionId: string,
@@ -102,16 +115,48 @@ export async function acquireExistingSessionForBackgroundSend(
   if (!sessionBeforeHydration) {
     return { status: "session-missing" } as const;
   }
-  const snapshottedTarget = sessionBeforeHydration.executionTarget;
-  const loaded = await loadSessionMessages(sessionId);
-  if (!loaded) {
-    throw new Error("Failed to load the target session before sending.");
+  // Backend creation is still in flight (or has failed), so this id is a
+  // renderer-local draft. `loadSessionMessages` reports success for it —
+  // "nothing to load" is not a failure there — which would let preparation
+  // walk on to `acpApi.loadSession` with an id the backend never issued.
+  const { creationState } = sessionBeforeHydration;
+  if (creationState) {
+    return { status: "creation-incomplete", creationState } as const;
   }
-  await applyPendingSessionWorkspaceActivation(sessionId);
-  if (!useChatSessionStore.getState().getSession(sessionId)) {
-    return { status: "session-missing" } as const;
+  // Claim the dispatch target before hydrating, not after. Every notification
+  // that arrives while `session/load` is in flight is classified as replay, so
+  // a sender that dispatched during our hydration would have its live turn
+  // buffered as history and then dropped when the load resolves and replaces
+  // the transcript. Holding the lease across the load publishes that window:
+  // other senders see contention and wait for the release instead of
+  // dispatching into it. Hydration under a held lease is expected — the target
+  // coordinator either absorbs a matching observation or defers it to release.
+  const acquisition = acquireSessionDispatchTarget(sessionId);
+  if (acquisition.status === "unresolved") {
+    // The store holds no execution target yet, so there is nothing to lease:
+    // the `session/load` replay is what hydrates the target for a session
+    // this renderer has never activated (berdctl can address one directly).
+    // Hydrate first and lease the replayed target. The unleased load this
+    // reopens covers only targetless sessions, which no queued drain attempts
+    // — `isQueuedMessageTargetAttemptable` requires an execution target.
+    if (!(await hydrateSessionForBackgroundSend(sessionId))) {
+      return { status: "session-missing" } as const;
+    }
+    return acquireSessionDispatchTarget(sessionId);
   }
-  return acquireSessionDispatchTarget(sessionId, snapshottedTarget);
+  if (acquisition.status !== "acquired") {
+    return acquisition;
+  }
+  try {
+    if (!(await hydrateSessionForBackgroundSend(sessionId))) {
+      acquisition.release();
+      return { status: "session-missing" } as const;
+    }
+    return acquisition;
+  } catch (error) {
+    acquisition.release();
+    throw error;
+  }
 }
 
 export async function prepareExistingSessionForBackgroundSend(
@@ -217,6 +262,9 @@ export async function sendQueuedPromptToExistingSessionInBackground(
   }
   if (acquisition.status === "session-missing") {
     throw new SessionDispatchMissingError(sessionId);
+  }
+  if (acquisition.status === "creation-incomplete") {
+    throw new SessionDispatchCreationIncompleteError(acquisition.creationState);
   }
   const targetLease = acquisition;
   try {

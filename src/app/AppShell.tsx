@@ -44,7 +44,10 @@ import { planProjectChatWorkspacesAsIs } from "@/features/projects/lib/projectCh
 import { ProjectWorkspaceStartupNameDialog } from "@/features/projects/ui/ProjectWorkspaceStartupNameDialog";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 import type { TopBarChromeInsets } from "./ui/TopBar";
-import { useChatStore } from "@/features/chat/stores/chatStore";
+import {
+  isSessionActivelyViewed,
+  useChatStore,
+} from "@/features/chat/stores/chatStore";
 import { useActiveProjectTint } from "@/features/chat/hooks/useActiveProjectTint";
 import { useWorkspaceNameRequestQueue } from "@/features/chat/hooks/useWorkspaceNameRequestQueue";
 import {
@@ -1998,6 +2001,23 @@ export function AppShell({
         )
         .catch(async (error) => {
           const chatStore = useChatStore.getState();
+          // A chat can fail to create while the user is somewhere else — the
+          // global composer hands off in the background, and any queued head
+          // stays held until creation settles. The in-transcript error would
+          // then be invisible until they open the chat, so report it where
+          // they are instead.
+          // Being the active session is not enough to make the transcript
+          // visible: opening Settings or the design system leaves
+          // `activeSessionId` pointing here, so the store's viewing flag is
+          // what decides whether the in-transcript error is on screen.
+          const reportCreationFailureIfHidden = (message: string) => {
+            if (isSessionActivelyViewed(useChatStore.getState(), session.id)) {
+              return;
+            }
+            toast.error(t("chat:toolbar.sessionStartFailed"), {
+              description: message,
+            });
+          };
           if (createdBackendSessionId) {
             try {
               await archiveSessionApi(createdBackendSessionId);
@@ -2046,6 +2066,7 @@ export function AppShell({
                   ),
                 );
                 chatStore.setError(session.id, messageWithCleanupStatus);
+                reportCreationFailureIfHidden(messageWithCleanupStatus);
                 return;
               }
             } catch (checkError) {
@@ -2070,6 +2091,7 @@ export function AppShell({
             createSystemNotificationMessage(messageWithCleanupStatus, "error"),
           );
           chatStore.setError(session.id, messageWithCleanupStatus);
+          reportCreationFailureIfHidden(messageWithCleanupStatus);
         });
     },
     [

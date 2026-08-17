@@ -92,6 +92,31 @@ function ownerIdFor(scopedSessionId?: string): string {
   return scopedSessionId ? `session:${scopedSessionId}` : "global";
 }
 
+/**
+ * Foreground ownership of a promoted chat's queue, spanning the id swap.
+ *
+ * Promotion re-keys the queue to the backend id synchronously, but the mounted
+ * ChatView is still registered under the renderer-local draft id until React
+ * commits the new `sessionId` into `useMessageQueue`. A promoted session keeps
+ * that draft id as its `clientSessionId`, so honoring both ids keeps the
+ * hand-off instant from looking unowned — otherwise this drain claims the head
+ * the foreground owner is about to send, and its hydration then races that
+ * send.
+ */
+function hasForegroundQueueOwnerAcrossPromotion(sessionId: string): boolean {
+  if (hasForegroundQueueOwner(sessionId)) {
+    return true;
+  }
+  const clientSessionId = useChatSessionStore
+    .getState()
+    .getSession(sessionId)?.clientSessionId;
+  return (
+    clientSessionId !== undefined &&
+    clientSessionId !== sessionId &&
+    hasForegroundQueueOwner(clientSessionId)
+  );
+}
+
 export function resetBackgroundQueueDrainStateForTesting(): void {
   restoredExclusionsBySession.clear();
 }
@@ -121,7 +146,7 @@ function isBackgroundDrainableHead(
   }
   return (
     !isRestoredExcluded(sessionId, record) &&
-    !hasForegroundQueueOwner(sessionId)
+    !hasForegroundQueueOwnerAcrossPromotion(sessionId)
   );
 }
 

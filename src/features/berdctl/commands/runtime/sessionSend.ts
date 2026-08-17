@@ -3,6 +3,7 @@ import {
   acquireExistingSessionForBackgroundSend,
   prepareExistingSessionForBackgroundSend,
   SessionDispatchContentionError,
+  SessionDispatchCreationIncompleteError,
   SessionDispatchMissingError,
   SessionDispatchUnresolvedError,
 } from "@/features/chat/lib/queuedSessionSend";
@@ -10,6 +11,7 @@ import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 export {
   sendQueuedPromptToExistingSessionInBackground,
   SessionDispatchContentionError,
+  SessionDispatchCreationIncompleteError,
   SessionDispatchMissingError,
   SessionDispatchUnresolvedError,
 } from "@/features/chat/lib/queuedSessionSend";
@@ -47,6 +49,9 @@ export async function sendPromptToExistingSessionInBackground(
   }
   if (acquisition.status === "session-missing") {
     throw new SessionDispatchMissingError(sessionId);
+  }
+  if (acquisition.status === "creation-incomplete") {
+    throw new SessionDispatchCreationIncompleteError(acquisition.creationState);
   }
   const targetLease = acquisition;
   let dispatched = false;
