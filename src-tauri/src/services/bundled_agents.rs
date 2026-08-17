@@ -232,9 +232,7 @@ fn seed_bundled_agents_from_dir(
     // authoritative for whether initial seeding has completed. If a prior
     // attempt copied some files but failed before writing the marker, another
     // marker-free pass safely resumes the remaining non-colliding files.
-    let initial_seed =
-        !marker_path(target_root).exists() && !legacy_marker_path(target_root).exists();
-    let mut marker = read_seed_marker(target_root)?;
+    let (mut marker, initial_seed) = read_seed_marker_for_seed(target_root)?;
     let mut seeded_count = 0usize;
     let mut avatar_refs_to_warm = BTreeSet::new();
 
@@ -459,18 +457,41 @@ fn legacy_marker_path(target_root: &Path) -> PathBuf {
     target_root.join(LEGACY_MARKER_FILE_NAME)
 }
 
+fn quarantine_invalid_marker(path: &Path) -> Result<(), String> {
+    let quarantine = path.with_file_name(format!(
+        ".berd-bundled-agents-invalid-{}.json",
+        uuid::Uuid::new_v4()
+    ));
+    fs::rename(path, &quarantine).map_err(|err| {
+        format!(
+            "Failed to quarantine invalid bundled agent marker '{}' at '{}': {err}",
+            path.display(),
+            quarantine.display()
+        )
+    })
+}
+
 fn read_seed_marker(target_root: &Path) -> Result<SeedMarker, String> {
-    let path = marker_path(target_root);
-    if path.exists() {
-        return read_seed_marker_file(&path);
-    }
+    Ok(read_seed_marker_for_seed(target_root)?.0)
+}
 
-    let legacy_path = legacy_marker_path(target_root);
-    if legacy_path.exists() {
-        return read_seed_marker_file(&legacy_path);
+fn read_seed_marker_for_seed(target_root: &Path) -> Result<(SeedMarker, bool), String> {
+    for path in [marker_path(target_root), legacy_marker_path(target_root)] {
+        if !path.exists() {
+            continue;
+        }
+        match read_seed_marker_file(&path) {
+            Ok(marker) => return Ok((marker, false)),
+            Err(_) => {
+                // Marker files are Berd-owned completion records. Invalid bytes
+                // mean a prior commit was interrupted, not that seeding
+                // completed. Move the bad record aside and resume the same
+                // non-overwriting marker-free pass.
+                quarantine_invalid_marker(&path)?;
+            }
+        }
     }
-
-    Ok(SeedMarker::default())
+    Ok((SeedMarker::default(), true))
 }
 
 fn read_seed_marker_file(path: &Path) -> Result<SeedMarker, String> {
@@ -488,6 +509,47 @@ fn read_seed_marker_file(path: &Path) -> Result<SeedMarker, String> {
     })
 }
 
+#[cfg(not(target_os = "windows"))]
+fn replace_marker_atomically(from: &Path, to: &Path) -> std::io::Result<()> {
+    fs::rename(from, to)
+}
+
+#[cfg(target_os = "windows")]
+fn replace_marker_atomically(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x1;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x8;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn MoveFileExW(from: *const u16, to: *const u16, flags: u32) -> i32;
+    }
+
+    let from = from
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let to = to
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
 fn write_seed_marker(target_root: &Path, marker: &SeedMarker) -> Result<(), String> {
     fs::create_dir_all(target_root).map_err(|err| {
         format!(
@@ -498,12 +560,43 @@ fn write_seed_marker(target_root: &Path, marker: &SeedMarker) -> Result<(), Stri
     let path = marker_path(target_root);
     let contents = serde_json::to_vec_pretty(marker)
         .map_err(|err| format!("Failed to serialize bundled agent marker: {err}"))?;
-    fs::write(&path, contents).map_err(|err| {
-        format!(
-            "Failed to write bundled agent marker '{}': {err}",
-            path.display()
-        )
-    })?;
+    let temp_path = target_root.join(format!(".berd-bundled-agents-{}.tmp", uuid::Uuid::new_v4()));
+    let result = (|| -> Result<(), String> {
+        let mut temp = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .map_err(|err| {
+                format!(
+                    "Failed to create temporary bundled agent marker '{}': {err}",
+                    temp_path.display()
+                )
+            })?;
+        temp.write_all(&contents).map_err(|err| {
+            format!(
+                "Failed to write temporary bundled agent marker '{}': {err}",
+                temp_path.display()
+            )
+        })?;
+        temp.sync_all().map_err(|err| {
+            format!(
+                "Failed to sync temporary bundled agent marker '{}': {err}",
+                temp_path.display()
+            )
+        })?;
+        replace_marker_atomically(&temp_path, &path).map_err(|err| {
+            format!(
+                "Failed to install bundled agent marker '{}' at '{}': {err}",
+                temp_path.display(),
+                path.display()
+            )
+        })?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result?;
 
     let legacy_path = legacy_marker_path(target_root);
     if legacy_path.exists() {
@@ -512,7 +605,6 @@ fn write_seed_marker(target_root: &Path, marker: &SeedMarker) -> Result<(), Stri
 
     Ok(())
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -594,6 +686,45 @@ mod tests {
         let marker = read_seed_marker(target.path()).unwrap();
         assert!(marker.seeded_files.contains("berdy.md"));
         assert!(marker.seeded_files.contains("tinker.md"));
+    }
+
+    #[test]
+    fn invalid_marker_is_quarantined_and_initial_seed_recovers() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let berdy = "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nBerdy.";
+        let tinker = "---\nname: Tinker\nmetadata:\n  berdBundled: true\n---\nTinker.";
+        write_agent(source.path(), "berdy.md", berdy);
+        write_agent(source.path(), "tinker.md", tinker);
+        write_agent(target.path(), "berdy.md", berdy);
+        write_agent(
+            target.path(),
+            "personal.md",
+            "---\nname: Mine\n---\nPersonal.",
+        );
+        fs::write(marker_path(target.path()), b"{\"seededFiles\":[").unwrap();
+
+        let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(result.seeded_count, 1);
+        assert_eq!(
+            fs::read_to_string(target.path().join("tinker.md")).unwrap(),
+            tinker
+        );
+        assert_eq!(
+            fs::read_to_string(target.path().join("personal.md")).unwrap(),
+            "---\nname: Mine\n---\nPersonal."
+        );
+        let marker = read_seed_marker(target.path()).unwrap();
+        assert!(marker.seeded_files.contains("berdy.md"));
+        assert!(marker.seeded_files.contains("tinker.md"));
+        assert!(fs::read_dir(target.path()).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".berd-bundled-agents-invalid-")
+        }));
     }
 
     #[test]
