@@ -381,7 +381,7 @@ export async function archiveSession(sessionId: string): Promise<void> {
 
 export async function deleteSession(sessionId: string): Promise<void> {
   const client = await getClient();
-  await client.goose.sessionDelete({ sessionId });
+  await client.extMethod("session/delete", { sessionId });
 }
 
 export async function unarchiveSession(sessionId: string): Promise<void> {

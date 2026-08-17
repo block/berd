@@ -103,6 +103,21 @@
             "socket": {
               "type": ["string", "null"]
             },
+            "clientId": {
+              "type": ["string", "null"],
+              "description": "Pre-registered OAuth client ID for the server's authorization server."
+            },
+            "clientSecretKey": {
+              "type": ["string", "null"],
+              "description": "Name of the env/secret key holding the OAuth client secret."
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "OAuth scopes to request with `client_id`."
+            },
             "bundled": {
               "type": ["boolean", "null"]
             },
@@ -352,18 +367,6 @@
       "description": "Remove an extension from an active session.",
       "x-side": "agent",
       "x-method": "_goose/unstable/session/extensions/remove"
-    },
-    "ApplySessionExtensionsRequest_unstable": {
-      "type": "object",
-      "properties": {
-        "sessionId": {
-          "type": "string"
-        }
-      },
-      "required": ["sessionId"],
-      "description": "Recreate the session's provider, keeping its current provider and model,\nso that the session's current extension list takes effect.\n\nUseful after adding or removing session extensions when the provider\nforwards extensions to a downstream session (ACP harness providers such as\nclaude-acp and codex-acp). Those providers snapshot the extension list when\nthey are built, so extension changes only reach them on rebuild: the\nprovider is replaced with a new instance whose downstream session is\ncreated with the updated extension list.\n\nProviders that don't forward extensions pick up extension changes\nimmediately; for them this call is not required.",
-      "x-side": "agent",
-      "x-method": "_goose/unstable/session/extensions/apply"
     },
     "GetToolsRequest_unstable": {
       "type": "object",
@@ -1216,18 +1219,6 @@
       "x-side": "agent",
       "x-method": "_goose/unstable/config/prompts/reset"
     },
-    "DeleteSessionRequest": {
-      "type": "object",
-      "properties": {
-        "sessionId": {
-          "type": "string"
-        }
-      },
-      "required": ["sessionId"],
-      "description": "Delete a session.",
-      "x-side": "agent",
-      "x-method": "session/delete"
-    },
     "GetConfigExtensionsRequest_unstable": {
       "type": "object",
       "description": "List configured extensions and any warnings.",
@@ -1413,6 +1404,10 @@
           "type": "boolean",
           "description": "Whether Goose has enough configuration to use this provider."
         },
+        "available": {
+          "type": "boolean",
+          "description": "Whether the provider's external runtime or required configuration is available."
+        },
         "providerType": {
           "type": "string",
           "description": "Provider classification such as `Preferred`, `Builtin`, `Declarative`, or `Custom`."
@@ -1420,6 +1415,23 @@
         "category": {
           "$ref": "#/$defs/ProviderSetupCategoryDto",
           "description": "Whether this inventory entry represents an agent provider or a model provider."
+        },
+        "acp": {
+          "type": "boolean",
+          "description": "Whether this provider communicates through ACP.",
+          "default": false
+        },
+        "visibleInSetup": {
+          "type": "boolean",
+          "description": "Whether this provider should appear in normal provider setup UIs."
+        },
+        "deprecated": {
+          "type": "boolean",
+          "description": "Whether this provider is retained only for compatibility."
+        },
+        "replacement": {
+          "type": ["string", "null"],
+          "description": "Preferred replacement for a deprecated provider."
         },
         "configKeys": {
           "type": "array",
@@ -1477,8 +1489,11 @@
         "description",
         "defaultModel",
         "configured",
+        "available",
         "providerType",
         "category",
+        "visibleInSetup",
+        "deprecated",
         "configKeys",
         "setupSteps",
         "supportsRefresh",
@@ -1677,6 +1692,11 @@
         },
         "category": {
           "$ref": "#/$defs/ProviderSetupCategoryDto"
+        },
+        "acp": {
+          "type": "boolean",
+          "description": "Whether this provider communicates through ACP.",
+          "default": false
         },
         "description": {
           "type": "string"
@@ -2214,6 +2234,35 @@
       "description": "Trigger a background refresh of provider inventories.",
       "x-side": "agent",
       "x-method": "_goose/unstable/providers/inventory/refresh"
+    },
+    "ProviderReadinessCheckRequest_unstable": {
+      "type": "object",
+      "properties": {
+        "providerId": {
+          "type": "string"
+        }
+      },
+      "required": ["providerId"],
+      "description": "Check whether an ACP provider can initialize and create a session.",
+      "x-side": "agent",
+      "x-method": "_goose/unstable/providers/readiness/check"
+    },
+    "ProviderReadinessCheckResponse_unstable": {
+      "type": "object",
+      "properties": {
+        "providerId": {
+          "type": "string"
+        },
+        "ready": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["providerId", "ready"],
+      "x-side": "agent",
+      "x-method": "_goose/unstable/providers/readiness/check"
     },
     "ProviderConfigReadRequest_unstable": {
       "type": "object",
@@ -3233,6 +3282,21 @@
             },
             "socket": {
               "type": ["string", "null"]
+            },
+            "client_id": {
+              "type": ["string", "null"],
+              "description": "Pre-registered OAuth client ID for the server's authorization server."
+            },
+            "client_secret_key": {
+              "type": ["string", "null"],
+              "description": "Name of the env/secret key holding the OAuth client secret."
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "OAuth scopes to request with `client_id`."
             },
             "bundled": {
               "type": ["boolean", "null"]
@@ -5704,15 +5768,6 @@
                 {
                   "allOf": [
                     {
-                      "$ref": "#/$defs/ApplySessionExtensionsRequest_unstable"
-                    }
-                  ],
-                  "description": "Params for _goose/unstable/session/extensions/apply",
-                  "title": "ApplySessionExtensionsRequest_unstable"
-                },
-                {
-                  "allOf": [
-                    {
                       "$ref": "#/$defs/GetToolsRequest_unstable"
                     }
                   ],
@@ -5857,15 +5912,6 @@
                 {
                   "allOf": [
                     {
-                      "$ref": "#/$defs/DeleteSessionRequest"
-                    }
-                  ],
-                  "description": "Params for session/delete",
-                  "title": "DeleteSessionRequest"
-                },
-                {
-                  "allOf": [
-                    {
                       "$ref": "#/$defs/GetConfigExtensionsRequest_unstable"
                     }
                   ],
@@ -6006,6 +6052,15 @@
                   ],
                   "description": "Params for _goose/unstable/providers/inventory/refresh",
                   "title": "RefreshProviderInventoryRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ProviderReadinessCheckRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/providers/readiness/check",
+                  "title": "ProviderReadinessCheckRequest_unstable"
                 },
                 {
                   "allOf": [
@@ -6948,6 +7003,14 @@
                         }
                       ],
                       "title": "RefreshProviderInventoryResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/ProviderReadinessCheckResponse_unstable"
+                        }
+                      ],
+                      "title": "ProviderReadinessCheckResponse_unstable"
                     },
                     {
                       "allOf": [
