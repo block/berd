@@ -69,6 +69,7 @@ vi.mock("@/shared/api/acpConnection", () => ({
 }));
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpPrepareSession: (...args: unknown[]) => mockPrepareSession(...args),
 }));
 
@@ -212,6 +213,7 @@ describe("useResolvedAgentModelPicker", () => {
       "openai",
       "/w",
       expect.objectContaining({ modelId: "next" }),
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
   });
 
@@ -470,6 +472,14 @@ describe("useResolvedAgentModelPicker", () => {
             providerId: "anthropic",
           },
         ],
+        getProvenModelsForAgent: () => [
+          { id: "gpt-5.4", name: "GPT-5.4", providerId: "openai" },
+          {
+            id: "claude-sonnet-4",
+            name: "Claude Sonnet 4",
+            providerId: "anthropic",
+          },
+        ],
         modelsLoading: false,
         modelStatusMessage: null,
         handleProviderChange: (providerId: string) =>
@@ -545,6 +555,19 @@ describe("useResolvedAgentModelPicker", () => {
         { id: "codex-acp", label: "Codex" },
       ],
       availableModels: [
+        {
+          id: "gpt-5.4-mini",
+          name: "GPT Mini 5.4",
+          providerId: "codex-acp",
+        },
+        {
+          id: "gpt-5.5",
+          name: "GPT 5.5",
+          providerId: "codex-acp",
+          recommended: true,
+        },
+      ],
+      getProvenModelsForAgent: () => [
         {
           id: "gpt-5.4-mini",
           name: "GPT Mini 5.4",
@@ -1203,7 +1226,14 @@ describe("useResolvedAgentModelPicker", () => {
           recommended: true,
         },
       ],
-      getProvenModelsForAgent: () => [],
+      getProvenModelsForAgent: () => [
+        {
+          id: "gpt-5.6",
+          name: "GPT-5.6",
+          providerId: "openai",
+          recommended: true,
+        },
+      ],
       isModelInventoryAuthoritative: (providerId: string) =>
         providerId === "openai",
       modelsLoading: false,

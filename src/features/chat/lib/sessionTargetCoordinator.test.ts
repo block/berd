@@ -17,6 +17,7 @@ import {
 
 const mockPrepare = vi.fn();
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpPrepareSession: (...args: unknown[]) => mockPrepare(...args),
 }));
 
@@ -126,9 +127,13 @@ describe("session target coordinator", () => {
       target: target("c"),
     });
     expect(mockPrepare).toHaveBeenCalledTimes(1);
-    expect(mockPrepare).toHaveBeenCalledWith("s", "openai", "/w", {
-      modelId: "c",
-    });
+    expect(mockPrepare).toHaveBeenCalledWith(
+      "s",
+      "openai",
+      "/w",
+      { modelId: "c" },
+      expect.objectContaining({ clear: expect.any(Function) }),
+    );
   });
 
   it("prevents an on-wire stale operation from committing over the winner", async () => {
@@ -405,10 +410,13 @@ describe("session target coordinator", () => {
       requireReasoningEffort: true,
     });
 
-    expect(mockPrepare).toHaveBeenCalledWith("s", "openai", "/w", {
-      modelId: "a",
-      forceConfigRefresh: true,
-    });
+    expect(mockPrepare).toHaveBeenCalledWith(
+      "s",
+      "openai",
+      "/w",
+      { modelId: "a", forceConfigRefresh: true },
+      expect.objectContaining({ clear: expect.any(Function) }),
+    );
   });
 
   it("defers external hydration until the dispatch lease releases", () => {

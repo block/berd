@@ -10,6 +10,7 @@ const mockAcpLoadSession = vi.fn();
 const mockAcpPrepareSession = vi.fn();
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpSendMessage: (...args: unknown[]) => {
     const result = mockAcpSendMessage(...args);
     const options = args[2] as

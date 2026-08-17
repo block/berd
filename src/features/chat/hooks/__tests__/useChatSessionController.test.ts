@@ -115,6 +115,7 @@ function deferred<T = void>() {
 }
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
   acpSetSessionConfigOption: (...args: unknown[]) =>
     mockAcpSetSessionConfigOption(...args),
@@ -326,6 +327,7 @@ function expectSessionPreparation({
       ...(modelId ? { modelId } : {}),
       ...(forceConfigRefresh ? { forceConfigRefresh: true } : {}),
     }),
+    expect.objectContaining({ clear: expect.any(Function) }),
   );
 }
 
@@ -4811,6 +4813,7 @@ describe("useChatSessionController", () => {
       "openai",
       "/tmp/project",
       expect.objectContaining({ requestId: expect.any(String) }),
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
   });
 

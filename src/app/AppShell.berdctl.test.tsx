@@ -80,6 +80,7 @@ vi.mock("@/app/views/NavigationPanesView", () => ({
 }));
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpCreateSession: (...args: unknown[]) => mockAcpCreateSession(...args),
   acpListSessionsPage: (...args: unknown[]) => mockAcpListSessionsPage(...args),
   acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),

@@ -74,6 +74,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpCreateSession: (...args: unknown[]) => mocks.acpCreateSession(...args),
   acpDuplicateSession: (...args: unknown[]) =>
     mocks.acpDuplicateSession(...args),
@@ -289,6 +290,9 @@ function seedModelCache(cacheKey: string, modelIds: string[]): void {
       providerId: cacheKey,
       models: modelIds.map((id) => ({ id, name: id })),
       fetchedAt: Date.now(),
+      // Simulate a successful live inventory response: proof is what keeps
+      // this cache entry from being treated as stale and re-fetched.
+      provenModelIds: modelIds,
     });
     return { providers };
   });
@@ -1006,6 +1010,7 @@ describe("sessions.send", () => {
       "codex-acp",
       "/resolved/cwd",
       { modelId: "gpt-6" },
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
     expect(controller.openSession).not.toHaveBeenCalled();
 
@@ -1083,6 +1088,7 @@ describe("sessions.send", () => {
       "codex-acp",
       "/resolved/cwd",
       {},
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
     expect(getPendingSessionWorkspaceActivation("session-1")).toBeNull();
   });
@@ -1132,6 +1138,7 @@ describe("sessions.send", () => {
       "old-provider",
       "/resolved/cwd",
       { modelId: "old-model" },
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
     await vi.waitFor(() => {
       expect(mocks.acpSendMessage).toHaveBeenCalledWith(

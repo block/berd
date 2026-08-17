@@ -5,6 +5,7 @@ import { resetSessionTargetCoordinatorsForTests } from "./sessionTargetCoordinat
 const mockAcpPrepareSession = vi.fn();
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
 }));
 
@@ -39,6 +40,7 @@ describe("transitionSessionTarget", () => {
       "new-provider",
       "/new",
       { modelId: "new-model" },
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
   });
 
@@ -65,6 +67,7 @@ describe("transitionSessionTarget", () => {
         forceConfigRefresh: true,
         requestId: "request-5-6",
       },
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
   });
 });
