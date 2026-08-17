@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use builderbot_auth::auth_login::{auth_url, build_auth_http_client};
+use builderbot_auth::auth_storage::StoredSessionCredential;
 use clap::{Arg, ArgMatches, Command};
 use reqwest::blocking::{multipart, Client, RequestBuilder, Response};
 use reqwest::header::{HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
@@ -26,7 +27,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 
 use super::auth_login::{ensure_browser_login, verify_stored_session};
-use super::auth_storage::{default_session_storage, session_storage_key_from_config};
+use super::auth_storage::default_session_storage;
 use super::display::{print_json, stdin_is_tty, terminal_safe_text, Style};
 use super::runner;
 use super::skills_api::{exit_codes, failure};
@@ -34,6 +35,8 @@ use super::skills_config::SkillsConfig;
 
 const APPS_BASE_URL_ENV_VAR: &str = "BB_APPS_CONTROL_PLANE_URL";
 const APPS_CLIENT_VERSION_ENV_VAR: &str = "BB_APPS_CLIENT_VERSION";
+#[cfg(debug_assertions)]
+const APPS_E2E_CONTROL_PLANE_URL_ENV_VAR: &str = "BB_APPS_E2E_CONTROL_PLANE_URL";
 const APPS_CONTRACT_PATH: &str = "/v1/agent/contract";
 const APPS_PLAN_PATH: &str = "/v1/agent/apps/plan";
 const HOTPOD_AGENT_CLIENT_VERSION_HEADER: &str = "X-Hotpod-Agent-Client-Version";
@@ -357,31 +360,16 @@ struct ComposeSessionCredential {
 impl ComposeSessionCredential {
     fn from_config(config: &SkillsConfig) -> Result<Self> {
         let storage = default_session_storage(config)?;
-        let session_storage_key = session_storage_key_from_config(config);
         if config.json || !stdin_is_tty() {
-            if verify_stored_session(config, storage.as_ref())?.is_none() {
-                return Err(auth_required_error());
-            }
-            Self::after_login(storage.as_ref(), &session_storage_key, || Ok(()))
+            let verified =
+                verify_stored_session(config, storage.as_ref())?.ok_or_else(auth_required_error)?;
+            Self::from_stored(verified.credential)
         } else {
-            Self::after_login(storage.as_ref(), &session_storage_key, || {
-                ensure_browser_login(config, storage.as_ref())
-            })
+            Self::from_stored(ensure_browser_login(config, storage.as_ref())?)
         }
     }
 
-    fn after_login<F>(
-        storage: &dyn super::auth_storage::SessionCredentialStorage,
-        session_storage_key: &super::auth_storage::SessionStorageKey,
-        login: F,
-    ) -> Result<Self>
-    where
-        F: FnOnce() -> Result<()>,
-    {
-        login()?;
-        let credential = storage
-            .get(session_storage_key)?
-            .ok_or_else(auth_required_error)?;
+    fn from_stored(credential: StoredSessionCredential) -> Result<Self> {
         let secret = credential
             .session_credential_header_value()
             .ok_or_else(auth_required_error)?;
@@ -437,7 +425,8 @@ impl ControlPlaneClient {
                 "Apps Platform control-plane URL must use HTTPS and target an approved Builderlab ingress host"
             );
         }
-        Self::build(base_url, client_version, style, request_timeout)
+        let transport_base_url = control_plane_transport_base_url(base_url)?;
+        Self::build(&transport_base_url, client_version, style, request_timeout)
     }
 
     fn build(
@@ -642,6 +631,42 @@ fn is_trusted_control_plane_url(url: &url::Url) -> bool {
         .any(|trusted| host.eq_ignore_ascii_case(trusted))
 }
 
+#[cfg(debug_assertions)]
+fn control_plane_transport_base_url(validated_base_url: &str) -> Result<String> {
+    let Some(override_url) = std::env::var_os(APPS_E2E_CONTROL_PLANE_URL_ENV_VAR) else {
+        return Ok(validated_base_url.to_string());
+    };
+    let override_url = override_url
+        .into_string()
+        .map_err(|_| anyhow::anyhow!("{APPS_E2E_CONTROL_PLANE_URL_ENV_VAR} must be UTF-8"))?;
+    let parsed = url::Url::parse(&override_url)
+        .with_context(|| format!("parse {APPS_E2E_CONTROL_PLANE_URL_ENV_VAR}"))?;
+    let loopback = match parsed.host() {
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        _ => false,
+    };
+    if parsed.scheme() != "http"
+        || !loopback
+        || parsed.port().is_none()
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.path() != "/"
+        || parsed.query().is_some()
+        || parsed.fragment().is_some()
+    {
+        anyhow::bail!(
+            "{APPS_E2E_CONTROL_PLANE_URL_ENV_VAR} must be an HTTP loopback origin with an explicit port"
+        );
+    }
+    Ok(override_url.trim_end_matches('/').to_string())
+}
+
+#[cfg(not(debug_assertions))]
+fn control_plane_transport_base_url(validated_base_url: &str) -> Result<String> {
+    Ok(validated_base_url.to_string())
+}
+
 fn read_limited_response_body(
     response: reqwest::blocking::Response,
     max_bytes: usize,
@@ -724,10 +749,6 @@ fn control_plane_http_failure(
 mod tests {
     use std::thread;
 
-    use builderbot_auth::auth_storage::{
-        InMemorySessionCredentialStorage, SessionCredentialStorage, SessionStorageKey,
-        StoredSessionCredential,
-    };
     use tiny_http::{Header, Response, Server};
 
     use super::*;
@@ -757,21 +778,13 @@ mod tests {
     }
 
     #[test]
-    fn compose_session_continues_with_the_session_stored_by_login() {
-        let storage = InMemorySessionCredentialStorage::default();
-        let storage_key = SessionStorageKey::new("default", "https://kgoose.example");
+    fn compose_session_uses_the_exact_credential_returned_by_login() {
         let secret = "session_stored_after_browser_login_12345";
-
-        let credential = ComposeSessionCredential::after_login(&storage, &storage_key, || {
-            storage.set(
-                &storage_key,
-                &StoredSessionCredential {
-                    session_credential: secret.to_string(),
-                    expires_at: Some("2099-01-01T00:00:00Z".to_string()),
-                },
-            )
+        let credential = ComposeSessionCredential::from_stored(StoredSessionCredential {
+            session_credential: secret.to_string(),
+            expires_at: Some("2099-01-01T00:00:00Z".to_string()),
         })
-        .expect("continue after login");
+        .expect("use returned login credential");
 
         assert_eq!(
             credential

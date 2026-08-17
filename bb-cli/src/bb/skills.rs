@@ -575,7 +575,7 @@ fn config_with_login_org(config: &SkillsConfig) -> Result<SkillsConfig> {
 
 fn auth_status(config: &SkillsConfig) -> Result<()> {
     let storage = default_session_storage(config)?;
-    let Some(me) = verify_stored_session(config, storage.as_ref())? else {
+    let Some(verified) = verify_stored_session(config, storage.as_ref())? else {
         if !config.json {
             println!("BuilderBot CLI auth");
             println!("  profile: {}", config.profile);
@@ -591,6 +591,7 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
             "profile": config.profile,
         }));
     };
+    let me = verified.me;
 
     if !config.json {
         let workspace_name = me.active_workspace_name()?;

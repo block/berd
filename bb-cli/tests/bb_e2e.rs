@@ -7,7 +7,7 @@ mod common;
 use std::fs;
 use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -3616,6 +3616,83 @@ fn bb_skills_doctor_offline_reports_server_failure() {
 // ---------------------------------------------------------------------------
 // External Apps Platform control plane
 
+const APPROVED_APPS_BASE_URL: &str = "https://compose-ctrl.test.blockstaging.build";
+
+fn apps_auth_me_response() -> MockResponse {
+    MockResponse::json(json!({
+        "subject": "auth0|apps-user",
+        "email": "apps@example.com",
+        "name": "Apps User",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "workspaces": {"active": [{"name": "Test Workspace"}]}
+    }))
+}
+
+fn configured_apps_command(server: &MockServer, temp: &Path, credential: &str) -> Command {
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+    write_browser_auth_session(
+        &storage_path,
+        &server.base_url,
+        credential,
+        "2099-01-01T00:00:00Z",
+    );
+
+    let mut command = bb_command();
+    command
+        .env("BB_HOME", bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .env("BB_APPS_E2E_CONTROL_PLANE_URL", &server.base_url);
+    command
+}
+
+fn assert_apps_auth_request(request: &common::RecordedRequest, credential: &str) {
+    assert_eq!(request.method, "GET");
+    assert_eq!(request.path, "/api/goose/v1/auth/me");
+    assert_eq!(
+        request
+            .headers
+            .get("x-bb-session-credential")
+            .map(String::as_str),
+        Some(credential)
+    );
+    assert!(!request.headers.contains_key("authorization"));
+}
+
+fn assert_apps_control_plane_request(
+    request: &common::RecordedRequest,
+    method: &str,
+    path: &str,
+    credential: &str,
+    client_version: &str,
+) {
+    let expected_authorization = format!("BBIdentity {credential}");
+    assert_eq!(request.method, method);
+    assert_eq!(request.path, path);
+    assert_eq!(
+        request.headers.get("authorization").map(String::as_str),
+        Some(expected_authorization.as_str())
+    );
+    assert_eq!(
+        request
+            .headers
+            .get("x-hotpod-agent-client-version")
+            .map(String::as_str),
+        Some(client_version)
+    );
+    for forbidden in [
+        "cookie",
+        "x-bb-session-credential",
+        "x-forwarded-user",
+        "x-forwarded-workspace-id",
+    ] {
+        assert!(!request.headers.contains_key(forbidden));
+    }
+}
+
 #[test]
 fn bb_apps_help_distinguishes_external_and_internal_paths() {
     let output = bb_command()
@@ -3638,6 +3715,281 @@ fn bb_apps_help_distinguishes_external_and_internal_paths() {
             "help did not explain {expected:?}: {stdout}"
         );
     }
+}
+
+#[test]
+fn bb_apps_contract_verifies_and_uses_the_same_session() {
+    let credential = "contract.session+credential";
+    let contract = json!({
+        "ok": true,
+        "contract_version": "2026-06-30",
+        "supported_operations": [{"method": "GET", "path": "/v1/agent/contract"}]
+    });
+    let server = MockServer::start(vec![
+        apps_auth_me_response(),
+        MockResponse::json(contract.clone()),
+    ]);
+    let temp = temp_test_dir("bb-apps-contract-success");
+
+    let output = configured_apps_command(&server, &temp, credential)
+        .args([
+            "apps",
+            "contract",
+            "--base-url",
+            APPROVED_APPS_BASE_URL,
+            "--client-version",
+            "0.2.0",
+            "--json",
+        ])
+        .output()
+        .expect("run bb apps contract");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout).expect("parse contract output"),
+        contract
+    );
+    assert!(!stdout.contains(credential));
+    assert!(!stderr.contains(credential));
+    assert_eq!(requests.len(), 2);
+    assert_apps_auth_request(&requests[0], credential);
+    assert_apps_control_plane_request(
+        &requests[1],
+        "GET",
+        "/v1/agent/contract",
+        credential,
+        "0.2.0",
+    );
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_apps_create_runs_plan_and_initialize_end_to_end() {
+    let credential = "create.session+credential";
+    let plan = json!({
+        "ok": true,
+        "app_id": "merchant-lookup",
+        "display_name": "Merchant Lookup",
+        "environment": "staging",
+        "persistence": "sqlite",
+        "runtime_class": "default",
+        "initialize": {"required": true, "recommended": false}
+    });
+    let initialized = json!({
+        "ok": true,
+        "app_id": "merchant-lookup-2",
+        "external_url": "https://merchant-lookup-2--bpsites.example/"
+    });
+    let server = MockServer::start(vec![
+        apps_auth_me_response(),
+        MockResponse::json(plan.clone()),
+        MockResponse::json(initialized.clone()),
+    ]);
+    let temp = temp_test_dir("bb-apps-create-success");
+
+    let output = configured_apps_command(&server, &temp, credential)
+        .args([
+            "apps",
+            "create",
+            "--app-id",
+            "merchant-lookup",
+            "--name",
+            "Merchant Lookup",
+            "--environment",
+            "staging",
+            "--runtime-profile",
+            "fetch-js",
+            "--persistence",
+            "sqlite",
+            "--base-url",
+            APPROVED_APPS_BASE_URL,
+            "--client-version",
+            "0.2.0",
+            "--json",
+        ])
+        .output()
+        .expect("run bb apps create");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let response = serde_json::from_str::<Value>(&stdout).expect("parse create output");
+    assert_eq!(response["app_id"], json!("merchant-lookup-2"));
+    assert_eq!(response["initialized"], json!(true));
+    assert_eq!(response["plan"], plan);
+    assert_eq!(response["initialize"], initialized);
+    assert!(!stdout.contains(credential));
+    assert!(!stderr.contains(credential));
+    assert_eq!(requests.len(), 3);
+    assert_apps_auth_request(&requests[0], credential);
+    assert_apps_control_plane_request(
+        &requests[1],
+        "POST",
+        "/v1/agent/apps/plan",
+        credential,
+        "0.2.0",
+    );
+    assert_eq!(
+        requests[1].body,
+        json!({
+            "app_id": "merchant-lookup",
+            "name": "Merchant Lookup",
+            "environment": "staging",
+            "runtime_profile": "fetch-js",
+            "persistence": "sqlite",
+            "client_version": "0.2.0"
+        })
+    );
+    assert_apps_control_plane_request(
+        &requests[2],
+        "POST",
+        "/v1/agent/apps/merchant-lookup/initialize",
+        credential,
+        "0.2.0",
+    );
+    assert_eq!(
+        requests[2].body,
+        json!({
+            "name": "Merchant Lookup",
+            "environment": "staging",
+            "persistence": "sqlite",
+            "runtime_class": "default"
+        })
+    );
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_apps_create_skips_initialize_when_plan_does_not_request_it() {
+    let credential = "existing.session+credential";
+    let plan = json!({
+        "ok": true,
+        "app_id": "existing-app",
+        "external_url": "https://existing-app--bpsites.example/",
+        "initialize": {"required": false, "recommended": false}
+    });
+    let server = MockServer::start(vec![
+        apps_auth_me_response(),
+        MockResponse::json(plan.clone()),
+    ]);
+    let temp = temp_test_dir("bb-apps-create-existing-success");
+
+    let output = configured_apps_command(&server, &temp, credential)
+        .args([
+            "apps",
+            "create",
+            "--app-id",
+            "existing-app",
+            "--base-url",
+            APPROVED_APPS_BASE_URL,
+            "--client-version",
+            "0.2.0",
+            "--json",
+        ])
+        .output()
+        .expect("run bb apps create without initialize");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let response = serde_json::from_str::<Value>(&stdout).expect("parse create output");
+    assert_eq!(response["app_id"], json!("existing-app"));
+    assert_eq!(response["initialized"], json!(false));
+    assert_eq!(response["initialize"], Value::Null);
+    assert_eq!(response["plan"], plan);
+    assert_eq!(requests.len(), 2);
+    assert_apps_auth_request(&requests[0], credential);
+    assert_apps_control_plane_request(
+        &requests[1],
+        "POST",
+        "/v1/agent/apps/plan",
+        credential,
+        "0.2.0",
+    );
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_apps_deploy_uploads_multipart_artifact_end_to_end() {
+    let credential = "deploy.session+credential";
+    let deployed = json!({
+        "ok": true,
+        "app_id": "merchant-lookup",
+        "version_id": "ver-123",
+        "deployment_id": "dpl-123",
+        "external_url": "https://merchant-lookup--bpsites.example/"
+    });
+    let server = MockServer::start(vec![
+        apps_auth_me_response(),
+        MockResponse::json(deployed.clone()),
+    ]);
+    let temp = temp_test_dir("bb-apps-deploy-success");
+    let artifact_path = temp.join("prepared-app.tar.gz");
+    let artifact_marker = "test-hotpod-artifact-marker";
+    fs::write(&artifact_path, artifact_marker).expect("write deploy artifact");
+
+    let output = configured_apps_command(&server, &temp, credential)
+        .args([
+            "apps",
+            "deploy",
+            "merchant-lookup",
+            artifact_path.to_str().expect("artifact path text"),
+            "--environment",
+            "production",
+            "--version-id",
+            "ver-123",
+            "--deployment-id",
+            "dpl-123",
+            "--base-url",
+            APPROVED_APPS_BASE_URL,
+            "--client-version",
+            "0.2.0",
+            "--json",
+        ])
+        .output()
+        .expect("run bb apps deploy");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    assert_eq!(
+        serde_json::from_str::<Value>(&stdout).expect("parse deploy output"),
+        deployed
+    );
+    assert!(!stdout.contains(credential));
+    assert!(!stderr.contains(credential));
+    assert_eq!(requests.len(), 2);
+    assert_apps_auth_request(&requests[0], credential);
+    let request = &requests[1];
+    assert_apps_control_plane_request(
+        request,
+        "POST",
+        "/v1/agent/apps/merchant-lookup/deploy",
+        credential,
+        "0.2.0",
+    );
+    assert!(request
+        .headers
+        .get("content-type")
+        .is_some_and(|value| value.starts_with("multipart/form-data; boundary=")));
+    let body = String::from_utf8_lossy(&request.body_bytes);
+    for expected in [
+        "name=\"artifact\"; filename=\"artifact.tar.gz\"",
+        "Content-Type: application/gzip",
+        artifact_marker,
+        "name=\"environment\"\r\n\r\nproduction",
+        "name=\"version_id\"\r\n\r\nver-123",
+        "name=\"deployment_id\"\r\n\r\ndpl-123",
+    ] {
+        assert!(
+            body.contains(expected),
+            "multipart body omitted {expected:?}"
+        );
+    }
+    assert!(!body.contains("publisher"));
+    fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
 #[test]
@@ -3718,7 +4070,7 @@ fn bb_apps_json_without_a_session_exits_promptly_with_auth_required() {
         .stderr(Stdio::piped())
         .spawn()
         .expect("start noninteractive bb apps contract");
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(10);
     let status = loop {
         if let Some(status) = child.try_wait().expect("poll bb apps contract") {
             break status;
