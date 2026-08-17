@@ -17,6 +17,7 @@ use super::skills_models::{
     InstallOperation, InstallPlanResponse, InstalledSkillMetadata, InstalledSkillRequest,
     SkillDetail, Warning,
 };
+use super::skills_slug::{confined_skill_path, ensure_confined_skill_path, validate_slug};
 use super::skills_targets::{
     backup_unmanaged_path, copy_dir_recursive, finish_link, iso8601_utc, link_into_target,
     remove_any, rollback_link, BackupOutcome, LinkOutcome, ResolvedTarget, Scope,
@@ -215,7 +216,12 @@ impl PackageReplacement {
     }
 }
 
-pub fn replace_managed_dir(staging: &Path, final_dir: &Path) -> Result<PackageReplacement> {
+pub fn replace_managed_dir(
+    root: &Path,
+    staging: &Path,
+    final_dir: &Path,
+) -> Result<PackageReplacement> {
+    ensure_confined_skill_path(root, final_dir)?;
     let final_metadata = fs::symlink_metadata(final_dir).ok();
     let final_exists = final_metadata.is_some();
     let is_bb_owned = final_metadata.is_some_and(|metadata| metadata.is_dir())
@@ -344,6 +350,18 @@ pub fn execute_plan(
     plan: InstallPlanResponse,
     options: &ExecuteOptions,
 ) -> Result<PlanExecution> {
+    // Validate the entire untrusted plan before the first operation can fetch
+    // an artifact or mutate the filesystem. Deserialization already applies
+    // this contract; this second gate protects programmatic future callers.
+    for operation in &plan.operations {
+        validate_slug(&operation.skill.slug).with_context(|| {
+            format!(
+                "invalid skill slug in install plan operation `{}`",
+                operation.action
+            )
+        })?;
+    }
+
     let mut execution = PlanExecution {
         plan_id: plan.plan_id,
         warnings: plan.warnings,
@@ -395,7 +413,7 @@ fn execute_install_operation(
         .as_ref()
         .context("install operation did not include artifact metadata")?;
 
-    let final_dir = canonical_dir(config, options.scope, slug);
+    let final_dir = confined_skill_path(&canonical_root(config, options.scope), slug)?;
 
     // Source provenance comes from the catalog detail; failures downgrade to
     // missing provenance rather than blocking the install.
@@ -466,7 +484,13 @@ fn persist_download(config: &SkillsConfig, slug: &str, version_id: &str, bytes: 
     if fs::create_dir_all(&downloads).is_err() {
         return;
     }
-    let _ = fs::write(downloads.join(format!("{slug}-{version_id}.zip")), bytes);
+    let version_key = sha256_hex(version_id.as_bytes());
+    let Ok(download_path) = confined_skill_path(&downloads, slug)
+        .map(|path| path.with_file_name(format!("{slug}-{version_key}.zip")))
+    else {
+        return;
+    };
+    let _ = fs::write(download_path, bytes);
 }
 
 fn write_package(
@@ -478,6 +502,7 @@ fn write_package(
     let parent = final_dir
         .parent()
         .context("package directory has no parent")?;
+    ensure_confined_skill_path(parent, final_dir)?;
     fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
 
     let staging = parent.join(format!(".{}.tmp-{}", metadata.slug, unique_suffix()));
@@ -499,7 +524,7 @@ fn write_package(
             serde_json::to_vec_pretty(metadata).context("serialize install metadata")?,
         )
         .context("write install metadata")?;
-        replace_managed_dir(&staging, final_dir)
+        replace_managed_dir(parent, &staging, final_dir)
     })();
     if result.is_err() && staging.exists() {
         let _ = fs::remove_dir_all(&staging);
@@ -513,6 +538,7 @@ pub fn link_targets(
     targets: &[ResolvedTarget],
     slug: &str,
 ) -> Result<Vec<LinkOutcome>> {
+    validate_slug(slug)?;
     let mut links = Vec::new();
     for target in targets {
         for base_dir in &target.base_dirs {
@@ -653,6 +679,7 @@ pub fn install_local_path(
     let parent = final_dir
         .parent()
         .context("package directory has no parent")?;
+    ensure_confined_skill_path(parent, &final_dir)?;
     fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
     let staging = parent.join(format!(".{slug}.tmp-{}", unique_suffix()));
     if staging.exists() {
@@ -685,7 +712,7 @@ pub fn install_local_path(
         serde_json::to_vec_pretty(&metadata).context("serialize install metadata")?,
     )
     .context("write install metadata")?;
-    let package_replacement = replace_managed_dir(&staging, &final_dir)?;
+    let package_replacement = replace_managed_dir(parent, &staging, &final_dir)?;
     let links = match link_targets(&final_dir, targets, &slug) {
         Ok(links) => links,
         Err(error) => {
@@ -715,18 +742,6 @@ pub fn install_local_path(
         }],
         ..Default::default()
     })
-}
-
-fn validate_slug(slug: &str) -> Result<()> {
-    let valid = !slug.is_empty()
-        && slug
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_');
-    if valid {
-        Ok(())
-    } else {
-        anyhow::bail!("invalid skill name `{slug}`; use lowercase letters, digits, `-`, and `_`")
-    }
 }
 
 /// Deterministic content hash over a directory's files (path + bytes).
@@ -803,7 +818,7 @@ pub fn remove_skill(
 ) -> Result<RemovalReport> {
     use super::skills_targets::{inspect_link, remove_any, LinkState, TargetRegistry};
 
-    let final_dir = canonical_dir(config, scope, slug);
+    let final_dir = confined_skill_path(&canonical_root(config, scope), slug)?;
     let metadata = read_metadata(&final_dir).ok();
     if metadata.is_none() && !(include_unmanaged && force) {
         return Err(failure(
@@ -840,7 +855,7 @@ pub fn remove_skill(
     let canonical_root = final_dir.parent();
     for target in targets {
         for base_dir in &target.base_dirs {
-            let link_path = base_dir.join(slug);
+            let link_path = confined_skill_path(base_dir, slug)?;
             // The agents target's directory is the canonical packages root
             // itself (skills live there; other targets link to it), so its
             // entry is never a link to remove — package removal below
@@ -875,7 +890,8 @@ pub fn remove_skill(
             }
         }
         // Clean up legacy Phase 1 copies under <skills_home>/targets/.
-        let legacy = config.legacy_target_dir(&target.name).join(slug);
+        let legacy_root = config.legacy_target_dir(&target.name);
+        let legacy = confined_skill_path(&legacy_root, slug)?;
         if legacy.exists() {
             if legacy.join(META_FILE_NAME).is_file() || (include_unmanaged && force) {
                 remove_any(&legacy)?;
@@ -999,7 +1015,7 @@ mod tests {
         fs::create_dir_all(&staging).expect("create staging skill");
         fs::write(staging.join("SKILL.md"), "new").expect("write new skill");
 
-        let backup = replace_managed_dir(&staging, &final_dir)
+        let backup = replace_managed_dir(&temp, &staging, &final_dir)
             .expect("replace managed skill")
             .finish()
             .expect("finish replacement");
@@ -1029,7 +1045,7 @@ mod tests {
         fs::create_dir_all(&staging).expect("create staging skill");
         fs::write(staging.join("SKILL.md"), "new").expect("write new skill");
 
-        let recovery = replace_managed_dir(&staging, &final_dir)
+        let recovery = replace_managed_dir(&temp, &staging, &final_dir)
             .expect("replace managed skill")
             .restore(&final_dir)
             .expect("restore previous package");
@@ -1052,7 +1068,7 @@ mod tests {
         fs::create_dir_all(&staging).expect("create staging skill");
         fs::write(staging.join("SKILL.md"), "new").expect("write new skill");
 
-        let recovery = replace_managed_dir(&staging, &final_dir)
+        let recovery = replace_managed_dir(&temp, &staging, &final_dir)
             .expect("replace unmanaged skill")
             .restore(&final_dir)
             .expect("restore unmanaged skill");
@@ -1079,7 +1095,7 @@ mod tests {
         fs::create_dir_all(&staging).expect("create staging skill");
         fs::write(staging.join("SKILL.md"), "new").expect("write new skill");
 
-        replace_managed_dir(&staging, &final_dir)
+        replace_managed_dir(&temp, &staging, &final_dir)
             .expect("replace manual symlink")
             .restore(&final_dir)
             .expect("restore manual symlink");

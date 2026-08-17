@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{de::Error as _, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 pub use builderbot_auth::preferences::{
@@ -168,9 +168,19 @@ pub struct InstallOperation {
 
 #[derive(Debug, Deserialize)]
 pub struct PlanSkill {
+    #[serde(deserialize_with = "deserialize_skill_slug")]
     pub slug: String,
     pub version_id: String,
     pub content_sha256: String,
+}
+
+fn deserialize_skill_slug<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let slug = String::deserialize(deserializer)?;
+    super::skills_slug::validate_slug(&slug).map_err(D::Error::custom)?;
+    Ok(slug)
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,4 +216,71 @@ pub struct InstalledSkillMetadata {
     pub targets: Vec<String>,
     pub local_source: bool,
     pub pinned: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn install_plan_rejects_unsafe_slugs_for_every_action() {
+        let oversized = "a".repeat(super::super::skills_slug::MAX_SKILL_SLUG_BYTES + 1);
+        let unsafe_slugs = [
+            "",
+            ".",
+            "..",
+            "../escape",
+            "foo/bar",
+            r"foo\bar",
+            "/absolute",
+            r"C:\absolute",
+            r"C:relative",
+            r"\\server\share",
+            oversized.as_str(),
+        ];
+
+        for action in ["install", "update", "remove", "noop", "future"] {
+            for slug in unsafe_slugs {
+                let plan = json!({
+                    "plan_id": "malicious",
+                    "operations": [{
+                        "action": action,
+                        "skill": {
+                            "slug": slug,
+                            "version_id": "version-1",
+                            "content_sha256": "content-sha"
+                        },
+                        "artifact": null,
+                        "installed_via": "explicit"
+                    }],
+                    "warnings": []
+                });
+                let error = serde_json::from_value::<InstallPlanResponse>(plan)
+                    .expect_err("unsafe slug must reject the entire plan");
+                assert!(error.to_string().contains("invalid skill name"));
+            }
+        }
+    }
+
+    #[test]
+    fn install_plan_accepts_valid_marketplace_slug() {
+        let plan = json!({
+            "plan_id": "valid",
+            "operations": [{
+                "action": "noop",
+                "skill": {
+                    "slug": "builderbot-tools",
+                    "version_id": "version-1",
+                    "content_sha256": "content-sha"
+                },
+                "artifact": null,
+                "installed_via": "explicit"
+            }],
+            "warnings": []
+        });
+
+        let plan = serde_json::from_value::<InstallPlanResponse>(plan).expect("valid plan");
+        assert_eq!(plan.operations[0].skill.slug, "builderbot-tools");
+    }
 }

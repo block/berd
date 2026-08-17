@@ -20,6 +20,7 @@ use serde::Serialize;
 use super::skills_api::{exit_codes, failure, MarketplaceClient};
 use super::skills_config::{SkillsConfig, META_FILE_NAME};
 use super::skills_models::{CapabilitiesResponse, TargetConfig};
+use super::skills_slug::confined_skill_path;
 
 const CAPABILITIES_CACHE_FILE: &str = "capabilities.json";
 
@@ -209,7 +210,7 @@ pub fn link_into_target(
     slug: &str,
     prefer_symlink: bool,
 ) -> Result<LinkOutcome> {
-    let link_path = base_dir.join(slug);
+    let link_path = confined_skill_path(base_dir, slug)?;
 
     // If the path already resolves to the canonical package (for example
     // ~/.claude/skills is itself a symlink into the packages dir), leave it.
