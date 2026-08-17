@@ -19,13 +19,7 @@ import { EXPERIMENT_PREFERENCES_STORAGE_KEY } from "../experimentPreferences";
 import { i18n } from "@/shared/i18n";
 import { renderWithProviders } from "@/test/render";
 
-const resetOnboardingTourExperienceMock = vi.hoisted(() =>
-  vi.fn(async () => true),
-);
 const resetHomeForOnboardingExperienceMock = vi.hoisted(() =>
-  vi.fn(async () => true),
-);
-const resetStarterTasksExperienceMock = vi.hoisted(() =>
   vi.fn(async () => true),
 );
 const syncOnboardingExperimentStateMock = vi.hoisted(() =>
@@ -33,8 +27,6 @@ const syncOnboardingExperimentStateMock = vi.hoisted(() =>
 );
 vi.mock("@/features/onboarding/resetOnboardingTour", () => ({
   resetHomeForOnboardingExperience: resetHomeForOnboardingExperienceMock,
-  resetOnboardingTourExperience: resetOnboardingTourExperienceMock,
-  resetStarterTasksExperience: resetStarterTasksExperienceMock,
   syncOnboardingExperimentState: syncOnboardingExperimentStateMock,
 }));
 
@@ -85,9 +77,7 @@ const uiRegistry = [
 describe("ExperimentsSettings", () => {
   beforeEach(() => {
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
-    resetOnboardingTourExperienceMock.mockClear();
     resetHomeForOnboardingExperienceMock.mockClear();
-    resetStarterTasksExperienceMock.mockClear();
     syncOnboardingExperimentStateMock.mockClear();
   });
 
@@ -236,22 +226,6 @@ describe("ExperimentsSettings", () => {
     renderWithProviders(<ExperimentsSettings />);
 
     expect(screen.queryByText("First-run onboarding")).not.toBeInTheDocument();
-  });
-
-  it("resets Berdy onboarding from its experiment card", async () => {
-    vi.stubEnv("DEV", true);
-    const user = userEvent.setup();
-    renderWithProviders(<ExperimentsSettings />);
-
-    await user.click(
-      screen.getByRole("button", {
-        name: i18n.t("experiments.berdyOnboarding.resetLabel", {
-          ns: "settings",
-        }),
-      }),
-    );
-
-    expect(resetOnboardingTourExperienceMock).toHaveBeenCalledOnce();
   });
 
   it("syncs Berdy onboarding when its dev-only experiment is toggled", async () => {

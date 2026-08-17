@@ -19,8 +19,6 @@ import {
 } from "./experimentPreferences";
 import {
   resetHomeForOnboardingExperience,
-  resetOnboardingTourExperience,
-  resetStarterTasksExperience,
   syncOnboardingExperimentState,
 } from "@/features/onboarding/resetOnboardingTour";
 import { Badge } from "@/shared/ui/badge";
@@ -52,8 +50,6 @@ export function ExperimentsSettings({
   registry = EXPERIMENT_DEFINITIONS,
 }: ExperimentsSettingsProps) {
   const { t } = useTranslation("settings");
-  const [isResettingBerdyOnboarding, setIsResettingBerdyOnboarding] =
-    useState(false);
   const [isResettingAllOnboarding, setIsResettingAllOnboarding] =
     useState(false);
   const [resetAllConfirmationOpen, setResetAllConfirmationOpen] =
@@ -153,62 +149,6 @@ export function ExperimentsSettings({
                     aria-label={t("experiments.resetToAuto")}
                   >
                     {t("experiments.resetToAuto")}
-                  </Button>
-                ) : null}
-                {definition.id === STARTER_TASKS_EXPERIMENT_ID ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label={t("experiments.starterTasks.resetAria")}
-                    onClick={() => {
-                      void resetStarterTasksExperience().then((didReset) => {
-                        if (!didReset) {
-                          toast.error(
-                            t("experiments.onboarding.resetAllError"),
-                          );
-                          return;
-                        }
-                        resetAssistiveUxMoment("home.starterTasks");
-                        window.dispatchEvent(new Event("starter-tasks-reset"));
-                        toast.success(
-                          t("experiments.starterTasks.resetSuccess"),
-                        );
-                      });
-                    }}
-                  >
-                    {t("experiments.starterTasks.reset")}
-                  </Button>
-                ) : null}
-                {definition.id === BERDY_ONBOARDING_EXPERIMENT_ID ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={!experiment.enabled || isResettingBerdyOnboarding}
-                    onClick={async () => {
-                      setIsResettingBerdyOnboarding(true);
-                      try {
-                        const didReset = await resetOnboardingTourExperience();
-                        if (didReset) {
-                          toast.success(
-                            t("experiments.berdyOnboarding.resetSuccess"),
-                          );
-                        } else {
-                          toast.error(
-                            t("experiments.berdyOnboarding.resetError"),
-                          );
-                        }
-                      } catch {
-                        toast.error(
-                          t("experiments.berdyOnboarding.resetError"),
-                        );
-                      } finally {
-                        setIsResettingBerdyOnboarding(false);
-                      }
-                    }}
-                  >
-                    {t("experiments.berdyOnboarding.resetLabel")}
                   </Button>
                 ) : null}
                 {showExperimentToggle ? (
