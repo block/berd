@@ -478,17 +478,23 @@ pub async fn save_exported_session_files(
         .into_path()
         .map_err(|_| "Selected folder path is not available".to_string())?;
 
-    let mut used: HashSet<String> = HashSet::new();
-    let mut written: Vec<String> = Vec::with_capacity(items.len());
+    // Pin the selected directory by an open handle immediately after the
+    // picker returns, and open it *without following symlinks* on the final
+    // component. Tauri's folder picker returns only a path (`FilePath` ->
+    // `PathBuf`), not an OS handle or security-scoped object, so a returned
+    // path alone cannot prove the identity of the picked directory. The
+    // narrow residual is the picker->open window: an attacker who renames the
+    // selected directory and drops a symlink/reparse point in its place before
+    // this open runs. Opening no-follow makes that swap *fail closed* (the open
+    // errors) rather than silently attaching the handle to a redirect target.
+    // Every subsequent write is then handle-relative (see `write_export_file`),
+    // so once acquired the handle cannot be redirected. This does not defend
+    // against a swap of an ancestor *above* the selected directory during the
+    // same window — that cannot be closed from a path-only picker API and would
+    // require an identity-bearing handle from the selection boundary itself.
+    let dir = open_selected_export_dir(&folder_path)?;
 
-    for item in items {
-        let resolved = resolve_export_filename(&folder_path, &item.filename, &used);
-        let path = folder_path.join(&resolved);
-        std::fs::write(&path, &item.contents)
-            .map_err(|e| format!("Failed to write file '{}': {}", path.display(), e))?;
-        used.insert(resolved.clone());
-        written.push(resolved);
-    }
+    let written = write_export_batch(&dir, &items)?;
 
     Ok(Some(SessionExportBatchResult {
         folder: folder_path.to_string_lossy().into_owned(),
@@ -496,24 +502,287 @@ pub async fn save_exported_session_files(
     }))
 }
 
-fn resolve_export_filename(folder: &Path, filename: &str, used: &HashSet<String>) -> String {
-    if !folder.join(filename).exists() && !used.contains(filename) {
-        return filename.to_string();
-    }
+/// Write a whole renderer-controlled export batch beneath the pinned directory
+/// handle in two phases.
+///
+/// Phase 1 validates *every* filename before any file is created. A batch such
+/// as `[session.json, ../escape.json]` is rejected in full — the malformed
+/// second item aborts the command before the valid first item is written, so a
+/// rejected batch never leaves a partial export on disk. Phase 2 then creates
+/// the files from the already-validated leaf names. The `ValidExportLeaf`
+/// newtype makes this ordering unbypassable: `write_export_file` only accepts a
+/// name that has already cleared `sanitize_export_leaf_filename`.
+fn write_export_batch(
+    dir: &cap_std::fs::Dir,
+    items: &[SessionExportItem],
+) -> Result<Vec<String>, String> {
+    let leaves = items
+        .iter()
+        .map(|item| ValidExportLeaf::parse(&item.filename))
+        .collect::<Result<Vec<_>, _>>()?;
 
-    let (stem, ext) = match filename.rsplit_once('.') {
-        Some((s, e)) => (s.to_string(), format!(".{}", e)),
-        None => (filename.to_string(), String::new()),
+    let mut used: HashSet<String> = HashSet::new();
+    let mut written: Vec<String> = Vec::with_capacity(items.len());
+    for (leaf, item) in leaves.iter().zip(items) {
+        written.push(write_export_file(
+            dir,
+            leaf,
+            item.contents.as_bytes(),
+            &mut used,
+        )?);
+    }
+    Ok(written)
+}
+
+/// Open the user-selected export directory into a cap-std `Dir` handle without
+/// following a symlink/reparse point on the final path component.
+///
+/// This closes the picker->open swap of the selected directory itself: if the
+/// selection path has been replaced by a symlink/reparse point, the open fails
+/// instead of attaching to the redirect target. Once the handle is held, all
+/// writes are performed relative to it inside cap-std's sandbox.
+fn open_selected_export_dir(folder_path: &Path) -> Result<cap_std::fs::Dir, String> {
+    let map_err = |e: io::Error| {
+        format!(
+            "Failed to open selected folder '{}': {}",
+            folder_path.display(),
+            e
+        )
     };
 
-    for n in 2..=9999 {
-        let candidate = format!("{}-{}{}", stem, n, ext);
-        if !folder.join(&candidate).exists() && !used.contains(&candidate) {
-            return candidate;
+    #[cfg(unix)]
+    let std_dir = {
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .read(true)
+            // O_NOFOLLOW: fail if the final component is a symlink.
+            // O_DIRECTORY: fail if it is not a directory.
+            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
+            .open(folder_path)
+            .map_err(map_err)?
+    };
+
+    #[cfg(windows)]
+    let std_dir = {
+        use std::os::windows::fs::OpenOptionsExt;
+        // FILE_FLAG_BACKUP_SEMANTICS is required to obtain a handle to a
+        // directory; FILE_FLAG_OPEN_REPARSE_POINT opens the reparse point
+        // itself rather than following it, so a swapped symlink/junction fails
+        // the subsequent directory-handle use instead of redirecting.
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        // cap-std's `Dir::from_std_file` requires the Windows handle be opened
+        // WITHOUT FILE_SHARE_DELETE so the directory cannot be renamed/deleted
+        // out from under the capability root (cap-std 4.0.2 src/fs/dir.rs).
+        // Rust std defaults to FILE_SHARE_READ|WRITE|DELETE, so set the share
+        // mode explicitly, excluding DELETE.
+        const FILE_SHARE_READ: u32 = 0x0000_0001;
+        const FILE_SHARE_WRITE: u32 = 0x0000_0002;
+        let std_dir = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(folder_path)
+            .map_err(map_err)?;
+        // FILE_FLAG_OPEN_REPARSE_POINT does not make the open fail on a
+        // junction/symlink; it returns a handle to the reparse object itself,
+        // and cap-std's `Dir::from_std_file` performs no type or attribute
+        // validation. Without the check below, a reparse point swapped into the
+        // selected path would become the capability root and later
+        // handle-relative writes would land on its target. Query the handle's
+        // own attributes (GetFileInformationByHandle, not a second path lookup)
+        // and reject a reparse point or a non-directory so acquisition fails
+        // closed on the selected final component.
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x0000_0010;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+        let attributes = std_dir.metadata().map_err(map_err)?.file_attributes();
+        if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(format!(
+                "Selected folder '{}' is a reparse point (symlink/junction); refusing to export through it",
+                folder_path.display()
+            ));
+        }
+        if attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+            return Err(format!(
+                "Selected path '{}' is not a directory",
+                folder_path.display()
+            ));
+        }
+        std_dir
+    };
+
+    #[cfg(not(any(unix, windows)))]
+    let std_dir = fs::File::open(folder_path).map_err(map_err)?;
+
+    Ok(cap_std::fs::Dir::from_std_file(std_dir))
+}
+
+/// Windows reserved device names. A file name is unsafe if its base name (the
+/// part before the first `.`, with trailing spaces stripped as Windows does)
+/// matches one of these case-insensitively, with or without an extension
+/// (e.g. `CON`, `con.json`, `CON .json`). Includes the superscript-digit forms
+/// Windows also reserves. See
+/// <https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file>.
+const WINDOWS_RESERVED_DEVICE_NAMES: &[&str] = &[
+    "CON", "PRN", "AUX", "NUL", "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
+    "COM8", "COM9", "COM¹", "COM²", "COM³", "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6",
+    "LPT7", "LPT8", "LPT9", "LPT¹", "LPT²", "LPT³",
+];
+
+/// Characters Windows forbids in a file name, rejected on every OS so a batch
+/// validates identically everywhere and cannot partially succeed then abort on
+/// a name only Windows refuses. The path separators `/`, `\`, and the drive /
+/// alternate-data-stream separator `:` are handled separately.
+const WINDOWS_FORBIDDEN_CHARS: &[char] = &['<', '>', '"', '|', '?', '*'];
+
+/// A renderer-supplied export filename that has been validated as a safe bare
+/// leaf name. Constructing one is the only way to obtain a name
+/// `write_export_file` will write, so the batch cannot mutate the filesystem
+/// with an unvalidated name.
+struct ValidExportLeaf(String);
+
+impl ValidExportLeaf {
+    fn parse(filename: &str) -> Result<Self, String> {
+        Ok(Self(sanitize_export_leaf_filename(filename)?))
+    }
+
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Validate a renderer-supplied export filename and return a safe leaf name.
+///
+/// `SessionExportItem.filename` is renderer-controlled, so this is the IPC
+/// security boundary — frontend cleanup does not count. Only a bare leaf file
+/// name may be written, so the result always stays directly inside the
+/// user-selected directory. Rejected inputs, on every supported OS:
+///
+/// - empty or whitespace-only names,
+/// - the path separators `/`, `\`, and the Windows drive / alternate-data-
+///   stream separator `:`, plus embedded NUL,
+/// - ASCII/Unicode control characters and the Windows-reserved punctuation
+///   `< > " | ? *`,
+/// - anything that does not parse to exactly one `Component::Normal` (absolute
+///   paths, drive/UNC prefixes, root, `.` and `..`),
+/// - dot-only names (`.`, `..`, `...`),
+/// - trailing `.` or space (silently stripped by Windows, which would change
+///   the target),
+/// - Windows reserved device names (incl. superscript-digit forms), matched on
+///   the base name before the first `.` with trailing spaces stripped.
+///
+/// Windows rules are enforced on all platforms so validation does not depend on
+/// the host filesystem and CI is deterministic.
+fn sanitize_export_leaf_filename(filename: &str) -> Result<String, String> {
+    let reject = || format!("Unsafe export filename: {filename:?}");
+
+    if filename.trim().is_empty() {
+        return Err(reject());
+    }
+    if filename.contains('\0')
+        || filename.contains('/')
+        || filename.contains('\\')
+        || filename.contains(':')
+    {
+        return Err(reject());
+    }
+
+    // Control characters and the Windows-reserved punctuation set are illegal
+    // in file names on Windows; reject everywhere for identical validation.
+    if filename
+        .chars()
+        .any(|c| c.is_control() || WINDOWS_FORBIDDEN_CHARS.contains(&c))
+    {
+        return Err(reject());
+    }
+
+    // Must be exactly one normal path component. This rejects absolute paths,
+    // drive/UNC prefixes, root, "." and "..".
+    let mut components = Path::new(filename).components();
+    match (components.next(), components.next()) {
+        (Some(Component::Normal(part)), None) if part == std::ffi::OsStr::new(filename) => {}
+        _ => return Err(reject()),
+    }
+
+    // Dot-only names (e.g. "...") are not useful and are treated specially by
+    // some filesystems.
+    if filename.chars().all(|c| c == '.') {
+        return Err(reject());
+    }
+
+    // Windows strips trailing dots and spaces, which can change the target.
+    if filename.ends_with('.') || filename.ends_with(' ') {
+        return Err(reject());
+    }
+
+    // Reserved device names apply to the base name before the first '.', after
+    // trailing spaces are stripped (Windows ignores them): "CON", "con.json",
+    // and "CON .json" all resolve to the CON device.
+    let base = filename.split('.').next().unwrap_or(filename).trim_end();
+    if WINDOWS_RESERVED_DEVICE_NAMES
+        .iter()
+        .any(|reserved| base.eq_ignore_ascii_case(reserved))
+    {
+        return Err(reject());
+    }
+
+    Ok(filename.to_string())
+}
+
+/// Write one exported session file beneath the pinned directory handle `dir`
+/// under a validated leaf name, never following symlinks and never overwriting
+/// an existing entry.
+///
+/// `dir` is a `cap_std::fs::Dir` opened once when the picker returned. All
+/// operations here are performed relative to that handle inside cap-std's
+/// sandbox, so a candidate can never resolve outside the originally selected
+/// directory even if its path is swapped for a symlink/reparse point after
+/// selection — this closes the parent-directory TOCTOU escape that a plain
+/// `folder.join(candidate)` re-resolution would reopen.
+///
+/// Collisions get a deterministic `-N` suffix. `create_new(true)` guarantees
+/// each write lands on a freshly created file: a pre-existing file, directory,
+/// or symlink (including a dangling one) at the target fails with
+/// `AlreadyExists` and is skipped rather than followed or overwritten.
+fn write_export_file(
+    dir: &cap_std::fs::Dir,
+    leaf: &ValidExportLeaf,
+    contents: &[u8],
+    used: &mut HashSet<String>,
+) -> Result<String, String> {
+    let leaf = leaf.as_str();
+
+    let (stem, ext) = match leaf.rsplit_once('.') {
+        Some((s, e)) => (s.to_string(), format!(".{e}")),
+        None => (leaf.to_string(), String::new()),
+    };
+
+    for attempt in 1..=9999 {
+        let candidate = if attempt == 1 {
+            leaf.to_string()
+        } else {
+            format!("{stem}-{attempt}{ext}")
+        };
+        if used.contains(&candidate) {
+            continue;
+        }
+        match dir.open_with(
+            &candidate,
+            cap_std::fs::OpenOptions::new().create_new(true).write(true),
+        ) {
+            Ok(mut file) => {
+                file.write_all(contents)
+                    .map_err(|e| format!("Failed to write file '{candidate}': {e}"))?;
+                used.insert(candidate.clone());
+                return Ok(candidate);
+            }
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(format!("Failed to write file '{candidate}': {e}")),
         }
     }
 
-    format!("{}-{}{}", stem, 9999, ext)
+    Err(format!("Too many name collisions for export file '{leaf}'"))
 }
 
 #[tauri::command]
@@ -1886,10 +2155,11 @@ mod tests {
         build_file_mention_index, build_file_tree_entry, ensure_directory_path,
         get_or_build_file_mention_index_from_cache, inspect_attachment_path,
         inspect_attachment_paths, normalize_attachment_paths, normalize_roots,
-        read_directory_entries, read_image_attachment, read_text_file,
-        search_file_mentions_blocking, validate_external_url, write_agent_image_atomically,
-        write_sibling_then_replace, FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES,
-        MAX_TEXT_FILE_BYTES,
+        open_selected_export_dir, read_directory_entries, read_image_attachment, read_text_file,
+        sanitize_export_leaf_filename, search_file_mentions_blocking, validate_external_url,
+        write_agent_image_atomically, write_export_batch, write_export_file,
+        write_sibling_then_replace, FileMentionIndexCache, SessionExportItem, ValidExportLeaf,
+        MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
     };
     use base64::Engine;
     use std::fs;
@@ -2880,5 +3150,383 @@ mod tests {
         assert!(validate_external_url("javascript:alert(1)").is_err());
         assert!(validate_external_url("file:///etc/passwd").is_err());
         assert!(validate_external_url("not a url").is_err());
+    }
+
+    #[test]
+    fn export_filename_accepts_plain_leaf_names() {
+        assert_eq!(
+            sanitize_export_leaf_filename("session.json").unwrap(),
+            "session.json"
+        );
+        assert_eq!(
+            sanitize_export_leaf_filename("My Chat - 2026.json").unwrap(),
+            "My Chat - 2026.json"
+        );
+        // No extension is fine.
+        assert_eq!(sanitize_export_leaf_filename("notes").unwrap(), "notes");
+        // A leading dot (dotfile) is allowed as long as it is not dot-only.
+        assert_eq!(
+            sanitize_export_leaf_filename(".hidden.json").unwrap(),
+            ".hidden.json"
+        );
+    }
+
+    #[test]
+    fn export_filename_rejects_empty_and_whitespace() {
+        assert!(sanitize_export_leaf_filename("").is_err());
+        assert!(sanitize_export_leaf_filename("   ").is_err());
+        assert!(sanitize_export_leaf_filename("\t\n").is_err());
+    }
+
+    #[test]
+    fn export_filename_rejects_parent_and_current_dir() {
+        assert!(sanitize_export_leaf_filename(".").is_err());
+        assert!(sanitize_export_leaf_filename("..").is_err());
+        assert!(sanitize_export_leaf_filename("...").is_err());
+        assert!(sanitize_export_leaf_filename("../secret.json").is_err());
+        assert!(sanitize_export_leaf_filename("../../etc/passwd").is_err());
+        assert!(sanitize_export_leaf_filename("foo/../bar.json").is_err());
+    }
+
+    #[test]
+    fn export_filename_rejects_separators_on_every_os() {
+        // Unix separator.
+        assert!(sanitize_export_leaf_filename("sub/dir.json").is_err());
+        assert!(sanitize_export_leaf_filename("/etc/passwd").is_err());
+        // Windows separator, rejected on all platforms.
+        assert!(sanitize_export_leaf_filename("sub\\dir.json").is_err());
+        assert!(sanitize_export_leaf_filename("\\\\server\\share\\x").is_err());
+        // Mixed separators.
+        assert!(sanitize_export_leaf_filename("a/b\\c.json").is_err());
+        // Windows drive / alternate-data-stream separator.
+        assert!(sanitize_export_leaf_filename("C:\\Windows\\x.json").is_err());
+        assert!(sanitize_export_leaf_filename("file.json:stream").is_err());
+        // Embedded NUL.
+        assert!(sanitize_export_leaf_filename("a\0b.json").is_err());
+    }
+
+    #[test]
+    fn export_filename_rejects_windows_unsafe_names() {
+        // Reserved device names, with and without extension, any case.
+        assert!(sanitize_export_leaf_filename("CON").is_err());
+        assert!(sanitize_export_leaf_filename("con.json").is_err());
+        assert!(sanitize_export_leaf_filename("NUL.txt").is_err());
+        assert!(sanitize_export_leaf_filename("Com1").is_err());
+        assert!(sanitize_export_leaf_filename("lpt9.json").is_err());
+        assert!(sanitize_export_leaf_filename("COM0").is_err());
+        assert!(sanitize_export_leaf_filename("LPT0.txt").is_err());
+        // Superscript-digit device forms Windows also reserves.
+        assert!(sanitize_export_leaf_filename("COM¹").is_err());
+        assert!(sanitize_export_leaf_filename("COM².json").is_err());
+        assert!(sanitize_export_leaf_filename("lpt³.txt").is_err());
+        // Trailing spaces before the extension still resolve to the device.
+        assert!(sanitize_export_leaf_filename("CON .json").is_err());
+        // Trailing dot or space are stripped by Windows.
+        assert!(sanitize_export_leaf_filename("session.json.").is_err());
+        assert!(sanitize_export_leaf_filename("session ").is_err());
+        // Not reserved: names that merely start with a reserved token.
+        assert_eq!(
+            sanitize_export_leaf_filename("console.json").unwrap(),
+            "console.json"
+        );
+    }
+
+    #[test]
+    fn export_filename_rejects_windows_forbidden_chars_and_controls() {
+        // Windows-reserved punctuation, rejected on every OS.
+        for name in [
+            "bad?.json",
+            "bad*.json",
+            "bad|name.json",
+            "bad<name.json",
+            "bad>name.json",
+            "bad\"name.json",
+        ] {
+            assert!(
+                sanitize_export_leaf_filename(name).is_err(),
+                "expected reject: {name:?}"
+            );
+        }
+        // ASCII control characters (1..=31), e.g. tab, newline, and a raw
+        // control byte.
+        assert!(sanitize_export_leaf_filename("bad\tname.json").is_err());
+        assert!(sanitize_export_leaf_filename("bad\nname.json").is_err());
+        assert!(sanitize_export_leaf_filename("bad\u{001f}name.json").is_err());
+        // A comparable safe name with none of the above is accepted.
+        assert_eq!(
+            sanitize_export_leaf_filename("badname.json").unwrap(),
+            "badname.json"
+        );
+    }
+
+    #[test]
+    fn write_export_file_writes_valid_export_into_folder() {
+        let dir = tempdir().expect("tempdir");
+        let handle =
+            cap_std::fs::Dir::open_ambient_dir(dir.path(), cap_std::ambient_authority()).unwrap();
+        let mut used = std::collections::HashSet::new();
+
+        let name = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("session.json").unwrap(),
+            b"hello",
+            &mut used,
+        )
+        .expect("valid export");
+        assert_eq!(name, "session.json");
+        assert_eq!(fs::read(dir.path().join("session.json")).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn write_export_batch_validates_all_names_before_writing_any() {
+        let dir = tempdir().expect("tempdir");
+        let handle = open_selected_export_dir(dir.path()).expect("acquire handle");
+
+        // A valid first item followed by a malformed later item must abort the
+        // whole batch before any file is created.
+        let items = vec![
+            SessionExportItem {
+                filename: "session.json".to_string(),
+                contents: "hello".to_string(),
+            },
+            SessionExportItem {
+                filename: "../escape.json".to_string(),
+                contents: "x".to_string(),
+            },
+        ];
+
+        assert!(write_export_batch(&handle, &items).is_err());
+        // No partial export: the valid first item was not written.
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+        assert!(!dir.path().parent().unwrap().join("escape.json").exists());
+    }
+
+    #[test]
+    fn write_export_batch_rejects_traversal_and_absolute_names() {
+        let dir = tempdir().expect("tempdir");
+        let handle = open_selected_export_dir(dir.path()).expect("acquire handle");
+
+        for bad in ["../escape.json", "/etc/passwd", "sub\\win.json"] {
+            let items = vec![SessionExportItem {
+                filename: bad.to_string(),
+                contents: "x".to_string(),
+            }];
+            assert!(
+                write_export_batch(&handle, &items).is_err(),
+                "expected reject: {bad:?}"
+            );
+        }
+        // Nothing was created inside the folder, and no escape file exists.
+        assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 0);
+        assert!(!dir.path().parent().unwrap().join("escape.json").exists());
+    }
+
+    #[test]
+    fn write_export_file_suffixes_disk_collisions_deterministically() {
+        let dir = tempdir().expect("tempdir");
+        fs::write(dir.path().join("chat.json"), b"pre-existing").unwrap();
+        let handle =
+            cap_std::fs::Dir::open_ambient_dir(dir.path(), cap_std::ambient_authority()).unwrap();
+        let mut used = std::collections::HashSet::new();
+
+        let name = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("chat.json").unwrap(),
+            b"new",
+            &mut used,
+        )
+        .expect("collision suffix");
+        assert_eq!(name, "chat-2.json");
+        // The pre-existing file is untouched.
+        assert_eq!(
+            fs::read(dir.path().join("chat.json")).unwrap(),
+            b"pre-existing"
+        );
+        assert_eq!(fs::read(dir.path().join("chat-2.json")).unwrap(), b"new");
+    }
+
+    #[test]
+    fn write_export_file_suffixes_duplicate_names_within_one_batch() {
+        let dir = tempdir().expect("tempdir");
+        let handle =
+            cap_std::fs::Dir::open_ambient_dir(dir.path(), cap_std::ambient_authority()).unwrap();
+        let mut used = std::collections::HashSet::new();
+
+        let first = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("chat.json").unwrap(),
+            b"a",
+            &mut used,
+        )
+        .expect("first duplicate");
+        let second = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("chat.json").unwrap(),
+            b"b",
+            &mut used,
+        )
+        .expect("second duplicate");
+        let third = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("chat.json").unwrap(),
+            b"c",
+            &mut used,
+        )
+        .expect("third duplicate");
+
+        assert_eq!(first, "chat.json");
+        assert_eq!(second, "chat-2.json");
+        assert_eq!(third, "chat-3.json");
+        assert_eq!(fs::read(dir.path().join("chat.json")).unwrap(), b"a");
+        assert_eq!(fs::read(dir.path().join("chat-2.json")).unwrap(), b"b");
+        assert_eq!(fs::read(dir.path().join("chat-3.json")).unwrap(), b"c");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_export_file_does_not_follow_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempdir().expect("tempdir");
+        let export_dir = root.path().join("export");
+        let outside_dir = root.path().join("outside");
+        fs::create_dir(&export_dir).unwrap();
+        fs::create_dir(&outside_dir).unwrap();
+
+        // Attacker pre-plants a symlink in the export dir that points outside.
+        let target = outside_dir.join("victim.json");
+        symlink(&target, export_dir.join("chat.json")).unwrap();
+
+        let handle =
+            cap_std::fs::Dir::open_ambient_dir(&export_dir, cap_std::ambient_authority()).unwrap();
+        let mut used = std::collections::HashSet::new();
+        let name = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("chat.json").unwrap(),
+            b"payload",
+            &mut used,
+        )
+        .expect("symlink collision is skipped");
+
+        // The symlinked target outside the folder must never be written.
+        assert!(!target.exists());
+        // The write lands on a fresh, suffixed name inside the folder.
+        assert_eq!(name, "chat-2.json");
+        assert_eq!(
+            fs::read(export_dir.join("chat-2.json")).unwrap(),
+            b"payload"
+        );
+    }
+
+    /// Regression for the parent-directory TOCTOU: after the handle to the
+    /// selected directory is acquired, an attacker renames the selected
+    /// directory and replaces its path with a symlink pointing outside. Writes
+    /// must stay attached to the originally selected inode (via the pinned
+    /// handle) and must never land in the attacker-controlled location.
+    #[cfg(unix)]
+    #[test]
+    fn write_export_file_stays_attached_to_pinned_dir_after_parent_swap() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempdir().expect("tempdir");
+        let selected = root.path().join("selected");
+        let outside = root.path().join("outside");
+        fs::create_dir(&selected).unwrap();
+        fs::create_dir(&outside).unwrap();
+
+        // Handle is acquired via the real acquisition path, pinned to the
+        // originally selected directory.
+        let handle = open_selected_export_dir(&selected).expect("acquire handle");
+
+        // Attacker swaps the selected path for a symlink to `outside`.
+        fs::rename(&selected, root.path().join("selected-old")).unwrap();
+        symlink(&outside, &selected).unwrap();
+
+        let mut used = std::collections::HashSet::new();
+        let name = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("chat.json").unwrap(),
+            b"payload",
+            &mut used,
+        )
+        .expect("write via pinned handle");
+        assert_eq!(name, "chat.json");
+
+        // The write landed on the original inode (now `selected-old`), not the
+        // attacker's redirect target.
+        assert_eq!(
+            fs::read(root.path().join("selected-old/chat.json")).unwrap(),
+            b"payload"
+        );
+        assert!(!outside.join("chat.json").exists());
+    }
+
+    /// Acquisition fails closed: if the selected path is (or is swapped to) a
+    /// symlink before the handle is opened, `open_selected_export_dir` errors
+    /// rather than attaching the handle to the symlink's redirect target. This
+    /// bounds the picker->open race for a swap of the selected directory
+    /// itself.
+    #[cfg(unix)]
+    #[test]
+    fn open_selected_export_dir_rejects_symlinked_selection() {
+        use std::os::unix::fs::symlink;
+
+        let root = tempdir().expect("tempdir");
+        let outside = root.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        let selected = root.path().join("selected");
+        // The selection path is a symlink to another directory.
+        symlink(&outside, &selected).unwrap();
+
+        let err =
+            open_selected_export_dir(&selected).expect_err("symlinked selection must fail closed");
+        assert!(err.contains("Failed to open selected folder"));
+        // Nothing was written through the redirect.
+        assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    }
+
+    /// Windows acquisition fails closed on a reparse point. Opening with
+    /// `FILE_FLAG_OPEN_REPARSE_POINT` returns a handle to the reparse object
+    /// itself, and `Dir::from_std_file` does not validate it, so acquisition
+    /// must reject the reparse handle before wrapping it as the capability
+    /// root. Requires privilege to create a directory symlink; run when a
+    /// Windows environment with that capability is available.
+    #[cfg(windows)]
+    #[test]
+    fn open_selected_export_dir_rejects_reparse_point_selection() {
+        use std::os::windows::fs::symlink_dir;
+
+        let root = tempdir().expect("tempdir");
+        let outside = root.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        let selected = root.path().join("selected");
+        // The selection path is a directory symlink (a reparse point) to
+        // another directory.
+        symlink_dir(&outside, &selected).expect("create directory symlink");
+
+        let err = open_selected_export_dir(&selected)
+            .expect_err("reparse-point selection must fail closed");
+        assert!(err.contains("reparse point"));
+        // Nothing was written through the redirect.
+        assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    }
+
+    /// A real (non-symlink) selected directory is accepted by the acquisition
+    /// path and writes land inside it.
+    #[test]
+    fn open_selected_export_dir_accepts_real_directory() {
+        let dir = tempdir().expect("tempdir");
+        let handle = open_selected_export_dir(dir.path()).expect("acquire handle");
+        let mut used = std::collections::HashSet::new();
+
+        let name = write_export_file(
+            &handle,
+            &ValidExportLeaf::parse("session.json").unwrap(),
+            b"hi",
+            &mut used,
+        )
+        .expect("valid export");
+        assert_eq!(name, "session.json");
+        assert_eq!(fs::read(dir.path().join("session.json")).unwrap(), b"hi");
     }
 }
