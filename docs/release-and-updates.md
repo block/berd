@@ -10,6 +10,10 @@ The tag-bound release defaults are centralized in `scripts/release/release-chann
 
 `https://github.com/block/berd/releases/download/berd-desktop-latest/latest.json`
 
+The latest user-facing macOS installer is always available at:
+
+`https://github.com/block/berd/releases/download/berd-desktop-latest/Berd-latest-darwin-aarch64.dmg`
+
 Public releases must be at least `0.6.0-rc.1`. The app, bundled `berdctl`,
 internal `tauri-plugin-berdctl`, their Cargo lock entries, and the changelog are
 validated at the immutable tag before GitHub creates a release.

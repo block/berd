@@ -1879,6 +1879,7 @@ fi
 describe("promote-updater", () => {
   async function fixture({
     publishedDigestMatches = true,
+    publishedDmgMatches = true,
     signatureValid = true,
     currentVersion = null,
     recheckedVersion = currentVersion,
@@ -1902,6 +1903,8 @@ describe("promote-updater", () => {
       `${archive}.sha256`,
       `${digest}  ${archive.split("/").at(-1)}\n`,
     );
+    const dmg = join(dir, "Berd_1.2.3_darwin-aarch64.dmg");
+    await writeFile(dmg, "signed-notarized-dmg");
     await writeFile(
       join(bin, "gh"),
       `#!/usr/bin/env bash
@@ -1909,10 +1912,22 @@ set -euo pipefail
 printf '%s\\n' "$*" >> "$CALLS"
 if [[ "$1 $2" == "release download" ]]; then
   dir=""
+  download_dmg=false
   while [[ $# -gt 0 ]]; do
-    case "$1" in --dir) dir="$2"; shift 2 ;; *) shift ;; esac
+    case "$1" in
+      --dir) dir="$2"; shift 2 ;;
+      --pattern)
+        [[ "$2" != "Berd_1.2.3_darwin-aarch64.dmg" ]] || download_dmg=true
+        shift 2
+        ;;
+      *) shift ;;
+    esac
   done
-  cp "$STAGED_ARCHIVE" "$STAGED_ARCHIVE.sig" "$STAGED_ARCHIVE.sha256" "$dir/"
+  if [[ "$download_dmg" == true ]]; then
+    cp "$STAGED_DMG" "$dir/"
+  else
+    cp "$STAGED_ARCHIVE" "$STAGED_ARCHIVE.sig" "$STAGED_ARCHIVE.sha256" "$dir/"
+  fi
 elif [[ "$1 $2" == "release view" ]]; then
   exit 0
 elif [[ "$1 $2" == "release upload" ]]; then
@@ -1968,6 +1983,12 @@ elif [[ "$output" == *rechecked-latest.json ]]; then
   if [[ "$status" == 200 ]]; then cp "$REMOTE_RECHECKED_MANIFEST" "$output"; fi
 elif [[ "$output" == *published-latest.json ]]; then
   cp "$PUBLISHED_MANIFEST" "$output"
+elif [[ "$output" == *public-Berd-latest-darwin-aarch64.dmg ]]; then
+  if [[ "$PUBLISHED_DMG_MATCHES" == true ]]; then
+    cp "$STAGED_DMG" "$output"
+  else
+    printf tampered > "$output"
+  fi
 elif [[ "$PUBLISHED_DIGEST_MATCHES" == true ]]; then
   cp "$STAGED_ARCHIVE" "$output"
 else
@@ -1991,9 +2012,11 @@ fi
       dir,
       bin,
       archive,
+      dmg,
       calls,
       channelConfig,
       publishedDigestMatches,
+      publishedDmgMatches,
       signatureValid,
       preflightStatus,
       recheckStatus,
@@ -2013,11 +2036,13 @@ fi
         BERD_UPDATER_PUBLIC_KEY: "test-public-key",
         GITHUB_REPOSITORY: "block/berd",
         STAGED_ARCHIVE: f.archive,
+        STAGED_DMG: f.dmg,
         CALLS: f.calls,
         PUBLISHED_MANIFEST: f.publishedManifest,
         REMOTE_CURRENT_MANIFEST: f.currentManifest,
         REMOTE_RECHECKED_MANIFEST: f.recheckedManifest,
         PUBLISHED_DIGEST_MATCHES: String(f.publishedDigestMatches),
+        PUBLISHED_DMG_MATCHES: String(f.publishedDmgMatches),
         SIGNATURE_VALID: String(f.signatureValid),
         PREFLIGHT_STATUS: String(f.preflightStatus),
         RECHECK_STATUS: String(f.recheckStatus),
@@ -2033,6 +2058,7 @@ fi
     expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
     const calls = (await readFile(f.calls, "utf8")).trim().split("\n");
     expect(calls.at(-1)).toContain("latest.json");
+    expect(calls.join("\n")).toContain("Berd-latest-darwin-aarch64.dmg");
     expect(
       JSON.parse(await readFile(f.publishedManifest, "utf8")).version,
     ).toBe("1.2.3");
@@ -2091,7 +2117,20 @@ fi
     const f = await fixture({ publishedDigestMatches: false });
     const result = promote(f);
     expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain("not publicly accessible");
+    expect(result.stderr).toContain(
+      "rolling archive was not publicly accessible",
+    );
+    const calls = await readFile(f.calls, "utf8");
+    expect(calls).not.toContain("latest.json");
+  });
+
+  it("leaves latest.json untouched when the rolling macOS installer does not match", async () => {
+    const f = await fixture({ publishedDmgMatches: false });
+    const result = promote(f);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      "rolling macOS installer was not publicly accessible",
+    );
     const calls = await readFile(f.calls, "utf8");
     expect(calls).not.toContain("latest.json");
   });
