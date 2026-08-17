@@ -1,7 +1,7 @@
 {
   "repo": "https://github.com/aaif-goose/goose.git",
-  "ref": "main",
-  "commit": "11deb564d09db782a17878af7cfafd299d9fa461",
+  "ref": "lifei/acp-migration-session-delete",
+  "commit": "bef92d0ad5fd85c464300fa2c78724568252603c",
   "package": "goose-cli",
   "bin": "goose"
 }

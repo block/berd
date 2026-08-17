@@ -10,7 +10,6 @@ export interface ExtMethodProvider {
 import type {
   AddConfigExtensionRequestUnstable,
   AddSessionExtensionRequestUnstable,
-  ApplySessionExtensionsRequestUnstable,
   AppsDeleteRequestUnstable,
   AppsDeleteResponseUnstable,
   AppsExportRequestUnstable,
@@ -48,7 +47,6 @@ import type {
   DefaultsSaveRequestUnstable,
   DeleteRecipeRequestUnstable,
   DeleteScheduleRequestUnstable,
-  DeleteSessionRequest,
   DeleteSourceRequestUnstable,
   DiagnosticsGetRequestUnstable,
   DiagnosticsGetResponseUnstable,
@@ -153,6 +151,8 @@ import type {
   ProviderConfigSaveRequestUnstable,
   ProviderConfigStatusRequestUnstable,
   ProviderConfigStatusResponseUnstable,
+  ProviderReadinessCheckRequestUnstable,
+  ProviderReadinessCheckResponseUnstable,
   ProviderSecretDeleteRequestUnstable,
   ProviderSecretsListRequestUnstable,
   ProviderSecretsListResponseUnstable,
@@ -258,6 +258,7 @@ import {
   zProviderConfigChangeResponseUnstable,
   zProviderConfigReadResponseUnstable,
   zProviderConfigStatusResponseUnstable,
+  zProviderReadinessCheckResponseUnstable,
   zProviderSecretsListResponseUnstable,
   zProviderSetupCatalogListResponseUnstable,
   zProviderSupportedModelsListResponseUnstable,
@@ -288,15 +289,6 @@ export class GooseExtClient {
   ): Promise<void> {
     await this.conn.extMethod(
       "_goose/unstable/session/extensions/remove",
-      params,
-    );
-  }
-
-  async GooseUnstableSessionExtensionsApply(
-    params: ApplySessionExtensionsRequestUnstable,
-  ): Promise<void> {
-    await this.conn.extMethod(
-      "_goose/unstable/session/extensions/apply",
       params,
     );
   }
@@ -464,10 +456,6 @@ export class GooseExtClient {
     return zPromptOperationResponseUnstable.parse(
       raw,
     ) as PromptOperationResponseUnstable;
-  }
-
-  async sessionDelete(params: DeleteSessionRequest): Promise<void> {
-    await this.conn.extMethod("session/delete", params);
   }
 
   async GooseUnstableConfigExtensionsList(
@@ -648,6 +636,18 @@ export class GooseExtClient {
     return zRefreshProviderInventoryResponseUnstable.parse(
       raw,
     ) as RefreshProviderInventoryResponseUnstable;
+  }
+
+  async GooseUnstableProvidersReadinessCheck(
+    params: ProviderReadinessCheckRequestUnstable,
+  ): Promise<ProviderReadinessCheckResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/providers/readiness/check",
+      params,
+    );
+    return zProviderReadinessCheckResponseUnstable.parse(
+      raw,
+    ) as ProviderReadinessCheckResponseUnstable;
   }
 
   async GooseUnstableProvidersConfigRead(
