@@ -18,6 +18,7 @@ export {
 export {
   TranscriptVirtualController,
   createTranscriptVirtualController,
+  type TranscriptScrollAnchorInput,
 } from "./transcriptVirtualController";
 export {
   TranscriptTanStackVirtualAdapter,

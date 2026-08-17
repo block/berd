@@ -55,14 +55,12 @@ interface RowPosition {
   bottom: number;
 }
 
-type PendingScrollAnchor =
+export type TranscriptScrollAnchorInput =
   | { type: "bottom" }
   | { type: "scroll-position"; scrollTop: number }
-  | {
-      type: "row";
-      rowId: string;
-      offsetWithinRow: number;
-    };
+  | { type: "row"; rowId: string; offsetWithinRow: number };
+
+type PendingScrollAnchor = TranscriptScrollAnchorInput;
 
 interface ReconcileOptions {
   reason: TranscriptCorrectionReason;
@@ -119,6 +117,8 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
   private readonly overscanBeforeRows: number;
   private readonly overscanAfterRows: number;
   private readonly protectedRowIds: readonly string[];
+  private readonly authorityBoundary: boolean;
+  private authorityOperation: TranscriptScrollOperation | undefined;
 
   constructor(
     input: TranscriptSessionGeometry,
@@ -153,6 +153,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     this.overscanAfterRows =
       options.overscanAfterRows ?? TRANSCRIPT_DEFAULT_OVERSCAN_AFTER_ROWS;
     this.protectedRowIds = options.protectedRowIds ?? [];
+    this.authorityBoundary = options.authorityBoundary === true;
   }
 
   reset(input: TranscriptSessionGeometry): void {
@@ -173,8 +174,30 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     this.rowIndexById = new Map();
     this.measurements = new Map();
     this.streamingHeightFloors = new Map();
+    this.authorityOperation = undefined;
     this.lastRange = null;
     this.setScrollAnchor({ type: "bottom" });
+  }
+
+  /** Supplies product ownership to the S3 boundary experiment. */
+  setAuthorityAnchor(anchor: TranscriptScrollAnchorInput): void {
+    if (!this.authorityBoundary) {
+      throw new Error("setAuthorityAnchor requires authorityBoundary mode");
+    }
+    this.setScrollAnchor(anchor);
+  }
+
+  setAuthorityOperation(operation: TranscriptScrollOperation): void {
+    if (!this.authorityBoundary) {
+      throw new Error("setAuthorityOperation requires authorityBoundary mode");
+    }
+    if (
+      this.authorityOperation &&
+      operation.generation < this.authorityOperation.generation
+    ) {
+      return;
+    }
+    this.authorityOperation = { ...operation };
   }
 
   setRows(
@@ -190,7 +213,8 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
 
     const correction = this.reconcileAnchor({
       reason: this.anchor.type === "bottom" ? "bottom-anchor" : "row-anchor",
-      updateAnchorOnStale: true,
+      updateAnchorOnStale: !this.authorityBoundary,
+      operation: this.authorityOperation,
     });
     return { correction };
   }
@@ -229,10 +253,17 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       type: "observe",
       scrollTop: geometry.scrollTop,
       maxScrollTop: this.getBottomScrollTop(),
+      clampObservedScrollTop: !this.authorityBoundary,
       operation: options.operation,
     }).state;
     this.lastRange = null;
     this.diagnostics.viewportUpdates += 1;
+
+    if (this.authorityBoundary) {
+      // Observation is acknowledgement only. External ownership is retained;
+      // geometry mutations (setRows/measurement) are the correction boundary.
+      return { correction: null };
+    }
 
     const direction = getScrollDirection(
       previousScrollTop,
@@ -294,7 +325,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
 
     const row = this.getRow(input.token.rowId);
     const height = Math.max(0, input.height);
-    if (row?.anchorPriority === "streaming") {
+    if (row?.anchorPriority === "streaming" && !this.authorityBoundary) {
       this.updateStreamingHeightFloor(row, height);
     }
 
@@ -309,7 +340,8 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
 
     const correction = this.reconcileAnchor({
       reason: this.anchor.type === "bottom" ? "bottom-anchor" : "row-anchor",
-      updateAnchorOnStale: true,
+      updateAnchorOnStale: !this.authorityBoundary,
+      operation: this.authorityOperation,
     });
     return { accepted: true, correction };
   }
@@ -331,7 +363,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
 
       const row = this.getRow(input.token.rowId);
       const height = Math.max(0, input.height);
-      if (row?.anchorPriority === "streaming") {
+      if (row?.anchorPriority === "streaming" && !this.authorityBoundary) {
         this.updateStreamingHeightFloor(row, height);
       }
 
@@ -356,7 +388,8 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     this.lastRange = null;
     const correction = this.reconcileAnchor({
       reason: this.anchor.type === "bottom" ? "bottom-anchor" : "row-anchor",
-      updateAnchorOnStale: true,
+      updateAnchorOnStale: !this.authorityBoundary,
+      operation: this.authorityOperation,
     });
 
     return {
@@ -821,6 +854,9 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
 
   private getBottomScrollTop(): number {
     const virtualBottom = this.getVirtualScrollHeight() - this.viewportHeight;
+    if (this.authorityBoundary) {
+      return Math.max(0, virtualBottom);
+    }
     const browserBottom =
       this.browserScrollHeight === null
         ? 0
@@ -873,7 +909,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
         : null;
     const measuredFloorHeight =
       measured?.layoutRevision === row.layoutRevision ? measured.height : 0;
-    if (row.anchorPriority === "streaming") {
+    if (row.anchorPriority === "streaming" && !this.authorityBoundary) {
       return Math.max(
         measuredHeight ?? estimatedHeight,
         measuredFloorHeight,

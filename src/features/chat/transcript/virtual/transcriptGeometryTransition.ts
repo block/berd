@@ -21,6 +21,8 @@ export type TranscriptGeometryViewportEvent =
       type: "observe";
       scrollTop: number;
       maxScrollTop: number;
+      /** Boundary mode acknowledges raw browser geometry without clamping it. */
+      clampObservedScrollTop?: boolean;
       operation?: TranscriptScrollOperation;
     }
   | {
@@ -52,7 +54,10 @@ export function transitionTranscriptGeometryViewport(
     }
     return {
       state: {
-        observedScrollTop: clampFinite(event.scrollTop, maxScrollTop),
+        observedScrollTop:
+          event.clampObservedScrollTop === false
+            ? finiteNonNegative(event.scrollTop)
+            : clampFinite(event.scrollTop, maxScrollTop),
         pendingScroll: null,
       },
       effect: null,

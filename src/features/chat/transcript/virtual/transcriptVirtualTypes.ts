@@ -134,6 +134,8 @@ export interface TranscriptVirtualDiagnostics {
 }
 
 export interface TranscriptVirtualControllerOptions {
+  /** S3 experiment: owner/anchor is supplied externally. */
+  authorityBoundary?: boolean;
   pinnedBottomThresholdPx?: number;
   autoScrollThresholdPx?: number;
   measurementEpsilonPx?: number;

@@ -159,6 +159,16 @@ describe("transitionTranscriptGeometryViewport", () => {
     }
   });
 
+  it("keeps boundary observations raw while proposals remain finite and clamped", () => {
+    const result = apply(initial, {
+      type: "observe",
+      scrollTop: 1000,
+      maxScrollTop: 500,
+      clampObservedScrollTop: false,
+    });
+    expect(result.state.observedScrollTop).toBe(1000);
+    expect(result.effect).toBeNull();
+  });
   it("always returns finite clamped proposals", () => {
     const values = [
       Number.NEGATIVE_INFINITY,

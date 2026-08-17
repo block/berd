@@ -794,6 +794,144 @@ describe("transcript virtual controller", () => {
     acknowledge(controller, result.correction);
     expect(controller.getRange().visibleRowIds).toContain("row-80");
   });
+  it("exercises the external authority boundary against real controller survivors", () => {
+    const operation = { generation: 7, cause: "jump" } as const;
+    const controller = createController(
+      { viewportHeight: 200, scrollTop: 300 },
+      { authorityBoundary: true },
+    );
+    controller.setRows(makeRows(8, 100));
+    controller.setAuthorityAnchor({
+      type: "row",
+      rowId: "row-3",
+      offsetWithinRow: 20,
+    });
+    controller.setAuthorityOperation(operation);
+
+    const observed = controller.syncViewport(
+      {
+        scrollTop: 999,
+        viewportHeight: 200,
+        widthScope: WIDTH_SCOPE,
+        browserScrollHeight: 5000,
+      },
+      { source: "browser", userScrollIntent: true, operation },
+    );
+
+    expect(observed.correction).toBeNull();
+    expect(controller.getState()).toMatchObject({
+      scrollTop: 999,
+      bottomScrollTop: 600,
+      anchor: { type: "row", rowId: "row-3", offsetWithinRow: 20 },
+    });
+
+    const measured = controller.applyMeasuredHeight({
+      token: tokenFor(controller, "row-0"),
+      height: 150,
+    });
+    expect(measured.correction).toMatchObject({
+      reason: "row-anchor",
+      nextScrollTop: 370,
+      operation,
+    });
+    // Boundary observation is intentionally not a correction acknowledgement: the
+    // browser may be beyond the modeled virtual bottom, so surviving range
+    // calculation must use that raw observation until the authority confirms a
+    // correction.
+    expect(controller.getRange().visibleRowIds).toEqual(["row-7"]);
+    expect(controller.getPendingScrollCorrection()).toMatchObject({
+      nextScrollTop: 370,
+      operation,
+    });
+
+    controller.syncViewport(
+      {
+        scrollTop: 370,
+        viewportHeight: 200,
+        widthScope: WIDTH_SCOPE,
+        browserScrollHeight: 5000,
+      },
+      { source: "browser", operation },
+    );
+    expect(controller.getRange().visibleRowIds).toEqual([
+      "row-3",
+      "row-4",
+      "row-5",
+    ]);
+  });
+
+  it("reports stale anchors without recapturing ownership in boundary mode", () => {
+    const controller = createController(
+      { viewportHeight: 200, scrollTop: 200 },
+      { authorityBoundary: true },
+    );
+    controller.setRows(makeRows(5, 100));
+    controller.setAuthorityAnchor({
+      type: "row",
+      rowId: "row-2",
+      offsetWithinRow: 10,
+    });
+    controller.setRows([row("row-0", 100), row("row-1", 100)]);
+
+    expect(controller.getState().anchor).toMatchObject({
+      type: "row",
+      rowId: "row-2",
+    });
+    expect(controller.getDiagnostics().missingAnchorsDropped).toBe(1);
+  });
+
+  it("cancels a genuinely pending jump correction with a newer authority acknowledgement", () => {
+    const controller = createController(
+      { viewportHeight: 200, scrollTop: 0 },
+      { authorityBoundary: true },
+    );
+    controller.setRows(makeRows(10, 100));
+    const jump = { generation: 1, cause: "jump" } as const;
+    controller.setAuthorityAnchor({
+      type: "row",
+      rowId: "row-8",
+      offsetWithinRow: 0,
+    });
+    controller.setAuthorityOperation(jump);
+    const pending = controller.applyMeasuredHeight({
+      token: tokenFor(controller, "row-0"),
+      height: 120,
+    });
+    expect(pending.correction).toMatchObject({ operation: jump });
+
+    const interrupt = {
+      generation: 2,
+      cause: "user-input",
+      userInputKind: "wheel",
+    } as const;
+    controller.setAuthorityOperation(interrupt);
+    controller.setAuthorityAnchor({ type: "scroll-position", scrollTop: 120 });
+    controller.syncViewport(
+      { scrollTop: 120, viewportHeight: 200, widthScope: WIDTH_SCOPE },
+      { source: "browser", operation: interrupt },
+    );
+
+    expect(controller.getPendingScrollCorrection()).toBeNull();
+    expect(controller.getState().anchor).toEqual({
+      type: "scroll-position",
+      scrollTop: 120,
+    });
+  });
+
+  it("uses surviving range, position, and token validation in boundary mode", () => {
+    const controller = createController(
+      { viewportHeight: 100, scrollTop: 100 },
+      { authorityBoundary: true, protectedRowIds: ["row-0"] },
+    );
+    controller.setRows(makeRows(20, 50));
+    const stale = tokenFor(controller, "row-2", { heightRevision: "stale" });
+    expect(
+      controller.applyMeasuredHeight({ token: stale, height: 90 }).accepted,
+    ).toBe(false);
+    expect(controller.getScrollTopForRow("row-10", "center")).toBe(475);
+    expect(controller.getRange().renderedRowIds).toContain("row-0");
+    expect(controller.getDiagnostics().staleMeasurementRevisionDrops).toBe(1);
+  });
 });
 
 function acknowledge(
