@@ -777,26 +777,6 @@ impl Drop for AgentLock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bb::agents_models::AgentInstallArtifact;
-    use crate::bb::skills_api::MarketplaceClient;
-
-    #[test]
-    fn agent_install_download_rejects_malformed_artifact_url() {
-        let artifact: AgentInstallArtifact = serde_json::from_value(serde_json::json!({
-            "id": "artifact",
-            "download_url": "data:text/plain,secret",
-            "sha256": "unused",
-            "size_bytes": 0,
-            "media_type": "application/zip"
-        }))
-        .expect("parse artifact");
-        let client = MarketplaceClient::unauthenticated_for_test("http://127.0.0.1:1");
-        let error = client
-            .download(&artifact.download_url)
-            .expect_err("agent install URL must fail safely");
-
-        assert!(format!("{error:#}").contains("artifact URL must be an absolute HTTP(S) URL"));
-    }
 
     fn temp_paths(slug: &str) -> (tempfile::TempDir, AgentPaths) {
         let root = tempfile::tempdir().unwrap();

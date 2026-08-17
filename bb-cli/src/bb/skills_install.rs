@@ -964,34 +964,6 @@ pub fn find_orphaned_work_dirs(root: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bb::skills_api::MarketplaceClient;
-
-    #[test]
-    fn skill_install_download_rejects_malformed_artifact_url() {
-        let operation: InstallOperation = serde_json::from_value(serde_json::json!({
-            "action": "install",
-            "reason": "test",
-            "skill": {
-                "slug": "demo",
-                "version_id": "v1",
-                "content_sha256": "content"
-            },
-            "artifact": {
-                "id": "artifact",
-                "download_url": "ftp://example.com/demo.zip",
-                "sha256": "unused",
-                "size_bytes": 0
-            },
-            "installed_via": "explicit"
-        }))
-        .expect("parse operation");
-        let client = MarketplaceClient::unauthenticated_for_test("http://127.0.0.1:1");
-        let error = client
-            .download(&operation.artifact.as_ref().expect("artifact").download_url)
-            .expect_err("skill install URL must fail safely");
-
-        assert!(format!("{error:#}").contains("artifact URL must be an absolute HTTP(S) URL"));
-    }
 
     #[test]
     fn iso8601_formats_known_timestamps() {

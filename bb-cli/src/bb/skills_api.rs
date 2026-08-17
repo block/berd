@@ -178,28 +178,6 @@ impl MarketplaceClient {
         self.has_auth
     }
 
-    #[cfg(test)]
-    pub(crate) fn unauthenticated_for_test(base_url: &str) -> Self {
-        let base_url = Url::parse(base_url).expect("parse test marketplace URL");
-        Self {
-            base_url: base_url.clone(),
-            client: Client::builder()
-                .redirect(same_origin_redirect_policy(base_url))
-                .build()
-                .expect("build test marketplace client"),
-            authenticated_artifact_client: Client::builder()
-                .redirect(Policy::none())
-                .build()
-                .expect("build test authenticated artifact client"),
-            artifact_client: Client::builder()
-                .redirect(Policy::none())
-                .build()
-                .expect("build test artifact client"),
-            has_auth: false,
-            style: Style::new(true, true, false),
-        }
-    }
-
     pub fn get_json<T>(&self, path: &str) -> Result<T>
     where
         T: for<'de> Deserialize<'de>,
