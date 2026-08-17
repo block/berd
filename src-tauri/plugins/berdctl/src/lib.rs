@@ -2,8 +2,10 @@
 //!
 //! A lazily started, loopback-only HTTP server (`GET /v1/ping`, `POST
 //! /v1/call`) that forwards commands over a request/response bridge into the
-//! main-window renderer. The CLI finds it through a per-instance discovery
-//! file written on start and removed on stop/exit.
+//! main-window renderer. The CLI finds it through a per-instance, owner-private
+//! discovery file written on start and removed on stop/exit. The file carries
+//! only a local bootstrap address; kernel peer-process admission releases the
+//! bearer capability to descendants of this instance's owned goosed tree.
 //!
 //! Without the `server` feature this crate is an inert stub: build.rs still
 //! generates the command permissions (so capability validation passes in
@@ -12,11 +14,17 @@
 //! app crate can compute paths without enabling the broker.
 
 #[cfg(feature = "server")]
+mod authorization;
+#[cfg(feature = "server")]
+mod bootstrap;
+#[cfg(feature = "server")]
 mod bridge;
 mod discovery;
 #[cfg(feature = "server")]
 mod server;
 
+#[cfg(feature = "server")]
+pub use authorization::{prepare_goosed, GoosedAdmission, GoosedAuthorization};
 pub use discovery::{discovery_file_path, owner_pid_from_discovery_file_name, DISCOVERY_DIR_NAME};
 
 #[cfg(feature = "server")]
@@ -163,20 +171,29 @@ mod plugin {
             Arc::new(tokio::sync::Semaphore::new(IN_FLIGHT_LIMIT)),
             generation,
         ));
-        let handle = server::start_server(ctx)
-            .await
-            .map_err(|err| format!("failed to start berdctl server: {err}"))?;
-        let port = handle.port;
-
-        // The CLI can only find the broker through the discovery file, so a
-        // failed write means a failed start.
         let app_data_dir = app
             .path()
             .app_data_dir()
             .map_err(|err| format!("failed to resolve app data dir: {err}"))?;
+        discovery::prepare_discovery_directory(&app_data_dir)
+            .map_err(|err| format!("failed to prepare berdctl discovery directory: {err}"))?;
+        let bootstrap_endpoint = discovery::bootstrap_endpoint(&app_data_dir, std::process::id());
+        let handle = server::start_server_with_bootstrap(
+            ctx,
+            &bootstrap_endpoint,
+            crate::authorization::authorizer(),
+        )
+        .await
+        .map_err(|err| format!("failed to start berdctl server: {err}"))?;
+        let port = handle.port;
+
+        // The CLI can only find the broker through the discovery file, so a
+        // failed write means a failed start.
         let pid = std::process::id();
         let path = discovery::discovery_file_path(&app_data_dir, pid);
-        if let Err(err) = discovery::write_discovery_file(&path, port, pid, generation) {
+        if let Err(err) =
+            discovery::write_discovery_file(&path, port, pid, generation, &bootstrap_endpoint)
+        {
             handle.shutdown();
             return Err(format!(
                 "failed to write berdctl discovery file {}: {err}",

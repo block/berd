@@ -1,16 +1,16 @@
 //! Loopback-only HTTP broker for the berdctl CLI.
 //!
 //! Serves `GET /v1/ping` (generation/protocol handshake) and `POST /v1/call`
-//! (command dispatch over the renderer bridge). There is no application auth
-//! in v1; the header rejection below (any `Origin`, any `Sec-Fetch-*`, `Host`
-//! mismatch) is the sole defense against browser-JS-to-localhost and DNS
-//! rebinding, so it applies to every route.
+//! (command dispatch over the renderer bridge). Every route requires the
+//! per-server bearer capability released by authenticated local bootstrap. The
+//! existing Origin, Sec-Fetch, and literal Host checks remain a separate
+//! defense against browser-JS-to-localhost and DNS rebinding.
 
 use crate::bridge::{Bridge, BridgeError, BridgeRequest, BridgeResult};
 use crate::discovery::PROTOCOL_VERSION;
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::header::{HOST, ORIGIN};
+use axum::http::header::{AUTHORIZATION, HOST, ORIGIN};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Duration, Instant};
+use subtle::ConstantTimeEq;
 use tauri::{AppHandle, Runtime};
 use tokio::sync::{oneshot, Semaphore};
 
@@ -29,6 +30,13 @@ pub const IN_FLIGHT_LIMIT: usize = 4;
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 const MIN_REQUEST_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_COMMAND_TIMEOUT: Duration = Duration::from_secs(900);
+const CAPABILITY_BYTES: usize = 32;
+
+pub fn generate_capability() -> std::io::Result<String> {
+    let mut bytes = [0_u8; CAPABILITY_BYTES];
+    getrandom::fill(&mut bytes).map_err(std::io::Error::other)?;
+    Ok(hex::encode(bytes))
+}
 
 /// Resolve the bridge timeout for a call: a request `timeout_ms` wins
 /// (clamped to [`MIN_REQUEST_TIMEOUT`]..=[`MAX_COMMAND_TIMEOUT`]); otherwise
@@ -118,6 +126,7 @@ pub struct ServerContext<D> {
     // against their own instance, never the next server's.
     inflight: Arc<Semaphore>,
     generation: u64,
+    capability: String,
     // Set by `start_server` once the listener is bound, before any request.
     port: OnceLock<u16>,
 }
@@ -134,6 +143,8 @@ impl<D: CommandDispatcher> ServerContext<D> {
             timeouts,
             inflight,
             generation,
+            capability: generate_capability()
+                .expect("operating-system randomness is required for berdctl"),
             port: OnceLock::new(),
         }
     }
@@ -144,11 +155,15 @@ impl<D: CommandDispatcher> ServerContext<D> {
 pub struct ServerHandle {
     pub port: u16,
     shutdown: oneshot::Sender<()>,
+    bootstrap: Option<crate::bootstrap::BootstrapHandle>,
 }
 
 impl ServerHandle {
     pub fn shutdown(self) {
         let _ = self.shutdown.send(());
+        if let Some(bootstrap) = self.bootstrap {
+            bootstrap.shutdown();
+        }
     }
 }
 
@@ -172,7 +187,32 @@ pub async fn start_server<D: CommandDispatcher>(
     Ok(ServerHandle {
         port,
         shutdown: shutdown_tx,
+        bootstrap: None,
     })
+}
+
+pub async fn start_server_with_bootstrap<D: CommandDispatcher>(
+    ctx: Arc<ServerContext<D>>,
+    endpoint: &std::path::Path,
+    authorizer: crate::authorization::ProcessAuthorizer,
+) -> std::io::Result<ServerHandle> {
+    let mut handle = start_server(ctx.clone()).await?;
+    match crate::bootstrap::start(
+        endpoint,
+        handle.port,
+        ctx.generation,
+        ctx.capability.clone(),
+        authorizer,
+    ) {
+        Ok(bootstrap) => {
+            handle.bootstrap = Some(bootstrap);
+            Ok(handle)
+        }
+        Err(error) => {
+            handle.shutdown();
+            Err(error)
+        }
+    }
 }
 
 pub fn build_router<D: CommandDispatcher>(ctx: Arc<ServerContext<D>>) -> Router {
@@ -183,8 +223,9 @@ pub fn build_router<D: CommandDispatcher>(ctx: Arc<ServerContext<D>>) -> Router 
 }
 
 /// Reject requests that look like they came from a browser (any `Origin` or
-/// `Sec-Fetch-*` header) or through DNS rebinding (`Host` other than our
-/// loopback bind). Applied by every handler before anything else.
+/// `Sec-Fetch-*` header), through DNS rebinding (`Host` other than our
+/// loopback bind), or without this server instance's bearer capability.
+/// Applied by every handler before reading or dispatching a body.
 fn forbidden_header_response<D>(ctx: &ServerContext<D>, headers: &HeaderMap) -> Option<Response> {
     let violation = if headers.contains_key(ORIGIN) {
         Some("Origin header not allowed".to_string())
@@ -199,11 +240,28 @@ fn forbidden_header_response<D>(ctx: &ServerContext<D>, headers: &HeaderMap) -> 
             Some(host) if host == expected => None,
             _ => Some(format!("Host must be {expected}")),
         }
-    };
+    }
+    .or_else(|| {
+        let authorized = headers
+            .get(AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.strip_prefix("Bearer "))
+            .is_some_and(|provided| capability_matches(&ctx.capability, provided));
+        (!authorized).then(|| "valid bearer capability required".to_string())
+    });
     violation.map(|message| {
         log::warn!("[berdctl] rejected request: {message}");
         error_response(StatusCode::FORBIDDEN, "forbidden", &message)
     })
+}
+
+fn capability_matches(expected: &str, provided: &str) -> bool {
+    let expected = expected.as_bytes();
+    let provided = provided.as_bytes();
+    if expected.len() != provided.len() {
+        return false;
+    }
+    bool::from(expected.ct_eq(provided))
 }
 
 async fn handle_ping<D: CommandDispatcher>(
@@ -359,6 +417,10 @@ mod tests {
     use tokio::sync::{mpsc, Notify};
 
     const TEST_GENERATION: u64 = 3;
+    const TEST_CAPABILITY: &str =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const STALE_CAPABILITY: &str =
+        "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
     #[derive(Clone)]
     enum StubBehavior {
@@ -452,6 +514,10 @@ mod tests {
             Arc::new(Semaphore::new(limits.permits)),
             TEST_GENERATION,
         ));
+        // Tests pin a known capability while production generates one.
+        let mut ctx = Arc::try_unwrap(ctx).ok().unwrap();
+        ctx.capability = TEST_CAPABILITY.to_string();
+        let ctx = Arc::new(ctx);
         let handle = start_server(ctx).await.unwrap();
         TestServer {
             base: format!("http://127.0.0.1:{}", handle.port),
@@ -459,13 +525,32 @@ mod tests {
         }
     }
 
-    async fn post_call(base: &str, body: &Value) -> reqwest::Response {
-        reqwest::Client::new()
+    async fn get_ping(base: &str, capability: Option<&str>) -> reqwest::Response {
+        let request = reqwest::Client::new().get(format!("{base}/v1/ping"));
+        let request = match capability {
+            Some(capability) => request.bearer_auth(capability),
+            None => request,
+        };
+        request.send().await.unwrap()
+    }
+
+    async fn post_call_with_capability(
+        base: &str,
+        body: &Value,
+        capability: Option<&str>,
+    ) -> reqwest::Response {
+        let request = reqwest::Client::new()
             .post(format!("{base}/v1/call"))
-            .json(body)
-            .send()
-            .await
-            .unwrap()
+            .json(body);
+        let request = match capability {
+            Some(capability) => request.bearer_auth(capability),
+            None => request,
+        };
+        request.send().await.unwrap()
+    }
+
+    async fn post_call(base: &str, body: &Value) -> reqwest::Response {
+        post_call_with_capability(base, body, Some(TEST_CAPABILITY)).await
     }
 
     fn call_body(command: &str, args: Value) -> Value {
@@ -475,13 +560,59 @@ mod tests {
     #[tokio::test]
     async fn ping_echoes_generation_and_protocol_version() {
         let server = spawn_server(StubBehavior::Echo, Limits::default()).await;
-        let response = reqwest::get(format!("{}/v1/ping", server.base))
-            .await
-            .unwrap();
+        let response = get_ping(&server.base, Some(TEST_CAPABILITY)).await;
         assert_eq!(response.status(), 200);
         let body: Value = response.json().await.unwrap();
         assert_eq!(body["generation"], TEST_GENERATION);
         assert_eq!(body["protocolVersion"], PROTOCOL_VERSION);
+    }
+
+    #[tokio::test]
+    async fn missing_wrong_and_stale_capabilities_are_rejected_on_all_routes() {
+        let server = spawn_server(StubBehavior::Echo, Limits::default()).await;
+        let body = call_body("sessions", json!({ "action": "list" }));
+
+        for capability in [None, Some("wrong"), Some(STALE_CAPABILITY)] {
+            let ping = get_ping(&server.base, capability).await;
+            assert_eq!(ping.status(), 403, "ping capability {capability:?}");
+            let ping_body: Value = ping.json().await.unwrap();
+            assert_eq!(ping_body["error"]["code"], "forbidden");
+
+            let call = post_call_with_capability(&server.base, &body, capability).await;
+            assert_eq!(call.status(), 403, "call capability {capability:?}");
+            let call_body: Value = call.json().await.unwrap();
+            assert_eq!(call_body["error"]["code"], "forbidden");
+        }
+
+        assert_eq!(
+            get_ping(&server.base, Some(TEST_CAPABILITY)).await.status(),
+            200
+        );
+        assert_eq!(
+            post_call_with_capability(&server.base, &body, Some(TEST_CAPABILITY))
+                .await
+                .status(),
+            200
+        );
+    }
+
+    #[test]
+    fn generated_capabilities_are_random_256_bit_hex() {
+        let first = generate_capability().unwrap();
+        let second = generate_capability().unwrap();
+        assert_eq!(first.len(), CAPABILITY_BYTES * 2);
+        assert!(first
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)));
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn capability_match_checks_content_and_length() {
+        assert!(capability_matches(TEST_CAPABILITY, TEST_CAPABILITY));
+        assert!(!capability_matches(TEST_CAPABILITY, STALE_CAPABILITY));
+        assert!(!capability_matches(TEST_CAPABILITY, "short"));
+        assert!(!capability_matches(TEST_CAPABILITY, &"0".repeat(128)));
     }
 
     #[tokio::test]
@@ -491,6 +622,7 @@ mod tests {
 
         let ping = client
             .get(format!("{}/v1/ping", server.base))
+            .bearer_auth(TEST_CAPABILITY)
             .header("Origin", "https://evil.example")
             .send()
             .await
@@ -502,6 +634,7 @@ mod tests {
 
         let call = client
             .post(format!("{}/v1/call", server.base))
+            .bearer_auth(TEST_CAPABILITY)
             .header("Origin", "http://localhost:3000")
             .json(&call_body("sessions", json!({ "action": "list" })))
             .send()
@@ -519,6 +652,7 @@ mod tests {
         for header in ["Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest"] {
             let response = client
                 .post(format!("{}/v1/call", server.base))
+                .bearer_auth(TEST_CAPABILITY)
                 .header(header, "cross-site")
                 .json(&call_body("sessions", json!({ "action": "list" })))
                 .send()
@@ -539,6 +673,7 @@ mod tests {
         for host in ["evil.example:1234", "localhost:80"] {
             let response = client
                 .get(format!("{}/v1/ping", server.base))
+                .bearer_auth(TEST_CAPABILITY)
                 .header("Host", host)
                 .send()
                 .await
@@ -626,6 +761,7 @@ mod tests {
         // Not JSON at all.
         let response = client
             .post(format!("{}/v1/call", server.base))
+            .bearer_auth(TEST_CAPABILITY)
             .header("Content-Type", "application/json")
             .body("{not json")
             .send()
@@ -805,16 +941,27 @@ mod tests {
 
     /// The non-test portion of a plugin source file: everything before its
     /// `mod tests` module, which must be unique and must run to end-of-file
-    /// so no scannable code can hide after it. The brace walk is naive about
-    /// braces inside test string literals, but that confusion fails CLOSED
-    /// (the gate then scans test code too and trips loudly).
+    /// so no scannable code can hide after it. Both LF and CRLF are accepted
+    /// because `include_str!` preserves the checkout's line endings. The brace
+    /// walk is naive about braces inside test string literals, but that confusion
+    /// fails CLOSED (the gate then scans test code too and trips loudly).
     fn non_test_source<'a>(name: &str, source: &'a str) -> &'a str {
-        const MARKER: &str = "#[cfg(test)]\nmod tests {";
-        match source.matches(MARKER).count() {
+        const MARKERS: &[&str] = &["#[cfg(test)]\nmod tests {", "#[cfg(test)]\r\nmod tests {"];
+        let mut matches = Vec::new();
+        for marker in MARKERS {
+            matches.extend(
+                source
+                    .match_indices(marker)
+                    .map(|(start, _)| (start, *marker)),
+            );
+        }
+
+        match matches.len() {
             0 => source,
             1 => {
-                let head = source.split(MARKER).next().unwrap();
-                let tail = &source[head.len() + MARKER.len()..];
+                let (start, marker) = matches[0];
+                let head = &source[..start];
+                let tail = &source[start + marker.len()..];
                 let mut depth: i64 = 1;
                 let mut after = "";
                 for (i, c) in tail.char_indices() {
@@ -839,6 +986,23 @@ mod tests {
             }
             n => panic!("{name}: expected at most one `mod tests` marker, found {n}"),
         }
+    }
+
+    #[test]
+    fn non_test_source_accepts_crlf_checkouts() {
+        let source = [
+            "const LIVE: &str = \"transport\";",
+            "#[cfg(test)]",
+            "mod tests {",
+            "    const TEST_ONLY: &str = \"create\";",
+            "}",
+            "",
+        ]
+        .join("\r\n");
+        let non_test = non_test_source("fixture.rs", &source);
+
+        assert_eq!(non_test, "const LIVE: &str = \"transport\";\r\n");
+        assert!(!non_test.contains("\"create\""));
     }
 
     /// Invariant #1 of the berdctl architecture

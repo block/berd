@@ -1,5 +1,6 @@
 //! Per-instance discovery ("lock") file the berdctl CLI reads to find the
-//! running broker: `{port, pid, generation, protocolVersion}`.
+//! running broker and its authenticated-bootstrap endpoint. The record contains
+//! no bearer credential.
 //!
 //! The path formula and protocol version are exported unconditionally (not
 //! behind the `server` feature) so the app crate can compute the path for the
@@ -12,17 +13,21 @@ use std::path::{Path, PathBuf};
 /// (src-tauri/crates/berdctl); the CLI does not depend on this crate —
 /// bump both together.
 #[cfg_attr(not(feature = "server"), allow(dead_code))]
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Directory under the app data dir holding the per-instance discovery files.
 pub const DISCOVERY_DIR_NAME: &str = "berdctl";
 
 const DISCOVERY_FILE_PREFIX: &str = "control-";
 const DISCOVERY_FILE_SUFFIX: &str = ".json";
-/// A crash between the temp-file write and the atomic rename below leaves
-/// `control-<pid>.json.tmp` behind; the app crate's stale-file sweep owns
-/// those orphans too.
-const DISCOVERY_TEMP_SUFFIX: &str = ".json.tmp";
+/// A crash between a temp-file write and its atomic rename can leave either
+/// the legacy fixed-name `control-<pid>.json.tmp` orphan or the current
+/// `control-<pid>.json.<nonce>.tmp` orphan. The app crate's stale-file sweep
+/// owns both forms.
+const LEGACY_DISCOVERY_TEMP_SUFFIX: &str = ".json.tmp";
+const DISCOVERY_TEMP_MARKER: &str = ".json.";
+const DISCOVERY_TEMP_SUFFIX: &str = ".tmp";
+const DISCOVERY_TEMP_NONCE_HEX_LEN: usize = 32;
 
 /// `<app_data_dir>/berdctl/control-<pid>.json`. Per-instance (pid
 /// suffix): dev worktrees share a bundle identifier, so a well-known filename
@@ -33,24 +38,113 @@ pub fn discovery_file_path(app_data_dir: &Path, pid: u32) -> PathBuf {
     ))
 }
 
-/// Owning app pid encoded in a discovery file name: `control-<pid>.json` or
-/// its orphaned temp form `control-<pid>.json.tmp`. `None` for anything else.
+/// Per-instance authenticated bootstrap endpoint. This value is an address,
+/// not a credential; the listener authorizes the kernel-reported peer process.
+#[cfg(feature = "server")]
+pub(crate) fn bootstrap_endpoint(app_data_dir: &Path, pid: u32) -> PathBuf {
+    let nonce = uuid::Uuid::new_v4().simple();
+    #[cfg(unix)]
+    {
+        let _ = app_data_dir;
+        std::env::temp_dir().join(format!("bctl-{pid}-{nonce}.sock"))
+    }
+    #[cfg(windows)]
+    {
+        let _ = app_data_dir;
+        PathBuf::from(format!("berdctl-bootstrap-{pid}-{nonce}"))
+    }
+}
+
+/// Owning app pid encoded in a discovery file name. Recognized forms are the
+/// final `control-<pid>.json`, legacy `control-<pid>.json.tmp`, and current
+/// `control-<pid>.json.<32 lowercase hex chars>.tmp` orphan names. `None` for
+/// anything else, so the stale-file sweep cannot delete unrelated files.
 pub fn owner_pid_from_discovery_file_name(name: &str) -> Option<u32> {
     let stem = name.strip_prefix(DISCOVERY_FILE_PREFIX)?;
-    stem.strip_suffix(DISCOVERY_TEMP_SUFFIX)
-        .or_else(|| stem.strip_suffix(DISCOVERY_FILE_SUFFIX))?
-        .parse()
-        .ok()
+    let pid = if let Some(pid) = stem.strip_suffix(DISCOVERY_FILE_SUFFIX) {
+        pid
+    } else if let Some(pid) = stem.strip_suffix(LEGACY_DISCOVERY_TEMP_SUFFIX) {
+        pid
+    } else {
+        let (pid, nonce_with_suffix) = stem.split_once(DISCOVERY_TEMP_MARKER)?;
+        let nonce = nonce_with_suffix.strip_suffix(DISCOVERY_TEMP_SUFFIX)?;
+        if nonce.len() != DISCOVERY_TEMP_NONCE_HEX_LEN
+            || !nonce
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return None;
+        }
+        pid
+    };
+    pid.parse().ok()
+}
+
+#[cfg(feature = "server")]
+fn private_discovery_directory(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+
+        // Refuse to follow a symlink or repair a directory after it has been
+        // swapped out from under the checked path.
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
+            .open(dir)?;
+        let metadata = handle.metadata()?;
+        // SAFETY: `geteuid` takes no arguments and has no preconditions.
+        let current_uid = unsafe { libc::geteuid() };
+        if !metadata.file_type().is_dir() || metadata.uid() != current_uid {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!(
+                    "discovery directory {} is not owned by the current user",
+                    dir.display()
+                ),
+            ));
+        }
+        handle.set_permissions(unix_permissions(0o700))?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let metadata = std::fs::symlink_metadata(dir)?;
+        if !metadata.file_type().is_dir() {
+            return Err(std::io::Error::other(format!(
+                "discovery directory {} is not a directory",
+                dir.display()
+            )));
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "server")]
+pub(crate) fn prepare_discovery_directory(app_data_dir: &Path) -> std::io::Result<PathBuf> {
+    let dir = app_data_dir.join(DISCOVERY_DIR_NAME);
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(&dir)?;
+    private_discovery_directory(&dir)?;
+    Ok(dir)
 }
 
 /// Atomically write the discovery file: private dir + temp file + fsync +
-/// rename, so a CLI reading mid-write never sees partial JSON.
+/// rename, so a CLI reading mid-write never sees partial JSON. Unix paths stay
+/// owner-only to prevent other users from redirecting the bootstrap address.
 #[cfg(feature = "server")]
 pub(crate) fn write_discovery_file(
     path: &Path,
     port: u16,
     pid: u32,
     generation: u64,
+    bootstrap_endpoint: &Path,
 ) -> std::io::Result<()> {
     use std::io::Write;
 
@@ -65,33 +159,87 @@ pub(crate) fn write_discovery_file(
         dir_builder.mode(0o700);
     }
     dir_builder.create(dir)?;
+    private_discovery_directory(dir)?;
 
     let payload = serde_json::json!({
         "port": port,
         "pid": pid,
         "generation": generation,
         "protocolVersion": PROTOCOL_VERSION,
+        "bootstrapEndpoint": bootstrap_endpoint.to_string_lossy(),
     });
 
-    let mut tmp_name = path
-        .file_name()
-        .map(std::ffi::OsStr::to_os_string)
-        .unwrap_or_default();
-    tmp_name.push(".tmp");
-    let tmp = path.with_file_name(tmp_name);
+    // Use a unique adjacent path for each write. A stale fixed-name temp file
+    // must never block broker startup, and `create_new` prevents following or
+    // truncating a same-user symlink planted at the candidate path.
+    let tmp = (0_u8..16)
+        .find_map(|_| {
+            let mut suffix = [0_u8; 16];
+            if let Err(err) = getrandom::fill(&mut suffix) {
+                return Some(Err(std::io::Error::other(err)));
+            }
+            let mut tmp_name = path
+                .file_name()
+                .map(std::ffi::OsStr::to_os_string)
+                .unwrap_or_default();
+            tmp_name.push(format!(".{}.tmp", hex::encode(suffix)));
+            let candidate = path.with_file_name(tmp_name);
 
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+            let mut options = std::fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            match options.open(&candidate) {
+                Ok(file) => Some(Ok((candidate, file))),
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => None,
+                Err(err) => Some(Err(err)),
+            }
+        })
+        .transpose()?
+        .ok_or_else(|| std::io::Error::other("could not allocate discovery temp file"))?;
+    let (tmp, mut file) = tmp;
+    #[cfg(unix)]
+    file.set_permissions(unix_permissions(0o600))?;
+
+    let mut renamed = false;
+    let result = (|| {
+        file.write_all(payload.to_string().as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&tmp, path)?;
+        renamed = true;
+        sync_directory(dir)
+    })();
+    if result.is_err() {
+        let cleanup_path = if renamed { path } else { &tmp };
+        let _ = std::fs::remove_file(cleanup_path);
+        if renamed {
+            let _ = sync_directory(dir);
+        }
+    }
+    result
+}
+
+#[cfg(feature = "server")]
+fn sync_directory(dir: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
+        std::fs::File::open(dir)?.sync_all()
     }
-    let mut file = options.open(&tmp)?;
-    file.write_all(payload.to_string().as_bytes())?;
-    file.sync_all()?;
-    drop(file);
-    std::fs::rename(&tmp, path)
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        Ok(())
+    }
+}
+
+#[cfg(all(feature = "server", unix))]
+fn unix_permissions(mode: u32) -> std::fs::Permissions {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::Permissions::from_mode(mode)
 }
 
 /// Best-effort removal (stop / app exit); missing files are expected.
@@ -124,16 +272,34 @@ mod tests {
 
     #[test]
     fn parses_owner_pid_from_file_name() {
-        assert_eq!(
-            owner_pid_from_discovery_file_name("control-1234.json"),
-            Some(1234)
-        );
-        assert_eq!(
-            owner_pid_from_discovery_file_name("control-1234.json.tmp"),
-            Some(1234)
-        );
-        assert_eq!(owner_pid_from_discovery_file_name("other.json"), None);
-        assert_eq!(owner_pid_from_discovery_file_name("control-1234.tmp"), None);
+        const NONCE: &str = "0123456789abcdef0123456789abcdef";
+
+        for name in [
+            "control-1234.json".to_string(),
+            "control-1234.json.tmp".to_string(),
+            format!("control-1234.json.{NONCE}.tmp"),
+        ] {
+            assert_eq!(
+                owner_pid_from_discovery_file_name(&name),
+                Some(1234),
+                "expected to recognize {name}"
+            );
+        }
+
+        for name in [
+            "other.json",
+            "control-1234.tmp",
+            "control-1234.json.short.tmp",
+            "control-1234.json.0123456789abcdef0123456789abcdeg.tmp",
+            "control-1234.json.0123456789ABCDEF0123456789ABCDEF.tmp",
+            "control-1234.json.0123456789abcdef0123456789abcdef.tmp.extra",
+        ] {
+            assert_eq!(
+                owner_pid_from_discovery_file_name(name),
+                None,
+                "must not recognize unrelated name {name}"
+            );
+        }
 
         // The parser round-trips the name `discovery_file_path` writes.
         let path = discovery_file_path(Path::new("/data"), 4242);
@@ -155,23 +321,99 @@ mod tests {
         );
     }
 
+    #[cfg(all(feature = "server", unix))]
+    #[test]
+    fn write_rejects_symlinked_discovery_directory() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!(
+            "berdctl-discovery-dir-symlink-test-{}",
+            std::process::id()
+        ));
+        std::fs::remove_dir_all(&base).ok();
+        std::fs::create_dir(&base).unwrap();
+        let target = base.join("target");
+        let link = base.join("berdctl");
+        std::fs::create_dir(&target).unwrap();
+        std::fs::set_permissions(&target, unix_permissions(0o700)).unwrap();
+        symlink(&target, &link).unwrap();
+        let path = link.join("control-4242.json");
+
+        let error = write_discovery_file(&path, 8080, 4242, 7, Path::new("/tmp/bootstrap.sock"))
+            .expect_err("symlinked discovery directory must fail closed");
+        assert!(!target.join("control-4242.json").exists());
+        assert_ne!(error.kind(), std::io::ErrorKind::NotFound);
+
+        std::fs::remove_dir_all(base).ok();
+    }
+
     #[cfg(feature = "server")]
     #[test]
     fn write_and_remove_lifecycle() {
+        let first_endpoint = Path::new("/tmp/bootstrap-first.sock");
+        let rotated_endpoint = Path::new("/tmp/bootstrap-rotated.sock");
         let base =
             std::env::temp_dir().join(format!("berdctl-discovery-test-{}", std::process::id()));
         std::fs::remove_dir_all(&base).ok();
         let path = discovery_file_path(&base, 4242);
 
-        write_discovery_file(&path, 8080, 4242, 7).unwrap();
+        write_discovery_file(&path, 8080, 4242, 7, first_endpoint).unwrap();
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed["port"], 8080);
         assert_eq!(parsed["pid"], 4242);
         assert_eq!(parsed["generation"], 7);
         assert_eq!(parsed["protocolVersion"], PROTOCOL_VERSION);
+        assert_eq!(
+            parsed["bootstrapEndpoint"],
+            first_endpoint.to_string_lossy().as_ref()
+        );
         // The temp file is renamed away, never left behind.
-        assert!(!path.with_file_name("control-4242.json.tmp").exists());
+        let leftovers: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("control-4242.json.")
+            })
+            .collect();
+        assert!(leftovers.is_empty(), "leftover temp files: {leftovers:?}");
+
+        // A crash orphan at the legacy fixed temp name cannot block a future
+        // broker start or be overwritten with the new capability.
+        let legacy_tmp = path.with_file_name("control-4242.json.tmp");
+        std::fs::write(&legacy_tmp, "stale").unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let dir_mode = std::fs::metadata(path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode();
+            assert_eq!(dir_mode & 0o777, 0o700);
+            let file_mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(file_mode & 0o777, 0o600);
+
+            // Pre-existing permissive paths are tightened too; creation modes
+            // alone do not repair them.
+            std::fs::set_permissions(path.parent().unwrap(), unix_permissions(0o755)).unwrap();
+            std::fs::set_permissions(&path, unix_permissions(0o644)).unwrap();
+        }
+
+        // Restart case: an atomic rewrite rotates both generation and endpoint.
+        write_discovery_file(&path, 9090, 4242, 8, rotated_endpoint).unwrap();
+        let parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(parsed["port"], 9090);
+        assert_eq!(parsed["generation"], 8);
+        assert_eq!(
+            parsed["bootstrapEndpoint"],
+            rotated_endpoint.to_string_lossy().as_ref()
+        );
+        assert_eq!(std::fs::read_to_string(&legacy_tmp).unwrap(), "stale");
 
         #[cfg(unix)]
         {
@@ -184,13 +426,6 @@ mod tests {
             let file_mode = std::fs::metadata(&path).unwrap().permissions().mode();
             assert_eq!(file_mode & 0o777, 0o600);
         }
-
-        // Restart case: a rewrite replaces the content atomically.
-        write_discovery_file(&path, 9090, 4242, 8).unwrap();
-        let parsed: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(parsed["port"], 9090);
-        assert_eq!(parsed["generation"], 8);
 
         remove_discovery_file(&path);
         assert!(!path.exists());

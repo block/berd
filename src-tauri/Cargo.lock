@@ -583,6 +583,8 @@ version = "0.6.0"
 dependencies = [
  "clap",
  "indexmap 2.13.1",
+ "interprocess",
+ "libc",
  "serde",
  "serde_json",
  "ureq 3.4.0",
@@ -1683,6 +1685,12 @@ checksum = "442039f5147480ba31067cb00ada1adae6892028e40e45fc5de7b7df6dcc1b5f"
 dependencies = [
  "const-random",
 ]
+
+[[package]]
+name = "doctest-file"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2db04e74f0a9a93103b50e90b96024c9b2bdca8bce6a632ec71b88736d3d359"
 
 [[package]]
 name = "doctor"
@@ -2989,6 +2997,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a588916bfdfd92e71cacef98a63d9b1f0d74d6599980d11894290e7ddefffcf7"
 dependencies = [
  "cfb",
+]
+
+[[package]]
+name = "interprocess"
+version = "2.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "798de1433ba514cc6c04c4144c2469af81396e4906195218737c776d47769572"
+dependencies = [
+ "doctest-file",
+ "futures-core",
+ "libc",
+ "recvmsg",
+ "tokio",
+ "widestring",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5006,6 +5029,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "recvmsg"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3edd4d5d42c92f0a659926464d4cce56b562761267ecf0f469d85b7de384175"
+
+[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6583,14 +6612,20 @@ name = "tauri-plugin-berdctl"
 version = "0.6.0"
 dependencies = [
  "axum",
+ "getrandom 0.4.3",
+ "hex",
+ "interprocess",
+ "libc",
  "log",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
+ "subtle",
  "tauri",
  "tauri-plugin",
  "tokio",
  "uuid",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -8070,6 +8105,12 @@ dependencies = [
  "libredox",
  "wasite",
 ]
+
+[[package]]
+name = "widestring"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
 
 [[package]]
 name = "winapi"

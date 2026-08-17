@@ -1,10 +1,11 @@
 # Native x64 MSVC CI gate for the managed Node runtime + npm ACP bridge.
 #
-# Runs the Rust checks that only a real Windows host can exercise: the
-# `managed_node` / `managed_acp_tools` module tests (including the native gate
-# that downloads and executes the real pinned Node ZIP), plus Windows clippy in
-# the default and app-feature configurations. Invoked through `just ci-windows`
-# for local and release validation.
+# Runs the Rust checks that only a real Windows host can exercise: berdctl's
+# Job Object / named-pipe authorization tests, the `managed_node` /
+# `managed_acp_tools` module tests (including the native gate that downloads and
+# executes the real pinned Node ZIP), plus Windows clippy in the default and app
+# feature configurations. Invoked through `just ci-windows` for local and release
+# validation.
 $ErrorActionPreference = "Stop"
 trap {
     Write-Host $_.Exception.Message -ForegroundColor Red
@@ -45,6 +46,10 @@ Invoke-CargoCheck -ArgumentList @("fmt", "--check") -Label "cargo fmt --check"
 # Both managed-Node modules share this test-name prefix. Run them in one process
 # so the Windows test binary is linked once. The live ACP bridge install has no
 # equivalent macOS/Linux CI coverage, so leave it for targeted manual runs.
+Invoke-CargoCheck -ArgumentList @(
+    "test", "-p", "tauri-plugin-berdctl", "--features", "server"
+) -Label "cargo test berdctl plugin"
+
 Invoke-CargoCheck -ArgumentList @(
     "test", "--lib", "services::managed_", "--", "--skip",
     "native_gate_installs_and_launches_a_bridge_by_bare_name"

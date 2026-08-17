@@ -15,9 +15,11 @@ The Tauri 2 shell: the app crate (`src/`), the berdctl workspace crates
 
 The CLI embeds the contract artifacts (`crates/berdctl/api-surface.json` +
 `cli-surface.json`) and builds its clap tree at startup. It locates the
-broker through the `BERDCTL_LOCK` discovery file, verifies
-`protocolVersion`/generation via `GET /v1/ping`, and sends
-`POST /v1/call {"command", "args"}`. The broker forwards to the renderer
+broker through the `BERDCTL_LOCK` discovery file, connects to its non-secret
+local bootstrap address, and receives a capability only after the broker admits
+the kernel-reported process as a descendant of this app's owned `goosed` tree.
+It then verifies `protocolVersion`/generation through authenticated
+`GET /v1/ping` and sends authenticated `POST /v1/call {"command", "args"}`. The broker forwards to the renderer
 over Tauri IPC (`berdctl:request` event out, `submit_result` back).
 Command dispatch, zod validation, guards, and execution live in the
 renderer registry (`src/features/berdctl/`). The two crates share no code;
@@ -41,7 +43,8 @@ capability grants a permission allowing that command.
   window.
 
 This ACL gates webview → Rust IPC only; the localhost HTTP side is governed
-separately (discovery file, header rejection, global caps).
+separately by process-authenticated capability bootstrap, browser/DNS-rebinding
+header rejection, and global caps.
 
 Stock Tauri 2 plugin layout. Docs:
 [Plugin Development](https://v2.tauri.app/develop/plugins/),

@@ -2,6 +2,9 @@
 //! mapping from HTTP outcomes to the CLI's exit-code contract:
 //! 0 ok, 1 command error, 2 transport, 3 environment/reachability/version.
 
+#[cfg(windows)]
+use interprocess::local_socket::{prelude::*, GenericNamespaced, Stream, ToNsName};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::time::Duration;
 
@@ -15,6 +18,8 @@ pub const EXIT_TRANSPORT: u8 = 2;
 pub const EXIT_ENV: u8 = 3;
 
 const PING_TIMEOUT: Duration = Duration::from_secs(2);
+const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(2);
+const MAX_BOOTSTRAP_RESPONSE_BYTES: u64 = 4096;
 /// Above the broker's 900s command-timeout ceiling, so the broker's
 /// structured 504 always arrives before this client-side timeout fires.
 const CALL_TIMEOUT: Duration = Duration::from_secs(910);
@@ -62,11 +67,26 @@ pub struct PingResponse {
 
 pub struct Endpoint {
     pub port: u16,
+    capability: String,
+}
+
+impl std::fmt::Debug for Endpoint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Endpoint")
+            .field("port", &self.port)
+            .field("capability", &"[redacted]")
+            .finish()
+    }
 }
 
 fn agent(timeout: Duration) -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
+        // The broker is a literal loopback service. Never hand its bearer
+        // capability to a user-configured proxy or redirect target.
+        .proxy(None)
+        .max_redirects(0)
         // Non-2xx responses carry the broker's structured error body; read it
         // instead of treating the status as a transport error.
         .http_status_as_error(false)
@@ -74,53 +94,209 @@ fn agent(timeout: Duration) -> ureq::Agent {
         .new_agent()
 }
 
+#[derive(Debug)]
+struct PingFailure {
+    detail: String,
+    status: Option<u16>,
+}
+
+impl PingFailure {
+    fn transport(detail: String) -> Self {
+        Self {
+            detail,
+            status: None,
+        }
+    }
+
+    fn status(detail: String, status: u16) -> Self {
+        Self {
+            detail,
+            status: Some(status),
+        }
+    }
+}
+
 /// Probe the listener before sending any payload (command args can contain
 /// prompt text, which must not be sprayed at an unknown local service).
 /// Returns the failure detail only; callers decide the exit class.
-pub fn ping(port: u16) -> Result<PingResponse, String> {
+fn ping(port: u16, capability: &str) -> Result<PingResponse, PingFailure> {
     let url = format!("http://127.0.0.1:{port}/v1/ping");
     let mut response = agent(PING_TIMEOUT)
         .get(&url)
+        .header("Authorization", format!("Bearer {capability}"))
         .call()
-        .map_err(|err| format!("nothing answered on 127.0.0.1:{port} ({err})"))?;
+        .map_err(|err| {
+            PingFailure::transport(format!("nothing answered on 127.0.0.1:{port} ({err})"))
+        })?;
     let status = response.status().as_u16();
     if status != 200 {
-        return Err(format!(
-            "the listener on 127.0.0.1:{port} does not look like the Berd app \
-             control endpoint (ping returned status {status})"
+        return Err(PingFailure::status(
+            format!(
+                "the listener on 127.0.0.1:{port} does not look like the Berd app \
+                 control endpoint (ping returned status {status})"
+            ),
+            status,
         ));
     }
     response
         .body_mut()
         .read_json::<PingResponse>()
         .map_err(|err| {
-            format!(
-                "the listener on 127.0.0.1:{port} does not look like the Berd app \
-                 control endpoint (unrecognized ping response: {err})"
+            PingFailure::status(
+                format!(
+                    "the listener on 127.0.0.1:{port} does not look like the Berd app \
+                     control endpoint (unrecognized ping response: {err})"
+                ),
+                status,
             )
         })
 }
 
+fn bootstrap(file: &discovery::DiscoveryFile) -> Result<Endpoint, Failure> {
+    #[cfg(unix)]
+    let stream = std::os::unix::net::UnixStream::connect(&file.bootstrap_endpoint).map_err(|error| Failure::env(format!("the Berd desktop app's authenticated control bootstrap is unavailable ({error}); {CONTROL_REMEDIATION}")))?;
+    #[cfg(windows)]
+    let stream = {
+        let name = file
+            .bootstrap_endpoint
+            .to_string_lossy()
+            .to_string()
+            .to_ns_name::<GenericNamespaced>()
+            .map_err(|error| {
+                Failure::env(format!("invalid Berd control bootstrap endpoint: {error}"))
+            })?;
+        Stream::connect(name).map_err(|error| Failure::env(format!("the Berd desktop app's authenticated control bootstrap is unavailable ({error}); {CONTROL_REMEDIATION}")))?
+    };
+    #[cfg(unix)]
+    stream
+        .set_read_timeout(Some(BOOTSTRAP_TIMEOUT))
+        .map_err(|error| {
+            Failure::env(format!(
+                "the Berd desktop app's authenticated control bootstrap could not set a read timeout ({error}); {CONTROL_REMEDIATION}"
+            ))
+        })?;
+    #[cfg(windows)]
+    stream.set_nonblocking(true).map_err(|error| {
+        Failure::env(format!(
+            "the Berd desktop app's authenticated control bootstrap could not set nonblocking mode ({error}); {CONTROL_REMEDIATION}"
+        ))
+    })?;
+    let mut response = String::new();
+    #[cfg(unix)]
+    BufReader::new(stream)
+        .take(MAX_BOOTSTRAP_RESPONSE_BYTES + 1)
+        .read_line(&mut response)
+        .map_err(|error| Failure::env(format!("the Berd desktop app's authenticated control bootstrap failed ({error}); {CONTROL_REMEDIATION}")))?;
+    #[cfg(windows)]
+    read_bootstrap_response_with_deadline(&mut BufReader::new(stream), &mut response)?;
+    if response.len() as u64 > MAX_BOOTSTRAP_RESPONSE_BYTES {
+        return Err(Failure::env(
+            "the Berd control bootstrap returned an unexpectedly large response",
+        ));
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct BootstrapResponse {
+        port: u16,
+        generation: u64,
+        protocol_version: u32,
+        capability: String,
+    }
+    let response: BootstrapResponse = serde_json::from_str(&response).map_err(|error| {
+        Failure::env(format!(
+            "the Berd control bootstrap returned invalid data ({error})"
+        ))
+    })?;
+    if response.port != file.port
+        || response.generation != file.generation
+        || response.protocol_version != PROTOCOL_VERSION
+    {
+        return Err(Failure::env(
+            "the Berd desktop app restarted its control endpoint; retry the command",
+        ));
+    }
+    Ok(Endpoint {
+        port: response.port,
+        capability: response.capability,
+    })
+}
+
+#[cfg(windows)]
+fn read_bootstrap_response_with_deadline<R: BufRead>(
+    reader: &mut R,
+    response: &mut String,
+) -> Result<(), Failure> {
+    let deadline = std::time::Instant::now() + BOOTSTRAP_TIMEOUT;
+    loop {
+        let remaining = (MAX_BOOTSTRAP_RESPONSE_BYTES + 1).saturating_sub(response.len() as u64);
+        if remaining == 0 {
+            return Ok(());
+        }
+        match (&mut *reader).take(remaining).read_line(response) {
+            Ok(_) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if std::time::Instant::now() >= deadline {
+                    return Err(Failure::env(format!(
+                        "the Berd desktop app's authenticated control bootstrap timed out; {CONTROL_REMEDIATION}"
+                    )));
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => {
+                return Err(Failure::env(format!(
+                    "the Berd desktop app's authenticated control bootstrap failed ({error}); {CONTROL_REMEDIATION}"
+                )));
+            }
+        }
+    }
+}
+
 /// Read the discovery file and verify the broker behind it echoes the file's
-/// generation and this binary's protocol version. A generation mismatch means
-/// the file was read across a broker restart: re-read once and retry once.
+/// generation and this binary's protocol version. A generation mismatch or
+/// authentication failure can mean the file was read across a broker restart:
+/// re-read once and retry once.
 pub fn handshake(lock_path: &Path) -> Result<Endpoint, Failure> {
     let mut file = discovery::load_with_retry(lock_path)?;
     for attempt in 0..2 {
         if file.protocol_version != PROTOCOL_VERSION {
             return Err(Failure::env(APP_UPDATED));
         }
-        let ping = ping(file.port).map_err(|detail| {
-            Failure::env(format!(
-                "the Berd desktop app is not reachable: {detail}. The app may have \
-                 quit; {CONTROL_REMEDIATION}"
-            ))
-        })?;
+        let endpoint = bootstrap(&file)?;
+        let ping = match ping(endpoint.port, &endpoint.capability) {
+            Ok(ping) => ping,
+            Err(failure) if failure.status == Some(403) => {
+                if attempt == 0 {
+                    // Authentication failure can be the observable edge of a
+                    // broker restart: the process has rotated the capability but
+                    // this command opened the previous discovery inode. Re-read
+                    // once, just as for the existing generation-mismatch path.
+                    file = discovery::load(lock_path).map_err(|err| {
+                        Failure::env(format!(
+                            "the Berd desktop app restarted its control endpoint and the new \
+                             one could not be read ({err}); {CONTROL_REMEDIATION}"
+                        ))
+                    })?;
+                    continue;
+                }
+                return Err(Failure::env(format!(
+                    "the Berd desktop app is not reachable: {}. The app may have \
+                     quit; {CONTROL_REMEDIATION}",
+                    failure.detail
+                )));
+            }
+            Err(failure) => {
+                return Err(Failure::env(format!(
+                    "the Berd desktop app is not reachable: {}. The app may have \
+                     quit; {CONTROL_REMEDIATION}",
+                    failure.detail
+                )));
+            }
+        };
         if ping.protocol_version != PROTOCOL_VERSION {
             return Err(Failure::env(APP_UPDATED));
         }
         if ping.generation == file.generation {
-            return Ok(Endpoint { port: file.port });
+            return Ok(endpoint);
         }
         if attempt == 0 {
             file = discovery::load(lock_path).map_err(|err| {
@@ -155,6 +331,7 @@ pub fn call(
     }
     let mut response = agent(CALL_TIMEOUT)
         .post(&url)
+        .header("Authorization", format!("Bearer {}", endpoint.capability))
         .send_json(Value::Object(payload))
         .map_err(|err| transport_error_failure(endpoint.port, &err))?;
     let status = response.status().as_u16();
@@ -247,6 +424,201 @@ fn error_parts(value: &Value) -> Option<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
+    use std::io::Write;
+    #[cfg(unix)]
+    use std::net::{TcpListener, TcpStream};
+    #[cfg(unix)]
+    use std::path::PathBuf;
+    #[cfg(unix)]
+    use std::sync::mpsc;
+    #[cfg(unix)]
+    use std::thread;
+
+    #[cfg(unix)]
+    const TEST_CAPABILITY: &str =
+        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[cfg(unix)]
+    struct TempDiscoveryFile {
+        path: PathBuf,
+        bootstrap_endpoint: PathBuf,
+    }
+
+    #[cfg(unix)]
+    impl TempDiscoveryFile {
+        fn new(port: u16, generation: u64) -> Self {
+            use std::os::unix::fs::PermissionsExt;
+            static NEXT_DISCOVERY: std::sync::atomic::AtomicU64 =
+                std::sync::atomic::AtomicU64::new(0);
+            let nonce = NEXT_DISCOVERY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let base = std::env::temp_dir().join(format!(
+                "berdctl-client-bootstrap-{}-{port}-{nonce}",
+                std::process::id()
+            ));
+            std::fs::remove_dir_all(&base).ok();
+            std::fs::create_dir(&base).unwrap();
+            std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let path = base.join("control.json");
+            let bootstrap_endpoint = base.join("bootstrap.sock");
+            std::fs::write(
+                &path,
+                format!(
+                    r#"{{"port":{port},"pid":4242,"generation":{generation},"protocolVersion":{PROTOCOL_VERSION},"bootstrapEndpoint":"{}"}}"#,
+                    bootstrap_endpoint.display()
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+            Self {
+                path,
+                bootstrap_endpoint,
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for TempDiscoveryFile {
+        fn drop(&mut self) {
+            if let Some(parent) = self.path.parent() {
+                std::fs::remove_dir_all(parent).ok();
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn read_request(stream: &mut TcpStream) -> (String, Option<String>, String) {
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut request_line = String::new();
+        reader.read_line(&mut request_line).unwrap();
+        let mut authorization = None;
+        let mut content_length = 0;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if line == "\r\n" {
+                break;
+            }
+            if let Some((name, value)) = line.trim_end().split_once(':') {
+                if name.eq_ignore_ascii_case("authorization") {
+                    authorization = Some(value.trim().to_string());
+                }
+                if name.eq_ignore_ascii_case("content-length") {
+                    content_length = value.trim().parse().unwrap();
+                }
+            }
+        }
+        let mut body = vec![0; content_length];
+        reader.read_exact(&mut body).unwrap();
+        (
+            request_line.trim_end().to_string(),
+            authorization,
+            String::from_utf8(body).unwrap(),
+        )
+    }
+
+    #[cfg(unix)]
+    fn write_response(stream: &mut TcpStream, body: &str) {
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handshake_bootstraps_capability_and_call_reuses_it() {
+        let broker = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = broker.local_addr().unwrap().port();
+        let discovery = TempDiscoveryFile::new(port, 7);
+        let bootstrap =
+            std::os::unix::net::UnixListener::bind(&discovery.bootstrap_endpoint).unwrap();
+        let (requests_tx, requests_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = bootstrap.accept().unwrap();
+            writeln!(stream, r#"{{"port":{port},"generation":7,"protocolVersion":{PROTOCOL_VERSION},"capability":"{TEST_CAPABILITY}"}}"#).unwrap();
+            for response in [
+                format!(r#"{{"generation":7,"protocolVersion":{PROTOCOL_VERSION}}}"#),
+                r#"{"ok":true,"result":"ok"}"#.to_string(),
+            ] {
+                let (mut stream, _) = broker.accept().unwrap();
+                requests_tx.send(read_request(&mut stream)).unwrap();
+                write_response(&mut stream, &response);
+            }
+        });
+
+        let endpoint = handshake(&discovery.path).unwrap();
+        assert_eq!(
+            format!("{endpoint:?}"),
+            format!("Endpoint {{ port: {port}, capability: \"[redacted]\" }}")
+        );
+        assert_eq!(
+            call(
+                &endpoint,
+                "sessions",
+                Map::from_iter([("action".into(), Value::String("list".into()))]),
+                None
+            )
+            .unwrap(),
+            Value::String("ok".into())
+        );
+
+        let ping = requests_rx.recv().unwrap();
+        assert_eq!(ping.0, "GET /v1/ping HTTP/1.1");
+        assert_eq!(
+            ping.1.as_deref(),
+            Some(format!("Bearer {TEST_CAPABILITY}").as_str())
+        );
+        let call = requests_rx.recv().unwrap();
+        assert_eq!(call.0, "POST /v1/call HTTP/1.1");
+        assert_eq!(
+            call.1.as_deref(),
+            Some(format!("Bearer {TEST_CAPABILITY}").as_str())
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&call.2).unwrap()["command"],
+            "sessions"
+        );
+        worker.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_rejects_mismatched_discovery_generation() {
+        let discovery = TempDiscoveryFile::new(43123, 7);
+        let bootstrap =
+            std::os::unix::net::UnixListener::bind(&discovery.bootstrap_endpoint).unwrap();
+        let worker = thread::spawn(move || {
+            let (mut stream, _) = bootstrap.accept().unwrap();
+            writeln!(stream, r#"{{"port":43123,"generation":6,"protocolVersion":{PROTOCOL_VERSION},"capability":"{TEST_CAPABILITY}"}}"#).unwrap();
+        });
+        let failure = handshake(&discovery.path).expect_err("mismatched generation fails closed");
+        assert_eq!(failure.exit, EXIT_ENV);
+        assert!(failure.message.contains("restarted its control endpoint"));
+        worker.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn bootstrap_stall_times_out_as_environment_failure() {
+        let discovery = TempDiscoveryFile::new(43123, 7);
+        let bootstrap =
+            std::os::unix::net::UnixListener::bind(&discovery.bootstrap_endpoint).unwrap();
+        let worker = thread::spawn(move || {
+            let (_stream, _) = bootstrap.accept().unwrap();
+            thread::sleep(BOOTSTRAP_TIMEOUT + Duration::from_secs(1));
+        });
+
+        let started = std::time::Instant::now();
+        let failure = handshake(&discovery.path).expect_err("stalled bootstrap must time out");
+        assert_eq!(failure.exit, EXIT_ENV);
+        assert!(failure
+            .message
+            .contains("authenticated control bootstrap failed"));
+        assert!(started.elapsed() < BOOTSTRAP_TIMEOUT + Duration::from_secs(1));
+        worker.join().unwrap();
+    }
 
     #[test]
     fn ok_true_yields_the_result_verbatim() {

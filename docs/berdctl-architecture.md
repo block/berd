@@ -10,16 +10,19 @@ berdctl project create --name demo
 The implementation has three layers:
 
 1. CLI: `src-tauri/crates/berdctl/`
-   Parses flags with clap, prints help, reads the app discovery file, and sends
+   Parses flags with clap, prints help, reads non-secret endpoint discovery,
+   obtains the broker-generation capability over authenticated local IPC, and sends
    JSON calls. CLI validation is convenience only.
 2. Broker: `src-tauri/plugins/berdctl/`
-   Runs a localhost server inside the app, rejects browser-origin requests,
-   enforces in-flight and timeout limits, and forwards calls to the renderer
-   without command-specific logic.
+   Admits only kernel-identified descendants of this Berd instance's owned
+   `goosed` tree, then requires the issued capability on the loopback server,
+   rejects browser-origin requests, enforces in-flight and timeout limits, and
+   forwards calls without command-specific logic.
 3. Renderer registry: `src/features/berdctl/commands/`
    Strict-parses args with zod, runs guards, executes through app state, and
-   returns JSON results. This is the trust boundary because any same-user
-   process can bypass the CLI and POST to the broker directly.
+   returns JSON results. This remains the command-policy trust boundary; the
+   broker admission boundary prevents unrelated same-user processes from
+   directly reaching it.
 
 ## Layer rules
 
@@ -87,9 +90,18 @@ belongs in error messages, not generic help text.
 
 ## Safety model
 
-v1 has no auth tokens and no confirmation dialogs. That remains acceptable only
-while mutations are visible in the UI and either reversible or direct
-user-requested product actions, such as creating a session or sending a prompt.
+v1 publishes no bearer in the discovery file. Discovery contains only the
+loopback port, generation, protocol version, and local bootstrap address. The
+CLI connects to that local IPC endpoint; the broker obtains the peer PID from
+the kernel and admits it only when it is a descendant of the exact app-owned
+`goosed` process on Unix or a member of the exact retained no-breakaway Job
+Object on Windows. Only then does it return the per-broker 256-bit capability,
+which the CLI presents on `/v1/ping` and `/v1/call`.
+
+This blocks direct broker use by unrelated same-user processes. It deliberately
+does not claim protection from same-user malware that can inspect or inject
+into an admitted descendant. Closing that stronger boundary requires OS
+isolation or interactive user authorization, not another ambient bearer.
 
 Required command properties:
 
@@ -108,8 +120,11 @@ piecemeal auth in a command PR.
 
 ## Versioning
 
-The broker writes a discovery file with `protocolVersion`, generation, and port.
-The CLI verifies it via `/v1/ping` before calls.
+The broker writes a private discovery file with `protocolVersion`, generation,
+port, and a non-secret local bootstrap address. The CLI obtains the bearer only
+after peer-process admission, then authenticates and verifies `/v1/ping` before
+calls. This authenticated bootstrap is a breaking wire reshape, so the surface
+starts at protocol version 5.
 
 Breaking wire reshapes must bump all three constants:
 
