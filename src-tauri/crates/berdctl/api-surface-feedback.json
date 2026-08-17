@@ -970,6 +970,174 @@
         }
       }
     },
+    "automations": {
+      "description": "Manage the user's scheduled automations: list, get, create, run now.",
+      "actions": {
+        "list": {
+          "description": "List the user's scheduled automations (id, title, schedule, status, and last-run info) as the Automations view shows them; does not change anything on screen. Read one automation's full detail with action \"get\".",
+          "fields": [
+            {
+              "name": "query",
+              "required": false,
+              "kind": "string",
+              "description": "Case-insensitive substring filter on the automation title (1-200 chars).",
+              "min": 1,
+              "max": 200
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "query": {
+                "description": "Case-insensitive substring filter on the automation title (1-200 chars).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "get": {
+          "description": "Read one automation's full detail — title, schedule, time zone, status, pause state, instructions, and latest-run wiring — exactly as the Automations view shows it; does not change anything on screen.",
+          "fields": [
+            {
+              "name": "automation_id",
+              "required": true,
+              "kind": "string",
+              "description": "Automation id, as returned by `berdctl automation list` (1-200 chars).",
+              "min": 1,
+              "max": 200
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "automation_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "Automation id, as returned by `berdctl automation list` (1-200 chars)."
+              }
+            },
+            "required": ["automation_id"],
+            "additionalProperties": false
+          }
+        },
+        "create": {
+          "description": "Create a scheduled automation that runs the given instruction steps on the given cron cadence. The new automation appears in the Automations view immediately and can be edited, paused, or deleted there.",
+          "fields": [
+            {
+              "name": "title",
+              "required": true,
+              "kind": "string",
+              "description": "Automation title, shown in the Automations view (1-200 chars).",
+              "min": 1,
+              "max": 200
+            },
+            {
+              "name": "schedule",
+              "required": true,
+              "kind": "string",
+              "description": "Cron schedule for the run cadence (e.g. \"0 */30 * * * *\"); the backend interprets it in --time-zone.",
+              "min": 1,
+              "max": 100
+            },
+            {
+              "name": "instruction",
+              "required": true,
+              "kind": "string_array",
+              "description": "One instruction step the automation runs each time (repeat the flag for multiple steps; 1-50 steps, each 1-10000 chars)."
+            },
+            {
+              "name": "time_zone",
+              "required": false,
+              "kind": "string",
+              "description": "IANA time zone for the schedule (e.g. \"America/New_York\"); defaults to the app's current time zone.",
+              "min": 1,
+              "max": 100
+            },
+            {
+              "name": "enable_notifications",
+              "required": false,
+              "kind": "boolean",
+              "description": "Notify the user when runs complete; omitted means no notifications."
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "Automation title, shown in the Automations view (1-200 chars)."
+              },
+              "schedule": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "description": "Cron schedule for the run cadence (e.g. \"0 */30 * * * *\"); the backend interprets it in --time-zone."
+              },
+              "instruction": {
+                "minItems": 1,
+                "maxItems": 50,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "description": "One instruction step the automation runs each time (repeat the flag for multiple steps; 1-50 steps, each 1-10000 chars)."
+              },
+              "time_zone": {
+                "description": "IANA time zone for the schedule (e.g. \"America/New_York\"); defaults to the app's current time zone.",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "enable_notifications": {
+                "default": false,
+                "description": "Notify the user when runs complete; omitted means no notifications.",
+                "type": "boolean"
+              }
+            },
+            "required": ["title", "schedule", "instruction"],
+            "additionalProperties": false
+          }
+        },
+        "run": {
+          "description": "Trigger one immediate run of an automation without changing its schedule. The run and its output appear in the Automations view like any scheduled run.",
+          "fields": [
+            {
+              "name": "automation_id",
+              "required": true,
+              "kind": "string",
+              "description": "Automation id, as returned by `berdctl automation list` (1-200 chars).",
+              "min": 1,
+              "max": 200
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "automation_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "Automation id, as returned by `berdctl automation list` (1-200 chars)."
+              }
+            },
+            "required": ["automation_id"],
+            "additionalProperties": false
+          }
+        }
+      }
+    },
     "feedback": {
       "description": "Open an approved report in Berd's feedback form or submit it directly after explicit user approval.",
       "actions": {

@@ -87,6 +87,10 @@ export const COMMAND_ERROR_CODES = [
   "feedback_disabled",
   "feedback_form_busy",
   "feedback_submission_failed",
+  "automations_disabled",
+  "automation_not_found",
+  "automation_create_failed",
+  "automation_run_failed",
   "timed_out",
   "internal_error",
 ] as const;

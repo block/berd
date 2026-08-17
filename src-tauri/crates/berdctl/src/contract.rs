@@ -102,6 +102,9 @@ pub struct Contract {
     pub surface: Surface,
 }
 
+// `block-feedback` selects the Block-variant artifacts, which carry BOTH
+// gated groups (feedback and automations); the renderer's per-flag registry
+// filter remains the trust boundary for whichever is actually enabled.
 pub(crate) const API_SURFACE: &str = if cfg!(feature = "block-feedback") {
     include_str!("../api-surface-feedback.json")
 } else {

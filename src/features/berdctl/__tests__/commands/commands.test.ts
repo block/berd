@@ -581,6 +581,14 @@ describe("action schemas", () => {
       "skills.get": { skill_id: "global:/skills/x" },
       "feedback.open": { title: "Bug", description: "Details" },
       "feedback.submit": { title: "Bug", description: "Details" },
+      "automations.list": {},
+      "automations.get": { automation_id: "auto-1" },
+      "automations.create": {
+        title: "Morning digest",
+        schedule: "0 0 9 * * *",
+        instruction: ["Summarize unread messages"],
+      },
+      "automations.run": { automation_id: "auto-1" },
       "info.list_harnesses": {},
       "info.list_models": {},
       "info.get_context": {},
@@ -4062,6 +4070,41 @@ describe("info", () => {
     expect(result.active_session_id).toBe("session-2");
     expect(result.active_project_id).toBe("project-9");
     expect(result.app_version.length).toBeGreaterThan(0);
+  });
+});
+
+describe("automation schemas", () => {
+  it("bounds ids, titles, schedules, and instruction steps", () => {
+    const create = ALL_TOOL_GROUPS.automations.actions.create.schema;
+    expect(
+      create.safeParse({
+        title: "Morning digest",
+        schedule: "0 0 9 * * *",
+        instruction: ["Summarize unread messages"],
+      }),
+    ).toMatchObject({ success: true, data: { enable_notifications: false } });
+    expect(
+      create.safeParse({
+        title: "",
+        schedule: "0 0 9 * * *",
+        instruction: ["x"],
+      }).success,
+    ).toBe(false);
+    expect(
+      create.safeParse({
+        title: "T",
+        schedule: "0 0 9 * * *",
+        instruction: [],
+      }).success,
+    ).toBe(false);
+
+    const get = ALL_TOOL_GROUPS.automations.actions.get.schema;
+    expect(get.safeParse({ automation_id: "auto-1" }).success).toBe(true);
+    expect(get.safeParse({ automation_id: "" }).success).toBe(false);
+
+    const run = ALL_TOOL_GROUPS.automations.actions.run.schema;
+    expect(run.safeParse({ automation_id: "auto-1" }).success).toBe(true);
+    expect(run.safeParse({}).success).toBe(false);
   });
 });
 

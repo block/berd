@@ -307,6 +307,17 @@ mod tests {
             ("feedback", "open") | ("feedback", "submit") => {
                 vec!["--title", "t", "--description", "d"]
             }
+            ("automation", "list") => vec![],
+            ("automation", "get") => vec!["--automation-id", "a"],
+            ("automation", "create") => vec![
+                "--title",
+                "t",
+                "--schedule",
+                "0 0 9 * * *",
+                "--instruction",
+                "step",
+            ],
+            ("automation", "run") => vec!["--automation-id", "a"],
             ("info", "harnesses") => vec![],
             ("info", "models") => vec![],
             ("info", "context") => vec![],
@@ -758,6 +769,11 @@ Result:
         assert_eq!(
             rendered.contains("feedback"),
             cfg!(feature = "block-feedback")
+        );
+        assert_eq!(
+            rendered.contains("automation"),
+            cfg!(feature = "block-feedback"),
+            "the block variant artifacts carry feedback and automations together"
         );
         for command in ["session", "folder", "project", "agent", "skill", "info"] {
             assert!(

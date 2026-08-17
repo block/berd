@@ -30,7 +30,11 @@ fi
 
 EXPLICIT_TRIPLE="${1:-${BERDCTL_TRIPLE:-}}"
 CARGO_ARGS=(build -p berdctl --release)
-if [[ "${VITE_FEEDBACK:-0}" == "1" ]]; then
+# The berdctl contract ships as two variants: public, and one "block"
+# variant carrying both gated groups (feedback + automations). Either
+# renderer flag therefore selects the block artifacts; the renderer
+# registry still refuses per-flag at dispatch (the trust boundary).
+if [[ "${VITE_FEEDBACK:-0}" == "1" || "${VITE_AUTOMATIONS:-0}" == "1" ]]; then
   CARGO_ARGS+=(--features block-feedback)
 fi
 if [[ -n "$EXPLICIT_TRIPLE" ]]; then

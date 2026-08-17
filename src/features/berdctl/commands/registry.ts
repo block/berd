@@ -8,16 +8,19 @@ import { listSessionFoldersCommand } from "./impl/listSessionFolders";
 import { replaceSessionFolderCommand } from "./impl/replaceSessionFolder";
 import { setSessionFolderCwdCommand } from "./impl/setSessionFolderCwd";
 import { clearSessionProjectCommand } from "./impl/clearSessionProject";
+import { createAutomationCommand } from "./impl/createAutomation";
 import { createAgentCommand } from "./impl/createAgent";
 import { createProjectCommand } from "./impl/createProject";
 import { createSessionCommand } from "./impl/createSession";
 import { createSkillCommand } from "./impl/createSkill";
 import { forkSessionCommand } from "./impl/forkSession";
+import { getAutomationCommand } from "./impl/getAutomation";
 import { getContextCommand } from "./impl/getContext";
 import { getProjectCommand } from "./impl/getProject";
 import { getSessionCommand } from "./impl/getSession";
 import { getSkillCommand } from "./impl/getSkill";
 import { listAgentsCommand } from "./impl/listAgents";
+import { listAutomationsCommand } from "./impl/listAutomations";
 import { listHarnessesCommand } from "./impl/listHarnesses";
 import { listModelsCommand } from "./impl/listModels";
 import { listProjectsCommand } from "./impl/listProjects";
@@ -28,6 +31,7 @@ import { moveSessionToGroupCommand } from "./impl/moveSessionToGroup";
 import { openFeedbackCommand } from "./impl/openFeedback";
 import { openSessionCommand } from "./impl/openSession";
 import { renameSessionCommand } from "./impl/renameSession";
+import { runAutomationCommand } from "./impl/runAutomation";
 import { sendSessionCommand } from "./impl/sendSession";
 import { setProjectStartupModeCommand } from "./impl/setProjectStartupMode";
 import { submitFeedbackCommand } from "./impl/submitFeedback";
@@ -150,6 +154,20 @@ export const ALL_TOOL_GROUPS = {
       get: getSkillCommand,
     },
   },
+  automations: {
+    description:
+      "Manage the user's scheduled automations: list, get, create, run now.",
+    cli: {
+      noun: "automation",
+      about: "Manage scheduled automations: list, get, create, run",
+    },
+    actions: {
+      list: listAutomationsCommand,
+      get: getAutomationCommand,
+      create: createAutomationCommand,
+      run: runAutomationCommand,
+    },
+  },
   feedback: {
     description:
       "Open an approved report in Berd's feedback form or submit it directly after explicit user approval.",
@@ -185,13 +203,19 @@ export const ALL_TOOL_GROUPS = {
 } as const satisfies Record<string, ToolGroup>;
 
 /**
- * Build-owned command registry. Public builds omit Feedback entirely; an
- * enabled distribution opts it back in with the same VITE_FEEDBACK boolean
- * that owns the renderer and backend surfaces.
+ * Build-owned command registry. Public builds omit the Block-only groups
+ * (Feedback, Automations) entirely; an enabled distribution opts each back
+ * in with the same VITE_* boolean that owns its renderer and backend
+ * surfaces.
  */
+const GROUP_BUILD_GATES: Record<string, boolean> = {
+  feedback: import.meta.env.VITE_FEEDBACK === "1",
+  automations: import.meta.env.VITE_AUTOMATIONS === "1",
+};
+
 export const TOOL_GROUPS: Record<string, ToolGroup> = Object.fromEntries(
   Object.entries(ALL_TOOL_GROUPS).filter(
-    ([name]) => name !== "feedback" || import.meta.env.VITE_FEEDBACK === "1",
+    ([name]) => GROUP_BUILD_GATES[name] ?? true,
   ),
 );
 
