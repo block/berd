@@ -37,9 +37,19 @@ const mockToastError = vi.fn();
 const mockUseChatSendMessage = vi.fn();
 const mockUseChatSteerMessage = vi.fn();
 const mockUseChatHook = vi.fn();
+const mockUseChatOptionsBySession = new Map<
+  string,
+  {
+    onMessageAccepted?: (
+      sessionId: string,
+      text: string,
+    ) => boolean | undefined;
+  }
+>();
 const mockUseMessageQueue = vi.fn();
 const mockPickerOpen = vi.fn();
 const mockPreSeedDraftAgent = vi.fn();
+const mockMigratePendingDraftAgent = vi.fn();
 const mockDeletePersonaSource = vi.fn();
 const mockAcpCreateSession = vi.fn();
 const mockAcpSessionArchive = vi.fn();
@@ -155,6 +165,7 @@ vi.mock("../useChat", () => ({
       systemPromptOverride,
       personaInfo,
     );
+    mockUseChatOptionsBySession.set(sessionId, options ?? {});
     const optionsWithSessionId = { ...options, __sessionId: sessionId };
     return {
       messages: [],
@@ -188,6 +199,8 @@ vi.mock("../useAutoCompactPreferences", () => ({
 
 vi.mock("@/features/agents/lib/agentBuilderSession", () => ({
   preSeedDraftAgent: (...args: unknown[]) => mockPreSeedDraftAgent(...args),
+  migratePendingDraftAgent: (...args: unknown[]) =>
+    mockMigratePendingDraftAgent(...args),
 }));
 
 vi.mock("@/shared/api/agents", () => ({
@@ -276,6 +289,29 @@ function latestMessageQueueArgs() {
     boolean | undefined,
     boolean | undefined,
   ];
+}
+
+function mockQueueAdmissionWithoutDrain(): void {
+  mockUseMessageQueue.mockImplementation((sessionId: string) => ({
+    queuedMessage: null,
+    queuedRecords: [],
+    enqueue: (
+      text: string,
+      personaId?: string,
+      attachments?: ChatAttachmentDraft[],
+      sendOptions?: ChatSendOptions,
+      personaName?: string,
+    ) =>
+      useChatStore.getState().enqueueTransportReadyMessage(sessionId, {
+        text,
+        persona: personaId
+          ? { kind: "persona", id: personaId, name: personaName }
+          : { kind: "inherit" },
+        attachments,
+        sendOptions,
+      }),
+    dismiss: vi.fn(),
+  }));
 }
 
 function expectSessionPreparation({
@@ -382,6 +418,7 @@ describe("useChatSessionController", () => {
   beforeEach(() => {
     resetSessionTargetCoordinatorsForTests();
     vi.clearAllMocks();
+    mockUseChatOptionsBySession.clear();
     delete modelFixtures["legacy-v1-model"];
     resetManagedModelSelectionRepairCacheForTests();
     useRuntimeConfigStore.setState({
@@ -517,6 +554,7 @@ describe("useChatSessionController", () => {
       path: "/Users/x/.agents/agents/draft-from-chat.md",
       slug: "draft-from-chat",
     });
+    mockMigratePendingDraftAgent.mockResolvedValue(undefined);
     mockPickerState.selectedAgentId = "goose";
     mockPickerState.pickerAgents = [{ id: "goose", label: "Goose" }];
     mockPickerState.availableModels = [];
@@ -793,6 +831,84 @@ describe("useChatSessionController", () => {
     });
 
     expect(sendResult).toBe(true);
+  });
+
+  it("accepts a composer message into a pending draft session queue", () => {
+    mockQueueAdmissionWithoutDrain();
+    useChatSessionStore.setState({
+      sessions: [
+        sessionFixture({
+          id: "draft-session",
+          clientSessionId: "draft-session",
+          creationState: "pending",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
+        }),
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "draft-session" }),
+    );
+
+    act(() => {
+      expect(result.current.handleSend("send when ready")).toBe(true);
+    });
+
+    expect(mockUseChatSendMessage).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession["draft-session"]?.[0],
+    ).toMatchObject({
+      kind: "transport-ready",
+      payload: {
+        text: "send when ready",
+        persona: { kind: "inherit" },
+      },
+    });
+  });
+
+  it("preserves a newer draft when a pending send drains during promotion", () => {
+    mockQueueAdmissionWithoutDrain();
+    useChatSessionStore.setState({
+      sessions: [
+        sessionFixture({
+          id: "draft-session",
+          clientSessionId: "draft-session",
+          creationState: "pending",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
+        }),
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "draft-session" }),
+    );
+    const acceptMessage =
+      mockUseChatOptionsBySession.get("draft-session")?.onMessageAccepted;
+    let shouldClearDraft: boolean | undefined;
+
+    act(() => {
+      expect(result.current.handleSend("send when ready")).toBe(true);
+      result.current.handleDraftChange("newer draft");
+      useChatStore
+        .getState()
+        .promoteSessionId("draft-session", "backend-session");
+      useChatSessionStore
+        .getState()
+        .promoteDraftSession("draft-session", "backend-session");
+      shouldClearDraft = acceptMessage?.("backend-session", "send when ready");
+    });
+
+    expect(shouldClearDraft).toBe(false);
   });
 
   it("preserves a newer draft when an older send is accepted later", async () => {
@@ -2363,6 +2479,216 @@ describe("useChatSessionController", () => {
       | undefined;
     expect(sendOptions?.assistantPrompt).toContain("agent-builder");
     expect(sendOptions?.assistantPrompt).toContain("draft-from-chat.md");
+  });
+
+  it("queues agent-builder activation while draft session creation is pending", async () => {
+    mockQueueAdmissionWithoutDrain();
+    useChatSessionStore.setState({
+      sessions: [
+        sessionFixture({
+          id: "draft-session",
+          clientSessionId: "draft-session",
+          creationState: "pending",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
+        }),
+      ],
+    });
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "draft-session" }),
+    );
+
+    await act(async () => {
+      expect(
+        await result.current.handleSend(
+          "make a reviewer",
+          undefined,
+          undefined,
+          {
+            chips: [{ label: "agent-builder", type: "skill" }],
+            assistantPrompt: "Use agent-builder.",
+          },
+        ),
+      ).toBe(true);
+    });
+
+    expect(mockPreSeedDraftAgent).toHaveBeenCalledWith("draft-session");
+    expect(mockUseChatSendMessage).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("draft-session"),
+    ).toMatchObject({
+      intent: "build-agent",
+      agentBuilderOpen: true,
+      targetAgentPath: "/Users/x/.agents/agents/draft-from-chat.md",
+    });
+    expect(
+      useChatStore.getState().queuedMessageBySession["draft-session"]?.[0],
+    ).toMatchObject({
+      kind: "transport-ready",
+      payload: {
+        text: "make a reviewer",
+        sendOptions: {
+          assistantPrompt: expect.stringContaining("draft-from-chat.md"),
+        },
+      },
+    });
+  });
+
+  it("queues an in-flight builder activation against the promoted session", async () => {
+    mockQueueAdmissionWithoutDrain();
+    const pendingDraft = deferred<{ path: string; slug: string }>();
+    const pendingMigration = deferred<void>();
+    mockPreSeedDraftAgent.mockReturnValueOnce(pendingDraft.promise);
+    mockMigratePendingDraftAgent.mockReturnValueOnce(pendingMigration.promise);
+    useChatSessionStore.setState({
+      sessions: [
+        sessionFixture({
+          id: "draft-session",
+          clientSessionId: "draft-session",
+          creationState: "pending",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
+        }),
+      ],
+    });
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "draft-session" }),
+    );
+
+    const sendResult = result.current.handleSend(
+      "make a reviewer",
+      undefined,
+      undefined,
+      {
+        chips: [{ label: "agent-builder", type: "skill" }],
+        assistantPrompt: "Use agent-builder.",
+      },
+    );
+    expect(sendResult).toBeInstanceOf(Promise);
+    await waitFor(() => {
+      expect(mockPreSeedDraftAgent).toHaveBeenCalledWith("draft-session");
+    });
+
+    act(() => {
+      useChatStore
+        .getState()
+        .promoteSessionId("draft-session", "backend-session");
+      useChatSessionStore
+        .getState()
+        .promoteDraftSession("draft-session", "backend-session");
+    });
+    await act(async () => {
+      pendingDraft.resolve({
+        path: "/Users/x/.agents/agents/draft-from-chat.md",
+        slug: "draft-from-chat",
+      });
+      await pendingDraft.promise;
+    });
+
+    await waitFor(() => {
+      expect(mockMigratePendingDraftAgent).toHaveBeenCalledWith(
+        "draft-session",
+        "backend-session",
+        "/Users/x/.agents/agents/draft-from-chat.md",
+      );
+    });
+    expect(useChatStore.getState().queuedMessageBySession).toEqual({});
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      pendingMigration.resolve();
+      accepted = await sendResult;
+    });
+
+    expect(accepted).toBe(true);
+    expect(mockDeletePersonaSource).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession("backend-session"),
+    ).toMatchObject({
+      intent: "build-agent",
+      agentBuilderOpen: true,
+      targetAgentPath: "/Users/x/.agents/agents/draft-from-chat.md",
+    });
+    expect(
+      useChatStore.getState().queuedMessageBySession["draft-session"],
+    ).toBeUndefined();
+    expect(
+      useChatStore.getState().queuedMessageBySession["backend-session"]?.[0],
+    ).toMatchObject({
+      kind: "transport-ready",
+      payload: {
+        text: "make a reviewer",
+        sendOptions: {
+          assistantPrompt: expect.stringContaining("draft-from-chat.md"),
+        },
+      },
+    });
+  });
+
+  it("does not queue an in-flight builder activation after creation fails", async () => {
+    mockQueueAdmissionWithoutDrain();
+    const pendingDraft = deferred<{ path: string; slug: string }>();
+    mockPreSeedDraftAgent.mockReturnValueOnce(pendingDraft.promise);
+    useChatSessionStore.setState({
+      sessions: [
+        sessionFixture({
+          id: "draft-session",
+          clientSessionId: "draft-session",
+          creationState: "pending",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "openai",
+            modelId: "gpt-4o",
+            modelName: "GPT-4o",
+          },
+        }),
+      ],
+    });
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "draft-session" }),
+    );
+
+    const sendResult = result.current.handleSend(
+      "make a reviewer",
+      undefined,
+      undefined,
+      {
+        chips: [{ label: "agent-builder", type: "skill" }],
+        assistantPrompt: "Use agent-builder.",
+      },
+    );
+    await waitFor(() => {
+      expect(mockPreSeedDraftAgent).toHaveBeenCalledWith("draft-session");
+    });
+    act(() => {
+      useChatSessionStore
+        .getState()
+        .markSessionCreationFailed("draft-session", "creation failed");
+    });
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      pendingDraft.resolve({
+        path: "/Users/x/.agents/agents/draft-from-chat.md",
+        slug: "draft-from-chat",
+      });
+      accepted = await sendResult;
+    });
+
+    expect(accepted).toBe(false);
+    expect(mockDeletePersonaSource).toHaveBeenCalledWith(
+      "/Users/x/.agents/agents/draft-from-chat.md",
+    );
+    expect(mockMigratePendingDraftAgent).not.toHaveBeenCalled();
+    expect(useChatStore.getState().queuedMessageBySession).toEqual({});
   });
 
   it("activates builder mode before appending an agent-builder send", async () => {

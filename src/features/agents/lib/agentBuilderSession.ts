@@ -22,13 +22,17 @@ import {
   listAgentBuilderSources,
   promoteAgentBuilderDraftSource,
   readFreshAgentSource,
+  updateAgentBuilderSource,
   type DraftAgentDefaults,
+  type PersonaSourcePatch,
 } from "./agentBuilderSourceLifecycle";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 import {
   deriveSlug,
   fileStem,
   isEmptyPlaceholderDraft,
+  isPlaceholderDraftForSession,
+  placeholderAgentName,
 } from "./agentBuilderIdentity";
 export {
   deriveSlug,
@@ -367,6 +371,50 @@ export async function preSeedDraftAgent(
     provider,
     modelSelection,
   });
+}
+
+export async function migratePendingDraftAgent(
+  draftSessionId: string,
+  backendSessionId: string,
+  targetPath?: string | null,
+): Promise<void> {
+  const resolvedTargetPath =
+    targetPath ??
+    useChatSessionStore.getState().getSession(backendSessionId)
+      ?.targetAgentPath;
+  if (!resolvedTargetPath) {
+    return;
+  }
+
+  const source = await findAgentBuilderSource(
+    draftSessionId,
+    resolvedTargetPath,
+  );
+  if (!source) {
+    throw new Error(
+      "Pending Agent Builder target could not be verified before session promotion.",
+    );
+  }
+  if (source.properties?.draft !== true) {
+    return;
+  }
+  if (source.properties.builderSessionId !== draftSessionId) {
+    throw new Error(
+      "Pending Agent Builder draft belongs to a different session.",
+    );
+  }
+
+  const patch: PersonaSourcePatch = {
+    properties: {
+      ...source.properties,
+      builderSessionId: backendSessionId,
+    },
+  };
+  if (isPlaceholderDraftForSession(source, draftSessionId)) {
+    patch.name = placeholderAgentName(backendSessionId);
+  }
+
+  await updateAgentBuilderSource(source.path, patch);
 }
 
 export async function recoverDraftAgent(
