@@ -1,8 +1,13 @@
 import {
   markStarterAgentPinsEligible,
+  markStarterAgentPinsSeeded,
   resetStarterAgentPinsSeeded,
 } from "@/features/home/onboarding/starterAgents";
-import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
+import { STARTER_HOME_LAYOUT } from "@/features/home/onboarding/starterHomeLayout";
+import {
+  useHomeWidgetStore,
+  type OnboardingHomeResetResult,
+} from "@/features/home/stores/homeWidgetStore";
 
 async function initializeHomeWidgets(): Promise<void> {
   const state = useHomeWidgetStore.getState();
@@ -23,12 +28,21 @@ export async function resetStarterTasksExperience(): Promise<boolean> {
   return useHomeWidgetStore.getState().resetStarterTasks();
 }
 
-export async function resetHomeForOnboardingExperience(): Promise<boolean> {
-  resetStarterAgentPinsSeeded();
+export async function resetHomeForOnboardingExperience(): Promise<OnboardingHomeResetResult> {
   await initializeHomeWidgets();
-  const didReset = await useHomeWidgetStore.getState().resetHomeForOnboarding();
-  if (didReset) markStarterAgentPinsEligible();
-  return didReset;
+  const result = await useHomeWidgetStore.getState().resetHomeForOnboarding();
+  if (result.itemsConfirmed) {
+    resetStarterAgentPinsSeeded();
+    const starterAgentPinCount = useHomeWidgetStore
+      .getState()
+      .instances.filter((instance) => instance.type === "agentPin").length;
+    if (starterAgentPinCount === STARTER_HOME_LAYOUT.agents.length) {
+      markStarterAgentPinsSeeded();
+    } else {
+      markStarterAgentPinsEligible();
+    }
+  }
+  return result;
 }
 
 export async function resetOnboardingTourExperience(): Promise<boolean> {

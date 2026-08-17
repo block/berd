@@ -2928,11 +2928,13 @@ describe("AppShell global navigation", () => {
         {
           id: personaId,
           displayName: "Berdy",
-          avatar: "app-avatar:gloopies-14",
+          avatar: "app-avatar:gloopies-22",
           systemPrompt: "Help people use Berd.",
           isBuiltin: false,
           writable: true,
-          sourceProperties: { metadata: { berdBundled: true } },
+          sourceProperties: {
+            metadata: { berdBundled: true, berdBundledSource: "berdy" },
+          },
         },
       ],
     });
@@ -2953,11 +2955,13 @@ describe("AppShell global navigation", () => {
       {
         id: personaId,
         displayName: "Berdy",
-        avatar: "app-avatar:gloopies-14",
+        avatar: "app-avatar:gloopies-22",
         systemPrompt: "Help people use Berd.",
         isBuiltin: false,
         writable: false,
-        sourceProperties: { metadata: { berdBundled: true } },
+        sourceProperties: {
+          metadata: { berdBundled: true, berdBundledSource: "berdy" },
+        },
       },
     ]);
     useAgentStore.setState({ personas: [], personasLoading: false });
@@ -2986,11 +2990,13 @@ describe("AppShell global navigation", () => {
       {
         id: personaId,
         displayName: "Berdy",
-        avatar: "app-avatar:gloopies-14",
+        avatar: "app-avatar:gloopies-22",
         systemPrompt: "Help people use Berd.",
         isBuiltin: false,
         writable: false,
-        sourceProperties: { metadata: { berdBundled: true } },
+        sourceProperties: {
+          metadata: { berdBundled: true, berdBundledSource: "berdy" },
+        },
       },
     ]);
     useAgentStore.setState({ personas: [], personasLoading: false });

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { waitFor } from "@testing-library/react";
 import { toast } from "sonner";
 import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
@@ -224,6 +225,14 @@ beforeEach(() => {
   vi.mocked(getLayout).mockReset();
   vi.mocked(saveLayoutCamera).mockReset();
   vi.mocked(saveLayoutItems).mockReset();
+  vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+    ok: true,
+    layout: layout({ itemRevision: 5, items: request.items }),
+  }));
+  vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
+    ok: true,
+    layout: layout({ camera: request.camera, cameraRevision: 2 }),
+  }));
   vi.mocked(toast.error).mockClear();
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.warning).mockClear();
@@ -282,6 +291,72 @@ describe("homeWidgetStore", () => {
     );
   });
 
+  it("rejects widget mutations while a full onboarding reset is in flight", async () => {
+    const resetSave = deferred<SaveItemsResult>();
+    setReadyHomeState({
+      camera: INITIAL_CAMERA,
+      cameraRevision: 1,
+      itemRevision: 4,
+      instances: [clockWidget()],
+    });
+    vi.mocked(saveLayoutItems).mockReturnValueOnce(resetSave.promise);
+
+    const reset = useHomeWidgetStore.getState().resetHomeForOnboarding();
+    useHomeWidgetStore
+      .getState()
+      .addWidget("agentPin", 10, 10, { agentId: "concurrent" }, CANVAS_BOUNDS);
+
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.some((instance) => instance.state?.agentId === "concurrent"),
+    ).toBe(false);
+
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledOnce());
+    const requestedItems = vi.mocked(saveLayoutItems).mock.calls[0][0].items;
+    resetSave.resolve({
+      ok: true,
+      layout: layout({ itemRevision: 5, items: requestedItems }),
+    });
+    await reset;
+  });
+
+  it("rejects every persistence entry point while onboarding reset is in flight", async () => {
+    const resetSave = deferred<SaveItemsResult>();
+    setReadyHomeState({
+      camera: INITIAL_CAMERA,
+      cameraRevision: 1,
+      itemRevision: 4,
+      instances: [clockWidget()],
+    });
+    useHomeWidgetStore.setState({
+      cleanUpSnapshot: [{ id: "w1", type: "clock", x: 0, y: 0, z: 1 }],
+    });
+    vi.mocked(saveLayoutItems).mockReturnValueOnce(resetSave.promise);
+
+    const reset = useHomeWidgetStore.getState().resetHomeForOnboarding();
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledOnce());
+    const duringReset = useHomeWidgetStore.getState();
+    duringReset.addWidget("agentPin", 1, 1, { agentId: "blocked" });
+    duringReset.toggleCleanUpWidgets();
+    duringReset.saveCamera({ centerX: 99, centerY: 99, zoomBps: 9_999 });
+    await expect(
+      duringReset.addMissingStarterAgentPins(["blocked"]),
+    ).resolves.toBe(false);
+    await expect(
+      duringReset.applyStarterLayout([clockWidget()], INITIAL_CAMERA),
+    ).resolves.toBe(false);
+
+    expect(saveLayoutItems).toHaveBeenCalledOnce();
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
+    const requestedItems = vi.mocked(saveLayoutItems).mock.calls[0][0].items;
+    resetSave.resolve({
+      ok: true,
+      layout: layout({ itemRevision: 5, items: requestedItems }),
+    });
+    await reset;
+  });
+
   it("keeps a confirmed onboarding canvas when camera recentering fails", async () => {
     setReadyHomeState({
       camera: INITIAL_CAMERA,
@@ -296,7 +371,7 @@ describe("homeWidgetStore", () => {
 
     await expect(
       useHomeWidgetStore.getState().resetHomeForOnboarding(),
-    ).resolves.toBe(true);
+    ).resolves.toEqual({ itemsConfirmed: true, cameraConfirmed: false });
     expect(toast.warning).toHaveBeenCalledWith(
       "home:widgetLayer.toasts.cameraSaveFailed",
     );
@@ -447,24 +522,23 @@ describe("homeWidgetStore", () => {
         replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
       }),
     );
-    expect(vi.mocked(saveLayoutItems).mock.calls[0][0].items).toMatchObject([
-      { kind: "stickyNote", targetId: "onboarding:tour" },
-      { kind: "stickyNote", targetId: "onboarding:start-project" },
-      { kind: "stickyNote", targetId: "onboarding:build-agent" },
-      { kind: "stickyNote", targetId: "onboarding:reuse-workflows" },
-      { kind: "stickyNote", targetId: "onboarding:manage-automations" },
-      { kind: "stickyNote", targetId: "onboarding:shape-home" },
-      { kind: "clock" },
-    ]);
+    expect(vi.mocked(saveLayoutItems).mock.calls[0][0].items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "clock" }),
+        expect.objectContaining({ targetId: "onboarding:tour" }),
+        expect.objectContaining({ targetId: "onboarding:starter-project" }),
+        expect.objectContaining({ targetId: "onboarding:starter-tasks" }),
+      ]),
+    );
     expect(saveLayoutCamera).toHaveBeenCalledWith({
       layoutId: HOME_LAYOUT_ID,
       expectedRevision: 1,
-      camera: { centerX: 750.5, centerY: 335, zoomBps: 9_000 },
+      camera: { centerX: 0, centerY: 40, zoomBps: 10_000 },
     });
     expect(useHomeWidgetStore.getState().camera).toEqual({
-      centerX: 750.5,
-      centerY: 335,
-      zoomBps: 9_000,
+      centerX: 0,
+      centerY: 40,
+      zoomBps: 10_000,
     });
     expect(useHomeWidgetStore.getState().loadStatus).toBe("ready");
     expect(useHomeWidgetStore.getState().itemRevision).toBe(8);
@@ -493,15 +567,8 @@ describe("homeWidgetStore", () => {
         expect.objectContaining({ targetId: "onboarding:tour" }),
       ]),
     );
-    expect(saveLayoutCamera).toHaveBeenCalledWith({
-      layoutId: HOME_LAYOUT_ID,
-      expectedRevision: 1,
-      camera: { ...INITIAL_CAMERA, zoomBps: 9_000 },
-    });
-    expect(useHomeWidgetStore.getState().camera).toEqual({
-      ...INITIAL_CAMERA,
-      zoomBps: 9_000,
-    });
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
+    expect(useHomeWidgetStore.getState().camera).toEqual(INITIAL_CAMERA);
   });
 
   it("backfills onboarding sticky notes into existing layouts once", async () => {

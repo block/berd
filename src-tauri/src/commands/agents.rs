@@ -21,6 +21,13 @@ pub struct ImportFileReadResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ManagedBundledAgentAllocation {
+    pub path: String,
+    pub source_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImportBinaryFileReadResult {
     pub file_bytes: Vec<u8>,
     pub file_name: String,
@@ -157,6 +164,21 @@ fn validate_file_size(size: u64, label: &'static str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn list_managed_bundled_agent_allocations(
+    app: tauri::AppHandle,
+) -> Result<Vec<ManagedBundledAgentAllocation>, String> {
+    let e2e_agents_dir = app
+        .try_state::<crate::services::e2e_mode::E2eMode>()
+        .map(|mode| mode.goose_agents_dir());
+    Ok(
+        bundled_agents::verified_managed_agent_allocations(e2e_agents_dir.as_deref())?
+            .into_iter()
+            .map(|(path, source_id)| ManagedBundledAgentAllocation { path, source_id })
+            .collect(),
+    )
 }
 
 #[tauri::command]

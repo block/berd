@@ -16,11 +16,15 @@ vi.mock("@/shared/hooks/useArtifacts", () => ({
   useArtifacts: () => ({ data: null }),
 }));
 
+const avatarMediaState = vi.hoisted(() => ({
+  media: {
+    src: "asset://localhost/gloopies-22.webm",
+    mediaType: "video" as const,
+  } as { src: string; mediaType: "video" } | undefined,
+}));
+
 vi.mock("@/shared/hooks/useAvatarSrc", () => ({
-  useAvatarMedia: () => ({
-    src: "asset://localhost/gloopies-14.webm",
-    mediaType: "video",
-  }),
+  useAvatarMedia: () => avatarMediaState.media,
 }));
 
 const avatarMediaRenderMock = vi.hoisted(() => vi.fn());
@@ -63,16 +67,22 @@ describe("OnboardingTourWidget", () => {
   beforeEach(() => {
     localStorage.clear();
     avatarMediaRenderMock.mockClear();
+    avatarMediaState.media = {
+      src: "asset://localhost/gloopies-22.webm",
+      mediaType: "video",
+    };
     useAgentStore.setState({
       personas: [
         {
           id: "/Users/test/.agents/agents/berdy.md",
           displayName: "Berdy",
-          avatar: "app-avatar:gloopies-14",
+          avatar: "app-avatar:gloopies-22",
           systemPrompt: "Help people use Berd.",
           isBuiltin: false,
           writable: true,
-          sourceProperties: { metadata: { berdBundled: true } },
+          sourceProperties: {
+            metadata: { berdBundled: true, berdBundledSource: "berdy" },
+          },
         },
       ],
     });
@@ -83,7 +93,7 @@ describe("OnboardingTourWidget", () => {
 
     expect(screen.getByTestId("animated-berdy")).toHaveAttribute(
       "data-loading-strategy",
-      "lazy-once",
+      "eager",
     );
     expect(screen.getByTestId("animated-berdy")).toHaveAttribute(
       "data-playback-mode",
@@ -157,6 +167,21 @@ describe("OnboardingTourWidget", () => {
     expect(
       screen.queryByText("I’m here to answer any questions you might have."),
     ).not.toBeInTheDocument();
+  });
+
+  it("renders Berdy when avatar media becomes cached after first render", () => {
+    avatarMediaState.media = undefined;
+    const { rerender } = render(<OnboardingTourWidget {...baseProps} />);
+
+    expect(screen.queryByTestId("animated-berdy")).not.toBeInTheDocument();
+
+    avatarMediaState.media = {
+      src: "asset://localhost/gloopies-22.webm",
+      mediaType: "video",
+    };
+    rerender(<OnboardingTourWidget {...baseProps} onOpenAgent={vi.fn()} />);
+
+    expect(screen.getByTestId("animated-berdy")).toBeInTheDocument();
   });
 
   it("keeps Berdy's label visible with the home pin label preference", () => {
@@ -270,11 +295,13 @@ describe("OnboardingTourWidget", () => {
           {
             id: "/Users/test/.agents/agents/berdy.md",
             displayName: "Berdy",
-            avatar: "app-avatar:gloopies-14",
+            avatar: "app-avatar:gloopies-22",
             systemPrompt: "Help people use Berd.",
             isBuiltin: false,
             writable: true,
-            sourceProperties: { metadata: { berdBundled: true } },
+            sourceProperties: {
+              metadata: { berdBundled: true, berdBundledSource: "berdy" },
+            },
           },
         ],
       });

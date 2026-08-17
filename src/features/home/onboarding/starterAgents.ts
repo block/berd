@@ -1,16 +1,45 @@
 import type { Persona } from "@/shared/types/agents";
 
-export const STARTER_AGENT_NAMES = ["block.md", "Builderbot"] as const;
-const LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEY =
-  "goose:home:starter-agent-pins-seeded";
+// Berdy is already featured by the onboarding tour widget. These are the two
+// additional agent pins that complete the three-agent starter Home.
+export const STARTER_AGENT_NAMES = ["Tinker", "Wildcard"] as const;
+const STARTER_AGENT_FILE_NAMES = ["tinker.md", "wildcard.md"] as const;
+const LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEYS = [
+  "goose:home:starter-agent-pins-seeded",
+  "goose:home:starter-agent-pins-seeded-v2",
+  "goose:home:starter-agent-pins-seeded-v3",
+  "goose:home:starter-agent-pins-seeded-v4",
+] as const;
 const SEEDED_STARTER_AGENTS_STORAGE_KEY =
-  "goose:home:starter-agent-pins-seeded-v2";
+  "goose:home:starter-agent-pins-seeded-v5";
 const STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY =
   "goose:home:starter-agent-pins-eligible-v1";
+let starterAgentPinsEligibleForCurrentRun = false;
 
-const STARTER_AGENT_NAME_ORDER = new Map(
-  STARTER_AGENT_NAMES.map((name, index) => [name.toLowerCase(), index]),
-);
+function metadataFor(persona: Persona): Record<string, unknown> | undefined {
+  const metadata = persona.sourceProperties?.metadata;
+  return typeof metadata === "object" && metadata !== null
+    ? (metadata as Record<string, unknown>)
+    : undefined;
+}
+
+function bundledSourceId(persona: Persona): string | undefined {
+  const metadata = metadataFor(persona);
+  const managedSource = metadata?.berdBundledAllocationSource;
+  if (typeof managedSource === "string") return managedSource;
+  const source = metadata?.berdBundledSource;
+  return typeof source === "string" ? source : undefined;
+}
+
+function isManagedBundledCopy(persona: Persona): boolean {
+  return metadataFor(persona)?.berdManagedBundledCopy === true;
+}
+
+export function starterAgentIndex(persona: Persona): number {
+  return STARTER_AGENT_FILE_NAMES.findIndex(
+    (fileName) => bundledSourceId(persona) === fileName.slice(0, -3),
+  );
+}
 
 function isBundledPersona(persona: Persona): boolean {
   const metadata = persona.sourceProperties?.metadata;
@@ -31,6 +60,7 @@ export function haveStarterAgentPinsBeenSeeded(): boolean {
 }
 
 export function areStarterAgentPinsEligible(): boolean {
+  if (starterAgentPinsEligibleForCurrentRun) return true;
   try {
     return (
       localStorage.getItem(STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY) === "1"
@@ -41,6 +71,7 @@ export function areStarterAgentPinsEligible(): boolean {
 }
 
 export function markStarterAgentPinsEligible(): void {
+  starterAgentPinsEligibleForCurrentRun = true;
   try {
     localStorage.setItem(STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY, "1");
   } catch {
@@ -51,8 +82,9 @@ export function markStarterAgentPinsEligible(): void {
 export function shouldRemoveLegacyBerdyPin(): boolean {
   try {
     return (
-      localStorage.getItem(LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEY) === "1" &&
-      !haveStarterAgentPinsBeenSeeded()
+      LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEYS.some(
+        (key) => localStorage.getItem(key) === "1",
+      ) && !haveStarterAgentPinsBeenSeeded()
     );
   } catch {
     return false;
@@ -60,9 +92,12 @@ export function shouldRemoveLegacyBerdyPin(): boolean {
 }
 
 export function resetStarterAgentPinsSeeded(): void {
+  starterAgentPinsEligibleForCurrentRun = false;
   try {
     localStorage.removeItem(SEEDED_STARTER_AGENTS_STORAGE_KEY);
-    localStorage.removeItem(LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEY);
+    for (const key of LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEYS) {
+      localStorage.removeItem(key);
+    }
     localStorage.removeItem(STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY);
   } catch {
     // Home remains usable when localStorage is unavailable.
@@ -70,30 +105,39 @@ export function resetStarterAgentPinsSeeded(): void {
 }
 
 export function markStarterAgentPinsSeeded(): void {
+  starterAgentPinsEligibleForCurrentRun = false;
   try {
     localStorage.setItem(SEEDED_STARTER_AGENTS_STORAGE_KEY, "1");
-    localStorage.removeItem(LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEY);
+    for (const key of LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEYS) {
+      localStorage.removeItem(key);
+    }
     localStorage.removeItem(STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY);
   } catch {
     // Home remains usable when localStorage is unavailable.
   }
 }
 
-/** Returns the two pinned starter agents in their Home canvas order. */
+/** Returns at most one bundled persona per starter slot in Home canvas order. */
 export function selectStarterAgentPersonas(
   personas: readonly Persona[],
 ): Persona[] {
-  return personas
-    .filter(
-      (persona) =>
-        isBundledPersona(persona) &&
-        STARTER_AGENT_NAME_ORDER.has(persona.displayName.trim().toLowerCase()),
-    )
-    .sort(
-      (left, right) =>
-        (STARTER_AGENT_NAME_ORDER.get(left.displayName.trim().toLowerCase()) ??
-          Number.MAX_SAFE_INTEGER) -
-        (STARTER_AGENT_NAME_ORDER.get(right.displayName.trim().toLowerCase()) ??
-          Number.MAX_SAFE_INTEGER),
-    );
+  const selected: Array<Persona | undefined> = STARTER_AGENT_FILE_NAMES.map(
+    () => undefined,
+  );
+  const haveManagedCopies = personas.some(isManagedBundledCopy);
+  for (const persona of personas) {
+    if (
+      haveManagedCopies
+        ? !isManagedBundledCopy(persona)
+        : !isBundledPersona(persona)
+    ) {
+      continue;
+    }
+    const index = starterAgentIndex(persona);
+    if (index < 0) continue;
+    if (!selected[index]) selected[index] = persona;
+  }
+  return selected.filter(
+    (persona): persona is Persona => persona !== undefined,
+  );
 }

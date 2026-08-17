@@ -19,12 +19,17 @@ import YAML from "yaml";
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---(?:\n|$)/;
 const APP_AVATAR_REF_RE = /^app-avatar:[a-z0-9][a-z0-9_-]{0,63}$/;
+const BUNDLED_SOURCE_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 interface BundledAgentFrontmatter {
   name?: unknown;
   description?: unknown;
   avatar?: unknown;
-  metadata?: { berdBundled?: unknown; [key: string]: unknown };
+  metadata?: {
+    berdBundled?: unknown;
+    berdBundledSource?: unknown;
+    [key: string]: unknown;
+  };
 }
 
 const USAGE =
@@ -106,6 +111,18 @@ export function validateBundledAgent(
     );
   }
 
+  if (
+    typeof frontmatter.metadata?.berdBundledSource !== "string" ||
+    !BUNDLED_SOURCE_RE.test(frontmatter.metadata.berdBundledSource)
+  ) {
+    errors.push(
+      error(
+        "frontmatter must set a stable `metadata.berdBundledSource` id",
+        filePath,
+      ),
+    );
+  }
+
   if (frontmatter.metadata?.berdBundled !== true) {
     errors.push(
       error(
@@ -115,6 +132,55 @@ export function validateBundledAgent(
     );
   }
 
+  return errors;
+}
+
+function bundledSourceId(filePath: string): string | undefined {
+  try {
+    const contents = new TextDecoder("utf-8", { fatal: true }).decode(
+      readFileSync(filePath),
+    );
+    const match = FRONTMATTER_RE.exec(contents);
+    if (!match) return undefined;
+    const frontmatter = YAML.parse(match[1]) as BundledAgentFrontmatter;
+    return typeof frontmatter.metadata?.berdBundledSource === "string"
+      ? frontmatter.metadata.berdBundledSource
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function validateBundledAgentSet(paths: string[]): string[] {
+  const errors: string[] = [];
+  const sourceOwners = new Map<string, string>();
+  for (const filePath of paths) {
+    const sourceId = bundledSourceId(filePath);
+    if (!sourceId) continue;
+    const existing = sourceOwners.get(sourceId);
+    if (existing) {
+      errors.push(
+        error(
+          `bundled source id \`${sourceId}\` is already owned by ${basename(existing)}`,
+          filePath,
+        ),
+      );
+    } else {
+      sourceOwners.set(sourceId, filePath);
+    }
+    const canonicalFileName = `${sourceId}.md`;
+    if (
+      ["berdy", "tinker", "wildcard"].includes(sourceId) &&
+      basename(filePath) !== canonicalFileName
+    ) {
+      errors.push(
+        error(
+          `reserved bundled source id \`${sourceId}\` must be owned by ${canonicalFileName}`,
+          filePath,
+        ),
+      );
+    }
+  }
   return errors;
 }
 
@@ -135,7 +201,7 @@ function main(paths: string[]): number {
     return 2;
   }
 
-  const allErrors: string[] = [];
+  const allErrors: string[] = validateBundledAgentSet(paths);
 
   for (const filePath of paths) {
     const errors = validateBundledAgentFile(filePath);

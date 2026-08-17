@@ -176,9 +176,9 @@ const BerdyContent = memo(function BerdyContent({
   const personasLoading = useAgentStore((state) => state.personasLoading);
   const berdyPersonaId = findBerdyPersonaId(personas);
   const gloopyPoster = useArtifacts({
-    select: (artifacts) => selectAvatarImageUrl(artifacts, "gloopies-14"),
+    select: (artifacts) => selectAvatarImageUrl(artifacts, "gloopies-22"),
   });
-  const gloopyMedia = useAvatarMedia("app-avatar:gloopies-14");
+  const gloopyMedia = useAvatarMedia("app-avatar:gloopies-22");
   const start = useWidgetActivationGuard(shouldIgnoreActivation, () => {
     onStartOnboardingTour?.(() => {
       onUpdateState({ welcomeDismissed: true });
@@ -249,7 +249,7 @@ const BerdyContent = memo(function BerdyContent({
               media={gloopyMedia}
               poster={gloopyPoster.data}
               alt={t("onboarding.callout.avatarAlt")}
-              loadingStrategy="lazy-once"
+              loadingStrategy="eager"
               playbackMode="occasional"
               className="size-full object-contain"
             />

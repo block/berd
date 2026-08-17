@@ -2,11 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const storeMocks = vi.hoisted(() => {
   let loadStatus = "idle";
+  let instances: Array<{ type: string }> = [];
   const initialize = vi.fn(async () => {
     loadStatus = "ready";
   });
   const resetOnboardingTour = vi.fn(async () => true);
-  const resetHomeForOnboarding = vi.fn(async () => true);
+  const resetHomeForOnboarding = vi.fn(async () => ({
+    itemsConfirmed: true,
+    cameraConfirmed: true,
+  }));
   const resetStarterTasks = vi.fn(async () => true);
   const syncOnboardingExperiment = vi.fn();
 
@@ -16,6 +20,12 @@ const storeMocks = vi.hoisted(() => {
     },
     setLoadStatus(next: string) {
       loadStatus = next;
+    },
+    get instances() {
+      return instances;
+    },
+    setInstances(next: Array<{ type: string }>) {
+      instances = next;
     },
     initialize,
     resetOnboardingTour,
@@ -29,6 +39,7 @@ vi.mock("@/features/home/stores/homeWidgetStore", () => ({
   useHomeWidgetStore: {
     getState: () => ({
       loadStatus: storeMocks.loadStatus,
+      instances: storeMocks.instances,
       initialize: storeMocks.initialize,
       resetOnboardingTour: storeMocks.resetOnboardingTour,
       resetHomeForOnboarding: storeMocks.resetHomeForOnboarding,
@@ -44,10 +55,15 @@ import {
   resetStarterTasksExperience,
   syncOnboardingExperimentState,
 } from "./resetOnboardingTour";
+import {
+  areStarterAgentPinsEligible,
+  haveStarterAgentPinsBeenSeeded,
+} from "@/features/home/onboarding/starterAgents";
 
 describe("onboarding tour experience controls", () => {
   beforeEach(() => {
     storeMocks.setLoadStatus("idle");
+    storeMocks.setInstances([{ type: "agentPin" }, { type: "agentPin" }]);
     storeMocks.initialize.mockClear();
     storeMocks.resetOnboardingTour.mockClear();
     storeMocks.resetHomeForOnboarding.mockClear();
@@ -56,10 +72,41 @@ describe("onboarding tour experience controls", () => {
   });
 
   it("initializes before resetting the whole Home onboarding canvas", async () => {
-    await expect(resetHomeForOnboardingExperience()).resolves.toBe(true);
+    await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
+      itemsConfirmed: true,
+      cameraConfirmed: true,
+    });
 
     expect(storeMocks.initialize).toHaveBeenCalledOnce();
     expect(storeMocks.resetHomeForOnboarding).toHaveBeenCalledOnce();
+  });
+
+  it("preserves starter-agent markers when the Home reset fails", async () => {
+    localStorage.setItem("goose:home:starter-agent-pins-seeded-v5", "1");
+    storeMocks.resetHomeForOnboarding.mockResolvedValueOnce({
+      itemsConfirmed: false,
+      cameraConfirmed: false,
+    });
+
+    await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
+      itemsConfirmed: false,
+      cameraConfirmed: false,
+    });
+
+    expect(haveStarterAgentPinsBeenSeeded()).toBe(true);
+    expect(areStarterAgentPinsEligible()).toBe(false);
+  });
+
+  it("keeps a partial reset eligible for starter-agent recovery", async () => {
+    storeMocks.setInstances([]);
+
+    await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
+      itemsConfirmed: true,
+      cameraConfirmed: true,
+    });
+
+    expect(haveStarterAgentPinsBeenSeeded()).toBe(false);
+    expect(areStarterAgentPinsEligible()).toBe(true);
   });
 
   it("initializes before resetting starter tasks from another route", async () => {

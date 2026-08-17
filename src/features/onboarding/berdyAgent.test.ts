@@ -6,11 +6,13 @@ function persona(overrides: Partial<Persona> = {}): Persona {
   return {
     id: "/Users/test/.agents/agents/berdy.md",
     displayName: "Berdy",
-    avatar: "app-avatar:gloopies-14",
+    avatar: "app-avatar:gloopies-22",
     systemPrompt: "Help people use Berd.",
     isBuiltin: false,
     writable: true,
-    sourceProperties: { metadata: { berdBundled: true } },
+    sourceProperties: {
+      metadata: { berdBundled: true, berdBundledSource: "berdy" },
+    },
     ...overrides,
   };
 }
@@ -33,9 +35,31 @@ describe("findBerdyPersonaId", () => {
   it("does not select another agent that only shares Berdy's name", () => {
     expect(
       findBerdyPersonaId([
-        persona({ id: "/Users/test/.agents/agents/other.md" }),
+        persona({
+          id: "/Users/test/.agents/agents/other.md",
+          sourceProperties: {
+            metadata: { berdBundled: true, berdBundledSource: "other" },
+          },
+        }),
       ]),
     ).toBeNull();
+  });
+
+  it("prefers the verified managed Berdy copy over a preserved edit", () => {
+    const edited = persona({ id: "/Users/test/.agents/agents/berdy.md" });
+    const managed = persona({
+      id: "/Users/test/.agents/agents/berdy2.md",
+      sourceProperties: {
+        metadata: {
+          berdBundled: true,
+          berdBundledSource: "berdy",
+          berdManagedBundledCopy: true,
+          berdBundledAllocationSource: "berdy",
+        },
+      },
+    });
+
+    expect(findBerdyPersonaId([edited, managed])).toBe(managed.id);
   });
 
   it("ignores a project agent impersonating Berdy before the bundled agent", () => {

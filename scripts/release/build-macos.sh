@@ -223,7 +223,7 @@ stage_custom_bundled_agents() {
   fi
 
   echo "+++ :robot: Staging custom bundled agents: $raw"
-  pnpm exec tsx scripts/validate-bundled-agents.ts "${files[@]}"
+  pnpm exec tsx scripts/validate-bundled-agents.ts "$dest_dir"/*.md "${files[@]}"
 
   local file
   for file in "${files[@]}"; do
