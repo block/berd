@@ -409,7 +409,7 @@ describe("AgentProviderCard", () => {
     await waitFor(() => {
       expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "auth", {
         installFixType: null,
-        updateCommands: [],
+        updateFixTypes: [],
         verifyInstall: true,
       });
     });
@@ -463,7 +463,7 @@ describe("AgentProviderCard", () => {
     await waitFor(() => {
       expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "install", {
         installFixType: "command",
-        updateCommands: [],
+        updateFixTypes: [],
         verifyInstall: true,
       });
     });
@@ -494,7 +494,7 @@ describe("AgentProviderCard", () => {
     await waitFor(() => {
       expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "install", {
         installFixType: "command",
-        updateCommands: [],
+        updateFixTypes: [],
         verifyInstall: true,
       });
     });
@@ -618,7 +618,7 @@ describe("AgentProviderCard", () => {
     await waitFor(() => {
       expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "install", {
         installFixType: "command",
-        updateCommands: [],
+        updateFixTypes: [],
         verifyInstall: true,
       });
     });
@@ -680,12 +680,7 @@ describe("AgentProviderCard", () => {
     await waitFor(() => {
       expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "update", {
         installFixType: null,
-        updateCommands: [
-          {
-            fixType: "updateMain",
-            command: "npm install -g @anthropic-ai/claude-code@latest",
-          },
-        ],
+        updateFixTypes: ["updateMain"],
         verifyInstall: true,
       });
     });
@@ -785,12 +780,7 @@ describe("AgentProviderCard", () => {
     await waitFor(() => {
       expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "update", {
         installFixType: null,
-        updateCommands: [
-          {
-            fixType: "updateMain",
-            command: "npm install -g @anthropic-ai/claude-code@latest",
-          },
-        ],
+        updateFixTypes: ["updateMain"],
         verifyInstall: true,
       });
     });
@@ -809,7 +799,7 @@ describe("AgentProviderCard", () => {
     await waitFor(() => {
       expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "auth", {
         installFixType: null,
-        updateCommands: [],
+        updateFixTypes: [],
         verifyInstall: true,
       });
     });
@@ -921,9 +911,7 @@ describe("AgentProviderCard", () => {
     await waitFor(() => {
       expect(startAgentSetup).toHaveBeenCalledWith("codex-acp", "install", {
         installFixType: "bridge",
-        updateCommands: [
-          { fixType: "updateMain", command: "brew upgrade codex" },
-        ],
+        updateFixTypes: ["updateMain"],
         verifyInstall: true,
       });
     });
@@ -966,7 +954,7 @@ describe("AgentProviderCard", () => {
     await waitFor(() => {
       expect(startAgentSetup).toHaveBeenCalledWith("codex-acp", "install", {
         installFixType: "command",
-        updateCommands: [],
+        updateFixTypes: [],
         verifyInstall: true,
         // The backend's post-install verification mirrors the readiness gate:
         // a bundled-bridge provider must resolve its only binary under `path`,
@@ -1062,7 +1050,7 @@ describe("AgentProviderCard", () => {
     await waitFor(() => {
       expect(startAgentSetup).toHaveBeenCalledWith("codex-acp", "install", {
         installFixType: "command",
-        updateCommands: [],
+        updateFixTypes: [],
         verifyInstall: true,
       });
     });
@@ -1175,16 +1163,7 @@ describe("AgentProviderCard", () => {
     await waitFor(() => {
       expect(startAgentSetup).toHaveBeenCalledWith("claude-acp", "update", {
         installFixType: null,
-        updateCommands: [
-          {
-            fixType: "updateMain",
-            command: "curl -fsSL https://example.com/install.sh | bash",
-          },
-          {
-            fixType: "updateBridge",
-            command: "npm install -g claude-agent-acp@latest",
-          },
-        ],
+        updateFixTypes: ["updateMain", "updateBridge"],
         verifyInstall: true,
       });
     });

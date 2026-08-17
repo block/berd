@@ -115,6 +115,51 @@ impl SetupOperation {
     }
 }
 
+/// The renderer-selectable install fix identity. Narrowed to the two *install*
+/// slots so a forged `auth` / `updateMain` / `updateBridge` cannot deserialize
+/// into the install seed at all; the backend still re-authorizes the value
+/// against the provider's current doctor state before running it (see
+/// [`authorize_install_seed`]). The TypeScript contract mirrors this, but the
+/// narrow wire type — not the TS `Extract<>` — is the security boundary.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InstallFixType {
+    Command,
+    Bridge,
+}
+
+impl From<InstallFixType> for FixType {
+    fn from(value: InstallFixType) -> Self {
+        match value {
+            InstallFixType::Command => FixType::Command,
+            InstallFixType::Bridge => FixType::Bridge,
+        }
+    }
+}
+
+/// The narrow wire type for a per-readout update slot. Only the two update
+/// families deserialize here; a forged `command`/`bridge`/`auth` fix can't cross
+/// the wire in the update list, and — combined with [`authorize_update_fixes`]'s
+/// duplicate rejection — a compromised renderer can't submit the same slot N
+/// times to rerun the trusted update command N times off one freshness
+/// snapshot. Mirrors [`InstallFixType`]: the narrow wire type, not the TS
+/// `Extract<>`, is the security boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateFixType {
+    UpdateMain,
+    UpdateBridge,
+}
+
+impl From<UpdateFixType> for FixType {
+    fn from(value: UpdateFixType) -> Self {
+        match value {
+            UpdateFixType::UpdateMain => FixType::UpdateMain,
+            UpdateFixType::UpdateBridge => FixType::UpdateBridge,
+        }
+    }
+}
+
 /// The execution recipe captured at click time. Keeping readout *derivation* in
 /// TS (it already has the doctor report) avoids porting `actionableReadouts`
 /// into Rust; the backend just runs the recipe autonomously so the chain
@@ -124,11 +169,20 @@ impl SetupOperation {
 pub struct SetupPlan {
     /// The install recipe to seed the install loop with (`command` for the main
     /// CLI, `bridge` for a missing ACP bridge). `null` for a pure update/auth.
+    /// Only the two install variants can deserialize here; the backend still
+    /// re-authorizes it against the provider's current doctor state before
+    /// running it (see [`authorize_install_seed`]).
     #[serde(default)]
-    install_fix_type: Option<FixType>,
-    /// Per-readout source-aware update commands to run after the install loop.
+    install_fix_type: Option<InstallFixType>,
+    /// Per-readout update fix identities to run after the install loop. Only
+    /// `updateMain` / `updateBridge` are valid (enforced by the narrow
+    /// [`UpdateFixType`] wire type); the exact source-aware command is resolved
+    /// by the backend from the crate's trusted freshness readout, never supplied
+    /// verbatim by the renderer. Duplicate slots are rejected before dispatch
+    /// (see [`authorize_update_fixes`]) so a compromised renderer can't rerun the
+    /// trusted update command N times off one freshness snapshot.
     #[serde(default)]
-    update_commands: Vec<UpdateCommand>,
+    update_fix_types: Vec<UpdateFixType>,
     /// Whether the post-fix step probes PATH to confirm the agent resolved on
     /// disk. The frontend sends `hasBinary && !isBuiltIn`: a built-in or
     /// binary-less provider has nothing to resolve, so a clean fix run is taken
@@ -148,15 +202,6 @@ pub struct SetupPlan {
     /// to not_installed, an install-succeeds/still-broken loop.
     #[serde(default)]
     bundled_bridge: bool,
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UpdateCommand {
-    /// `updateMain` or `updateBridge`.
-    fix_type: FixType,
-    /// The readout's `updateCommand`, run verbatim as `command_override`.
-    command: String,
 }
 
 /// Managed Tauri state: `providerId -> SetupOperation`. Keying by provider lets
@@ -343,13 +388,48 @@ async fn setup_env_vars(app: &AppHandle) -> Vec<(String, String)> {
 }
 
 async fn find_check(app: &AppHandle, provider_id: &str) -> Result<doctor::DoctorCheck, String> {
+    find_check_with_options(app, provider_id, false).await
+}
+
+/// Like [`find_check`], but runs the crate's freshness pass so the returned
+/// check carries populated per-readout `update_command` / `update_fix_type`
+/// fields. Used to resolve the source-aware update command for a requested
+/// update fix from trusted crate state, rather than trusting a renderer string.
+async fn find_check_fresh(
+    app: &AppHandle,
+    provider_id: &str,
+) -> Result<doctor::DoctorCheck, String> {
+    find_check_with_options(app, provider_id, true).await
+}
+
+async fn find_check_with_options(
+    app: &AppHandle,
+    provider_id: &str,
+    check_freshness: bool,
+) -> Result<doctor::DoctorCheck, String> {
     let target = crate_check_id(provider_id);
+    run_crate_check_report(app, check_freshness)
+        .await
+        .into_iter()
+        .find(|check| check.id == target)
+        .ok_or_else(|| format!("Unknown agent provider '{provider_id}'"))
+}
+
+/// The crate's AI-agent doctor report (with the Windows managed-bridge repair
+/// applied), built with the same env/registry/bundled-tools view the settings
+/// screen reads. `check_freshness` mirrors [`find_check`] vs [`find_check_fresh`]:
+/// the cheap path skips version/registry probing. Shared by the provider check
+/// lookups and the offered-fix resolver so both authorize against one report.
+async fn run_crate_check_report(
+    app: &AppHandle,
+    check_freshness: bool,
+) -> Vec<doctor::DoctorCheck> {
     let env_vars = setup_env_vars(app).await;
     let bundled_tools_dir = managed_acp_tools::bundled_tools_dir_for_checks(app);
     let mut report = doctor::run_checks_with_options(
         doctor::RunChecksOptions {
             npm_registry: npm_registry(app),
-            check_freshness: false,
+            check_freshness,
             offline: false,
             env: None,
             // The crate labels binaries resolving from this dir as bundled and
@@ -370,11 +450,25 @@ async fn find_check(app: &AppHandle, provider_id: &str) -> Result<doctor::Doctor
         )
         .await;
     }
-    report
-        .checks
+    report.checks
+}
+
+/// The top-level fix a crate AI-agent check (`ai-agent-*`) currently offers from
+/// trusted state, resolved from the same non-fresh crate report the renderer
+/// reads: `Some(Command | Bridge | Auth)` when the check currently offers that
+/// fix, `None` when it offers none (already installed and authenticated) or the
+/// check id isn't present. `run_doctor_fix` authorizes every agent fix request
+/// against this before dispatch, so a forged or stale `(check_id, fix_type)`
+/// pair fails closed rather than reaching a shell/native side effect.
+pub(crate) async fn offered_crate_check_fix(
+    app: &AppHandle,
+    check_id: &str,
+) -> Result<Option<FixType>, String> {
+    Ok(run_crate_check_report(app, false)
+        .await
         .into_iter()
-        .find(|check| check.id == target)
-        .ok_or_else(|| format!("Unknown agent provider '{provider_id}'"))
+        .find(|check| check.id == check_id)
+        .and_then(|check| check.fix_type))
 }
 
 /// Whether the agent's main CLI or ACP bridge resolved on disk. Used as the
@@ -432,10 +526,201 @@ async fn verify_installed(
     }
 }
 
+/// Authorize the renderer-requested update slots before any executor runs.
+/// Rejects a list with a duplicate slot: `run_install` runs each entry against
+/// one freshness snapshot, so N copies of `updateMain` would rerun the trusted
+/// update command N times through a single IPC request. The card only ever
+/// names each slot at most once (`buildUpdateFixTypes` derives from distinct
+/// readouts), so a duplicate is a forged/replayed request. Returns the
+/// authorized `FixType` list on success. Pure so the boundary is unit-testable
+/// without a Tauri handle.
+fn authorize_update_fixes(
+    provider_id: &str,
+    requested: &[UpdateFixType],
+) -> Result<Vec<FixType>, String> {
+    let mut seen: Vec<UpdateFixType> = Vec::with_capacity(requested.len());
+    for slot in requested {
+        if seen.contains(slot) {
+            return Err(format!(
+                "duplicate '{slot:?}' update slot requested for '{provider_id}'"
+            ));
+        }
+        seen.push(*slot);
+    }
+    Ok(seen.into_iter().map(FixType::from).collect())
+}
+
+/// Resolve the exact, source-aware update command for a requested update fix
+/// from the crate's freshness readout — the trusted source of truth. The
+/// renderer names only the readout slot (`updateMain` / `updateBridge`); the
+/// command string never crosses the wire.
+///
+/// Rejects (returns `Err`) when:
+/// - `fix_type` is not one of the two update slots (a forged/mismatched fix);
+/// - the addressed readout is absent (`main` / `bridge` is `None`);
+/// - the readout reports no actionable update (`update_command` is `None`), or
+///   its own `update_fix_type` doesn't match the requested slot.
+fn resolve_update_command(
+    check: &doctor::DoctorCheck,
+    fix_type: &FixType,
+) -> Result<String, String> {
+    let readout = match fix_type {
+        FixType::UpdateMain => check.main.as_ref(),
+        FixType::UpdateBridge => check.bridge.as_ref(),
+        other => {
+            return Err(format!(
+                "unsupported update fix type '{other:?}' for '{}'",
+                check.id
+            ));
+        }
+    };
+    let readout = readout.ok_or_else(|| {
+        format!(
+            "no '{fix_type:?}' readout available for '{}' to resolve an update command",
+            check.id
+        )
+    })?;
+    // Both fields are set together by the crate's freshness pass, and only when
+    // the update is actionable; a mismatched slot means the requested update
+    // isn't the one the readout offers.
+    if readout.update_fix_type.as_ref() != Some(fix_type) {
+        return Err(format!(
+            "'{fix_type:?}' does not match the actionable update for '{}'",
+            check.id
+        ));
+    }
+    readout.update_command.clone().ok_or_else(|| {
+        format!(
+            "no actionable '{fix_type:?}' update command for '{}'",
+            check.id
+        )
+    })
+}
+
+/// The sign-in capability the pinned doctor crate declares for a check, read
+/// from the backend-owned `AI_AGENT_CHECKS` table — never renderer input. It is
+/// the authorization oracle for [`authorize_auth`]: "currently offers `Auth`"
+/// is only valid for agents Doctor can actually probe.
+#[derive(Debug, PartialEq, Eq)]
+enum AuthCapability {
+    /// No `auth_command` (goose, pi): the agent has no sign-in flow, so a
+    /// renderer-requested `Auth` is never authorized.
+    None,
+    /// Both a login command and a status probe (claude, codex, amp, cursor):
+    /// Doctor reports `Auth` when installed-but-signed-out, so authorize a
+    /// sign-in only when the check currently offers it.
+    Probeable,
+    /// A login command but no status probe (copilot): Doctor can't observe the
+    /// auth state, so it reports `Pass`/no fix even when a sign-in is needed.
+    /// Authorize the registered login for the installed agent directly.
+    Unprobeable,
+}
+
+/// The sign-in capability the pinned crate declares for a crate check id
+/// (`ai-agent-*`). Resolved from the static `AI_AGENT_CHECKS` table so the auth
+/// gate authorizes against backend-owned recipe metadata, not a renderer claim.
+/// An unknown id has no capability, so auth is never authorized for it.
+fn auth_capability(check_id: &str) -> AuthCapability {
+    doctor::agents::AI_AGENT_CHECKS
+        .iter()
+        .find(|info| info.id == check_id)
+        .map(|info| {
+            match (
+                info.auth_command.is_some(),
+                info.auth_status_command.is_some(),
+            ) {
+                (false, _) => AuthCapability::None,
+                (true, true) => AuthCapability::Probeable,
+                (true, false) => AuthCapability::Unprobeable,
+            }
+        })
+        .unwrap_or(AuthCapability::None)
+}
+
+/// Authorize a renderer-requested `Auth` action against the provider's current
+/// doctor `check` and its backend-owned [`AuthCapability`]. Sign-in fails closed
+/// unless the pinned crate declares a login flow for the check:
+///
+/// - `None` (no `auth_command`): never authorized.
+/// - `Probeable` (has an auth-status probe): authorized only when the check
+///   currently offers `Auth` (installed but not authenticated); a check that
+///   offers an install fix or is already authenticated (no fix) rejects.
+/// - `Unprobeable` (a login command but no status probe, e.g. Copilot): Doctor
+///   can't report `Auth`, so authorize the registered login when the agent is
+///   installed (`path`/`bridge_path` resolved) and offers no install fix. A
+///   not-installed provider still offers `Command`, so a forged sign-in against
+///   it rejects.
+///
+/// Pure so the boundary is unit-testable without a Tauri handle.
+fn authorize_auth(provider_id: &str, check: &doctor::DoctorCheck) -> Result<(), String> {
+    match auth_capability(&check.id) {
+        AuthCapability::None => Err(format!("'{provider_id}' has no sign-in flow")),
+        AuthCapability::Probeable => match &check.fix_type {
+            Some(FixType::Auth) => Ok(()),
+            Some(offered) => Err(format!(
+                "'{provider_id}' currently offers the '{offered:?}' fix, not sign-in"
+            )),
+            None => Err(format!(
+                "'{provider_id}' offers no sign-in in its current state"
+            )),
+        },
+        AuthCapability::Unprobeable => {
+            if check.path.is_none() && check.bridge_path.is_none() {
+                return Err(format!(
+                    "'{provider_id}' is not installed, so sign-in is unavailable"
+                ));
+            }
+            match &check.fix_type {
+                None => Ok(()),
+                Some(offered) => Err(format!(
+                    "'{provider_id}' currently offers the '{offered:?}' fix, not sign-in"
+                )),
+            }
+        }
+    }
+}
+
+/// The install fix (`Command` / `Bridge`) the provider's check currently offers
+/// from trusted crate state, or `None` when it offers no install fix (already
+/// installed, or exposes only auth/update). Used by [`run_install`] to reject a
+/// forged or mismatched managed-install seed before the install loop runs any
+/// command.
+async fn offered_install_fix(
+    app: &AppHandle,
+    provider_id: &str,
+) -> Result<Option<FixType>, String> {
+    let check = find_check(app, provider_id).await?;
+    Ok(install_fix_for_check(&check))
+}
+
+/// Authorize a renderer-requested install seed against the provider's current
+/// doctor state (`offered` = the install fix the check actually offers now).
+/// The renderer names *which* install fix it intends; this returns the backend
+/// value only when it matches, rejecting a mismatched seed or one against a
+/// check that offers no install fix (already installed / auth-or-update only)
+/// before any install shell command runs. Pure so the authorization boundary is
+/// unit-testable without a Tauri `AppHandle`.
+fn authorize_install_seed(
+    provider_id: &str,
+    requested: &InstallFixType,
+    offered: Option<FixType>,
+) -> Result<FixType, String> {
+    let requested = FixType::from(requested.clone());
+    match offered {
+        Some(offered) if offered == requested => Ok(offered),
+        Some(offered) => Err(format!(
+            "'{requested:?}' install is not the '{offered:?}' fix currently offered for '{provider_id}'"
+        )),
+        None => Err(format!(
+            "'{provider_id}' offers no '{requested:?}' install fix in its current state"
+        )),
+    }
+}
+
 /// The install recipe a check still needs, if any. Only the two *install* fix
 /// types qualify — `Auth` (installed-but-signed-out) and the per-readout update
 /// types are handled by later chain steps, not the install loop.
-fn install_fix_for_check(check: &doctor::DoctorCheck) -> Option<FixType> {
+pub(crate) fn install_fix_for_check(check: &doctor::DoctorCheck) -> Option<FixType> {
     match check.fix_type {
         Some(FixType::Command) => Some(FixType::Command),
         Some(FixType::Bridge) => Some(FixType::Bridge),
@@ -541,7 +826,20 @@ async fn run_install(
     // after each install and run the next install fix the crate reports, so a
     // from-scratch Codex installs `codex` + `codex-acp` under one click. See
     // `next_install_fix` for the ≤2-pass bound that terminates a stuck install.
-    let mut pending = plan.install_fix_type.clone();
+    //
+    // The renderer only names *which* install fix it intends; before running it
+    // we re-read the provider's doctor check and authorize the seed against that
+    // trusted state, so a forged/mismatched seed (or one against an
+    // already-installed check) rejects before the install shell command runs.
+    // Subsequent passes re-derive `pending` from the backend check directly, so
+    // only the renderer-supplied seed needs this gate.
+    let mut pending = match &plan.install_fix_type {
+        Some(requested) => {
+            let offered = offered_install_fix(app, provider_id).await?;
+            Some(authorize_install_seed(provider_id, requested, offered)?)
+        }
+        None => None,
+    };
     let mut ran: Vec<FixType> = Vec::new();
     while let Some(fix) = next_install_fix(&pending, &ran) {
         ran.push(fix.clone());
@@ -552,16 +850,20 @@ async fn run_install(
 
     // Update-after-install: a partial install with stale binaries (the "Fix"
     // state) is brought fully current in the same pass; for a plain install this
-    // list is empty and the loop is a no-op.
-    for update in &plan.update_commands {
-        run_fix(
-            app,
-            registry,
-            provider_id,
-            update.fix_type.clone(),
-            Some(update.command.clone()),
-        )
-        .await?;
+    // list is empty and the loop is a no-op. The renderer only names *which*
+    // readouts to update (`updateMain` / `updateBridge`); the exact source-aware
+    // command is resolved here from the crate's trusted freshness readout, so a
+    // compromised renderer can't smuggle an arbitrary shell command through.
+    // Authorize the slot list first — reject a duplicate slot before any
+    // executor runs, so a replayed slot can't rerun the update command N times
+    // off one freshness snapshot.
+    let update_fixes = authorize_update_fixes(provider_id, &plan.update_fix_types)?;
+    if !update_fixes.is_empty() {
+        let fresh = find_check_fresh(app, provider_id).await?;
+        for fix_type in &update_fixes {
+            let command = resolve_update_command(&fresh, fix_type)?;
+            run_fix(app, registry, provider_id, fix_type.clone(), Some(command)).await?;
+        }
     }
 
     // Only enter the visible Checking phase when there's a binary to probe;
@@ -583,6 +885,16 @@ async fn run_auth(
     provider_id: &str,
     plan: &SetupPlan,
 ) -> Result<(), String> {
+    // The renderer only names the *action*; before running the auth shell
+    // command we re-read the provider's doctor check and authorize `Auth`
+    // against its backend-owned sign-in capability (see [`authorize_auth`]). A
+    // forged/stale sign-in rejects here — for a probe-capable agent unless it
+    // currently offers `Auth`, and for an unprobeable one (Copilot) unless the
+    // agent is installed and offers no install fix — rather than executing the
+    // static `<agent> login` command on demand. `find_check` also fails closed
+    // on an unknown provider.
+    let check = find_check(app, provider_id).await?;
+    authorize_auth(provider_id, &check)?;
     set_phase(app, registry, provider_id, SetupPhase::Authenticating);
     run_fix(app, registry, provider_id, FixType::Auth, None).await?;
 
@@ -831,6 +1143,132 @@ mod tests {
         }
     }
 
+    /// Build a readout with a paired `(update_command, update_fix_type)`, as
+    /// the crate's freshness pass emits for an actionable update.
+    fn readout_with_update(command: &str, fix_type: FixType) -> doctor::types::AgentVersionInfo {
+        doctor::types::AgentVersionInfo {
+            update_command: Some(command.to_string()),
+            update_fix_type: Some(fix_type),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn resolve_update_command_returns_the_trusted_readout_command() {
+        let mut check = check_with_fix(None);
+        check.main = Some(readout_with_update(
+            "npm install -g @anthropic-ai/claude-code@latest",
+            FixType::UpdateMain,
+        ));
+        check.bridge = Some(readout_with_update(
+            "npm install -g claude-agent-acp@latest",
+            FixType::UpdateBridge,
+        ));
+
+        assert_eq!(
+            resolve_update_command(&check, &FixType::UpdateMain).unwrap(),
+            "npm install -g @anthropic-ai/claude-code@latest"
+        );
+        assert_eq!(
+            resolve_update_command(&check, &FixType::UpdateBridge).unwrap(),
+            "npm install -g claude-agent-acp@latest"
+        );
+    }
+
+    #[test]
+    fn resolve_update_command_rejects_non_update_fix_types() {
+        // A forged plan naming an install/auth fix as an "update" must never
+        // resolve to a command — those are not update slots.
+        let mut check = check_with_fix(None);
+        check.main = Some(readout_with_update(
+            "brew upgrade codex",
+            FixType::UpdateMain,
+        ));
+
+        for forged in [FixType::Command, FixType::Bridge, FixType::Auth] {
+            assert!(
+                resolve_update_command(&check, &forged).is_err(),
+                "{forged:?} must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_update_command_rejects_absent_readout() {
+        // No `main` / `bridge` readout means there is no trusted command to run.
+        let check = check_with_fix(None);
+        assert!(resolve_update_command(&check, &FixType::UpdateMain).is_err());
+        assert!(resolve_update_command(&check, &FixType::UpdateBridge).is_err());
+    }
+
+    #[test]
+    fn resolve_update_command_rejects_mismatched_slot() {
+        // The bridge readout carries a bridge update; requesting `updateMain`
+        // against it (a mismatched slot) must fail rather than run the bridge
+        // command under the wrong identity.
+        let mut check = check_with_fix(None);
+        check.main = Some(readout_with_update(
+            "npm install -g claude-agent-acp@latest",
+            FixType::UpdateBridge,
+        ));
+        assert!(resolve_update_command(&check, &FixType::UpdateMain).is_err());
+    }
+
+    #[test]
+    fn resolve_update_command_rejects_readout_without_actionable_command() {
+        // A readout with no derived update command (e.g. a self-updating or
+        // opaque install source) offers nothing to run, even for a valid slot.
+        let mut check = check_with_fix(None);
+        check.main = Some(doctor::types::AgentVersionInfo {
+            update_command: None,
+            update_fix_type: None,
+            ..Default::default()
+        });
+        assert!(resolve_update_command(&check, &FixType::UpdateMain).is_err());
+    }
+
+    #[test]
+    fn authorize_update_fixes_rejects_duplicate_slots_before_dispatch() {
+        // Regression: `run_install` runs each slot against one freshness
+        // snapshot, so a duplicate `updateMain` would rerun the trusted update
+        // command twice through one IPC request. A duplicate must reject before
+        // any executor target is produced.
+        assert!(authorize_update_fixes(
+            "claude",
+            &[UpdateFixType::UpdateMain, UpdateFixType::UpdateMain]
+        )
+        .is_err());
+        assert!(authorize_update_fixes(
+            "claude",
+            &[
+                UpdateFixType::UpdateBridge,
+                UpdateFixType::UpdateMain,
+                UpdateFixType::UpdateBridge,
+            ]
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn authorize_update_fixes_allows_at_most_one_of_each_slot() {
+        // The card only ever names each slot once. An empty list, a single
+        // slot, and one of each (in either order) all authorize and map to the
+        // corresponding `FixType`.
+        assert_eq!(authorize_update_fixes("claude", &[]).unwrap(), Vec::new());
+        assert_eq!(
+            authorize_update_fixes("claude", &[UpdateFixType::UpdateMain]).unwrap(),
+            vec![FixType::UpdateMain]
+        );
+        assert_eq!(
+            authorize_update_fixes(
+                "claude",
+                &[UpdateFixType::UpdateBridge, UpdateFixType::UpdateMain]
+            )
+            .unwrap(),
+            vec![FixType::UpdateBridge, FixType::UpdateMain]
+        );
+    }
+
     #[test]
     fn install_fix_for_check_returns_the_two_install_recipes() {
         assert_eq!(
@@ -861,6 +1299,150 @@ mod tests {
         );
         // A fully-installed agent has no install fix pending.
         assert_eq!(install_fix_for_check(&check_with_fix(None)), None);
+    }
+
+    #[test]
+    fn authorize_install_seed_returns_the_matching_backend_fix() {
+        // The renderer names the install fix it intends; when it matches the
+        // fix the check currently offers, the backend value is what runs.
+        assert_eq!(
+            authorize_install_seed(
+                "codex-acp",
+                &InstallFixType::Command,
+                Some(FixType::Command)
+            ),
+            Ok(FixType::Command)
+        );
+        assert_eq!(
+            authorize_install_seed("codex-acp", &InstallFixType::Bridge, Some(FixType::Bridge)),
+            Ok(FixType::Bridge)
+        );
+    }
+
+    #[test]
+    fn authorize_install_seed_rejects_a_mismatched_seed() {
+        // A renderer that requests `bridge` when the check offers only `command`
+        // (or vice versa) must reject before any install shell command runs,
+        // rather than execute the provider's other install recipe on demand.
+        assert!(authorize_install_seed(
+            "codex-acp",
+            &InstallFixType::Bridge,
+            Some(FixType::Command)
+        )
+        .is_err());
+        assert!(authorize_install_seed(
+            "codex-acp",
+            &InstallFixType::Command,
+            Some(FixType::Bridge)
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn authorize_install_seed_rejects_when_no_install_fix_is_offered() {
+        // An already-installed provider (or one exposing only auth/update)
+        // offers no install fix, so a forged install seed must fail closed
+        // instead of re-running the install shell command.
+        assert!(authorize_install_seed("codex-acp", &InstallFixType::Command, None).is_err());
+        assert!(authorize_install_seed("codex-acp", &InstallFixType::Bridge, None).is_err());
+    }
+
+    #[test]
+    fn authorize_auth_rejects_forged_sign_in_for_a_probeable_agent() {
+        // Probe-capable agents (claude/codex/amp/cursor) report `Auth` only when
+        // installed-but-signed-out, so a forged sign-in against a missing
+        // (offers `Command`/`Bridge`) or already-authenticated (no fix) codex
+        // check must reject before the `<agent> login` command runs.
+        let mut check = check_with_fix(Some(FixType::Command)); // id = ai-agent-codex
+        assert!(authorize_auth("codex-acp", &check).is_err());
+        check.fix_type = Some(FixType::Bridge);
+        assert!(authorize_auth("codex-acp", &check).is_err());
+        check.fix_type = None;
+        assert!(authorize_auth("codex-acp", &check).is_err());
+    }
+
+    #[test]
+    fn authorize_auth_allows_a_currently_offered_sign_in_for_a_probeable_agent() {
+        // Installed-but-signed-out is the state a probe-capable agent reports as
+        // offering `Auth`, so a legitimate sign-in is authorized.
+        let check = check_with_fix(Some(FixType::Auth)); // id = ai-agent-codex
+        assert!(authorize_auth("codex-acp", &check).is_ok());
+    }
+
+    #[test]
+    fn authorize_auth_allows_installed_copilot_despite_no_offered_fix() {
+        // Regression for the Copilot auth-gate defect: Copilot declares an
+        // `auth_command` but no `auth_status_command`, so Doctor reports
+        // `Pass`/`fix_type = None` even when a sign-in is needed. The gate must
+        // authorize the registered login for the *installed* agent (resolved
+        // `path`) rather than blocking its only sign-in path.
+        let mut check = check_with_fix(None);
+        check.id = "ai-agent-copilot".into();
+        check.path = Some("/opt/homebrew/bin/copilot".into());
+        assert!(authorize_auth("copilot-acp", &check).is_ok());
+    }
+
+    #[test]
+    fn authorize_auth_rejects_copilot_sign_in_when_not_installed() {
+        // A not-installed Copilot still offers a `Command` install fix and has no
+        // resolved binary, so a forged sign-in against it must reject — the
+        // unprobeable capability authorizes login only for an installed agent.
+        let mut check = check_with_fix(Some(FixType::Command));
+        check.id = "ai-agent-copilot".into();
+        check.path = None;
+        check.bridge_path = None;
+        assert!(authorize_auth("copilot-acp", &check).is_err());
+    }
+
+    #[test]
+    fn authorize_auth_rejects_sign_in_for_an_agent_with_no_login_flow() {
+        // Goose declares no `auth_command`, so a renderer-requested sign-in is
+        // never authorized regardless of the reported check state.
+        let mut check = check_with_fix(None);
+        check.id = "ai-agent-goose".into();
+        check.path = Some("/usr/local/bin/goose".into());
+        assert!(authorize_auth("goose", &check).is_err());
+    }
+
+    #[test]
+    fn auth_capability_reflects_the_pinned_crate_table() {
+        // The gate's oracle is the backend-owned `AI_AGENT_CHECKS` table, not a
+        // renderer claim: probe-capable agents, the unprobeable Copilot, the
+        // no-login goose, and an unknown id each resolve to their capability.
+        assert_eq!(auth_capability("ai-agent-codex"), AuthCapability::Probeable);
+        assert_eq!(
+            auth_capability("ai-agent-copilot"),
+            AuthCapability::Unprobeable
+        );
+        assert_eq!(auth_capability("ai-agent-goose"), AuthCapability::None);
+        assert_eq!(auth_capability("ai-agent-nope"), AuthCapability::None);
+    }
+
+    #[test]
+    fn install_fix_type_wire_rejects_non_install_variants() {
+        // The security boundary is the narrow Rust wire type: `auth` and the
+        // update slots must not deserialize into the install seed at all, so a
+        // forged plan can never smuggle a non-install identity through
+        // `installFixType` regardless of the TS `Extract<>` contract.
+        assert_eq!(
+            serde_json::from_str::<InstallFixType>("\"command\"").unwrap(),
+            InstallFixType::Command
+        );
+        assert_eq!(
+            serde_json::from_str::<InstallFixType>("\"bridge\"").unwrap(),
+            InstallFixType::Bridge
+        );
+        for forged in ["\"auth\"", "\"updateMain\"", "\"updateBridge\""] {
+            assert!(
+                serde_json::from_str::<InstallFixType>(forged).is_err(),
+                "{forged} must not deserialize into an install seed"
+            );
+        }
+        // And it must not deserialize as the SetupPlan field either.
+        assert!(serde_json::from_str::<SetupPlan>(
+            "{\"installFixType\":\"auth\",\"updateFixTypes\":[],\"verifyInstall\":false}"
+        )
+        .is_err());
     }
 
     /// Test model of the install loop in [`run_install`]: both share
@@ -1040,7 +1622,7 @@ mod tests {
     fn plan_with_requirements(verify_install: bool, bundled_bridge: bool) -> SetupPlan {
         SetupPlan {
             install_fix_type: None,
-            update_commands: Vec::new(),
+            update_fix_types: Vec::new(),
             verify_install,
             bundled_bridge,
         }

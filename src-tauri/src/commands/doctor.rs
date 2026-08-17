@@ -1554,72 +1554,205 @@ pub async fn run_doctor_fresh(
 
 /// Run a fix command for a doctor check, identified by check ID and fix type.
 ///
-/// `command_override` lets the frontend pass a verbatim shell command (used by
-/// the per-readout Update affordances, whose source-aware commands aren't in
-/// the crate's static lookup table); `None` falls back to the crate's
-/// `lookup_fix_command`. The npm registry override is still applied either way.
+/// The renderer sends only the typed `(check_id, fix_type)` identity; the exact
+/// command (or native operation) is resolved here from trusted backend state —
+/// the managed installer, the local check registry, or the crate's static
+/// `lookup_fix_command`. There is no renderer-supplied command string: an
+/// unknown check id or a check/fix-type combination with no registered fix is
+/// rejected by the crate with an `Unknown check …` error rather than executing
+/// arbitrary text.
 #[tauri::command]
 pub async fn run_doctor_fix(
     app_handle: AppHandle,
+    distro_state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
     check_id: String,
     fix_type: FixType,
-    command_override: Option<String>,
 ) -> Result<(), String> {
-    // The node-runtime fix is native — (re)install the pinned managed
-    // runtime — not a shell command.
-    if check_id == NODE_RUNTIME_CHECK.id {
-        return ensure_managed_node_runtime_logged(&app_handle).await;
+    // Feature-policy gate: when Doctor is disabled by runtime config,
+    // `run_doctor`/`run_doctor_fresh` return an empty report, so no check is
+    // offered — but this command never loaded that config, so a renderer could
+    // invoke it directly and drive a native/managed/local/crate fix. Enforce the
+    // same policy here, before resolving offered state or any side effect.
+    // Hiding Doctor in the frontend is not a backend authorization boundary.
+    let runtime_config = runtime_config_state
+        .ready_config(distro_state.inner())
+        .await?;
+    if !doctor_enabled(&runtime_config) {
+        return Err("Doctor is disabled by runtime configuration".to_string());
     }
-    // Managed bridge installs (claude, codex) go through the managed installer
-    // so the floating `<pkg>@latest` install lands in `packages/tools` with an
-    // absolute-path shim, rather than the crate's `npm install -g`.
-    if command_override.is_none() && matches!(fix_type, FixType::Command | FixType::Bridge) {
-        if let Some(provider_id) = managed_provider_for_check(&check_id) {
+
+    // Resolve the fix the check *currently offers* from trusted state, then let
+    // the pure planner authorize the request and pick the dispatch target in
+    // one step. A forged, stale, or mismatched `(check_id, fix_type)` pair (an
+    // install fix against a healthy check, an `Auth` fix against a check that
+    // offers `Command`, an unknown check id) yields an `Err` and no dispatch
+    // target, so it can never reach a shell/native side effect.
+    let offered = offered_fix_for_check(&app_handle, &check_id).await?;
+    match plan_doctor_fix(&check_id, &fix_type, offered)? {
+        // The node-runtime fix is native — (re)install the pinned managed
+        // runtime — not a shell command.
+        DoctorFixDispatch::NodeRuntime => ensure_managed_node_runtime_logged(&app_handle).await,
+        // Managed bridge installs (claude, codex) go through the managed
+        // installer so the floating `<pkg>@latest` install lands in
+        // `packages/tools` with an absolute-path shim, rather than the crate's
+        // `npm install -g`.
+        DoctorFixDispatch::ManagedInstall(provider_id) => {
             let log_prefix = format!("[doctor fix {check_id}]");
-            return managed_acp_tools::install_managed_tool(&app_handle, provider_id, &|line| {
+            managed_acp_tools::install_managed_tool(&app_handle, provider_id, &|line| {
                 log::info!("{log_prefix} {line}");
             })
             .await
-            .map_err(|error| error.to_string());
+            .map_err(|error| error.to_string())
+        }
+        DoctorFixDispatch::LocalCommand(command) => {
+            let captured_shell_env = dir_env::capture_home_interactive_env().await;
+            let prepend_dirs = doctor_prepend_dirs(&app_handle);
+            execute_local_fix(command, &captured_shell_env, &prepend_dirs).await
+        }
+        DoctorFixDispatch::CrateCommand => {
+            let captured_shell_env = dir_env::capture_home_interactive_env().await;
+            let prepend_dirs = doctor_prepend_dirs(&app_handle);
+            // npm-backed fixes run the managed npm into the private prefix, so
+            // the managed runtime must exist before the command does.
+            let resolved_command = doctor::agents::lookup_fix_command(&check_id, &fix_type);
+            if resolved_command
+                .as_deref()
+                .is_some_and(managed_acp_tools::is_npm_backed_command)
+            {
+                ensure_managed_node_runtime_logged(&app_handle).await?;
+            }
+            let mut env_vars = path_env::env_vars_with_extended_path_and_prepended_dirs(
+                &captured_shell_env,
+                &prepend_dirs,
+            );
+            managed_acp_tools::apply_managed_npm_env(
+                &mut env_vars,
+                &managed_acp_tools::managed_npm_env(&app_handle),
+            );
+            doctor::execute_fix_with_env_options(
+                check_id,
+                fix_type,
+                doctor::ExecuteFixOptions {
+                    command_override: None,
+                    npm_registry: crate::commands::agent_setup::npm_registry(&app_handle),
+                    env: None,
+                }
+                .with_env_snapshot(env_vars),
+            )
+            .await
         }
     }
-    let captured_shell_env = dir_env::capture_home_interactive_env().await;
-    let prepend_dirs = doctor_prepend_dirs(&app_handle);
-    if command_override.is_none() {
-        if let Some(fix) = find_local_fix(&LOCAL_DOCTOR_REGISTRY, &check_id, &fix_type) {
-            return execute_local_fix(fix.command, &captured_shell_env, &prepend_dirs).await;
+}
+
+/// Where an authorized `run_doctor_fix` request dispatches. Selecting the target
+/// is pure (it reads only static registries), so [`plan_doctor_fix`] can decide
+/// it — and reject an unauthorized request before any target is chosen — under
+/// unit test without a Tauri runtime.
+#[derive(Debug, PartialEq, Eq)]
+enum DoctorFixDispatch {
+    /// Native (re)install of the managed Node.js runtime.
+    NodeRuntime,
+    /// Managed bridge install through the managed installer (provider id).
+    ManagedInstall(&'static str),
+    /// A local-registry fix command run through `execute_local_fix`.
+    LocalCommand(&'static str),
+    /// A crate AI-agent static command run through `execute_fix_with_env_options`.
+    CrateCommand,
+}
+
+/// Authorize a `run_doctor_fix` request against the fix the check currently
+/// offers, then select its dispatch target — the single backend-owned check/fix
+/// gate for every dispatch path. `offered` is the check's currently-offered fix
+/// from trusted state (`None` when it offers none, e.g. a healthy check). The
+/// request is rejected (and no target is returned) unless it matches, so a
+/// forged/stale/mismatched pair can never reach a shell/native side effect. The
+/// selection reads only static registries, so it is pure and testable.
+fn plan_doctor_fix(
+    check_id: &str,
+    fix_type: &FixType,
+    offered: Option<FixType>,
+) -> Result<DoctorFixDispatch, String> {
+    ensure_offered_fix(check_id, fix_type, offered)?;
+
+    if check_id == NODE_RUNTIME_CHECK.id {
+        return Ok(DoctorFixDispatch::NodeRuntime);
+    }
+    if matches!(fix_type, FixType::Command | FixType::Bridge) {
+        if let Some(provider_id) = managed_provider_for_check(check_id) {
+            return Ok(DoctorFixDispatch::ManagedInstall(provider_id));
         }
     }
-    // npm-backed fixes run the managed npm into the private prefix, so the
-    // managed runtime must exist before the command does.
-    let resolved_command = command_override
-        .clone()
-        .or_else(|| doctor::agents::lookup_fix_command(&check_id, &fix_type));
-    if resolved_command
-        .as_deref()
-        .is_some_and(managed_acp_tools::is_npm_backed_command)
-    {
-        ensure_managed_node_runtime_logged(&app_handle).await?;
+    if let Some(fix) = find_local_fix(&LOCAL_DOCTOR_REGISTRY, check_id, fix_type) {
+        return Ok(DoctorFixDispatch::LocalCommand(fix.command));
     }
-    let mut env_vars = path_env::env_vars_with_extended_path_and_prepended_dirs(
-        &captured_shell_env,
-        &prepend_dirs,
-    );
-    managed_acp_tools::apply_managed_npm_env(
-        &mut env_vars,
-        &managed_acp_tools::managed_npm_env(&app_handle),
-    );
-    doctor::execute_fix_with_env_options(
-        check_id,
-        fix_type,
-        doctor::ExecuteFixOptions {
-            command_override,
-            npm_registry: crate::commands::agent_setup::npm_registry(&app_handle),
-            env: None,
-        }
-        .with_env_snapshot(env_vars),
+    Ok(DoctorFixDispatch::CrateCommand)
+}
+
+/// The fix a doctor check currently offers from trusted backend state, resolved
+/// per check family so the [`ensure_offered_fix`] gate authorizes every
+/// `run_doctor_fix` dispatch against the same current state the renderer's
+/// report reflects:
+///
+/// - `node-runtime`: the native runtime check (`Some(Command)` when
+///   missing/broken, `None` when healthy).
+/// - `ai-agent-*`: the crate check's currently-offered top-level fix
+///   (`Command`/`Bridge` when missing, `Auth` when installed-but-signed-out,
+///   `None` when healthy), resolved from the crate report — this covers both
+///   managed bridges and the static-command agents.
+/// - anything else: the local registry defines no runtime fixes, so this
+///   resolves to `None` and the gate rejects. (Add a resolver here if a local
+///   check ever registers a runnable fix.)
+async fn offered_fix_for_check(
+    app_handle: &AppHandle,
+    check_id: &str,
+) -> Result<Option<FixType>, String> {
+    if check_id == NODE_RUNTIME_CHECK.id {
+        return Ok(node_runtime_offered_fix(app_handle).await);
+    }
+    if check_id.starts_with("ai-agent-") {
+        return crate::commands::agent_setup::offered_crate_check_fix(app_handle, check_id).await;
+    }
+    Ok(None)
+}
+
+/// Reject a fix request whose typed identity doesn't match the fix the check
+/// currently offers from trusted backend state. `offered` is the check's
+/// current fix type (`None` when it offers no fix — e.g. already healthy); the
+/// request is authorized only when the requested `fix_type` equals it. This is
+/// the backend-owned check/fix-combination gate that keeps a compromised
+/// renderer from driving a native or managed operation outside the check's
+/// registered, currently-actionable identity.
+fn ensure_offered_fix(
+    check_id: &str,
+    requested: &FixType,
+    offered: Option<FixType>,
+) -> Result<(), String> {
+    match offered {
+        Some(ref offered) if offered == requested => Ok(()),
+        Some(offered) => Err(format!(
+            "'{requested:?}' does not match the '{offered:?}' fix currently offered for '{check_id}'"
+        )),
+        None => Err(format!(
+            "'{check_id}' offers no '{requested:?}' fix in its current state"
+        )),
+    }
+}
+
+/// The fix the managed Node runtime check currently offers, resolved from the
+/// same trusted state the report is built from: `Some(Command)` when the
+/// runtime is missing/broken (the native reinstall), `None` when it is healthy
+/// or unreported. Mirrors `build_managed_node_runtime_check`'s `offers_fix`
+/// decision so the fix gate can't disagree with the report the renderer saw.
+async fn node_runtime_offered_fix(app_handle: &AppHandle) -> Option<FixType> {
+    let paths = ManagedRuntimePaths::resolve(app_handle);
+    let check = run_node_runtime_check(
+        paths.node_root,
+        paths.npm_prefix_bin_dir,
+        paths.shim_bin_dir,
     )
-    .await
+    .await?;
+    check.fix_type
 }
 
 /// The provider id of a managed bridge, when this crate check id maps to one
@@ -1907,6 +2040,197 @@ mod tests {
         assert!(text.contains("  details:\n    exit status: 0"));
         // Category headers appear before the checks that belong to them.
         assert!(text.find("== Tools ==").unwrap() < text.find("(git)").unwrap());
+    }
+
+    #[test]
+    fn run_doctor_fix_policy_gate_rejects_when_doctor_disabled() {
+        // `run_doctor_fix` guards on `doctor_enabled(&runtime_config)` before it
+        // resolves offered state or dispatches any fix. This pins the decision
+        // core of that guard: a config that disables Doctor selects no dispatch
+        // (the command returns `Err` before `offered_fix_for_check`), while the
+        // default (absent config) keeps fixes runnable.
+        let disabled = runtime_config_with_doctor(Some(RuntimeDoctorConfig {
+            enabled: Some(false),
+            kgoose_connectivity: None,
+            internal_tooling_checks: None,
+        }));
+        assert!(!doctor_enabled(&disabled));
+
+        let explicitly_enabled = runtime_config_with_doctor(Some(RuntimeDoctorConfig {
+            enabled: Some(true),
+            kgoose_connectivity: None,
+            internal_tooling_checks: None,
+        }));
+        assert!(doctor_enabled(&explicitly_enabled));
+
+        // Absent config defaults to enabled so the fix path keeps working.
+        assert!(doctor_enabled(&runtime_config_with_doctor(None)));
+    }
+
+    #[test]
+    fn ensure_offered_fix_authorizes_only_the_currently_offered_fix() {
+        // The dispatch gate the node-runtime and managed-install branches call
+        // before any native/managed side effect. A request is authorized only
+        // when it equals the fix the check currently offers from trusted state.
+        assert!(
+            ensure_offered_fix("node-runtime", &FixType::Command, Some(FixType::Command)).is_ok()
+        );
+        assert!(
+            ensure_offered_fix("ai-agent-claude", &FixType::Command, Some(FixType::Command))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn ensure_offered_fix_rejects_a_mismatched_fix_identity() {
+        // Concrete mismatch from the review: the managed Claude check offers
+        // `Command`, so `(ai-agent-claude, Bridge)` must reject before the
+        // networked native install, not silently install.
+        assert!(
+            ensure_offered_fix("ai-agent-claude", &FixType::Bridge, Some(FixType::Command))
+                .is_err()
+        );
+        // Any non-Command identity against node-runtime is a forged pair.
+        for forged in [
+            FixType::Bridge,
+            FixType::Auth,
+            FixType::UpdateMain,
+            FixType::UpdateBridge,
+        ] {
+            assert!(
+                ensure_offered_fix("node-runtime", &forged, Some(FixType::Command)).is_err(),
+                "expected {forged:?} against a Command-only check to reject"
+            );
+        }
+    }
+
+    #[test]
+    fn ensure_offered_fix_rejects_when_the_check_offers_no_fix() {
+        // A passing runtime (or an already-installed managed agent) offers no
+        // fix, so every request must fail closed rather than trigger a
+        // privileged reinstall.
+        assert!(ensure_offered_fix("node-runtime", &FixType::Command, None).is_err());
+        assert!(ensure_offered_fix("ai-agent-claude", &FixType::Command, None).is_err());
+        assert!(ensure_offered_fix("ai-agent-claude", &FixType::Bridge, None).is_err());
+    }
+
+    #[test]
+    fn plan_doctor_fix_forged_auth_rejects_before_selecting_the_static_command() {
+        // Regression for the auth/command bypass: a forged `(ai-agent-claude,
+        // Auth)` request when the check currently offers `Command` (missing
+        // install) must return an `Err` from the planner — no dispatch target —
+        // so `run_doctor_fix` never reaches the `CrateCommand` branch that would
+        // resolve and run `claude-agent-acp --cli auth login`.
+        assert!(
+            plan_doctor_fix("ai-agent-claude", &FixType::Auth, Some(FixType::Command)).is_err()
+        );
+        // An `Auth` request against a healthy (already-authenticated) check that
+        // offers nothing also rejects before target selection.
+        assert!(plan_doctor_fix("ai-agent-claude", &FixType::Auth, None).is_err());
+    }
+
+    #[test]
+    fn plan_doctor_fix_static_command_rejects_while_the_check_is_passing() {
+        // A registered static/local `Command` fix must not be callable while the
+        // check is passing: a healthy check offers no fix, so the planner rejects
+        // before returning any dispatch target.
+        assert!(plan_doctor_fix("ai-agent-copilot", &FixType::Command, None).is_err());
+        // A `Command` request against a check that currently offers `Auth`
+        // (installed but signed out) is a mismatch and also rejects.
+        assert!(
+            plan_doctor_fix("ai-agent-copilot", &FixType::Command, Some(FixType::Auth)).is_err()
+        );
+    }
+
+    #[test]
+    fn plan_doctor_fix_authorizes_and_routes_the_currently_offered_fix() {
+        // The valid currently-offered paths still resolve to their exact
+        // dispatch target, so legitimate fixes keep working after the gate.
+        assert_eq!(
+            plan_doctor_fix("node-runtime", &FixType::Command, Some(FixType::Command)).unwrap(),
+            DoctorFixDispatch::NodeRuntime
+        );
+        // A currently-offered `Auth` on a static-command agent routes to the
+        // crate command executor (which then resolves `<agent> login`).
+        assert_eq!(
+            plan_doctor_fix("ai-agent-copilot", &FixType::Auth, Some(FixType::Auth)).unwrap(),
+            DoctorFixDispatch::CrateCommand
+        );
+    }
+
+    #[test]
+    fn plan_doctor_fix_routes_a_currently_offered_managed_install() {
+        // A managed bridge whose check currently offers `Command` routes to the
+        // managed installer; a mismatched `Bridge` request (the registry offers
+        // `Command`, not `Bridge`) rejects before any target is chosen. Guarded
+        // on the managed set being present on this build/target.
+        if let Some(provider_id) = managed_provider_for_check("ai-agent-claude") {
+            assert_eq!(
+                plan_doctor_fix("ai-agent-claude", &FixType::Command, Some(FixType::Command))
+                    .unwrap(),
+                DoctorFixDispatch::ManagedInstall(provider_id)
+            );
+            assert!(
+                plan_doctor_fix("ai-agent-claude", &FixType::Bridge, Some(FixType::Command))
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn plan_doctor_fix_rejects_forged_node_runtime_pairs() {
+        // Any non-`Command` identity against node-runtime is a forged pair, and
+        // a request against a healthy runtime (offers nothing) fails closed —
+        // neither ever reaches the native reinstall target.
+        for forged in [
+            FixType::Bridge,
+            FixType::Auth,
+            FixType::UpdateMain,
+            FixType::UpdateBridge,
+        ] {
+            assert!(
+                plan_doctor_fix("node-runtime", &forged, Some(FixType::Command)).is_err(),
+                "expected {forged:?} against a Command-only runtime to reject"
+            );
+        }
+        assert!(plan_doctor_fix("node-runtime", &FixType::Command, None).is_err());
+    }
+
+    #[test]
+    fn run_doctor_fix_cannot_resolve_update_fix_types_without_an_override() {
+        // Regression for the renderer-command-override removal: `run_doctor_fix`
+        // no longer accepts a command string, so the only command source for an
+        // agent check is the crate's static table. Update fixes are derived
+        // per-readout and are intentionally absent from that table, so a forged
+        // `updateMain` / `updateBridge` request resolves to nothing and the
+        // executor rejects it rather than running arbitrary text.
+        for check_id in ["ai-agent-claude", "ai-agent-codex", "ai-agent-amp"] {
+            assert_eq!(
+                doctor::agents::lookup_fix_command(check_id, &FixType::UpdateMain),
+                None
+            );
+            assert_eq!(
+                doctor::agents::lookup_fix_command(check_id, &FixType::UpdateBridge),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn run_doctor_fix_rejects_unknown_check_ids() {
+        // An unknown check id has no static fix and no local-registry fix, so
+        // there is nothing for the renderer to trigger — the executor path
+        // resolves `None` and fails closed.
+        assert_eq!(
+            doctor::agents::lookup_fix_command("totally-made-up-check", &FixType::Command),
+            None
+        );
+        assert!(find_local_fix(
+            &LOCAL_DOCTOR_REGISTRY,
+            "totally-made-up-check",
+            &FixType::Command
+        )
+        .is_none());
     }
 
     #[test]

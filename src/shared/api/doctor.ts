@@ -95,7 +95,6 @@ export async function runDoctorFresh(): Promise<DoctorReport> {
 export async function runDoctorFix(
   checkId: string,
   fixType: FixType,
-  commandOverride?: string,
 ): Promise<void> {
-  return invoke("run_doctor_fix", { checkId, fixType, commandOverride });
+  return invoke("run_doctor_fix", { checkId, fixType });
 }

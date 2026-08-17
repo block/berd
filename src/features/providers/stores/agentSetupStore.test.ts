@@ -99,7 +99,7 @@ describe("useAgentSetupStore", () => {
     await useAgentSetupStore.getState().init();
     await useAgentSetupStore.getState().startSetup("claude-acp", "install", {
       installFixType: "command",
-      updateCommands: [],
+      updateFixTypes: [],
       verifyInstall: true,
     });
 

@@ -32,7 +32,7 @@ import {
 import { ArrowUpCircle } from "lucide-react";
 import type {
   AgentSetupAction,
-  AgentSetupUpdateCommand,
+  AgentSetupUpdateFixType,
 } from "@/features/providers/api/agentSetup";
 import { useAgentSetupStore } from "@/features/providers/stores/agentSetupStore";
 import {
@@ -213,15 +213,16 @@ export function AgentProviderCard({
   const installFixType: Extract<FixType, "command" | "bridge"> =
     versionCheck?.fixType === "bridge" ? "bridge" : "command";
 
-  // Build the per-readout update commands the backend runs after the install
-  // loop. Readout *derivation* stays here (it already has the doctor report);
-  // only the resulting recipe crosses to Rust.
-  function buildUpdateCommands(): AgentSetupUpdateCommand[] {
+  // Build the per-readout update fix identities the backend runs after the
+  // install loop. Readout *derivation* stays here (it already has the doctor
+  // report) to decide *whether* an update is actionable; only the typed fix
+  // slot crosses to Rust, which re-resolves the exact command from the crate's
+  // trusted freshness readout.
+  function buildUpdateFixTypes(): AgentSetupUpdateFixType[] {
     return actionableReadouts.flatMap((readout) =>
-      (readout.updateFixType === "updateMain" ||
-        readout.updateFixType === "updateBridge") &&
-      readout.updateCommand
-        ? [{ fixType: readout.updateFixType, command: readout.updateCommand }]
+      readout.updateFixType === "updateMain" ||
+      readout.updateFixType === "updateBridge"
+        ? [readout.updateFixType]
         : [],
     );
   }
@@ -256,7 +257,7 @@ export function AgentProviderCard({
     try {
       await startSetup(provider.id, "install", {
         installFixType,
-        updateCommands: buildUpdateCommands(),
+        updateFixTypes: buildUpdateFixTypes(),
         verifyInstall,
         ...(bundledBridge ? { bundledBridge } : {}),
       });
@@ -348,7 +349,7 @@ export function AgentProviderCard({
     }
     void startSetup(provider.id, "update", {
       installFixType: null,
-      updateCommands: buildUpdateCommands(),
+      updateFixTypes: buildUpdateFixTypes(),
       verifyInstall,
       ...(bundledBridge ? { bundledBridge } : {}),
     });
@@ -362,7 +363,7 @@ export function AgentProviderCard({
     }
     void startSetup(provider.id, "auth", {
       installFixType: null,
-      updateCommands: [],
+      updateFixTypes: [],
       verifyInstall,
       ...(bundledBridge ? { bundledBridge } : {}),
     });
