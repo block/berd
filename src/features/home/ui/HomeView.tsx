@@ -206,10 +206,14 @@ export function HomeView({
       }
       return instance;
     });
-    void widgetMutations.applyStarterLayout(
-      arranged,
-      camera ? { ...camera, centerX: 80, centerY: 44, zoomBps: 9_000 } : null,
-    );
+    void widgetMutations
+      .applyStarterLayout(
+        arranged,
+        camera ? { ...camera, centerX: 80, centerY: 44, zoomBps: 9_000 } : null,
+      )
+      .then((confirmed) => {
+        if (!confirmed) starterLayoutArrangementAttemptedRef.current = false;
+      });
   }, [
     camera,
     instances,

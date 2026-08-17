@@ -321,6 +321,42 @@ describe("homeWidgetStore", () => {
     await reset;
   });
 
+  it("rejects every persistence entry point while onboarding reset is in flight", async () => {
+    const resetSave = deferred<SaveItemsResult>();
+    setReadyHomeState({
+      camera: INITIAL_CAMERA,
+      cameraRevision: 1,
+      itemRevision: 4,
+      instances: [clockWidget()],
+    });
+    useHomeWidgetStore.setState({
+      cleanUpSnapshot: [{ id: "w1", type: "clock", x: 0, y: 0, z: 1 }],
+    });
+    vi.mocked(saveLayoutItems).mockReturnValueOnce(resetSave.promise);
+
+    const reset = useHomeWidgetStore.getState().resetHomeForOnboarding();
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledOnce());
+    const duringReset = useHomeWidgetStore.getState();
+    duringReset.addWidget("agentPin", 1, 1, { agentId: "blocked" });
+    duringReset.toggleCleanUpWidgets();
+    duringReset.saveCamera({ centerX: 99, centerY: 99, zoomBps: 9_999 });
+    await expect(
+      duringReset.addMissingStarterAgentPins(["blocked"]),
+    ).resolves.toBe(false);
+    await expect(
+      duringReset.applyStarterLayout([clockWidget()], INITIAL_CAMERA),
+    ).resolves.toBe(false);
+
+    expect(saveLayoutItems).toHaveBeenCalledOnce();
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
+    const requestedItems = vi.mocked(saveLayoutItems).mock.calls[0][0].items;
+    resetSave.resolve({
+      ok: true,
+      layout: layout({ itemRevision: 5, items: requestedItems }),
+    });
+    await reset;
+  });
+
   it("keeps a confirmed onboarding canvas when camera recentering fails", async () => {
     setReadyHomeState({
       camera: INITIAL_CAMERA,

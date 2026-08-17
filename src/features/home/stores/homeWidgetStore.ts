@@ -305,13 +305,17 @@ function createHomeWidgetStore() {
   });
 
   store = create<HomeWidgetStore>()((set, get) => {
+    function canAcceptMutation(state: HomeWidgetStore): boolean {
+      return !onboardingResetInFlight && canMutateWidgets(state);
+    }
+
     function applyMutation(
       mutate: (
         instances: HomeWidgetState["instances"],
       ) => HomeWidgetState["instances"] | null,
     ): void {
       const state = get();
-      if (onboardingResetInFlight || !canMutateWidgets(state)) {
+      if (!canAcceptMutation(state)) {
         return;
       }
 
@@ -349,7 +353,7 @@ function createHomeWidgetStore() {
         if (starterAgentRecoveryPromise) return starterAgentRecoveryPromise;
         starterAgentRecoveryPromise = (async () => {
           const state = get();
-          if (!canMutateWidgets(state) || agentIds.length === 0) return false;
+          if (!canAcceptMutation(state) || agentIds.length === 0) return false;
           const retainedInstances = legacyBerdyAgentId
             ? state.instances.filter(
                 (instance) =>
@@ -420,7 +424,7 @@ function createHomeWidgetStore() {
         }
 
         const current = get();
-        if (!canMutateWidgets(current)) {
+        if (!canAcceptMutation(current)) {
           return false;
         }
 
@@ -522,7 +526,7 @@ function createHomeWidgetStore() {
       },
       applyStarterLayout: async (instances, camera) => {
         const state = get();
-        if (!canMutateWidgets(state)) return false;
+        if (!canAcceptMutation(state)) return false;
         const initialItemRevision = state.itemRevision;
         const initialCameraRevision = state.cameraRevision;
         set({ instances, ...(camera ? { camera } : {}) });
@@ -530,7 +534,26 @@ function createHomeWidgetStore() {
         if (camera) runtime.enqueueCameraSave(camera);
         await runtime.waitForPendingSaves();
         const latest = get();
-        const itemsConfirmed = latest.itemRevision !== initialItemRevision;
+        const requestedById = new Map(
+          instances.map((instance) => [instance.id, instance]),
+        );
+        const itemsConfirmed =
+          latest.itemRevision !== initialItemRevision &&
+          latest.instances.length === instances.length &&
+          latest.instances.every((actual) => {
+            const expected = requestedById.get(actual.id);
+            return (
+              expected !== undefined &&
+              actual.type === expected.type &&
+              actual.x === expected.x &&
+              actual.y === expected.y &&
+              actual.width === expected.width &&
+              actual.height === expected.height &&
+              actual.z === expected.z &&
+              actual.state?.agentId === expected.state?.agentId &&
+              actual.state?.noteId === expected.state?.noteId
+            );
+          });
         const cameraConfirmed =
           !camera ||
           (latest.cameraRevision !== initialCameraRevision &&
@@ -548,7 +571,7 @@ function createHomeWidgetStore() {
       },
       toggleCleanUpWidgets: (bounds) => {
         const state = get();
-        if (!canMutateWidgets(state)) {
+        if (!canAcceptMutation(state)) {
           return;
         }
 
@@ -599,7 +622,7 @@ function createHomeWidgetStore() {
         const state = get();
         const berdyOnboardingEnabled =
           getExperiment(BERDY_ONBOARDING_EXPERIMENT_ID)?.enabled === true;
-        if (!berdyOnboardingEnabled || !canMutateWidgets(state)) {
+        if (!berdyOnboardingEnabled || !canAcceptMutation(state)) {
           return false;
         }
 
@@ -649,7 +672,7 @@ function createHomeWidgetStore() {
       },
       resetStarterTasks: async () => {
         const state = get();
-        if (!canMutateWidgets(state)) return false;
+        if (!canAcceptMutation(state)) return false;
         const initialItemRevision = state.itemRevision;
         const existingTaskNote = state.instances.find(
           (instance) => defaultStickyNoteId(instance) === STARTER_TASKS_NOTE_ID,
@@ -852,7 +875,7 @@ function createHomeWidgetStore() {
       },
       saveCamera: (camera) => {
         const state = get();
-        if (state.loadStatus !== "ready" || state.cameraRevision === null) {
+        if (!canAcceptMutation(state) || state.cameraRevision === null) {
           return;
         }
 
