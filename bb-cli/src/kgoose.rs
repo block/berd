@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::env;
-use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -8,11 +7,9 @@ use reqwest::blocking::{Client, ClientBuilder};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use url::Url;
 
 use crate::bb::auth::SESSION_CREDENTIAL_HEADER;
 use crate::bb::skills_config::normalize_kgoose_service_path;
-use crate::http_origin::{origin_label, parse_http_url, same_origin_redirect_policy_with};
 pub use crate::proto::squareup::cash::kgoose::api::v3::{
     CallToolRequest, CallToolResponse, ExtensionInfo, ListExtensionsRequest,
     ListExtensionsResponse, ListToolsRequest, ListToolsResponse, Source, ToolConfig,
@@ -23,8 +20,6 @@ pub const DEFAULT_KGOOSE_BASE_URL: &str = "https://kgoose.sqprod.co";
 pub const DEFAULT_KGOOSE_TIMEOUT_SECS: f64 = 600.0;
 const STS_ACCESS_TOKEN_ENV_VAR: &str = "STS_ACCESS_TOKEN";
 const KGOOSE_DEBUG_ENV_VAR: &str = "KGOOSE_DEBUG";
-/// Registrable domain Cloudflare Access redirects to when WARP is off.
-const CLOUDFLARE_ACCESS_DOMAIN: &str = "cloudflareaccess.com";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct KgooseConfig {
@@ -111,8 +106,7 @@ impl HttpKgooseClient {
         T: DeserializeOwned,
         B: Serialize + ?Sized,
     {
-        let base_url = parse_http_url(&config.base_url, "kgoose base URL")?;
-        let (client, refused_redirect) = build_http_client(config, &base_url)?;
+        let client = build_http_client(config)?;
         let service_path = normalize_kgoose_service_path(&config.service_path)?;
         let request_path = format!(
             "{}/{}",
@@ -128,20 +122,13 @@ impl HttpKgooseClient {
             option_for_debug(config.goosemcp_playpen.as_deref())
         ));
 
-        let response = match client.post(&url).json(body).send() {
-            Ok(response) => response,
-            Err(err) => {
-                // The slot is only filled when our redirect policy refused a
-                // hop, so a recorded target means the credential stayed home.
-                if let Some(target) = refused_redirect.take() {
-                    return Err(cross_origin_redirect_error(&base_url, &target));
-                }
-                return Err(err).with_context(|| format!("POST {request_path}"));
-            }
-        };
+        let response = client
+            .post(&url)
+            .json(body)
+            .send()
+            .with_context(|| format!("POST {request_path}"))?;
 
         let status = response.status();
-        let served_by_cloudflare_access = is_cloudflare_access(response.url());
         let final_url = response.url().to_string();
         let response_body = response
             .text()
@@ -152,12 +139,9 @@ impl HttpKgooseClient {
             response_body.len()
         ));
 
-        // Backstop for a Cloudflare Access login page (indicates VPN is off).
-        // A redirect to Cloudflare Access is refused before the credential is
-        // sent, so this only fires when the configured base URL is itself a
-        // Cloudflare Access host. Note that Cloudflare returns 200 OK with an
-        // HTML login page, not an error status.
-        if served_by_cloudflare_access {
+        // Check for Cloudflare Access redirect (indicates VPN is off)
+        // Note: Cloudflare returns 200 OK with an HTML login page, not an error status
+        if final_url.contains("cloudflareaccess.com") {
             anyhow::bail!(
                 "Cannot connect to kgoose - received Cloudflare Access redirect.\n\
                  This usually means you need to connect to the corporate VPN (WARP).\n\
@@ -175,51 +159,7 @@ impl HttpKgooseClient {
     }
 }
 
-/// Records the redirect target the client refused to follow, so `post_json` can
-/// name the host it declined to send credentials to.
-#[derive(Clone, Debug, Default)]
-struct RefusedRedirect(Arc<Mutex<Option<Url>>>);
-
-impl RefusedRedirect {
-    fn record(&self, url: &Url) {
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(url.clone());
-    }
-
-    fn take(&self) -> Option<Url> {
-        self.0.lock().unwrap_or_else(PoisonError::into_inner).take()
-    }
-}
-
-fn is_cloudflare_access(url: &Url) -> bool {
-    url.host_str().is_some_and(|host| {
-        host == CLOUDFLARE_ACCESS_DOMAIN || host.ends_with(&format!(".{CLOUDFLARE_ACCESS_DOMAIN}"))
-    })
-}
-
-fn cross_origin_redirect_error(base_url: &Url, target: &Url) -> anyhow::Error {
-    let base_origin = origin_label(base_url);
-    let target_origin = origin_label(target);
-    if is_cloudflare_access(target) {
-        anyhow::anyhow!(
-            "Cannot connect to kgoose - {base_origin} redirected to Cloudflare Access \
-             ({target_origin}).\n\
-             This usually means you need to connect to the corporate VPN (WARP).\n\
-             Please enable WARP and try again.\n\
-             Your kgoose credentials were not sent to {target_origin}."
-        )
-    } else {
-        anyhow::anyhow!(
-            "Cannot connect to kgoose - {base_origin} redirected to {target_origin}, a different \
-             origin.\n\
-             Your kgoose credentials were not sent to {target_origin}; point KGOOSE_BASE_URL at \
-             {target_origin} directly if that host is the intended service."
-        )
-    }
-}
-
-/// Builds the request client alongside the slot that records a refused
-/// cross-origin redirect.
-fn build_http_client(config: &KgooseConfig, base_url: &Url) -> Result<(Client, RefusedRedirect)> {
+fn build_http_client(config: &KgooseConfig) -> Result<Client> {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
@@ -271,29 +211,11 @@ fn build_http_client(config: &KgooseConfig, base_url: &Url) -> Result<(Client, R
             .join(",")
     ));
 
-    // The session credential and identity token ride on every request as
-    // default headers, so redirects stay inside the configured origin: reqwest
-    // would otherwise replay them to whatever host a redirect names, which is
-    // exactly what happens when Cloudflare Access bounces us off-origin.
-    let refused_redirect = RefusedRedirect::default();
-    let redirect_policy = same_origin_redirect_policy_with(base_url.clone(), {
-        let refused_redirect = refused_redirect.clone();
-        move |target| {
-            refused_redirect.record(target);
-            format!(
-                "refusing to send kgoose credentials across a redirect to {}",
-                origin_label(target)
-            )
-        }
-    });
-
-    let client = ClientBuilder::new()
+    ClientBuilder::new()
         .default_headers(headers)
-        .redirect(redirect_policy)
         .timeout(config.timeout())
         .build()
-        .context("build HTTP client")?;
-    Ok((client, refused_redirect))
+        .context("build HTTP client")
 }
 
 fn truncate(value: &str, max_len: usize) -> String {
@@ -327,237 +249,8 @@ fn option_for_debug(value: Option<&str>) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{BufRead, BufReader, Read, Write};
-    use std::net::{TcpListener, TcpStream};
-
-    use super::*;
-    use crate::bb::skills_config::DEFAULT_KGOOSE_SERVICE_PATH;
+    use super::{CallToolResponse, ListExtensionsResponse, ListToolsResponse};
     use crate::proto::squareup::cash::kgoose::api::v3::user_content;
-    use crate::test_server::{prepare_stream, ServerThread};
-
-    const TEST_SESSION_CREDENTIAL: &str = "test-session-credential";
-
-    #[derive(Clone, Debug)]
-    struct RecordedRequest {
-        path: String,
-        headers: HeaderMap,
-    }
-
-    impl RecordedRequest {
-        fn session_credential(&self) -> Option<&str> {
-            self.headers
-                .get(SESSION_CREDENTIAL_HEADER)
-                .and_then(|value| value.to_str().ok())
-        }
-    }
-
-    /// Minimal HTTP server for the redirect tests, over the shared
-    /// [`ServerThread`] so a test that expects *no* request cannot hang waiting
-    /// for one that never arrives.
-    struct TestServer {
-        base_url: String,
-        requests: Arc<Mutex<Vec<RecordedRequest>>>,
-        _thread: ServerThread,
-    }
-
-    impl TestServer {
-        fn start(responses: Vec<String>) -> Self {
-            let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
-            let base_url = format!("http://{}", listener.local_addr().expect("server address"));
-            let requests = Arc::new(Mutex::new(Vec::new()));
-            let thread_requests = Arc::clone(&requests);
-            let thread = ServerThread::spawn(listener, responses, move |stream, response| {
-                let response = response.unwrap_or_else(unexpected_request_response);
-                record_and_respond(stream, &thread_requests, &response);
-            });
-            Self {
-                base_url,
-                requests,
-                _thread: thread,
-            }
-        }
-
-        /// Requests recorded so far. Each request is recorded before its
-        /// response is written, so every hop the client saw completed is
-        /// already here by the time the client call returns.
-        fn requests(&self) -> Vec<RecordedRequest> {
-            self.requests.lock().expect("lock requests").clone()
-        }
-    }
-
-    fn record_and_respond(
-        stream: TcpStream,
-        requests: &Arc<Mutex<Vec<RecordedRequest>>>,
-        response: &str,
-    ) {
-        prepare_stream(&stream);
-        let mut reader = BufReader::new(stream.try_clone().expect("clone test stream"));
-        let mut request_line = String::new();
-        reader
-            .read_line(&mut request_line)
-            .expect("read request line");
-        let path = request_line
-            .split_whitespace()
-            .nth(1)
-            .expect("request path")
-            .to_string();
-        let mut headers = HeaderMap::new();
-        let mut content_length = 0usize;
-        loop {
-            let mut line = String::new();
-            reader.read_line(&mut line).expect("read request header");
-            if line == "\r\n" || line.is_empty() {
-                break;
-            }
-            if let Some((name, value)) = line.split_once(':') {
-                if name.eq_ignore_ascii_case("content-length") {
-                    content_length = value.trim().parse().expect("content length");
-                }
-                headers.insert(
-                    HeaderName::from_bytes(name.as_bytes()).expect("valid header name"),
-                    HeaderValue::from_str(value.trim()).expect("valid header value"),
-                );
-            }
-        }
-        let mut body = vec![0; content_length];
-        reader.read_exact(&mut body).expect("read request body");
-        requests
-            .lock()
-            .expect("lock requests")
-            .push(RecordedRequest { path, headers });
-        let mut stream = stream;
-        stream
-            .write_all(response.as_bytes())
-            .expect("write test response");
-    }
-
-    fn json_response(body: &str) -> String {
-        format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        )
-    }
-
-    /// Served for a request the test queued no response for, so that request is
-    /// still recorded rather than dropped.
-    fn unexpected_request_response() -> String {
-        "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-            .to_string()
-    }
-
-    /// 307 keeps the method and body, so the retried hop is another authenticated POST.
-    fn redirect_response(location: &str) -> String {
-        format!(
-            "HTTP/1.1 307 Temporary Redirect\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        )
-    }
-
-    fn test_config(base_url: &str) -> KgooseConfig {
-        KgooseConfig {
-            base_url: base_url.to_string(),
-            service_path: DEFAULT_KGOOSE_SERVICE_PATH.to_string(),
-            playpen: None,
-            goosemcp_playpen: None,
-            timeout_secs: 5.0,
-            session_credential: Some(TEST_SESSION_CREDENTIAL.to_string()),
-        }
-    }
-
-    fn list_extensions(config: &KgooseConfig) -> Result<ListExtensionsResponse> {
-        HttpKgooseClient.post_json(config, LIST_EXTENSIONS_PATH, &ListExtensionsRequest {})
-    }
-
-    #[test]
-    fn post_json_keeps_credential_across_same_origin_redirect() {
-        let server = TestServer::start(vec![
-            redirect_response("/cash-app/goose/v3/list-extensions?retry=1"),
-            json_response("{}"),
-        ]);
-
-        let response =
-            list_extensions(&test_config(&server.base_url)).expect("follow same-origin redirect");
-
-        assert!(response.extensions.is_empty());
-        let requests = server.requests();
-        assert_eq!(requests.len(), 2);
-        assert_eq!(
-            requests[1].path,
-            "/cash-app/goose/v3/list-extensions?retry=1"
-        );
-        for request in &requests {
-            assert_eq!(
-                request.session_credential(),
-                Some(TEST_SESSION_CREDENTIAL),
-                "same-origin hop {} lost the credential",
-                request.path
-            );
-        }
-    }
-
-    #[test]
-    fn post_json_refuses_cross_origin_redirect_without_sending_credential() {
-        // The destination serves what it would serve in the attack it stands in
-        // for, so a client that followed the hop fails on `expect_err` rather
-        // than on some incidental error from an unserved request.
-        let destination = TestServer::start(vec![json_response("{}")]);
-        let kgoose = TestServer::start(vec![redirect_response(&format!(
-            "{}/cash-app/goose/v3/list-extensions",
-            destination.base_url
-        ))]);
-
-        let error =
-            list_extensions(&test_config(&kgoose.base_url)).expect_err("refuse cross-origin hop");
-
-        let message = format!("{error:#}");
-        assert!(message.contains(&destination.base_url), "{message}");
-        assert!(message.contains("credentials were not sent"), "{message}");
-        assert_eq!(kgoose.requests().len(), 1);
-        assert!(
-            destination.requests().is_empty(),
-            "credential-bearing request reached the redirect target"
-        );
-    }
-
-    #[test]
-    fn post_json_reports_cloudflare_access_redirect_as_vpn_hint() {
-        let server = TestServer::start(vec![redirect_response(
-            "https://block.cloudflareaccess.com/cdn-cgi/access/login/kgoose.sqprod.co",
-        )]);
-
-        let error = list_extensions(&test_config(&server.base_url))
-            .expect_err("refuse Cloudflare Access hop");
-
-        let message = format!("{error:#}");
-        assert!(message.contains("WARP"), "{message}");
-        assert!(
-            message.contains("https://block.cloudflareaccess.com"),
-            "{message}"
-        );
-        assert!(message.contains("credentials were not sent"), "{message}");
-    }
-
-    #[test]
-    fn cloudflare_access_detection_requires_the_real_domain() {
-        for host in [
-            "https://block.cloudflareaccess.com/login",
-            "https://cloudflareaccess.com/login",
-        ] {
-            assert!(
-                is_cloudflare_access(&Url::parse(host).expect("parse URL")),
-                "{host}"
-            );
-        }
-        for host in [
-            "https://notcloudflareaccess.com/login",
-            "https://cloudflareaccess.com.evil.example/login",
-            "https://kgoose.sqprod.co/cash-app/goose",
-        ] {
-            assert!(
-                !is_cloudflare_access(&Url::parse(host).expect("parse URL")),
-                "{host}"
-            );
-        }
-    }
 
     #[test]
     fn list_tools_response_deserializes_generated_proto_shape() {

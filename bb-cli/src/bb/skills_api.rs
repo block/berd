@@ -19,9 +19,6 @@ use super::auth_storage::stored_session_credential_header_value;
 use super::display::Style;
 use super::skills_config::{kgoose_service_url, SkillsConfig};
 use super::skills_models::{BundlePage, BundleSummary, SkillPage, SkillSummary};
-use crate::http_origin::{
-    ensure_http_url, parse_http_url, same_origin, same_origin_redirect_policy, MAX_REDIRECTS,
-};
 
 /// Documented `bb skills` exit codes (see `bb skills --help`).
 pub mod exit_codes {
@@ -241,7 +238,7 @@ impl MarketplaceClient {
         let mut authenticated = same_origin(&url, &self.base_url);
         self.style.verbose(&format!("GET {path_or_url} (artifact)"));
 
-        for redirects in 0..=MAX_REDIRECTS {
+        for redirects in 0..=10 {
             let client = if authenticated {
                 &self.authenticated_artifact_client
             } else {
@@ -253,7 +250,7 @@ impl MarketplaceClient {
                 .map_err(|err| network_failure("GET", path_or_url, err))?;
             let status = response.status();
             if is_redirect(status) {
-                if redirects == MAX_REDIRECTS {
+                if redirects == 10 {
                     return Err(failure(
                         exit_codes::NETWORK,
                         "too_many_redirects",
@@ -534,6 +531,25 @@ fn invalid_agent_operation(error: AgentOperationError) -> anyhow::Error {
 
 pub const LIST_PAGE_LIMIT: u32 = 5000;
 
+fn parse_http_url(value: &str, label: &str) -> Result<Url> {
+    let url = Url::parse(value).with_context(|| format!("parse {label} `{value}`"))?;
+    ensure_http_url(&url, label)?;
+    Ok(url)
+}
+
+fn ensure_http_url(url: &Url, label: &str) -> Result<()> {
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        anyhow::bail!("{label} must be an absolute HTTP(S) URL: `{url}`");
+    }
+    Ok(())
+}
+
+fn same_origin(left: &Url, right: &Url) -> bool {
+    left.scheme() == right.scheme()
+        && left.host_str() == right.host_str()
+        && left.port_or_known_default() == right.port_or_known_default()
+}
+
 fn is_redirect(status: StatusCode) -> bool {
     matches!(
         status,
@@ -543,6 +559,18 @@ fn is_redirect(status: StatusCode) -> bool {
             | StatusCode::TEMPORARY_REDIRECT
             | StatusCode::PERMANENT_REDIRECT
     )
+}
+
+fn same_origin_redirect_policy(origin: Url) -> Policy {
+    Policy::custom(move |attempt| {
+        if attempt.previous().len() > 10 {
+            attempt.error("too many redirects")
+        } else if same_origin(attempt.url(), &origin) {
+            attempt.follow()
+        } else {
+            attempt.error("refusing authenticated cross-origin redirect")
+        }
+    })
 }
 
 fn network_failure(method: &str, path: &str, err: reqwest::Error) -> anyhow::Error {
