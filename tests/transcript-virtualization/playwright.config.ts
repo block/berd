@@ -40,6 +40,10 @@ export default defineConfig({
         viewport: { width: 390, height: 844 },
       },
     },
+    {
+      name: "webkit",
+      use: { ...devices["Desktop Safari"] },
+    },
   ],
   ...(startServer
     ? {
