@@ -228,9 +228,10 @@ fn seed_bundled_agents_from_dir(
     entries.sort_by_key(|entry| entry.file_name());
 
     let mut marker = read_seed_marker(target_root)?;
-    let clean_install = !target_root.exists() || fs::read_dir(target_root)
-        .map(|mut entries| entries.next().is_none())
-        .unwrap_or(false);
+    let clean_install = !target_root.exists()
+        || fs::read_dir(target_root)
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false);
     let mut seeded_count = 0usize;
     let mut avatar_refs_to_warm = BTreeSet::new();
 
@@ -268,16 +269,15 @@ fn seed_bundled_agents_from_dir(
             primary_target
         };
         let was_previously_seeded = marker.seeded_files.contains(&file_name);
-        let installed_or_refreshed =
-            if (clean_install || was_previously_seeded)
-                && should_install_agent(&source, &target, was_previously_seeded)?
-            {
-                install_agent_file(&source, &target)?;
-                seeded_count += 1;
-                true
-            } else {
-                false
-            };
+        let installed_or_refreshed = if (clean_install || was_previously_seeded)
+            && should_install_agent(&source, &target, was_previously_seeded)?
+        {
+            install_agent_file(&source, &target)?;
+            seeded_count += 1;
+            true
+        } else {
+            false
+        };
 
         if (installed_or_refreshed || was_previously_seeded)
             && target.exists()
