@@ -766,7 +766,7 @@ describe("sendPromptToExistingSessionInBackground", () => {
     ).toEqual(UPDATED_TARGET_FROM_ACP);
   });
 
-  it("loads the session before acquiring and retains the lease through transport", async () => {
+  it("holds the lease from before hydration through transport", async () => {
     const order: string[] = [];
     let resolveLoad: (() => void) | undefined;
     let resolveTransport: (() => void) | undefined;
@@ -802,9 +802,12 @@ describe("sendPromptToExistingSessionInBackground", () => {
     });
     await vi.waitFor(() => expect(mocks.acpLoadSession).toHaveBeenCalledOnce());
 
-    const leaseDuringLoad = acquireSessionDispatchTarget(SESSION_ID);
-    expect(leaseDuringLoad).not.toBeNull();
-    leaseDuringLoad.release?.();
+    // The hydration window must already be contended: a prompt dispatched
+    // while `session/load` is in flight has its live turn classified as replay
+    // and then discarded when the load replaces the transcript.
+    expect(acquireSessionDispatchTarget(SESSION_ID)).toMatchObject({
+      status: "contended",
+    });
 
     resolveLoad?.();
     await vi.waitFor(() => expect(mocks.acpSendMessage).toHaveBeenCalledOnce());

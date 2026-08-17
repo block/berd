@@ -112,16 +112,33 @@ export async function acquireExistingSessionForBackgroundSend(
   if (creationState) {
     return { status: "creation-incomplete", creationState } as const;
   }
-  const snapshottedTarget = sessionBeforeHydration.executionTarget;
-  const loaded = await loadSessionMessages(sessionId);
-  if (!loaded) {
-    throw new Error("Failed to load the target session before sending.");
+  // Claim the dispatch target before hydrating, not after. Every notification
+  // that arrives while `session/load` is in flight is classified as replay, so
+  // a sender that dispatched during our hydration would have its live turn
+  // buffered as history and then dropped when the load resolves and replaces
+  // the transcript. Holding the lease across the load publishes that window:
+  // other senders see contention and wait for the release instead of
+  // dispatching into it. Hydration under a held lease is expected — the target
+  // coordinator either absorbs a matching observation or defers it to release.
+  const acquisition = acquireSessionDispatchTarget(sessionId);
+  if (acquisition.status !== "acquired") {
+    return acquisition;
   }
-  await applyPendingSessionWorkspaceActivation(sessionId);
-  if (!useChatSessionStore.getState().getSession(sessionId)) {
-    return { status: "session-missing" } as const;
+  try {
+    const loaded = await loadSessionMessages(sessionId);
+    if (!loaded) {
+      throw new Error("Failed to load the target session before sending.");
+    }
+    await applyPendingSessionWorkspaceActivation(sessionId);
+    if (!useChatSessionStore.getState().getSession(sessionId)) {
+      acquisition.release();
+      return { status: "session-missing" } as const;
+    }
+    return acquisition;
+  } catch (error) {
+    acquisition.release();
+    throw error;
   }
-  return acquireSessionDispatchTarget(sessionId, snapshottedTarget);
 }
 
 export async function prepareExistingSessionForBackgroundSend(

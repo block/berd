@@ -1254,4 +1254,42 @@ describe("useBackgroundQueuedMessageDrain", () => {
     ).toBe(ordinary);
     releaseOwner();
   });
+
+  it("leaves a just-promoted head to a foreground owner still keyed to the draft id", async () => {
+    const ordinary = ordinaryRecord();
+    seedDraftSession();
+    useChatStore.setState({
+      queuedMessageBySession: { [DRAFT_SESSION_ID]: [ordinary] },
+    });
+    // The real hand-off timeline: the mounted ChatView owns the draft id and
+    // stays registered there until React commits the promoted id, which is
+    // after the synchronous store writes below. Claiming the head in that
+    // window makes this drain's hydration race the foreground send.
+    const releaseOwner = registerForegroundQueueOwner(DRAFT_SESSION_ID);
+
+    render(<DrainHarness />);
+    act(() => promoteDraft());
+
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession[BACKEND_SESSION_ID]?.[0],
+    ).toBe(ordinary);
+
+    // The user leaves before the foreground drain sends it: this drain takes
+    // over, against the promoted id.
+    act(() => releaseOwner());
+
+    await waitFor(() =>
+      expect(
+        mocks.sendQueuedPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledWith(
+        BACKEND_SESSION_ID,
+        ordinary,
+        expect.any(Function),
+        expect.any(Function),
+      ),
+    );
+  });
 });

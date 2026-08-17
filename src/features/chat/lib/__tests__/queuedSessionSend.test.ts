@@ -6,7 +6,10 @@ import {
   sendQueuedPromptToExistingSessionInBackground,
 } from "@/features/chat/lib/queuedSessionSend";
 import { SessionDispatchCreationIncompleteError } from "@/features/chat/lib/sessionDispatchAcquisition";
-import { resetSessionTargetCoordinatorsForTests } from "@/features/chat/lib/sessionTargetCoordinator";
+import {
+  acquireSessionDispatchTarget,
+  resetSessionTargetCoordinatorsForTests,
+} from "@/features/chat/lib/sessionTargetCoordinator";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { QueuedMessageRecord } from "@/features/chat/stores/chatStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
@@ -84,6 +87,57 @@ describe("acquireExistingSessionForBackgroundSend", () => {
       acquireExistingSessionForBackgroundSend(SESSION_ID),
     ).resolves.toMatchObject({ status: "acquired" });
     expect(mocks.loadSessionMessages).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("holds the dispatch target across hydration so no other sender dispatches into the load", async () => {
+    seedSession();
+    let resolveHydration!: (loaded: boolean) => void;
+    mocks.loadSessionMessages.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        resolveHydration = resolve;
+      }),
+    );
+
+    const acquisition = acquireExistingSessionForBackgroundSend(SESSION_ID);
+
+    // Notifications arriving during `session/load` are treated as replay, so a
+    // second sender must see this window as contended rather than free.
+    expect(mocks.loadSessionMessages).toHaveBeenCalledWith(SESSION_ID);
+    expect(acquireSessionDispatchTarget(SESSION_ID).status).toBe("contended");
+
+    resolveHydration(true);
+    await expect(acquisition).resolves.toMatchObject({ status: "acquired" });
+  });
+
+  it("releases the dispatch target when hydration fails", async () => {
+    seedSession();
+    mocks.loadSessionMessages.mockResolvedValue(false);
+
+    await expect(
+      acquireExistingSessionForBackgroundSend(SESSION_ID),
+    ).rejects.toThrow(/load the target session/);
+
+    // A leaked lease would make every later send look like a running dispatch.
+    const retry = acquireSessionDispatchTarget(SESSION_ID);
+    expect(retry.status).toBe("acquired");
+    retry.release?.();
+  });
+
+  it("releases the dispatch target when the session disappears during hydration", async () => {
+    seedSession();
+    mocks.loadSessionMessages.mockImplementation(async () => {
+      useChatSessionStore.setState({ sessions: [] });
+      return true;
+    });
+
+    await expect(
+      acquireExistingSessionForBackgroundSend(SESSION_ID),
+    ).resolves.toEqual({ status: "session-missing" });
+
+    seedSession();
+    const retry = acquireSessionDispatchTarget(SESSION_ID);
+    expect(retry.status).toBe("acquired");
+    retry.release?.();
   });
 });
 
