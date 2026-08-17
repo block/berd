@@ -367,6 +367,7 @@ mod tests {
             let requests = Arc::new(Mutex::new(Vec::new()));
             let thread_requests = Arc::clone(&requests);
             let thread = ServerThread::spawn(listener, responses, move |stream, response| {
+                let response = response.unwrap_or_else(unexpected_request_response);
                 record_and_respond(stream, &thread_requests, &response);
             });
             Self {
@@ -437,6 +438,13 @@ mod tests {
         )
     }
 
+    /// Served for a request the test queued no response for, so that request is
+    /// still recorded rather than dropped.
+    fn unexpected_request_response() -> String {
+        "HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            .to_string()
+    }
+
     /// 307 keeps the method and body, so the retried hop is another authenticated POST.
     fn redirect_response(location: &str) -> String {
         format!(
@@ -488,8 +496,9 @@ mod tests {
 
     #[test]
     fn post_json_refuses_cross_origin_redirect_without_sending_credential() {
-        // Queue a response the destination would happily serve, so the empty
-        // request log below reflects a refusal rather than a dead listener.
+        // The destination serves what it would serve in the attack it stands in
+        // for, so a client that followed the hop fails on `expect_err` rather
+        // than on some incidental error from an unserved request.
         let destination = TestServer::start(vec![json_response("{}")]);
         let kgoose = TestServer::start(vec![redirect_response(&format!(
             "{}/cash-app/goose/v3/list-extensions",

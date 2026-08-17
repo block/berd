@@ -750,6 +750,7 @@ mod tests {
             let requests = Arc::new(Mutex::new(Vec::new()));
             let thread_requests = Arc::clone(&requests);
             let thread = ServerThread::spawn(listener, responses, move |stream, response| {
+                let response = response.unwrap_or_else(unexpected_request_response);
                 record_and_respond_raw(stream, &thread_requests, &response);
             });
             Self {
@@ -784,6 +785,12 @@ mod tests {
 
     fn status_response(status_line: &str) -> String {
         format!("HTTP/1.1 {status_line}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+    }
+
+    /// Served for a request the test queued no response for, so that request is
+    /// still recorded rather than dropped.
+    fn unexpected_request_response() -> String {
+        status_response("500 Internal Server Error")
     }
 
     fn record_and_respond_raw(
@@ -868,6 +875,7 @@ mod tests {
             let requests = Arc::new(Mutex::new(Vec::new()));
             let thread_requests = Arc::clone(&requests);
             let thread = ServerThread::spawn(listener, responses, move |stream, response| {
+                let response = response.unwrap_or_else(|| json!({"error": "unexpected request"}));
                 record_and_respond(stream, &thread_requests, response);
             });
             Self {
@@ -1305,7 +1313,10 @@ mod tests {
             .headers
             .get(SESSION_CREDENTIAL_HEADER)
             .is_some());
-        assert!(destination.requests().is_empty());
+        assert!(
+            destination.requests().is_empty(),
+            "credential-bearing request reached the redirect target"
+        );
     }
 
     #[test]
@@ -1341,7 +1352,10 @@ mod tests {
 
         let requests = artifact.requests();
         assert!(requests[0].headers.get(SESSION_CREDENTIAL_HEADER).is_none());
-        assert!(marketplace.requests().is_empty());
+        assert!(
+            marketplace.requests().is_empty(),
+            "cross-origin artifact URL was fetched through the marketplace"
+        );
     }
 
     #[test]
@@ -1360,7 +1374,10 @@ mod tests {
         assert!(rendered.contains("artifact host"));
         assert!(!rendered.contains("run `bb auth login`"));
         assert_eq!(artifact.requests().len(), 1);
-        assert!(marketplace.requests().is_empty());
+        assert!(
+            marketplace.requests().is_empty(),
+            "artifact host failure was retried against the marketplace"
+        );
     }
 
     #[test]
@@ -1379,7 +1396,10 @@ mod tests {
         assert!(rendered.contains("artifact host"));
         assert!(!rendered.contains("run `bb auth login`"));
         assert_eq!(artifact.requests().len(), 1);
-        assert!(marketplace.requests().is_empty());
+        assert!(
+            marketplace.requests().is_empty(),
+            "artifact host failure was retried against the marketplace"
+        );
     }
 
     #[test]
@@ -1479,7 +1499,10 @@ mod tests {
             let error = client.download(url).expect_err("unsafe URL must fail");
             assert!(format!("{error:#}").contains("artifact URL"));
         }
-        assert!(marketplace.requests().is_empty());
+        assert!(
+            marketplace.requests().is_empty(),
+            "rejected URL still produced a request"
+        );
     }
 
     #[test]

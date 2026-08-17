@@ -13,6 +13,12 @@ use std::time::Duration;
 /// non-blocking and stops on drop, so a test that queues more responses than
 /// the client requests — the shape a dropped redirect hop produces — fails its
 /// assertions instead of blocking forever in `accept()`.
+///
+/// A connection that arrives after the queue is drained is still handed to
+/// `respond`, with `None` in place of a response, so the request lands in the
+/// caller's log. Otherwise a request no test expected would go unrecorded, and
+/// `assert!(server.requests().is_empty())` — the way these tests state "the
+/// client never contacted this host" — could not fail.
 pub struct ServerThread {
     stop: Arc<AtomicBool>,
     handle: Option<thread::JoinHandle<()>>,
@@ -22,7 +28,7 @@ impl ServerThread {
     pub fn spawn<R: Send + 'static>(
         listener: TcpListener,
         responses: Vec<R>,
-        respond: impl Fn(TcpStream, R) + Send + 'static,
+        respond: impl Fn(TcpStream, Option<R>) + Send + 'static,
     ) -> Self {
         listener
             .set_nonblocking(true)
@@ -33,10 +39,7 @@ impl ServerThread {
             let mut responses = responses.into_iter();
             while !thread_stop.load(Ordering::Relaxed) {
                 match listener.accept() {
-                    Ok((stream, _)) => match responses.next() {
-                        Some(response) => respond(stream, response),
-                        None => break,
-                    },
+                    Ok((stream, _)) => respond(stream, responses.next()),
                     Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(5));
                     }
