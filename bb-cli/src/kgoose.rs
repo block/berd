@@ -327,14 +327,13 @@ fn option_for_debug(value: Option<&str>) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{self, BufRead, BufReader, Read, Write};
+    use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{TcpListener, TcpStream};
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::thread;
 
     use super::*;
     use crate::bb::skills_config::DEFAULT_KGOOSE_SERVICE_PATH;
     use crate::proto::squareup::cash::kgoose::api::v3::user_content;
+    use crate::test_server::{prepare_stream, ServerThread};
 
     const TEST_SESSION_CREDENTIAL: &str = "test-session-credential";
 
@@ -352,63 +351,36 @@ mod tests {
         }
     }
 
-    /// Minimal HTTP server for the redirect tests. It accepts non-blocking and
-    /// stops on drop, so a test that expects *no* request cannot hang waiting
+    /// Minimal HTTP server for the redirect tests, over the shared
+    /// [`ServerThread`] so a test that expects *no* request cannot hang waiting
     /// for one that never arrives.
     struct TestServer {
         base_url: String,
         requests: Arc<Mutex<Vec<RecordedRequest>>>,
-        stop: Arc<AtomicBool>,
-        handle: Option<thread::JoinHandle<()>>,
+        _thread: ServerThread,
     }
 
     impl TestServer {
         fn start(responses: Vec<String>) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
-            listener
-                .set_nonblocking(true)
-                .expect("set listener non-blocking");
             let base_url = format!("http://{}", listener.local_addr().expect("server address"));
             let requests = Arc::new(Mutex::new(Vec::new()));
-            let stop = Arc::new(AtomicBool::new(false));
             let thread_requests = Arc::clone(&requests);
-            let thread_stop = Arc::clone(&stop);
-            let handle = thread::spawn(move || {
-                let mut responses = responses.into_iter();
-                while !thread_stop.load(Ordering::Relaxed) {
-                    match listener.accept() {
-                        Ok((stream, _)) => match responses.next() {
-                            Some(response) => {
-                                record_and_respond(stream, &thread_requests, &response)
-                            }
-                            None => break,
-                        },
-                        Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                            thread::sleep(Duration::from_millis(5));
-                        }
-                        Err(_) => break,
-                    }
-                }
+            let thread = ServerThread::spawn(listener, responses, move |stream, response| {
+                record_and_respond(stream, &thread_requests, &response);
             });
             Self {
                 base_url,
                 requests,
-                stop,
-                handle: Some(handle),
+                _thread: thread,
             }
         }
 
+        /// Requests recorded so far. Each request is recorded before its
+        /// response is written, so every hop the client saw completed is
+        /// already here by the time the client call returns.
         fn requests(&self) -> Vec<RecordedRequest> {
             self.requests.lock().expect("lock requests").clone()
-        }
-    }
-
-    impl Drop for TestServer {
-        fn drop(&mut self) {
-            self.stop.store(true, Ordering::Relaxed);
-            if let Some(handle) = self.handle.take() {
-                let _ = handle.join();
-            }
         }
     }
 
@@ -417,12 +389,7 @@ mod tests {
         requests: &Arc<Mutex<Vec<RecordedRequest>>>,
         response: &str,
     ) {
-        stream
-            .set_nonblocking(false)
-            .expect("set stream blocking(false)");
-        stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
-            .expect("set stream read timeout");
+        prepare_stream(&stream);
         let mut reader = BufReader::new(stream.try_clone().expect("clone test stream"));
         let mut request_line = String::new();
         reader

@@ -720,9 +720,9 @@ mod tests {
     use std::io::{BufRead, BufReader, Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::sync::{Arc, Mutex};
-    use std::thread;
 
     use super::*;
+    use crate::test_server::{prepare_stream, ServerThread};
     use serde_json::json;
 
     type RecordedRequest = (String, String, Value);
@@ -736,7 +736,7 @@ mod tests {
     struct ArtifactServer {
         base_url: String,
         requests: Arc<Mutex<Vec<ArtifactRequest>>>,
-        handle: thread::JoinHandle<()>,
+        _thread: ServerThread,
     }
 
     impl ArtifactServer {
@@ -749,21 +749,20 @@ mod tests {
             let base_url = format!("http://{}", listener.local_addr().expect("server address"));
             let requests = Arc::new(Mutex::new(Vec::new()));
             let thread_requests = Arc::clone(&requests);
-            let handle = thread::spawn(move || {
-                for response in responses {
-                    let (stream, _) = listener.accept().expect("accept artifact request");
-                    record_and_respond_raw(stream, &thread_requests, &response);
-                }
+            let thread = ServerThread::spawn(listener, responses, move |stream, response| {
+                record_and_respond_raw(stream, &thread_requests, &response);
             });
             Self {
                 base_url,
                 requests,
-                handle,
+                _thread: thread,
             }
         }
 
-        fn finish(self) -> Vec<ArtifactRequest> {
-            self.handle.join().expect("join artifact server");
+        /// Requests recorded so far. Each request is recorded before its
+        /// response is written, so every hop the client saw completed is
+        /// already here by the time the client call returns.
+        fn requests(&self) -> Vec<ArtifactRequest> {
             self.requests.lock().expect("lock requests").clone()
         }
     }
@@ -792,6 +791,7 @@ mod tests {
         requests: &Arc<Mutex<Vec<ArtifactRequest>>>,
         response: &str,
     ) {
+        prepare_stream(&stream);
         let mut reader = BufReader::new(stream.try_clone().expect("clone artifact stream"));
         let mut request_line = String::new();
         reader
@@ -858,7 +858,7 @@ mod tests {
     struct TestServer {
         base_url: String,
         requests: Arc<Mutex<Vec<RecordedRequest>>>,
-        handle: thread::JoinHandle<()>,
+        _thread: ServerThread,
     }
 
     impl TestServer {
@@ -867,16 +867,13 @@ mod tests {
             let base_url = format!("http://{}", listener.local_addr().expect("server address"));
             let requests = Arc::new(Mutex::new(Vec::new()));
             let thread_requests = Arc::clone(&requests);
-            let handle = thread::spawn(move || {
-                for response in responses {
-                    let (stream, _) = listener.accept().expect("accept client request");
-                    record_and_respond(stream, &thread_requests, response);
-                }
+            let thread = ServerThread::spawn(listener, responses, move |stream, response| {
+                record_and_respond(stream, &thread_requests, response);
             });
             Self {
                 base_url,
                 requests,
-                handle,
+                _thread: thread,
             }
         }
 
@@ -897,8 +894,8 @@ mod tests {
             }
         }
 
-        fn finish(self) -> Vec<RecordedRequest> {
-            self.handle.join().expect("join test server");
+        /// Requests recorded so far; see [`ArtifactServer::requests`].
+        fn requests(&self) -> Vec<RecordedRequest> {
             self.requests.lock().expect("lock requests").clone()
         }
     }
@@ -908,6 +905,7 @@ mod tests {
         requests: &Arc<Mutex<Vec<RecordedRequest>>>,
         response: Value,
     ) {
+        prepare_stream(&stream);
         let mut reader = BufReader::new(stream.try_clone().expect("clone test stream"));
         let mut request_line = String::new();
         reader
@@ -1148,7 +1146,7 @@ mod tests {
             "application/zip"
         );
 
-        let requests = server.finish();
+        let requests = server.requests();
         assert_eq!(requests[0].0, "GET");
         assert_eq!(
             requests[0].1,
@@ -1212,7 +1210,6 @@ mod tests {
             let (exit_code, payload) = failure_info(&error);
             assert_eq!(exit_code, exit_codes::VERIFICATION);
             assert_eq!(payload["error"]["code"], "invalid_agent_operation_kind");
-            server.finish();
         }
     }
 
@@ -1249,7 +1246,6 @@ mod tests {
             payload["error"]["message"],
             "requested version `agent-v1` but the server resolved `agent-v2`; the marketplace currently serves only the latest stable version"
         );
-        server.finish();
     }
 
     #[test]
@@ -1284,7 +1280,6 @@ mod tests {
         assert_eq!(resolution.plan.version_id, "agent-v1");
         assert!(resolution.artifact.is_none());
         assert_eq!(resolution.installed_via, "explicit");
-        server.finish();
     }
 
     #[test]
@@ -1304,13 +1299,13 @@ mod tests {
         assert_eq!(exit_code, exit_codes::NETWORK);
         assert_eq!(payload["error"]["code"], "server_unreachable");
         assert!(format!("{error:#}").contains("redirect"));
-        let marketplace_requests = marketplace.finish();
+        let marketplace_requests = marketplace.requests();
         assert_eq!(marketplace_requests.len(), 1);
         assert!(marketplace_requests[0]
             .headers
             .get(SESSION_CREDENTIAL_HEADER)
             .is_some());
-        assert!(destination.finish().is_empty());
+        assert!(destination.requests().is_empty());
     }
 
     #[test]
@@ -1323,7 +1318,7 @@ mod tests {
         assert_eq!(download.bytes, b"artifact");
         assert_eq!(download.header_sha256.as_deref(), Some("test-sha"));
         assert_eq!(download.header_size, Some(8));
-        let requests = server.finish();
+        let requests = server.requests();
         assert_eq!(requests[0].path, "/artifact.zip");
         assert_eq!(
             requests[0]
@@ -1344,9 +1339,9 @@ mod tests {
             .download(&format!("{}/artifact.zip", artifact.base_url))
             .expect("download cross-origin artifact");
 
-        let requests = artifact.finish();
+        let requests = artifact.requests();
         assert!(requests[0].headers.get(SESSION_CREDENTIAL_HEADER).is_none());
-        marketplace.finish();
+        assert!(marketplace.requests().is_empty());
     }
 
     #[test]
@@ -1364,8 +1359,8 @@ mod tests {
         let rendered = format!("{error:#}");
         assert!(rendered.contains("artifact host"));
         assert!(!rendered.contains("run `bb auth login`"));
-        artifact.finish();
-        marketplace.finish();
+        assert_eq!(artifact.requests().len(), 1);
+        assert!(marketplace.requests().is_empty());
     }
 
     #[test]
@@ -1383,8 +1378,8 @@ mod tests {
         let rendered = format!("{error:#}");
         assert!(rendered.contains("artifact host"));
         assert!(!rendered.contains("run `bb auth login`"));
-        artifact.finish();
-        marketplace.finish();
+        assert_eq!(artifact.requests().len(), 1);
+        assert!(marketplace.requests().is_empty());
     }
 
     #[test]
@@ -1399,7 +1394,7 @@ mod tests {
         let (exit_code, _) = failure_info(&error);
         assert_eq!(exit_code, exit_codes::AUTH_REQUIRED);
         assert!(format!("{error:#}").contains("run `bb auth login`"));
-        server.finish();
+        assert_eq!(server.requests().len(), 1);
     }
 
     #[test]
@@ -1414,7 +1409,7 @@ mod tests {
             .download("/redirect")
             .expect("follow same-origin artifact redirect");
 
-        let requests = server.finish();
+        let requests = server.requests();
         assert_eq!(requests.len(), 2);
         assert!(requests
             .iter()
@@ -1434,12 +1429,12 @@ mod tests {
             .download("/redirect")
             .expect("follow cross-origin artifact redirect");
 
-        let marketplace_requests = marketplace.finish();
+        let marketplace_requests = marketplace.requests();
         assert!(marketplace_requests[0]
             .headers
             .get(SESSION_CREDENTIAL_HEADER)
             .is_some());
-        let destination_requests = destination.finish();
+        let destination_requests = destination.requests();
         assert!(destination_requests[0]
             .headers
             .get(SESSION_CREDENTIAL_HEADER)
@@ -1468,10 +1463,11 @@ mod tests {
         let client = authenticated_client(&marketplace.base_url);
         client.download("/start").expect("download redirect chain");
 
-        let requests = marketplace.finish();
+        let requests = marketplace.requests();
+        assert_eq!(requests.len(), 2);
         assert!(requests[0].headers.get(SESSION_CREDENTIAL_HEADER).is_some());
         assert!(requests[1].headers.get(SESSION_CREDENTIAL_HEADER).is_none());
-        cross_origin.finish();
+        assert_eq!(cross_origin.requests().len(), 1);
     }
 
     #[test]
@@ -1483,7 +1479,7 @@ mod tests {
             let error = client.download(url).expect_err("unsafe URL must fail");
             assert!(format!("{error:#}").contains("artifact URL"));
         }
-        marketplace.finish();
+        assert!(marketplace.requests().is_empty());
     }
 
     #[test]
