@@ -18,6 +18,7 @@ use super::auth_storage::{session_storage_key_from_config, SessionCredentialStor
 use super::skills_config::{kgoose_service_url, SkillsConfig};
 
 const CALLBACK_PATH: &str = "/callback";
+const EMBEDDED_LOGIN_CALLBACK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Clone, Copy)]
 enum AuthCallbackPage {
@@ -50,14 +51,20 @@ pub fn run_browser_login(
     config: &SkillsConfig,
     storage: &dyn SessionCredentialStorage,
 ) -> Result<BrowserLoginSummary> {
-    run_browser_login_with_output(config, storage, BrowserLoginOutput::Standalone)
+    run_browser_login_with_output(config, storage, BrowserLoginOutput::Standalone, None)
 }
 
 pub fn ensure_browser_login(
     config: &SkillsConfig,
     storage: &dyn SessionCredentialStorage,
 ) -> Result<()> {
-    run_browser_login_with_output(config, storage, BrowserLoginOutput::Embedded).map(|_| ())
+    run_browser_login_with_output(
+        config,
+        storage,
+        BrowserLoginOutput::Embedded,
+        Some(EMBEDDED_LOGIN_CALLBACK_TIMEOUT),
+    )
+    .map(|_| ())
 }
 
 #[derive(Clone, Copy)]
@@ -111,6 +118,7 @@ fn run_browser_login_with_output(
     config: &SkillsConfig,
     storage: &dyn SessionCredentialStorage,
     output: BrowserLoginOutput,
+    callback_timeout: Option<Duration>,
 ) -> Result<BrowserLoginSummary> {
     let service_url = kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path);
     let client = build_auth_http_client(Duration::from_secs(30))?;
@@ -183,9 +191,7 @@ fn run_browser_login_with_output(
         output.browser_fallback();
     }
 
-    let code = rx
-        .recv()
-        .context("loopback auth server stopped before login completed")??;
+    let code = wait_for_login_callback(rx, callback_timeout)?;
     let verified =
         exchange_login_code_and_verify(&client, config.playpen.as_deref(), &service_url, &code)?;
     let stored = verified.credential;
@@ -210,6 +216,25 @@ fn run_browser_login_with_output(
         credential_prefix: Some(safe_prefix(&stored.session_credential)),
         credential_sha256_prefix: Some(sha256_prefix(&stored.session_credential)),
     })
+}
+
+fn wait_for_login_callback(
+    rx: mpsc::Receiver<Result<String>>,
+    timeout: Option<Duration>,
+) -> Result<String> {
+    match timeout {
+        Some(timeout) => rx.recv_timeout(timeout).map_err(|error| match error {
+            mpsc::RecvTimeoutError::Timeout => {
+                anyhow!("BuilderBot auth login timed out; run `bb auth login` to try again")
+            }
+            mpsc::RecvTimeoutError::Disconnected => {
+                anyhow!("loopback auth server stopped before login completed")
+            }
+        })?,
+        None => rx
+            .recv()
+            .context("loopback auth server stopped before login completed")?,
+    }
 }
 
 pub fn verify_stored_session(
@@ -367,12 +392,29 @@ fn auth_info(config: &SkillsConfig, message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{auth_callback_page, AuthCallbackPage, BrowserLoginOutput};
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    use super::{
+        auth_callback_page, wait_for_login_callback, AuthCallbackPage, BrowserLoginOutput,
+    };
 
     #[test]
     fn embedded_login_never_writes_command_stdout() {
         assert!(!BrowserLoginOutput::Embedded.writes_command_stdout());
         assert!(BrowserLoginOutput::Standalone.writes_command_stdout());
+    }
+
+    #[test]
+    fn embedded_login_callback_wait_is_bounded() {
+        let (_tx, rx) = mpsc::channel();
+        let started = Instant::now();
+
+        let error = wait_for_login_callback(rx, Some(Duration::from_millis(10)))
+            .expect_err("time out abandoned embedded login");
+
+        assert!(error.to_string().contains("auth login timed out"));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]

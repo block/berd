@@ -5,8 +5,11 @@
 mod common;
 
 use std::fs;
-use std::io::{Cursor, Write};
+use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -3690,6 +3693,64 @@ fn bb_apps_contract_rejects_arbitrary_https_origin() {
     assert!(!output.status.success());
     assert!(stdout.is_empty(), "stdout was: {stdout}");
     assert!(stderr.contains("approved Builderlab ingress"));
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_apps_json_without_a_session_exits_promptly_with_auth_required() {
+    let temp = temp_test_dir("bb-apps-json-auth-required");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("missing-auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+
+    let mut child = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .args([
+            "apps",
+            "contract",
+            "--base-url",
+            "https://compose-ctrl.test.blockstaging.build",
+            "--json",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start noninteractive bb apps contract");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll bb apps contract") {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            child.kill().expect("stop hung bb apps contract");
+            child.wait().expect("reap hung bb apps contract");
+            panic!("bb apps contract did not fail promptly without a session");
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    child
+        .stdout
+        .take()
+        .expect("capture stdout")
+        .read_to_string(&mut stdout)
+        .expect("read stdout");
+    child
+        .stderr
+        .take()
+        .expect("capture stderr")
+        .read_to_string(&mut stderr)
+        .expect("read stderr");
+
+    assert_eq!(status.code(), Some(3), "stderr was: {stderr}");
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    let payload = parse_stderr_error(&stderr);
+    assert_eq!(payload["error"]["code"], json!("auth_required"));
+    assert_eq!(payload["error"]["exit_code"], json!(3));
+    assert!(!storage_path.exists());
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 

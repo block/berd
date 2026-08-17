@@ -25,9 +25,9 @@ use reqwest::StatusCode;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
-use super::auth_login::ensure_browser_login;
+use super::auth_login::{ensure_browser_login, verify_stored_session};
 use super::auth_storage::{default_session_storage, session_storage_key_from_config};
-use super::display::{print_json, terminal_safe_text, Style};
+use super::display::{print_json, stdin_is_tty, terminal_safe_text, Style};
 use super::runner;
 use super::skills_api::{exit_codes, failure};
 use super::skills_config::SkillsConfig;
@@ -358,9 +358,16 @@ impl ComposeSessionCredential {
     fn from_config(config: &SkillsConfig) -> Result<Self> {
         let storage = default_session_storage(config)?;
         let session_storage_key = session_storage_key_from_config(config);
-        Self::after_login(storage.as_ref(), &session_storage_key, || {
-            ensure_browser_login(config, storage.as_ref())
-        })
+        if config.json || !stdin_is_tty() {
+            if verify_stored_session(config, storage.as_ref())?.is_none() {
+                return Err(auth_required_error());
+            }
+            Self::after_login(storage.as_ref(), &session_storage_key, || Ok(()))
+        } else {
+            Self::after_login(storage.as_ref(), &session_storage_key, || {
+                ensure_browser_login(config, storage.as_ref())
+            })
+        }
     }
 
     fn after_login<F>(
@@ -382,13 +389,6 @@ impl ComposeSessionCredential {
     }
 
     fn new(secret: String) -> Result<Self> {
-        if !(32..=512).contains(&secret.len())
-            || !secret
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-        {
-            anyhow::bail!("stored BuilderBot CLI auth session is invalid; run `bb auth login`");
-        }
         let authorization = HeaderValue::from_str(&format!("BBIdentity {secret}"))
             .context("stored BuilderBot CLI auth session is invalid; run `bb auth login`")?;
         Ok(Self {
@@ -693,7 +693,7 @@ fn control_plane_http_failure(
         .unwrap_or("control_plane_request_failed");
     let code = credential.redact(&terminal_safe_text(code));
     let next_action = if status == StatusCode::UNAUTHORIZED {
-        Some("Run `bb auth login` to refresh your session.".to_string())
+        Some("Run `bb auth logout`, then `bb auth login` to replace your session.".to_string())
     } else {
         parsed
             .as_ref()
@@ -738,7 +738,7 @@ mod tests {
 
     #[test]
     fn compose_session_header_matches_kgoose_contract() {
-        let secret = "abcdefghijklmnopqrstuvwxyz_ABCDE-1234";
+        let secret = "opaque.session+credential/with=punctuation";
         let credential = test_credential(secret);
 
         assert_eq!(
@@ -748,11 +748,7 @@ mod tests {
                 .expect("authorization text"),
             format!("BBIdentity {secret}")
         );
-        for invalid in [
-            "too-short",
-            "credential with spaces that is long enough",
-            "credential.with.punctuation.that.is.long",
-        ] {
+        for invalid in ["credential\r\nInjected: header", "credential\nheader"] {
             let error = ComposeSessionCredential::new(invalid.to_string())
                 .err()
                 .expect("reject invalid session credential");
@@ -943,6 +939,7 @@ mod tests {
         let message = error.to_string();
 
         assert!(message.contains("401"));
+        assert!(message.contains("bb auth logout"));
         assert!(message.contains("bb auth login"));
         assert!(!message.contains(secret));
         server_thread.join().expect("join request server");
