@@ -17,6 +17,17 @@ import {
 
 const AGENT_SOURCE_TYPE = "agent" as const;
 const AGENT_DESCRIPTION = "Agent";
+// Keep this string literal in sync with PLACEHOLDER_AGENT_DESCRIPTION in
+// @/features/agents/lib/agentBuilderIdentity.ts. Defined locally, not
+// imported, since that module re-exports the functions below and importing
+// its value in the other direction would create a real circular import
+// (unlike the type-only import that module has on this one).
+const DRAFT_AGENT_DESCRIPTION = "Draft";
+const PLACEHOLDER_AGENT_DESCRIPTIONS = new Set(
+  [AGENT_DESCRIPTION, DRAFT_AGENT_DESCRIPTION].map((value) =>
+    value.toLowerCase(),
+  ),
+);
 const PERSONA_MD_EXTENSION = ".persona.md";
 const PORTABLE_SPROUT_FRONTMATTER_KEYS = new Set([
   "name",
@@ -25,6 +36,26 @@ const PORTABLE_SPROUT_FRONTMATTER_KEYS = new Set([
   "model",
   "avatar",
 ]);
+
+// The API layer requires a non-empty description on every source, so a
+// persona with no real, user-authored description still gets a placeholder
+// string under the hood: "Agent" (the old default, before a description
+// field existed in the create/edit form) or "Draft" (a builder draft in
+// progress). Neither was written by the user on purpose, so treat both as
+// "no real description" everywhere a persona's description is read back and
+// shown, exported, or used as a fallback for a newer write.
+export function isPlaceholderAgentDescription(
+  description: string | undefined | null,
+): boolean {
+  const trimmed = description?.trim().toLowerCase();
+  return !trimmed || PLACEHOLDER_AGENT_DESCRIPTIONS.has(trimmed);
+}
+
+export function hasRealAgentDescription(
+  description: string | undefined | null,
+): boolean {
+  return !isPlaceholderAgentDescription(description);
+}
 
 export type AgentSourceProperties = {
   [key: string]: unknown;
@@ -241,10 +272,9 @@ function sproutFrontmatterFromProperties(
 function serializePersonaMarkdown(source: AgentSourceEntry): ExportResult {
   const properties = source.properties;
   const name = personaExportName(source);
-  const description =
-    source.description.trim().length > 0
-      ? source.description
-      : "Imported Goose agent";
+  const description = hasRealAgentDescription(source.description)
+    ? source.description
+    : "Imported Goose agent";
   const frontmatter: Record<string, unknown> = {
     name,
     display_name: source.name,
@@ -798,7 +828,9 @@ export async function createPersona(
   const response = await client.goose.GooseUnstableSourcesCreate({
     type: AGENT_SOURCE_TYPE,
     name: request.displayName,
-    description: AGENT_DESCRIPTION,
+    description: hasRealAgentDescription(request.description)
+      ? (request.description as string).trim()
+      : AGENT_DESCRIPTION,
     content: request.systemPrompt,
     target: { scope: "global" },
     properties: personaProperties(request),
@@ -824,7 +856,19 @@ export async function updatePersona(
   request: UpdatePersonaRequest,
 ): Promise<Persona> {
   const client = await getClient();
-  const description = persona.sourceDescription ?? AGENT_DESCRIPTION;
+  // A description explicitly passed in this request wins, even if it's an
+  // empty string (clearing the field is a real, intentional edit — same
+  // as create, an empty/placeholder value falls back rather than being
+  // written through literally). Otherwise, keep whatever the persona
+  // already had, falling back only if that was never real to begin with.
+  const description =
+    request.description !== undefined
+      ? hasRealAgentDescription(request.description)
+        ? request.description.trim()
+        : AGENT_DESCRIPTION
+      : hasRealAgentDescription(persona.sourceDescription)
+        ? (persona.sourceDescription as string).trim()
+        : AGENT_DESCRIPTION;
 
   const response = await client.goose.GooseUnstableSourcesUpdate({
     type: AGENT_SOURCE_TYPE,

@@ -22,6 +22,7 @@ vi.mock("@/features/agents/lib/agentBuilderSession", () => ({
     name === "Untitled agent" || name.startsWith("Untitled agent "),
   PLACEHOLDER_AGENT_NAME: "Untitled agent",
   PLACEHOLDER_AGENT_BODY: "Draft in progress.",
+  PLACEHOLDER_AGENT_DESCRIPTION: "Draft",
 }));
 
 vi.mock("@/features/agents/hooks/useAvatarLibrary", () => ({
@@ -209,6 +210,35 @@ describe("AgentBuilderRail", () => {
       target: { value: "Be snarky." },
     });
     expect(update).toHaveBeenCalledWith({ content: "Be snarky." });
+  });
+
+  it("calls update() when the description field changes", () => {
+    const { update } = mockHook();
+    renderWithProviders(
+      <AgentBuilderRail
+        sessionId="s1"
+        targetAgentPath={baseSource.path}
+        targetAgentSlug="draft-1"
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: "Catches bugs before you ship them." },
+    });
+    expect(update).toHaveBeenCalledWith({
+      description: "Catches bugs before you ship them.",
+    });
+  });
+
+  it("treats the placeholder draft description as empty in the field", () => {
+    mockHook({ data: { ...baseSource, description: "Draft" } });
+    renderWithProviders(
+      <AgentBuilderRail
+        sessionId="s1"
+        targetAgentPath={baseSource.path}
+        targetAgentSlug="draft-1"
+      />,
+    );
+    expect(screen.getByLabelText(/description/i)).toHaveValue("");
   });
 
   it("renders the placeholder draft body as muted placeholder text", () => {

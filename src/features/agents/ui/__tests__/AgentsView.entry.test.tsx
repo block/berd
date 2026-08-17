@@ -73,6 +73,14 @@ vi.mock("@/shared/api/agents", () => ({
   readAgentSourceFile: vi.fn().mockResolvedValue(mockDraftSource),
   updatePersonaSource: vi.fn().mockResolvedValue(mockDraftSource),
   deletePersonaSource: vi.fn().mockResolvedValue(undefined),
+  isPlaceholderAgentDescription: (description: string | undefined | null) => {
+    const trimmed = description?.trim().toLowerCase();
+    return !trimmed || trimmed === "agent" || trimmed === "draft";
+  },
+  hasRealAgentDescription: (description: string | undefined | null) => {
+    const trimmed = description?.trim().toLowerCase();
+    return Boolean(trimmed) && trimmed !== "agent" && trimmed !== "draft";
+  },
 }));
 
 vi.mock("@/shared/api/system", () => ({

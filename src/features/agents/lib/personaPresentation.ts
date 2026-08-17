@@ -1,6 +1,15 @@
 import type { Persona } from "@/shared/types/agents";
+import { hasRealAgentDescription } from "@/features/agents/lib/agentBuilderIdentity";
 
 export type PersonaSource = "builtin" | "file";
+
+export function getRealPersonaDescription(
+  persona: Persona,
+): string | undefined {
+  return hasRealAgentDescription(persona.sourceDescription)
+    ? persona.sourceDescription?.trim()
+    : undefined;
+}
 
 type ProviderLabel = {
   id: string;

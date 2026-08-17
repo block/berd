@@ -26,6 +26,7 @@ export interface Persona {
 
 export interface CreatePersonaRequest {
   displayName: string;
+  description?: string;
   avatar?: Avatar | null;
   systemPrompt: string;
   provider?: ProviderType;
@@ -35,6 +36,7 @@ export interface CreatePersonaRequest {
 
 export interface UpdatePersonaRequest {
   displayName?: string;
+  description?: string;
   avatar?: Avatar | null;
   systemPrompt?: string;
   provider?: ProviderType | null;

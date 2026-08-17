@@ -2,6 +2,7 @@ import cardFoil from "@/features/agents/assets/share-card/card-foil.png";
 import berdCardLogo from "@/features/agents/assets/share-card/berd-card-logo.svg";
 import type { ResolvedAvatarMedia } from "@/shared/avatars/catalog";
 import type { Persona } from "@/shared/types/agents";
+import { getRealPersonaDescription } from "@/features/agents/lib/personaPresentation";
 import {
   fallbackAgentCardColor,
   sampleAgentAvatarColor,
@@ -24,13 +25,7 @@ export function getAgentShareCardBase(_personaId: string): string {
 }
 
 export function getAgentShareDescription(persona: Persona): string {
-  const sourceDescription = persona.sourceDescription?.trim();
-  const candidate =
-    sourceDescription && sourceDescription.toLowerCase() !== "agent"
-      ? sourceDescription
-      : persona.systemPrompt.trim();
-
-  return candidate;
+  return getRealPersonaDescription(persona) ?? persona.systemPrompt.trim();
 }
 
 export function getAgentShareFilename(name: string): string {

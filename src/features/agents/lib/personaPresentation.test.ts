@@ -4,6 +4,7 @@ import {
   canDeletePersona,
   canEditPersona,
   getPersonaSource,
+  getRealPersonaDescription,
   isPersonaReadOnly,
 } from "./personaPresentation";
 
@@ -33,5 +34,39 @@ describe("personaPresentation", () => {
   it("derives persona source from writability", () => {
     expect(getPersonaSource(persona({ writable: true }))).toBe("file");
     expect(getPersonaSource(persona({ writable: false }))).toBe("builtin");
+  });
+
+  it("returns a real, user-authored description as-is", () => {
+    expect(
+      getRealPersonaDescription(
+        persona({ sourceDescription: "Reviews your code and catches bugs." }),
+      ),
+    ).toBe("Reviews your code and catches bugs.");
+  });
+
+  it("treats the legacy 'Agent' placeholder as no description", () => {
+    expect(
+      getRealPersonaDescription(persona({ sourceDescription: "Agent" })),
+    ).toBeUndefined();
+    // Case-insensitive and trims whitespace, since the placeholder could
+    // come back from the API in either form.
+    expect(
+      getRealPersonaDescription(persona({ sourceDescription: "  AGENT  " })),
+    ).toBeUndefined();
+  });
+
+  it("treats the builder-draft 'Draft' placeholder as no description", () => {
+    expect(
+      getRealPersonaDescription(persona({ sourceDescription: "Draft" })),
+    ).toBeUndefined();
+  });
+
+  it("treats a missing or empty description as no description", () => {
+    expect(
+      getRealPersonaDescription(persona({ sourceDescription: undefined })),
+    ).toBeUndefined();
+    expect(
+      getRealPersonaDescription(persona({ sourceDescription: "   " })),
+    ).toBeUndefined();
   });
 });
