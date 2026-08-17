@@ -2,6 +2,7 @@ mod appkit;
 mod bb;
 mod catalog;
 mod cli;
+mod http_origin;
 mod kgoose;
 mod proto;
 mod runtime;
