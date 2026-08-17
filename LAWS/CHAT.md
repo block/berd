@@ -1,39 +1,40 @@
-# Sending messages from the composer
+# Composer queues and session dispatch
 
-## Sending
+## Queue acceptance and dispatch
 
-- Every message sent from the composer MUST go through the queue.
-- The queue MUST keep messages in the order they were added.
-- A queued message MUST retain the message and persona intent accepted when it was added or last edited.
-- Each send attempt MUST use one authoritative session model and provider from the start of preparation through dispatch.
-- A message that is not first in the queue MUST NOT be sent.
-- A message MUST NOT be sent until its session is ready.
-- A session MUST be considered ready if and only if it exists, its preparation is complete, and it can accept a message.
-- The queue MUST resume sending when the session becomes ready.
+- The composer MUST queue every accepted message into the selected chat's queue, including before that chat's session is ready.
+- The composer MUST queue accepted messages into the selected chat's queue in their acceptance order.
+- The selected chat's queue MUST retain the message and persona intent most recently accepted from the composer or a user edit.
+- A chat's queue MUST dispatch each message to that chat's session with the model and provider shown when the composer queued it.
+- A chat's queue MUST NOT dispatch a message to that chat's session before every message ahead of it in the queue.
+- A message MUST NOT be dispatched from the queue until its session is ready.
+- A session MUST be ready for dispatch from its queue only when it can begin processing that queue's first message.
+- When a chat's session becomes ready, that chat's queue MUST resume dispatching its first message to that session.
 
-## Success and failure
+## Dispatch outcomes
 
-- A message MUST remain in the queue until its session begins processing it or the user removes it.
-- A message MUST produce at most one user turn, including across retries.
-- A failed message MUST remain first in the queue.
-- A message MUST NOT have more than one active send attempt.
-- A send result MUST affect only the message and attempt that produced it.
+- A chat's queue MUST NOT dequeue a message before that chat's session begins processing it.
+- A user action to remove a message from a chat's queue MUST remove only the selected message from that queue.
+- A chat's queue MUST NOT dispatch a message to that chat's session in a way that creates more than one user turn, including after a failed dispatch.
+- A failed dispatch from a chat's queue to its session MUST leave the message first in that queue.
+- A chat's queue MUST NOT dispatch a second copy of a message to that chat's session while the first dispatch is unresolved.
+- A dispatch outcome from a chat's queue to its session MUST NOT change any other message in that queue.
 
-## Editing and removal
+## Queue editing and removal
 
-- Editing a queued message MUST NOT change its position.
-- Removing a queued message MUST NOT change the order of the remaining messages.
-- Canceling an edit MUST leave the message unchanged.
-- Sending a queued message MUST NOT alter text entered in the composer after that message was queued.
+- A user edit to a message in a chat's queue MUST NOT change that message's position in the queue.
+- A user removal from a chat's queue MUST NOT change the order of messages remaining in that queue.
+- A user cancellation of an edit MUST leave the selected message unchanged in that chat's queue.
+- Dispatching a message from a chat's queue to its session MUST NOT alter text entered later in that chat's composer.
 
-## Steering
+## Queue steering
 
-- A message that is not first in the queue MUST NOT steer the session.
-- A steering result MUST affect only the message that produced it.
-- While the session is running, a send shortcut with an empty composer MUST steer the first queued message when steering is available.
-- A send shortcut MUST NOT steer a queued message while the composer holds draft content or a queued message is being edited.
+- A message that is not first in a chat's queue MUST NOT be steered from that queue to that chat's session.
+- A steering outcome from a chat's queue to its session MUST NOT change any other message in that queue.
+- While a chat's session is running, an empty-composer shortcut MUST steer the first message from that chat's queue to that session when steering is available.
+- A composer shortcut MUST NOT steer a message from a chat's queue to that chat's session while the composer contains draft text or a message in that queue is being edited.
 
-## Subagent activity
+## Session activity presentation
 
-- Subagent activity MUST attribute the subagent when its identity is known.
-- Subagent activity MUST describe the delegated task when it is known.
+- A session's subagent activity MUST appear in the chat transcript with the subagent identity when known.
+- A session's subagent activity MUST appear in the chat transcript with the delegated task when known.
