@@ -40,7 +40,7 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
-    "@modelcontextprotocol/ext-apps": "^0.3.1",
+    "@modelcontextprotocol/ext-apps": "^0.4.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "zod": "^4.4.3"
   },
@@ -48,7 +48,7 @@
     "@agentclientprotocol/sdk": "^0.19.0"
   },
   "devDependencies": {
-    "@agentclientprotocol/sdk": "^0.19.0",
+    "@agentclientprotocol/sdk": "^0.29.0",
     "@hey-api/openapi-ts": "^0.99.0",
     "@types/node": "^26.2.0",
     "prettier": "^3.9.6",

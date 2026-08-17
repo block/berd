@@ -27,7 +27,7 @@ jobs:
 
       - name: Install just on Windows
         if: runner.os == 'Windows'
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: just@1.48.0
 
@@ -35,7 +35,7 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: 24.10.0
+          node-version: 24.19.0
 
       - name: Install pinned pnpm on Windows
         if: runner.os == 'Windows'
@@ -55,7 +55,7 @@ jobs:
 
       - name: Cache managed Goose Cargo target on Windows
         if: runner.os == 'Windows'
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.GOOSE_DEV_CARGO_TARGET_DIR }}
           key: goose-cargo-${{ runner.os }}-rust-1.94.1-${{ hashFiles('goose-backend.lock.json') }}

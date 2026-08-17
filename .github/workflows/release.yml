@@ -306,14 +306,14 @@ jobs:
         run: scripts/release/github/verify-release-ref.sh "$TAG"
 
       - name: Install just
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
+        uses: taiki-e/install-action@82cd3e7658a6f96c86c0234aeeda1748937cb0a1 # v2.85.13
         with:
           tool: just@1.48.0
 
       - name: Install pinned Node
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: 24.10.0
+          node-version: 24.19.0
           package-manager-cache: false
 
       - name: Install pinned pnpm

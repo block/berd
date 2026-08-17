@@ -5,5 +5,5 @@ edition = "2021"
 publish = false
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 minisign-verify = "0.2.5"
