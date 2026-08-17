@@ -3,7 +3,7 @@ packages:
   - "sdk"
 
 overrides:
-  "@babel/core": "7.29.6"
+  "@babel/core": "8.0.1"
   dompurify: "3.4.13"
   uuid: ">=11.1.1 <12.0.0"
   hono: "4.12.34"
