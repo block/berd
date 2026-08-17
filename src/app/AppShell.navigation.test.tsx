@@ -15,14 +15,12 @@ import { i18n } from "@/shared/i18n";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { getAppNavigationController } from "@/features/berdctl/navigation";
-import { placeholderAgentName } from "@/features/agents/lib/agentBuilderIdentity";
 import { resetAgentBuilderSourceLifecycleForTests } from "@/features/agents/lib/agentBuilderSourceLifecycle";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { ensureReplayBuffer } from "@/features/chat/hooks/replayBuffer";
 import { createUserMessage } from "@/shared/types/messages";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
-import { BackgroundQueuedMessageDrain } from "@/features/chat/ui/BackgroundQueuedMessageDrain";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { Message } from "@/shared/types/messages";
 import type { GitState } from "@/shared/types/git";
@@ -97,10 +95,6 @@ const mockCreatePersonaSource = vi.hoisted(() => vi.fn());
 const mockListPersonaSources = vi.hoisted(() => vi.fn());
 const mockReadAgentSourceFile = vi.hoisted(() => vi.fn());
 const mockDeletePersonaSource = vi.hoisted(() => vi.fn());
-const mockUpdatePersonaSource = vi.hoisted(() => vi.fn());
-const mockSendQueuedPromptToExistingSessionInBackground = vi.hoisted(() =>
-  vi.fn(),
-);
 const mockListPersonas = vi.hoisted(() => vi.fn());
 const mockRepairBundledAgent = vi.hoisted(() => vi.fn());
 const mockAutomationBuilderSave = vi.hoisted(() => vi.fn());
@@ -151,10 +145,7 @@ function flushAfterNextPaintCallbacks() {
   }
 }
 
-function appShellWithTheme(
-  children?: ReactNode,
-  options?: { backgroundQueueDrain?: boolean },
-) {
+function appShellWithTheme(children?: ReactNode) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -162,19 +153,13 @@ function appShellWithTheme(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <AppShell>{children}</AppShell>
-        {options?.backgroundQueueDrain ? (
-          <BackgroundQueuedMessageDrain />
-        ) : null}
       </ThemeProvider>
     </QueryClientProvider>
   );
 }
 
-function renderAppShell(
-  children?: ReactNode,
-  options?: { backgroundQueueDrain?: boolean },
-) {
-  return render(appShellWithTheme(children, options));
+function renderAppShell(children?: ReactNode) {
+  return render(appShellWithTheme(children));
 }
 
 function managedWorktreeGitState(
@@ -465,11 +450,6 @@ vi.mock("@/shared/api/acpApi", () => ({
   updateSessionProject: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/features/chat/lib/queuedSessionSend", () => ({
-  sendQueuedPromptToExistingSessionInBackground: (...args: unknown[]) =>
-    mockSendQueuedPromptToExistingSessionInBackground(...args),
-}));
-
 vi.mock("@/shared/api/git", () => ({
   countBranchCommitsNotInBase: (...args: unknown[]) =>
     gitMocks.countBranchCommitsNotInBase(...args),
@@ -499,7 +479,6 @@ vi.mock("@/shared/api/agents", () => ({
   repairBundledAgent: (...args: unknown[]) => mockRepairBundledAgent(...args),
   readAgentSourceFile: (...args: unknown[]) => mockReadAgentSourceFile(...args),
   deletePersonaSource: (...args: unknown[]) => mockDeletePersonaSource(...args),
-  updatePersonaSource: (...args: unknown[]) => mockUpdatePersonaSource(...args),
   promotePersonaSource: vi.fn().mockResolvedValue(null),
 }));
 
@@ -1044,11 +1023,6 @@ describe("AppShell global navigation", () => {
     mockReadAgentSourceFile.mockRejectedValue(new Error("not found"));
     mockDeletePersonaSource.mockReset();
     mockDeletePersonaSource.mockResolvedValue(undefined);
-    mockUpdatePersonaSource.mockReset();
-    mockSendQueuedPromptToExistingSessionInBackground.mockReset();
-    mockSendQueuedPromptToExistingSessionInBackground.mockResolvedValue(
-      undefined,
-    );
     mockAutomationBuilderSave.mockReset();
     useChatStore.setState({
       messagesBySession: {},
@@ -3417,162 +3391,6 @@ describe("AppShell global navigation", () => {
       creationState: undefined,
       workingDir: draftWorkingDir,
     });
-  });
-
-  it("holds a queued builder prompt until draft identity migration completes", async () => {
-    const pendingSession = deferred<{ sessionId: string }>();
-    const pendingMigration = deferred<{
-      type: "agent";
-      path: string;
-      name: string;
-      description: string;
-      content: string;
-      global: boolean;
-      writable: boolean;
-      properties: { draft: true; builderSessionId: string };
-    }>();
-    mockAcpCreateSession.mockReturnValueOnce(pendingSession.promise);
-    const user = userEvent.setup();
-    renderAppShell(undefined, { backgroundQueueDrain: true });
-
-    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
-    await waitFor(() => expect(mockAcpCreateSession).toHaveBeenCalled());
-
-    const draftSessionId = useChatSessionStore.getState().activeSessionId ?? "";
-    const targetAgentPath =
-      "/Users/test/.agents/agents/pending-builder-draft.md";
-    const localDraft = {
-      type: "agent" as const,
-      path: targetAgentPath,
-      name: placeholderAgentName(draftSessionId),
-      description: "Draft",
-      content: "Draft in progress.",
-      global: true,
-      writable: true,
-      properties: { draft: true, builderSessionId: draftSessionId },
-    };
-    useChatSessionStore.getState().patchSession(draftSessionId, {
-      intent: "build-agent",
-      agentBuilderOpen: true,
-      targetAgentPath,
-      targetAgentSlug: "pending-builder-draft",
-    });
-    mockListPersonaSources.mockResolvedValue([localDraft]);
-    mockReadAgentSourceFile.mockResolvedValue(localDraft);
-    mockUpdatePersonaSource.mockReturnValueOnce(pendingMigration.promise);
-    useChatStore.getState().enqueueTransportReadyMessage(draftSessionId, {
-      text: "make a reviewer",
-      persona: { kind: "inherit" },
-      sendOptions: {
-        assistantPrompt: `Use agent-builder at ${targetAgentPath}.`,
-      },
-    });
-    useChatSessionStore.setState({ hasHydratedSessions: true });
-
-    act(() => pendingSession.resolve({ sessionId: "created-session" }));
-
-    await waitFor(() => {
-      expect(mockUpdatePersonaSource).toHaveBeenCalledWith(targetAgentPath, {
-        name: placeholderAgentName("created-session"),
-        properties: {
-          draft: true,
-          builderSessionId: "created-session",
-        },
-      });
-    });
-    expect(
-      useChatSessionStore.getState().getSession(draftSessionId),
-    ).toMatchObject({ creationState: "pending" });
-    expect(
-      useChatStore.getState().queuedMessageBySession[draftSessionId]?.[0],
-    ).toMatchObject({ payload: { text: "make a reviewer" } });
-    expect(
-      mockSendQueuedPromptToExistingSessionInBackground,
-    ).not.toHaveBeenCalled();
-
-    act(() => {
-      pendingMigration.resolve({
-        ...localDraft,
-        name: placeholderAgentName("created-session"),
-        properties: {
-          draft: true,
-          builderSessionId: "created-session",
-        },
-      });
-    });
-
-    await waitFor(() => {
-      expect(
-        mockSendQueuedPromptToExistingSessionInBackground,
-      ).toHaveBeenCalledTimes(1);
-    });
-    expect(
-      mockSendQueuedPromptToExistingSessionInBackground.mock.calls[0]?.[0],
-    ).toBe("created-session");
-    expect(useChatSessionStore.getState().activeSessionId).toBe(
-      "created-session",
-    );
-  });
-
-  it("fails creation without dispatch when builder draft migration fails", async () => {
-    const pendingSession = deferred<{ sessionId: string }>();
-    mockAcpCreateSession.mockReturnValueOnce(pendingSession.promise);
-    const user = userEvent.setup();
-    renderAppShell(undefined, { backgroundQueueDrain: true });
-
-    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
-    await waitFor(() => expect(mockAcpCreateSession).toHaveBeenCalled());
-
-    const draftSessionId = useChatSessionStore.getState().activeSessionId ?? "";
-    const targetAgentPath =
-      "/Users/test/.agents/agents/pending-builder-draft.md";
-    const localDraft = {
-      type: "agent" as const,
-      path: targetAgentPath,
-      name: placeholderAgentName(draftSessionId),
-      description: "Draft",
-      content: "Draft in progress.",
-      global: true,
-      writable: true,
-      properties: { draft: true, builderSessionId: draftSessionId },
-    };
-    useChatSessionStore.getState().patchSession(draftSessionId, {
-      intent: "build-agent",
-      agentBuilderOpen: true,
-      targetAgentPath,
-      targetAgentSlug: "pending-builder-draft",
-    });
-    mockListPersonaSources.mockResolvedValue([localDraft]);
-    mockReadAgentSourceFile.mockResolvedValue(localDraft);
-    mockUpdatePersonaSource.mockRejectedValueOnce(
-      new Error("draft identity update failed"),
-    );
-    useChatStore.getState().enqueueTransportReadyMessage(draftSessionId, {
-      text: "make a reviewer",
-      persona: { kind: "inherit" },
-    });
-    useChatSessionStore.setState({ hasHydratedSessions: true });
-
-    act(() => pendingSession.resolve({ sessionId: "created-session" }));
-
-    await waitFor(() => {
-      expect(mockAcpArchiveSession).toHaveBeenCalledWith("created-session");
-      expect(
-        useChatSessionStore.getState().getSession(draftSessionId),
-      ).toMatchObject({
-        creationState: "failed",
-        creationError: "draft identity update failed",
-      });
-    });
-    expect(
-      useChatStore.getState().queuedMessageBySession[draftSessionId]?.[0],
-    ).toMatchObject({ payload: { text: "make a reviewer" } });
-    expect(
-      useChatStore.getState().queuedMessageBySession["created-session"],
-    ).toBeUndefined();
-    expect(
-      mockSendQueuedPromptToExistingSessionInBackground,
-    ).not.toHaveBeenCalled();
   });
 
   it("applies the latest pending draft selection before promotion", async () => {

@@ -114,7 +114,6 @@ import {
   setSettingsSectionUrl,
 } from "./lib/settingsSectionUrl";
 import { useAgentBuilderCoordinator } from "@/features/agents/hooks/useAgentBuilderCoordinator";
-import { migratePendingDraftAgent } from "@/features/agents/lib/agentBuilderSession";
 import {
   type ArchiveCleanupPolicy,
   MUTATION_DEADLINE_MARGIN_MS,
@@ -1973,13 +1972,6 @@ export function AppShell({
               clearCurrentModelSelectionIntent(
                 session.id,
                 pendingSelectionIntent.requestId,
-              );
-            }
-            if (latestSessionPatch.targetAgentPath) {
-              await migratePendingDraftAgent(
-                session.id,
-                sessionId,
-                latestSessionPatch.targetAgentPath,
               );
             }
             promoteChatSessionId(session.id, sessionId);

@@ -355,8 +355,6 @@ export function ChatView({
     : `${1 - builderFraction}fr ${builderFraction}fr`;
   const isAgentBuilderTargetFailed =
     isAgentBuilderOpen && effectiveSession?.targetAgentDraftState === "failed";
-  const isAgentBuilderTargetPending =
-    isAgentBuilderOpen && !effectiveSession?.targetAgentPath;
   const hasVisibleRightRail =
     isAgentBuilderOpen ||
     Boolean(
@@ -676,8 +674,6 @@ export function ChatView({
       effectiveSession.creationError ?? t("toolbar.sessionStartFailed");
   } else if (isAgentBuilderTargetFailed) {
     sendDisabledReason = t("toolbar.agentBuilderPrepareFailed");
-  } else if (isAgentBuilderTargetPending) {
-    sendDisabledReason = t("toolbar.agentBuilderPreparing");
   }
 
   // The composer is owned by the timeline so it stays mounted across loading,
@@ -791,7 +787,7 @@ export function ChatView({
             sendDisabled:
               isReadOnly ||
               effectiveSession?.creationState === "failed" ||
-              isAgentBuilderTargetPending ||
+              isAgentBuilderTargetFailed ||
               controller.workspaceSetupInProgress,
             sendDisabledReason,
             queuedMessage: composerHandoffInProgress
