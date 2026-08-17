@@ -16,6 +16,7 @@ import { sendPromptInBackground } from "@/features/chat/lib/backgroundSend";
 import { loadSessionMessages } from "@/features/chat/lib/sessionActivation";
 import {
   SessionDispatchContentionError,
+  SessionDispatchCreationIncompleteError,
   SessionDispatchMissingError,
   SessionDispatchUnresolvedError,
 } from "@/features/chat/lib/sessionDispatchAcquisition";
@@ -89,6 +90,7 @@ function hasUiOwnedUnresolvedTarget(session?: ChatSession): boolean {
 
 export {
   SessionDispatchContentionError,
+  SessionDispatchCreationIncompleteError,
   SessionDispatchMissingError,
   SessionDispatchUnresolvedError,
 } from "@/features/chat/lib/sessionDispatchAcquisition";
@@ -101,6 +103,14 @@ export async function acquireExistingSessionForBackgroundSend(
     .getSession(sessionId);
   if (!sessionBeforeHydration) {
     return { status: "session-missing" } as const;
+  }
+  // Backend creation is still in flight (or has failed), so this id is a
+  // renderer-local draft. `loadSessionMessages` reports success for it —
+  // "nothing to load" is not a failure there — which would let preparation
+  // walk on to `acpApi.loadSession` with an id the backend never issued.
+  const { creationState } = sessionBeforeHydration;
+  if (creationState) {
+    return { status: "creation-incomplete", creationState } as const;
   }
   const snapshottedTarget = sessionBeforeHydration.executionTarget;
   const loaded = await loadSessionMessages(sessionId);
@@ -217,6 +227,9 @@ export async function sendQueuedPromptToExistingSessionInBackground(
   }
   if (acquisition.status === "session-missing") {
     throw new SessionDispatchMissingError(sessionId);
+  }
+  if (acquisition.status === "creation-incomplete") {
+    throw new SessionDispatchCreationIncompleteError(acquisition.creationState);
   }
   const targetLease = acquisition;
   try {

@@ -21,6 +21,7 @@ import { beginModelSelectionIntent } from "@/features/chat/model-selection/model
 import {
   sendPromptToExistingSessionInBackground,
   sendQueuedPromptToExistingSessionInBackground,
+  SessionDispatchCreationIncompleteError,
 } from "./sessionSend";
 
 const mocks = vi.hoisted(() => ({
@@ -278,6 +279,28 @@ describe("sendPromptToExistingSessionInBackground", () => {
       nextLease.release?.();
     });
     vi.useRealTimers();
+  });
+
+  it("refuses to reach the wire while the target session is still being created", async () => {
+    const onUserMessageCommitted = vi.fn();
+    useChatSessionStore
+      .getState()
+      .patchSession(SESSION_ID, { creationState: "pending" });
+
+    await expect(
+      sendPromptToExistingSessionInBackground(
+        SESSION_ID,
+        "cross-session prompt",
+        onUserMessageCommitted,
+      ),
+    ).rejects.toBeInstanceOf(SessionDispatchCreationIncompleteError);
+
+    // The id is renderer-local until promotion, so any wire call would be
+    // made against a session the backend never created.
+    expect(mocks.acpLoadSession).not.toHaveBeenCalled();
+    expect(mocks.acpPrepareSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(onUserMessageCommitted).not.toHaveBeenCalled();
   });
 
   it("rejects when ACP setup fails before background transport dispatch", async () => {

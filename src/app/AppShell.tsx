@@ -1998,6 +1998,19 @@ export function AppShell({
         )
         .catch(async (error) => {
           const chatStore = useChatStore.getState();
+          // A chat can fail to create while the user is somewhere else — the
+          // global composer hands off in the background, and any queued head
+          // stays held until creation settles. The in-transcript error would
+          // then be invisible until they open the chat, so report it where
+          // they are instead.
+          const reportCreationFailureIfHidden = (message: string) => {
+            if (useChatSessionStore.getState().activeSessionId === session.id) {
+              return;
+            }
+            toast.error(t("chat:toolbar.sessionStartFailed"), {
+              description: message,
+            });
+          };
           if (createdBackendSessionId) {
             try {
               await archiveSessionApi(createdBackendSessionId);
@@ -2046,6 +2059,7 @@ export function AppShell({
                   ),
                 );
                 chatStore.setError(session.id, messageWithCleanupStatus);
+                reportCreationFailureIfHidden(messageWithCleanupStatus);
                 return;
               }
             } catch (checkError) {
@@ -2070,6 +2084,7 @@ export function AppShell({
             createSystemNotificationMessage(messageWithCleanupStatus, "error"),
           );
           chatStore.setError(session.id, messageWithCleanupStatus);
+          reportCreationFailureIfHidden(messageWithCleanupStatus);
         });
     },
     [

@@ -51,6 +51,15 @@ function runningTargetMessage(sessionId: string): string {
   return `Refusing to send to session "${sessionId}" while its agent is running; use --if-running steer or --if-running queue, or wait for the turn to finish.`;
 }
 
+function creationIncompleteTargetMessage(
+  sessionId: string,
+  creationState: "pending" | "failed",
+): string {
+  return creationState === "failed"
+    ? `Refusing to send to session "${sessionId}" because the chat failed to be created; ask the user to fix the chat, or use --if-running queue to hold the prompt until it starts.`
+    : `Refusing to send to session "${sessionId}" while the chat is still being created; use --if-running queue to send it once creation finishes, or retry shortly.`;
+}
+
 export const sendSessionCommand = defineCommand({
   effect: "update",
   visibility: "discoverable",
@@ -80,6 +89,7 @@ Result:
         berdctlCrossSessionSendOptions,
         sendPromptToExistingSessionInBackground,
         SessionDispatchContentionError,
+        SessionDispatchCreationIncompleteError,
         SessionDispatchUnresolvedError,
       },
     ] = await Promise.all([
@@ -217,6 +227,26 @@ Result:
       }
       if (error instanceof SessionDispatchUnresolvedError) {
         throw new CommandError("invalid_args", error.message);
+      }
+      // Checked before the general pre-commit rejection below (this is a
+      // subclass) so the refusal says the chat is still being created rather
+      // than blaming a run that isn't happening. Queued prompts are held by
+      // the berdctl drain and sent once promotion publishes the backend id.
+      if (error instanceof SessionDispatchCreationIncompleteError) {
+        if (args.if_running === "queue") {
+          useChatStore.getState().enqueueTransportReadyMessage(
+            args.session_id,
+            admitSystemInheritedQueuedMessage({
+              text: args.prompt,
+              sendOptions: berdctlCrossSessionSendOptions(),
+            }),
+          );
+          return { session_id: session.id, send_status: "queued" };
+        }
+        throw new CommandError(
+          "target_session_running",
+          creationIncompleteTargetMessage(args.session_id, error.creationState),
+        );
       }
       if (error instanceof PreCommitSendRejectedError) {
         if (args.if_running === "queue") {

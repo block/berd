@@ -13,7 +13,13 @@ export function isQueuedMessageTargetAttemptable(
   session: ChatSession | null | undefined,
 ): record is QueuedMessageRecord & { kind: "transport-ready" } {
   return (
-    isQueuedMessageAttemptable(record) && Boolean(session?.executionTarget)
+    isQueuedMessageAttemptable(record) &&
+    Boolean(session?.executionTarget) &&
+    // A draft session's id is renderer-local until promotion, so dispatching
+    // against it reaches the backend with an id it never created. Hold the
+    // head instead; promotion clears `creationState` and swaps in the backend
+    // id, which notifies the session store and wakes every drain.
+    session?.creationState == null
   );
 }
 
