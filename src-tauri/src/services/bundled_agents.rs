@@ -227,11 +227,14 @@ fn seed_bundled_agents_from_dir(
         .collect::<Result<Vec<_>, _>>()?;
     entries.sort_by_key(|entry| entry.file_name());
 
+    // The agents directory is shared with Goose/ACP and may already contain
+    // personal agents before Berd's first launch. Only Berd's own marker is
+    // authoritative for whether initial seeding has completed. If a prior
+    // attempt copied some files but failed before writing the marker, another
+    // marker-free pass safely resumes the remaining non-colliding files.
+    let initial_seed =
+        !marker_path(target_root).exists() && !legacy_marker_path(target_root).exists();
     let mut marker = read_seed_marker(target_root)?;
-    let clean_install = !target_root.exists()
-        || fs::read_dir(target_root)
-            .map(|mut entries| entries.next().is_none())
-            .unwrap_or(false);
     let mut seeded_count = 0usize;
     let mut avatar_refs_to_warm = BTreeSet::new();
 
@@ -269,7 +272,7 @@ fn seed_bundled_agents_from_dir(
             primary_target
         };
         let was_previously_seeded = marker.seeded_files.contains(&file_name);
-        let installed_or_refreshed = if (clean_install || was_previously_seeded)
+        let installed_or_refreshed = if (initial_seed || was_previously_seeded)
             && should_install_agent(&source, &target, was_previously_seeded)?
         {
             install_agent_file(&source, &target)?;
@@ -538,6 +541,59 @@ mod tests {
             fs::read_to_string(target.path().join("builderbot.md")).unwrap(),
             "---\nname: Builderbot\ndescription: Agent\navatar: app-avatar:gloopies-20\nmetadata:\n  berdBundled: true\n---\nBuild carefully."
         );
+    }
+
+    #[test]
+    fn initial_seed_ignores_unrelated_personal_agents() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let bundled = "---\nname: Tinker\nmetadata:\n  berdBundled: true\n---\nBundled.";
+        write_agent(source.path(), "tinker.md", bundled);
+        write_agent(
+            target.path(),
+            "personal.md",
+            "---\nname: Mine\n---\nPersonal.",
+        );
+
+        let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(result.seeded_count, 1);
+        assert_eq!(
+            fs::read_to_string(target.path().join("tinker.md")).unwrap(),
+            bundled
+        );
+        assert_eq!(
+            fs::read_to_string(target.path().join("personal.md")).unwrap(),
+            "---\nname: Mine\n---\nPersonal."
+        );
+    }
+
+    #[test]
+    fn marker_free_retry_completes_an_interrupted_initial_seed() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let berdy = "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nBerdy.";
+        let tinker = "---\nname: Tinker\nmetadata:\n  berdBundled: true\n---\nTinker.";
+        write_agent(source.path(), "berdy.md", berdy);
+        write_agent(source.path(), "tinker.md", tinker);
+        // Simulate a process interruption after one file was copied but before
+        // the all-files marker was committed.
+        write_agent(target.path(), "berdy.md", berdy);
+
+        let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(result.seeded_count, 1);
+        assert_eq!(
+            fs::read_to_string(target.path().join("berdy.md")).unwrap(),
+            berdy
+        );
+        assert_eq!(
+            fs::read_to_string(target.path().join("tinker.md")).unwrap(),
+            tinker
+        );
+        let marker = read_seed_marker(target.path()).unwrap();
+        assert!(marker.seeded_files.contains("berdy.md"));
+        assert!(marker.seeded_files.contains("tinker.md"));
     }
 
     #[test]
