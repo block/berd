@@ -2003,8 +2003,15 @@ export function AppShell({
           // stays held until creation settles. The in-transcript error would
           // then be invisible until they open the chat, so report it where
           // they are instead.
+          // Being the active session is not enough to make the transcript
+          // visible: opening Settings or the design system leaves
+          // `activeSessionId` pointing here, so the store's viewing flag is
+          // what decides whether the in-transcript error is on screen.
           const reportCreationFailureIfHidden = (message: string) => {
-            if (useChatSessionStore.getState().activeSessionId === session.id) {
+            const isViewingFailedSession =
+              useChatSessionStore.getState().activeSessionId === session.id &&
+              useChatStore.getState().isViewingActiveSession;
+            if (isViewingFailedSession) {
               return;
             }
             toast.error(t("chat:toolbar.sessionStartFailed"), {
