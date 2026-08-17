@@ -117,9 +117,10 @@ and show me first," or "prefix messages sent for me with 🤖."*
 
 ## Topics
 
-*Deeper knowledge lives in its own topic files in a "topics" folder here —
-like "style.md" or "family.md". Agents only read a topic when that part
-of your life is what's going on. Add one in Settings, or just tell Berdy.*
+*Deeper knowledge lives in its own topic files in the "topics" folder
+here, like "home.md" or "social.md." Agents only read a topic when it's
+relevant to what they're working on. Add one manually, or just tell your
+agent.*
 `;
 
 export type MeFileState =

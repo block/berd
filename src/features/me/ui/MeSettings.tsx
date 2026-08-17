@@ -362,7 +362,7 @@ export function MeSettings() {
             <SettingsSection title={t("me.spineTitle")}>
               <div className="space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  {t("me.description")} {t("me.ownership")}
+                  {t("me.description")}
                 </p>
 
                 {state.status === "error" && (
