@@ -918,6 +918,136 @@ describe("transcript virtual controller", () => {
     });
   });
 
+  it("keeps the supplied anchor through detached resize without recapture", () => {
+    const controller = createController(
+      { viewportHeight: 200, scrollTop: 320 },
+      { authorityBoundary: true },
+    );
+    controller.setRows(makeRows(8, 100));
+    controller.setAuthorityAnchor({
+      type: "row",
+      rowId: "row-3",
+      offsetWithinRow: 20,
+    });
+    controller.setAuthorityOperation({ generation: 4, cause: "geometry" });
+
+    const resized = controller.syncViewport(
+      {
+        scrollTop: 250,
+        viewportHeight: 300,
+        widthScope: "w:600",
+        browserScrollHeight: 5000,
+      },
+      { source: "browser", userScrollIntent: true },
+    );
+
+    expect(resized.correction).toBeNull();
+    expect(controller.getState().anchor).toMatchObject({
+      type: "row",
+      rowId: "row-3",
+      offsetWithinRow: 20,
+    });
+    expect(controller.getDiagnostics()).toMatchObject({
+      recapturedAnchors: 0,
+      bottomFollowExits: 0,
+    });
+  });
+
+  it("reduces a measurement batch to one correction and releases stream completion", () => {
+    const controller = createController(
+      { viewportHeight: 100, scrollTop: 150 },
+      { authorityBoundary: true },
+    );
+    controller.setRows([
+      row("row-0", 100),
+      row("row-1", 100),
+      row("row-2", 100),
+      row("stream-tail", 300, { anchorPriority: "streaming" }),
+    ]);
+    controller.setAuthorityAnchor({
+      type: "row",
+      rowId: "row-2",
+      offsetWithinRow: 0,
+    });
+    controller.setAuthorityOperation({ generation: 5, cause: "follow" });
+    const correctionsBeforeBatch = controller.getDiagnostics().corrections;
+
+    const batch = controller.applyMeasuredHeights([
+      { token: tokenFor(controller, "row-0"), height: 150 },
+      { token: tokenFor(controller, "row-1"), height: 125 },
+    ]);
+
+    expect(batch.correction).toMatchObject({
+      reason: "row-anchor",
+      nextScrollTop: 275,
+      operation: { generation: 5, cause: "follow" },
+    });
+    expect(controller.getDiagnostics().corrections).toBe(
+      correctionsBeforeBatch + 1,
+    );
+
+    expect(
+      controller.applyMeasuredHeight({
+        token: tokenFor(controller, "stream-tail"),
+        height: 360,
+      }).accepted,
+    ).toBe(true);
+    expect(controller.getState().virtualScrollHeight).toBe(735);
+
+    controller.setRows([
+      row("row-0", 100),
+      row("row-1", 100),
+      row("row-2", 100),
+      row("stream-tail", 140, {
+        anchorPriority: "stable",
+        heightRevision: "stream:complete",
+      }),
+    ]);
+    expect(controller.getState().virtualScrollHeight).toBe(515);
+  });
+
+  it("resets replay state while retaining shared token validation and clamp", () => {
+    const controller = createController(
+      { viewportHeight: 100, scrollTop: 100 },
+      { authorityBoundary: true },
+    );
+    controller.setRows(makeRows(4, 100));
+    const oldToken = tokenFor(controller, "row-0");
+    controller.setAuthorityAnchor({
+      type: "row",
+      rowId: "row-2",
+      offsetWithinRow: 0,
+    });
+    controller.setAuthorityOperation({ generation: 6, cause: "jump" });
+    controller.applyMeasuredHeight({ token: oldToken, height: 120 });
+
+    controller.reset({
+      sessionId: "session-b",
+      sessionEpoch: 2,
+      widthScope: WIDTH_SCOPE,
+      viewportHeight: 100,
+      scrollTop: 999,
+    });
+    expect(controller.getState()).toMatchObject({
+      sessionId: "session-b",
+      sessionEpoch: 2,
+      scrollTop: 999,
+      anchor: { type: "bottom" },
+    });
+    expect(controller.getPendingScrollCorrection()).toBeNull();
+
+    controller.setRows(makeRows(4, 100));
+    expect(
+      controller.applyMeasuredHeight({ token: oldToken, height: 200 }).accepted,
+    ).toBe(false);
+    expect(controller.getDiagnostics().staleMeasurementSessionDrops).toBe(1);
+    controller.setAuthorityAnchor({ type: "scroll-position", scrollTop: 9999 });
+    expect(controller.getState().anchor).toEqual({
+      type: "scroll-position",
+      scrollTop: 300,
+    });
+  });
+
   it("uses surviving range, position, and token validation in boundary mode", () => {
     const controller = createController(
       { viewportHeight: 100, scrollTop: 100 },
