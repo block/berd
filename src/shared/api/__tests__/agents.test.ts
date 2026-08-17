@@ -308,6 +308,46 @@ describe("agents API", () => {
     expect(result.avatar).toBe("https://example.test/scout.png");
   });
 
+  it("uses a real description when creating a persona", async () => {
+    mockGooseSourcesCreate.mockResolvedValue({ source: agentSource });
+
+    const { createPersona } = await import("../agents");
+    await createPersona({
+      displayName: "Scout",
+      systemPrompt: "Research carefully.",
+      description: "Finds the source you actually need.",
+    });
+
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Finds the source you actually need.",
+      }),
+    );
+  });
+
+  it.each([
+    undefined,
+    "",
+    "   ",
+    "Agent",
+    "agent",
+    "Draft",
+    "  draft  ",
+  ])("falls back to the placeholder description when creating with %j", async (description) => {
+    mockGooseSourcesCreate.mockResolvedValue({ source: agentSource });
+
+    const { createPersona } = await import("../agents");
+    await createPersona({
+      displayName: "Scout",
+      systemPrompt: "Research carefully.",
+      description,
+    });
+
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "Agent" }),
+    );
+  });
+
   it("does not store unsupported avatar values on create", async () => {
     mockGooseSourcesCreate.mockResolvedValue({ source: agentSource });
 
@@ -402,6 +442,81 @@ describe("agents API", () => {
     });
   });
 
+  it("uses a new real description when updating a persona", async () => {
+    mockGooseSourcesUpdate.mockResolvedValue({ source: agentSource });
+
+    const { updatePersona } = await import("../agents");
+    await updatePersona(loadedPersona, {
+      description: "Finds the source you actually need.",
+    });
+
+    expect(mockGooseSourcesUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Finds the source you actually need.",
+      }),
+    );
+  });
+
+  it("keeps the persona's existing real description when the update omits it", async () => {
+    mockGooseSourcesUpdate.mockResolvedValue({ source: agentSource });
+
+    const { updatePersona } = await import("../agents");
+    await updatePersona(
+      {
+        ...loadedPersona,
+        sourceDescription: "Finds the source you actually need.",
+      },
+      { systemPrompt: "Updated prompt." },
+    );
+
+    expect(mockGooseSourcesUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Finds the source you actually need.",
+      }),
+    );
+  });
+
+  it.each([
+    "",
+    "   ",
+    "Agent",
+    "agent",
+    "Draft",
+    "  draft  ",
+  ])("falls back to the placeholder description when the update explicitly clears it with %j", async (description) => {
+    mockGooseSourcesUpdate.mockResolvedValue({ source: agentSource });
+
+    const { updatePersona } = await import("../agents");
+    // Same behavior as create: explicitly passing a cleared/placeholder
+    // value is a real edit, not "leave it alone" — it does not fall back
+    // to whatever the persona already had.
+    await updatePersona(
+      {
+        ...loadedPersona,
+        sourceDescription: "Finds the source you actually need.",
+      },
+      { description },
+    );
+
+    expect(mockGooseSourcesUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "Agent" }),
+    );
+  });
+
+  it("falls back to the placeholder description when the persona never had a real one and the update omits it", async () => {
+    mockGooseSourcesUpdate.mockResolvedValue({ source: agentSource });
+
+    const { updatePersona } = await import("../agents");
+    await updatePersona(
+      { ...loadedPersona, sourceDescription: "Draft" },
+      { systemPrompt: "Updated prompt." },
+    );
+
+    expect(mockGooseSourcesUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ description: "Agent" }),
+    );
+  });
+
   it("clears modeled properties while preserving unknown source properties", async () => {
     mockGooseSourcesUpdate.mockResolvedValue({
       source: {
@@ -439,7 +554,11 @@ describe("agents API", () => {
       type: "agent",
       path: agentSource.path,
       name: "Scout",
-      description: "",
+      // The persona's existing sourceDescription is an empty string here,
+      // which was never a real, user-authored description to begin with,
+      // so it falls back to the placeholder rather than being sent through
+      // verbatim.
+      description: "Agent",
       content: "Research carefully.",
       properties: {
         provider: null,
@@ -702,8 +821,12 @@ describe("agents API", () => {
     expect(mockGooseSourcesList).toHaveBeenCalledWith({ type: "agent" });
     expect(mockGooseSourcesExport).not.toHaveBeenCalled();
     expect(result).toEqual({
+      // agentSource's description ("Agent") is the API-required placeholder
+      // used when there's no real, user-authored description, not something
+      // a user wrote on purpose, so export substitutes a real fallback
+      // rather than writing "Agent" into the exported file's frontmatter.
       contents:
-        "---\nname: scout\ndisplay_name: Scout\ndescription: Agent\nmodel: openai:gpt-4.1\navatar: https://example.test/scout.png\n---\n\nResearch carefully.\n",
+        "---\nname: scout\ndisplay_name: Scout\ndescription: Imported Goose agent\nmodel: openai:gpt-4.1\navatar: https://example.test/scout.png\n---\n\nResearch carefully.\n",
       filename: "scout.persona.md",
       mimeType: "text/markdown",
     });
@@ -799,8 +922,9 @@ describe("agents API", () => {
     );
 
     expect(result).toEqual({
+      // Same placeholder-description substitution as above.
       contents:
-        '---\nname: scout\ndisplay_name: Scout\ndescription: Agent\nmodel: openai:gpt-4.1\navatar: https://example.test/scout.png\nsubscribe:\n  - "#agents"\ntags:\n  - research\n  - support\ntools:\n  web: true\n---\n\nResearch carefully.\n',
+        '---\nname: scout\ndisplay_name: Scout\ndescription: Imported Goose agent\nmodel: openai:gpt-4.1\navatar: https://example.test/scout.png\nsubscribe:\n  - "#agents"\ntags:\n  - research\n  - support\ntools:\n  web: true\n---\n\nResearch carefully.\n',
       filename: "scout.persona.md",
       mimeType: "text/markdown",
     });

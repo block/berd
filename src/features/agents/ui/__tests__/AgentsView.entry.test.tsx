@@ -73,6 +73,14 @@ vi.mock("@/shared/api/agents", () => ({
   readAgentSourceFile: vi.fn().mockResolvedValue(mockDraftSource),
   updatePersonaSource: vi.fn().mockResolvedValue(mockDraftSource),
   deletePersonaSource: vi.fn().mockResolvedValue(undefined),
+  isPlaceholderAgentDescription: (description: string | undefined | null) => {
+    const trimmed = description?.trim().toLowerCase();
+    return !trimmed || trimmed === "agent" || trimmed === "draft";
+  },
+  hasRealAgentDescription: (description: string | undefined | null) => {
+    const trimmed = description?.trim().toLowerCase();
+    return Boolean(trimmed) && trimmed !== "agent" && trimmed !== "draft";
+  },
 }));
 
 vi.mock("@/shared/api/system", () => ({
@@ -373,6 +381,29 @@ describe("AgentsView entry points", () => {
     expect(onActivePersonaIdChange).toHaveBeenCalledWith(null, undefined);
   });
 
+  it("shows the agent's description on the detail page, next to provider and model", () => {
+    useAgentStore.setState({
+      personas: [
+        { ...persona, sourceDescription: "Reviews your code carefully." },
+      ],
+    });
+
+    render(<AgentsView activePersonaId={persona.id} />);
+
+    expect(screen.getByText("view.description")).toBeInTheDocument();
+    expect(
+      screen.getByText("Reviews your code carefully."),
+    ).toBeInTheDocument();
+  });
+
+  it("shows no description row on the detail page when there's no real description", () => {
+    useAgentStore.setState({ personas: [persona] });
+
+    render(<AgentsView activePersonaId={persona.id} />);
+
+    expect(screen.queryByText("view.description")).not.toBeInTheDocument();
+  });
+
   it("shows and activates the avatar customization affordance", async () => {
     useAgentStore.setState({ personas: [persona] });
     const user = userEvent.setup();
@@ -382,7 +413,7 @@ describe("AgentsView entry points", () => {
     const customizeAvatar = screen.getByRole("button", {
       name: "editor.customizeAvatar",
     });
-    expect(screen.getByText("editor.changeAvatar")).toBeInTheDocument();
+    expect(screen.getByText("builderRail.changeAvatar")).toBeInTheDocument();
     customizeAvatar.focus();
     expect(customizeAvatar).toHaveFocus();
     await user.keyboard("{Enter}");

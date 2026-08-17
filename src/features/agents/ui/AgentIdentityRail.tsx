@@ -4,7 +4,10 @@ import { cn } from "@/shared/lib/cn";
 interface AgentIdentityMetadataItem {
   label: string;
   value: string;
+  /** Breaks anywhere, for unbroken strings like file paths. */
   wrap?: boolean;
+  /** Wraps at word boundaries, for real prose like a description. */
+  multiline?: boolean;
 }
 
 interface AgentIdentityRailProps {
@@ -62,7 +65,11 @@ export function AgentIdentityRail({
                 <dd
                   className={cn(
                     "text-[14px] leading-5 text-surface-agent-profile-fg-80",
-                    item.wrap ? "break-all" : "truncate",
+                    item.multiline
+                      ? "whitespace-pre-line break-words"
+                      : item.wrap
+                        ? "break-all"
+                        : "truncate",
                   )}
                 >
                   {item.value}

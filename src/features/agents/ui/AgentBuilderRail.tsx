@@ -38,6 +38,7 @@ import {
   fileStem,
   isPlaceholderAgentName,
   PLACEHOLDER_AGENT_BODY,
+  PLACEHOLDER_AGENT_DESCRIPTION,
   promoteDraft,
 } from "@/features/agents/lib/agentBuilderSession";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
@@ -302,6 +303,10 @@ export function AgentBuilderRail({
       : null;
   const nameFieldValue =
     data && !isPlaceholderAgentName(data.name) ? data.name : "";
+  const descriptionFieldValue =
+    data && data.description !== PLACEHOLDER_AGENT_DESCRIPTION
+      ? data.description
+      : "";
   const contentFieldValue = data?.content ?? "";
   const isPlaceholderContent = contentFieldValue === PLACEHOLDER_AGENT_BODY;
   const instructionsFieldValue = isPlaceholderContent ? "" : contentFieldValue;
@@ -708,6 +713,19 @@ export function AgentBuilderRail({
           value={nameFieldValue}
           placeholder={t("editor.displayNamePlaceholder")}
           onChange={(event) => update({ name: event.target.value })}
+          className={FIELD_CLASS}
+        />
+      </label>
+
+      <label className="block text-sm" htmlFor="builder-rail-description">
+        <span className={FIELD_LABEL_CLASS}>
+          {t("builderRail.descriptionLabel")}
+        </span>
+        <Input
+          id="builder-rail-description"
+          value={descriptionFieldValue}
+          placeholder={t("builderRail.descriptionPlaceholder")}
+          onChange={(event) => update({ description: event.target.value })}
           className={FIELD_CLASS}
         />
       </label>

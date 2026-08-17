@@ -24,6 +24,7 @@ import type { Persona } from "@/shared/types/agents";
 import {
   canDeletePersona,
   canEditPersona,
+  getRealPersonaDescription,
 } from "@/features/agents/lib/personaPresentation";
 import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
 import { getAgentAvatarTransitionName } from "@/features/agents/lib/agentViewTransitions";
@@ -254,7 +255,7 @@ export const PersonaCard = memo(function PersonaCard({
         </div>
 
         <p className="line-clamp-3 max-w-[28ch] text-xs font-normal leading-4 text-muted-foreground">
-          {persona.systemPrompt}
+          {getRealPersonaDescription(persona) ?? persona.systemPrompt}
         </p>
       </div>
     </div>

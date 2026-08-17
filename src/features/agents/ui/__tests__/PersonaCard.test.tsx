@@ -146,10 +146,42 @@ describe("PersonaCard", () => {
     expect(screen.queryByText(/claude-sonnet/i)).not.toBeInTheDocument();
   });
 
-  it("shows system prompt preview", () => {
+  it("shows the agent's description, not its instructions", () => {
     render(
       <PersonaCard
-        persona={makePersona({ systemPrompt: "You are a coding assistant." })}
+        persona={makePersona({
+          systemPrompt: "You are a coding assistant.",
+          sourceDescription: "Reviews your code and catches bugs.",
+        })}
+      />,
+    );
+    expect(
+      screen.getByText("Reviews your code and catches bugs."),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("You are a coding assistant."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("falls back to instructions when there's no real description", () => {
+    render(
+      <PersonaCard
+        persona={makePersona({
+          systemPrompt: "You are a coding assistant.",
+          sourceDescription: undefined,
+        })}
+      />,
+    );
+    expect(screen.getByText("You are a coding assistant.")).toBeInTheDocument();
+  });
+
+  it("falls back to instructions when the description is a placeholder", () => {
+    render(
+      <PersonaCard
+        persona={makePersona({
+          systemPrompt: "You are a coding assistant.",
+          sourceDescription: "Agent",
+        })}
       />,
     );
     expect(screen.getByText("You are a coding assistant.")).toBeInTheDocument();

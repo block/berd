@@ -22,6 +22,8 @@
     "invalidFrontmatterTitle": "Frontmatter inválido",
     "invalidFrontmatterBody": "Corrígelo desde el chat o abre el archivo en un editor.",
     "openFailed": "No se pudo abrir el editor de agente.",
+    "descriptionLabel": "Descripción",
+    "descriptionPlaceholder": "Una línea breve sobre lo que hace este agente",
     "instructionsLabel": "Instrucciones del agente",
     "instructionsPlaceholder": "Describe el objetivo e instrucciones del agente",
     "selectedAvatar": "Avatar seleccionado",
@@ -231,6 +233,7 @@
     "title": "Agentes",
     "backToAgents": "Volver a agentes",
     "created": "Creado",
+    "description": "Descripción",
     "more": "Más",
     "source": "Origen",
     "updated": "Actualizado"
