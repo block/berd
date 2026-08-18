@@ -58,6 +58,8 @@ export interface ProjectArtifactRendererProps {
   /** Pauses continuous rendering while a mounted preview is not visible. */
   renderPaused?: boolean;
   onGlCanvasReady?: (canvas: HTMLCanvasElement) => void;
+  /** Pulls the camera back to provide extra framing around oversized embeds. */
+  cameraDistanceScale?: number;
 }
 
 export type ProjectArtifactPinState = { projectId: string };

@@ -33,6 +33,7 @@ interface ProjectArtifactPreviewProps {
   gestureFreezeActive?: boolean;
   renderPaused?: boolean;
   onGlCanvasReady?: (canvas: HTMLCanvasElement) => void;
+  cameraDistanceScale?: number;
 }
 
 function canUseWebGlRenderer(): boolean {
@@ -148,6 +149,7 @@ export function ProjectArtifactPreview({
   gestureFreezeActive,
   renderPaused = false,
   onGlCanvasReady,
+  cameraDistanceScale,
   variant = "preview",
 }: ProjectArtifactPreviewProps) {
   const state = useMemo(() => deriveProjectArtifactState(input), [input]);
@@ -215,6 +217,7 @@ export function ProjectArtifactPreview({
             gestureFreezeActive={gestureFreezeActive}
             motionImpulse={motionImpulse}
             onGlCanvasReady={onGlCanvasReady}
+            cameraDistanceScale={cameraDistanceScale}
             state={state}
             variant={variant}
           />

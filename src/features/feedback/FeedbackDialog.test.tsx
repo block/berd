@@ -54,6 +54,7 @@ vi.mock("@/shared/api/feedback", async (importOriginal) => {
 describe("FeedbackDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.setItem("berd:telemetry-consent:v1", "true");
     mockGetVersion.mockResolvedValue("0.1.0-test");
     mockOpenDialog.mockResolvedValue(null);
     mockInspectAttachmentPaths.mockResolvedValue([]);

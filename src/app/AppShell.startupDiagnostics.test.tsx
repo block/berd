@@ -6,6 +6,7 @@ import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import { dispatchOnboarding } from "@/features/onboarding/model";
 import { AppShell } from "./AppShell";
 
 const mocks = vi.hoisted(() => ({
@@ -117,6 +118,7 @@ describe("AppShell startup diagnostics", () => {
     vi.clearAllMocks();
     window.history.replaceState(null, "", "/");
     window.localStorage.clear();
+    dispatchOnboarding({ type: "complete" });
     mocks.startupState.ready = true;
     mocks.startupState.error = null;
     mocks.migrationState.status = "ready";

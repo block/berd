@@ -63,12 +63,6 @@ export const BERDY_ONBOARDING_EXPERIMENT_ID = "berdy-onboarding";
 
 export const SKILL_DISCOVERY_EXPERIMENT_ID = "skill-discovery";
 
-export const FIRST_RUN_ONBOARDING_EXPERIMENT_ID = "first-run-onboarding";
-
-export const HIDDEN_EXPERIMENT_IDS = new Set<string>([
-  FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
-]);
-
 export const EXPERIMENT_DEFINITIONS = [
   {
     id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
@@ -115,14 +109,6 @@ export const EXPERIMENT_DEFINITIONS = [
     id: BERDY_ONBOARDING_EXPERIMENT_ID,
     titleKey: "experiments.berdyOnboarding.title",
     descriptionKey: "experiments.berdyOnboarding.description",
-    settingsVisibility: "dev",
-  },
-  {
-    id: FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
-    titleKey: "experiments.firstRunOnboarding.title",
-    descriptionKey: "experiments.firstRunOnboarding.description",
-    defaultEnabled: false,
-    manualEnableOnly: true,
     settingsVisibility: "dev",
   },
 ] as const satisfies readonly ExperimentDefinition[];

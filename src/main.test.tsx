@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mockInstallRendererDiagnostics = vi.hoisted(() => vi.fn());
 const mockReportRendererError = vi.hoisted(() => vi.fn());
 const mockInvoke = vi.hoisted(() => vi.fn());
+const mockInitTelemetry = vi.hoisted(() => vi.fn());
+const mockTrackAppLaunched = vi.hoisted(() => vi.fn());
 
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 vi.mock("@/shared/styles/globals.css", () => ({}));
@@ -19,6 +21,10 @@ vi.mock("@/app/LocalMediaCacheEvents", () => ({
 
 vi.mock("@/app/RendererTelemetry", () => ({
   RendererTelemetry: () => null,
+}));
+
+vi.mock("@/app/ui/StartupLoadingView", () => ({
+  StartupLoadingView: () => <div data-testid="startup-loading" />,
 }));
 
 vi.mock("@/app/SessionWindowApp", () => ({
@@ -52,6 +58,11 @@ vi.mock("@/shared/i18n", () => ({
   I18nProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
+vi.mock("@/shared/telemetry/client", () => ({
+  initTelemetry: mockInitTelemetry,
+  trackAppLaunched: mockTrackAppLaunched,
+}));
+
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mockInvoke }));
 
 vi.mock("@/shared/theme/ThemeProvider", () => ({
@@ -72,24 +83,62 @@ describe("main entrypoint telemetry startup", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    localStorage.clear();
+    mockInitTelemetry.mockReset();
+    mockTrackAppLaunched.mockReset();
+    mockInvoke.mockResolvedValue("fresh-with-landing-v1");
     globalThis.fetch = vi.fn() as typeof globalThis.fetch;
   });
 
   afterEach(() => {
     document.body.innerHTML = "";
+    localStorage.clear();
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
-  it("runs the production startup path without telemetry network or native-command work", async () => {
+  it("resolves the installation cohort before rendering the main app", async () => {
     await loadMainAt("");
 
     await screen.findByTestId("main-app");
     expect(globalThis.fetch).not.toHaveBeenCalled();
-    expect(mockInvoke).not.toHaveBeenCalled();
+    expect(mockInvoke).toHaveBeenCalledOnce();
+    expect(mockInvoke).toHaveBeenCalledWith("get_installation_cohort");
     expect(mockInstallRendererDiagnostics).toHaveBeenCalledWith({
       windowKind: "main",
     });
+  });
+
+  it("reports cohort lookup failures without blocking startup", async () => {
+    const error = new Error("state unavailable");
+    mockInvoke.mockRejectedValueOnce(error);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await loadMainAt("");
+
+    await screen.findByTestId("main-app");
+    expect(mockReportRendererError).toHaveBeenCalledWith(
+      "installation_cohort_failed",
+      error,
+    );
+  });
+
+  it("reports telemetry init failures without blocking startup", async () => {
+    const error = new Error("analytics unavailable");
+    mockInitTelemetry.mockImplementation(() => {
+      throw error;
+    });
+    localStorage.setItem("berd:telemetry-consent:v1", "true");
+
+    await loadMainAt("");
+
+    await screen.findByTestId("main-app");
+    expect(mockInitTelemetry).toHaveBeenCalledOnce();
+    expect(mockTrackAppLaunched).not.toHaveBeenCalled();
+    expect(mockReportRendererError).toHaveBeenCalledWith(
+      "telemetry_init_failed",
+      error,
+    );
   });
 
   it("does not start launch telemetry for session windows", async () => {
@@ -101,6 +150,7 @@ describe("main entrypoint telemetry startup", () => {
     expect(mockInstallRendererDiagnostics).toHaveBeenCalledWith({
       windowKind: "session",
     });
+    expect(mockInvoke).not.toHaveBeenCalled();
   });
 
   it("does not start launch telemetry for malformed session windows", async () => {
