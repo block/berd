@@ -2337,8 +2337,9 @@ function VirtualMessageTimelineSession({
         return;
       }
 
+      const authorityState = reconcileAuthorityResize();
       let virtualState =
-        reconcileAuthorityResize() ??
+        authorityState ??
         syncViewportFromDom({
           source: pointerScrollIntentActiveRef.current
             ? "browser"
@@ -3103,10 +3104,12 @@ function VirtualMessageTimelineSession({
           ? "toward-latest"
           : null,
     );
+    if (event.deltaY !== 0) {
+      interruptAuthorityScroll("wheel");
+    }
 
     if (event.deltaY < 0) {
       cancelJumpToLatestAnimation();
-      interruptAuthorityScroll("wheel");
       detachFromBottomFollow();
       // Push the detach into the controller immediately so it captures a row
       // anchor at the current position. Otherwise the controller can keep a

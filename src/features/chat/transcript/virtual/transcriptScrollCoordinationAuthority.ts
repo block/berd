@@ -181,10 +181,14 @@ export class TranscriptScrollCoordinationAuthority {
     if (geometry.scrollTop > modeledBottom) {
       return { correction: null };
     }
-    return this.engine.syncViewport(geometry, {
+    const result = this.engine.syncViewport(geometry, {
       source: "browser",
       userScrollIntent: options.userScrollIntent,
     });
+    if (options.userScrollIntent) {
+      this.trackedAnchor = this.engine.getState().anchor;
+    }
+    return result;
   }
 
   setRows(

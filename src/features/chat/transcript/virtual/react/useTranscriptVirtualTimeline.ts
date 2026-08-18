@@ -758,8 +758,12 @@ export function useTranscriptVirtualTimeline({
         protectedRowIds,
         state,
       });
+      const previousAuthority = runtimeRef.current.authority;
       runtimeRef.current.controller = replacement;
-      runtimeRef.current.authority = createAuthority(replacement);
+      runtimeRef.current.authority = createAuthority(
+        replacement,
+        previousAuthority?.getTrackedAnchor(),
+      );
       runtimeRef.current.controllerScrollElement = containerRef.current;
       const liveViewportBeforeRows = readViewportGeometry(
         containerRef.current,
@@ -943,6 +947,7 @@ export function useTranscriptVirtualTimeline({
     const controllerState = controller?.getState();
     if (!controller || shouldBindRealContainer) {
       const previousState = controllerState ?? undefined;
+      const previousAuthority = runtimeRef.current.authority;
       runtimeRef.current.controller = createController({
         sessionId,
         sessionEpoch,
@@ -951,6 +956,10 @@ export function useTranscriptVirtualTimeline({
         protectedRowIds: normalizedProtectedRowIds,
         state: previousState,
       });
+      runtimeRef.current.authority = createAuthority(
+        runtimeRef.current.controller,
+        previousAuthority?.getTrackedAnchor(),
+      );
       runtimeRef.current.controllerScrollElement = container;
       runtimeRef.current.measurementScheduler =
         createTranscriptMeasurementScheduler({
@@ -1524,12 +1533,28 @@ export function useTranscriptVirtualTimeline({
     if (!authority) {
       return null;
     }
-    authority.reconcileResize(
-      readViewportGeometry(containerRef.current, footerHeight),
-    );
+    const geometry = readViewportGeometry(containerRef.current, footerHeight);
+    const preserveLiveViewport = shouldPreserveLiveScrollPosition();
+    if (preserveLiveViewport) {
+      authority.observeScroll(geometry, {
+        userScrollIntent: true,
+      });
+    }
+    if (
+      preserveLiveViewport ||
+      authority.getTrackedAnchor().type !== "bottom"
+    ) {
+      applyCorrection(authority.reconcileResize(geometry), "authority-resize");
+    }
     commitSnapshot();
     return authority.getState();
-  }, [commitSnapshot, containerRef, footerHeight]);
+  }, [
+    applyCorrection,
+    commitSnapshot,
+    containerRef,
+    footerHeight,
+    shouldPreserveLiveScrollPosition,
+  ]);
 
   const getScrollPresentation = useCallback(() => {
     const authority = runtimeRef.current.authority;
@@ -1818,6 +1843,7 @@ function getMeasurementStats(
 
 function createAuthority(
   engine: TranscriptVirtualEngine,
+  initialAnchor?: TranscriptScrollAnchor,
 ): TranscriptScrollCoordinationAuthority {
   if (!engine.installAuthorityAnchor || !engine.getMeasurementToken) {
     throw new Error(
@@ -1826,6 +1852,7 @@ function createAuthority(
   }
   return createTranscriptScrollCoordinationAuthority(
     engine as Parameters<typeof createTranscriptScrollCoordinationAuthority>[0],
+    initialAnchor ? { initialAnchor } : undefined,
   );
 }
 
