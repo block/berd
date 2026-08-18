@@ -60,6 +60,7 @@ import {
   AgentZipImportError,
   type ExtractedAgentFile,
   extractAgentFileFromZip,
+  extractAgentFileFromZipInWorker,
   isAgentZipFileName,
 } from "@/features/agents/lib/agentZipImport";
 
@@ -436,13 +437,6 @@ export function AgentsView({
         if (file.size > MAX_SNAPSHOT_PNG_BYTES) {
           return t("view.importTooLarge", { maxSize: "10 MB" });
         }
-        if (
-          file.type &&
-          file.type !== "application/zip" &&
-          file.type !== "application/x-zip-compressed"
-        ) {
-          return t("view.importInvalidMimeType");
-        }
         return null;
       }
       if (isAgentImageFileName(file.name)) {
@@ -521,11 +515,11 @@ export function AgentsView({
           open
           onOpenChange={setImportDialogOpen}
           onImportFile={handleImportFileBytes}
-          prepareImport={(bytes, name) => {
+          prepareImport={async (bytes, name, signal) => {
             let extracted: ExtractedAgentFile;
             try {
               extracted = isAgentZipFileName(name)
-                ? extractAgentFileFromZip(bytes)
+                ? await extractAgentFileFromZipInWorker(bytes, signal)
                 : { bytes, name };
             } catch (error) {
               if (error instanceof AgentZipImportError) {
@@ -536,7 +530,7 @@ export function AgentsView({
             if (isAgentImageFileName(extracted.name)) {
               const snapshot = decodeAgentImage(extracted.bytes);
               const { width, height } = getPngDimensions(extracted.bytes);
-              return {
+              const preview = {
                 displayName:
                   snapshot.profile?.displayName ??
                   snapshot.definition.name ??
@@ -556,11 +550,13 @@ export function AgentsView({
                   }),
                 ),
               };
+              return { ...extracted, preview };
             }
-            return previewPersonaImport(
+            const preview = previewPersonaImport(
               decodeImportFileBytes(extracted.bytes),
               extracted.name,
             );
+            return { ...extracted, preview };
           }}
           validateImportFile={validateImportFile}
           onImportError={handleImportError}

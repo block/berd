@@ -6,7 +6,18 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { AgentImportDialog } from "../AgentImportDialog";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+import {
+  AgentImportDialog,
+  type AgentImportPreview,
+} from "../AgentImportDialog";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -80,6 +91,51 @@ describe("AgentImportDialog", () => {
       screen.queryByRole("button", { name: "importDialog.import" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("Reviewer")).not.toBeInTheDocument();
+  });
+
+  it("cancels in-flight preparation when the dialog closes", async () => {
+    const preparation = deferred<{
+      bytes: Uint8Array;
+      name: string;
+      preview: AgentImportPreview;
+    }>();
+    const bytes = Uint8Array.from([1]);
+    const file = new File([bytes], "agent.zip", { type: "application/zip" });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(bytes.buffer),
+    });
+    let preparationSignal: AbortSignal | undefined;
+    const props = importDialogProps({
+      prepareImport: (
+        _bytes: Uint8Array,
+        _name: string,
+        signal: AbortSignal,
+      ) => {
+        preparationSignal = signal;
+        return preparation.promise;
+      },
+    });
+    const { rerender } = render(<AgentImportDialog {...props} />);
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
+    await waitFor(() => expect(preparationSignal).toBeDefined());
+
+    rerender(<AgentImportDialog {...props} open={false} />);
+    expect(preparationSignal?.aborted).toBe(true);
+
+    preparation.resolve({
+      bytes,
+      name: "stale.md",
+      preview: {
+        displayName: "Stale",
+        systemPrompt: "Stale",
+        identity: "stale.md",
+      },
+    });
+    await Promise.resolve();
+    expect(screen.queryByText("Stale")).not.toBeInTheDocument();
   });
 
   it("tilts the rendered import card toward the pointer and resets", async () => {

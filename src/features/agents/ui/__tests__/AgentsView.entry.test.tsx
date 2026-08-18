@@ -45,6 +45,18 @@ const mockDraftSource = vi.hoisted(() => ({
   },
 }));
 
+vi.mock("@/features/agents/lib/agentZipImport", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/features/agents/lib/agentZipImport")
+    >();
+  return {
+    ...actual,
+    extractAgentFileFromZipInWorker: async (bytes: Uint8Array) =>
+      actual.extractAgentFileFromZip(bytes),
+  };
+});
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, options?: Record<string, unknown>) =>

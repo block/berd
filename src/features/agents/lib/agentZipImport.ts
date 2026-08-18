@@ -56,6 +56,61 @@ function validateExtractedSize(fileName: string, size: number): void {
   }
 }
 
+export const AGENT_ZIP_IMPORT_TIMEOUT_MS = 15_000;
+
+export function extractAgentFileFromZipInWorker(
+  archiveBytes: Uint8Array,
+  signal?: AbortSignal,
+  timeoutMs = AGENT_ZIP_IMPORT_TIMEOUT_MS,
+): Promise<ExtractedAgentFile> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(
+      new URL("./agentZipImport.worker.ts", import.meta.url),
+      { type: "module" },
+    );
+    let settled = false;
+    const finish = (operation: () => void) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      signal?.removeEventListener("abort", handleAbort);
+      worker.terminate();
+      operation();
+    };
+    const handleAbort = () =>
+      finish(() => reject(new DOMException("Aborted", "AbortError")));
+    const timeout = window.setTimeout(
+      () => finish(() => reject(new AgentZipImportError("invalid"))),
+      timeoutMs,
+    );
+    worker.onmessage = (
+      event: MessageEvent<
+        | ExtractedAgentFile
+        | {
+            error: { code: AgentZipImportErrorCode; maxBytes?: number };
+          }
+      >,
+    ) => {
+      if ("error" in event.data) {
+        const { code, maxBytes } = event.data.error;
+        finish(() => reject(new AgentZipImportError(code, maxBytes)));
+      } else {
+        const extracted = event.data;
+        finish(() => resolve(extracted));
+      }
+    };
+    worker.onerror = () =>
+      finish(() => reject(new AgentZipImportError("invalid")));
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+    signal?.addEventListener("abort", handleAbort, { once: true });
+    const workerBytes = new Uint8Array(archiveBytes);
+    worker.postMessage({ archiveBytes: workerBytes }, [workerBytes.buffer]);
+  });
+}
+
 export function extractAgentFileFromZip(
   archiveBytes: Uint8Array,
 ): ExtractedAgentFile {

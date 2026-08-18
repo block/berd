@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IconPhotoPlus, IconUpload } from "@tabler/icons-react";
 
 import { useTranslation } from "react-i18next";
@@ -45,7 +45,14 @@ interface AgentImportDialogProps {
   prepareImport: (
     fileBytes: Uint8Array,
     fileName: string,
-  ) => AgentImportPreview;
+    signal: AbortSignal,
+  ) =>
+    | AgentImportPreview
+    | Promise<{
+        bytes: Uint8Array;
+        name: string;
+        preview: AgentImportPreview;
+      }>;
   validateImportFile: (
     file: Pick<File, "name" | "type" | "size">,
   ) => string | null;
@@ -69,6 +76,7 @@ export function AgentImportDialog({
   const [importAccentColor, setImportAccentColor] = useState<string | null>(
     null,
   );
+  const preparationRef = useRef<AbortController | null>(null);
   const [prepared, setPrepared] = useState<{
     bytes: Uint8Array;
     name: string;
@@ -76,8 +84,18 @@ export function AgentImportDialog({
   } | null>(null);
 
   useEffect(() => {
-    if (!open) setPrepared(null);
+    if (!open) {
+      preparationRef.current?.abort();
+      setPrepared(null);
+    }
   }, [open]);
+
+  useEffect(
+    () => () => {
+      preparationRef.current?.abort();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!prepared?.preview.cardImageUrl) {
@@ -123,17 +141,29 @@ export function AgentImportDialog({
     handleFileChange,
     openFilePicker,
   } = useFileImportZone({
-    onImportFile: (bytes, name) => {
+    onImportFile: async (bytes, name) => {
+      const controller = new AbortController();
+      preparationRef.current = controller;
       try {
-        const preview = prepareImport(bytes, name);
+        const result = await prepareImport(bytes, name, controller.signal);
+        if (controller.signal.aborted) return;
         // The cleanup effect keyed by cardImageUrl revokes the previous URL
         // exactly once when this prepared preview replaces it.
-        setPrepared({ bytes, name, preview });
+        setPrepared(
+          "preview" in result ? result : { bytes, name, preview: result },
+        );
       } catch (error) {
-        onImportError(error instanceof Error ? error.message : String(error));
+        if (!controller.signal.aborted) {
+          onImportError(error instanceof Error ? error.message : String(error));
+        }
+      } finally {
+        if (preparationRef.current === controller) {
+          preparationRef.current = null;
+        }
       }
     },
     validateFile: (file) => {
+      preparationRef.current?.abort();
       setPrepared(null);
       return validateImportFile(file);
     },
