@@ -100,7 +100,7 @@ export function WelcomeStep({ onStart }: WelcomeStepProps) {
   };
 
   return (
-    <OnboardingShell contentClassName="max-[760px]:overflow-visible">
+    <OnboardingShell contentClassName="max-[760px]:overflow-x-hidden max-[760px]:overflow-y-auto">
       <motion.div
         className="relative grid h-full w-full grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] items-center gap-[clamp(3rem,8vw,10rem)] px-[clamp(0rem,4vw,5rem)] pt-[var(--spacing-app-top-bar)] max-[760px]:grid-cols-1 max-[760px]:gap-0 max-[760px]:px-8"
         initial="hidden"

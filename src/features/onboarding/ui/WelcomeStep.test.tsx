@@ -55,6 +55,9 @@ describe("WelcomeStep", () => {
     });
     expect(heading).toBeInTheDocument();
     expect(heading).toHaveFocus();
+    const scrollRegion = heading.closest("[class*='overflow-y-auto']");
+    expect(scrollRegion).toHaveClass("max-[760px]:overflow-y-auto");
+    expect(scrollRegion).toHaveClass("max-[760px]:overflow-x-hidden");
     expect(screen.getByTestId("project-cube")).toBeInTheDocument();
     expect(
       screen.getByRole("checkbox", { name: /share anonymous usage data/i }),
