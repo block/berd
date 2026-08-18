@@ -79,6 +79,15 @@ vi.mock("@/shared/hooks/useAvatarSrc", () => ({
       ? avatar
       : undefined;
   }),
+  useAvatarMedia: vi.fn((avatar: unknown) =>
+    avatar === "user-avatar:custom"
+      ? {
+          src: "asset:///avatars/custom.webm",
+          mediaType: "video",
+          posterSrc: "asset:///avatars/custom.png",
+        }
+      : undefined,
+  ),
 }));
 
 vi.mock("@/shared/api/system", async (importOriginal) => {
@@ -1452,6 +1461,37 @@ describe("MessageBubble", () => {
       "Builder",
     );
     expectNoVisibleText(container, "Builder");
+  });
+
+  it("renders a generated custom gloopie in the assistant gutter", () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Builder",
+          avatar: "user-avatar:custom",
+          systemPrompt: "",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([{ type: "text", text: "hi" }], {
+          metadata: { personaId: "persona-1", personaName: "Builder" },
+        })}
+      />,
+    );
+
+    const gutterAvatar = container.querySelector(
+      '[data-role="assistant-persona-avatar"]',
+    );
+    expect(gutterAvatar?.querySelector("img")).toHaveAttribute(
+      "src",
+      "asset:///avatars/custom.png",
+    );
   });
 
   it("keeps custom persona identity in the gutter while avatar media is unavailable", () => {
