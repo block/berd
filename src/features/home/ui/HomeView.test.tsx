@@ -391,7 +391,7 @@ describe("HomeView", () => {
       ).toMatchObject({
         width: 156,
         height: 156,
-        x: 542,
+        x: 522,
         y: -274,
       }),
     );
@@ -401,7 +401,7 @@ describe("HomeView", () => {
       .mock.calls.flatMap(([request]) => request.items)
       .findLast((item) => item.kind === "clock" && item.width === 156);
     expect(savedClock).toMatchObject({
-      centerX: 620,
+      centerX: 600,
       centerY: -196,
       width: 156,
       height: 156,

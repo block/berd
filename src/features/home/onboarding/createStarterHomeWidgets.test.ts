@@ -86,7 +86,7 @@ describe("createStarterHomeWidgets", () => {
 
     expect(widgets).not.toBeNull();
     expect(widgets?.find((widget) => widget.type === "clock")).toMatchObject({
-      x: 542,
+      x: 522,
       y: -274,
       width: 156,
       height: 156,

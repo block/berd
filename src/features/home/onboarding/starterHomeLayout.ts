@@ -38,10 +38,10 @@ export function starterLayoutCenter(rect: {
 
 export const STARTER_HOME_LAYOUT = {
   project: { x: -266, y: -334, width: 748, height: 748 },
-  berdy: { x: -352, y: -180 },
+  berdy: { x: -368, y: -180 },
   // Keep the clock centered in its existing slot while shrinking it by 10%.
-  clock: { x: 542, y: -274, width: 156, height: 156 },
-  tasks: { x: -500, y: 218, width: 224, height: 196 },
+  clock: { x: 522, y: -274, width: 156, height: 156 },
+  tasks: { x: -476, y: 218, width: 224, height: 196 },
   agents: [
     { x: 410, y: 191, width: 180, height: 198 },
     { x: 214, y: -369, width: 180, height: 198 },

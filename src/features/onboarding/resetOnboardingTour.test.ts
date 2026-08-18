@@ -156,6 +156,30 @@ describe("onboarding tour experience controls", () => {
     expect(haveStarterAgentPinsBeenSeeded()).toBe(true);
   });
 
+  it("preserves concurrent persona edits and deletions during refresh", async () => {
+    const originalTinker = starterPersona("tinker");
+    const originalWildcard = starterPersona("wildcard");
+    storeMocks.setPersonaRecords([originalTinker, originalWildcard]);
+    storeMocks.listPersonas.mockImplementationOnce(async () => {
+      storeMocks.setPersonaRecords([
+        { ...originalTinker, displayName: "Edited Tinker" },
+      ]);
+      return [originalTinker, originalWildcard];
+    });
+
+    await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
+      itemsConfirmed: true,
+      cameraConfirmed: true,
+      starterAgentsConfirmed: false,
+    });
+
+    expect(storeMocks.personas).toEqual([
+      { ...originalTinker, displayName: "Edited Tinker" },
+    ]);
+    expect(storeMocks.addMissingStarterAgentPins).not.toHaveBeenCalled();
+    expect(areStarterAgentPinsEligible()).toBe(true);
+  });
+
   it("refreshes and persists starter agents when the store is empty", async () => {
     storeMocks.listPersonas.mockResolvedValueOnce([
       starterPersona("tinker"),
