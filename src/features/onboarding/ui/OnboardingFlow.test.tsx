@@ -15,6 +15,9 @@ import { OnboardingFlow } from "./OnboardingFlow";
 const mockCreatePersona = vi.hoisted(() => vi.fn());
 const mockListPersonas = vi.hoisted(() => vi.fn());
 const mockTrackAgentCreateCompleted = vi.hoisted(() => vi.fn());
+const mockUpdateTelemetryEnabled = vi.hoisted(() =>
+  vi.fn(async () => undefined),
+);
 
 vi.mock("@/shared/api/agents", () => ({
   createPersona: mockCreatePersona,
@@ -66,8 +69,14 @@ vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
 }));
 
 vi.mock("@/shared/telemetry/consent", () => ({
-  updateTelemetryEnabled: vi.fn(async () => undefined),
+  updateTelemetryEnabled: mockUpdateTelemetryEnabled,
   telemetryConsentEnforced: () => false,
+}));
+
+// Pin the telemetry capability on so the welcome consent checkbox renders
+// regardless of the test build's feature profile.
+vi.mock("@/shared/profile/capabilities", () => ({
+  useProfileCapability: () => true,
 }));
 
 function createdPersona(request: CreatePersonaRequest) {
@@ -174,6 +183,61 @@ describe("OnboardingFlow agent adoption telemetry", () => {
     // which the count of two pins now that no id rides the event.
     expect(mockTrackAgentCreateCompleted).toHaveBeenCalledTimes(2);
     expect(toast.warning).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The welcome consent answer lives in the onboarding store, so Back
+// navigation must show what was actually chosen and can never launder an
+// explicit opt-out back into the default-ON write.
+describe("OnboardingFlow welcome consent round-trip", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+    resetOnboardingStoreForTests();
+    dispatchOnboarding({ type: "start" });
+  });
+
+  it("keeps an opt-out unchecked across Back and never writes consent ON", async () => {
+    renderFlow();
+    const user = userEvent.setup();
+
+    await user.click(
+      screen.getByRole("checkbox", { name: /share anonymous usage data/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Let’s go" }));
+    expect(
+      screen.getByRole("heading", {
+        name: "What type of work will you use Berd for?",
+      }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Go back" }));
+    expect(
+      screen.getByRole("checkbox", { name: /share anonymous usage data/i }),
+    ).not.toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Let’s go" }));
+
+    // Each advance past the unchecked box re-asserts disabled; no
+    // interleaving of this journey may produce a write of true.
+    expect(mockUpdateTelemetryEnabled.mock.calls).toEqual([[false], [false]]);
+  });
+
+  it("does not rewrite an untouched opt-in when revisiting the landing page", async () => {
+    renderFlow();
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("button", { name: "Let’s go" }));
+    await user.click(screen.getByRole("button", { name: "Go back" }));
+    expect(
+      screen.getByRole("checkbox", { name: /share anonymous usage data/i }),
+    ).toBeChecked();
+
+    await user.click(screen.getByRole("button", { name: "Let’s go" }));
+
+    // Only the first ceremony writes; the untouched pass back through
+    // welcome cannot overwrite a Settings change made in the meantime.
+    expect(mockUpdateTelemetryEnabled.mock.calls).toEqual([[true]]);
   });
 });
 

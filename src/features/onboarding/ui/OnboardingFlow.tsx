@@ -131,6 +131,10 @@ export function OnboardingFlow({ runtime }: OnboardingFlowProps) {
   if (state.step === "welcome") {
     return (
       <WelcomeStep
+        recordedShareUsageData={state.shareUsageData}
+        onRecordShareUsageData={(shareUsageData) =>
+          dispatchOnboarding({ type: "set-share-usage-data", shareUsageData })
+        }
         onStart={() =>
           dispatchOnboarding({ type: "go-to", step: "work-types" })
         }

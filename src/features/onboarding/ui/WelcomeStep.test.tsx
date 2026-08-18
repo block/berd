@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import { WelcomeStep } from "./WelcomeStep";
 
 const motionMocks = vi.hoisted(() => ({ reduced: false }));
@@ -48,16 +48,28 @@ vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
   ),
 }));
 
-function renderStep(onStart = vi.fn()) {
+function renderStep({
+  onStart = vi.fn(),
+  recordedShareUsageData = null,
+  onRecordShareUsageData = vi.fn(),
+}: {
+  onStart?: Mock<() => void>;
+  recordedShareUsageData?: boolean | null;
+  onRecordShareUsageData?: Mock<(shareUsageData: boolean) => void>;
+} = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
   render(
     <QueryClientProvider client={client}>
-      <WelcomeStep onStart={onStart} />
+      <WelcomeStep
+        onStart={onStart}
+        recordedShareUsageData={recordedShareUsageData}
+        onRecordShareUsageData={onRecordShareUsageData}
+      />
     </QueryClientProvider>,
   );
-  return onStart;
+  return { onStart, onRecordShareUsageData };
 }
 
 describe("WelcomeStep", () => {
@@ -69,7 +81,7 @@ describe("WelcomeStep", () => {
   });
 
   it("starts onboarding from the landing page with sharing defaulted on", async () => {
-    const onStart = renderStep();
+    const { onStart, onRecordShareUsageData } = renderStep();
 
     const heading = screen.getByRole("heading", {
       name: "Welcome to Berd. Your place for doing.",
@@ -86,18 +98,71 @@ describe("WelcomeStep", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
     expect(consentMocks.update).toHaveBeenCalledExactlyOnceWith(true);
+    expect(onRecordShareUsageData).toHaveBeenCalledExactlyOnceWith(true);
     expect(onStart).toHaveBeenCalledOnce();
   });
 
   it("persists an opt out before advancing", async () => {
-    const onStart = renderStep();
+    const { onStart, onRecordShareUsageData } = renderStep();
     await userEvent.click(
       screen.getByRole("checkbox", { name: /share anonymous usage data/i }),
     );
     await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
 
     expect(consentMocks.update).toHaveBeenCalledExactlyOnceWith(false);
+    expect(onRecordShareUsageData).toHaveBeenCalledExactlyOnceWith(false);
     expect(onStart).toHaveBeenCalledOnce();
+  });
+
+  // The regression pin for Back navigation: the checkbox shows the recorded
+  // answer, not the default, so an explicit opt-out cannot silently revert.
+  it("renders a recorded opt-out unchecked on a revisit", () => {
+    renderStep({ recordedShareUsageData: false });
+
+    expect(
+      screen.getByRole("checkbox", { name: /share anonymous usage data/i }),
+    ).not.toBeChecked();
+  });
+
+  it("writes nothing when an untouched opt-in passes through again", async () => {
+    const { onStart, onRecordShareUsageData } = renderStep({
+      recordedShareUsageData: true,
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
+
+    expect(consentMocks.update).not.toHaveBeenCalled();
+    expect(onRecordShareUsageData).toHaveBeenCalledExactlyOnceWith(true);
+    expect(onStart).toHaveBeenCalledOnce();
+  });
+
+  // Advancing past a visibly unchecked box always re-asserts disabled, even
+  // when the recorded answer already says so — writing OFF can only ever stop
+  // data from being sent, and it retries an earlier disable that failed.
+  it("re-asserts disabled when advancing with the box unchecked", async () => {
+    const { onStart, onRecordShareUsageData } = renderStep({
+      recordedShareUsageData: false,
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
+
+    expect(consentMocks.update).toHaveBeenCalledExactlyOnceWith(false);
+    expect(onRecordShareUsageData).toHaveBeenCalledExactlyOnceWith(false);
+    expect(onStart).toHaveBeenCalledOnce();
+  });
+
+  it("writes a deliberate change of answer on a revisit", async () => {
+    const { onRecordShareUsageData } = renderStep({
+      recordedShareUsageData: false,
+    });
+
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: /share anonymous usage data/i }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
+
+    expect(consentMocks.update).toHaveBeenCalledExactlyOnceWith(true);
+    expect(onRecordShareUsageData).toHaveBeenCalledExactlyOnceWith(true);
   });
 
   it("advances even when the consent write fails", async () => {
@@ -106,7 +171,7 @@ describe("WelcomeStep", () => {
     const consoleWarn = vi
       .spyOn(console, "warn")
       .mockImplementation(() => undefined);
-    const onStart = renderStep();
+    const { onStart } = renderStep();
 
     await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
 
@@ -138,7 +203,7 @@ describe("WelcomeStep", () => {
     ],
   ])("hides the consent choice when %s", async (_case, arrange) => {
     arrange();
-    const onStart = renderStep();
+    const { onStart, onRecordShareUsageData } = renderStep();
 
     expect(
       screen.queryByRole("checkbox", { name: /share anonymous usage data/i }),
@@ -146,6 +211,7 @@ describe("WelcomeStep", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
     expect(consentMocks.update).not.toHaveBeenCalled();
+    expect(onRecordShareUsageData).not.toHaveBeenCalled();
     expect(onStart).toHaveBeenCalledOnce();
   });
 

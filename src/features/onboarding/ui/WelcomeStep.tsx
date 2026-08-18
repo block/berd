@@ -15,6 +15,11 @@ import { OnboardingShell } from "./OnboardingShell";
 
 interface WelcomeStepProps {
   onStart: () => void;
+  // The answer recorded by a previous completion of the welcome ceremony,
+  // null when the user has never advanced past this page. The page never
+  // reads the telemetry-enabled setting itself — it only writes it.
+  recordedShareUsageData: boolean | null;
+  onRecordShareUsageData: (shareUsageData: boolean) => void;
 }
 
 const reveal = {
@@ -26,15 +31,22 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-export function WelcomeStep({ onStart }: WelcomeStepProps) {
+export function WelcomeStep({
+  onStart,
+  recordedShareUsageData,
+  onRecordShareUsageData,
+}: WelcomeStepProps) {
   const { t } = useTranslation("onboarding");
   const reduceMotion = useReducedMotion() === true;
   const checkboxId = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
   // The landing page is the one consent surface that defaults to sharing ON:
   // the persisted Rust-owned setting stays at its opt-in default (OFF) until
-  // the user advances, so declining is just leaving the page.
-  const [shareUsageData, setShareUsageData] = useState(true);
+  // the user advances, so declining is just leaving the page. A per-visit
+  // toggle layers over the recorded answer so Back navigation shows what was
+  // actually chosen instead of resetting to the default.
+  const [visitAnswer, setVisitAnswer] = useState<boolean | null>(null);
+  const shareUsageData = visitAnswer ?? recordedShareUsageData ?? true;
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Mirrors TelemetryConsentRow's gate: enforced builds decide consent as
   // build policy, and capability-less sessions can never emit an event, so in
@@ -174,12 +186,22 @@ export function WelcomeStep({ onStart }: WelcomeStepProps) {
               // explicit pipeline start either: telemetry initialized at boot,
               // and the consent store update brings the pipeline up.
               if (!consentHidden) {
-                updateTelemetryEnabled(shareUsageData).catch((error) => {
-                  console.warn(
-                    "Failed to persist the usage-data choice:",
-                    error,
-                  );
-                });
+                onRecordShareUsageData(shareUsageData);
+                // Sharing ON is written only when it is news — the first
+                // completion of the ceremony (the default-ON landing consent)
+                // or a deliberate change on a revisit — so a stale checkbox
+                // passed through untouched can never overwrite a later
+                // Settings opt-out. Sharing OFF is always re-asserted: the
+                // user is advancing past a visibly unchecked box, and writing
+                // OFF can only ever stop data from being sent.
+                if (!shareUsageData || recordedShareUsageData !== true) {
+                  updateTelemetryEnabled(shareUsageData).catch((error) => {
+                    console.warn(
+                      "Failed to persist the usage-data choice:",
+                      error,
+                    );
+                  });
+                }
               }
               onStart();
             }}
@@ -192,9 +214,7 @@ export function WelcomeStep({ onStart }: WelcomeStepProps) {
               <Checkbox
                 id={checkboxId}
                 checked={shareUsageData}
-                onCheckedChange={(checked) =>
-                  setShareUsageData(checked === true)
-                }
+                onCheckedChange={(checked) => setVisitAnswer(checked === true)}
                 aria-describedby={`${checkboxId}-description`}
               />
               <p id={`${checkboxId}-description`}>

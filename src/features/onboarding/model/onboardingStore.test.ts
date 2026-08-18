@@ -146,6 +146,35 @@ describe("onboarding persistence", () => {
     expect(getOnboardingSnapshot()).toEqual(INITIAL_ONBOARDING_STATE);
   });
 
+  it.each([
+    ["a recorded opt-out", false, false],
+    ["a recorded opt-in", true, true],
+    ["an unanswered ceremony", null, null],
+    ["a record predating the field", undefined, null],
+  ])("hydrates %s as the usage-data answer", (_label, persisted, expected) => {
+    window.localStorage.setItem(
+      ONBOARDING_STORAGE_KEY,
+      JSON.stringify({
+        version: ONBOARDING_STORAGE_VERSION,
+        state: { ...INITIAL_ONBOARDING_STATE, shareUsageData: persisted },
+      }),
+    );
+
+    expect(getOnboardingSnapshot().shareUsageData).toBe(expected);
+  });
+
+  it("rejects a persisted non-boolean usage-data answer", () => {
+    window.localStorage.setItem(
+      ONBOARDING_STORAGE_KEY,
+      JSON.stringify({
+        version: ONBOARDING_STORAGE_VERSION,
+        state: { ...INITIAL_ONBOARDING_STATE, shareUsageData: "yes" },
+      }),
+    );
+
+    expect(getOnboardingSnapshot()).toEqual(INITIAL_ONBOARDING_STATE);
+  });
+
   it("hydrates catalog-backed IDs and deduplicates persisted arrays", () => {
     window.localStorage.setItem(
       ONBOARDING_STORAGE_KEY,

@@ -144,6 +144,9 @@ function isValidPersistedState(
       (state.completedHarnessSetupIds === undefined ||
         (isStringArray(state.completedHarnessSetupIds) &&
           state.completedHarnessSetupIds.every((id) => harnessIds.has(id)))) &&
+      (state.shareUsageData === undefined ||
+        state.shareUsageData === null ||
+        typeof state.shareUsageData === "boolean") &&
       (state.step === "complete") === (state.lifecycle === "completed") &&
       (state.step !== "harness-setup" || state.selectedHarnessId !== null),
   );
@@ -178,6 +181,7 @@ function parsePersisted(raw: string | null): OnboardingState {
       completedHarnessSetupIds: [
         ...new Set(state.completedHarnessSetupIds ?? []),
       ],
+      shareUsageData: state.shareUsageData ?? null,
     };
   } catch {
     return { ...INITIAL_ONBOARDING_STATE };

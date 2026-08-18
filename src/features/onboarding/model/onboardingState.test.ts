@@ -67,6 +67,20 @@ describe("onboardingReducer", () => {
     expect(back.completedHarnessSetupIds).toEqual(["claude-acp"]);
   });
 
+  it("records the usage-data answer given on the welcome page", () => {
+    const declined = onboardingReducer(
+      { ...INITIAL_ONBOARDING_STATE },
+      { type: "set-share-usage-data", shareUsageData: false },
+    );
+    expect(declined.shareUsageData).toBe(false);
+    expect(
+      onboardingReducer(declined, {
+        type: "set-share-usage-data",
+        shareUsageData: true,
+      }).shareUsageData,
+    ).toBe(true);
+  });
+
   it("replay clears choices but preserves durable setup outcomes", () => {
     const completed = onboardingReducer(
       {
@@ -75,13 +89,17 @@ describe("onboardingReducer", () => {
         selectedAgentId: "builder",
         selectedHarnessId: "goose",
         completedHarnessSetupIds: ["goose"],
+        shareUsageData: false,
       },
       { type: "complete" },
     );
+    // The consent answer is a durable outcome like configured providers: a
+    // replayed tour shows what was chosen, and reset returns to "never asked".
     expect(onboardingReducer(completed, { type: "replay" })).toEqual({
       ...INITIAL_ONBOARDING_STATE,
       lifecycle: "in-progress",
       completedHarnessSetupIds: ["goose"],
+      shareUsageData: false,
     });
     expect(onboardingReducer(completed, { type: "reset" })).toEqual(
       INITIAL_ONBOARDING_STATE,
