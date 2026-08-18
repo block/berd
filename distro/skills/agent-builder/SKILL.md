@@ -37,6 +37,8 @@ Agent instructions here.
 ```
 Required frontmatter keys are name and description. Preserve all other frontmatter keys when editing existing agents unless the user explicitly changes them. The Markdown body is the agent’s system prompt/persona instructions.
 
+When writing or generating a description or body, do not assign the agent a gender or gendered pronouns unless the user asked for one. Use it/its or they/them for the agent, matching how it is framed (tool vs. character), or avoid pronouns; people the instructions describe get they/them. Preserve pronouns the user chose, in either direction.
+
 ## Names and Slugs
 
 For create/rename, require a trimmed name that is non-empty, ≤80 characters, and contains no `/` or `\`.

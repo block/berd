@@ -31,6 +31,7 @@ import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStor
 import { resolveManagedGooseProviderSelection } from "@/shared/runtime-config/modelProviderPolicy";
 import { getStyleGuidelinesPrompt } from "@/shared/preferences/styleGuidelinesPreference";
 import { getBerdctlPreamble } from "@/features/berdctl/appPreamble";
+import { INTERACTION_NORMS_PREAMBLE } from "@/shared/api/interactionNorms";
 import { perfLog } from "@/shared/lib/perfLog";
 import {
   applySessionConfigOptionsSnapshot,
@@ -114,6 +115,7 @@ function resolveProvidersCatalog(providers: AcpProvider[]): AcpProvider[] {
     .filter((provider): provider is AcpProvider => provider !== null);
 }
 
+const BERD_INTERACTION_NORMS_SYSTEM_PROMPT_KEY = "berd_interaction_norms";
 const BERD_APP_CONTEXT_SYSTEM_PROMPT_KEY = "berd_app_context";
 const BERD_STYLE_GUIDELINES_SYSTEM_PROMPT_KEY = "berd_style_guidelines";
 const LEGACY_STYLE_GUIDELINES_SYSTEM_PROMPT_KEY =
@@ -186,6 +188,14 @@ async function acpSendMessageNow(
       sessionId,
       getStyleGuidelinesPrompt(),
     );
+    // App-level defaults with no off switch. Sent before user-authored
+    // sections so the user's own content arrives after — and therefore
+    // reads as — the override. See interactionNorms.ts.
+    await directAcp.appendSessionSystemPrompt(
+      sessionId,
+      BERD_INTERACTION_NORMS_SYSTEM_PROMPT_KEY,
+      INTERACTION_NORMS_PREAMBLE,
+    );
     // Keyed and re-sent on every send (empty when berdctl is unreachable),
     // so availability changes self-correct on the next message.
     await directAcp.appendSessionSystemPrompt(
@@ -199,11 +209,14 @@ async function acpSendMessageNow(
       systemPrompt?.trim() ? systemPrompt : "",
     );
   } else {
+    const appPreamble = [INTERACTION_NORMS_PREAMBLE, berdctlPreamble]
+      .filter((part): part is string => Boolean(part?.trim()))
+      .join("\n\n");
     personaHandoffClaim = preparePersonaHandoff(
       sessionId,
       providerId,
       systemPrompt,
-      berdctlPreamble,
+      appPreamble,
     );
   }
 

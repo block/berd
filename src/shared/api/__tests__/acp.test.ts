@@ -8,6 +8,7 @@ import {
   DEFAULT_STYLE_GUIDELINES_PROMPT,
   STYLE_GUIDELINES_STORAGE_KEY,
 } from "@/shared/preferences/styleGuidelinesPreference";
+import { INTERACTION_NORMS_PREAMBLE } from "@/shared/api/interactionNorms";
 
 const mockLoadSession = vi.fn();
 const mockNewSession = vi.fn();
@@ -285,16 +286,22 @@ describe("acpSendMessage", () => {
     expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
       3,
       sessionId,
-      "berd_app_context",
-      "",
+      "berd_interaction_norms",
+      INTERACTION_NORMS_PREAMBLE,
     );
     expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
       4,
       sessionId,
+      "berd_app_context",
+      "",
+    );
+    expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
+      5,
+      sessionId,
       "client_system_prompt",
       "You are Starfriend.",
     );
-    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledTimes(4);
+    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledTimes(5);
   });
 
   it("adds the default style guidelines when unset", async () => {
@@ -370,6 +377,31 @@ describe("acpSendMessage", () => {
       "acp-session-preamble",
       "berd_app_context",
       "[Berd]\nberdctl is on your PATH.",
+    );
+  });
+
+  it("hands the interaction norms off in-band for external agents, before the persona", async () => {
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { __resetAllPersonaHandoffs } = await import("../acpPersonaHandoff");
+    const { acpSendMessage } = await import("../acp");
+    __resetAllPersonaHandoffs();
+
+    sessionRegistry.registerPreparedSession(
+      "acp-session-norms-ext",
+      "claude-acp",
+      "/tmp/project",
+      "test-model",
+    );
+
+    await acpSendMessage("acp-session-norms-ext", "hello", {
+      systemPrompt: "You are Starfriend.",
+    });
+
+    const [, blocks] = mockPrompt.mock.calls[0];
+    expect(blocks[0].annotations).toEqual({ audience: ["assistant"] });
+    expect(blocks[0].text).toContain(INTERACTION_NORMS_PREAMBLE);
+    expect(blocks[0].text.indexOf(INTERACTION_NORMS_PREAMBLE)).toBeLessThan(
+      blocks[0].text.indexOf("You are Starfriend."),
     );
   });
 
