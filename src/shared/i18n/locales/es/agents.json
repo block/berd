@@ -225,8 +225,8 @@
     "deleted": "Se eliminó \"{{name}}\".",
     "exportFailed": "No se pudo exportar el agente.",
     "exportedTo": "Exportado a {{filename}}",
-    "importInvalidExtension": "Tipo de archivo no compatible. Elige un archivo .persona.md o .json.",
-    "importInvalidMimeType": "Tipo de archivo no compatible. Elige un archivo de persona markdown o JSON.",
+    "importInvalidExtension": "Tipo de archivo no compatible. Elige un archivo ZIP, PNG, .persona.md o JSON de agente.",
+    "importInvalidMimeType": "Tipo de archivo no compatible. Elige un archivo ZIP, PNG, markdown de persona o JSON de agente.",
     "importTooLarge": "El archivo importado debe ser de {{maxSize}} o menos.",
     "importFailed": "No se pudo importar el agente.",
     "imported_one": "Se importó {{count}} agente.",
@@ -263,9 +263,15 @@
     "tooLarge": "La imagen del agente debe ser de 10 MB o menos.",
     "pngOnly": "La imagen del agente debe ser un archivo PNG."
   },
+  "zipImport": {
+    "invalid": "El archivo ZIP del agente no es válido o está dañado.",
+    "tooManyFiles": "El archivo ZIP del agente contiene demasiados archivos.",
+    "missingAgent": "El archivo ZIP no contiene un archivo de agente compatible.",
+    "multipleAgents": "El archivo ZIP debe contener exactamente un archivo de agente."
+  },
   "importDialog": {
     "title": "Importar un agente",
-    "description": "Importa un agente con una imagen o un archivo .md o JSON.",
+    "description": "Importa un agente con un archivo ZIP, una imagen o un archivo .md o JSON.",
     "dropTitle": "Arrastra y suelta aquí un archivo de agente",
     "openFinder": "Abrir Finder",
     "previewAlt": "Vista previa de {{name}}",

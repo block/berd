@@ -222,7 +222,7 @@ export function AgentImportDialog({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".agent.png,.png,.persona.md,.md,.json,image/png,text/markdown,text/plain,application/json"
+            accept=".agent.zip,.zip,.agent.png,.png,.persona.md,.md,.json,application/zip,application/x-zip-compressed,image/png,text/markdown,text/plain,application/json"
             className="hidden"
             onChange={handleFileChange}
           />

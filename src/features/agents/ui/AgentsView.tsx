@@ -42,6 +42,7 @@ import type { Persona } from "@/shared/types/agents";
 import {
   formatAgentError,
   formatImportSuccessMessage,
+  formatPersonaImportFileSize,
   validatePersonaImportFile,
 } from "@/features/agents/lib/personaImport";
 import { isEmptyAgentsGallerySimulated } from "@/features/agents/lib/emptyGallerySimulation";
@@ -55,6 +56,12 @@ import { runAgentViewTransition } from "@/features/agents/lib/agentViewTransitio
 import { deleteDraftAgentSession } from "@/features/agents/lib/agentBuilderSession";
 import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
 import { isSafePngAvatarDataUrl } from "@/shared/lib/avatarUrl";
+import {
+  AgentZipImportError,
+  type ExtractedAgentFile,
+  extractAgentFileFromZip,
+  isAgentZipFileName,
+} from "@/features/agents/lib/agentZipImport";
 
 function decodeImportFileBytes(fileBytes: Uint8Array): string {
   try {
@@ -75,6 +82,18 @@ function sourcePathToSlug(pathOrId: string): string {
 
 function isAgentImageFileName(fileName: string): boolean {
   return fileName.toLowerCase().endsWith(".png");
+}
+
+function formatAgentZipImportError(
+  error: AgentZipImportError,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  if (error.code === "tooLarge" && error.maxBytes) {
+    return t("view.importTooLarge", {
+      maxSize: formatPersonaImportFileSize(error.maxBytes),
+    });
+  }
+  return t(`zipImport.${error.code}`);
 }
 
 function exportFilenameFromPath(
@@ -413,6 +432,19 @@ export function AgentsView({
 
   const validateImportFile = useCallback(
     (file: Pick<File, "name" | "type" | "size">) => {
+      if (isAgentZipFileName(file.name)) {
+        if (file.size > MAX_SNAPSHOT_PNG_BYTES) {
+          return t("view.importTooLarge", { maxSize: "10 MB" });
+        }
+        if (
+          file.type &&
+          file.type !== "application/zip" &&
+          file.type !== "application/x-zip-compressed"
+        ) {
+          return t("view.importInvalidMimeType");
+        }
+        return null;
+      }
       if (isAgentImageFileName(file.name)) {
         if (file.size > MAX_SNAPSHOT_PNG_BYTES) {
           return t("imageImport.tooLarge");
@@ -457,16 +489,26 @@ export function AgentsView({
       preview?: { snapshot?: ReturnType<typeof decodeAgentImage> },
     ) => {
       try {
-        if (isAgentImageFileName(fileName)) {
+        const extracted = isAgentZipFileName(fileName)
+          ? extractAgentFileFromZip(fileBytes)
+          : { bytes: fileBytes, name: fileName };
+        if (isAgentImageFileName(extracted.name)) {
           setImageImport({
-            snapshot: preview?.snapshot ?? decodeAgentImage(fileBytes),
-            bytes: fileBytes,
+            snapshot: preview?.snapshot ?? decodeAgentImage(extracted.bytes),
+            bytes: extracted.bytes,
           });
           return;
         }
-        await handleImportContents(decodeImportFileBytes(fileBytes), fileName);
+        await handleImportContents(
+          decodeImportFileBytes(extracted.bytes),
+          extracted.name,
+        );
       } catch (err) {
-        toast.error(formatAgentError(err, t("view.importFailed")));
+        toast.error(
+          err instanceof AgentZipImportError
+            ? formatAgentZipImportError(err, t)
+            : formatAgentError(err, t("view.importFailed")),
+        );
       }
     },
     [handleImportContents, t],
@@ -480,16 +522,27 @@ export function AgentsView({
           onOpenChange={setImportDialogOpen}
           onImportFile={handleImportFileBytes}
           prepareImport={(bytes, name) => {
-            if (isAgentImageFileName(name)) {
-              const snapshot = decodeAgentImage(bytes);
-              const { width, height } = getPngDimensions(bytes);
+            let extracted: ExtractedAgentFile;
+            try {
+              extracted = isAgentZipFileName(name)
+                ? extractAgentFileFromZip(bytes)
+                : { bytes, name };
+            } catch (error) {
+              if (error instanceof AgentZipImportError) {
+                throw new Error(formatAgentZipImportError(error, t));
+              }
+              throw error;
+            }
+            if (isAgentImageFileName(extracted.name)) {
+              const snapshot = decodeAgentImage(extracted.bytes);
+              const { width, height } = getPngDimensions(extracted.bytes);
               return {
                 displayName:
                   snapshot.profile?.displayName ??
                   snapshot.definition.name ??
                   "Imported agent",
                 systemPrompt: snapshot.definition.systemPrompt ?? "",
-                identity: name,
+                identity: extracted.name,
                 avatar:
                   typeof snapshot.profile?.avatarDataUrl === "string" &&
                   isSafePngAvatarDataUrl(snapshot.profile.avatarDataUrl)
@@ -498,13 +551,16 @@ export function AgentsView({
                 snapshot,
                 cardAspectRatio: width / height,
                 cardImageUrl: URL.createObjectURL(
-                  new Blob([new Uint8Array(bytes).buffer], {
+                  new Blob([new Uint8Array(extracted.bytes).buffer], {
                     type: "image/png",
                   }),
                 ),
               };
             }
-            return previewPersonaImport(decodeImportFileBytes(bytes), name);
+            return previewPersonaImport(
+              decodeImportFileBytes(extracted.bytes),
+              extracted.name,
+            );
           }}
           validateImportFile={validateImportFile}
           onImportError={handleImportError}

@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { zipSync } from "fflate";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { toast } from "sonner";
@@ -367,6 +368,72 @@ describe("AgentsView entry points", () => {
     ).toBeInTheDocument();
     expect(screen.getByDisplayValue("Test Agent Display")).toBeInTheDocument();
     expect(screen.getByText("You are a test agent.")).toBeInTheDocument();
+  });
+
+  it("previews a portable agent image imported from a ZIP", async () => {
+    const fixtureBytes = readFileSync(
+      resolve(
+        process.cwd(),
+        "src/features/agents/agent-snapshot/fixtures/buzz-v1-config-only.agent.png",
+      ),
+    );
+    const archive = zipSync({ "shared.agent.png": fixtureBytes });
+    const file = new File([archive], "shared.agent.zip", {
+      type: "application/zip",
+    });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(archive.buffer),
+    });
+    render(<AgentsView />);
+    await userEvent.click(
+      screen.getByRole("button", { name: "gallery.importViaImage" }),
+    );
+    const input = document.querySelector<HTMLInputElement>(
+      'input[type="file"][accept*="application/zip"]',
+    );
+    expect(input).not.toBeNull();
+
+    fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
+
+    expect(
+      await screen.findByRole("img", { name: "importDialog.previewAlt" }),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "importDialog.import" }),
+    );
+    expect(
+      await screen.findByRole("heading", { name: "imageImport.description" }),
+    ).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Test Agent Display")).toBeInTheDocument();
+  });
+
+  it("shows a localized error for an ambiguous agent ZIP", async () => {
+    const archive = zipSync({
+      "one.persona.md": new TextEncoder().encode("one"),
+      "two.json": new TextEncoder().encode("{}"),
+    });
+    const file = new File([archive], "agents.zip", {
+      type: "application/zip",
+    });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(archive.buffer),
+    });
+    render(<AgentsView />);
+    await userEvent.click(
+      screen.getByRole("button", { name: "gallery.importViaImage" }),
+    );
+    const input = document.querySelector<HTMLInputElement>(
+      'input[type="file"][accept*="application/zip"]',
+    );
+    expect(input).not.toBeNull();
+
+    fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("zipImport.multipleAgents"),
+    );
   });
 
   it("reports malformed PNG imports instead of rejecting silently", async () => {
