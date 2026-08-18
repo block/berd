@@ -587,6 +587,35 @@ describe("ChatView MCP app messaging", () => {
     expect(timelineProps.showPlaceholder).toBe(false);
   });
 
+  it("keeps Send available while a blank draft session is pending", () => {
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      messages: [],
+    });
+
+    render(
+      <ChatView
+        sessionId="draft-session"
+        activeSession={{
+          ...chatSessionWithWorkingDir("~/goose artifacts"),
+          id: "draft-session",
+          creationState: "pending",
+        }}
+      />,
+    );
+
+    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+      composerActions?: {
+        onSend?: unknown;
+        sendDisabled?: boolean;
+        sendDisabledReason?: string;
+      };
+    };
+    expect(chatInputProps.composerActions?.onSend).toBe(mocks.handleSend);
+    expect(chatInputProps.composerActions?.sendDisabled).toBe(false);
+    expect(chatInputProps.composerActions?.sendDisabledReason).toBeUndefined();
+  });
+
   it("keeps the empty-state placeholder visible while a blank draft session is pending", () => {
     mocks.useChatSessionController.mockReturnValue({
       ...mocks.useChatSessionController(),
@@ -1107,6 +1136,32 @@ describe("ChatView MCP app messaging", () => {
     expect(chatInputProps.controls).toEqual({ skills: false });
     expect(chatInputProps.placeholder).toBeUndefined();
     expect(document.querySelector(".agent-builder-column-enter")).toBeTruthy();
+  });
+
+  it("keeps Send available while an agent builder draft target is preparing", () => {
+    const activeSession = {
+      id: "session-1",
+      title: "Build agent",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: "build-agent",
+      agentBuilderOpen: true,
+      targetAgentPath: null,
+      targetAgentSlug: null,
+      targetAgentDraftState: "preparing",
+    } satisfies ChatSession;
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+      composerActions?: {
+        sendDisabled?: boolean;
+        sendDisabledReason?: string;
+      };
+    };
+    expect(chatInputProps.composerActions?.sendDisabled).toBe(false);
+    expect(chatInputProps.composerActions?.sendDisabledReason).toBeUndefined();
   });
 
   it("uses failed draft copy when an agent builder draft target fails", () => {

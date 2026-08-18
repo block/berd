@@ -183,7 +183,7 @@ export async function startAgentBuilderSession(
   await deps.navigateChat(provisionalSessionId);
   void prepareProvisionalDraftTarget(sessionId).catch((error) => {
     console.error("Failed to prepare agent builder draft:", error);
-    markProvisionalDraftTargetFailed(sessionId);
+    markAgentBuilderSessionPreparationFailed(sessionId);
   });
   return sessionId;
 }
@@ -220,7 +220,9 @@ async function prepareProvisionalDraftTarget(
   });
 }
 
-function markProvisionalDraftTargetFailed(initialSessionId: string): void {
+export function markAgentBuilderSessionPreparationFailed(
+  initialSessionId: string,
+): void {
   const session = findSessionByInitialId(initialSessionId);
   if (
     !session ||

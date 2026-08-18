@@ -355,8 +355,6 @@ export function ChatView({
     : `${1 - builderFraction}fr ${builderFraction}fr`;
   const isAgentBuilderTargetFailed =
     isAgentBuilderOpen && effectiveSession?.targetAgentDraftState === "failed";
-  const isAgentBuilderTargetPending =
-    isAgentBuilderOpen && !effectiveSession?.targetAgentPath;
   const hasVisibleRightRail =
     isAgentBuilderOpen ||
     Boolean(
@@ -671,15 +669,11 @@ export function ChatView({
   let sendDisabledReason: string | undefined;
   if (readOnlyStatus) {
     sendDisabledReason = readOnlyStatus;
-  } else if (effectiveSession?.creationState === "pending") {
-    sendDisabledReason = t("toolbar.sessionStarting");
   } else if (effectiveSession?.creationState === "failed") {
     sendDisabledReason =
       effectiveSession.creationError ?? t("toolbar.sessionStartFailed");
   } else if (isAgentBuilderTargetFailed) {
     sendDisabledReason = t("toolbar.agentBuilderPrepareFailed");
-  } else if (isAgentBuilderTargetPending) {
-    sendDisabledReason = t("toolbar.agentBuilderPreparing");
   }
 
   // The composer is owned by the timeline so it stays mounted across loading,
@@ -792,8 +786,8 @@ export function ChatView({
               controller.isCompactingContext,
             sendDisabled:
               isReadOnly ||
-              effectiveSession?.creationState != null ||
-              isAgentBuilderTargetPending ||
+              effectiveSession?.creationState === "failed" ||
+              isAgentBuilderTargetFailed ||
               controller.workspaceSetupInProgress,
             sendDisabledReason,
             queuedMessage: composerHandoffInProgress
