@@ -1,68 +1,16 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { toast } from "sonner";
-import { useAgentStore } from "@/features/agents/stores/agentStore";
-import type { CreatePersonaRequest } from "@/shared/types/agents";
 import {
-  dispatchOnboarding,
+  getOnboardingSnapshot,
   resetOnboardingStoreForTests,
 } from "../model/onboardingStore";
-import type { OnboardingRuntimeState } from "../model";
 import { OnboardingFlow } from "./OnboardingFlow";
 
-const mockCreatePersona = vi.hoisted(() => vi.fn());
-const mockListPersonas = vi.hoisted(() => vi.fn());
-const mockTrackAgentCreateCompleted = vi.hoisted(() => vi.fn());
 const mockUpdateTelemetryEnabled = vi.hoisted(() =>
   vi.fn(async () => undefined),
 );
-
-vi.mock("@/shared/api/agents", () => ({
-  createPersona: mockCreatePersona,
-  listPersonas: mockListPersonas,
-}));
-
-vi.mock("@/features/agents/lib/agentTelemetry", () => ({
-  trackAgentCreateCompleted: mockTrackAgentCreateCompleted,
-}));
-
-vi.mock("@/shared/api/artifacts", () => ({
-  ARTIFACTS_QUERY_KEY: ["artifacts"],
-  getArtifacts: vi
-    .fn()
-    .mockResolvedValue({ catalogVersion: "test", assets: [] }),
-  selectAvatarImageUrl: vi.fn(),
-}));
-
-vi.mock("@/shared/api/avatars", () => ({
-  avatarCachedRefQueryKey: (avatarRef: string) => ["avatar", avatarRef],
-  getCachedAvatarForRef: vi.fn().mockResolvedValue(null),
-}));
-
-vi.mock("sonner", () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-    warning: vi.fn(),
-  },
-}));
-
-vi.mock("@/shared/hooks/useAvatarSrc", () => ({
-  useAvatarImage: () => undefined,
-  useAvatarMedia: () => ({
-    src: "asset://localhost/avatar.webm",
-    mediaType: "video",
-    alphaMode: "stacked",
-  }),
-}));
-
-vi.mock("@/shared/ui/avatar-media", () => ({
-  AvatarMedia: ({ className }: { className?: string }) => (
-    <canvas data-testid="avatar-media" className={className} />
-  ),
-}));
 
 vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
   ProjectArtifactPreview: () => <div data-testid="project-cube" />,
@@ -73,131 +21,43 @@ vi.mock("@/shared/telemetry/consent", () => ({
   telemetryConsentEnforced: () => false,
 }));
 
-// Pin the telemetry capability on so the welcome consent checkbox renders
-// regardless of the test build's feature profile.
 vi.mock("@/shared/profile/capabilities", () => ({
   useProfileCapability: () => true,
 }));
 
-function createdPersona(request: CreatePersonaRequest) {
-  return {
-    id: `/Users/x/.agents/agents/${request.displayName.toLowerCase()}.md`,
-    displayName: request.displayName,
-    systemPrompt: request.systemPrompt,
-    provider: request.provider,
-    modelProviderId: request.modelProviderId,
-    model: request.model,
-    isBuiltin: false,
-    writable: true,
-  };
-}
-
-const readyRuntime: OnboardingRuntimeState = {
-  ready: true,
-  failed: false,
-  retry: vi.fn(),
-};
-
-function renderFlow(runtime: OnboardingRuntimeState = readyRuntime) {
+function renderFlow() {
   return render(
     <QueryClientProvider client={new QueryClient()}>
-      <OnboardingFlow runtime={runtime} />
+      <OnboardingFlow />
     </QueryClientProvider>,
   );
 }
 
-async function keepRecommendedAgents(): Promise<void> {
-  const user = userEvent.setup();
-  await user.click(screen.getByRole("button", { name: /keep/i }));
-  // Adoption finished once the flow leaves the recommendations step.
-  await waitFor(() =>
+describe("OnboardingFlow", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+    resetOnboardingStoreForTests();
+  });
+
+  it("completes first-run onboarding directly from the landing page", async () => {
+    renderFlow();
+
+    await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
+
+    expect(getOnboardingSnapshot()).toMatchObject({
+      lifecycle: "completed",
+      step: "complete",
+    });
     expect(
-      screen.queryByRole("button", { name: /keep/i }),
-    ).not.toBeInTheDocument(),
-  );
-}
-
-// The "engineering" work type recommends Builder, Debugger, and Reviewer, in
-// catalog order — pinned here so the per-agent assertions below stay readable.
-describe("OnboardingFlow agent adoption telemetry", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    window.localStorage.clear();
-    resetOnboardingStoreForTests();
-    dispatchOnboarding({ type: "start" });
-    dispatchOnboarding({
-      type: "set-work-types",
-      workTypeIds: ["engineering"],
-    });
-    dispatchOnboarding({ type: "go-to", step: "recommendations" });
-    useAgentStore.setState({
-      personas: [],
-      personasLoading: false,
-      providers: [],
-    });
-    mockListPersonas.mockResolvedValue([]);
-    mockCreatePersona.mockImplementation(
-      async (request: CreatePersonaRequest) => createdPersona(request),
-    );
+      screen.queryByRole("heading", {
+        name: "What type of work will you use Berd for?",
+      }),
+    ).not.toBeInTheDocument();
+    expect(mockUpdateTelemetryEnabled).toHaveBeenCalledWith(true);
   });
 
-  it("emits Create Completed once per persona actually created by Keep", async () => {
-    // Builder already exists, so keeping the recommendations only creates
-    // Debugger and Reviewer.
-    mockListPersonas.mockResolvedValue([
-      {
-        id: "/Users/x/.agents/agents/builder.md",
-        displayName: "Builder",
-        systemPrompt: "Existing.",
-        isBuiltin: false,
-        writable: true,
-      },
-    ]);
-    renderFlow();
-
-    await keepRecommendedAgents();
-
-    expect(mockCreatePersona).toHaveBeenCalledTimes(2);
-    // One event per persona actually created; with no id on the event the
-    // count of two is what pins the per-persona emission.
-    expect(mockTrackAgentCreateCompleted).toHaveBeenCalledTimes(2);
-    expect(mockTrackAgentCreateCompleted).toHaveBeenCalledWith({
-      provider: undefined,
-      model: undefined,
-    });
-  });
-
-  it("does not emit for a persona whose creation fails", async () => {
-    // Builder succeeds, Debugger's create rejects, Reviewer succeeds.
-    mockCreatePersona
-      .mockImplementationOnce(async (request: CreatePersonaRequest) =>
-        createdPersona(request),
-      )
-      .mockRejectedValueOnce(new Error("create failed"));
-    renderFlow();
-
-    await keepRecommendedAgents();
-
-    expect(mockCreatePersona).toHaveBeenCalledTimes(3);
-    // Three creates attempted, two succeeded: the failed one emits nothing,
-    // which the count of two pins now that no id rides the event.
-    expect(mockTrackAgentCreateCompleted).toHaveBeenCalledTimes(2);
-    expect(toast.warning).toHaveBeenCalledTimes(1);
-  });
-});
-
-// The welcome consent answer lives in the onboarding store, so Back
-// navigation must show what was actually chosen and can never launder an
-// explicit opt-out back into the default-ON write.
-describe("OnboardingFlow welcome consent round-trip", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    window.localStorage.clear();
-    resetOnboardingStoreForTests();
-    dispatchOnboarding({ type: "start" });
-  });
-
-  it("keeps an opt-out unchecked across Back and never writes consent ON", async () => {
+  it("records an explicit usage-data opt-out before completing", async () => {
     renderFlow();
     const user = userEvent.setup();
 
@@ -205,90 +65,12 @@ describe("OnboardingFlow welcome consent round-trip", () => {
       screen.getByRole("checkbox", { name: /share anonymous usage data/i }),
     );
     await user.click(screen.getByRole("button", { name: "Let’s go" }));
-    expect(
-      screen.getByRole("heading", {
-        name: "What type of work will you use Berd for?",
-      }),
-    ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Go back" }));
-    expect(
-      screen.getByRole("checkbox", { name: /share anonymous usage data/i }),
-    ).not.toBeChecked();
-
-    await user.click(screen.getByRole("button", { name: "Let’s go" }));
-
-    // Each advance past the unchecked box re-asserts disabled; no
-    // interleaving of this journey may produce a write of true.
-    expect(mockUpdateTelemetryEnabled.mock.calls).toEqual([[false], [false]]);
-  });
-
-  it("does not rewrite an untouched opt-in when revisiting the landing page", async () => {
-    renderFlow();
-    const user = userEvent.setup();
-
-    await user.click(screen.getByRole("button", { name: "Let’s go" }));
-    await user.click(screen.getByRole("button", { name: "Go back" }));
-    expect(
-      screen.getByRole("checkbox", { name: /share anonymous usage data/i }),
-    ).toBeChecked();
-
-    await user.click(screen.getByRole("button", { name: "Let’s go" }));
-
-    // Only the first ceremony writes; the untouched pass back through
-    // welcome cannot overwrite a Settings change made in the meantime.
-    expect(mockUpdateTelemetryEnabled.mock.calls).toEqual([[true]]);
-  });
-});
-
-// AppShell renders the flow ahead of its startup gates, so the runtime-free
-// steps must not depend on the chat runtime having started.
-describe("OnboardingFlow runtime independence", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    window.localStorage.clear();
-    resetOnboardingStoreForTests();
-    dispatchOnboarding({ type: "start" });
-  });
-
-  it.each([
-    ["startup has not settled", { ready: false, failed: false }],
-    ["startup failed", { ready: false, failed: true }],
-  ])("renders the landing page while %s", (_case, runtime) => {
-    renderFlow({ ...runtime, retry: vi.fn() });
-
-    expect(
-      screen.getByRole("heading", {
-        name: "Welcome to Berd. Your place for doing.",
-      }),
-    ).toBeInTheDocument();
-  });
-
-  it("moves on to the work-type picker without the runtime", async () => {
-    renderFlow({ ready: false, failed: false, retry: vi.fn() });
-
-    await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
-
-    expect(
-      screen.getByRole("heading", {
-        name: "What type of work will you use Berd for?",
-      }),
-    ).toBeInTheDocument();
-  });
-
-  it("waits for the runtime before agent adoption can call ACP", async () => {
-    dispatchOnboarding({
-      type: "set-work-types",
-      workTypeIds: ["engineering"],
+    expect(getOnboardingSnapshot()).toMatchObject({
+      lifecycle: "completed",
+      step: "complete",
+      shareUsageData: false,
     });
-    dispatchOnboarding({ type: "go-to", step: "recommendations" });
-    renderFlow({ ready: false, failed: false, retry: vi.fn() });
-
-    await userEvent.click(
-      screen.getByRole("button", { name: "Getting ready…" }),
-    );
-
-    expect(mockListPersonas).not.toHaveBeenCalled();
-    expect(mockCreatePersona).not.toHaveBeenCalled();
+    expect(mockUpdateTelemetryEnabled).toHaveBeenCalledWith(false);
   });
 });
