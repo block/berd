@@ -64,6 +64,10 @@ vi.mock(
           syncViewportFromDom: timelineMocks.syncViewportFromDom,
           scrollToRow: vi.fn(() => true),
           scrollToBottom: timelineMocks.scrollToBottom,
+          getScrollPresentation: () => ({
+            intent: "following-latest" as const,
+            detached: false,
+          }),
           setRowFocused: vi.fn(),
           markRowInteracted: vi.fn(),
         };
