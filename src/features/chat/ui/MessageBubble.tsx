@@ -26,7 +26,7 @@ import {
   useTranscriptRowRootAdapter,
   useTranscriptRowStateAdapter,
 } from "@/features/chat/transcript/row-state";
-import { useAvatarImage } from "@/shared/hooks/useAvatarSrc";
+import { AvatarVisual } from "@/shared/ui/avatar-visual";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import {
   RunnableCodeBlock,
@@ -729,7 +729,7 @@ export const MessageBubble = memo(function MessageBubble({
       : undefined,
   );
   const { isCopied: isCopyConfirmed, copyToClipboard } = useCopyToClipboard();
-  const personaGutterImage = useAvatarImage(persona?.avatar);
+  const hasPersonaAvatar = Boolean(persona?.avatar);
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
   const runItCodeRenderers = useMemo<CustomRenderer[]>(
     () =>
@@ -870,7 +870,7 @@ export const MessageBubble = memo(function MessageBubble({
     ? getProviderIcon(assistantProviderId, "size-3.5")
     : null;
   const showPersonaGutterAvatar = Boolean(
-    !isUser && (message.metadata?.personaId || personaGutterImage),
+    !isUser && (message.metadata?.personaId || hasPersonaAvatar),
   );
   const isFragmentMiddleOrEnd =
     fragmentRole === "middle" || fragmentRole === "end";
@@ -898,7 +898,7 @@ export const MessageBubble = memo(function MessageBubble({
     !isUser &&
       showLeadingAssistantChrome &&
       !showPersonaGutterAvatar &&
-      (assistantDisplayName || personaGutterImage || assistantProviderIcon),
+      (assistantDisplayName || hasPersonaAvatar || assistantProviderIcon),
   );
   const isSteeredMessage = isUser && message.metadata?.delivery === "steer";
   const isBerdctlCrossSessionMessage =
@@ -933,28 +933,21 @@ export const MessageBubble = memo(function MessageBubble({
     >
       {showPersonaGutterAvatar && showLeadingAssistantChrome ? (
         <div
-          className={cn(
-            "mt-0.5 flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md",
-            // The persona PNGs are transparent — skip the muted backdrop
-            // when we're rendering an actual image so the chat surface
-            // shows through. Keep it for the icon fallback so the icon
-            // has something behind it.
-            !personaGutterImage && "bg-muted/40",
-          )}
+          className="mt-0.5 flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md"
           data-role="assistant-persona-avatar"
         >
           {assistantDisplayName ? (
             <span className="sr-only">{assistantDisplayName}</span>
           ) : null}
-          {personaGutterImage ? (
-            <img
-              src={personaGutterImage}
-              alt=""
-              className="h-full w-full object-contain"
-            />
-          ) : (
-            <IconRobot size={16} className="text-muted-foreground" />
-          )}
+          <AvatarVisual
+            avatar={persona?.avatar}
+            className="h-full w-full object-contain"
+            fallback={
+              <div className="flex size-full items-center justify-center bg-muted/40">
+                <IconRobot size={16} className="text-muted-foreground" />
+              </div>
+            }
+          />
         </div>
       ) : showPersonaGutterAvatar && isFragmentMiddleOrEnd ? (
         <div
@@ -977,11 +970,10 @@ export const MessageBubble = memo(function MessageBubble({
       >
         {showAssistantIdentity ? (
           <div className="mb-0.5 flex items-center gap-1 text-xs">
-            {personaGutterImage ? (
-              <img
-                src={personaGutterImage}
-                alt=""
-                className="h-5 w-5 rounded-full"
+            {hasPersonaAvatar ? (
+              <AvatarVisual
+                avatar={persona?.avatar}
+                className="h-5 w-5 rounded-full object-cover"
               />
             ) : assistantProviderIcon ? (
               <span className="flex h-5 w-5 items-center justify-center">

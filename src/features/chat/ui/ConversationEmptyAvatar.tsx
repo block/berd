@@ -1,7 +1,6 @@
 import { AnimatePresence, motion } from "motion/react";
 import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
-import { useAvatarImage, useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
-import { AvatarMedia } from "@/shared/ui/avatar-media";
+import { AvatarVisual } from "@/shared/ui/avatar-visual";
 import type { Persona } from "@/shared/types/agents";
 
 /**
@@ -10,28 +9,19 @@ import type { Persona } from "@/shared/types/agents";
  * which lets an outgoing avatar keep rendering correctly while it fades out.
  */
 function PersonaAvatarMedia({ persona }: { persona: Persona }) {
-  const avatarMedia = useAvatarMedia(persona.avatar);
-  const avatarImage = useAvatarImage(persona.avatar);
-  const fallbackIconSrc = resolveAgentIcon(persona.id);
-
-  if (avatarMedia) {
-    return (
-      <AvatarMedia
-        media={avatarMedia}
-        alt=""
-        loadingStrategy="eager"
-        poster={avatarImage}
-        className="h-full w-full object-contain"
-      />
-    );
-  }
-
   return (
-    <img
-      aria-hidden="true"
-      alt=""
-      src={avatarImage ?? fallbackIconSrc}
+    <AvatarVisual
+      avatar={persona.avatar}
+      loadingStrategy="eager"
       className="h-full w-full object-contain"
+      fallback={
+        <img
+          aria-hidden="true"
+          alt=""
+          src={resolveAgentIcon(persona.id)}
+          className="h-full w-full object-contain"
+        />
+      }
     />
   );
 }

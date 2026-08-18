@@ -1,7 +1,7 @@
 import { IconRobot } from "@tabler/icons-react";
 import { SkillIcon } from "@/features/skills/ui/SkillIcon";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
-import { useAvatarImage } from "@/shared/hooks/useAvatarSrc";
+import { AvatarVisual } from "@/shared/ui/avatar-visual";
 import { cn } from "@/shared/lib/cn";
 import type { MessageChip } from "@/shared/types/messages";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
@@ -49,13 +49,13 @@ export function MessageMetadataChip({ chip }: { chip: MessageChip }) {
   const agentPersona = useAgentStore((state) =>
     chip.type === "agent" && chip.id ? state.getPersonaById(chip.id) : null,
   );
-  const agentAvatar = useAvatarImage(agentPersona?.avatar);
   const Icon =
     chip.type === "skill"
       ? SkillIcon
       : chip.type === "agent"
         ? IconRobot
         : null;
+  const leadingIcon = Icon ? <Icon className="size-3.5 shrink-0" /> : null;
   const chipLabel = getChipLabel(chip);
 
   return (
@@ -70,15 +70,15 @@ export function MessageMetadataChip({ chip }: { chip: MessageChip }) {
               "opacity-80",
           )}
         >
-          {agentAvatar ? (
-            <img
-              src={agentAvatar}
-              alt=""
+          {chip.type === "agent" ? (
+            <AvatarVisual
+              avatar={agentPersona?.avatar}
               className="size-3.5 shrink-0 object-contain"
+              fallback={leadingIcon}
             />
-          ) : Icon ? (
-            <Icon className="size-3.5 shrink-0" />
-          ) : null}
+          ) : (
+            leadingIcon
+          )}
           <span className="min-w-0 truncate">{chipLabel}</span>
         </span>
       </TooltipTrigger>

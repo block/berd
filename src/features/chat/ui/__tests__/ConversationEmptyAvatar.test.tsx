@@ -22,6 +22,33 @@ vi.mock("@/features/agents/lib/resolveAgentIcon", () => ({
 }));
 
 describe("ConversationEmptyAvatar", () => {
+  it("renders cached custom avatar media before falling back to the generated agent icon", () => {
+    mockUseAvatarMedia.mockReturnValue({
+      src: "asset:///avatars/custom.webm",
+      mediaType: "video",
+      posterSrc: "asset:///avatars/custom.png",
+    });
+    mockUseAvatarImage.mockReturnValue(undefined);
+
+    render(
+      <ConversationEmptyAvatar
+        persona={{
+          id: "custom",
+          displayName: "Custom",
+          systemPrompt: "Custom.",
+          avatar: "user-avatar:custom",
+          isBuiltin: false,
+          writable: true,
+        }}
+      />,
+    );
+
+    expect(document.querySelector("img")).toHaveAttribute(
+      "src",
+      "asset:///avatars/custom.png",
+    );
+  });
+
   it("uses the selected avatar image before falling back to the generated agent icon", () => {
     mockUseAvatarMedia.mockReturnValue(undefined);
     mockUseAvatarImage.mockReturnValue("asset:///avatars/polys/libra.png");

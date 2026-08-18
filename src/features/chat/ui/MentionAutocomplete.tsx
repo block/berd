@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Sparkles, User } from "lucide-react";
 import { IconBook, IconFile, IconFolder } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
-import { useAvatarImage } from "@/shared/hooks/useAvatarSrc";
+import { AvatarVisual } from "@/shared/ui/avatar-visual";
 import { PopoverContent } from "@/shared/ui/popover";
 import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import type { Persona } from "@/shared/types/agents";
@@ -452,18 +452,7 @@ function HighlightedMatchText({
 // ---------------------------------------------------------------------------
 
 function MentionAvatar({ persona }: { persona: Persona }) {
-  const avatarImage = useAvatarImage(persona.avatar);
-  if (avatarImage) {
-    return (
-      <img
-        src={avatarImage}
-        alt={persona.displayName}
-        className="h-7 w-7 rounded-full object-cover"
-      />
-    );
-  }
-
-  return (
+  const fallback = (
     <div
       className={cn(
         "flex h-7 w-7 items-center justify-center rounded-full",
@@ -478,5 +467,14 @@ function MentionAvatar({ persona }: { persona: Persona }) {
         <User className="h-3.5 w-3.5" />
       )}
     </div>
+  );
+
+  return (
+    <AvatarVisual
+      avatar={persona.avatar}
+      alt={persona.displayName}
+      className="h-7 w-7 rounded-full object-cover"
+      fallback={fallback}
+    />
   );
 }
