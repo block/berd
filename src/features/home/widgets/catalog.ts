@@ -26,12 +26,23 @@ function isFinitePositive(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
-const CLOCK_ANALOG_PROFILE: WidgetSizeProfile = {
-  defaultSize: { width: 173, height: 173 },
+const ONBOARDING_TOUR_AVATAR_PROFILE: WidgetSizeProfile = {
+  defaultSize: { width: 160, height: 160 },
   sizeBounds: {
-    minWidth: 168,
+    minWidth: 160,
+    maxWidth: 160,
+    minHeight: 160,
+    maxHeight: 160,
+    lockAspectRatio: true,
+  },
+};
+
+const CLOCK_ANALOG_PROFILE: WidgetSizeProfile = {
+  defaultSize: { width: 156, height: 156 },
+  sizeBounds: {
+    minWidth: 156,
     maxWidth: 360,
-    minHeight: 168,
+    minHeight: 156,
     maxHeight: 360,
     lockAspectRatio: true,
   },
@@ -66,6 +77,20 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
       maxHeight: 270,
       lockAspectRatio: true,
     },
+    resolveProfile: (instance) =>
+      instance.state?.welcomeDismissed === true
+        ? ONBOARDING_TOUR_AVATAR_PROFILE
+        : {
+            defaultSize: { width: 448, height: 180 },
+            sizeBounds: {
+              minWidth: 448,
+              maxWidth: 672,
+              minHeight: 180,
+              maxHeight: 270,
+              lockAspectRatio: true,
+            },
+          },
+    preservePositionOnProfileChange: true,
     Component: OnboardingTourWidget,
   },
   {
@@ -97,9 +122,9 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
     resolveProfile: (instance) =>
       instance.state?.noteId === "onboarding:starter-tasks"
         ? {
-            defaultSize: { width: 256, height: 196 },
+            defaultSize: { width: 224, height: 196 },
             sizeBounds: {
-              minWidth: 256,
+              minWidth: 224,
               maxWidth: 360,
               minHeight: 156,
               maxHeight: 320,

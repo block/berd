@@ -101,6 +101,8 @@ export interface WidgetCatalogEntry {
   resolveProfile?: (instance: WidgetInstance) => WidgetSizeProfile;
   /** Keep the current rendered width when state switches size profiles. */
   preserveWidthOnProfileChange?: boolean;
+  /** Keep the top-left position when state switches size profiles. */
+  preservePositionOnProfileChange?: boolean;
   /** Keep each instance's resolved size when organizing the canvas. */
   preserveSizeOnCleanUp?: boolean;
   /** Renderable component for this widget type. Entries without a Component

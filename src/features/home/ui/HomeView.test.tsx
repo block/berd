@@ -389,22 +389,22 @@ describe("HomeView", () => {
           .getState()
           .instances.find((item) => item.type === "clock"),
       ).toMatchObject({
-        width: 173,
-        height: 173,
-        x: 533.5,
-        y: -266.5,
+        width: 156,
+        height: 156,
+        x: 542,
+        y: -274,
       }),
     );
     await waitFor(() => expect(saveLayoutCamera).toHaveBeenCalled());
     const savedClock = vi
       .mocked(saveLayoutItems)
       .mock.calls.flatMap(([request]) => request.items)
-      .findLast((item) => item.kind === "clock" && item.width === 173);
+      .findLast((item) => item.kind === "clock" && item.width === 156);
     expect(savedClock).toMatchObject({
       centerX: 620,
-      centerY: -180,
-      width: 173,
-      height: 173,
+      centerY: -196,
+      width: 156,
+      height: 156,
     });
   });
 

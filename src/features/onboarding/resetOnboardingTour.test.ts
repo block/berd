@@ -3,6 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const storeMocks = vi.hoisted(() => {
   let loadStatus = "idle";
   let instances: Array<{ type: string }> = [];
+  let personas: Array<Record<string, unknown>> = [];
+  const listPersonas = vi.fn(async () => personas);
+  const setPersonas = vi.fn((next: Array<Record<string, unknown>>) => {
+    personas = next;
+  });
   const initialize = vi.fn(async () => {
     loadStatus = "ready";
   });
@@ -11,6 +16,7 @@ const storeMocks = vi.hoisted(() => {
     itemsConfirmed: true,
     cameraConfirmed: true,
   }));
+  const addMissingStarterAgentPins = vi.fn(async () => true);
   const resetStarterTasks = vi.fn(async () => true);
   const syncOnboardingExperiment = vi.fn();
 
@@ -27,9 +33,18 @@ const storeMocks = vi.hoisted(() => {
     setInstances(next: Array<{ type: string }>) {
       instances = next;
     },
+    get personas() {
+      return personas;
+    },
+    setPersonaRecords(next: Array<Record<string, unknown>>) {
+      personas = next;
+    },
+    listPersonas,
+    setPersonas,
     initialize,
     resetOnboardingTour,
     resetHomeForOnboarding,
+    addMissingStarterAgentPins,
     resetStarterTasks,
     syncOnboardingExperiment,
   };
@@ -43,10 +58,24 @@ vi.mock("@/features/home/stores/homeWidgetStore", () => ({
       initialize: storeMocks.initialize,
       resetOnboardingTour: storeMocks.resetOnboardingTour,
       resetHomeForOnboarding: storeMocks.resetHomeForOnboarding,
+      addMissingStarterAgentPins: storeMocks.addMissingStarterAgentPins,
       resetStarterTasks: storeMocks.resetStarterTasks,
       syncOnboardingExperiment: storeMocks.syncOnboardingExperiment,
     }),
   },
+}));
+
+vi.mock("@/features/agents/stores/agentStore", () => ({
+  useAgentStore: {
+    getState: () => ({
+      personas: storeMocks.personas,
+      setPersonas: storeMocks.setPersonas,
+    }),
+  },
+}));
+
+vi.mock("@/shared/api/agents", () => ({
+  listPersonas: storeMocks.listPersonas,
 }));
 
 import {
@@ -58,20 +87,45 @@ import {
 import {
   areStarterAgentPinsEligible,
   haveStarterAgentPinsBeenSeeded,
+  resetStarterAgentPinsSeeded,
 } from "@/features/home/onboarding/starterAgents";
+
+function starterPersona(sourceId: "tinker" | "wildcard") {
+  return {
+    id: `/Users/test/.agents/agents/${sourceId}.md`,
+    displayName: sourceId,
+    systemPrompt: "Help.",
+    isBuiltin: false,
+    writable: true,
+    sourceProperties: {
+      metadata: { berdBundled: true, berdBundledSource: sourceId },
+    },
+  };
+}
 
 describe("onboarding tour experience controls", () => {
   beforeEach(() => {
+    resetStarterAgentPinsSeeded();
     storeMocks.setLoadStatus("idle");
     storeMocks.setInstances([{ type: "agentPin" }, { type: "agentPin" }]);
+    storeMocks.setPersonaRecords([]);
+    storeMocks.listPersonas.mockClear();
+    storeMocks.setPersonas.mockClear();
+    storeMocks.addMissingStarterAgentPins.mockResolvedValue(true);
     storeMocks.initialize.mockClear();
     storeMocks.resetOnboardingTour.mockClear();
     storeMocks.resetHomeForOnboarding.mockClear();
+    storeMocks.addMissingStarterAgentPins.mockClear();
     storeMocks.resetStarterTasks.mockClear();
     storeMocks.syncOnboardingExperiment.mockClear();
   });
 
   it("initializes before resetting the whole Home onboarding canvas", async () => {
+    storeMocks.setPersonaRecords([
+      starterPersona("tinker"),
+      starterPersona("wildcard"),
+    ]);
+
     await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
       itemsConfirmed: true,
       cameraConfirmed: true,
@@ -79,6 +133,51 @@ describe("onboarding tour experience controls", () => {
 
     expect(storeMocks.initialize).toHaveBeenCalledOnce();
     expect(storeMocks.resetHomeForOnboarding).toHaveBeenCalledOnce();
+  });
+
+  it("persists loaded starter agents as part of the reset", async () => {
+    storeMocks.setPersonaRecords([
+      starterPersona("tinker"),
+      starterPersona("wildcard"),
+    ]);
+
+    await resetHomeForOnboardingExperience();
+
+    expect(storeMocks.listPersonas).not.toHaveBeenCalled();
+    expect(storeMocks.addMissingStarterAgentPins).toHaveBeenCalledWith([
+      "/Users/test/.agents/agents/tinker.md",
+      "/Users/test/.agents/agents/wildcard.md",
+    ]);
+    expect(haveStarterAgentPinsBeenSeeded()).toBe(true);
+  });
+
+  it("refreshes and persists starter agents when the store is empty", async () => {
+    storeMocks.listPersonas.mockResolvedValueOnce([
+      starterPersona("tinker"),
+      starterPersona("wildcard"),
+    ]);
+
+    await resetHomeForOnboardingExperience();
+
+    expect(storeMocks.setPersonas).toHaveBeenCalledOnce();
+    expect(storeMocks.addMissingStarterAgentPins).toHaveBeenCalledOnce();
+    expect(haveStarterAgentPinsBeenSeeded()).toBe(true);
+  });
+
+  it("keeps recovery eligible when starter-agent persistence fails", async () => {
+    storeMocks.setPersonaRecords([
+      starterPersona("tinker"),
+      starterPersona("wildcard"),
+    ]);
+    storeMocks.addMissingStarterAgentPins.mockResolvedValueOnce(false);
+
+    await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
+      itemsConfirmed: true,
+      cameraConfirmed: true,
+    });
+
+    expect(haveStarterAgentPinsBeenSeeded()).toBe(false);
+    expect(areStarterAgentPinsEligible()).toBe(true);
   });
 
   it("preserves starter-agent markers when the Home reset fails", async () => {
@@ -97,7 +196,7 @@ describe("onboarding tour experience controls", () => {
     expect(areStarterAgentPinsEligible()).toBe(false);
   });
 
-  it("keeps a partial reset eligible for starter-agent recovery", async () => {
+  it("keeps a partial starter-agent reset eligible for recovery", async () => {
     storeMocks.setInstances([]);
 
     await expect(resetHomeForOnboardingExperience()).resolves.toEqual({

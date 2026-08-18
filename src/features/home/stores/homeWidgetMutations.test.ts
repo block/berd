@@ -38,15 +38,15 @@ describe("homeWidgetMutations", () => {
     expect(widget).toMatchObject({
       id: "00000000-0000-4000-8000-000000000001",
       type: "clock",
-      x: -206.5,
-      y: 153.5,
+      x: -198,
+      y: 162,
     });
   });
 
   it("moves widgets with snapped top-left coordinates clamped by layout center constraints", () => {
     expect(
       moveWidgetMutation([clockWidget()], "w1", 1000, -1000, CONSTRAINTS),
-    ).toEqual([clockWidget({ x: 153.5, y: -206.5 })]);
+    ).toEqual([clockWidget({ x: 162, y: -198 })]);
   });
 
   it("can preserve an exact fractional position for initial layout placement", () => {
@@ -124,7 +124,7 @@ describe("homeWidgetMutations", () => {
       clockWidget({
         id: "agent",
         type: "agentPin",
-        x: 336,
+        x: 312,
         y: 0,
         z: 2,
         width: 200,
@@ -135,13 +135,13 @@ describe("homeWidgetMutations", () => {
         x: 0,
         y: 0,
         z: 1,
-        width: 173,
-        height: 173,
+        width: 156,
+        height: 156,
       }),
       clockWidget({
         id: "chat",
         type: "chatPin",
-        x: 696,
+        x: 672,
         y: 0,
         z: 3,
         width: 188,
@@ -150,7 +150,7 @@ describe("homeWidgetMutations", () => {
       clockWidget({
         id: "skill",
         type: "skillPin",
-        x: 1032,
+        x: 1008,
         y: 0,
         z: 4,
         width: 240,
@@ -205,11 +205,11 @@ describe("homeWidgetMutations", () => {
 
   it("skips no-op cleanup mutations when widgets are already organized", () => {
     const widgets: WidgetInstance[] = [
-      clockWidget({ id: "clock", x: 0, y: 0, z: 1, width: 173, height: 173 }),
+      clockWidget({ id: "clock", x: 0, y: 0, z: 1, width: 156, height: 156 }),
       clockWidget({
         id: "agent",
         type: "agentPin",
-        x: 336,
+        x: 312,
         y: 0,
         z: 2,
         width: 200,
@@ -218,7 +218,7 @@ describe("homeWidgetMutations", () => {
       clockWidget({
         id: "chat",
         type: "chatPin",
-        x: 696,
+        x: 672,
         y: 0,
         z: 3,
         width: 188,
@@ -227,7 +227,7 @@ describe("homeWidgetMutations", () => {
       clockWidget({
         id: "skill",
         type: "skillPin",
-        x: 1032,
+        x: 1008,
         y: 0,
         z: 4,
         width: 240,
@@ -309,6 +309,31 @@ describe("updateWidgetStateMutation — photo shape resize", () => {
       width: 320,
       height: 320,
     });
+  });
+});
+
+describe("updateWidgetStateMutation — onboarding tour resize", () => {
+  it("keeps Berdy in place when dismissing the welcome bubble", () => {
+    const tour: WidgetInstance = {
+      id: "tour",
+      type: "onboardingTour",
+      x: 120,
+      y: 150,
+      z: 1,
+      width: 448,
+      height: 180,
+    };
+
+    expect(
+      updateWidgetStateMutation([tour], "tour", { welcomeDismissed: true }),
+    ).toEqual([
+      expect.objectContaining({
+        x: 120,
+        y: 150,
+        width: 160,
+        height: 160,
+      }),
+    ]);
   });
 });
 
@@ -396,8 +421,8 @@ describe("updateWidgetStateMutation — clock mode resize", () => {
     };
     const next = updateWidgetStateMutation([digital], "c1", { mode: "analog" });
     expect(next?.[0]).toMatchObject({
-      width: 173,
-      height: 173,
+      width: 156,
+      height: 156,
       state: { mode: "analog" },
     });
   });

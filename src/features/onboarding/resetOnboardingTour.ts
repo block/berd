@@ -1,7 +1,10 @@
+import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { listPersonas } from "@/shared/api/agents";
 import {
   markStarterAgentPinsEligible,
   markStarterAgentPinsSeeded,
   resetStarterAgentPinsSeeded,
+  selectStarterAgentPersonas,
 } from "@/features/home/onboarding/starterAgents";
 import { STARTER_HOME_LAYOUT } from "@/features/home/onboarding/starterHomeLayout";
 import {
@@ -33,11 +36,30 @@ export async function resetHomeForOnboardingExperience(): Promise<OnboardingHome
   const result = await useHomeWidgetStore.getState().resetHomeForOnboarding();
   if (result.itemsConfirmed) {
     resetStarterAgentPinsSeeded();
-    const starterAgentPinCount = useHomeWidgetStore
-      .getState()
-      .instances.filter((instance) => instance.type === "agentPin").length;
-    if (starterAgentPinCount === STARTER_HOME_LAYOUT.agents.length) {
-      markStarterAgentPinsSeeded();
+    let starterPersonas = selectStarterAgentPersonas(
+      useAgentStore.getState().personas,
+    );
+    if (starterPersonas.length !== STARTER_HOME_LAYOUT.agents.length) {
+      try {
+        const personas = await listPersonas();
+        useAgentStore.getState().setPersonas(personas);
+        starterPersonas = selectStarterAgentPersonas(personas);
+      } catch (error) {
+        console.error(
+          "Failed to load starter agents during onboarding reset:",
+          error,
+        );
+      }
+    }
+    if (starterPersonas.length === STARTER_HOME_LAYOUT.agents.length) {
+      const didPersist = await useHomeWidgetStore
+        .getState()
+        .addMissingStarterAgentPins(starterPersonas.map(({ id }) => id));
+      if (didPersist) {
+        markStarterAgentPinsSeeded();
+      } else {
+        markStarterAgentPinsEligible();
+      }
     } else {
       markStarterAgentPinsEligible();
     }

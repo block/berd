@@ -174,7 +174,7 @@ export function StarterTaskList({
       data-starter-task-list="true"
       style={overlayStyle}
       className={cn(
-        "h-full w-full overflow-hidden rounded-xs bg-sticky-note-blue px-4 pb-4 pt-2 text-[12px] text-sticky-note-foreground shadow-sticky-note",
+        "h-full w-full overflow-hidden rounded-xs bg-sticky-note-rose px-4 pb-4 pt-2 text-[12px] text-sticky-note-foreground shadow-sticky-note",
         mode === "overlay" &&
           "pointer-events-auto fixed right-4 bottom-28 z-[55] max-h-[min(24rem,calc(100dvh-8rem))] h-auto w-[min(16rem,calc(100vw-2rem))] overflow-y-auto smooth-shadow-sm motion-safe:animate-in motion-safe:slide-in-from-right-8 motion-safe:fade-in-0 motion-safe:duration-500 motion-safe:ease-[cubic-bezier(0.19,1,0.22,1)] motion-safe:will-change-transform motion-reduce:animate-none",
         mode === "overlay" &&
