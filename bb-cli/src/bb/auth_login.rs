@@ -19,7 +19,6 @@ use super::auth_storage::{session_storage_key_from_config, SessionCredentialStor
 use super::skills_config::{kgoose_service_url, SkillsConfig};
 
 const CALLBACK_PATH: &str = "/callback";
-const EMBEDDED_LOGIN_CALLBACK_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Clone, Copy)]
 enum AuthCallbackPage {
@@ -43,7 +42,6 @@ pub struct BrowserLoginSummary {
 
 struct BrowserLoginOutcome {
     summary: BrowserLoginSummary,
-    credential: StoredSessionCredential,
 }
 
 pub struct VerifiedStoredSession {
@@ -62,75 +60,12 @@ pub fn run_browser_login(
     config: &SkillsConfig,
     storage: &dyn SessionCredentialStorage,
 ) -> Result<BrowserLoginSummary> {
-    run_browser_login_with_output(config, storage, BrowserLoginOutput::Standalone, None)
-        .map(|outcome| outcome.summary)
+    run_browser_login_inner(config, storage).map(|outcome| outcome.summary)
 }
 
-pub fn ensure_browser_login(
+fn run_browser_login_inner(
     config: &SkillsConfig,
     storage: &dyn SessionCredentialStorage,
-) -> Result<StoredSessionCredential> {
-    run_browser_login_with_output(
-        config,
-        storage,
-        BrowserLoginOutput::Embedded,
-        Some(EMBEDDED_LOGIN_CALLBACK_TIMEOUT),
-    )
-    .map(|outcome| outcome.credential)
-}
-
-#[derive(Clone, Copy)]
-enum BrowserLoginOutput {
-    Standalone,
-    Embedded,
-}
-
-impl BrowserLoginOutput {
-    fn info(self, config: &SkillsConfig, message: &str) {
-        match self {
-            Self::Standalone => auth_info(config, message),
-            Self::Embedded => config.style.verbose(message),
-        }
-    }
-
-    fn login_url(self, config: &SkillsConfig, login_url: &Url) {
-        if config.json {
-            return;
-        }
-        match self {
-            Self::Standalone => {
-                println!("Opening BuilderBot auth login in your browser:");
-                println!("{login_url}");
-            }
-            Self::Embedded => {
-                eprintln!("Opening BuilderBot auth login in your browser:");
-                eprintln!("{login_url}");
-            }
-        }
-    }
-
-    fn browser_fallback(self) {
-        match self {
-            Self::Standalone => {
-                println!("Could not open a browser automatically. Open the URL above manually.")
-            }
-            Self::Embedded => {
-                eprintln!("Could not open a browser automatically. Open the URL above manually.")
-            }
-        }
-    }
-
-    #[cfg(test)]
-    fn writes_command_stdout(self) -> bool {
-        matches!(self, Self::Standalone)
-    }
-}
-
-fn run_browser_login_with_output(
-    config: &SkillsConfig,
-    storage: &dyn SessionCredentialStorage,
-    output: BrowserLoginOutput,
-    callback_timeout: Option<Duration>,
 ) -> Result<BrowserLoginOutcome> {
     let service_url = kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path);
     let client = build_auth_http_client(Duration::from_secs(30))?;
@@ -144,7 +79,7 @@ fn run_browser_login_with_output(
                 &service_url,
                 &stored,
             )? {
-                output.info(
+                auth_info(
                     config,
                     &format!(
                         "Found valid BuilderBot CLI auth session in {} storage",
@@ -163,10 +98,9 @@ fn run_browser_login_with_output(
                         credential_prefix: None,
                         credential_sha256_prefix: None,
                     },
-                    credential: stored,
                 });
             }
-            output.info(
+            auth_info(
                 config,
                 &format!(
                     "Stored BuilderBot CLI auth session in {} storage is invalid",
@@ -175,7 +109,7 @@ fn run_browser_login_with_output(
             );
         }
         None => {
-            output.info(
+            auth_info(
                 config,
                 &format!(
                     "No BuilderBot CLI auth session found in {} storage",
@@ -196,22 +130,27 @@ fn run_browser_login_with_output(
         let _ = tx.send(result);
     });
 
-    output.login_url(config, &login_url);
+    if !config.json {
+        println!("Opening BuilderBot auth login in your browser:");
+        println!("{login_url}");
+    }
     if let Err(error) = webbrowser::open(login_url.as_str()) {
         if config.json {
             return Err(anyhow!(
                 "failed to open browser for BuilderBot auth login: {error}"
             ));
         }
-        output.browser_fallback();
+        println!("Could not open a browser automatically. Open the URL above manually.");
     }
 
-    let code = wait_for_login_callback(rx, callback_timeout)?;
+    let code = rx
+        .recv()
+        .context("loopback auth server stopped before login completed")??;
     let verified =
         exchange_login_code_and_verify(&client, config.playpen.as_deref(), &service_url, &code)?;
     let (stored, me, workspace_name) =
         validate_and_store_login_credential(storage, &storage_key, verified)?;
-    output.info(
+    auth_info(
         config,
         &format!(
             "Stored BuilderBot CLI auth session in {} storage",
@@ -230,27 +169,7 @@ fn run_browser_login_with_output(
             credential_prefix: Some(safe_prefix(&stored.session_credential)),
             credential_sha256_prefix: Some(sha256_prefix(&stored.session_credential)),
         },
-        credential: stored,
     })
-}
-
-fn wait_for_login_callback(
-    rx: mpsc::Receiver<Result<String>>,
-    timeout: Option<Duration>,
-) -> Result<String> {
-    match timeout {
-        Some(timeout) => rx.recv_timeout(timeout).map_err(|error| match error {
-            mpsc::RecvTimeoutError::Timeout => {
-                anyhow!("BuilderBot auth login timed out; run `bb auth login` to try again")
-            }
-            mpsc::RecvTimeoutError::Disconnected => {
-                anyhow!("loopback auth server stopped before login completed")
-            }
-        })?,
-        None => rx
-            .recv()
-            .context("loopback auth server stopped before login completed")?,
-    }
 }
 
 pub fn verify_stored_session(
@@ -444,8 +363,6 @@ fn auth_info(config: &SkillsConfig, message: &str) {
 mod tests {
     use std::cell::{Cell, RefCell};
     use std::collections::VecDeque;
-    use std::sync::mpsc;
-    use std::time::{Duration, Instant};
 
     use anyhow::Result;
     use builderbot_auth::auth_login::{
@@ -457,7 +374,7 @@ mod tests {
 
     use super::{
         auth_callback_page, store_login_credential, validate_and_store_login_credential,
-        verify_stored_session_with, wait_for_login_callback, AuthCallbackPage, BrowserLoginOutput,
+        verify_stored_session_with, AuthCallbackPage,
     };
 
     struct SwappingStorage {
@@ -519,24 +436,6 @@ mod tests {
                 }],
             },
         }
-    }
-
-    #[test]
-    fn embedded_login_never_writes_command_stdout() {
-        assert!(!BrowserLoginOutput::Embedded.writes_command_stdout());
-        assert!(BrowserLoginOutput::Standalone.writes_command_stdout());
-    }
-
-    #[test]
-    fn embedded_login_callback_wait_is_bounded() {
-        let (_tx, rx) = mpsc::channel();
-        let started = Instant::now();
-
-        let error = wait_for_login_callback(rx, Some(Duration::from_millis(10)))
-            .expect_err("time out abandoned embedded login");
-
-        assert!(error.to_string().contains("auth login timed out"));
-        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     #[test]

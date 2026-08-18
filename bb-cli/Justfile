@@ -104,7 +104,7 @@ lint: fmt-check
   cargo clippy --locked --all-targets --all-features -- -D warnings
 
 test:
-  cargo test --locked
+  cargo test --locked --features apps-e2e-test
 
 package-smoke: build-sq
   ./sqbin/{{BIN_NAME}}.exoskeleton --version

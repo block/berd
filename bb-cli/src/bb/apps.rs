@@ -17,24 +17,31 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use builderbot_auth::auth_login::{auth_url, build_auth_http_client};
+use builderbot_auth::auth_login::auth_url;
+#[cfg(test)]
+use builderbot_auth::auth_login::build_auth_http_client;
 use builderbot_auth::auth_storage::StoredSessionCredential;
 use clap::{Arg, ArgMatches, Command};
 use reqwest::blocking::{multipart, Client, Request, RequestBuilder, Response};
 use reqwest::header::{HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
+use reqwest::redirect::Policy;
+#[cfg(feature = "apps-e2e-test")]
+use reqwest::Certificate;
 use reqwest::StatusCode;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 
-use super::auth_login::{ensure_browser_login, verify_stored_session};
+use super::auth_login::verify_stored_session;
 use super::auth_storage::default_session_storage;
-use super::display::{print_json, stdin_is_tty, terminal_safe_text, Style};
+use super::display::{print_json, terminal_safe_text, Style};
 use super::runner;
 use super::skills_api::{exit_codes, failure};
 use super::skills_config::SkillsConfig;
 
 const APPS_BASE_URL_ENV_VAR: &str = "BB_APPS_CONTROL_PLANE_URL";
 const APPS_CLIENT_VERSION_ENV_VAR: &str = "BB_APPS_CLIENT_VERSION";
+#[cfg(feature = "apps-e2e-test")]
+const APPS_E2E_RESOLVE_ADDR_ENV_VAR: &str = "BB_APPS_E2E_RESOLVE_ADDR";
 const APPS_CONTRACT_PATH: &str = "/v1/agent/contract";
 const APPS_PLAN_PATH: &str = "/v1/agent/apps/plan";
 const HOTPOD_AGENT_CLIENT_VERSION_HEADER: &str = "X-Hotpod-Agent-Client-Version";
@@ -200,14 +207,6 @@ fn run_contract(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
 
 fn run_create(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     let (client, credential) = control_plane_context(config, matches)?;
-    print_json(&create_response(&client, &credential, matches)?)
-}
-
-fn create_response(
-    client: &ControlPlaneClient,
-    credential: &ComposeSessionCredential,
-    matches: &ArgMatches,
-) -> Result<Value> {
     let request = PlanRequest {
         app_id: matches.get_one::<String>("app-id").map(String::as_str),
         name: matches.get_one::<String>("name").map(String::as_str),
@@ -218,7 +217,7 @@ fn create_response(
         persistence: matches.get_one::<String>("persistence").map(String::as_str),
         client_version: client.client_version_text(),
     };
-    let plan = client.plan(credential, &request)?;
+    let plan = client.plan(&credential, &request)?;
     let app_id = required_response_string(&plan, "app_id", "Apps Platform plan")?.to_string();
     let initialize_required = plan
         .pointer("/initialize/required")
@@ -235,7 +234,7 @@ fn create_response(
         initialize_required.unwrap_or(false) || initialize_recommended.unwrap_or(false);
     let initialize = if should_initialize {
         let request = initialize_request_from_plan(&plan);
-        Some(client.initialize(credential, &app_id, &request)?)
+        Some(client.initialize(&credential, &app_id, &request)?)
     } else {
         None
     };
@@ -252,7 +251,7 @@ fn create_response(
             plan.get("external_url").cloned().unwrap_or(Value::Null),
         ),
     };
-    Ok(json!({
+    print_json(&json!({
         "ok": true,
         "app_id": effective_app_id,
         "external_url": effective_external_url,
@@ -267,19 +266,6 @@ fn run_deploy(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
         .get_one::<PathBuf>("artifact")
         .context("expected artifact.tar.gz path")?;
     validate_artifact_path(artifact)?;
-    let (client, credential) = control_plane_context(config, matches)?;
-    print_json(&deploy_response(&client, &credential, matches)?)
-}
-
-fn deploy_response(
-    client: &ControlPlaneClient,
-    credential: &ComposeSessionCredential,
-    matches: &ArgMatches,
-) -> Result<Value> {
-    let artifact = matches
-        .get_one::<PathBuf>("artifact")
-        .context("expected artifact.tar.gz path")?;
-    validate_artifact_path(artifact)?;
     let app_id = matches
         .get_one::<String>("app-id")
         .context("expected app id")?;
@@ -288,7 +274,9 @@ fn deploy_response(
         version_id: matches.get_one::<String>("version-id").cloned(),
         deployment_id: matches.get_one::<String>("deployment-id").cloned(),
     };
-    client.deploy(credential, app_id, artifact, &options)
+    let (client, credential) = control_plane_context(config, matches)?;
+    let response = client.deploy(&credential, app_id, artifact, &options)?;
+    print_json(&response)
 }
 
 fn control_plane_context(
@@ -377,13 +365,9 @@ struct ComposeSessionCredential {
 impl ComposeSessionCredential {
     fn from_config(config: &SkillsConfig) -> Result<Self> {
         let storage = default_session_storage(config)?;
-        if config.json || !stdin_is_tty() {
-            let verified =
-                verify_stored_session(config, storage.as_ref())?.ok_or_else(auth_required_error)?;
-            Self::from_stored(verified.credential)
-        } else {
-            Self::from_stored(ensure_browser_login(config, storage.as_ref())?)
-        }
+        let verified =
+            verify_stored_session(config, storage.as_ref())?.ok_or_else(auth_required_error)?;
+        Self::from_stored(verified.credential)
     }
 
     fn from_stored(credential: StoredSessionCredential) -> Result<Self> {
@@ -443,7 +427,7 @@ impl ControlPlaneClient {
         request_timeout: Duration,
     ) -> Result<Self> {
         validate_control_plane_base_url(base_url)?;
-        let client = build_auth_http_client(request_timeout)?;
+        let client = build_control_plane_http_client(request_timeout)?;
         Self::build(base_url, client_version, style, client)
     }
 
@@ -631,6 +615,36 @@ impl ControlPlaneClient {
     }
 }
 
+fn build_control_plane_http_client(timeout: Duration) -> Result<Client> {
+    let builder = Client::builder().redirect(Policy::none()).timeout(timeout);
+    #[cfg(feature = "apps-e2e-test")]
+    let builder = {
+        let mut builder = builder;
+        if let Some(address) = std::env::var_os(APPS_E2E_RESOLVE_ADDR_ENV_VAR) {
+            let address = address
+                .into_string()
+                .map_err(|_| anyhow::anyhow!("{APPS_E2E_RESOLVE_ADDR_ENV_VAR} must be UTF-8"))?
+                .parse::<std::net::SocketAddr>()
+                .with_context(|| format!("parse {APPS_E2E_RESOLVE_ADDR_ENV_VAR}"))?;
+            if !address.ip().is_loopback() {
+                anyhow::bail!("{APPS_E2E_RESOLVE_ADDR_ENV_VAR} must be a loopback socket address");
+            }
+            let certificate =
+                Certificate::from_pem(include_bytes!("../../tests/fixtures/apps-e2e-ca.pem"))
+                    .context("parse Apps E2E test CA")?;
+            builder = builder
+                .no_proxy()
+                .add_root_certificate(certificate)
+                .resolve(TRUSTED_CONTROL_PLANE_HOSTS[0], address)
+                .resolve(TRUSTED_CONTROL_PLANE_HOSTS[1], address);
+        }
+        builder
+    };
+    builder
+        .build()
+        .context("build Apps Platform control-plane HTTP client")
+}
+
 fn deploy_form(artifact: &Path, options: &DeployOptions) -> Result<multipart::Form> {
     let artifact_part = multipart::Part::file(artifact)
         .with_context(|| format!("open Apps Platform artifact {}", artifact.display()))?
@@ -806,22 +820,6 @@ mod tests {
         .expect("build test control-plane client")
     }
 
-    fn parsed_apps_subcommand(args: &[&str]) -> ArgMatches {
-        command()
-            .try_get_matches_from(args)
-            .expect("parse Apps command")
-            .subcommand()
-            .expect("Apps subcommand")
-            .1
-            .clone()
-    }
-
-    fn json_response(value: &Value) -> Response<std::io::Cursor<Vec<u8>>> {
-        Response::from_string(value.to_string()).with_header(
-            Header::from_bytes("Content-Type", "application/json").expect("build content type"),
-        )
-    }
-
     fn test_credential(secret: &str) -> ComposeSessionCredential {
         ComposeSessionCredential::new(secret.to_string()).expect("build test credential")
     }
@@ -862,216 +860,6 @@ mod tests {
                 .expect("authorization text"),
             format!("BBIdentity {secret}")
         );
-    }
-
-    #[test]
-    fn create_command_runs_plan_and_required_initialize() {
-        let plan = json!({
-            "app_id": "merchant-lookup",
-            "display_name": "Merchant Lookup",
-            "environment": "staging",
-            "persistence": "sqlite",
-            "runtime_class": "default",
-            "initialize": {"required": true, "recommended": false}
-        });
-        let initialized = json!({
-            "app_id": "merchant-lookup-2",
-            "external_url": "https://merchant-lookup-2.example"
-        });
-        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
-        let base_url = format!("http://{}", server.server_addr());
-        let server_thread = thread::spawn({
-            let plan = plan.clone();
-            let initialized = initialized.clone();
-            move || {
-                let mut request = server.recv().expect("receive plan request");
-                assert_eq!(request.url(), APPS_PLAN_PATH);
-                let mut body = String::new();
-                request
-                    .as_reader()
-                    .read_to_string(&mut body)
-                    .expect("read plan request");
-                assert_eq!(
-                    serde_json::from_str::<Value>(&body).expect("parse plan request"),
-                    json!({
-                        "app_id": "merchant-lookup",
-                        "name": "Merchant Lookup",
-                        "environment": "staging",
-                        "runtime_profile": "fetch-js",
-                        "persistence": "sqlite",
-                        "client_version": "1.0.0"
-                    })
-                );
-                request
-                    .respond(json_response(&plan))
-                    .expect("respond to plan");
-
-                let mut request = server.recv().expect("receive initialize request");
-                assert_eq!(request.url(), "/v1/agent/apps/merchant-lookup/initialize");
-                let mut body = String::new();
-                request
-                    .as_reader()
-                    .read_to_string(&mut body)
-                    .expect("read initialize request");
-                assert_eq!(
-                    serde_json::from_str::<Value>(&body).expect("parse initialize request"),
-                    json!({
-                        "name": "Merchant Lookup",
-                        "environment": "staging",
-                        "persistence": "sqlite",
-                        "runtime_class": "default"
-                    })
-                );
-                request
-                    .respond(json_response(&initialized))
-                    .expect("respond to initialize");
-            }
-        });
-        let client = test_control_plane_client(&base_url, Duration::from_secs(2));
-        let matches = parsed_apps_subcommand(&[
-            "apps",
-            "create",
-            "--app-id",
-            "merchant-lookup",
-            "--name",
-            "Merchant Lookup",
-            "--environment",
-            "staging",
-            "--runtime-profile",
-            "fetch-js",
-            "--persistence",
-            "sqlite",
-            "--base-url",
-            APPROVED_TEST_BASE_URL,
-            "--client-version",
-            "1.0.0",
-        ]);
-
-        let response = create_response(
-            &client,
-            &test_credential("create_session_credential_123456"),
-            &matches,
-        )
-        .expect("create app");
-
-        assert_eq!(response["app_id"], "merchant-lookup-2");
-        assert_eq!(response["initialized"], true);
-        assert_eq!(response["plan"], plan);
-        assert_eq!(response["initialize"], initialized);
-        server_thread.join().expect("join control-plane server");
-    }
-
-    #[test]
-    fn create_command_skips_initialize_when_plan_does_not_request_it() {
-        let plan = json!({
-            "app_id": "existing-app",
-            "external_url": "https://existing-app.example",
-            "initialize": {"required": false, "recommended": false}
-        });
-        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
-        let base_url = format!("http://{}", server.server_addr());
-        let server_thread = thread::spawn({
-            let plan = plan.clone();
-            move || {
-                let request = server.recv().expect("receive plan request");
-                assert_eq!(request.url(), APPS_PLAN_PATH);
-                request
-                    .respond(json_response(&plan))
-                    .expect("respond to plan");
-                assert!(server
-                    .recv_timeout(Duration::from_millis(250))
-                    .expect("wait for unexpected initialize")
-                    .is_none());
-            }
-        });
-        let client = test_control_plane_client(&base_url, Duration::from_secs(2));
-        let matches = parsed_apps_subcommand(&[
-            "apps",
-            "create",
-            "--app-id",
-            "existing-app",
-            "--base-url",
-            APPROVED_TEST_BASE_URL,
-            "--client-version",
-            "1.0.0",
-        ]);
-
-        let response = create_response(
-            &client,
-            &test_credential("existing_session_credential_123456"),
-            &matches,
-        )
-        .expect("reuse existing app");
-
-        assert_eq!(response["app_id"], "existing-app");
-        assert_eq!(response["initialized"], false);
-        assert!(response["initialize"].is_null());
-        server_thread.join().expect("join control-plane server");
-    }
-
-    #[test]
-    fn deploy_command_uploads_the_parsed_artifact_and_options() {
-        let temporary_directory = tempfile::tempdir().expect("create temporary directory");
-        let artifact_path = temporary_directory.path().join("artifact.tar.gz");
-        fs::write(&artifact_path, b"test-deploy-artifact").expect("write artifact");
-        let deployed = json!({"ok": true, "version_id": "ver-123"});
-        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
-        let base_url = format!("http://{}", server.server_addr());
-        let server_thread = thread::spawn({
-            let deployed = deployed.clone();
-            move || {
-                let mut request = server.recv().expect("receive deploy request");
-                assert_eq!(request.url(), "/v1/agent/apps/merchant-lookup/deploy");
-                let mut body = Vec::new();
-                request
-                    .as_reader()
-                    .read_to_end(&mut body)
-                    .expect("read deploy request");
-                let body = String::from_utf8_lossy(&body);
-                for expected in [
-                    "test-deploy-artifact",
-                    "name=\"environment\"\r\n\r\nproduction",
-                    "name=\"version_id\"\r\n\r\nver-123",
-                    "name=\"deployment_id\"\r\n\r\ndpl-123",
-                ] {
-                    assert!(
-                        body.contains(expected),
-                        "multipart body omitted {expected:?}"
-                    );
-                }
-                request
-                    .respond(json_response(&deployed))
-                    .expect("respond to deploy");
-            }
-        });
-        let client = test_control_plane_client(&base_url, Duration::from_secs(2));
-        let artifact = artifact_path.to_str().expect("artifact path");
-        let matches = parsed_apps_subcommand(&[
-            "apps",
-            "deploy",
-            "merchant-lookup",
-            artifact,
-            "--environment",
-            "production",
-            "--version-id",
-            "ver-123",
-            "--deployment-id",
-            "dpl-123",
-            "--base-url",
-            APPROVED_TEST_BASE_URL,
-            "--client-version",
-            "1.0.0",
-        ]);
-
-        let response = deploy_response(
-            &client,
-            &test_credential("deploy_session_credential_123456"),
-            &matches,
-        )
-        .expect("deploy app");
-
-        assert_eq!(response, deployed);
-        server_thread.join().expect("join control-plane server");
     }
 
     #[test]
