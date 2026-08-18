@@ -40,6 +40,10 @@ const APPS_BASE_URL_ENV_VAR: &str = "BB_APPS_CONTROL_PLANE_URL";
 const APPS_CLIENT_VERSION_ENV_VAR: &str = "BB_APPS_CLIENT_VERSION";
 #[cfg(test)]
 const APPS_E2E_CONTROL_PLANE_URL_ENV_VAR: &str = "BB_APPS_E2E_CONTROL_PLANE_URL";
+#[cfg(test)]
+const APPS_E2E_AUTH_URL_ENV_VAR: &str = "BB_APPS_E2E_AUTH_URL";
+#[cfg(test)]
+const APPS_E2E_CREDENTIAL_ENV_VAR: &str = "BB_APPS_E2E_CREDENTIAL";
 const APPS_CONTRACT_PATH: &str = "/v1/agent/contract";
 const APPS_PLAN_PATH: &str = "/v1/agent/apps/plan";
 const HOTPOD_AGENT_CLIENT_VERSION_HEADER: &str = "X-Hotpod-Agent-Client-Version";
@@ -419,7 +423,7 @@ impl LoopbackTestTransport {
     fn new(base_url: &str, timeout: Duration) -> Result<Self> {
         Ok(Self {
             client: build_auth_http_client(timeout)?,
-            base_url: url::Url::parse(base_url).context("parse Apps E2E loopback URL")?,
+            base_url: validate_apps_e2e_loopback_url(base_url, APPS_E2E_CONTROL_PLANE_URL_ENV_VAR)?,
         })
     }
 }
@@ -622,7 +626,8 @@ impl ControlPlaneClient {
         }
         let mut value = serde_json::from_str(&body)
             .with_context(|| format!("parse Apps Platform {method} {path} response"))?;
-        redact_json_value(&mut value, credential);
+        redact_json_value(&mut value, credential)
+            .with_context(|| format!("sanitize Apps Platform {method} {path} response"))?;
         Ok(value)
     }
 
@@ -671,24 +676,51 @@ fn build_control_plane_http_client(timeout: Duration) -> Result<Client> {
         .context("build Apps Platform control-plane HTTP client")
 }
 
-fn redact_json_value(value: &mut Value, credential: &ComposeSessionCredential) {
+fn redact_json_value(value: &mut Value, credential: &ComposeSessionCredential) -> Result<()> {
     match value {
         Value::String(text) => *text = credential.redact(text),
         Value::Array(items) => {
             for item in items {
-                redact_json_value(item, credential);
+                redact_json_value(item, credential)?;
             }
         }
         Value::Object(object) => {
-            let mut sanitized = Map::new();
-            for (key, mut value) in std::mem::take(object) {
-                redact_json_value(&mut value, credential);
-                sanitized.insert(credential.redact(&key), value);
+            for (key, value) in object {
+                if credential.redact(key) != *key {
+                    anyhow::bail!(
+                        "Apps Platform response contained the session credential in an object key"
+                    );
+                }
+                redact_json_value(value, credential)?;
             }
-            *object = sanitized;
         }
         Value::Null | Value::Bool(_) | Value::Number(_) => {}
     }
+    Ok(())
+}
+
+#[cfg(test)]
+fn validate_apps_e2e_loopback_url(value: &str, name: &str) -> Result<url::Url> {
+    let url = url::Url::parse(value).with_context(|| format!("parse {name}"))?;
+    let loopback_ip = match url.host() {
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        Some(url::Host::Domain(_)) | None => false,
+    };
+    if url.scheme() != "http"
+        || !loopback_ip
+        || url.port().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        anyhow::bail!(
+            "{name} must be an HTTP loopback IP origin with an explicit port and no userinfo, path, query, or fragment"
+        );
+    }
+    Ok(url)
 }
 
 fn deploy_form(artifact: &Path, options: &DeployOptions) -> Result<multipart::Form> {
@@ -946,6 +978,49 @@ mod tests {
             args.to_str().expect("BB_APPS_E2E_ARGS must be UTF-8"),
         )
         .expect("parse BB_APPS_E2E_ARGS");
+        let auth_url = std::env::var(APPS_E2E_AUTH_URL_ENV_VAR)
+            .expect("Apps E2E helper requires an explicit auth URL");
+        let auth_url = validate_apps_e2e_loopback_url(&auth_url, APPS_E2E_AUTH_URL_ENV_VAR)
+            .expect("validate Apps E2E auth URL");
+        let credential = std::env::var(APPS_E2E_CREDENTIAL_ENV_VAR)
+            .expect("Apps E2E helper requires an explicit synthetic credential");
+        assert!(
+            credential.starts_with("apps-e2e-only."),
+            "Apps E2E helper accepts only synthetic test credentials"
+        );
+        let temp = tempfile::tempdir().expect("create isolated Apps E2E home");
+        let bb_home = temp.path().join("bb-home");
+        let storage_path = temp.path().join("auth-sessions.json");
+        fs::create_dir_all(&bb_home).expect("create isolated Apps E2E bb home");
+        fs::write(bb_home.join("config.yaml"), "org: test\n")
+            .expect("write isolated Apps E2E config");
+        let service_url = format!("{}/api/goose", auth_url.as_str().trim_end_matches('/'));
+        let mut hasher = Sha256::new();
+        hasher.update(b"default");
+        hasher.update([0]);
+        hasher.update(service_url.as_bytes());
+        let storage_key = hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        fs::write(
+            &storage_path,
+            serde_json::to_vec_pretty(&json!({
+                storage_key: {
+                    "sessionCredential": credential,
+                    "expiresAt": "2099-01-01T00:00:00Z"
+                }
+            }))
+            .expect("serialize isolated Apps E2E storage"),
+        )
+        .expect("write isolated Apps E2E storage");
+        std::env::set_var("BB_HOME", &bb_home);
+        std::env::set_var("BB_AUTH_STORAGE", "file");
+        std::env::set_var("BB_AUTH_STORAGE_FILE", &storage_path);
+        std::env::set_var("KGOOSE_BASE_URL", auth_url.as_str());
+        std::env::remove_var("BB_SKILLS_PROFILE");
+        std::env::remove_var("KGOOSE_PLAYPEN");
         println!("{PROCESS_STDOUT_BEGIN}");
         crate::run_bb_with_argv(args).expect("run bb Apps process command");
         println!("{PROCESS_STDOUT_END}");
@@ -966,33 +1041,8 @@ mod tests {
         control_plane: &ProcessServer,
         args: &[&str],
         credential: &str,
-    ) -> (tempfile::TempDir, ProcessCommand) {
-        let temp = tempfile::tempdir().expect("create Apps process temp directory");
-        let bb_home = temp.path().join("bb-home");
-        let storage_path = temp.path().join("auth-sessions.json");
-        fs::create_dir_all(&bb_home).expect("create Apps process bb home");
-        fs::write(bb_home.join("config.yaml"), "org: test\n").expect("write Apps process config");
-        let service_url = format!("{}/api/goose", auth_server.base_url);
-        let mut hasher = Sha256::new();
-        hasher.update(b"default");
-        hasher.update([0]);
-        hasher.update(service_url.as_bytes());
-        let storage_key = hasher
-            .finalize()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        fs::write(
-            &storage_path,
-            serde_json::to_vec_pretty(&json!({
-                storage_key: {
-                    "sessionCredential": credential,
-                    "expiresAt": "2099-01-01T00:00:00Z"
-                }
-            }))
-            .expect("serialize Apps process storage"),
-        )
-        .expect("write Apps process storage");
+    ) -> ProcessCommand {
+        assert!(credential.starts_with("apps-e2e-only."));
         let argv = std::iter::once("bb")
             .chain(args.iter().copied())
             .map(str::to_string)
@@ -1006,13 +1056,15 @@ mod tests {
             ])
             .env("BB_APPS_E2E_ARGS", serde_json::to_string(&argv).unwrap())
             .env(APPS_E2E_CONTROL_PLANE_URL_ENV_VAR, &control_plane.base_url)
-            .env("BB_HOME", bb_home)
-            .env("BB_AUTH_STORAGE", "file")
-            .env("BB_AUTH_STORAGE_FILE", storage_path)
-            .env("KGOOSE_BASE_URL", &auth_server.base_url)
+            .env(APPS_E2E_AUTH_URL_ENV_VAR, &auth_server.base_url)
+            .env(APPS_E2E_CREDENTIAL_ENV_VAR, credential)
+            .env_remove("BB_HOME")
+            .env_remove("BB_AUTH_STORAGE")
+            .env_remove("BB_AUTH_STORAGE_FILE")
+            .env_remove("KGOOSE_BASE_URL")
             .env_remove("BB_SKILLS_PROFILE")
             .env_remove("KGOOSE_PLAYPEN");
-        (temp, command)
+        command
     }
 
     fn process_stdout(output: &std::process::Output) -> String {
@@ -1063,8 +1115,29 @@ mod tests {
     }
 
     #[test]
+    fn apps_e2e_destinations_require_explicit_http_loopback_ip_origins() {
+        for valid in ["http://127.0.0.1:1234", "http://[::1]:4321"] {
+            assert!(validate_apps_e2e_loopback_url(valid, "test URL").is_ok());
+        }
+        for invalid in [
+            "http://192.0.2.1:1234",
+            "https://127.0.0.1:1234",
+            "http://localhost:1234",
+            "http://user@127.0.0.1:1234",
+            "http://127.0.0.1:1234/path",
+            "http://127.0.0.1:1234/?query=yes",
+            "http://127.0.0.1:1234/#fragment",
+            "http://127.0.0.1",
+        ] {
+            let error = validate_apps_e2e_loopback_url(invalid, "test URL")
+                .expect_err("reject unsafe Apps E2E destination");
+            assert!(error.to_string().contains("HTTP loopback IP origin"));
+        }
+    }
+
+    #[test]
     fn bb_apps_contract_process_covers_auth_dispatch_output_and_redaction() {
-        let credential = "contract.session+credential";
+        let credential = "apps-e2e-only.contract.session+credential";
         let contract = json!({
             "ok": true,
             "contract_version": "2026-06-30",
@@ -1073,7 +1146,7 @@ mod tests {
         });
         let auth_server = ProcessServer::start(vec![process_auth_response()]);
         let control_plane = ProcessServer::start(vec![ProcessResponse::json(contract)]);
-        let (_temp, mut command) = process_command(
+        let mut command = process_command(
             &auth_server,
             &control_plane,
             &[
@@ -1108,7 +1181,7 @@ mod tests {
 
     #[test]
     fn bb_apps_create_process_runs_plan_and_initialize() {
-        let credential = "create.session+credential";
+        let credential = "apps-e2e-only.create.session+credential";
         let plan = json!({
             "app_id": "merchant-lookup",
             "display_name": "Merchant Lookup",
@@ -1126,7 +1199,7 @@ mod tests {
             ProcessResponse::json(plan.clone()),
             ProcessResponse::json(initialized.clone()),
         ]);
-        let (_temp, mut command) = process_command(
+        let mut command = process_command(
             &auth_server,
             &control_plane,
             &[
@@ -1189,7 +1262,7 @@ mod tests {
 
     #[test]
     fn bb_apps_create_process_skips_unrequested_initialize() {
-        let credential = "existing.session+credential";
+        let credential = "apps-e2e-only.existing.session+credential";
         let plan = json!({
             "app_id": "existing-app",
             "external_url": "https://existing-app--bpsites.example/",
@@ -1197,7 +1270,7 @@ mod tests {
         });
         let auth_server = ProcessServer::start(vec![process_auth_response()]);
         let control_plane = ProcessServer::start(vec![ProcessResponse::json(plan.clone())]);
-        let (_temp, mut command) = process_command(
+        let mut command = process_command(
             &auth_server,
             &control_plane,
             &[
@@ -1230,7 +1303,7 @@ mod tests {
 
     #[test]
     fn bb_apps_deploy_process_uploads_multipart_artifact() {
-        let credential = "deploy.session+credential";
+        let credential = "apps-e2e-only.deploy.session+credential";
         let deployed = json!({
             "ok": true,
             "app_id": "merchant-lookup",
@@ -1243,7 +1316,7 @@ mod tests {
         let artifact = temp.path().join("prepared-app.tar.gz");
         fs::write(&artifact, "test-hotpod-artifact-marker").expect("write deploy artifact");
         let artifact_text = artifact.to_str().expect("artifact path UTF-8");
-        let (_config_temp, mut command) = process_command(
+        let mut command = process_command(
             &auth_server,
             &control_plane,
             &[
@@ -1520,6 +1593,33 @@ mod tests {
 
         assert!(!message.contains(secret));
         assert!(message.contains("[REDACTED]"));
+        server_thread.join().expect("join request server");
+    }
+
+    #[test]
+    fn successful_response_rejects_secret_bearing_keys_without_collisions() {
+        let server = Server::http("127.0.0.1:0").expect("bind control-plane server");
+        let base_url = format!("http://{}", server.server_addr());
+        let secret = "reflected_key_session_credential_123456";
+        let mut nested = Map::new();
+        nested.insert(secret.to_string(), json!("secret-key value"));
+        nested.insert("[REDACTED]".to_string(), json!("existing value"));
+        let response_body = json!({"nested": Value::Object(nested)}).to_string();
+        let server_thread = thread::spawn(move || {
+            let request = server.recv().expect("receive request");
+            request
+                .respond(Response::from_string(response_body))
+                .expect("send reflected key response");
+        });
+        let client = test_control_plane_client(&base_url, Duration::from_secs(2));
+
+        let error = client
+            .contract(&test_credential(secret))
+            .expect_err("reject a successful response with the session in an object key");
+        let message = format!("{error:#}");
+
+        assert!(message.contains("object key"));
+        assert!(!message.contains(secret));
         server_thread.join().expect("join request server");
     }
 

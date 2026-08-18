@@ -3622,6 +3622,8 @@ fn bb_shipped_artifact_contains_no_apps_test_transport() {
     let binary = fs::read(env!("CARGO_BIN_EXE_bb")).expect("read shipped bb test artifact");
     for forbidden in [
         "BB_APPS_E2E_CONTROL_PLANE_URL",
+        "BB_APPS_E2E_AUTH_URL",
+        "BB_APPS_E2E_CREDENTIAL",
         "BB_APPS_E2E_RESOLVE_ADDR",
         "Berd Apps E2E Test CA",
     ] {
