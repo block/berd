@@ -89,6 +89,7 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
               maxHeight: 270,
               lockAspectRatio: true,
             },
+            contentOffset: { x: 0, y: 10 },
           },
     preservePositionOnProfileChange: true,
     Component: OnboardingTourWidget,

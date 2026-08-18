@@ -180,6 +180,24 @@ describe("onboarding tour experience controls", () => {
     expect(areStarterAgentPinsEligible()).toBe(true);
   });
 
+  it("keeps recovery eligible when starter-agent persistence rejects", async () => {
+    storeMocks.setPersonaRecords([
+      starterPersona("tinker"),
+      starterPersona("wildcard"),
+    ]);
+    storeMocks.addMissingStarterAgentPins.mockRejectedValueOnce(
+      new Error("save failed"),
+    );
+
+    await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
+      itemsConfirmed: true,
+      cameraConfirmed: true,
+    });
+
+    expect(haveStarterAgentPinsBeenSeeded()).toBe(false);
+    expect(areStarterAgentPinsEligible()).toBe(true);
+  });
+
   it("preserves starter-agent markers when the Home reset fails", async () => {
     localStorage.setItem("goose:home:starter-agent-pins-seeded-v5", "1");
     storeMocks.resetHomeForOnboarding.mockResolvedValueOnce({

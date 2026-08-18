@@ -313,7 +313,7 @@ describe("updateWidgetStateMutation — photo shape resize", () => {
 });
 
 describe("updateWidgetStateMutation — onboarding tour resize", () => {
-  it("keeps Berdy in place when dismissing the welcome bubble", () => {
+  it("keeps Berdy's avatar in place when dismissing the welcome bubble", () => {
     const tour: WidgetInstance = {
       id: "tour",
       type: "onboardingTour",
@@ -329,7 +329,30 @@ describe("updateWidgetStateMutation — onboarding tour resize", () => {
     ).toEqual([
       expect.objectContaining({
         x: 120,
-        y: 150,
+        y: 160,
+        width: 160,
+        height: 160,
+      }),
+    ]);
+  });
+
+  it("keeps a resized Berdy avatar in place when dismissing the bubble", () => {
+    const tour: WidgetInstance = {
+      id: "tour",
+      type: "onboardingTour",
+      x: 120,
+      y: 150,
+      z: 1,
+      width: 672,
+      height: 270,
+    };
+
+    expect(
+      updateWidgetStateMutation([tour], "tour", { welcomeDismissed: true }),
+    ).toEqual([
+      expect.objectContaining({
+        x: 120,
+        y: 165,
         width: 160,
         height: 160,
       }),

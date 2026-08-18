@@ -52,12 +52,20 @@ export async function resetHomeForOnboardingExperience(): Promise<OnboardingHome
       }
     }
     if (starterPersonas.length === STARTER_HOME_LAYOUT.agents.length) {
-      const didPersist = await useHomeWidgetStore
-        .getState()
-        .addMissingStarterAgentPins(starterPersonas.map(({ id }) => id));
-      if (didPersist) {
-        markStarterAgentPinsSeeded();
-      } else {
+      try {
+        const didPersist = await useHomeWidgetStore
+          .getState()
+          .addMissingStarterAgentPins(starterPersonas.map(({ id }) => id));
+        if (didPersist) {
+          markStarterAgentPinsSeeded();
+        } else {
+          markStarterAgentPinsEligible();
+        }
+      } catch (error) {
+        console.error(
+          "Failed to persist starter agents during onboarding reset:",
+          error,
+        );
         markStarterAgentPinsEligible();
       }
     } else {
