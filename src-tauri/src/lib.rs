@@ -414,6 +414,7 @@ pub fn run() {
             commands::agents::read_import_persona_file,
             commands::agents::read_import_agent_image,
             commands::agents::read_agent_source_file,
+            commands::agents::list_managed_bundled_agent_allocations,
             commands::agents::repair_bundled_agent,
             #[cfg(feature = "block-builderbot")]
             commands::auth::auth_status,

@@ -2932,7 +2932,13 @@ describe("AppShell global navigation", () => {
           systemPrompt: "Help people use Berd.",
           isBuiltin: false,
           writable: true,
-          sourceProperties: { metadata: { berdBundled: true } },
+          sourceProperties: {
+            metadata: {
+              berdBundled: true,
+              berdManagedBundledCopy: true,
+              berdBundledAllocationSource: "berdy",
+            },
+          },
         },
       ],
     });
@@ -2957,7 +2963,13 @@ describe("AppShell global navigation", () => {
         systemPrompt: "Help people use Berd.",
         isBuiltin: false,
         writable: false,
-        sourceProperties: { metadata: { berdBundled: true } },
+        sourceProperties: {
+          metadata: {
+            berdBundled: true,
+            berdManagedBundledCopy: true,
+            berdBundledAllocationSource: "berdy",
+          },
+        },
       },
     ]);
     useAgentStore.setState({ personas: [], personasLoading: false });
@@ -2990,7 +3002,13 @@ describe("AppShell global navigation", () => {
         systemPrompt: "Help people use Berd.",
         isBuiltin: false,
         writable: false,
-        sourceProperties: { metadata: { berdBundled: true } },
+        sourceProperties: {
+          metadata: {
+            berdBundled: true,
+            berdManagedBundledCopy: true,
+            berdBundledAllocationSource: "berdy",
+          },
+        },
       },
     ]);
     useAgentStore.setState({ personas: [], personasLoading: false });

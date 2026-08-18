@@ -10,19 +10,25 @@ function persona(overrides: Partial<Persona> = {}): Persona {
     systemPrompt: "Help people use Berd.",
     isBuiltin: false,
     writable: true,
-    sourceProperties: { metadata: { berdBundled: true } },
+    sourceProperties: {
+      metadata: {
+        berdBundled: true,
+        berdManagedBundledCopy: true,
+        berdBundledAllocationSource: "berdy",
+      },
+    },
     ...overrides,
   };
 }
 
 describe("findBerdyPersonaId", () => {
-  it("finds the installed Berdy agent by its stable file identity", () => {
+  it("finds the verified managed Berdy agent", () => {
     expect(findBerdyPersonaId([persona()])).toBe(
       "/Users/test/.agents/agents/berdy.md",
     );
   });
 
-  it("finds the fallback Berdy agent when the primary filename was occupied", () => {
+  it("finds a verified managed fallback Berdy agent", () => {
     expect(
       findBerdyPersonaId([
         persona({ id: "/Users/test/.agents/agents/berdy2.md" }),
@@ -33,7 +39,10 @@ describe("findBerdyPersonaId", () => {
   it("does not select another agent that only shares Berdy's name", () => {
     expect(
       findBerdyPersonaId([
-        persona({ id: "/Users/test/.agents/agents/other.md" }),
+        persona({
+          id: "/Users/test/.agents/agents/other.md",
+          sourceProperties: { metadata: { berdBundled: true } },
+        }),
       ]),
     ).toBeNull();
   });

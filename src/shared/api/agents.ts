@@ -608,13 +608,48 @@ function toPersona(source: AgentSourceEntry): Persona {
   };
 }
 
+type ManagedBundledAgentAllocation = { path: string; sourceId: string };
+
 async function listAgentSources(): Promise<AgentSourceEntry[]> {
   const client = await getClient();
   const response = await client.goose.GooseUnstableSourcesList({
     type: AGENT_SOURCE_TYPE,
   });
-  const sources = response.sources.filter(isAgentSource);
-  return Promise.all(sources.map(hydrateListedAgentSource));
+  const sources = await Promise.all(
+    response.sources.filter(isAgentSource).map(hydrateListedAgentSource),
+  );
+  let managed: ManagedBundledAgentAllocation[] = [];
+  try {
+    const result = await invoke<ManagedBundledAgentAllocation[] | undefined>(
+      "list_managed_bundled_agent_allocations",
+    );
+    managed = Array.isArray(result) ? result : [];
+  } catch {
+    return sources;
+  }
+  const managedByPath = new Map(
+    managed.map(({ path, sourceId }) => [path, sourceId]),
+  );
+  return sources.map((source) => {
+    const sourceId = managedByPath.get(source.path);
+    if (!sourceId) return source;
+    const metadata =
+      typeof source.properties?.metadata === "object" &&
+      source.properties.metadata !== null
+        ? source.properties.metadata
+        : {};
+    return {
+      ...source,
+      properties: {
+        ...(source.properties ?? {}),
+        metadata: {
+          ...metadata,
+          berdManagedBundledCopy: true,
+          berdBundledAllocationSource: sourceId,
+        },
+      },
+    };
+  });
 }
 
 function canHydrateListedAgentSource(source: AgentSourceEntry): boolean {
