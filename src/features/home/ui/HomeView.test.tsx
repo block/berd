@@ -565,6 +565,104 @@ describe("HomeView", () => {
     ).toBe("1");
   });
 
+  it("seeds starter agents through the empty-Home lifecycle without duplicating them after remount", async () => {
+    const bundledPersona = (displayName: string): Persona => ({
+      id: `/Users/test/.agents/agents/${displayName.toLowerCase()}.md`,
+      displayName,
+      systemPrompt: "Help.",
+      isBuiltin: false,
+      writable: true,
+      sourceProperties: { metadata: { berdBundled: true } },
+    });
+    const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
+    useAgentStore.setState({ personas, personasLoading: false });
+    vi.mocked(getLayout).mockResolvedValue(layout({ items: [] }));
+
+    const firstMount = renderHomeView();
+
+    await waitFor(() =>
+      expect(
+        useHomeWidgetStore
+          .getState()
+          .instances.filter((instance) => instance.type === "agentPin"),
+      ).toHaveLength(2),
+    );
+    await waitFor(() =>
+      expect(
+        localStorage.getItem("goose:home:starter-agent-pins-seeded-v2"),
+      ).toBe("1"),
+    );
+    const persistedLayout = layout({
+      items: vi.mocked(saveLayoutItems).mock.calls.at(-1)?.[0].items ?? [],
+      itemRevision: 3,
+    });
+    expect(
+      persistedLayout.items
+        .filter((item) => item.kind === "persona")
+        .map((item) => item.targetId),
+    ).toEqual(personas.map((persona) => persona.id));
+
+    firstMount.unmount();
+    resetHomeWidgetStoreForTests();
+    vi.mocked(saveLayoutItems).mockClear();
+    vi.mocked(getLayout).mockResolvedValue(persistedLayout);
+    renderHomeView();
+    await screen.findByText("widget canvas");
+
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.filter((instance) => instance.type === "agentPin"),
+    ).toHaveLength(2);
+    expect(saveLayoutItems).not.toHaveBeenCalled();
+  });
+
+  it("waits for both starter personas before persisting either pin", async () => {
+    const bundledPersona = (displayName: string): Persona => ({
+      id: `/Users/test/.agents/agents/${displayName.toLowerCase()}.md`,
+      displayName,
+      systemPrompt: "Help.",
+      isBuiltin: false,
+      writable: true,
+      sourceProperties: { metadata: { berdBundled: true } },
+    });
+    const tinker = bundledPersona("Tinker");
+    const wildcard = bundledPersona("Wildcard");
+    vi.mocked(getLayout).mockResolvedValue(layout());
+    markStarterAgentPinsEligible();
+    useAgentStore.setState({ personas: [tinker], personasLoading: false });
+
+    renderHomeView();
+    await screen.findByText("widget canvas");
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.filter((instance) => instance.type === "agentPin"),
+    ).toHaveLength(0);
+    expect(saveLayoutItems).not.toHaveBeenCalled();
+
+    act(() => {
+      useAgentStore.setState({ personas: [tinker, wildcard] });
+    });
+
+    await waitFor(() =>
+      expect(
+        useHomeWidgetStore
+          .getState()
+          .instances.filter((instance) => instance.type === "agentPin"),
+      ).toHaveLength(2),
+    );
+    await waitFor(() =>
+      expect(
+        vi
+          .mocked(saveLayoutItems)
+          .mock.calls.at(-1)?.[0]
+          .items.filter((item) => item.kind === "persona")
+          .map((item) => item.targetId),
+      ).toEqual([tinker.id, wildcard.id]),
+    );
+  });
+
   it("adds bundled starter agents to a newly seeded Home", async () => {
     vi.mocked(getLayout).mockResolvedValue(layout());
     const bundledPersona = (displayName: string): Persona => ({
