@@ -20,6 +20,7 @@ import { readCachedAvatarAnimation } from "@/shared/api/avatars";
 import {
   AgentShareDialog,
   AVATAR_ANIMATION_EMBED_TIMEOUT_MS,
+  createAgentZip,
 } from "./AgentShareDialog";
 import { downloadBlob, renderAgentShareCard } from "./agentShareCard";
 
@@ -201,7 +202,9 @@ describe("AgentShareDialog", () => {
 
     pending.resolve();
     await waitFor(() =>
-      expect(screen.getByTestId("agent-download-status")).toHaveTextContent(""),
+      expect(
+        screen.queryByTestId("agent-download-status"),
+      ).not.toBeInTheDocument(),
     );
   });
 
@@ -302,6 +305,28 @@ describe("AgentShareDialog", () => {
     );
     await waitFor(() => expect(workerMocks.terminate).toHaveBeenCalled());
     expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it("terminates a ZIP worker that never responds", async () => {
+    vi.useFakeTimers();
+    workerMocks.mode = "hang";
+    try {
+      const result = createAgentZip(
+        "reviewer.agent.png",
+        new Uint8Array([1, 2, 3]),
+        undefined,
+        100,
+      );
+      const rejection = expect(result).rejects.toThrow("ZIP worker timed out");
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      await rejection;
+      expect(workerMocks.terminate).toHaveBeenCalled();
+    } finally {
+      workerMocks.mode = "success";
+      vi.useRealTimers();
+    }
   });
 
   it("recognizes an avatar that completed before its load handler attached", async () => {

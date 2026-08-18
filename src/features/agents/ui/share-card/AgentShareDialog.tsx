@@ -80,11 +80,13 @@ async function avatarSourceToDataUrl(source: string): Promise<string | null> {
 }
 
 export const AVATAR_ANIMATION_EMBED_TIMEOUT_MS = 5_000;
+export const AGENT_ZIP_TIMEOUT_MS = 15_000;
 
 export function createAgentZip(
   pngFilename: string,
   contents: Uint8Array,
   signal?: AbortSignal,
+  timeoutMs = AGENT_ZIP_TIMEOUT_MS,
 ): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     const worker = new Worker(
@@ -94,9 +96,13 @@ export function createAgentZip(
       },
     );
     let settled = false;
+    const timeout = window.setTimeout(() => {
+      finish(() => reject(new Error("ZIP worker timed out")));
+    }, timeoutMs);
     const finish = (operation: () => void) => {
       if (settled) return;
       settled = true;
+      window.clearTimeout(timeout);
       signal?.removeEventListener("abort", handleAbort);
       worker.terminate();
       operation();
@@ -523,13 +529,16 @@ export function AgentShareDialog({
         </div>
 
         <DialogFooter>
-          <span
-            className="sr-only"
-            aria-live="polite"
-            data-testid="agent-download-status"
-          >
-            {agentDownloadPending ? t("share.downloadingAgent") : ""}
-          </span>
+          {agentDownloadPending ? (
+            <span
+              className="sr-only"
+              role="status"
+              aria-live="polite"
+              data-testid="agent-download-status"
+            >
+              {t("share.downloadingAgent")}
+            </span>
+          ) : null}
           <SplitButton
             size="default"
             activeActionId="png"
