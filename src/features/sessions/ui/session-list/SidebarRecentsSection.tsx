@@ -104,7 +104,7 @@ export function SidebarRecentsSection({
   const { activeSessionDropTargetKey, registerSessionDropTarget } =
     useSidebarChatDrag();
   const recentsDropTargetRef = useRef<HTMLDivElement>(null);
-  const showContent = collapsed || isOpen;
+  const showContent = collapsed || showEmptyState || isOpen;
   const recentsDropTargetKey = "recents";
 
   const handleSessionDrop = useCallback(
@@ -136,7 +136,7 @@ export function SidebarRecentsSection({
           collapsed={collapsed}
           labelTransition={labelTransition}
           labelVisible={labelVisible}
-          onToggleOpen={onToggleOpen}
+          onToggleOpen={showEmptyState ? undefined : onToggleOpen}
           isOpen={isOpen}
           labelClassName={sectionHeaderTextClass}
           actions={

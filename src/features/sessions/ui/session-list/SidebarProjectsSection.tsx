@@ -1,10 +1,5 @@
 import { useTranslation } from "react-i18next";
-import {
-  IconChevronDown,
-  IconCubePlus,
-  IconEdit,
-  IconPlus,
-} from "@tabler/icons-react";
+import { IconCubePlus, IconEdit, IconPlus } from "@tabler/icons-react";
 import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { selectHasFetchedProjects } from "@/features/projects/stores/projectSelectors";
@@ -19,7 +14,6 @@ import {
   SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
   SIDEBAR_ROW_HEIGHT_CLASS,
   SIDEBAR_ROW_HOVER_CLASS,
-  SIDEBAR_SECTION_HEADER_ROW_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { SidebarChatDragProvider } from "./SidebarChatDragContext";
 import {
@@ -448,42 +442,13 @@ export function SidebarProjectsSection({
           </div>
         ) : showCombinedEmptyState ? (
           <>
-            <div
-              className={cn(
-                "relative flex items-center transition-all duration-300",
-                collapsed
-                  ? "px-0 pt-0 pb-1 justify-center"
-                  : SIDEBAR_SECTION_HEADER_ROW_CLASS,
-              )}
-            >
-              {!collapsed && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  flush
-                  size="xs"
-                  onClick={onToggleRecentsSection}
-                  aria-expanded={recentsSectionOpen}
-                  className={cn(
-                    "h-7 min-w-0 flex-1 justify-start gap-1.5",
-                    labelTransition,
-                    labelVisible
-                      ? "opacity-100 w-auto"
-                      : "opacity-0 w-0 overflow-hidden",
-                  )}
-                >
-                  <IconChevronDown
-                    className={cn(
-                      "size-3 shrink-0 transition-transform duration-150",
-                      !recentsSectionOpen && "-rotate-90",
-                    )}
-                  />
-                  <span className={cn("truncate", SECTION_HEADER_TEXT_CLASS)}>
-                    {t("sections.recents")}
-                  </span>
-                </Button>
-              )}
-            </div>
+            <SidebarSectionHeader
+              label={t("sections.recents")}
+              collapsed={collapsed}
+              labelTransition={labelTransition}
+              labelVisible={labelVisible}
+              labelClassName={SECTION_HEADER_TEXT_CLASS}
+            />
             <div className="space-y-0">
               <Button
                 type="button"
