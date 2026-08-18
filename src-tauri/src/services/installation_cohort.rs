@@ -72,14 +72,27 @@ pub fn initialize_installation_cohort(
         return Ok(record.cohort);
     }
 
-    let current_layout_exists = current_layout_exists?;
-    let legacy_layout_exists = legacy_layout_exists?;
-    let cohort = if current_layout_exists || legacy_layout_exists {
-        InstallationCohort::EstablishedBeforeLandingV1
-    } else {
-        InstallationCohort::FreshWithLandingV1
+    // A probe that answered affirmatively has already proven the install is
+    // established, so a failure from the other probe cannot unprove it. Only an
+    // install that is genuinely indeterminate — no affirmative sighting and at
+    // least one probe that could not answer — is an error.
+    let cohort = match (current_layout_exists, legacy_layout_exists) {
+        (Ok(true), _) | (_, Ok(true)) => InstallationCohort::EstablishedBeforeLandingV1,
+        (Ok(false), Ok(false)) => InstallationCohort::FreshWithLandingV1,
+        (Err(error), _) | (_, Err(error)) => return Err(error),
     };
-    persist_marker(&marker_path, cohort)
+
+    // The marker is a cache of the classification, not its source of truth. A
+    // full disk or an `fsync` that fails on a network-mounted home directory
+    // must not turn a detected cohort into `Unknown`, which would route an
+    // established user into first-run onboarding.
+    match persist_marker(&marker_path, cohort) {
+        Ok(published) => Ok(published),
+        Err(error) => {
+            log::warn!("Installation cohort marker not persisted, using detected cohort: {error}");
+            Ok(cohort)
+        }
+    }
 }
 
 fn persist_marker(path: &Path, cohort: InstallationCohort) -> Result<InstallationCohort, String> {
@@ -174,6 +187,72 @@ mod tests {
             initialize_installation_cohort(legacy.path(), Ok(false), Ok(true)).unwrap(),
             InstallationCohort::EstablishedBeforeLandingV1
         );
+    }
+
+    #[test]
+    fn an_affirmative_probe_outweighs_a_failing_probe() {
+        let current = tempdir().unwrap();
+        assert_eq!(
+            initialize_installation_cohort(
+                current.path(),
+                Ok(true),
+                Err("legacy directories unavailable".into()),
+            )
+            .unwrap(),
+            InstallationCohort::EstablishedBeforeLandingV1
+        );
+
+        let legacy = tempdir().unwrap();
+        assert_eq!(
+            initialize_installation_cohort(
+                legacy.path(),
+                Err("metadata unavailable".into()),
+                Ok(true),
+            )
+            .unwrap(),
+            InstallationCohort::EstablishedBeforeLandingV1
+        );
+    }
+
+    #[test]
+    fn an_unclassifiable_installation_stays_an_error() {
+        let both = tempdir().unwrap();
+        assert!(initialize_installation_cohort(
+            both.path(),
+            Err("metadata unavailable".into()),
+            Err("legacy directories unavailable".into()),
+        )
+        .is_err());
+
+        let legacy_only = tempdir().unwrap();
+        assert!(initialize_installation_cohort(
+            legacy_only.path(),
+            Ok(false),
+            Err("legacy directories unavailable".into()),
+        )
+        .is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn reports_the_detected_cohort_when_the_marker_cannot_be_written() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempdir().unwrap();
+        let original_permissions = fs::metadata(root.path()).unwrap().permissions();
+        let mut read_only_permissions = original_permissions.clone();
+        read_only_permissions.set_mode(0o500);
+        fs::set_permissions(root.path(), read_only_permissions).unwrap();
+
+        let cohort = initialize_installation_cohort(root.path(), Ok(true), Ok(false));
+
+        fs::set_permissions(root.path(), original_permissions).unwrap();
+
+        assert_eq!(
+            cohort.unwrap(),
+            InstallationCohort::EstablishedBeforeLandingV1
+        );
+        assert!(!root.path().join(MARKER_FILE_NAME).exists());
     }
 
     #[test]
