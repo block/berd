@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { prefetchProjectArtifactRenderer } from "@/features/projects/artifact/prefetchProjectArtifactRenderer";
 import { OnboardingTourDialog } from "@/features/onboarding/ui/OnboardingTourDialog";
-import { findBerdyPersonaId } from "@/features/onboarding/berdyAgent";
 import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
@@ -31,7 +30,6 @@ import {
   haveStarterAgentPinsBeenSeeded,
   markStarterAgentPinsSeeded,
   selectStarterAgentPersonas,
-  shouldRemoveLegacyBerdyPin,
 } from "@/features/home/onboarding/starterAgents";
 import {
   STARTER_PROJECT_ID,
@@ -196,43 +194,19 @@ export function HomeView({
       return;
     }
 
-    const legacyBerdyMigration = shouldRemoveLegacyBerdyPin();
-    const berdyPersonaId = findBerdyPersonaId(personas);
-    if (legacyBerdyMigration && !berdyPersonaId) return;
-    if (legacyBerdyMigration) {
-      for (const instance of instances) {
-        if (
-          instance.type === "agentPin" &&
-          instance.state?.agentId === berdyPersonaId
-        ) {
-          widgetMutations.removeWidget(instance.id);
-        }
-      }
-    }
-
     const haveSeededStarterAgents = haveStarterAgentPinsBeenSeeded();
     const starterAgentPinsEligible = areStarterAgentPinsEligible();
     // A missing marker is not proof of a new Home: every existing user lacks
     // this newly introduced key. Only a layout seeded from empty is eligible;
     // otherwise migrate the marker without touching the user's canvas.
-    if (
-      !haveSeededStarterAgents &&
-      !starterAgentPinsEligible &&
-      !legacyBerdyMigration
-    ) {
+    if (!haveSeededStarterAgents && !starterAgentPinsEligible) {
       markStarterAgentPinsSeeded();
       return;
     }
     const availableStarterAgents = haveSeededStarterAgents
       ? []
       : selectStarterAgentPersonas(personas);
-    if (availableStarterAgents.length === 0) {
-      if (legacyBerdyMigration) {
-        starterAgentSeedAttemptedRef.current = true;
-        pendingStarterAgentSeedRef.current = true;
-      }
-      return;
-    }
+    if (availableStarterAgents.length === 0) return;
 
     const pinnedAgentIds = new Set(
       instances
@@ -243,7 +217,7 @@ export function HomeView({
     const missingAgents = availableStarterAgents
       .map((persona, index) => ({ persona, index }))
       .filter(({ persona }) => !pinnedAgentIds.has(persona.id));
-    if (missingAgents.length === 0 && !legacyBerdyMigration) {
+    if (missingAgents.length === 0) {
       markStarterAgentPinsSeeded();
       return;
     }

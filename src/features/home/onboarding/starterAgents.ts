@@ -4,10 +4,8 @@ import type { Persona } from "@/shared/types/agents";
 // complete the three-agent starter Home.
 export const STARTER_AGENT_NAMES = ["Tinker", "Wildcard"] as const;
 const STARTER_AGENT_FILE_NAMES = ["tinker.md", "wildcard.md"] as const;
-const LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEY =
-  "goose:home:starter-agent-pins-seeded";
 const SEEDED_STARTER_AGENTS_STORAGE_KEY =
-  "goose:home:starter-agent-pins-seeded-v3";
+  "goose:home:starter-agent-pins-seeded-v2";
 const STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY =
   "goose:home:starter-agent-pins-eligible-v1";
 
@@ -54,21 +52,9 @@ export function markStarterAgentPinsEligible(): void {
   }
 }
 
-export function shouldRemoveLegacyBerdyPin(): boolean {
-  try {
-    return (
-      localStorage.getItem(LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEY) === "1" &&
-      !haveStarterAgentPinsBeenSeeded()
-    );
-  } catch {
-    return false;
-  }
-}
-
 export function resetStarterAgentPinsSeeded(): void {
   try {
     localStorage.removeItem(SEEDED_STARTER_AGENTS_STORAGE_KEY);
-    localStorage.removeItem(LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEY);
     localStorage.removeItem(STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY);
   } catch {
     // Home remains usable when localStorage is unavailable.
@@ -78,7 +64,6 @@ export function resetStarterAgentPinsSeeded(): void {
 export function markStarterAgentPinsSeeded(): void {
   try {
     localStorage.setItem(SEEDED_STARTER_AGENTS_STORAGE_KEY, "1");
-    localStorage.removeItem(LEGACY_SEEDED_STARTER_AGENTS_STORAGE_KEY);
     localStorage.removeItem(STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY);
   } catch {
     // Home remains usable when localStorage is unavailable.

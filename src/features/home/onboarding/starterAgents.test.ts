@@ -5,7 +5,6 @@ import {
   markStarterAgentPinsSeeded,
   resetStarterAgentPinsSeeded,
   selectStarterAgentPersonas,
-  shouldRemoveLegacyBerdyPin,
   STARTER_AGENT_NAMES,
 } from "./starterAgents";
 
@@ -63,15 +62,5 @@ describe("starter agents", () => {
     resetStarterAgentPinsSeeded();
 
     expect(haveStarterAgentPinsBeenSeeded()).toBe(false);
-  });
-
-  it("migrates the legacy three-agent seed marker", () => {
-    localStorage.setItem("goose:home:starter-agent-pins-seeded", "1");
-    expect(shouldRemoveLegacyBerdyPin()).toBe(true);
-
-    markStarterAgentPinsSeeded();
-
-    expect(haveStarterAgentPinsBeenSeeded()).toBe(true);
-    expect(shouldRemoveLegacyBerdyPin()).toBe(false);
   });
 });

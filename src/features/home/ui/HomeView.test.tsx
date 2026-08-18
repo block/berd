@@ -496,7 +496,56 @@ describe("HomeView", () => {
         .instances.filter((instance) => instance.type === "agentPin"),
     ).toHaveLength(0);
     expect(
-      localStorage.getItem("goose:home:starter-agent-pins-seeded-v3"),
+      localStorage.getItem("goose:home:starter-agent-pins-seeded-v2"),
+    ).toBe("1");
+  });
+
+  it("preserves an established Berdy pin when the legacy marker exists", async () => {
+    const berdy = {
+      id: "/Users/test/.agents/agents/berdy.md",
+      displayName: "Berdy",
+      avatar: "app-avatar:gloopies-22" as const,
+      systemPrompt: "Help.",
+      isBuiltin: false,
+      writable: true,
+      sourceProperties: { metadata: { berdBundled: true } },
+    } satisfies Persona;
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          ...layout().items,
+          {
+            id: "legacy-berdy-pin",
+            kind: "persona",
+            targetId: berdy.id,
+            centerX: 320,
+            centerY: 320,
+            width: 200,
+            height: 220,
+            zIndex: 2,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+    localStorage.setItem("goose:home:starter-agent-pins-seeded", "1");
+    useAgentStore.setState({ personas: [berdy], personasLoading: false });
+
+    renderHomeView();
+    await screen.findByText("widget canvas");
+
+    expect(
+      useHomeWidgetStore
+        .getState()
+        .instances.some(
+          (instance) =>
+            instance.type === "agentPin" &&
+            instance.state?.agentId === berdy.id,
+        ),
+    ).toBe(true);
+    expect(saveLayoutItems).not.toHaveBeenCalled();
+    expect(
+      localStorage.getItem("goose:home:starter-agent-pins-seeded-v2"),
     ).toBe("1");
   });
 
