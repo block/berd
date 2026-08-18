@@ -24,6 +24,7 @@ interface SplitButtonProps<T extends string = string> {
   disabled?: boolean;
   className?: string;
   menuTriggerLabel: string;
+  menuTooltip?: React.ReactNode;
   variant?: ButtonProps["variant"];
   size?: ButtonProps["size"];
   feedbackState?: ButtonProps["feedbackState"];
@@ -39,6 +40,7 @@ export function SplitButton<T extends string = string>({
   disabled = false,
   className,
   menuTriggerLabel,
+  menuTooltip,
   variant = "outline",
   size = "xs",
   feedbackState = "idle",
@@ -84,7 +86,9 @@ export function SplitButton<T extends string = string>({
               </Button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
-          <TooltipContent layer={menuLayer}>{menuTriggerLabel}</TooltipContent>
+          {menuTooltip ? (
+            <TooltipContent layer={menuLayer}>{menuTooltip}</TooltipContent>
+          ) : null}
         </Tooltip>
         <DropdownMenuContent align="end" sideOffset={4} layer={menuLayer}>
           {actions.map((action) => (
