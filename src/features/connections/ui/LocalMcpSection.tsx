@@ -1,0 +1,95 @@
+import { useQuery } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
+import {
+  listLocalMcpInventory,
+  LOCAL_MCP_INVENTORY_QUERY_KEY,
+} from "@/features/connections/api/localMcpInventory";
+import {
+  filterMcpGroups,
+  groupMcpServers,
+  harnessesWithErrors,
+} from "@/features/connections/lib/localMcpInventory";
+import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
+import { Button } from "@/shared/ui/button";
+import { SettingsSection } from "@/shared/ui/settings-section";
+import { Skeleton } from "@/shared/ui/skeleton";
+import { LocalMcpConnectionCard } from "./LocalMcpConnectionCard";
+
+export function LocalMcpSection({
+  searchTerm,
+  workspacePaths,
+}: {
+  searchTerm: string;
+  workspacePaths: string[];
+}) {
+  const { t } = useTranslation("settings");
+  const query = useQuery({
+    queryKey: [...LOCAL_MCP_INVENTORY_QUERY_KEY, workspacePaths],
+    queryFn: () => listLocalMcpInventory(workspacePaths),
+    staleTime: 10_000,
+  });
+  const groups = groupMcpServers(query.data);
+  const visibleGroups = filterMcpGroups(groups, searchTerm);
+  const failedSources = harnessesWithErrors(query.data);
+  const hasFailure = query.isError || failedSources.length > 0;
+
+  if (query.isLoading) {
+    return (
+      <SettingsSection title={t("connections.sections.local")}>
+        {[1, 2, 3].map((item) => (
+          <div key={item} className="flex items-center gap-3 p-3">
+            <Skeleton className="size-4.5 rounded-full" />
+            <Skeleton className="h-4 w-32 rounded-sm" />
+          </div>
+        ))}
+      </SettingsSection>
+    );
+  }
+
+  if (groups.length === 0 && hasFailure) {
+    return (
+      <SettingsSection title={t("connections.sections.local")}>
+        <Alert>
+          <AlertTitle>{t("connections.localError.title")}</AlertTitle>
+          <AlertDescription>
+            <span>{t("connections.localError.description")}</span>
+            <Button
+              type="button"
+              variant="alert"
+              size="xs"
+              feedbackState={query.isFetching ? "loading" : "idle"}
+              loadingLabel={t("connections.localError.retrying")}
+              onClick={() => void query.refetch()}
+            >
+              {t("connections.localError.retry")}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </SettingsSection>
+    );
+  }
+
+  if (groups.length === 0) return null;
+
+  return (
+    <SettingsSection title={t("connections.sections.local")}>
+      {hasFailure ? (
+        <Alert>
+          <AlertTitle>{t("connections.localError.partialTitle")}</AlertTitle>
+          <AlertDescription>
+            {t("connections.localError.partialDescription")}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {visibleGroups.length === 0 && searchTerm.trim() ? (
+        <p className="p-3 text-sm text-muted-foreground">
+          {t("connections.noResults")}
+        </p>
+      ) : (
+        visibleGroups.map((group) => (
+          <LocalMcpConnectionCard key={group.id} group={group} />
+        ))
+      )}
+    </SettingsSection>
+  );
+}

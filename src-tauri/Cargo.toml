@@ -61,6 +61,7 @@ sha2 = "0.10"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "migrate", "macros"] }
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 tauri = { version = "2", features = ["protocol-asset"] }
+toml = "1.1.4"
 tauri-plugin-berdctl = { path = "plugins/berdctl" }
 tauri-plugin-app-test-driver = { path = "plugins/app-test-driver" }
 tauri-plugin-clipboard-manager = "2"

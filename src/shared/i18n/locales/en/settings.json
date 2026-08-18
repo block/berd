@@ -108,7 +108,7 @@
     "configure": "Configure",
     "connect": "Connect",
     "connectError": "Couldn't open the connect flow. Try again.",
-    "description": "Sign in to apps and services Berd can use on your behalf.",
+    "description": "See company-managed connections and MCP servers configured on this device.",
     "disconnect": "Disconnect",
     "disconnectError": "Couldn't disconnect. Try again.",
     "empty": {
@@ -123,15 +123,27 @@
     "reconnect": "Reconnect",
     "search": "Search connections",
     "sections": {
-      "available": "Available",
-      "installed": "Installed"
+      "managed": "Company managed",
+      "local": "Local"
     },
     "status": {
       "active": "Active",
       "disconnected": "Disconnected",
       "expired": "Expired"
     },
-    "title": "Connections"
+    "title": "Connections",
+    "worksWith": "Works with: {{harnesses}}",
+    "localError": {
+      "title": "Couldn’t load your local MCPs",
+      "description": "Try again in a moment.",
+      "partialTitle": "Some local MCPs may be missing",
+      "partialDescription": "Berd couldn’t read every local configuration source.",
+      "retry": "Try again",
+      "retrying": "Trying…"
+    },
+    "askAgent": "Add MCP",
+    "askAgentTitle": "Add an MCP",
+    "askAgentPrompt": "Help me add an MCP server. Ask which one I want, explain what access it needs, and use the supported setup path for my active agent. Ask before changing any configuration and never print or copy credentials."
   },
   "deleteProject": {
     "description": "Removes the project and all its data. You can't undo this.",

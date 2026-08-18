@@ -71,7 +71,9 @@ export function SettingsView({
     <SettingsPane>
       {activeSection === "appearance" && <AppearanceSettings />}
       {activeSection === "behavior" && <BehaviorSettings />}
-      {activeSection === "connections" && <ConnectionsSettings />}
+      {activeSection === "connections" && (
+        <ConnectionsSettings onAskAgentToAddMcp={onStartTroubleshootingChat} />
+      )}
       {activeSection === "providers" && (
         <ProvidersSettings
           onStartTroubleshootingChat={onStartTroubleshootingChat}

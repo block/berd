@@ -108,7 +108,7 @@
     "configure": "Configurar",
     "connect": "Conectar",
     "connectError": "No se pudo abrir el flujo de conexión. Inténtalo de nuevo.",
-    "description": "Inicia sesión en apps y servicios que Berd puede usar en tu nombre.",
+    "description": "Consulta las conexiones administradas por la empresa y los servidores MCP configurados en este dispositivo.",
     "disconnect": "Desconectar",
     "disconnectError": "No se pudo desconectar. Inténtalo de nuevo.",
     "empty": {
@@ -123,15 +123,27 @@
     "reconnect": "Reconectar",
     "search": "Buscar conexiones",
     "sections": {
-      "available": "Disponibles",
-      "installed": "Instaladas"
+      "managed": "Administradas por la empresa",
+      "local": "Locales"
     },
     "status": {
       "active": "Activa",
       "disconnected": "Desconectada",
       "expired": "Caducada"
     },
-    "title": "Conexiones"
+    "title": "Conexiones",
+    "worksWith": "Funciona con: {{harnesses}}",
+    "localError": {
+      "title": "No se pudieron cargar tus MCP locales",
+      "description": "Inténtalo de nuevo en unos instantes.",
+      "partialTitle": "Es posible que falten algunos MCP locales",
+      "partialDescription": "Berd no pudo leer todas las fuentes de configuración local.",
+      "retry": "Intentar de nuevo",
+      "retrying": "Intentando…"
+    },
+    "askAgent": "Agregar MCP",
+    "askAgentTitle": "Agregar un MCP",
+    "askAgentPrompt": "Ayúdame a agregar un servidor MCP. Pregunta cuál quiero, explica qué acceso necesita y usa el método de configuración compatible con mi agente activo. Pregunta antes de cambiar cualquier configuración y nunca muestres ni copies credenciales."
   },
   "deleteProject": {
     "description": "Este proyecto y todos sus datos se eliminarán de forma permanente.",

@@ -1,74 +1,140 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 
-/**
- * BOT-1272 guard, on the real component.
- *
- * `SettingsView` renders `ConnectionsSettings` into the one shared
- * `SettingsPane` that every settings section uses. `SettingsPane` carries
- * `.page-transition`, which starts at `opacity: 0` and animates in over 160ms.
- * If `ConnectionsSettings` ever supplies its own pane again, switching to or
- * from Connections replays that enter animation and flashes the surface
- * underneath.
- *
- * The sibling assertion in `SettingsView.test.tsx` mocks this module, so it
- * cannot see inside it. This test renders the real component so re-adding a
- * pane here fails CI instead of silently reintroducing the flash.
- */
+const testState = vi.hoisted(() => ({ managed: false }));
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
-}));
-
-vi.mock("@tauri-apps/plugin-deep-link", () => ({
-  onOpenUrl: () => Promise.resolve(() => {}),
-}));
-
-vi.mock("@/features/extensions/hooks/useExtensionsSettings", () => ({
-  useExtensionsSettings: () => ({
-    extensions: [],
-    isLoading: false,
-    modalMode: null,
-    editingExtension: null,
-    handleAdd: () => {},
-    handleConfigure: () => {},
-    handleSubmit: () => {},
-    handleDelete: () => {},
-    handleReset: () => {},
-    handleModalClose: () => {},
+  useTranslation: () => ({
+    t: (key: string, options?: { harnesses?: string }) =>
+      options?.harnesses ? `${key}:${options.harnesses}` : key,
   }),
 }));
 
-// Off keeps the OAuth catalog query out of this test; the pane contract is
-// independent of which connection rows render.
+vi.mock("@tauri-apps/plugin-deep-link", () => ({
+  onOpenUrl: async () => () => {},
+}));
+
 vi.mock("@/shared/profile/capabilities", () => ({
-  useProfileCapability: () => false,
+  useProfileCapability: () => testState.managed,
+}));
+
+vi.mock("@/features/projects/stores/projectStore", () => ({
+  useProjectStore: (selector: (state: object) => unknown) =>
+    selector({ projects: [], activeProjectId: null }),
+}));
+
+vi.mock("@/features/connections/api/connections", () => ({
+  CONNECTIONS_QUERY_KEY: ["connections"],
+  listConnections: async () => ({ connections: [] }),
+  disconnectConnection: async () => {},
+}));
+
+vi.mock("@/features/connections/api/localMcpInventory", () => ({
+  LOCAL_MCP_INVENTORY_QUERY_KEY: ["local-mcp-inventory"],
+  listLocalMcpInventory: async () => ({
+    harnesses: [
+      {
+        harness: "goose",
+        status: "configured",
+        checkedLocations: [],
+        servers: [
+          {
+            id: "goose:user:github",
+            harness: "goose",
+            source: { scope: "user", label: "Goose user config" },
+            configKey: "github",
+            name: "GitHub",
+            transport: "stdio",
+          },
+        ],
+      },
+      {
+        harness: "codex",
+        status: "configured",
+        checkedLocations: [],
+        servers: [
+          {
+            id: "codex:user:github",
+            harness: "codex",
+            source: { scope: "user", label: "Codex user config" },
+            configKey: "github",
+            name: "GitHub",
+            transport: "stdio",
+          },
+        ],
+      },
+    ],
+  }),
 }));
 
 function renderConnectionsSettings() {
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-
   return render(
-    <QueryClientProvider client={queryClient}>
+    <QueryClientProvider
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
+    >
       <ConnectionsSettings />
     </QueryClientProvider>,
   );
 }
 
 describe("ConnectionsSettings", () => {
-  it("renders no page wrapper so the caller owns the settings pane", () => {
-    const { container } = renderConnectionsSettings();
+  it("renders passive local inventory without a distribution section", async () => {
+    renderConnectionsSettings();
 
-    expect(container.querySelectorAll(".page-transition")).toHaveLength(0);
+    expect(await screen.findByText("GitHub")).toBeInTheDocument();
+    expect(
+      screen.getByText("connections.worksWith:Goose, Codex"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("connections.sections.local")).toBeInTheDocument();
+    expect(
+      screen.queryByText("connections.sections.managed"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /configure|remove|connect/i }),
+    ).not.toBeInTheDocument();
   });
 
-  it("renders its own content spacing", () => {
-    const { container } = renderConnectionsSettings();
+  it("organizes the managed catalog and local inventory without installed or available sections", async () => {
+    testState.managed = true;
+    renderConnectionsSettings();
 
-    expect(container.firstElementChild).toHaveClass("flex", "flex-col");
+    expect(
+      await screen.findByText("connections.sections.managed"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("connections.sections.local")).toBeInTheDocument();
+    expect(
+      screen.queryByText("connections.sections.installed"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("connections.sections.available"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("uses one search across managed and local sections", async () => {
+    const user = userEvent.setup();
+    testState.managed = true;
+    renderConnectionsSettings();
+
+    await screen.findByText("GitHub");
+    await user.type(
+      screen.getByRole("searchbox", { name: "connections.search" }),
+      "Codex",
+    );
+
+    expect(screen.getByText("GitHub")).toBeInTheDocument();
+    expect(
+      screen.getByText("connections.worksWith:Goose, Codex"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("connections.noResults")).toBeInTheDocument();
+  });
+
+  it("renders no page wrapper so the caller owns the settings pane", () => {
+    const { container } = renderConnectionsSettings();
+    expect(container.querySelectorAll(".page-transition")).toHaveLength(0);
   });
 });
