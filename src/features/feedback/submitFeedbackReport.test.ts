@@ -17,6 +17,7 @@ vi.mock("@/shared/telemetry/client", () => ({
 describe("submitFeedbackReport", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.setItem("berd:telemetry-consent:v1", "true");
     mockGetVersion.mockResolvedValue("1.2.3");
     vi.mocked(submitFeedbackIssue).mockResolvedValue({
       issueUrl: "https://linear.test/BOT-1",

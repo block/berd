@@ -45,6 +45,7 @@ function renderStep(onStart = vi.fn()) {
 describe("WelcomeStep", () => {
   afterEach(() => {
     motionMocks.reduced = false;
+    localStorage.clear();
   });
 
   it("starts onboarding from the landing page", async () => {
@@ -64,6 +65,17 @@ describe("WelcomeStep", () => {
     ).toBeChecked();
 
     await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
+    expect(onStart).toHaveBeenCalledOnce();
+  });
+
+  it("persists opt out before advancing", async () => {
+    const onStart = renderStep();
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: /share anonymous usage data/i }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
+
+    expect(localStorage.getItem("berd:telemetry-consent:v1")).toBe("false");
     expect(onStart).toHaveBeenCalledOnce();
   });
 

@@ -20,7 +20,7 @@ import { getInstallationCohort } from "@/features/onboarding/api/installationCoh
 import { initializeOnboardingGraduation } from "@/features/onboarding/model";
 import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
 import { I18nProvider } from "@/shared/i18n";
-import { initTelemetry, trackAppLaunched } from "@/shared/telemetry/client";
+import { startTelemetryIfConsented } from "@/shared/telemetry/startup";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import { TooltipProvider } from "@/shared/ui/tooltip";
 import { RendererErrorBoundary } from "@/app/ui/RendererErrorBoundary";
@@ -173,8 +173,7 @@ if (bootError) {
       initializeOnboardingGraduation("unknown");
     })
     .finally(() => {
-      initTelemetry();
-      trackAppLaunched();
+      startTelemetryIfConsented();
 
       reactRoot.render(
         <React.StrictMode>

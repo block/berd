@@ -12,6 +12,11 @@ import {
 } from "@/shared/ui/dialog";
 import { ProjectArtifactPreview } from "@/features/projects/artifact/ProjectArtifactPreview";
 import type { ProjectArtifactMotionImpulse } from "@/features/projects/artifact/types";
+import {
+  getTelemetryConsent,
+  setTelemetryConsent,
+} from "@/shared/telemetry/consentPreference";
+import { startTelemetryIfConsented } from "@/shared/telemetry/startup";
 import { OnboardingShell } from "./OnboardingShell";
 
 interface WelcomeStepProps {
@@ -32,7 +37,9 @@ export function WelcomeStep({ onStart }: WelcomeStepProps) {
   const reduceMotion = useReducedMotion() === true;
   const checkboxId = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const [shareUsageData, setShareUsageData] = useState(true);
+  const [shareUsageData, setShareUsageData] = useState(
+    () => getTelemetryConsent() ?? true,
+  );
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [cubeMotion, setCubeMotion] = useState<ProjectArtifactMotionImpulse>();
   const lastPointer = useRef<{ x: number; y: number; time: number } | null>(
@@ -158,7 +165,12 @@ export function WelcomeStep({ onStart }: WelcomeStepProps) {
             type="button"
             size="lg"
             className="mt-9 w-[calc(100%-80px)] max-[760px]:mx-auto"
-            onClick={onStart}
+            onClick={() => {
+              if (setTelemetryConsent(shareUsageData) && shareUsageData) {
+                startTelemetryIfConsented();
+              }
+              onStart();
+            }}
           >
             {t("welcome.getStarted")}
           </Button>

@@ -6,6 +6,7 @@ import {
 } from "@/shared/api/feedback";
 import { getPlatform } from "@/shared/lib/platform";
 import { trackFeedbackSubmitted } from "@/shared/telemetry/client";
+import { getTelemetryConsent } from "@/shared/telemetry/consentPreference";
 
 export interface SubmitFeedbackReportInput {
   title: string;
@@ -58,7 +59,9 @@ export async function submitFeedbackReport(
     doctorReport,
     labelIds: input.labelIds,
   });
-  trackFeedbackSubmitted();
+  if (getTelemetryConsent() === true) {
+    trackFeedbackSubmitted();
+  }
   return result;
 }
 
