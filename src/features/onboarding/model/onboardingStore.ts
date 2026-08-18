@@ -16,7 +16,10 @@ import {
 
 export const ONBOARDING_STORAGE_VERSION = 1;
 export const ONBOARDING_STORAGE_KEY = "berd:onboarding:v1";
-export const ONBOARDING_GRADUATION_STORAGE_KEY = "berd:onboarding:graduated-v1";
+
+export type InstallationCohort =
+  | "fresh-with-landing-v1"
+  | "established-before-landing-v1";
 
 interface PersistedOnboardingState {
   version: typeof ONBOARDING_STORAGE_VERSION;
@@ -43,21 +46,18 @@ function storage(): Storage | null {
   }
 }
 
-/**
- * Graduates first-run onboarding without sending established installations
- * through a newly enabled flow. A blank storage area represents a fresh app
- * profile; any pre-existing app state means Berd has run before.
- */
-export function initializeOnboardingGraduation(): void {
+/** Preserve authored onboarding state while graduating established installs. */
+export function initializeOnboardingGraduation(
+  cohort: InstallationCohort,
+): void {
   const target = storage();
-  if (!target || target.getItem(ONBOARDING_GRADUATION_STORAGE_KEY) !== null) {
-    return;
-  }
+  if (!target) return;
 
   try {
-    const hasOnboardingState = target.getItem(ONBOARDING_STORAGE_KEY) !== null;
-    const hasExistingAppState = target.length > 0;
-    if (!hasOnboardingState && hasExistingAppState) {
+    if (
+      target.getItem(ONBOARDING_STORAGE_KEY) === null &&
+      cohort === "established-before-landing-v1"
+    ) {
       const completedState: OnboardingState = {
         ...INITIAL_ONBOARDING_STATE,
         lifecycle: "completed",
@@ -71,7 +71,6 @@ export function initializeOnboardingGraduation(): void {
         } satisfies PersistedOnboardingState),
       );
     }
-    target.setItem(ONBOARDING_GRADUATION_STORAGE_KEY, "1");
   } catch {
     // Onboarding remains usable if localStorage is unavailable or full.
   }

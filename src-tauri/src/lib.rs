@@ -211,6 +211,13 @@ pub fn run() {
             app.manage(commands::pocket_voice::PocketVoiceState::default());
             app.manage(commands::native_voice::NativeVoiceState::default());
             app.manage(commands::voice_capture::VoiceCaptureState::default());
+            let installation_cohort =
+                services::installation_cohort::initialize_installation_cohort(
+                    &app_data_dir,
+                    services::app_data_migration::legacy_layout_database_exists(app.handle()),
+                )
+                .map_err(std::io::Error::other)?;
+            app.manage(installation_cohort);
             let release_channel_state = commands::updates::ReleaseChannelState::load(app.handle())?;
             app.manage(release_channel_state);
 
@@ -510,6 +517,7 @@ pub fn run() {
             commands::git::git_create_worktree,
             commands::git::git_remove_worktree,
             commands::home_widget_media::import_home_widget_photo,
+            commands::installation::get_installation_cohort,
             commands::layout::get_layout,
             commands::layout::save_layout_items,
             commands::layout::save_layout_camera,

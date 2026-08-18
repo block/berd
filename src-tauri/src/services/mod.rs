@@ -12,6 +12,7 @@ pub mod distro_bundle;
 pub(crate) mod e2e_mode;
 pub(crate) mod env_key;
 pub(crate) mod goose_config;
+pub(crate) mod installation_cohort;
 #[cfg(target_os = "macos")]
 pub(crate) mod installer_media;
 #[cfg_attr(

@@ -72,6 +72,7 @@ describe("main entrypoint telemetry startup", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    mockInvoke.mockResolvedValue("fresh-with-landing-v1");
     globalThis.fetch = vi.fn() as typeof globalThis.fetch;
   });
 
@@ -81,12 +82,13 @@ describe("main entrypoint telemetry startup", () => {
     vi.restoreAllMocks();
   });
 
-  it("runs the production startup path without telemetry network or native-command work", async () => {
+  it("resolves the installation cohort before rendering the main app", async () => {
     await loadMainAt("");
 
     await screen.findByTestId("main-app");
     expect(globalThis.fetch).not.toHaveBeenCalled();
-    expect(mockInvoke).not.toHaveBeenCalled();
+    expect(mockInvoke).toHaveBeenCalledOnce();
+    expect(mockInvoke).toHaveBeenCalledWith("get_installation_cohort");
     expect(mockInstallRendererDiagnostics).toHaveBeenCalledWith({
       windowKind: "main",
     });
@@ -101,6 +103,7 @@ describe("main entrypoint telemetry startup", () => {
     expect(mockInstallRendererDiagnostics).toHaveBeenCalledWith({
       windowKind: "session",
     });
+    expect(mockInvoke).not.toHaveBeenCalled();
   });
 
   it("does not start launch telemetry for malformed session windows", async () => {

@@ -4,7 +4,6 @@ import {
   dispatchOnboarding,
   getOnboardingSnapshot,
   initializeOnboardingGraduation,
-  ONBOARDING_GRADUATION_STORAGE_KEY,
   ONBOARDING_STORAGE_KEY,
   ONBOARDING_STORAGE_VERSION,
   replayOnboarding,
@@ -20,19 +19,14 @@ describe("onboarding persistence", () => {
   });
 
   it("keeps onboarding pending for a fresh installation", () => {
-    initializeOnboardingGraduation();
+    initializeOnboardingGraduation("fresh-with-landing-v1");
     resetOnboardingStoreForTests();
 
     expect(getOnboardingSnapshot()).toEqual(INITIAL_ONBOARDING_STATE);
-    expect(window.localStorage.getItem(ONBOARDING_GRADUATION_STORAGE_KEY)).toBe(
-      "1",
-    );
   });
 
   it("marks an established installation complete during graduation", () => {
-    window.localStorage.setItem("goose-theme-mode", "dark");
-
-    initializeOnboardingGraduation();
+    initializeOnboardingGraduation("established-before-landing-v1");
     resetOnboardingStoreForTests();
 
     expect(getOnboardingSnapshot()).toMatchObject({
@@ -44,7 +38,7 @@ describe("onboarding persistence", () => {
   it("preserves existing onboarding progress during graduation", () => {
     dispatchOnboarding({ type: "start" });
 
-    initializeOnboardingGraduation();
+    initializeOnboardingGraduation("fresh-with-landing-v1");
     resetOnboardingStoreForTests();
 
     expect(getOnboardingSnapshot()).toMatchObject({

@@ -16,6 +16,7 @@ import { GitStateEvents } from "@/app/GitStateEvents";
 import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
 import { RendererTelemetry } from "@/app/RendererTelemetry";
 import { BackgroundQueuedMessageDrain } from "@/features/chat/ui/BackgroundQueuedMessageDrain";
+import { getInstallationCohort } from "@/features/onboarding/api/installationCohort";
 import { initializeOnboardingGraduation } from "@/features/onboarding/model";
 import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
 import { I18nProvider } from "@/shared/i18n";
@@ -33,7 +34,6 @@ try {
 } catch {
   // localStorage may be unavailable in some environments; ignore.
 }
-initializeOnboardingGraduation();
 
 // React Query's default focus detection relies on `visibilitychange`, which
 // the Tauri webview does not fire when the app window merely loses or regains
@@ -163,30 +163,41 @@ if (bootError) {
       renderBootError("The session window bundle could not be loaded.");
     });
 } else {
-  initTelemetry();
-  trackAppLaunched();
+  getInstallationCohort()
+    .then((cohort) => {
+      initializeOnboardingGraduation(cohort);
+    })
+    .catch((error) => {
+      console.error("Failed to resolve installation cohort:", error);
+      reportRendererError("installation_cohort_failed", error);
+      initializeOnboardingGraduation("established-before-landing-v1");
+    })
+    .finally(() => {
+      initTelemetry();
+      trackAppLaunched();
 
-  reactRoot.render(
-    <React.StrictMode>
-      <TooltipProvider>
-        <RendererErrorBoundary>
-          <QueryClientProvider client={queryClient}>
-            <AcpToolsEvents />
-            <GitStateEvents />
-            <LocalMediaCacheEvents />
-            <BackgroundQueuedMessageDrain />
-            <OptionalBerdctlBridge />
-            <RendererTelemetry />
-            <I18nProvider>
-              <ThemeProvider>
-                <UpdaterProvider>
-                  <App />
-                </UpdaterProvider>
-              </ThemeProvider>
-            </I18nProvider>
-          </QueryClientProvider>
-        </RendererErrorBoundary>
-      </TooltipProvider>
-    </React.StrictMode>,
-  );
+      reactRoot.render(
+        <React.StrictMode>
+          <TooltipProvider>
+            <RendererErrorBoundary>
+              <QueryClientProvider client={queryClient}>
+                <AcpToolsEvents />
+                <GitStateEvents />
+                <LocalMediaCacheEvents />
+                <BackgroundQueuedMessageDrain />
+                <OptionalBerdctlBridge />
+                <RendererTelemetry />
+                <I18nProvider>
+                  <ThemeProvider>
+                    <UpdaterProvider>
+                      <App />
+                    </UpdaterProvider>
+                  </ThemeProvider>
+                </I18nProvider>
+              </QueryClientProvider>
+            </RendererErrorBoundary>
+          </TooltipProvider>
+        </React.StrictMode>,
+      );
+    });
 }
