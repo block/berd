@@ -94,6 +94,61 @@ describe("AgentImportDialog", () => {
     expect(screen.queryByText("Reviewer")).not.toBeInTheDocument();
   });
 
+  it("revokes the preview URL of an aborted preparation result", async () => {
+    const revokeSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+    const preparation = deferred<{
+      bytes: Uint8Array;
+      name: string;
+      preview: AgentImportPreview;
+    }>();
+    const bytes = Uint8Array.from([1]);
+    const file = new File([bytes], "agent.zip", { type: "application/zip" });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(bytes.buffer),
+    });
+    let preparationSignal: AbortSignal | undefined;
+    const props = importDialogProps({
+      prepareImport: (
+        _bytes: Uint8Array,
+        _name: string,
+        signal: AbortSignal,
+      ) => {
+        preparationSignal = signal;
+        return preparation.promise;
+      },
+    });
+    const { rerender } = render(<AgentImportDialog {...props} />);
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
+    await waitFor(() => expect(preparationSignal).toBeDefined());
+
+    // Close aborts the preparation before its result lands.
+    rerender(<AgentImportDialog {...props} open={false} />);
+    expect(preparationSignal?.aborted).toBe(true);
+
+    // The aborted result carries a blob URL that no state will ever own.
+    await act(async () => {
+      preparation.resolve({
+        bytes,
+        name: "stale.agent.png",
+        preview: {
+          displayName: "Stale",
+          systemPrompt: "Stale",
+          identity: "stale.agent.png",
+          cardImageUrl: "blob:stale-card",
+        },
+      });
+    });
+
+    expect(revokeSpy).toHaveBeenCalledWith("blob:stale-card");
+    expect(screen.queryByText("Stale")).not.toBeInTheDocument();
+    revokeSpy.mockRestore();
+  });
+
   it("cancels in-flight preparation when the dialog closes", async () => {
     const preparation = deferred<{
       bytes: Uint8Array;

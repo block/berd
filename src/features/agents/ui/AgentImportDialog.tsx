@@ -150,7 +150,14 @@ export function AgentImportDialog({
       setPreparing(true);
       try {
         const result = await prepareImport(bytes, name, controller.signal);
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted) {
+          // A discarded result never reaches prepared state, so the cleanup
+          // effect will not revoke its preview URL; dispose of it here.
+          const staleUrl = ("preview" in result ? result.preview : result)
+            .cardImageUrl;
+          if (staleUrl) URL.revokeObjectURL(staleUrl);
+          return;
+        }
         // The cleanup effect keyed by cardImageUrl revokes the previous URL
         // exactly once when this prepared preview replaces it.
         setPrepared(
