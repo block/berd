@@ -153,6 +153,10 @@ describe("onboarding tour experience controls", () => {
       "/Users/test/.agents/agents/tinker.md",
       "/Users/test/.agents/agents/wildcard.md",
     ]);
+    expect(storeMocks.personas.map((persona) => persona.id)).toEqual([
+      "/Users/test/.agents/agents/tinker.md",
+      "/Users/test/.agents/agents/wildcard.md",
+    ]);
     expect(haveStarterAgentPinsBeenSeeded()).toBe(true);
   });
 

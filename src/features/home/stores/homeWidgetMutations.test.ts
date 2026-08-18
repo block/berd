@@ -352,7 +352,7 @@ describe("updateWidgetStateMutation — onboarding tour resize", () => {
     ).toEqual([
       expect.objectContaining({
         x: 120,
-        y: 165,
+        y: 205,
         width: 160,
         height: 160,
       }),

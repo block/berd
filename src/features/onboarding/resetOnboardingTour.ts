@@ -5,6 +5,7 @@ import {
   markStarterAgentPinsSeeded,
   resetStarterAgentPinsSeeded,
   selectStarterAgentPersonas,
+  starterAgentIndex,
 } from "@/features/home/onboarding/starterAgents";
 import { STARTER_HOME_LAYOUT } from "@/features/home/onboarding/starterHomeLayout";
 import {
@@ -43,12 +44,18 @@ async function restoreStarterAgentPins(): Promise<boolean> {
     const refreshedById = new Map(
       personas.map((persona) => [persona.id, persona]),
     );
+    const refreshedStarterSlots = new Set(
+      personas.map(starterAgentIndex).filter((index) => index >= 0),
+    );
     const reconciledPersonas = [
-      ...currentPersonas.map((persona) =>
-        beforeById.get(persona.id) === persona
-          ? (refreshedById.get(persona.id) ?? persona)
-          : persona,
-      ),
+      ...currentPersonas.flatMap((persona) => {
+        if (beforeById.get(persona.id) !== persona) return [persona];
+        const refreshed = refreshedById.get(persona.id);
+        if (refreshed) return [refreshed];
+        return refreshedStarterSlots.has(starterAgentIndex(persona))
+          ? []
+          : [persona];
+      }),
       ...personas.filter(
         (persona) =>
           !beforeById.has(persona.id) &&

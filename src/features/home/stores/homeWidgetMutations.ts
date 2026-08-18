@@ -543,21 +543,17 @@ export function updateWidgetStateMutation(
   const preservePosition =
     HOME_WIDGET_CATALOG_BY_ID[target.type]?.preservePositionOnProfileChange;
   const prevSize = widgetSizeForInstance(target);
-  const scaledContentOffset = (
+  const resolvedContentOffset = (
     profile: WidgetSizeProfile,
     size: { width: number; height: number },
   ) => {
-    const scale = Math.min(
-      size.width / profile.defaultSize.width,
-      size.height / profile.defaultSize.height,
-    );
-    return {
-      x: (profile.contentOffset?.x ?? 0) * scale,
-      y: (profile.contentOffset?.y ?? 0) * scale,
-    };
+    if (typeof profile.contentOffset === "function") {
+      return profile.contentOffset(size);
+    }
+    return profile.contentOffset ?? { x: 0, y: 0 };
   };
-  const prevContentOffset = scaledContentOffset(prevProfile, prevSize);
-  const nextContentOffset = scaledContentOffset(nextProfile, nextSize);
+  const prevContentOffset = resolvedContentOffset(prevProfile, prevSize);
+  const nextContentOffset = resolvedContentOffset(nextProfile, nextSize);
   const requestedPosition = preservePosition
     ? {
         x: target.x + prevContentOffset.x - nextContentOffset.x,

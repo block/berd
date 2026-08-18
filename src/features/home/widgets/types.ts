@@ -40,7 +40,9 @@ export interface WidgetSizeProfile {
   defaultSize: WidgetSize;
   sizeBounds: WidgetSizeBounds;
   /** Offset of the profile's primary visual content from the widget frame. */
-  contentOffset?: { x: number; y: number };
+  contentOffset?:
+    | { x: number; y: number }
+    | ((size: WidgetSize) => { x: number; y: number });
 }
 
 export interface WidgetInstance {
