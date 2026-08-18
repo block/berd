@@ -141,7 +141,7 @@
       "retry": "Try again",
       "retrying": "Trying…"
     },
-    "askAgent": "Add MCP",
+    "askAgent": "Add connection",
     "askAgentTitle": "Add an MCP",
     "askAgentPrompt": "Help me add an MCP server. Ask which one I want, explain what access it needs, and use the supported setup path for my active agent. Ask before changing any configuration and never print or copy credentials."
   },

@@ -141,7 +141,7 @@
       "retry": "Intentar de nuevo",
       "retrying": "Intentando…"
     },
-    "askAgent": "Agregar MCP",
+    "askAgent": "Agregar conexión",
     "askAgentTitle": "Agregar un MCP",
     "askAgentPrompt": "Ayúdame a agregar un servidor MCP. Pregunta cuál quiero, explica qué acceso necesita y usa el método de configuración compatible con mi agente activo. Pregunta antes de cambiar cualquier configuración y nunca muestres ni copies credenciales."
   },
