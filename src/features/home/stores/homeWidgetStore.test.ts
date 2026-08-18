@@ -416,15 +416,15 @@ describe("homeWidgetStore", () => {
       .instances.filter((instance) => instance.type === "onboardingTour");
     expect(onboardingWidgets).toHaveLength(1);
     expect(onboardingWidgets[0]).toMatchObject({
-      x: -137.5,
-      y: 205,
+      x: -146,
+      y: 188,
       state: { noteId: "onboarding:tour" },
       z: 2,
     });
     expect(onboardingWidgets[0].state?.welcomeDismissed).toBeUndefined();
     expect(useHomeWidgetStore.getState().camera).toMatchObject({
-      centerX: -65.5,
-      centerY: 295,
+      centerX: -74,
+      centerY: 278,
     });
   });
 
@@ -731,8 +731,8 @@ describe("homeWidgetStore", () => {
       },
       {
         targetId: "onboarding:tour",
-        centerX: 902.5,
-        centerY: 335,
+        centerX: 894,
+        centerY: 326,
       },
     ]);
     expect(useHomeWidgetStore.getState()).toMatchObject({
@@ -1710,8 +1710,8 @@ describe("homeWidgetStore", () => {
     const secondRequest = vi.mocked(saveLayoutItems).mock.calls[1][0];
     expect(secondRequest.expectedRevision).toBe(5);
     expect(secondRequest.items[0]).toMatchObject({
-      centerX: 134.5,
-      centerY: 134.5,
+      centerX: 126,
+      centerY: 126,
       zIndex: 1,
     });
     expect(secondRequest.items).toHaveLength(1);
