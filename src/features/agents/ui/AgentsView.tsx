@@ -513,6 +513,55 @@ export function AgentsView({
     [],
   );
 
+  // Stable identity: the dialog's initial-file effect aborts and restarts
+  // preparation when this callback changes, so it must not change per render.
+  const prepareImportFile = useCallback(
+    async (bytes: Uint8Array, name: string, signal: AbortSignal) => {
+      let extracted: ExtractedAgentFile;
+      try {
+        extracted = isAgentZipFileName(name)
+          ? await extractAgentFileFromZipInWorker(bytes, signal)
+          : { bytes, name };
+      } catch (error) {
+        if (error instanceof AgentZipImportError) {
+          throw new Error(formatAgentZipImportError(error, t));
+        }
+        throw error;
+      }
+      if (isAgentImageFileName(extracted.name)) {
+        const snapshot = decodeAgentImage(extracted.bytes);
+        const { width, height } = getPngDimensions(extracted.bytes);
+        const preview = {
+          displayName:
+            snapshot.profile?.displayName ??
+            snapshot.definition.name ??
+            "Imported agent",
+          systemPrompt: snapshot.definition.systemPrompt ?? "",
+          identity: extracted.name,
+          avatar:
+            typeof snapshot.profile?.avatarDataUrl === "string" &&
+            isSafePngAvatarDataUrl(snapshot.profile.avatarDataUrl)
+              ? snapshot.profile.avatarDataUrl
+              : undefined,
+          snapshot,
+          cardAspectRatio: width / height,
+          cardImageUrl: URL.createObjectURL(
+            new Blob([new Uint8Array(extracted.bytes).buffer], {
+              type: "image/png",
+            }),
+          ),
+        };
+        return { ...extracted, preview };
+      }
+      const preview = previewPersonaImport(
+        decodeImportFileBytes(extracted.bytes),
+        extracted.name,
+      );
+      return { ...extracted, preview };
+    },
+    [t],
+  );
+
   const dialogs = (
     <>
       {importDialogOpen ? (
@@ -524,49 +573,7 @@ export function AgentsView({
           }}
           initialFile={galleryImportFile}
           onImportFile={handleImportFileBytes}
-          prepareImport={async (bytes, name, signal) => {
-            let extracted: ExtractedAgentFile;
-            try {
-              extracted = isAgentZipFileName(name)
-                ? await extractAgentFileFromZipInWorker(bytes, signal)
-                : { bytes, name };
-            } catch (error) {
-              if (error instanceof AgentZipImportError) {
-                throw new Error(formatAgentZipImportError(error, t));
-              }
-              throw error;
-            }
-            if (isAgentImageFileName(extracted.name)) {
-              const snapshot = decodeAgentImage(extracted.bytes);
-              const { width, height } = getPngDimensions(extracted.bytes);
-              const preview = {
-                displayName:
-                  snapshot.profile?.displayName ??
-                  snapshot.definition.name ??
-                  "Imported agent",
-                systemPrompt: snapshot.definition.systemPrompt ?? "",
-                identity: extracted.name,
-                avatar:
-                  typeof snapshot.profile?.avatarDataUrl === "string" &&
-                  isSafePngAvatarDataUrl(snapshot.profile.avatarDataUrl)
-                    ? snapshot.profile.avatarDataUrl
-                    : undefined,
-                snapshot,
-                cardAspectRatio: width / height,
-                cardImageUrl: URL.createObjectURL(
-                  new Blob([new Uint8Array(extracted.bytes).buffer], {
-                    type: "image/png",
-                  }),
-                ),
-              };
-              return { ...extracted, preview };
-            }
-            const preview = previewPersonaImport(
-              decodeImportFileBytes(extracted.bytes),
-              extracted.name,
-            );
-            return { ...extracted, preview };
-          }}
+          prepareImport={prepareImportFile}
           validateImportFile={validateImportFile}
           onImportError={handleImportError}
           maxImportBytes={MAX_SNAPSHOT_PNG_BYTES}

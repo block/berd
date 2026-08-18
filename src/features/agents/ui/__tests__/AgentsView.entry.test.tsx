@@ -6,6 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { StrictMode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -553,6 +554,55 @@ describe("AgentsView entry points", () => {
       expect.anything(),
       "a.persona.md",
     );
+  });
+
+  it("gallery drops still preview under StrictMode effect replay", async () => {
+    const revokeSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+    const seenSignals: AbortSignal[] = [];
+    const actualZipImport = await vi.importActual<
+      typeof import("@/features/agents/lib/agentZipImport")
+    >("@/features/agents/lib/agentZipImport");
+    mockExtractInWorker.mockImplementation(
+      async (bytes: Uint8Array, signal?: AbortSignal) => {
+        if (signal) seenSignals.push(signal);
+        return actualZipImport.extractAgentFileFromZip(bytes);
+      },
+    );
+    const archive = zipSync({
+      "reviewer.persona.md": new TextEncoder().encode(
+        "---\nname: reviewer\n---\nReview.",
+      ),
+    });
+    const file = new File([archive], "reviewer.zip", {
+      type: "application/zip",
+    });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(archive.buffer),
+    });
+    const { container } = render(
+      <StrictMode>
+        <AgentsView />
+      </StrictMode>,
+    );
+    const dropZone = container.querySelector(".\\@container") as HTMLElement;
+
+    fireEvent.drop(dropZone, { dataTransfer: { files: [file] } });
+
+    // StrictMode replays the initial-file effect: the first attempt is
+    // aborted by cleanup and the replayed effect restarts preparation.
+    expect(
+      await screen.findByRole("button", { name: "importDialog.import" }),
+    ).toBeInTheDocument();
+    expect(seenSignals.length).toBeGreaterThanOrEqual(2);
+    expect(seenSignals[0].aborted).toBe(true);
+    expect(seenSignals.at(-1)?.aborted).toBe(false);
+    // Exactly one preview is live; any aborted attempt revoked its URL.
+    const liveUrls = revokeSpy.mock.calls.length;
+    expect(liveUrls).toBeLessThanOrEqual(seenSignals.length - 1);
+    revokeSpy.mockRestore();
   });
 
   it("closing the dialog cancels a pending gallery ZIP preparation", async () => {

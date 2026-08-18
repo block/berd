@@ -143,36 +143,41 @@ export function AgentImportDialog({
   );
 
   const startPreparation = useCallback(
-    async (bytes: Uint8Array, name: string) => {
+    (bytes: Uint8Array, name: string): AbortController => {
       preparationRef.current?.abort();
       const controller = new AbortController();
       preparationRef.current = controller;
       setPreparing(true);
-      try {
-        const result = await prepareImport(bytes, name, controller.signal);
-        if (controller.signal.aborted) {
-          // A discarded result never reaches prepared state, so the cleanup
-          // effect will not revoke its preview URL; dispose of it here.
-          const staleUrl = ("preview" in result ? result.preview : result)
-            .cardImageUrl;
-          if (staleUrl) URL.revokeObjectURL(staleUrl);
-          return;
+      void (async () => {
+        try {
+          const result = await prepareImport(bytes, name, controller.signal);
+          if (controller.signal.aborted) {
+            // A discarded result never reaches prepared state, so the cleanup
+            // effect will not revoke its preview URL; dispose of it here.
+            const staleUrl = ("preview" in result ? result.preview : result)
+              .cardImageUrl;
+            if (staleUrl) URL.revokeObjectURL(staleUrl);
+            return;
+          }
+          // The cleanup effect keyed by cardImageUrl revokes the previous URL
+          // exactly once when this prepared preview replaces it.
+          setPrepared(
+            "preview" in result ? result : { bytes, name, preview: result },
+          );
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            onImportError(
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        } finally {
+          if (preparationRef.current === controller) {
+            preparationRef.current = null;
+            setPreparing(false);
+          }
         }
-        // The cleanup effect keyed by cardImageUrl revokes the previous URL
-        // exactly once when this prepared preview replaces it.
-        setPrepared(
-          "preview" in result ? result : { bytes, name, preview: result },
-        );
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          onImportError(error instanceof Error ? error.message : String(error));
-        }
-      } finally {
-        if (preparationRef.current === controller) {
-          preparationRef.current = null;
-          setPreparing(false);
-        }
-      }
+      })();
+      return controller;
     },
     [onImportError, prepareImport],
   );
@@ -183,10 +188,23 @@ export function AgentImportDialog({
       consumedInitialFileRef.current = null;
       return;
     }
-    if (initialFile && consumedInitialFileRef.current !== initialFile) {
-      consumedInitialFileRef.current = initialFile;
-      void startPreparation(initialFile.bytes, initialFile.name);
+    if (!initialFile || consumedInitialFileRef.current === initialFile) {
+      return;
     }
+    consumedInitialFileRef.current = initialFile;
+    const controller = startPreparation(initialFile.bytes, initialFile.name);
+    return () => {
+      // Lifecycle cleanup (StrictMode replay, unmount) aborts this attempt.
+      // If it is still the active preparation, un-consume the file so a
+      // replayed effect can restart it; a picker selection that replaced
+      // this attempt keeps ownership and the marker stays consumed.
+      if (preparationRef.current === controller) {
+        controller.abort();
+        preparationRef.current = null;
+        setPreparing(false);
+        consumedInitialFileRef.current = null;
+      }
+    };
   }, [open, initialFile, startPreparation]);
 
   const {
