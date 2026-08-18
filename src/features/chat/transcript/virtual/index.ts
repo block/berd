@@ -20,10 +20,6 @@ export {
   createTranscriptVirtualController,
 } from "./transcriptVirtualController";
 export {
-  TranscriptTanStackVirtualAdapter,
-  createTranscriptTanStackVirtualAdapter,
-} from "./transcriptTanStackVirtualAdapter";
-export {
   TranscriptScrollCoordinationAuthority,
   createTranscriptScrollCoordinationAuthority,
   type TranscriptScrollCoordinationAuthorityOptions,
@@ -67,4 +63,3 @@ export type {
   TranscriptVirtualRangeSnapshot,
   TranscriptVisibleRange,
 } from "./transcriptVirtualTypes";
-export type { TranscriptTanStackVirtualAdapterOptions } from "./transcriptTanStackVirtualAdapter";
