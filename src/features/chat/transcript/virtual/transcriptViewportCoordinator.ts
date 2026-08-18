@@ -152,15 +152,21 @@ export class TranscriptViewportCoordinator implements TranscriptVirtualEngine {
   scrollToRow(
     rowId: string,
     align: TranscriptScrollAlign = "auto",
+    options: TranscriptViewportWriteOptions = {},
   ): TranscriptScrollToRowResult {
     let result: TranscriptScrollToRowResult = {
       found: false,
       correction: null,
     };
-    this.reconcile(() => {
-      result = this.engine.scrollToRow(rowId, align);
-      return result.correction;
-    });
+    this.reconcile(
+      () => {
+        result = this.engine.scrollToRow(rowId, align, options);
+        return result.correction;
+      },
+      options,
+      true,
+      options.operation,
+    );
     return { ...result, correction: null };
   }
 

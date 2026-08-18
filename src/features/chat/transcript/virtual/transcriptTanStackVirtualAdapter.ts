@@ -292,6 +292,7 @@ export class TranscriptTanStackVirtualAdapter
   scrollToRow(
     rowId: string,
     align: TranscriptScrollAlign = "start",
+    options: { operation?: TranscriptScrollOperation } = {},
   ): TranscriptScrollToRowResult {
     const index = this.rowIndexById.get(rowId);
     if (index !== undefined) {
@@ -302,7 +303,7 @@ export class TranscriptTanStackVirtualAdapter
       this.disarmVirtualizerScrollReconcile();
     }
 
-    const result = this.controller.scrollToRow(rowId, align);
+    const result = this.controller.scrollToRow(rowId, align, options);
     this.applyCorrection(result.correction);
     this.syncScrollElementToController();
     this.syncVirtualizerOffset();

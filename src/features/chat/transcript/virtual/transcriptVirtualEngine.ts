@@ -64,6 +64,7 @@ export interface TranscriptVirtualEngine {
   scrollToRow(
     rowId: string,
     align?: TranscriptScrollAlign,
+    options?: { operation?: TranscriptScrollOperation },
   ): TranscriptScrollToRowResult;
   scrollToEnd?(options?: { behavior?: ScrollBehavior }): void;
   /** Commit a product scroll through the viewport transaction owner. */

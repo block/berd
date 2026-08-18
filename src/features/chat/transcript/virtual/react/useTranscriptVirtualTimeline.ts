@@ -1434,21 +1434,16 @@ export function useTranscriptVirtualTimeline({
   const scrollToRow = useCallback(
     (rowId: string, align: TranscriptScrollAlign = "auto") => {
       const controller = runtimeRef.current.controller;
-      if (!controller) {
+      const authority = runtimeRef.current.authority;
+      if (!controller || !authority) {
         return false;
       }
 
-      const result = controller.scrollToRow(rowId, align);
+      const result = authority.startTargetOperation(rowId, align);
       if (!result.found) {
         return false;
       }
-      const authorityResult = runtimeRef.current.authority?.startOperation(
-        controller.getState().anchor,
-        "target",
-      );
-      if (authorityResult) {
-        runtimeRef.current.authority?.complete(authorityResult.operation);
-      }
+      authority.complete(result.operation);
       commitSnapshot();
       return true;
     },
@@ -1501,31 +1496,30 @@ export function useTranscriptVirtualTimeline({
       if (!authority || !controller) {
         return false;
       }
-      const interrupted = authority.interrupt(kind);
+      const interrupted = authority.getPendingOperation() !== null;
       const liveViewport = readViewportGeometry(
         containerRef.current,
         footerHeight,
       );
-      // Translate physical input into one authority-owned observation. React
-      // supplies the event kind; the engine resolves the anchor and the
-      // authority owns/retire its operation identity.
-      const observation = controller.syncViewport(liveViewport, {
-        source: "browser",
-        userScrollIntent: true,
-        preserveScrollPosition: true,
-      });
-      const operation = authority.startOperation(
-        controller.getState().anchor,
-        "user-input",
-        kind,
-      );
-      authority.complete(operation.operation);
-      void observation;
+      // The authority interrupts the prior generation, creates the newer
+      // physical-input operation, and owns its browser observation/retirement.
+      authority.observeUserInput(liveViewport, kind);
       commitSnapshot();
-      return interrupted !== null;
+      return interrupted;
     },
     [commitSnapshot, containerRef, footerHeight],
   );
+
+  const detachAtScrollPosition = useCallback(() => {
+    const authority = runtimeRef.current.authority;
+    const container = containerRef.current;
+    if (!authority || !container) {
+      return false;
+    }
+    authority.detachAtScrollPosition(container.scrollTop);
+    commitSnapshot();
+    return true;
+  }, [commitSnapshot, containerRef]);
 
   const reconcileResize = useCallback(() => {
     const authority = runtimeRef.current.authority;
@@ -1722,6 +1716,7 @@ export function useTranscriptVirtualTimeline({
     syncViewportFromDom,
     reconcileResize,
     interruptScroll,
+    detachAtScrollPosition,
     getScrollPresentation,
     scrollToRow,
     scrollToBottom,

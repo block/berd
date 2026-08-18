@@ -2,6 +2,7 @@ import { act, render, renderHook, waitFor } from "@testing-library/react";
 import { useLayoutEffect, type RefObject } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranscriptRowDescriptor } from "../../projection/transcriptItemTypes";
+import { TranscriptViewportCoordinator } from "../transcriptViewportCoordinator";
 import {
   createLoadedTranscriptState,
   MEASUREMENT_FLUSH_FALLBACK_MS,
@@ -413,6 +414,66 @@ describe("useTranscriptVirtualTimeline", () => {
     });
 
     expect(effectSnapshots).toHaveLength(1);
+  });
+
+  it("keeps an authority target pending until browser acknowledgement and lets user input interrupt it", () => {
+    const container = createContainer({ scrollHeight: 1000 });
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = Array.from({ length: 10 }, (_, index) =>
+      row(`row-${index}`, 100),
+    );
+    const loadedTranscript = createLoadedTranscriptState(SESSION_ID, 1);
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        loadedTranscript,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+    const authority = loadedTranscript.virtualTimeline.authority;
+    const controller = loadedTranscript.virtualTimeline.controller;
+    if (!authority || !controller) {
+      throw new Error(
+        "expected initialized transcript authority and controller",
+      );
+    }
+    const completeSpy = vi
+      .spyOn(authority, "complete")
+      .mockImplementationOnce(() => false);
+    expect(controller).toBeInstanceOf(TranscriptViewportCoordinator);
+    const scrollToRowSpy = vi.spyOn(controller, "scrollToRow");
+
+    act(() => {
+      expect(result.current.scrollToRow("row-0", "start")).toBe(true);
+    });
+
+    const target = authority?.getPendingOperation();
+    expect(target).toMatchObject({ cause: "target" });
+    expect(scrollToRowSpy).toHaveBeenCalledWith(
+      "row-0",
+      "start",
+      expect.objectContaining({ operation: target }),
+    );
+    expect(result.current.getScrollPresentation().intent).toBe(
+      "targeting-message",
+    );
+
+    container.scrollTop = 200;
+    act(() => {
+      expect(result.current.interruptScroll("wheel")).toBe(true);
+    });
+
+    expect(authority?.getPendingOperation()).toBeNull();
+    if (!target) {
+      throw new Error("expected pending target operation");
+    }
+    expect(authority.complete(target)).toBe(false);
+    expect(result.current.getScrollPresentation().intent).toBe("user-detached");
+    completeSpy.mockRestore();
   });
 
   it("accepts browser-clamped bottom corrections until virtual layout is reachable", () => {

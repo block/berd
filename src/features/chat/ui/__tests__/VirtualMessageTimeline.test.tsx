@@ -1047,12 +1047,12 @@ describe("VirtualMessageTimeline", () => {
 
     expect(scroller.scrollTop).toBe(120);
 
-    // The canonical virtual transcript contains only the split live tail, so
-    // authority still owns a bottom anchor. React presents that state rather
-    // than manufacturing a detached intent from browser-only tail geometry.
     expect(
-      screen.queryByRole("button", { name: "Jump to latest" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
+
+    expect(scroller.scrollTop).toBe(4700);
   });
 
   it("updates live agent work text before the turn completes", () => {

@@ -369,6 +369,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
   scrollToRow(
     rowId: string,
     align: TranscriptScrollAlign = "start",
+    options: { operation?: TranscriptScrollOperation } = {},
   ): TranscriptScrollToRowResult {
     const row = this.getRow(rowId);
     if (!row) {
@@ -380,9 +381,15 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       return { found: false, correction: null };
     }
 
+    this.setScrollAnchor({
+      type: "row",
+      rowId,
+      offsetWithinRow: target - this.getRowTop(rowId),
+    });
     const correction = this.applyScrollCorrection({
       reason: "scroll-to-row",
       nextScrollTop: target,
+      operation: options.operation,
     });
     return { found: true, correction };
   }

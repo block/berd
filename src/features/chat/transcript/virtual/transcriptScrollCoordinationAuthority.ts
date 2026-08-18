@@ -103,6 +103,25 @@ export class TranscriptScrollCoordinationAuthority {
     );
   }
 
+  /** Start and execute one authority-owned row target operation. */
+  startTargetOperation(
+    rowId: string,
+    align: TranscriptScrollAlign = "auto",
+  ): TranscriptScrollOperationResult & { found: boolean } {
+    const operation: TranscriptScrollOperation = {
+      generation: ++this.nextGeneration,
+      cause: "target",
+    };
+    this.pendingOperation = operation;
+    const result = this.engine.scrollToRow(rowId, align, { operation });
+    if (!result.found) {
+      this.retire(operation);
+      return { operation, correction: null, found: false };
+    }
+    this.trackedAnchor = this.engine.getState().anchor;
+    return { operation, correction: result.correction, found: true };
+  }
+
   /** Only a strictly newer generation supersedes the pending operation. */
   proposeAnchor(
     anchor: TranscriptScrollAnchor,
@@ -144,6 +163,37 @@ export class TranscriptScrollCoordinationAuthority {
     return true;
   }
 
+  /** Record a physical browser detachment outside or between canonical rows. */
+  detachAtScrollPosition(scrollTop: number): void {
+    this.trackedAnchor = {
+      type: "scroll-position",
+      scrollTop: Math.max(0, scrollTop),
+    };
+  }
+
+  /** Physical input interrupts pending work and observes under a newer operation. */
+  observeUserInput(
+    geometry: TranscriptViewportGeometry,
+    userInputKind: TranscriptUserInputKind,
+  ): TranscriptViewportUpdateResult {
+    this.interrupt(userInputKind);
+    const operation: TranscriptScrollOperation = {
+      generation: ++this.nextGeneration,
+      cause: "user-input",
+      userInputKind,
+    };
+    this.pendingOperation = operation;
+    const result = this.engine.syncViewport(geometry, {
+      source: "browser",
+      userScrollIntent: true,
+      operation,
+      preserveScrollPosition: true,
+    });
+    this.trackedAnchor = this.engine.getState().anchor;
+    this.complete(operation);
+    return result;
+  }
+
   /** Physical input interrupts pending work; late completion becomes inert. */
   interrupt(
     userInputKind: TranscriptUserInputKind,
@@ -179,6 +229,23 @@ export class TranscriptScrollCoordinationAuthority {
   ): TranscriptViewportUpdateResult {
     const modeledBottom = this.engine.getState().bottomScrollTop;
     if (geometry.scrollTop > modeledBottom) {
+      const browserBottom = Math.max(
+        0,
+        (geometry.browserScrollHeight ?? 0) - geometry.viewportHeight,
+      );
+      if (
+        options.userScrollIntent &&
+        browserBottom > modeledBottom &&
+        geometry.scrollTop < browserBottom
+      ) {
+        // A split live tail can extend the physical browser range beyond the
+        // canonical virtual geometry. Preserve that browser-owned position as
+        // an authority-owned detachment until the tail joins canonical rows.
+        this.trackedAnchor = {
+          type: "scroll-position",
+          scrollTop: geometry.scrollTop,
+        };
+      }
       return { correction: null };
     }
     const result = this.engine.syncViewport(geometry, {
@@ -219,8 +286,9 @@ export class TranscriptScrollCoordinationAuthority {
   scrollToRow(
     rowId: string,
     align?: TranscriptScrollAlign,
+    options?: { operation?: TranscriptScrollOperation },
   ): TranscriptScrollToRowResult {
-    return this.engine.scrollToRow(rowId, align);
+    return this.engine.scrollToRow(rowId, align, options);
   }
 
   getMeasurementToken(rowId: string): TranscriptVirtualMeasurementToken | null {

@@ -86,7 +86,6 @@ import {
   shouldShowTimelineJumpToLatest,
   TIMELINE_AUTO_SCROLL_THRESHOLD_PX,
   TIMELINE_MCP_APP_STICKY_SCROLL_MS,
-  type TimelineScrollIntent,
 } from "./timelineScrollIntent";
 import { getVirtualTranscriptRowSpacingBlockSize } from "./virtualTranscriptRowSpacing";
 import {
@@ -1022,9 +1021,6 @@ function VirtualMessageTimelineSession({
   const suppressScrollDeltaDetachUntilRef = useRef(0);
   const stickyScrollUntilRef = useRef(0);
   const messageListBottomPaddingPxRef = useRef(0);
-  // Scroll modes live in refs because they coordinate DOM scrollTop inside
-  // layout effects without forcing a React render for every scroll frame.
-  const scrollIntentRef = useRef<TimelineScrollIntent>("following-latest");
   const streamingBottomFollowActiveRef = useRef(false);
   const streamingBottomFollowFrameRef = useRef<number | null>(null);
   const suppressFollowResumeFromProgrammaticScrollRef = useRef(false);
@@ -1203,6 +1199,7 @@ function VirtualMessageTimelineSession({
     syncViewportFromDom,
     reconcileResize: reconcileAuthorityResize,
     interruptScroll: interruptAuthorityScroll,
+    detachAtScrollPosition: detachAuthorityAtScrollPosition,
     getScrollPresentation,
     writeScrollTop: writeVirtualScrollTop,
     readRealRowCoverage,
@@ -1703,25 +1700,22 @@ function VirtualMessageTimelineSession({
     });
   }, []);
 
-  const syncJumpToLatestVisibility = useCallback(
-    (_intent: TimelineScrollIntent = scrollIntentRef.current) => {
-      const intent = getScrollPresentation().intent;
-      const container = containerRef.current;
-      if (!container) {
-        setShowJumpToLatest(false);
-        return;
-      }
+  const syncJumpToLatestVisibility = useCallback(() => {
+    const intent = getScrollPresentation().intent;
+    const container = containerRef.current;
+    if (!container) {
+      setShowJumpToLatest(false);
+      return;
+    }
 
-      setShowJumpToLatest(
-        shouldShowTimelineJumpToLatest({
-          intent,
-          metrics: container,
-          bottomPaddingPx: messageListBottomPaddingPxRef.current,
-        }),
-      );
-    },
-    [getScrollPresentation],
-  );
+    setShowJumpToLatest(
+      shouldShowTimelineJumpToLatest({
+        intent,
+        metrics: container,
+        bottomPaddingPx: messageListBottomPaddingPxRef.current,
+      }),
+    );
+  }, [getScrollPresentation]);
 
   const stopStreamingBottomFollow = useCallback(() => {
     streamingBottomFollowActiveRef.current = false;
@@ -1734,18 +1728,14 @@ function VirtualMessageTimelineSession({
   }, []);
 
   const setDetachedFromLatest = useCallback(
-    (
-      detached: boolean,
-      intent: TimelineScrollIntent = detached
-        ? "user-detached"
-        : "following-latest",
-    ) => {
+    (detached: boolean) => {
       if (detached) {
         const container = containerRef.current;
         if (!container || !hasRealScrollableOverflow(container)) {
-          syncJumpToLatestVisibility("following-latest");
+          syncJumpToLatestVisibility();
           return;
         }
+        detachAuthorityAtScrollPosition();
         stopStreamingBottomFollow();
         detachedScrollTopRef.current = container.scrollTop;
       } else {
@@ -1755,8 +1745,7 @@ function VirtualMessageTimelineSession({
         setLiveTailScrollHeightFloorPx(0);
       }
 
-      scrollIntentRef.current = intent;
-      syncJumpToLatestVisibility(intent);
+      syncJumpToLatestVisibility();
 
       if (userDetachedRef.current === detached) {
         return;
@@ -1766,6 +1755,7 @@ function VirtualMessageTimelineSession({
       setUserDetached(detached);
     },
     [
+      detachAuthorityAtScrollPosition,
       hasRealScrollableOverflow,
       stopStreamingBottomFollow,
       syncJumpToLatestVisibility,
