@@ -84,8 +84,12 @@ setup: _setup-dev-deps
 
 # ── Build & Check ────────────────────────────────────────────
 
-# Run the frontend non-test checks: design-system guardrails, berdctl contract freshness, formatting, lint, i18n, and TypeScript.
-check: design-system-check berdctl-contract-check frontend-fmt-check lint i18n-check typecheck
+# Run the frontend non-test checks: design-system guardrails, berdctl contract freshness, formatting, lint, i18n, TypeScript, and public skills.
+check: design-system-check berdctl-contract-check frontend-fmt-check lint i18n-check typecheck public-skills-test
+
+# Validate the dependency-free tests shipped with public Agent Skills.
+public-skills-test:
+    python3 scripts/test-public-skills.py
 
 # Regenerate the berdctl CLI contract artifacts from the command registry.
 berdctl-contract-generate:

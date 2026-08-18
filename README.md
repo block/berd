@@ -60,6 +60,17 @@ app resource. The public app does not require a private CLI package; enterprise
 distributors can provide and package their own implementation while retaining
 the normal Berd build and validation flow.
 
+## Public Agent Skills
+
+Berd publishes portable Agent Skills under [`skills/`](skills/README.md). These
+can be installed independently of the Berd app and are separate from the
+contributor workflows under `.agents/skills/` and the starter skills bundled
+under `distro/skills/`.
+
+The first published skill, [`buzz-handoff`](skills/buzz-handoff/SKILL.md), brings
+Buzz channel or thread context into a private agent conversation and can send an
+explicitly approved reply through the public Buzz CLI.
+
 ## Adding an experiment
 
 Experiments are user-local preferences for unstable UI or workflow behavior.
