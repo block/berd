@@ -74,6 +74,7 @@ import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePock
 import { PocketVoiceSetupDialog } from "@/features/voice-conversation/ui/PocketVoiceSetupDialog";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { consumePendingVoiceStart } from "@/features/voice-conversation/lib/pendingVoiceStart";
+import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import {
   SecurityConfirmationPanel,
   useHasPendingSecurityConfirmation,
@@ -231,6 +232,9 @@ export function ChatView({
     useTerminalFallbackCwdPreference();
   const capabilities = useProfileCapabilities();
   const pocketVoiceSetup = usePocketVoiceSetup(capabilities.voiceConversation);
+  const requestVoiceConversationStart = useVoiceConversationStore(
+    (state) => state.requestStart,
+  );
   const [pocketVoiceSetupOpen, setPocketVoiceSetupOpen] = useState(false);
   const pendingPocketVoiceStartRef = useRef<string | null>(null);
   const voiceConversation = useVoiceConversationController({
@@ -262,8 +266,8 @@ export function ChatView({
     const shouldStart =
       consumePendingVoiceStart(pendingPocketVoiceStartRef) === sessionId;
     setPocketVoiceSetupOpen(false);
-    if (shouldStart) void voiceConversation.onToggle();
-  }, [sessionId, voiceConversation.onToggle]);
+    if (shouldStart) requestVoiceConversationStart(sessionId);
+  }, [requestVoiceConversationStart, sessionId]);
   const isAgentBuilderOpen = agentBuilderOpenForLayout;
   const patchSession = useChatSessionStore((s) => s.patchSession);
   const agentBuilderContextState = effectiveSession?.agentBuilderContextState;
