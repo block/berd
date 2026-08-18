@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Layout } from "@/features/layout/api/layout";
+import type { Layout, LayoutItem } from "@/features/layout/api/layout";
 import { HOME_LAYOUT_ID } from "@/features/layout/api/layout";
 import {
   type ChatSession,
@@ -76,6 +76,23 @@ function setConfirmedLayout(instances: WidgetInstance[]): void {
     loadStatus: "ready",
     itemRevision: 1,
     lastConfirmedLayout: layoutOf(instances),
+  });
+}
+
+/**
+ * A confirmed layout that `layoutItemsToHomeWidgets` cannot map: the item is not
+ * a layout item at all, so mapping it throws. The real seam the containment has
+ * to survive — the gate maps the whole confirmed layout on every record and
+ * flush.
+ */
+function setUnmappableConfirmedLayout(): void {
+  useHomeWidgetStore.setState({
+    loadStatus: "ready",
+    itemRevision: 1,
+    lastConfirmedLayout: {
+      ...layoutOf([]),
+      items: [null as unknown as LayoutItem],
+    },
   });
 }
 
@@ -405,6 +422,54 @@ describe("homePinTelemetry", () => {
 
     expect(trackHomeItemPinned).toHaveBeenCalledOnce();
     expect(trackHomeItemPinned).toHaveBeenCalledWith({ kind: "chat" });
+  });
+
+  it("never throws out of a record, and keeps recording afterwards", () => {
+    setUnmappableConfirmedLayout();
+
+    // Both anchors run synchronously inside the pin/unpin handlers, after the
+    // optimistic mutation applied: a throw here is a false failure toast, an
+    // aborted half-batch, or an uncaught canvas handler error.
+    expect(() =>
+      recordHomeItemPinIntent({ kind: "chat", itemId: "session-1" }),
+    ).not.toThrow();
+    expect(() =>
+      recordHomeItemUnpinIntent({ kind: "skill", itemId: "skill-1" }),
+    ).not.toThrow();
+
+    settleSave("confirmed");
+
+    expect(trackHomeItemPinned).not.toHaveBeenCalled();
+    expect(trackHomeItemUnpinned).not.toHaveBeenCalled();
+
+    // A dropped intent must not leave the gate broken for the next one.
+    setConfirmedLayout([]);
+    recordHomeItemPinIntent({ kind: "chat", itemId: "session-2" });
+    setConfirmedLayout([chatPin("session-2")]);
+    settleSave("confirmed");
+
+    expect(trackHomeItemPinned).toHaveBeenCalledOnce();
+    expect(trackHomeItemPinned).toHaveBeenCalledWith({ kind: "chat" });
+  });
+
+  it("never throws out of a flush, and still spends the intent", () => {
+    setConfirmedLayout([]);
+    recordHomeItemPinIntent({ kind: "chat", itemId: "session-1" });
+
+    // The confirmed layout goes unreadable between recording and resolution.
+    setUnmappableConfirmedLayout();
+    expect(() => settleSave("confirmed")).not.toThrow();
+
+    expect(trackHomeItemPinned).not.toHaveBeenCalled();
+    expect(trackHomeItemUnpinned).not.toHaveBeenCalled();
+
+    // Resolution is terminal even when it fails: a held-back intent would let
+    // the next save's transition — possibly another window's — read as this
+    // user's action arriving.
+    setConfirmedLayout([chatPin("session-1")]);
+    settleSave("confirmed");
+
+    expect(trackHomeItemPinned).not.toHaveBeenCalled();
   });
 
   it("reports nothing when no layout has been confirmed yet", () => {

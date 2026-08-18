@@ -7,6 +7,7 @@ import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimen
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import type { SkillInfo } from "@/features/skills/api/skills";
+import { perfLog } from "@/shared/lib/perfLog";
 import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
 import {
   recordHomeItemPinIntent,
@@ -799,9 +800,16 @@ function useHomeWidgetLayoutController() {
       if (!added) {
         return added;
       }
-      const target = entityPinTargetFromWidget(type, state);
-      if (target) {
-        recordHomeItemPinIntent({ kind: target.kind, itemId: target.id });
+      // Observation only: the widget is already on the canvas by now, so a throw
+      // would surface as an error out of the picker's add handler for an add
+      // that succeeded.
+      try {
+        const target = entityPinTargetFromWidget(type, state);
+        if (target) {
+          recordHomeItemPinIntent({ kind: target.kind, itemId: target.id });
+        }
+      } catch (error) {
+        perfLog(`[telemetry] home pin intent failed: ${String(error)}`);
       }
       return added;
     },
@@ -810,13 +818,23 @@ function useHomeWidgetLayoutController() {
 
   const removeWidgetWithTelemetry = useCallback<typeof removeWidget>(
     (id) => {
-      // Resolve the entity before removal, while the instance still exists.
-      const instance = useHomeWidgetStore
-        .getState()
-        .instances.find((candidate) => candidate.id === id);
-      const target = instance
-        ? entityPinTargetFromWidget(instance.type, instance.state)
-        : null;
+      // Resolve the entity before removal, while the instance still exists —
+      // and contain that separately from the removal, so a resolution throw
+      // degrades to "no intent recorded" rather than a remove button that
+      // silently does nothing.
+      let target: ReturnType<typeof entityPinTargetFromWidget> = null;
+      try {
+        const instance = useHomeWidgetStore
+          .getState()
+          .instances.find((candidate) => candidate.id === id);
+        target = instance
+          ? entityPinTargetFromWidget(instance.type, instance.state)
+          : null;
+      } catch (error) {
+        perfLog(
+          `[telemetry] home unpin target resolution failed: ${String(error)}`,
+        );
+      }
       removeWidget(id);
       if (target) {
         recordHomeItemUnpinIntent({ kind: target.kind, itemId: target.id });

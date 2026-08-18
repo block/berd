@@ -49,6 +49,7 @@ import {
   HOME_WIDGET_SAVE_CONFIRMED_EVENT,
   HOME_WIDGET_SAVE_DISCARDED_EVENT,
 } from "@/features/home/onboarding/homeWidgetSaveLifecycle";
+import { perfLog } from "@/shared/lib/perfLog";
 import { useHomeWidgetStore } from "../stores/homeWidgetStore";
 import type { WidgetInstance } from "../widgets/types";
 import { resolveChatPinIdentity } from "./chatPinIdentity";
@@ -136,30 +137,42 @@ function flushPendingIntents(): void {
     return;
   }
 
-  const confirmed = confirmedInstances();
+  // Drain before resolving, so resolution stays terminal even if it throws:
+  // holding a spent intent back would leave a later transition — one another
+  // window made — looking like this user's action arriving.
   const intents = [...pendingIntents.values()];
   pendingIntents.clear();
 
-  for (const intent of intents) {
-    const { matchIds } = resolvePinIdentity(intent);
-    const pinnedNow = isPinnedInConfirmedLayout(confirmed, intent, matchIds);
-    if (pinnedNow === intent.pinnedBefore) {
-      continue;
-    }
-    // The transition also has to be one this user asked for; anything else came
-    // from another writer's layout. Every direction they asked for in this
-    // window counts, not just their latest one: when they pin and then unpin
-    // before anything settles, the pin can still be the change that survives,
-    // and it is theirs to report.
-    if (!(pinnedNow ? intent.requestedPin : intent.requestedUnpin)) {
-      continue;
-    }
+  // Observation only. This runs from the save-lifecycle listeners rather than a
+  // product caller, so a throw cannot break a pin surface, but it maps the whole
+  // confirmed layout, and a corrupt one should stay a dropped event rather than
+  // become window.onerror noise.
+  try {
+    const confirmed = confirmedInstances();
 
-    if (pinnedNow) {
-      trackHomeItemPinned({ kind: intent.kind });
-    } else {
-      trackHomeItemUnpinned({ kind: intent.kind });
+    for (const intent of intents) {
+      const { matchIds } = resolvePinIdentity(intent);
+      const pinnedNow = isPinnedInConfirmedLayout(confirmed, intent, matchIds);
+      if (pinnedNow === intent.pinnedBefore) {
+        continue;
+      }
+      // The transition also has to be one this user asked for; anything else
+      // came from another writer's layout. Every direction they asked for in
+      // this window counts, not just their latest one: when they pin and then
+      // unpin before anything settles, the pin can still be the change that
+      // survives, and it is theirs to report.
+      if (!(pinnedNow ? intent.requestedPin : intent.requestedUnpin)) {
+        continue;
+      }
+
+      if (pinnedNow) {
+        trackHomeItemPinned({ kind: intent.kind });
+      } else {
+        trackHomeItemUnpinned({ kind: intent.kind });
+      }
     }
+  } catch (error) {
+    perfLog(`[telemetry] home pin intent flush failed: ${String(error)}`);
   }
 }
 
@@ -183,31 +196,42 @@ function ensureSaveLifecycleSubscription(): void {
 }
 
 function recordIntent(intent: HomePinIntent, action: "pin" | "unpin"): void {
-  ensureSaveLifecycleSubscription();
+  // Observation only, structurally: recording resolves a chat's pin identity and
+  // maps the whole confirmed layout, and it runs synchronously inside the pin and
+  // unpin handlers *after* their optimistic store mutation has already applied.
+  // A throw would therefore turn a change that succeeded into a false failure
+  // toast (usePinToHomeWidget), an aborted half-batch (pinBatchToHome /
+  // unpinBatchFromHome), or an uncaught error out of HomeView's canvas handlers.
+  try {
+    ensureSaveLifecycleSubscription();
 
-  const { key, matchIds } = resolvePinIdentity(intent);
-  const existing = pendingIntents.get(key);
-  if (existing) {
-    // Keep the baseline from when this window opened, and remember this
-    // direction alongside any earlier one: either can be the change that lands.
-    if (action === "pin") {
-      existing.requestedPin = true;
-    } else {
-      existing.requestedUnpin = true;
+    const { key, matchIds } = resolvePinIdentity(intent);
+    const existing = pendingIntents.get(key);
+    if (existing) {
+      // Keep the baseline from when this window opened, and remember this
+      // direction alongside any earlier one: either can be the change that
+      // lands.
+      if (action === "pin") {
+        existing.requestedPin = true;
+      } else {
+        existing.requestedUnpin = true;
+      }
+      return;
     }
-    return;
-  }
 
-  pendingIntents.set(key, {
-    ...intent,
-    requestedPin: action === "pin",
-    requestedUnpin: action === "unpin",
-    pinnedBefore: isPinnedInConfirmedLayout(
-      confirmedInstances(),
-      intent,
-      matchIds,
-    ),
-  });
+    pendingIntents.set(key, {
+      ...intent,
+      requestedPin: action === "pin",
+      requestedUnpin: action === "unpin",
+      pinnedBefore: isPinnedInConfirmedLayout(
+        confirmedInstances(),
+        intent,
+        matchIds,
+      ),
+    });
+  } catch (error) {
+    perfLog(`[telemetry] home pin intent failed: ${String(error)}`);
+  }
 }
 
 /** The user pinned an item to Home; reported if the pin survives persistence. */
