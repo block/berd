@@ -67,20 +67,32 @@ let loadStarted = false;
  * Kicks off the one read of the persisted setting for this renderer.
  * Idempotent; a no-op in enforced builds, where the file is never consulted.
  * A failed read settles the store as disabled — the fail-closed answer — and
- * is logged rather than retried: the value re-loads with the next renderer,
- * and the settings toggle writes repair it immediately.
+ * is logged rather than retried: the value re-loads with the next renderer.
+ *
+ * The read only ever settles a store that is still unsettled; a user write
+ * that lands first wins. Because the `loadStarted` guard admits exactly one
+ * read, `loaded` being true at resolution time can only mean
+ * `updateTelemetryEnabled` settled first, and that write's stored value
+ * reflects what the native side holds *after* this read's snapshot was taken.
+ * Overwriting it would silently revoke consent the user just granted (or,
+ * on the failure branch, force-disable it) for the rest of the session.
  */
 export function ensureTelemetryConsentLoaded(): void {
   if (loadStarted || telemetryConsentEnforced()) return;
   loadStarted = true;
+  const settleFromRead = (enabled: boolean) => {
+    if (useTelemetryConsentStore.getState().loaded) return;
+    useTelemetryConsentStore.setState({ loaded: true, enabled });
+  };
   void getTelemetrySettings().then(
-    ({ enabled }) =>
-      useTelemetryConsentStore.setState({ loaded: true, enabled }),
+    ({ enabled }) => settleFromRead(enabled),
     (error) => {
+      // Logged unconditionally: a failed read is worth recording even when a
+      // user write already superseded the value it would have settled.
       perfLog(
         `[telemetry] failed to load the telemetry setting: ${String(error)}`,
       );
-      useTelemetryConsentStore.setState({ loaded: true, enabled: false });
+      settleFromRead(false);
     },
   );
 }
@@ -89,6 +101,9 @@ export function ensureTelemetryConsentLoaded(): void {
  * Persists the user's choice natively, then reflects the value the Rust side
  * actually stored. Rejections propagate so the settings toggle can surface
  * the failure instead of showing a state that was never persisted.
+ *
+ * This overwrites unconditionally — a completed write is the freshest fact
+ * about the persisted setting, so it outranks the boot read either way round.
  */
 export async function updateTelemetryEnabled(enabled: boolean): Promise<void> {
   const settings = await setTelemetryEnabled(enabled);

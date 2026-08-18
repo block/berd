@@ -17,6 +17,24 @@ async function loadConsent() {
   return await import("./consent");
 }
 
+// Lets a test order the boot read's resolution against a consent write.
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  // The rejection path is asserted after the fact, so nothing awaits this
+  // promise directly; swallow it here to keep it from surfacing as unhandled.
+  promise.catch(() => {});
+  return { promise, resolve, reject };
+}
+
+function flushMicrotasks() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 beforeEach(() => {
   getTelemetrySettings.mockReset().mockResolvedValue({ enabled: true });
   setTelemetryEnabled.mockReset();
@@ -60,6 +78,45 @@ describe("telemetry consent", () => {
 
     expect(consent.telemetryConsentSettled()).toBe(true);
     expect(consent.telemetryConsentGranted()).toBe(false);
+    expect(perfLog).toHaveBeenCalledWith(
+      "[telemetry] failed to load the telemetry setting: Error: state went away",
+    );
+  });
+
+  it("does not let a stale read clobber a write that already settled", async () => {
+    // The welcome page's fire-and-forget write can land while the boot read is
+    // still in flight, so the read must not settle a store a write already owns.
+    const read = deferred<{ enabled: boolean }>();
+    getTelemetrySettings.mockReturnValue(read.promise);
+    setTelemetryEnabled.mockResolvedValue({ enabled: true });
+    const consent = await loadConsent();
+
+    consent.ensureTelemetryConsentLoaded();
+    await consent.updateTelemetryEnabled(true);
+
+    read.resolve({ enabled: false });
+    await flushMicrotasks();
+
+    expect(consent.telemetryConsentGranted()).toBe(true);
+    expect(consent.useTelemetryConsentStore.getState()).toEqual({
+      loaded: true,
+      enabled: true,
+    });
+  });
+
+  it("does not let a failed read force-disable consent a write already granted", async () => {
+    const read = deferred<{ enabled: boolean }>();
+    getTelemetrySettings.mockReturnValue(read.promise);
+    setTelemetryEnabled.mockResolvedValue({ enabled: true });
+    const consent = await loadConsent();
+
+    consent.ensureTelemetryConsentLoaded();
+    await consent.updateTelemetryEnabled(true);
+
+    read.reject(new Error("state went away"));
+    await flushMicrotasks();
+
+    expect(consent.telemetryConsentGranted()).toBe(true);
     expect(perfLog).toHaveBeenCalledWith(
       "[telemetry] failed to load the telemetry setting: Error: state went away",
     );
