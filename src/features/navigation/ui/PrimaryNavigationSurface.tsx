@@ -236,7 +236,7 @@ export const PrimaryNavigationSurface = forwardRef<
           inert={!isSecondarySurface ? true : undefined}
           aria-hidden={!isSecondarySurface}
         >
-          <div className="flex h-7 flex-shrink-0 items-center px-1.5">
+          <div className="mt-1 flex h-7 flex-shrink-0 items-center px-1.5">
             <SidebarNavItem
               icon={IconArrowLeft}
               label={t("actions.backToMainNavigation")}
