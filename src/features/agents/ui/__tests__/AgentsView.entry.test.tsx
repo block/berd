@@ -14,6 +14,11 @@ import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { toast } from "sonner";
 import { importPersonas } from "@/shared/api/agents";
 import type { CreatePersonaRequest } from "@/shared/types/agents";
+import {
+  EXPERIMENT_PREFERENCES_STORAGE_KEY,
+  EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+} from "@/features/experiments/experimentPreferences";
+import { AVATAR_COLLECTION_PAGE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { AgentsView } from "../AgentsView";
 
 const mockCreatePersona = vi.hoisted(() => vi.fn());
@@ -173,11 +178,24 @@ describe("AgentsView entry points", () => {
     });
     delete document.documentElement.dataset.agentTransition;
     Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
     vi.restoreAllMocks();
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // These tests exercise the inline customize section, so the collection
+    // gallery experiment (auto-enabled in dev/test) is pinned off.
+    // Gallery-specific tests re-enable it explicitly.
+    localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+        experiments: {
+          [AVATAR_COLLECTION_PAGE_EXPERIMENT_ID]: { enabled: false },
+        },
+      }),
+    );
     // Mirrors the real API: the created persona carries the persisted
     // identity the telemetry call sites are expected to report.
     mockCreatePersona.mockImplementation(
@@ -447,12 +465,37 @@ describe("AgentsView entry points", () => {
     const customizeAvatar = screen.getByRole("button", {
       name: "editor.customizeAvatar",
     });
-    expect(screen.getByText("builderRail.changeAvatar")).toBeInTheDocument();
+    expect(screen.getByText("editor.changeAvatar")).toBeInTheDocument();
     customizeAvatar.focus();
     expect(customizeAvatar).toHaveFocus();
     await user.keyboard("{Enter}");
 
     expect(screen.getByText("editor.avatarUrl")).toBeInTheDocument();
+  });
+
+  it("opens the avatar collection gallery instead of the inline section when the experiment is on", async () => {
+    localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+        experiments: {
+          [AVATAR_COLLECTION_PAGE_EXPERIMENT_ID]: { enabled: true },
+        },
+      }),
+    );
+    useAgentStore.setState({ personas: [persona] });
+    const user = userEvent.setup();
+
+    render(<AgentsView activePersonaId={persona.id} />);
+
+    await user.click(
+      screen.getByRole("button", { name: "editor.customizeAvatar" }),
+    );
+
+    // The full-surface gallery takeover renders; the inline customize
+    // section (with its duplicate custom-URL form) never appears.
+    expect(screen.getByTestId("avatar-collection-overlay")).toBeInTheDocument();
+    expect(screen.queryByText("editor.avatarUrl")).not.toBeInTheDocument();
   });
 
   it("clicking detail Start chat calls onStartChatWithAgent with the persona id", () => {
