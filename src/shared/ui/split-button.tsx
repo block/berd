@@ -26,6 +26,9 @@ interface SplitButtonProps<T extends string = string> {
   menuTriggerLabel: string;
   variant?: ButtonProps["variant"];
   size?: ButtonProps["size"];
+  feedbackState?: ButtonProps["feedbackState"];
+  loadingLabel?: React.ReactNode;
+  menuLayer?: React.ComponentProps<typeof DropdownMenuContent>["layer"];
 }
 
 export function SplitButton<T extends string = string>({
@@ -38,6 +41,9 @@ export function SplitButton<T extends string = string>({
   menuTriggerLabel,
   variant = "outline",
   size = "xs",
+  feedbackState = "idle",
+  loadingLabel,
+  menuLayer = "default",
 }: SplitButtonProps<T>) {
   const activeAction =
     actions.find((action) => action.id === activeActionId) ?? actions[0];
@@ -55,6 +61,8 @@ export function SplitButton<T extends string = string>({
         variant={variant}
         size={size}
         disabled={isPrimaryDisabled}
+        feedbackState={feedbackState}
+        loadingLabel={loadingLabel}
         className="rounded-r-none border-r-0 font-normal"
         onClick={() => onPrimaryClick(activeAction.id)}
       >
@@ -76,9 +84,9 @@ export function SplitButton<T extends string = string>({
               </Button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
-          <TooltipContent>{menuTriggerLabel}</TooltipContent>
+          <TooltipContent layer={menuLayer}>{menuTriggerLabel}</TooltipContent>
         </Tooltip>
-        <DropdownMenuContent align="end" sideOffset={4}>
+        <DropdownMenuContent align="end" sideOffset={4} layer={menuLayer}>
           {actions.map((action) => (
             <DropdownMenuItem
               key={action.id}

@@ -139,6 +139,7 @@ export const DESIGN_SYSTEM_COMPONENT_SECTIONS: Array<{
   { id: "component-toaster", label: "Toaster" },
   { id: "component-spinner", label: "Spinner" },
   { id: "component-switch", label: "Switch" },
+  { id: "component-split-button", label: "Split Button" },
   { id: "component-textarea", label: "Textarea" },
   { id: "component-toggle-group", label: "Toggle Group" },
   { id: "component-tooltip", label: "Tooltip" },
@@ -156,7 +157,6 @@ export const DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS: Array<{
   { id: "component-calendar", label: "Calendar" },
   { id: "component-carousel", label: "Carousel" },
   { id: "component-chart-container", label: "Chart Container" },
-  { id: "component-split-button", label: "Split Button" },
   { id: "component-drawer", label: "Drawer" },
   { id: "component-form", label: "Form" },
   { id: "component-berd-logo", label: "Berd Logo" },
@@ -170,7 +170,6 @@ export const DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS: Array<{
   { id: "component-resizable-handle", label: "Resizable Handle" },
   { id: "component-separator", label: "Separator" },
   { id: "component-sidebar", label: "Sidebar" },
-  { id: "component-split-button", label: "Split Button" },
   { id: "component-table", label: "Table" },
   { id: "component-toggle", label: "Toggle" },
 ];

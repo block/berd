@@ -7,6 +7,8 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { unzipSync } from "fflate";
+import { createStoredAgentZip } from "./agentZip";
 import type { Persona } from "@/shared/types/agents";
 import { toast } from "sonner";
 import {
@@ -20,6 +22,41 @@ import {
   AVATAR_ANIMATION_EMBED_TIMEOUT_MS,
 } from "./AgentShareDialog";
 import { downloadBlob, renderAgentShareCard } from "./agentShareCard";
+
+const workerMocks = vi.hoisted(() => ({
+  construct: vi.fn(),
+  terminate: vi.fn(),
+  mode: "success" as "success" | "error" | "hang",
+}));
+
+class MockWorker {
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: ((event: ErrorEvent) => void) | null = null;
+
+  constructor() {
+    workerMocks.construct();
+  }
+
+  postMessage(data: { pngFilename: string; contents: Uint8Array }) {
+    if (workerMocks.mode === "hang") return;
+    if (workerMocks.mode === "error") {
+      queueMicrotask(() =>
+        this.onmessage?.({ data: { error: "worker failed" } } as MessageEvent),
+      );
+      return;
+    }
+    const archive = createStoredAgentZip(data.pngFilename, data.contents);
+    queueMicrotask(() =>
+      this.onmessage?.({ data: { archive } } as MessageEvent),
+    );
+  }
+
+  terminate() {
+    workerMocks.terminate();
+  }
+}
+
+vi.stubGlobal("Worker", MockWorker);
 
 const avatarHookMocks = vi.hoisted(() => ({
   image: "https://example.com/avatar.png" as string | undefined,
@@ -109,7 +146,7 @@ async function markCardReady(): Promise<void> {
   fireEvent.load(preload);
   await waitFor(() =>
     expect(
-      screen.getByRole("button", { name: "share.downloadCard" }),
+      screen.getByRole("button", { name: "share.downloadPng" }),
     ).toBeEnabled(),
   );
 }
@@ -125,6 +162,7 @@ function deferred<T>() {
 describe("AgentShareDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    workerMocks.mode = "success";
     avatarHookMocks.image = "https://example.com/avatar.png";
     avatarHookMocks.media = undefined;
     vi.mocked(readCachedAvatarAnimation).mockResolvedValue(null);
@@ -141,16 +179,129 @@ describe("AgentShareDialog", () => {
         onDownloadAgent={onDownloadAgent}
       />,
     );
-    const button = screen.getByRole("button", { name: "share.downloadAgent" });
 
-    act(() => {
-      button.click();
-      button.click();
+    await userEvent.click(
+      screen.getByRole("button", { name: "share.downloadOptions" }),
+    );
+    const markdownAction = screen.getByRole("menuitem", {
+      name: "share.downloadMarkdown",
     });
+    await userEvent.click(markdownAction);
+    expect(screen.getByTestId("agent-download-status")).toHaveTextContent(
+      "share.downloadingAgent",
+    );
 
+    await userEvent.click(
+      screen.getByRole("button", { name: "share.downloadOptions" }),
+    );
+    expect(
+      screen.getByRole("menuitem", { name: "share.downloadMarkdown" }),
+    ).toHaveAttribute("aria-disabled", "true");
     expect(onDownloadAgent).toHaveBeenCalledTimes(1);
+
     pending.resolve();
-    await waitFor(() => expect(button).not.toBeDisabled());
+    await waitFor(() =>
+      expect(screen.getByTestId("agent-download-status")).toHaveTextContent(""),
+    );
+  });
+
+  it("packages the portable PNG in a ZIP for Slack", async () => {
+    const encoded = new Uint8Array([1, 2, 3, 4]);
+    vi.mocked(renderAgentShareCard).mockResolvedValue(
+      new Blob(["card"], { type: "image/png" }),
+    );
+    vi.mocked(encodeAgentImage).mockReturnValue(encoded);
+    render(
+      <AgentShareDialog
+        open
+        persona={persona}
+        onOpenChange={vi.fn()}
+        onDownloadAgent={vi.fn()}
+      />,
+    );
+    await markCardReady();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "share.downloadOptions" }),
+    );
+    await userEvent.click(
+      screen.getByRole("menuitem", { name: "share.downloadZip" }),
+    );
+
+    await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
+    const [blob, filename] = vi.mocked(downloadBlob).mock.calls[0];
+    expect(filename).toBe("reviewer.agent.zip");
+    expect(blob.type).toBe("application/zip");
+    const archiveBytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error);
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.readAsArrayBuffer(blob);
+    });
+    const archive = unzipSync(new Uint8Array(archiveBytes));
+    expect(archive["reviewer.agent.png"]).toEqual(encoded);
+  });
+
+  it("recovers when the ZIP worker fails", async () => {
+    workerMocks.mode = "error";
+    vi.mocked(renderAgentShareCard).mockResolvedValue(
+      new Blob(["card"], { type: "image/png" }),
+    );
+    render(
+      <AgentShareDialog
+        open
+        persona={persona}
+        onOpenChange={vi.fn()}
+        onDownloadAgent={vi.fn()}
+      />,
+    );
+    await markCardReady();
+    await userEvent.click(
+      screen.getByRole("button", { name: "share.downloadOptions" }),
+    );
+    await userEvent.click(
+      screen.getByRole("menuitem", { name: "share.downloadZip" }),
+    );
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(downloadBlob).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "share.downloadPng" }),
+    ).toBeEnabled();
+  });
+
+  it("terminates a pending ZIP worker when the dialog closes", async () => {
+    workerMocks.mode = "hang";
+    vi.mocked(renderAgentShareCard).mockResolvedValue(
+      new Blob(["card"], { type: "image/png" }),
+    );
+    const { rerender } = render(
+      <AgentShareDialog
+        open
+        persona={persona}
+        onOpenChange={vi.fn()}
+        onDownloadAgent={vi.fn()}
+      />,
+    );
+    await markCardReady();
+    await userEvent.click(
+      screen.getByRole("button", { name: "share.downloadOptions" }),
+    );
+    await userEvent.click(
+      screen.getByRole("menuitem", { name: "share.downloadZip" }),
+    );
+    await waitFor(() => expect(workerMocks.construct).toHaveBeenCalled());
+
+    rerender(
+      <AgentShareDialog
+        open={false}
+        persona={persona}
+        onOpenChange={vi.fn()}
+        onDownloadAgent={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(workerMocks.terminate).toHaveBeenCalled());
+    expect(downloadBlob).not.toHaveBeenCalled();
   });
 
   it("recognizes an avatar that completed before its load handler attached", async () => {
@@ -183,7 +334,7 @@ describe("AgentShareDialog", () => {
 
       await waitFor(() =>
         expect(
-          screen.getByRole("button", { name: "share.downloadCard" }),
+          screen.getByRole("button", { name: "share.downloadPng" }),
         ).not.toBeDisabled(),
       );
       await waitFor(() =>
@@ -286,9 +437,7 @@ describe("AgentShareDialog", () => {
       />,
     );
     await markCardReady();
-    await user.click(
-      screen.getByRole("button", { name: "share.downloadCard" }),
-    );
+    await user.click(screen.getByRole("button", { name: "share.downloadPng" }));
 
     await waitFor(() =>
       expect(renderAgentShareCard).toHaveBeenCalledWith(
@@ -329,7 +478,7 @@ describe("AgentShareDialog", () => {
     );
     await markCardReady();
     await userEvent.click(
-      screen.getByRole("button", { name: "share.downloadCard" }),
+      screen.getByRole("button", { name: "share.downloadPng" }),
     );
 
     await waitFor(() =>
@@ -370,7 +519,7 @@ describe("AgentShareDialog", () => {
       );
       fireEvent.load(fallbackPreload);
       expect(
-        screen.getByRole("button", { name: "share.downloadCard" }),
+        screen.getByRole("button", { name: "share.downloadPng" }),
       ).toBeEnabled();
     } finally {
       vi.useRealTimers();
@@ -399,7 +548,7 @@ describe("AgentShareDialog", () => {
     expect(error).toHaveTextContent("share.avatarUnavailable");
     expect(error).toHaveClass("text-sm");
     expect(
-      screen.getByRole("button", { name: "share.downloadCard" }),
+      screen.getByRole("button", { name: "share.downloadPng" }),
     ).toBeDisabled();
   });
 
@@ -434,7 +583,7 @@ describe("AgentShareDialog", () => {
       );
       await markCardReady();
       await userEvent.click(
-        screen.getByRole("button", { name: "share.downloadCard" }),
+        screen.getByRole("button", { name: "share.downloadPng" }),
       );
 
       await waitFor(() =>
@@ -484,7 +633,7 @@ describe("AgentShareDialog", () => {
       );
       fireEvent.load(screen.getByTestId("agent-card-avatar-preload"));
       fireEvent.click(
-        screen.getByRole("button", { name: "share.downloadCard" }),
+        screen.getByRole("button", { name: "share.downloadPng" }),
       );
       await act(async () => {
         await vi.advanceTimersByTimeAsync(AVATAR_ANIMATION_EMBED_TIMEOUT_MS);
@@ -498,7 +647,7 @@ describe("AgentShareDialog", () => {
       );
       expect(downloadBlob).toHaveBeenCalledTimes(1);
       expect(
-        screen.getByRole("button", { name: "share.downloadCard" }),
+        screen.getByRole("button", { name: "share.downloadPng" }),
       ).not.toBeDisabled();
     } finally {
       vi.useRealTimers();
@@ -551,7 +700,7 @@ describe("AgentShareDialog", () => {
       );
       await markCardReady();
       await userEvent.click(
-        screen.getByRole("button", { name: "share.downloadCard" }),
+        screen.getByRole("button", { name: "share.downloadPng" }),
       );
       await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
       expect(encodeAgentImage).toHaveBeenLastCalledWith(
@@ -571,7 +720,7 @@ describe("AgentShareDialog", () => {
       );
       await markCardReady();
       await userEvent.click(
-        screen.getByRole("button", { name: "share.downloadCard" }),
+        screen.getByRole("button", { name: "share.downloadPng" }),
       );
       await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(2));
       expect(encodeAgentImage).toHaveBeenLastCalledWith(
@@ -620,7 +769,7 @@ describe("AgentShareDialog", () => {
       );
       await markCardReady();
       await userEvent.click(
-        screen.getByRole("button", { name: "share.downloadCard" }),
+        screen.getByRole("button", { name: "share.downloadPng" }),
       );
 
       await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
@@ -671,7 +820,7 @@ describe("AgentShareDialog", () => {
       );
       await markCardReady();
       await userEvent.click(
-        screen.getByRole("button", { name: "share.downloadCard" }),
+        screen.getByRole("button", { name: "share.downloadPng" }),
       );
 
       await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
@@ -711,7 +860,7 @@ describe("AgentShareDialog", () => {
     fireEvent.error(poster as HTMLImageElement);
     await markCardReady();
     await userEvent.click(
-      screen.getByRole("button", { name: "share.downloadCard" }),
+      screen.getByRole("button", { name: "share.downloadPng" }),
     );
 
     await waitFor(() => expect(downloadBlob).toHaveBeenCalledTimes(1));
@@ -747,7 +896,7 @@ describe("AgentShareDialog", () => {
     fireEvent.load(fallback);
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "share.downloadCard" }),
+        screen.getByRole("button", { name: "share.downloadPng" }),
       ).toBeEnabled(),
     );
   });
@@ -766,7 +915,7 @@ describe("AgentShareDialog", () => {
 
     await markCardReady();
     act(() => {
-      screen.getByRole("button", { name: "share.downloadCard" }).click();
+      screen.getByRole("button", { name: "share.downloadPng" }).click();
     });
     rerender(
       <AgentShareDialog
@@ -785,7 +934,7 @@ describe("AgentShareDialog", () => {
     expect(toast.success).not.toHaveBeenCalled();
     await markCardReady();
     const downloadButton = screen.getByRole("button", {
-      name: "share.downloadCard",
+      name: "share.downloadPng",
     });
     expect(downloadButton).toBeEnabled();
 
@@ -818,7 +967,7 @@ describe("AgentShareDialog", () => {
 
     await markCardReady();
     const downloadButton = screen.getByRole("button", {
-      name: "share.downloadCard",
+      name: "share.downloadPng",
     });
     await user.click(downloadButton);
 
@@ -846,9 +995,7 @@ describe("AgentShareDialog", () => {
     );
 
     await markCardReady();
-    await user.click(
-      screen.getByRole("button", { name: "share.downloadCard" }),
-    );
+    await user.click(screen.getByRole("button", { name: "share.downloadPng" }));
     rerender(
       <AgentShareDialog
         open={false}
@@ -873,7 +1020,7 @@ describe("AgentShareDialog", () => {
     );
     await markCardReady();
     expect(
-      screen.getByRole("button", { name: "share.downloadCard" }),
+      screen.getByRole("button", { name: "share.downloadPng" }),
     ).toBeEnabled();
   });
 
@@ -891,7 +1038,7 @@ describe("AgentShareDialog", () => {
 
     await markCardReady();
     const downloadButton = screen.getByRole("button", {
-      name: "share.downloadCard",
+      name: "share.downloadPng",
     });
     act(() => {
       downloadButton.click();
@@ -937,7 +1084,7 @@ describe("AgentShareDialog", () => {
       ));
       fireEvent.load(screen.getByTestId("agent-card-avatar-preload"));
       fireEvent.click(
-        screen.getByRole("button", { name: "share.downloadCard" }),
+        screen.getByRole("button", { name: "share.downloadPng" }),
       );
       await act(async () => {
         await vi.advanceTimersByTimeAsync(AVATAR_ANIMATION_EMBED_TIMEOUT_MS);

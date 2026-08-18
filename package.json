@@ -108,6 +108,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "embla-carousel-react": "^8.6.0",
+    "fflate": "^0.8.3",
     "fzf": "^0.5.2",
     "i18next": "^26.3.6",
     "i18next-resources-to-backend": "^1.2.3",

@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Download, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -26,7 +26,7 @@ import {
 } from "@/shared/hooks/useAvatarSrc";
 import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
 import { readCachedAvatarAnimation } from "@/shared/api/avatars";
-import { Button } from "@/shared/ui/button";
+import { SplitButton } from "@/shared/ui/split-button";
 import {
   Dialog,
   DialogContent,
@@ -81,6 +81,52 @@ async function avatarSourceToDataUrl(source: string): Promise<string | null> {
 
 export const AVATAR_ANIMATION_EMBED_TIMEOUT_MS = 5_000;
 
+export function createAgentZip(
+  pngFilename: string,
+  contents: Uint8Array,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(
+      new URL("./agentZip.worker.ts", import.meta.url),
+      {
+        type: "module",
+      },
+    );
+    let settled = false;
+    const finish = (operation: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", handleAbort);
+      worker.terminate();
+      operation();
+    };
+    const handleAbort = () =>
+      finish(() => reject(new DOMException("Aborted", "AbortError")));
+    worker.onmessage = (
+      event: MessageEvent<{ archive?: Uint8Array; error?: string }>,
+    ) => {
+      const { archive, error } = event.data;
+      if (error) finish(() => reject(new Error(error)));
+      else if (archive) finish(() => resolve(archive));
+      else finish(() => reject(new Error("ZIP worker returned no archive")));
+    };
+    worker.onerror = (event) => {
+      finish(() => reject(new Error(event.message || "ZIP worker failed")));
+    };
+    if (signal?.aborted) {
+      handleAbort();
+      return;
+    }
+    signal?.addEventListener("abort", handleAbort, { once: true });
+    // Copy before transfer so the portable PNG remains available to the caller.
+    const workerContents = new Uint8Array(contents);
+    worker.postMessage({ pngFilename, contents: workerContents }, [
+      workerContents.buffer,
+    ]);
+  });
+}
+
 async function withAnimationEmbedDeadline<T>(
   operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs = AVATAR_ANIMATION_EMBED_TIMEOUT_MS,
@@ -126,9 +172,10 @@ export function AgentShareDialog({
     src: string;
   } | null>(null);
   const avatarPreloadRef = useRef<HTMLImageElement>(null);
-  const cardDownloadInFlightRef = useRef(false);
+  const cardDownloadInFlightRef = useRef<number | null>(null);
   const agentDownloadInFlightRef = useRef(false);
   const cardOperationGenerationRef = useRef(0);
+  const cardOperationAbortRef = useRef<AbortController | null>(null);
   const resolvedAvatar = useAvatarImage(persona.avatar);
   const cachedAvatarState = useAvatarMediaState(persona.avatar);
   const cachedAvatar = cachedAvatarState.media;
@@ -173,13 +220,17 @@ export function AgentShareDialog({
   useEffect(() => {
     if (!open) {
       cardOperationGenerationRef.current += 1;
-      cardDownloadInFlightRef.current = false;
+      cardOperationAbortRef.current?.abort();
+      cardOperationAbortRef.current = null;
+      cardDownloadInFlightRef.current = null;
       agentDownloadInFlightRef.current = false;
       setCardDownloadPending(false);
       setAgentDownloadPending(false);
     }
     return () => {
       cardOperationGenerationRef.current += 1;
+      cardOperationAbortRef.current?.abort();
+      cardOperationAbortRef.current = null;
     };
   }, [open]);
 
@@ -190,7 +241,9 @@ export function AgentShareDialog({
     // completion can commit.
     void cardContentIdentity;
     cardOperationGenerationRef.current += 1;
-    cardDownloadInFlightRef.current = false;
+    cardOperationAbortRef.current?.abort();
+    cardOperationAbortRef.current = null;
+    cardDownloadInFlightRef.current = null;
     setCardDownloadPending(false);
   }, [cardContentIdentity]);
 
@@ -225,125 +278,146 @@ export function AgentShareDialog({
     };
   }, [cachedAvatar, open, persona.avatar]);
 
-  const handleDownloadCard = useCallback(async () => {
-    if (cardDownloadInFlightRef.current) return;
-    cardDownloadInFlightRef.current = true;
-    const operationGeneration = cardOperationGenerationRef.current;
-    setCardDownloadPending(true);
-    try {
-      // Render exactly what the reviewed card displays. Re-generating a second
-      // poster here can produce a different or blank frame for stacked videos.
-      const cardAvatarSrc = avatarReadySrc;
-      if (!cardAvatarSrc) {
-        throw new Error("Agent avatar is not ready");
-      }
-      const card = await renderAgentShareCard(
-        persona,
-        cardAvatarSrc,
-        cardBase,
-        cardCopy,
-        locale,
-      );
-      if (operationGeneration !== cardOperationGenerationRef.current) return;
-      const embeddedAvatar = await avatarSourceToDataUrl(cardAvatarSrc);
-      if (operationGeneration !== cardOperationGenerationRef.current) return;
-      const snapshot = personaToSnapshot({
-        ...persona,
-        avatar: embeddedAvatar ?? persona.avatar,
-      });
-      let animation = null;
-      const stillMatchesAnimation = Boolean(
-        cachedAvatar?.mediaType === "video" &&
-          (cardAvatarSrc === currentGeneratedAvatarPoster ||
-            cardAvatarSrc === cachedAvatar.posterSrc),
-      );
-      if (cachedAvatar?.mediaType === "video" && stillMatchesAnimation) {
-        try {
-          if (
-            /^asset:/u.test(cachedAvatar.src) &&
-            typeof persona.avatar === "string"
-          ) {
-            const avatarRef = persona.avatar;
-            const cachedAnimation = await withAnimationEmbedDeadline(() =>
-              readCachedAvatarAnimation({ avatarRef }),
-            );
-            if (cachedAnimation) {
-              animation = {
-                bytes: new Uint8Array(cachedAnimation.bytes),
-                mimeType:
-                  cachedAnimation.mimeType === "video/mp4"
-                    ? ("video/mp4" as const)
-                    : ("video/webm" as const),
-                alphaMode: cachedAnimation.alphaMode,
-              };
-            }
-          } else if (/^(?:https?:|blob:|data:)/u.test(cachedAvatar.src)) {
-            const blob = await withAnimationEmbedDeadline(async (signal) => {
-              const response = await fetch(cachedAvatar.src, { signal });
-              if (!response.ok)
-                throw new Error("Avatar animation request failed");
-              return await response.blob();
-            });
-            if (blob.type !== "video/mp4" && blob.type !== "video/webm") {
-              throw new Error("Avatar animation has an unsupported media type");
-            }
-            const animationBytes = await blobToBytes(blob);
-            const mimeType = blob.type as "video/mp4" | "video/webm";
-            if (animationBytes.length <= MAX_SNAPSHOT_AVATAR_ANIMATION_BYTES) {
-              animation = {
-                bytes: animationBytes,
-                mimeType,
-                alphaMode: cachedAvatar.alphaMode,
-              };
-            }
-          }
-        } catch (error) {
-          console.warn("Could not embed animated avatar:", error);
-        }
-      }
-      if (operationGeneration !== cardOperationGenerationRef.current) return;
-      const cardBytes = await blobToBytes(card);
-      let encodedCard: Uint8Array;
+  const handleDownloadCard = useCallback(
+    async (format: "png" | "zip") => {
+      if (cardDownloadInFlightRef.current !== null) return;
+      const operationGeneration = cardOperationGenerationRef.current;
+      const controller = new AbortController();
+      cardDownloadInFlightRef.current = operationGeneration;
+      cardOperationAbortRef.current = controller;
+      setCardDownloadPending(true);
       try {
-        encodedCard = encodeAgentImage(cardBytes, snapshot, animation);
-      } catch (error) {
-        if (
-          !(error instanceof AgentSnapshotError) ||
-          error.code !== "too-large"
-        ) {
-          throw error;
+        // Render exactly what the reviewed card displays. Re-generating a second
+        // poster here can produce a different or blank frame for stacked videos.
+        const cardAvatarSrc = avatarReadySrc;
+        if (!cardAvatarSrc) {
+          throw new Error("Agent avatar is not ready");
         }
-        // The still card remains portable when an otherwise-valid animation
-        // would push the combined PNG over the snapshot size limit.
-        encodedCard = encodeAgentImage(cardBytes, snapshot, null);
+        const card = await renderAgentShareCard(
+          persona,
+          cardAvatarSrc,
+          cardBase,
+          cardCopy,
+          locale,
+        );
+        if (operationGeneration !== cardOperationGenerationRef.current) return;
+        const embeddedAvatar = await avatarSourceToDataUrl(cardAvatarSrc);
+        if (operationGeneration !== cardOperationGenerationRef.current) return;
+        const snapshot = personaToSnapshot({
+          ...persona,
+          avatar: embeddedAvatar ?? persona.avatar,
+        });
+        let animation = null;
+        const stillMatchesAnimation = Boolean(
+          cachedAvatar?.mediaType === "video" &&
+            (cardAvatarSrc === currentGeneratedAvatarPoster ||
+              cardAvatarSrc === cachedAvatar.posterSrc),
+        );
+        if (cachedAvatar?.mediaType === "video" && stillMatchesAnimation) {
+          try {
+            if (
+              /^asset:/u.test(cachedAvatar.src) &&
+              typeof persona.avatar === "string"
+            ) {
+              const avatarRef = persona.avatar;
+              const cachedAnimation = await withAnimationEmbedDeadline(() =>
+                readCachedAvatarAnimation({ avatarRef }),
+              );
+              if (cachedAnimation) {
+                animation = {
+                  bytes: new Uint8Array(cachedAnimation.bytes),
+                  mimeType:
+                    cachedAnimation.mimeType === "video/mp4"
+                      ? ("video/mp4" as const)
+                      : ("video/webm" as const),
+                  alphaMode: cachedAnimation.alphaMode,
+                };
+              }
+            } else if (/^(?:https?:|blob:|data:)/u.test(cachedAvatar.src)) {
+              const blob = await withAnimationEmbedDeadline(async (signal) => {
+                const response = await fetch(cachedAvatar.src, { signal });
+                if (!response.ok)
+                  throw new Error("Avatar animation request failed");
+                return await response.blob();
+              });
+              if (blob.type !== "video/mp4" && blob.type !== "video/webm") {
+                throw new Error(
+                  "Avatar animation has an unsupported media type",
+                );
+              }
+              const animationBytes = await blobToBytes(blob);
+              const mimeType = blob.type as "video/mp4" | "video/webm";
+              if (
+                animationBytes.length <= MAX_SNAPSHOT_AVATAR_ANIMATION_BYTES
+              ) {
+                animation = {
+                  bytes: animationBytes,
+                  mimeType,
+                  alphaMode: cachedAvatar.alphaMode,
+                };
+              }
+            }
+          } catch (error) {
+            console.warn("Could not embed animated avatar:", error);
+          }
+        }
+        if (operationGeneration !== cardOperationGenerationRef.current) return;
+        const cardBytes = await blobToBytes(card);
+        let encodedCard: Uint8Array;
+        try {
+          encodedCard = encodeAgentImage(cardBytes, snapshot, animation);
+        } catch (error) {
+          if (
+            !(error instanceof AgentSnapshotError) ||
+            error.code !== "too-large"
+          ) {
+            throw error;
+          }
+          // The still card remains portable when an otherwise-valid animation
+          // would push the combined PNG over the snapshot size limit.
+          encodedCard = encodeAgentImage(cardBytes, snapshot, null);
+        }
+        if (operationGeneration !== cardOperationGenerationRef.current) return;
+        const pngFilename = getAgentShareFilename(persona.displayName);
+        const filename =
+          format === "zip"
+            ? pngFilename.replace(/\.png$/u, ".zip")
+            : pngFilename;
+        const downloadBytes =
+          format === "zip"
+            ? await createAgentZip(pngFilename, encodedCard, controller.signal)
+            : encodedCard;
+        if (operationGeneration !== cardOperationGenerationRef.current) return;
+        const blob = new Blob([new Uint8Array(downloadBytes).buffer], {
+          type: format === "zip" ? "application/zip" : "image/png",
+        });
+        downloadBlob(blob, filename);
+        toast.success(t("share.cardDownloaded", { filename }));
+      } catch (error) {
+        if (operationGeneration !== cardOperationGenerationRef.current) return;
+        console.error("Failed to download agent share card:", error);
+        toast.error(t("share.cardDownloadFailed"));
+      } finally {
+        if (cardDownloadInFlightRef.current === operationGeneration) {
+          cardDownloadInFlightRef.current = null;
+          if (cardOperationAbortRef.current === controller) {
+            cardOperationAbortRef.current = null;
+          }
+          setCardDownloadPending(false);
+        }
       }
-      if (operationGeneration !== cardOperationGenerationRef.current) return;
-      const filename = getAgentShareFilename(persona.displayName);
-      downloadBlob(
-        new Blob([new Uint8Array(encodedCard).buffer], { type: "image/png" }),
-        filename,
-      );
-      toast.success(t("share.cardDownloaded", { filename }));
-    } catch (error) {
-      if (operationGeneration !== cardOperationGenerationRef.current) return;
-      console.error("Failed to download agent share card:", error);
-      toast.error(t("share.cardDownloadFailed"));
-    } finally {
-      cardDownloadInFlightRef.current = false;
-      if (operationGeneration === cardOperationGenerationRef.current) {
-        setCardDownloadPending(false);
-      }
-    }
-  }, [
-    avatarReadySrc,
-    cachedAvatar,
-    cardCopy,
-    cardBase,
-    currentGeneratedAvatarPoster,
-    locale,
-    persona,
-    t,
-  ]);
+    },
+    [
+      avatarReadySrc,
+      cachedAvatar,
+      cardCopy,
+      cardBase,
+      currentGeneratedAvatarPoster,
+      locale,
+      persona,
+      t,
+    ],
+  );
 
   const handleAvatarPreloadRef = useCallback(
     (node: HTMLImageElement | null) => {
@@ -449,36 +523,46 @@ export function AgentShareDialog({
         </div>
 
         <DialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            leftIcon={
-              cardDownloadPending ? (
-                <Loader2 className="animate-spin motion-reduce:animate-none" />
-              ) : (
-                <Download />
-              )
-            }
-            disabled={cardDownloadPending || !cardReady}
-            onClick={() => void handleDownloadCard()}
+          <span
+            className="sr-only"
+            aria-live="polite"
+            data-testid="agent-download-status"
           >
-            {t("share.downloadCard")}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            leftIcon={
-              agentDownloadPending ? (
-                <Loader2 className="animate-spin motion-reduce:animate-none" />
-              ) : (
-                <Download />
-              )
-            }
-            disabled={agentDownloadPending}
-            onClick={() => void handleDownloadAgent()}
-          >
-            {t("share.downloadAgent", { name: persona.displayName })}
-          </Button>
+            {agentDownloadPending ? t("share.downloadingAgent") : ""}
+          </span>
+          <SplitButton
+            size="default"
+            activeActionId="png"
+            menuTriggerLabel={t("share.downloadOptions")}
+            menuLayer="modal"
+            feedbackState={cardDownloadPending ? "loading" : "idle"}
+            loadingLabel={t("share.downloadingCard")}
+            actions={[
+              {
+                id: "png",
+                label: t("share.downloadPng"),
+                disabled: !cardReady || cardDownloadPending,
+              },
+              {
+                id: "zip",
+                label: t("share.downloadZip"),
+                disabled: !cardReady || cardDownloadPending,
+              },
+              {
+                id: "markdown",
+                label: t("share.downloadMarkdown"),
+                disabled: agentDownloadPending,
+              },
+            ]}
+            onActionSelect={() => {}}
+            onPrimaryClick={(action) => {
+              if (action === "markdown") {
+                void handleDownloadAgent();
+              } else {
+                void handleDownloadCard(action);
+              }
+            }}
+          />
         </DialogFooter>
       </DialogContent>
     </Dialog>
