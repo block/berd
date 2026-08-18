@@ -20,6 +20,7 @@ const inventory: McpInventory = {
           configKey: "github",
           name: "GitHub",
           transport: "stdio",
+          identityFingerprint: "stdio-shared",
           enabled: true,
         },
       ],
@@ -40,6 +41,7 @@ const inventory: McpInventory = {
           configKey: "github",
           name: "GitHub",
           transport: "stdio",
+          identityFingerprint: "stdio-shared",
           enabled: null,
         },
         {
@@ -52,6 +54,7 @@ const inventory: McpInventory = {
           configKey: "context7",
           name: "Context7",
           transport: "http",
+          identityFingerprint: "http-shared",
           enabled: null,
         },
       ],
@@ -95,6 +98,7 @@ describe("MCP inventory grouping", () => {
               configKey: "default",
               name: "GitHub",
               transport: "stdio",
+              identityFingerprint: "stdio-shared",
             },
           ],
         },
@@ -110,6 +114,7 @@ describe("MCP inventory grouping", () => {
               configKey: "default",
               name: "Context7",
               transport: "http",
+              identityFingerprint: "http-shared",
             },
           ],
         },
@@ -117,6 +122,47 @@ describe("MCP inventory grouping", () => {
     };
 
     expect(groupMcpServers(collidingInventory)).toHaveLength(2);
+  });
+
+  it("does not merge same-key name and transport with different targets", () => {
+    const targetCollision: McpInventory = {
+      harnesses: [
+        {
+          harness: "goose",
+          status: "configured",
+          checkedLocations: [],
+          servers: [
+            {
+              id: "goose:github",
+              harness: "goose",
+              source: { scope: "user", label: "Goose user config" },
+              configKey: "github",
+              name: "GitHub",
+              transport: "stdio",
+              identityFingerprint: "target-one",
+            },
+          ],
+        },
+        {
+          harness: "codex",
+          status: "configured",
+          checkedLocations: [],
+          servers: [
+            {
+              id: "codex:github",
+              harness: "codex",
+              source: { scope: "user", label: "Codex user config" },
+              configKey: "github",
+              name: "GitHub",
+              transport: "stdio",
+              identityFingerprint: "target-two",
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(groupMcpServers(targetCollision)).toHaveLength(2);
   });
 
   it("does not merge punctuation-distinct config keys", () => {
@@ -134,6 +180,7 @@ describe("MCP inventory grouping", () => {
               configKey: "block-app-kit",
               name: "Block App Kit",
               transport: "stdio",
+              identityFingerprint: "stdio-shared",
             },
           ],
         },
@@ -149,6 +196,7 @@ describe("MCP inventory grouping", () => {
               configKey: "block.app.kit",
               name: "Block App Kit",
               transport: "stdio",
+              identityFingerprint: "stdio-shared",
             },
           ],
         },

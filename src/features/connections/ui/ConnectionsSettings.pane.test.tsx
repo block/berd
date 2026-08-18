@@ -19,6 +19,7 @@ const configuredServers = [
     configKey: "github",
     name: "GitHub",
     transport: "stdio",
+    identityFingerprint: "stdio-shared",
   },
   {
     id: "codex:user:github",
@@ -27,6 +28,7 @@ const configuredServers = [
     configKey: "github",
     name: "GitHub",
     transport: "stdio",
+    identityFingerprint: "stdio-shared",
   },
 ];
 

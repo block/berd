@@ -37,6 +37,7 @@ export interface McpConfiguredServer {
   configKey: string;
   name: string;
   transport: McpTransportKind;
+  identityFingerprint: string;
   enabled?: boolean | null;
 }
 

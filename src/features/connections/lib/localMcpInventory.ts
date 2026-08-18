@@ -39,7 +39,7 @@ export function mcpIdentityKey(server: McpConfiguredServer): string {
   // A shared key alone is not identity: generic names such as `server` and
   // `default` commonly point at unrelated implementations. Reconcile only
   // when independently authored name and transport evidence also agree.
-  return `${configKey}:${name}:${server.transport}`;
+  return `${configKey}:${name}:${server.transport}:${server.identityFingerprint}`;
 }
 
 function displayNameForGroup(entries: McpConfiguredServer[]): string {

@@ -31,7 +31,7 @@ pub enum McpConfigScope {
     Additional,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum McpTransportKind {
     Stdio,
@@ -67,6 +67,7 @@ pub struct McpConfiguredServer {
     pub config_key: String,
     pub name: String,
     pub transport: McpTransportKind,
+    pub identity_fingerprint: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -452,6 +453,10 @@ fn collect_goose_servers(
             continue;
         }
 
+        let command = yaml_lookup_string(extension_map, "cmd");
+        let args = yaml_lookup_string_sequence(extension_map, "args");
+        let url = yaml_lookup_string(extension_map, "uri")
+            .or_else(|| yaml_lookup_string(extension_map, "url"));
         push_server(
             servers,
             McpConfiguredServer {
@@ -461,6 +466,12 @@ fn collect_goose_servers(
                 config_key: config_key.to_string(),
                 name,
                 transport,
+                identity_fingerprint: identity_fingerprint(
+                    transport,
+                    command.as_deref(),
+                    &args,
+                    url.as_deref(),
+                ),
             },
         );
     }
@@ -488,13 +499,13 @@ fn collect_claude_code_servers(
     };
 
     for (project_path, project_config) in projects {
-        let Some(workspace) = canonical_matching_workspace(project_path, active_workspaces) else {
+        if canonical_matching_workspace(project_path, active_workspaces).is_none() {
             continue;
-        };
+        }
         let local_file = ConfigFile {
             path: file.path.clone(),
             scope: McpConfigScope::LocalProject,
-            label: format!("Claude Code local project config ({})", workspace.display()),
+            label: "Claude Code local project config".to_string(),
         };
         collect_json_server_map(
             servers,
@@ -542,6 +553,17 @@ fn json_server_from_value(
         .get("command")
         .or_else(|| object.get("cmd"))
         .and_then(JsonValue::as_str);
+    let args = object
+        .get("args")
+        .and_then(JsonValue::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(JsonValue::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let url = object
         .get("url")
         .or_else(|| object.get("uri"))
@@ -564,6 +586,7 @@ fn json_server_from_value(
         config_key: config_key.to_string(),
         name,
         transport,
+        identity_fingerprint: identity_fingerprint(transport, command, &args, url),
     })
 }
 
@@ -685,6 +708,72 @@ fn yaml_lookup_string(map: &yaml_serde::Mapping, key: &str) -> Option<String> {
     yaml_lookup(map, key)
         .and_then(YamlValue::as_str)
         .map(str::to_string)
+}
+
+fn yaml_lookup_string_sequence(map: &yaml_serde::Mapping, key: &str) -> Vec<String> {
+    yaml_lookup(map, key)
+        .and_then(YamlValue::as_sequence)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(YamlValue::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn safe_stdio_identity(command: Option<&str>, args: &[String]) -> String {
+    let executable = command
+        .and_then(|value| PathBuf::from(value).file_name().map(|name| name.to_owned()))
+        .and_then(|name| name.to_str().map(str::to_string))
+        .unwrap_or_default();
+    let safe_args = args
+        .iter()
+        .filter(|arg| {
+            !arg.contains('=')
+                && !arg.to_ascii_lowercase().contains("token")
+                && !arg.to_ascii_lowercase().contains("secret")
+                && !arg.to_ascii_lowercase().contains("password")
+        })
+        .take(4)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\u{0}");
+    format!("{executable}\u{0}{safe_args}")
+}
+
+fn safe_remote_identity(raw_url: Option<&str>) -> String {
+    let Some(mut url) = raw_url.and_then(|value| url::Url::parse(value).ok()) else {
+        return String::new();
+    };
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    format!(
+        "{}://{}{}",
+        url.scheme(),
+        url.host_str().unwrap_or_default(),
+        url.path()
+    )
+}
+
+fn identity_fingerprint(
+    transport: McpTransportKind,
+    command: Option<&str>,
+    args: &[String],
+    url: Option<&str>,
+) -> String {
+    let identity = match transport {
+        McpTransportKind::Stdio => safe_stdio_identity(command, args),
+        McpTransportKind::Http | McpTransportKind::Sse => safe_remote_identity(url),
+        _ => String::new(),
+    };
+    let mut hasher = DefaultHasher::new();
+    transport.hash(&mut hasher);
+    identity.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 fn server_id(harness: McpHarnessId, file: &ConfigFile, config_key: &str) -> String {
@@ -846,6 +935,10 @@ url = "https://mcp.example.test/sse?api_key=secret"
         collect_codex_servers(&mut servers, &config, &value);
 
         assert_eq!(servers.len(), 2);
+        assert_ne!(
+            servers[0].identity_fingerprint,
+            servers[1].identity_fingerprint
+        );
         assert_eq!(servers[0].name, "context7");
         assert_eq!(servers[0].transport, McpTransportKind::Stdio);
         assert_eq!(servers[1].transport, McpTransportKind::Sse);
@@ -882,6 +975,7 @@ url = "https://mcp.example.test/sse?api_key=secret"
             config_key: "context7".to_string(),
             name: "Context7".to_string(),
             transport: McpTransportKind::Http,
+            identity_fingerprint: "fixture".to_string(),
         });
 
         inventory = finish_inventory(
@@ -1040,6 +1134,8 @@ url = "https://mcp.example.test/sse?api_key=secret"
         let rendered = serde_json::to_string(&servers).unwrap();
         assert!(!rendered.contains("unrelated"));
         assert!(!rendered.contains("secret"));
+        assert!(!rendered.contains(active_workspace.to_string_lossy().as_ref()));
+        assert!(!rendered.contains("Claude Code local project config ("));
     }
 
     #[test]
