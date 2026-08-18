@@ -13,11 +13,14 @@ import {
 
 import { loadWorkspaceInstructionFiles } from "@/features/chat/api/workspaceContext";
 import { sendPromptInBackground } from "@/features/chat/lib/backgroundSend";
+import { composeBuilderSendOptions } from "@/features/chat/hooks/useBuilderSendInterceptor";
+import { getAgentBuilderQueuePreparedTargetPath } from "@/features/chat/lib/agentBuilderQueueReadiness";
 import { isFirstCommittedUserMessage } from "@/features/chat/lib/chatFirstMessage";
 import {
   trackChatMessageSent,
   trackChatSessionStarted,
 } from "@/features/chat/lib/chatTelemetry";
+import { QueuedSessionNotReadyError } from "@/features/chat/lib/queuedMessageReadiness";
 import { loadSessionMessages } from "@/features/chat/lib/sessionActivation";
 import {
   SessionDispatchContentionError,
@@ -259,6 +262,22 @@ export async function sendQueuedPromptToExistingSessionInBackground(
   beforeUserMessageCommitted?: () => void,
   onPromptDispatched?: () => void,
 ): Promise<void> {
+  let preparedBuilderTargetPath: string | undefined;
+  const assertAgentBuilderPreparationReady = () => {
+    const targetPath = getAgentBuilderQueuePreparedTargetPath(
+      queuedMessage,
+      useChatSessionStore.getState().getSession(sessionId),
+    );
+    if (
+      targetPath === null ||
+      (preparedBuilderTargetPath !== undefined &&
+        targetPath !== preparedBuilderTargetPath)
+    ) {
+      throw new QueuedSessionNotReadyError();
+    }
+    return targetPath;
+  };
+  assertAgentBuilderPreparationReady();
   const acquisition = await acquireExistingSessionForBackgroundSend(sessionId);
   if (acquisition.status === "contended") {
     throw new SessionDispatchContentionError(acquisition.waiter);
@@ -275,7 +294,6 @@ export async function sendQueuedPromptToExistingSessionInBackground(
   const targetLease = acquisition;
   try {
     const { payload } = queuedMessage;
-    const sendOptions = payload.sendOptions ?? {};
     const payloadPersonaIntent = payload.persona;
     const payloadPersona =
       payloadPersonaIntent.kind === "persona"
@@ -338,6 +356,14 @@ export async function sendQueuedPromptToExistingSessionInBackground(
           formatAvailableSkillsCatalogPrompt(skills),
         )
       : undefined;
+    const sessionBeforeSend = useChatSessionStore
+      .getState()
+      .getSession(sessionId);
+    preparedBuilderTargetPath = assertAgentBuilderPreparationReady();
+    const sendOptions = composeBuilderSendOptions(
+      sessionBeforeSend,
+      payload.sendOptions ?? {},
+    );
     const personaSystemPrompt =
       sendOptions.capturedPersonaSystemPrompt ??
       formatPersonaSystemPrompt(persona);
@@ -408,7 +434,10 @@ export async function sendQueuedPromptToExistingSessionInBackground(
         executionSystemPrompt,
       },
       payload.attachments,
-      beforeUserMessageCommitted,
+      () => {
+        assertAgentBuilderPreparationReady();
+        beforeUserMessageCommitted?.();
+      },
       fireSendTelemetry,
       () => assertSessionExecutionTarget(sessionId, preparedExecutionTarget),
       onPromptDispatched,
