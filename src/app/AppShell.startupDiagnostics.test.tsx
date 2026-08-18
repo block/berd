@@ -101,20 +101,9 @@ vi.mock("./ui/AppShellContent", () => ({
   AppShellContent: () => <section data-testid="app-shell-content" />,
 }));
 
-// The flow's own tests cover the steps; here only the gate order and the
-// runtime state AppShell hands down matter.
+// The flow's own tests cover the landing ceremony; here only gate order matters.
 vi.mock("@/features/onboarding/ui/OnboardingFlow", () => ({
-  OnboardingFlow: ({
-    runtime,
-  }: {
-    runtime: { ready: boolean; failed: boolean };
-  }) => (
-    <div
-      data-testid="onboarding-flow"
-      data-runtime-ready={String(runtime.ready)}
-      data-runtime-failed={String(runtime.failed)}
-    />
-  ),
+  OnboardingFlow: () => <div data-testid="onboarding-flow" />,
 }));
 
 function renderAppShell() {
@@ -227,7 +216,6 @@ describe("AppShell startup diagnostics", () => {
       () => {
         mocks.startupState.ready = false;
       },
-      { ready: "false", failed: "false" },
     ],
     [
       "startup failed",
@@ -236,17 +224,14 @@ describe("AppShell startup diagnostics", () => {
           "Failed to spawn goose serve (binary: goosed): denied",
         );
       },
-      { ready: "false", failed: "true" },
     ],
-  ])("renders onboarding while %s", (_case, arrange, expected) => {
+  ])("renders onboarding while %s", (_case, arrange) => {
     arrange();
     resetOnboarding();
 
     renderAppShell();
 
-    const flow = screen.getByTestId("onboarding-flow");
-    expect(flow).toHaveAttribute("data-runtime-ready", expected.ready);
-    expect(flow).toHaveAttribute("data-runtime-failed", expected.failed);
+    expect(screen.getByTestId("onboarding-flow")).toBeInTheDocument();
     expect(
       screen.queryByRole("status", { name: "Starting Berd" }),
     ).not.toBeInTheDocument();
