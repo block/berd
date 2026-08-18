@@ -109,6 +109,10 @@ fn run_agent_tools() -> Result<()> {
 
 fn run_bb() -> Result<()> {
     let argv = std::env::args().collect::<Vec<_>>();
+    run_bb_with_argv(argv)
+}
+
+fn run_bb_with_argv(argv: Vec<String>) -> Result<()> {
     let raw_args = &argv[1..];
 
     if raw_args.first().map(String::as_str) == Some(TOOLS_COMMAND_NAME) {
