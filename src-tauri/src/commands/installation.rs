@@ -9,7 +9,6 @@ pub async fn get_installation_cohort(
     state: State<'_, InstallationCohortState>,
 ) -> Result<InstallationCohort, String> {
     let mut receiver = state.0.clone();
-    drop(state);
     loop {
         let readiness = *receiver.borrow_and_update();
         if let InstallationCohortReadiness::Ready(cohort) = readiness {
