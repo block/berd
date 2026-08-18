@@ -38,11 +38,11 @@ describe("release bundled-agent defaults", () => {
 
     expect(tauriConfig.bundle.resources["../distro"]).toBe("distro");
     expect(agentFiles).toEqual([
+      "agt-builder.md",
       "berdy.md",
       "choosey.md",
       "copycat.md",
       "pushback.md",
-      "sprout.md",
       "tinker.md",
       "wildcard.md",
     ]);
