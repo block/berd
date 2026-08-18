@@ -1,3 +1,4 @@
+import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { listPersonas } from "@/shared/api/agents";
 import {
   markStarterAgentPinsEligible,
@@ -33,7 +34,25 @@ export async function resetStarterTasksExperience(): Promise<boolean> {
 async function restoreStarterAgentPins(): Promise<boolean> {
   let starterPersonas: ReturnType<typeof selectStarterAgentPersonas>;
   try {
-    starterPersonas = selectStarterAgentPersonas(await listPersonas());
+    const personas = await listPersonas();
+    starterPersonas = selectStarterAgentPersonas(personas);
+    // Merge by stable identity so newly allocated starter personas resolve
+    // immediately without replacing concurrent persona edits in the store.
+    const currentPersonas = useAgentStore.getState().personas;
+    const refreshedById = new Map(
+      personas.map((persona) => [persona.id, persona]),
+    );
+    useAgentStore
+      .getState()
+      .setPersonas([
+        ...currentPersonas.map(
+          (persona) => refreshedById.get(persona.id) ?? persona,
+        ),
+        ...personas.filter(
+          (persona) =>
+            !currentPersonas.some((current) => current.id === persona.id),
+        ),
+      ]);
   } catch (error) {
     console.error(
       "Failed to load starter agents during onboarding reset:",

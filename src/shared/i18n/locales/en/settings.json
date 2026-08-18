@@ -220,6 +220,7 @@
       "description": "Try and reset onboarding experiences together.",
       "resetAll": "Reset all onboarding",
       "resetAllError": "Couldn't reset all onboarding experiences. Try again.",
+      "resetAllPartial": "Onboarding was reset. Starter agents will appear when they're available.",
       "resetAllSuccess": "All onboarding experiences were reset.",
       "title": "Onboarding"
     },

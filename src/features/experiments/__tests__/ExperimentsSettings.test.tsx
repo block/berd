@@ -29,6 +29,14 @@ const resetHomeForOnboardingExperienceMock = vi.hoisted(() =>
 const syncOnboardingExperimentStateMock = vi.hoisted(() =>
   vi.fn(async () => {}),
 );
+const toastWarningMock = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+    warning: toastWarningMock,
+  },
+}));
 vi.mock("@/features/onboarding/resetOnboardingTour", () => ({
   resetHomeForOnboardingExperience: resetHomeForOnboardingExperienceMock,
   syncOnboardingExperimentState: syncOnboardingExperimentStateMock,
@@ -83,6 +91,7 @@ describe("ExperimentsSettings", () => {
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
     resetHomeForOnboardingExperienceMock.mockClear();
     syncOnboardingExperimentStateMock.mockClear();
+    toastWarningMock.mockClear();
   });
 
   afterEach(() => {
@@ -251,6 +260,9 @@ describe("ExperimentsSettings", () => {
         i18n.t("experiments.onboarding.resetAllSuccess", { ns: "settings" }),
       ),
     ).not.toBeInTheDocument();
+    expect(toastWarningMock).toHaveBeenCalledWith(
+      i18n.t("experiments.onboarding.resetAllPartial", { ns: "settings" }),
+    );
   });
 
   it("preserves first-run state when reset-all preparation fails", async () => {
