@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { IconAlertTriangle, IconX } from "@tabler/icons-react";
 import {
   listLocalMcpInventory,
   LOCAL_MCP_INVENTORY_QUERY_KEY,
@@ -11,6 +12,7 @@ import {
 } from "@/features/connections/lib/localMcpInventory";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
+import { useMigrationStore } from "@/features/migration/stores/migrationStore";
 import { SettingsSection } from "@/shared/ui/settings-section";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { LocalMcpConnectionCard } from "./LocalMcpConnectionCard";
@@ -34,6 +36,25 @@ export function LocalMcpSection({
   const visibleGroups = filterMcpGroups(groups, searchTerm);
   const failedSources = harnessesWithErrors(query.data);
   const hasFailure = query.isError || failedSources.length > 0;
+  const disabledExtensions = useMigrationStore(
+    (state) => state.disabledExtensions,
+  );
+  const bannerDismissedAt = useMigrationStore(
+    (state) => state.bannerDismissedAt,
+  );
+  const dismissBanner = useMigrationStore((state) => state.dismissBanner);
+  const visibleGooseKeys = new Set(
+    groups.flatMap((group) =>
+      group.entries
+        .filter((entry) => entry.harness === "goose")
+        .map((entry) => entry.configKey),
+    ),
+  );
+  const visibleDisabledExtensions = disabledExtensions.filter((extension) =>
+    visibleGooseKeys.has(extension.configKey),
+  );
+  const showDisabledBanner =
+    visibleDisabledExtensions.length > 0 && !bannerDismissedAt;
 
   if (query.isLoading) {
     return (
@@ -103,6 +124,29 @@ export function LocalMcpSection({
 
   return (
     <SettingsSection title={t("connections.sections.local")}>
+      {showDisabledBanner ? (
+        <Alert variant="default" className="pr-10">
+          <IconAlertTriangle aria-hidden="true" className="text-warning!" />
+          <AlertTitle>{t("extensions.disabledBanner.title")}</AlertTitle>
+          <AlertDescription>
+            {t("extensions.disabledBanner.description", {
+              names: visibleDisabledExtensions
+                .map((extension) => extension.name)
+                .join(", "),
+            })}
+          </AlertDescription>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="absolute top-2 right-2"
+            aria-label={t("extensions.disabledBanner.dismiss")}
+            onClick={() => void dismissBanner()}
+          >
+            <IconX className="size-3.5" />
+          </Button>
+        </Alert>
+      ) : null}
       {hasFailure ? (
         <Alert>
           <AlertTitle>{t("connections.localError.partialTitle")}</AlertTitle>

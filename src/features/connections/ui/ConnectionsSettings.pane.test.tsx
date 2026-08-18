@@ -9,6 +9,8 @@ const testState = vi.hoisted(() => ({
   projectId: null as string | null,
   inventoryMode: "configured" as "configured" | "empty" | "error" | "partial",
   inventoryCalls: [] as string[][],
+  disabledExtensions: [] as Array<{ configKey: string; name: string }>,
+  dismissBanner: vi.fn(),
 }));
 
 const configuredServers = [
@@ -59,6 +61,15 @@ vi.mock("@/features/projects/stores/projectStore", () => ({
             },
           ]
         : [],
+    }),
+}));
+
+vi.mock("@/features/migration/stores/migrationStore", () => ({
+  useMigrationStore: (selector: (state: object) => unknown) =>
+    selector({
+      disabledExtensions: testState.disabledExtensions,
+      bannerDismissedAt: undefined,
+      dismissBanner: testState.dismissBanner,
     }),
 }));
 
@@ -118,6 +129,8 @@ describe("ConnectionsSettings", () => {
     testState.projectId = null;
     testState.inventoryMode = "configured";
     testState.inventoryCalls = [];
+    testState.disabledExtensions = [];
+    testState.dismissBanner.mockReset().mockResolvedValue(undefined);
   });
 
   it("renders passive local inventory without managed connections", async () => {
@@ -129,6 +142,20 @@ describe("ConnectionsSettings", () => {
     expect(
       screen.queryByText("connections.sections.managed"),
     ).not.toBeInTheDocument();
+  });
+
+  it("preserves the migration warning for visible disabled Goose extensions", async () => {
+    testState.disabledExtensions = [{ configKey: "github", name: "GitHub" }];
+    const user = userEvent.setup();
+    renderConnectionsSettings();
+
+    expect(
+      await screen.findByText("extensions.disabledBanner.title"),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "extensions.disabledBanner.dismiss" }),
+    );
+    expect(testState.dismissBanner).toHaveBeenCalledOnce();
   });
 
   it("organizes managed and local connections without installed or available sections", async () => {
