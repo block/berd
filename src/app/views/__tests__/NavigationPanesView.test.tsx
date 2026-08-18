@@ -2077,10 +2077,9 @@ describe("NavigationPanesView", () => {
       name: /settings navigation/i,
     });
     expect(settingsNavigation).toHaveClass("px-1.5", "py-1");
-    expect(screen.getByRole("button", { name: /^back$/i })).toHaveClass(
-      "h-7",
-      "px-3",
-    );
+    const backButton = screen.getByRole("button", { name: /^back$/i });
+    expect(backButton.parentElement).toHaveClass("mt-1");
+    expect(backButton).toHaveClass("h-7", "px-3");
     expect(
       within(settingsNavigation).getByRole("button", { name: /providers/i }),
     ).toHaveClass("h-7", "px-3");
