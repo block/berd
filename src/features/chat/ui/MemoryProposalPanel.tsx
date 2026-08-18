@@ -1,37 +1,61 @@
-import { useAddedMemories } from "@/features/me/hooks/useAddedMemories";
+import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 
-import { AddedMemoryCard } from "./AddedMemoryCard";
+import { useAddedMemories } from "@/features/me/hooks/useAddedMemories";
+import { showAddedMemoryToast } from "@/features/me/lib/addedMemoryToast";
+import { ToastActionButton, ToastActionGroup } from "@/shared/ui/sonner";
 
 /**
- * Memories added from this chat, surfaced above the composer.
+ * Announces memories added from this chat as toasts.
  *
- * The noticer runs a few seconds after a conversation goes quiet — the
- * person is usually still sitting right there — so a fact caught from
- * this conversation gets disclosed in it. Nothing here is an ask: the
- * entry is already in the file, and the card is how the user finds out
- * and can undo it.
+ * Memory is written automatically, so this is disclosure: the toast says what
+ * landed and offers to undo it while the person is still in the conversation
+ * that produced it. Nothing renders inline — an earlier version put cards
+ * above the composer, but a transient toast is the right weight for something
+ * the user doesn't have to act on.
  *
- * Resolving a card here (OK or Delete) clears it from Settings → Memory
- * too; both surfaces read the same `recent.jsonl`.
+ * Missing the toast costs nothing: unresolved entries stay in
+ * Settings → Memory (with the nav badge) until acknowledged or deleted.
+ * Acting here clears them from that list too, since both read one file.
  */
 export function MemoryProposalPanel({
   sessionId,
 }: {
   sessionId: string | undefined;
 }) {
+  const { t } = useTranslation("settings");
   const { entries, acknowledge, remove } = useAddedMemories(sessionId);
-  if (!sessionId || entries.length === 0) return null;
 
-  return (
-    <div data-role="added-memory-panel" className="mb-2 flex flex-col gap-1.5">
-      {entries.map((entry) => (
-        <AddedMemoryCard
-          key={entry.id}
-          entry={entry}
-          onAcknowledge={(item) => void acknowledge(item)}
-          onDelete={(item) => void remove(item)}
-        />
-      ))}
-    </div>
-  );
+  useEffect(() => {
+    if (!sessionId) return;
+    for (const entry of entries) {
+      showAddedMemoryToast({
+        entry,
+        destination: entry.topic
+          ? t("me.added.inTopic", { topic: entry.topic })
+          : t("me.added.inGeneral"),
+        title: t("me.added.title"),
+        okLabel: t("me.added.ok"),
+        deleteLabel: t("me.added.delete"),
+        onAcknowledge: (item) => void acknowledge(item),
+        onDelete: (item) => void remove(item),
+        renderActions: ({ okLabel, deleteLabel, onOk, onDelete }) => (
+          <ToastActionGroup>
+            <ToastActionButton
+              className="ml-0"
+              emphasis="secondary"
+              onClick={onDelete}
+            >
+              {deleteLabel}
+            </ToastActionButton>
+            <ToastActionButton className="ml-0" onClick={onOk}>
+              {okLabel}
+            </ToastActionButton>
+          </ToastActionGroup>
+        ),
+      });
+    }
+  }, [entries, sessionId, acknowledge, remove, t]);
+
+  return null;
 }

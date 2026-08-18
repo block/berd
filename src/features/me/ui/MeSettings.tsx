@@ -317,42 +317,52 @@ export function MeSettings() {
         )}
 
         {memoryEnabled && added.length > 0 && (
-          <SettingsSection title={t("me.added.title")}>
-            <p className="text-xs text-muted-foreground">
-              {t("me.added.description")}
-            </p>
-            <div className="mt-3 space-y-2">
-              {added.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="flex items-start justify-between gap-4 rounded-md border bg-muted/50 px-4 py-3"
-                >
-                  <div className="min-w-0">
-                    <p className="text-xs text-foreground">{entry.content}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      {entry.topic
-                        ? t("me.added.inTopic", { topic: entry.topic })
-                        : t("me.added.inGeneral")}
-                    </p>
+          <SettingsSection
+            title={t("me.added.title")}
+            className="border-b border-border pb-11"
+          >
+            <div className="space-y-3 pb-1">
+              <p className="text-xs text-muted-foreground">
+                {t("me.added.description")}
+              </p>
+              <div className="space-y-2">
+                {added.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="flex items-start justify-between gap-4 rounded-md border bg-muted/50 px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs text-foreground">{entry.content}</p>
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {entry.topic
+                          ? t("me.added.inTopic", { topic: entry.topic })
+                          : t("me.added.inGeneral")}
+                      </p>
+                    </div>
+                    {/* Delete is the consequential one, so it reads as
+                        destructive; OK is the plain acknowledgment. Both were
+                        identical ghost buttons before, which gave no signal
+                        about which does what. */}
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        destructive
+                        onClick={() => void handleDeleteAdded(entry)}
+                      >
+                        {t("me.added.delete")}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void handleAcknowledgeAdded(entry)}
+                      >
+                        {t("me.added.ok")}
+                      </Button>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => void handleDeleteAdded(entry)}
-                    >
-                      {t("me.added.delete")}
-                    </Button>
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      onClick={() => void handleAcknowledgeAdded(entry)}
-                    >
-                      {t("me.added.ok")}
-                    </Button>
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </SettingsSection>
         )}
@@ -410,6 +420,24 @@ export function MeSettings() {
             </SettingsSection>
 
             <SettingsSection title={t("me.topicsTitle")}>
+              {/* pr-4 matches SettingsRow's own right padding, so Add topic
+                  lines up with the View buttons in the rows below it. */}
+              <div className="flex items-start justify-between gap-4 border-b border-border pr-4 pb-3">
+                <p className="text-xs text-muted-foreground">
+                  {t("me.topicsHint")}
+                </p>
+                {!creatingTopic && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => setCreatingTopic(true)}
+                  >
+                    {t("me.addTopic")}
+                  </Button>
+                )}
+              </div>
+
               {topics.length === 0 && !creatingTopic && (
                 <p className="py-3 text-sm text-muted-foreground">
                   {t("me.noTopics")}
@@ -451,10 +479,9 @@ export function MeSettings() {
                 />
               ))}
 
-              {creatingTopic ? (
+              {creatingTopic && (
                 <SettingsRow
-                  label={t("me.newTopicLabel")}
-                  description={t("me.newTopicDescription")}
+                  label={t("me.newTopicDescription")}
                   action={
                     <div className="flex items-center gap-2">
                       <Input
@@ -501,20 +528,6 @@ export function MeSettings() {
                         {t("me.newTopicError")}
                       </p>
                     ) : undefined
-                  }
-                />
-              ) : (
-                <SettingsRow
-                  label={t("me.addTopicLabel")}
-                  description={t("me.topicsHint")}
-                  action={
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setCreatingTopic(true)}
-                    >
-                      {t("me.addTopic")}
-                    </Button>
                   }
                 />
               )}
