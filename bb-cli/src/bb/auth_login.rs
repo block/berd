@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use builderbot_auth::auth_login::{
     build_auth_http_client, exchange_login_code_and_verify, login_url, logout_session_credential,
-    verify_session_credential, AuthMeResponse,
+    verify_session_credential, AuthMeResponse, VerifiedLoginSession,
 };
 use builderbot_auth::auth_storage::StoredSessionCredential;
 use serde::Serialize;
@@ -209,9 +209,8 @@ fn run_browser_login_with_output(
     let code = wait_for_login_callback(rx, callback_timeout)?;
     let verified =
         exchange_login_code_and_verify(&client, config.playpen.as_deref(), &service_url, &code)?;
-    let stored = store_login_credential(storage, &storage_key, verified.credential)?;
-    let me = verified.me;
-    let workspace_name = me.active_workspace_name()?.to_string();
+    let (stored, me, workspace_name) =
+        validate_and_store_login_credential(storage, &storage_key, verified)?;
     output.info(
         config,
         &format!(
@@ -290,6 +289,16 @@ fn store_login_credential(
 ) -> Result<StoredSessionCredential> {
     storage.set(storage_key, &credential)?;
     Ok(credential)
+}
+
+fn validate_and_store_login_credential(
+    storage: &dyn SessionCredentialStorage,
+    storage_key: &super::auth_storage::SessionStorageKey,
+    verified: VerifiedLoginSession,
+) -> Result<(StoredSessionCredential, AuthMeResponse, String)> {
+    let workspace_name = verified.me.active_workspace_name()?.to_string();
+    let stored = store_login_credential(storage, storage_key, verified.credential)?;
+    Ok((stored, verified.me, workspace_name))
 }
 
 pub fn logout_stored_session(
@@ -439,14 +448,16 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use anyhow::Result;
-    use builderbot_auth::auth_login::{AuthMeResponse, AuthMeWorkspace, AuthMeWorkspaces};
+    use builderbot_auth::auth_login::{
+        AuthMeResponse, AuthMeWorkspace, AuthMeWorkspaces, VerifiedLoginSession,
+    };
     use builderbot_auth::auth_storage::{
         SessionCredentialStorage, SessionStorageKey, StoredSessionCredential,
     };
 
     use super::{
-        auth_callback_page, store_login_credential, verify_stored_session_with,
-        wait_for_login_callback, AuthCallbackPage, BrowserLoginOutput,
+        auth_callback_page, store_login_credential, validate_and_store_login_credential,
+        verify_stored_session_with, wait_for_login_callback, AuthCallbackPage, BrowserLoginOutput,
     };
 
     struct SwappingStorage {
@@ -563,6 +574,29 @@ mod tests {
         assert_eq!(returned.session_credential, "issued-a");
         assert_eq!(storage.read_count.get(), 0);
         assert_eq!(storage.writes.borrow()[0].session_credential, "issued-a");
+    }
+
+    #[test]
+    fn browser_login_does_not_store_a_session_without_an_active_workspace() {
+        let storage = SwappingStorage::new([]);
+        let key = SessionStorageKey::new("default", "https://kgoose.example");
+        let verified = VerifiedLoginSession {
+            credential: stored("issued-without-workspace"),
+            me: AuthMeResponse {
+                subject: None,
+                email: None,
+                name: None,
+                expires_at: None,
+                workspaces: AuthMeWorkspaces { active: vec![] },
+            },
+        };
+
+        let error = validate_and_store_login_credential(&storage, &key, verified)
+            .expect_err("reject login without an active workspace");
+
+        assert!(error.to_string().contains("no active workspaces"));
+        assert!(storage.writes.borrow().is_empty());
+        assert!(storage.get(&key).expect("read storage").is_none());
     }
 
     #[test]

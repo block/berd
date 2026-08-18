@@ -197,7 +197,6 @@ pub fn bb_command() -> Command {
         .env_remove("BB_KGOOSE_PLAYPEN")
         .env_remove("BB_AUTH_STORAGE")
         .env_remove("BB_AUTH_STORAGE_FILE")
-        .env_remove("BB_APPS_E2E_CONTROL_PLANE_URL")
         .env_remove("KGOOSE_BASE_URL")
         .env_remove("KGOOSE_DEBUG")
         .env_remove("KGOOSE_PLAYPEN")
