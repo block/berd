@@ -2241,7 +2241,7 @@ describe("VirtualMessageTimeline", () => {
         "bounded-controller",
       ),
     );
-    expect(list).toHaveAttribute("data-virtual-engine", "tanstack");
+    expect(list).toHaveAttribute("data-virtual-engine", "direct");
     expect(list).toHaveAttribute("data-virtual-unmounting", "enabled");
     expect(list).toHaveAttribute("data-virtual-total-rows", "82");
     const mountedRows = Number(list.getAttribute("data-virtual-mounted-rows"));
@@ -2289,7 +2289,7 @@ describe("VirtualMessageTimeline", () => {
       expect(diagnosticsSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           renderer: "virtual-message-timeline",
-          engineKind: "tanstack",
+          engineKind: "direct",
           mode: "bounded-controller",
           sessionId: "session-1",
           totalRows: 82,
@@ -2301,7 +2301,7 @@ describe("VirtualMessageTimeline", () => {
     );
     expect(diagnosticEvents.at(-1)).toMatchObject({
       renderer: "virtual-message-timeline",
-      engineKind: "tanstack",
+      engineKind: "direct",
       mode: "bounded-controller",
       virtualUnmountingEnabled: true,
     });
@@ -2431,7 +2431,7 @@ describe("VirtualMessageTimeline", () => {
     );
   });
 
-  it("inspects and recovers a blank viewport from browser-owned geometry after resize", async () => {
+  it("inspects and retries blank-viewport recovery after resize without manufacturing a range change", async () => {
     vi.spyOn(performance, "now").mockReturnValue(1_000);
     const animationFrame = mockRequestAnimationFrame();
     let realRowsOffscreen = false;
@@ -2467,7 +2467,7 @@ describe("VirtualMessageTimeline", () => {
       list.querySelectorAll("[data-virtual-row-id]"),
       (row) => row.getAttribute("data-virtual-row-id"),
     );
-    expect(renderedRowIdsAfterResize).not.toEqual(renderedRowIdsBeforeResize);
+    expect(renderedRowIdsAfterResize).toEqual(renderedRowIdsBeforeResize);
     expect(renderedRowIdsAfterResize).toContain("message:message-0");
     await waitFor(() =>
       expect(list).toHaveAttribute(

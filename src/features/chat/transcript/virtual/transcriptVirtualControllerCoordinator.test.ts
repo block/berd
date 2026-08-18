@@ -249,7 +249,7 @@ describe("direct controller to viewport coordinator composition", () => {
     expect(controller.getDiagnostics().rangeCalculations).toBe(2);
   });
 
-  it("propagates a direct-controller correction through the coordinator's sole browser writer", () => {
+  it("commits a reduced direct-controller measurement batch through one coordinator browser write", () => {
     const { container, writes } = browserHarness({
       viewportHeight: 300,
       scrollHeight: 1000,
@@ -274,10 +274,14 @@ describe("direct controller to viewport coordinator composition", () => {
       { source: "browser", userScrollIntent: true },
     );
     const token = tokenFor(controller, "row-2");
-    const measured = coordinator.applyMeasuredHeight({ token, height: 160 });
+    const measured = coordinator.applyMeasuredHeights([
+      { token, height: 160 },
+      { token: { ...token, sessionId: "stale-session" }, height: 900 },
+    ]);
 
     expect(measured).toMatchObject({
-      accepted: true,
+      acceptedTokens: [token],
+      rejected: 1,
       correction: null,
     });
     expect(writes).toEqual([460]);
@@ -306,6 +310,7 @@ describe("direct controller to viewport coordinator composition", () => {
 
     coordinator.setRows(makeRows(5, 100));
 
+    expect("setScrollWritesSuspended" in controller).toBe(false);
     expect("writeScrollTop" in controller).toBe(false);
     expect(writes).toEqual([300]);
     expect(container.scrollTop).toBe(300);

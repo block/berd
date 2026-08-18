@@ -96,6 +96,7 @@ const EMPTY_DIAGNOSTICS: TranscriptVirtualDiagnostics = {
 };
 
 export class TranscriptVirtualController implements TranscriptVirtualEngine {
+  readonly engineKind = "direct";
   private rows: readonly TranscriptRowDescriptor[] = [];
   private rowIndexById = new Map<string, number>();
   private measurements = new Map<string, MeasurementEntry>();

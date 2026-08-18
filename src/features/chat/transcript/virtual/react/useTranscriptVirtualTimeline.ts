@@ -27,7 +27,7 @@ import {
 } from "../../row-state";
 import {
   createTranscriptScrollCoordinationAuthority,
-  createTranscriptTanStackVirtualAdapter,
+  createTranscriptVirtualController,
   type TranscriptScrollCoordinationAuthority,
   TranscriptViewportCoordinator,
   type TranscriptScrollAlign,
@@ -234,8 +234,8 @@ const EMPTY_LOCAL_MEASUREMENT_COUNTERS: LocalMeasurementCounters = {
 };
 
 const DEFAULT_ASSUMED_VIEWPORT_HEIGHT_PX = 640;
-const TANSTACK_UI_OVERSCAN_BEFORE_PX = 1600;
-const TANSTACK_UI_OVERSCAN_AFTER_PX = 1200;
+const UI_OVERSCAN_BEFORE_PX = 1600;
+const UI_OVERSCAN_AFTER_PX = 1200;
 const MAX_CONTROLLER_MEASUREMENT_UPDATES_PER_BATCH = 24;
 const TRANSCRIPT_MEASUREMENT_STABILITY_EPSILON_PX = 2;
 const TRANSCRIPT_LAYOUT_SYNC_EPSILON_PX = 1;
@@ -1877,7 +1877,7 @@ function createController({
   protectedRowIds: readonly string[];
   state?: TranscriptVirtualControllerState;
 }): TranscriptVirtualEngine {
-  const engine = createTranscriptTanStackVirtualAdapter(
+  const engine = createTranscriptVirtualController(
     {
       sessionId,
       sessionEpoch,
@@ -1892,9 +1892,8 @@ function createController({
     },
     {
       protectedRowIds,
-      overscanBeforePx: TANSTACK_UI_OVERSCAN_BEFORE_PX,
-      overscanAfterPx: TANSTACK_UI_OVERSCAN_AFTER_PX,
-      viewportWidth: container?.clientWidth,
+      overscanBeforePx: UI_OVERSCAN_BEFORE_PX,
+      overscanAfterPx: UI_OVERSCAN_AFTER_PX,
     },
   );
 

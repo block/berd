@@ -3616,9 +3616,9 @@ function VirtualMessageTimelineSession({
       setBlankViewportRecoveryAttempts(recoveryState.attempts);
 
       // Refresh row geometry first, then reconcile from the browser's actual
-      // viewport. Writing its current scrollTop through the adapter and reading
-      // it back makes clamping/browser behavior authoritative without moving a
-      // viewport owned by the user.
+      // viewport. The coordinator is the sole browser writer: preserve the
+      // current scroll position while it publishes browser-authoritative
+      // geometry without moving a viewport owned by the user.
       remeasureVisibleRowsSync();
       writeVirtualScrollTop(container.scrollTop, {
         source: "browser",
