@@ -95,10 +95,7 @@ pub fn verified_managed_agent_allocations(
             _ => continue,
         };
         let _ = metadata;
-        if source.is_file()
-            && digest_file(&source)? == allocation.installed_digest
-            && digest_file(&target)? == allocation.installed_digest
-        {
+        if source.is_file() && digest_file(&target)? == allocation.installed_digest {
             verified.insert(
                 target.to_string_lossy().into_owned(),
                 source_name.trim_end_matches(".md").to_string(),
@@ -175,51 +172,75 @@ fn repair_bundled_agent_from_dir(
         ));
     }
 
-    let mut marker = read_current_seed_marker(target_root)?.unwrap_or(SeedMarker {
-        version: 1,
-        install_state: InstallState::Complete,
-        seeded_files: BTreeSet::new(),
-        allocations: BTreeMap::new(),
-    });
-    if marker.version != 1 {
-        marker = SeedMarker {
-            version: 1,
-            install_state: InstallState::Complete,
-            seeded_files: BTreeSet::new(),
-            allocations: BTreeMap::new(),
-        };
-    }
+    let mut marker = read_current_seed_marker(target_root)?
+        .filter(|marker| marker.version == 1)
+        .ok_or_else(|| {
+            "Bundled agent repair requires a valid managed allocation manifest".to_string()
+        })?;
     let source_digest = digest_file(&source)?;
-    let claimed = marker
-        .allocations
-        .values()
-        .map(|allocation| allocation.target_file_name.clone())
-        .collect::<BTreeSet<_>>();
-    let target_file_name = match marker.allocations.get(file_name) {
-        Some(allocation) => {
-            let target = target_root.join(&allocation.target_file_name);
-            if target.exists() && digest_file(&target)? != allocation.installed_digest {
-                allocate_target_name(file_name, &claimed, target_root)?
-            } else {
-                allocation.target_file_name.clone()
-            }
-        }
-        None => allocate_target_name(file_name, &claimed, target_root)?,
+    let allocation = marker.allocations.get(file_name).cloned().ok_or_else(|| {
+        format!("Bundled agent '{file_name}' has no managed allocation to repair")
+    })?;
+
+    let target = target_root.join(&allocation.target_file_name);
+    let target_matches_recorded =
+        target.is_file() && digest_file(&target)? == allocation.installed_digest;
+    let target_file_name = if allocation.status == AllocationStatus::Pending
+        || !target.exists()
+        || target_matches_recorded
+    {
+        allocation.target_file_name
+    } else {
+        let claimed = marker
+            .allocations
+            .values()
+            .map(|record| record.target_file_name.clone())
+            .collect::<BTreeSet<_>>();
+        allocate_target_name(file_name, &claimed, target_root)?
     };
-    let target = target_root.join(&target_file_name);
-    if !target.exists() || digest_file(&target)? != source_digest {
-        install_agent_file(&source, &target)?;
-    }
+
+    // Persist the exact repair destination before writing its file. A retry can
+    // then adopt a matching target or safely reallocate around a late collision.
     marker.allocations.insert(
         file_name.to_string(),
         AllocationRecord {
             target_file_name: target_file_name.clone(),
-            installed_digest: source_digest,
-            status: AllocationStatus::Installed,
+            installed_digest: source_digest.clone(),
+            status: AllocationStatus::Pending,
         },
     );
-    marker.seeded_files.insert(file_name.to_string());
-    marker.seeded_files.insert(target_file_name);
+    write_seed_marker(target_root, &marker)?;
+
+    let target = target_root.join(&target_file_name);
+    if !(target.is_file() && digest_file(&target)? == source_digest) {
+        if fs::symlink_metadata(&target).is_ok() {
+            let claimed = marker
+                .allocations
+                .values()
+                .map(|record| record.target_file_name.clone())
+                .collect::<BTreeSet<_>>();
+            let replacement = allocate_target_name(file_name, &claimed, target_root)?;
+            marker
+                .allocations
+                .get_mut(file_name)
+                .unwrap()
+                .target_file_name = replacement;
+            write_seed_marker(target_root, &marker)?;
+        }
+        let target = target_root.join(&marker.allocations[file_name].target_file_name);
+        install_agent_file(&source, &target)?;
+    }
+
+    marker.allocations.get_mut(file_name).unwrap().status = AllocationStatus::Installed;
+    marker.install_state = if marker
+        .allocations
+        .values()
+        .all(|record| record.status == AllocationStatus::Installed)
+    {
+        InstallState::Complete
+    } else {
+        InstallState::Installing
+    };
     write_seed_marker(target_root, &marker)
 }
 
@@ -479,13 +500,10 @@ fn seed_bundled_agents_from_dir(
                 if digest_file(&target)? != allocation.installed_digest {
                     continue; // User edit or replacement: preserve and relinquish management.
                 }
-                if source_digest != allocation.installed_digest {
-                    install_agent_file(&source, &target)?;
-                    marker.allocations.get_mut(&name).unwrap().installed_digest =
-                        source_digest.clone();
-                    write_seed_marker(target_root, &marker)?;
-                    seeded_count += 1;
-                }
+                // Packaged updates do not rewrite established copies in this
+                // clean-install-only flow. The recorded digest remains the
+                // ownership proof as long as the target still matches it.
+                let _ = source_digest;
             }
         }
         if marker.allocations[&name].status == AllocationStatus::Installed {
@@ -1086,5 +1104,86 @@ mod tests {
                 .to_string_lossy()
                 .starts_with(".berd-bundled-agents-invalid-")
         }));
+    }
+
+    #[test]
+    fn packaged_source_change_preserves_managed_copy_and_verified_digest() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let original = "---\nname: Tinker\nmetadata:\n  berdBundled: true\n---\nOriginal.";
+        write_agent(source.path(), "tinker.md", original);
+        seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+        let recorded = read_seed_marker(target.path()).unwrap().allocations["tinker.md"]
+            .installed_digest
+            .clone();
+        write_agent(
+            source.path(),
+            "tinker.md",
+            "---\nname: Tinker\nmetadata:\n  berdBundled: true\n---\nUpdated package.",
+        );
+
+        let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(result.seeded_count, 0);
+        assert_eq!(
+            fs::read_to_string(target.path().join("tinker.md")).unwrap(),
+            original
+        );
+        assert_eq!(
+            read_seed_marker(target.path()).unwrap().allocations["tinker.md"].installed_digest,
+            recorded
+        );
+    }
+
+    #[test]
+    fn repair_keeps_corrupt_manifest_fail_closed() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        write_agent(
+            source.path(),
+            "berdy.md",
+            "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nBundled.",
+        );
+        fs::write(marker_path(target.path()), "{").unwrap();
+        seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        let error =
+            repair_bundled_agent_from_dir(source.path(), target.path(), "berdy.md").unwrap_err();
+
+        assert!(error.contains("valid managed allocation manifest"));
+        assert_eq!(read_seed_marker(target.path()).unwrap().version, 0);
+        assert!(!target.path().join("berdy.md").exists());
+    }
+
+    #[test]
+    fn repair_resumes_pending_allocation_without_duplicate() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let contents = "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nBundled.";
+        write_agent(source.path(), "berdy.md", contents);
+        seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+        let mut marker = read_seed_marker(target.path()).unwrap();
+        marker.allocations.get_mut("berdy.md").unwrap().status = AllocationStatus::Pending;
+        marker.install_state = InstallState::Installing;
+        write_seed_marker(target.path(), &marker).unwrap();
+
+        repair_bundled_agent_from_dir(source.path(), target.path(), "berdy.md").unwrap();
+
+        let marker = read_seed_marker(target.path()).unwrap();
+        assert_eq!(
+            marker.allocations["berdy.md"].status,
+            AllocationStatus::Installed
+        );
+        assert_eq!(marker.install_state, InstallState::Complete);
+        assert_eq!(
+            fs::read_dir(target.path())
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter(
+                    |entry| entry.path().extension().and_then(|value| value.to_str()) == Some("md")
+                )
+                .count(),
+            1
+        );
     }
 }
