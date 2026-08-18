@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { IconPhotoPlus, IconUpload } from "@tabler/icons-react";
 
 import { useTranslation } from "react-i18next";
@@ -37,6 +37,12 @@ export interface AgentImportPreview extends PersonaImportPreview {
 interface AgentImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * A file already validated and read by another import surface (the gallery
+   * drop zone). The dialog prepares it through the same flow as picker files
+   * so every entry point shares one preview/confirmation owner.
+   */
+  initialFile?: { bytes: Uint8Array; name: string } | null;
   onImportFile: (
     fileBytes: Uint8Array,
     fileName: string,
@@ -64,6 +70,7 @@ interface AgentImportDialogProps {
 export function AgentImportDialog({
   open,
   onOpenChange,
+  initialFile,
   onImportFile,
   prepareImport,
   validateImportFile,
@@ -135,14 +142,9 @@ export function AgentImportDialog({
     [prepared?.preview.cardImageUrl],
   );
 
-  const {
-    fileInputRef,
-    isDragOver,
-    dropHandlers,
-    handleFileChange,
-    openFilePicker,
-  } = useFileImportZone({
-    onImportFile: async (bytes, name) => {
+  const startPreparation = useCallback(
+    async (bytes: Uint8Array, name: string) => {
+      preparationRef.current?.abort();
       const controller = new AbortController();
       preparationRef.current = controller;
       setPreparing(true);
@@ -165,6 +167,29 @@ export function AgentImportDialog({
         }
       }
     },
+    [onImportError, prepareImport],
+  );
+
+  const consumedInitialFileRef = useRef<typeof initialFile>(null);
+  useEffect(() => {
+    if (!open) {
+      consumedInitialFileRef.current = null;
+      return;
+    }
+    if (initialFile && consumedInitialFileRef.current !== initialFile) {
+      consumedInitialFileRef.current = initialFile;
+      void startPreparation(initialFile.bytes, initialFile.name);
+    }
+  }, [open, initialFile, startPreparation]);
+
+  const {
+    fileInputRef,
+    isDragOver,
+    dropHandlers,
+    handleFileChange,
+    openFilePicker,
+  } = useFileImportZone({
+    onImportFile: startPreparation,
     validateFile: (file) => {
       preparationRef.current?.abort();
       setPrepared(null);
@@ -256,6 +281,7 @@ export function AgentImportDialog({
                 variant="outline"
                 leftIcon={<IconUpload />}
                 feedbackState={preparing ? "loading" : "idle"}
+                loadingLabel={t("importDialog.preparing")}
                 onClick={openFilePicker}
               >
                 {t("importDialog.openFinder")}

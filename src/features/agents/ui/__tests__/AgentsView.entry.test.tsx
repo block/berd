@@ -95,7 +95,12 @@ vi.mock("@/shared/api/artifacts", () => ({
     artifacts.assets.find((asset) => asset.path.endsWith(`/${id}.png`))?.path,
 }));
 
-vi.mock("@/shared/api/agents", () => ({
+vi.mock("@/shared/api/agents", async (importOriginal) => ({
+  // The preview builder is pure; the real one keeps gallery-drop tests
+  // exercising the actual parse-and-preview path.
+  previewPersonaImport: (
+    await importOriginal<typeof import("@/shared/api/agents")>()
+  ).previewPersonaImport,
   exportPersona: vi.fn(),
   importPersonas: vi.fn(),
   readImportPersonaFile: vi.fn(),
@@ -250,7 +255,7 @@ describe("AgentsView entry points", () => {
     vi.restoreAllMocks();
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     vi.mocked(useAvatarLibrary).mockReturnValue(EMPTY_AVATAR_LIBRARY);
     // These tests exercise the inline customize section, so the collection
@@ -264,6 +269,13 @@ describe("AgentsView entry points", () => {
           [AVATAR_COLLECTION_PAGE_EXPERIMENT_ID]: { enabled: false },
         },
       }),
+    );
+    // Restore the default passthrough after tests that defer extraction.
+    const actualZipImport = await vi.importActual<
+      typeof import("@/features/agents/lib/agentZipImport")
+    >("@/features/agents/lib/agentZipImport");
+    mockExtractInWorker.mockImplementation(async (bytes: Uint8Array) =>
+      actualZipImport.extractAgentFileFromZip(bytes),
     );
     // Mirrors the real API: the created persona carries the persisted
     // identity the telemetry call sites are expected to report.
@@ -379,6 +391,10 @@ describe("AgentsView entry points", () => {
 
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
 
+    // Gallery selections route through the shared import dialog preview.
+    await userEvent.click(
+      await screen.findByRole("button", { name: "importDialog.import" }),
+    );
     expect(
       await screen.findByRole("heading", { name: "imageImport.description" }),
     ).toBeInTheDocument();
@@ -424,8 +440,132 @@ describe("AgentsView entry points", () => {
     expect(screen.getByDisplayValue("Test Agent Display")).toBeInTheDocument();
   });
 
-  it("routes gallery ZIP drops through worker-backed extraction", async () => {
+  it("routes gallery ZIP drops into the import dialog for confirmation", async () => {
     vi.mocked(importPersonas).mockResolvedValue([]);
+    const archive = zipSync({
+      "reviewer.persona.md": new TextEncoder().encode(
+        "---\nname: reviewer\n---\nReview.",
+      ),
+    });
+    const file = new File([archive], "reviewer.zip", {
+      type: "application/zip",
+    });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(archive.buffer),
+    });
+    const { container } = render(<AgentsView />);
+    const dropZone = container.querySelector(".\\@container") as HTMLElement;
+
+    fireEvent.drop(dropZone, { dataTransfer: { files: [file] } });
+
+    // The drop opens the shared dialog and prepares through the worker; no
+    // personas are created before the user confirms.
+    await waitFor(() => expect(mockExtractInWorker).toHaveBeenCalled());
+    expect(
+      await screen.findByRole("button", { name: "importDialog.import" }),
+    ).toBeInTheDocument();
+    expect(importPersonas).not.toHaveBeenCalled();
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "importDialog.import" }),
+    );
+    await waitFor(() =>
+      expect(importPersonas).toHaveBeenCalledWith(
+        expect.stringContaining("Review."),
+        "reviewer.persona.md",
+      ),
+    );
+  });
+
+  it("only the latest gallery drop can win an extraction race", async () => {
+    vi.mocked(importPersonas).mockResolvedValue([]);
+    const resolvers: Array<{
+      name: string;
+      resolve: (value: { bytes: Uint8Array; name: string }) => void;
+      reject: (reason: unknown) => void;
+      signal?: AbortSignal;
+    }> = [];
+    mockExtractInWorker.mockImplementation(
+      (_bytes: Uint8Array, signal?: AbortSignal) =>
+        new Promise((resolve, reject) => {
+          resolvers.push({
+            name: `drop-${resolvers.length}`,
+            resolve,
+            reject,
+            signal,
+          });
+          signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        }),
+    );
+    const makeZipFile = (name: string) => {
+      const archive = zipSync({
+        [`${name}.persona.md`]: new TextEncoder().encode(
+          `---\nname: ${name}\n---\n${name}`,
+        ),
+      });
+      const file = new File([archive], `${name}.zip`, {
+        type: "application/zip",
+      });
+      Object.defineProperty(file, "arrayBuffer", {
+        configurable: true,
+        value: vi.fn().mockResolvedValue(archive.buffer),
+      });
+      return file;
+    };
+    const { container } = render(<AgentsView />);
+    const dropZone = container.querySelector(".\\@container") as HTMLElement;
+
+    fireEvent.drop(dropZone, { dataTransfer: { files: [makeZipFile("a")] } });
+    await waitFor(() => expect(resolvers).toHaveLength(1));
+
+    // Dropping B onto the dialog's drop zone replaces A and aborts its work.
+    const dialogDropZone = screen.getByRole("status");
+    const fileB = makeZipFile("b");
+    fireEvent.drop(dialogDropZone, { dataTransfer: { files: [fileB] } });
+    await waitFor(() => expect(resolvers).toHaveLength(2));
+    expect(resolvers[0].signal?.aborted).toBe(true);
+
+    // A resolving late must not surface or import.
+    resolvers[0].resolve({
+      bytes: new TextEncoder().encode("---\nname: a\n---\na"),
+      name: "a.persona.md",
+    });
+    resolvers[1].resolve({
+      bytes: new TextEncoder().encode("---\nname: b\n---\nb"),
+      name: "b.persona.md",
+    });
+    expect(
+      await screen.findByRole("button", { name: "importDialog.import" }),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "importDialog.import" }),
+    );
+    await waitFor(() =>
+      expect(importPersonas).toHaveBeenCalledWith(
+        expect.stringContaining("b"),
+        "b.persona.md",
+      ),
+    );
+    expect(importPersonas).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "a.persona.md",
+    );
+  });
+
+  it("closing the dialog cancels a pending gallery ZIP preparation", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    mockExtractInWorker.mockImplementation(
+      (_bytes: Uint8Array, signal?: AbortSignal) =>
+        new Promise((_resolve, reject) => {
+          capturedSignal = signal;
+          signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        }),
+    );
     const archive = zipSync({
       "reviewer.persona.md": new TextEncoder().encode("---\n---\nReview."),
     });
@@ -440,14 +580,12 @@ describe("AgentsView entry points", () => {
     const dropZone = container.querySelector(".\\@container") as HTMLElement;
 
     fireEvent.drop(dropZone, { dataTransfer: { files: [file] } });
+    await waitFor(() => expect(capturedSignal).toBeDefined());
 
-    await waitFor(() => expect(mockExtractInWorker).toHaveBeenCalled());
-    await waitFor(() =>
-      expect(importPersonas).toHaveBeenCalledWith(
-        expect.stringContaining("Review."),
-        "reviewer.persona.md",
-      ),
-    );
+    await userEvent.keyboard("{Escape}");
+
+    await waitFor(() => expect(capturedSignal?.aborted).toBe(true));
+    expect(importPersonas).not.toHaveBeenCalled();
   });
 
   it("shows a localized error for an ambiguous agent ZIP", async () => {
@@ -843,7 +981,14 @@ describe("AgentsView entry points", () => {
     }
 
     function importTextFile(name: string, type: string): File {
-      const bytes = new TextEncoder().encode("{}");
+      const contents = name.endsWith(".json")
+        ? JSON.stringify({
+            version: 1,
+            displayName: "Imported",
+            systemPrompt: "Imported prompt.",
+          })
+        : "---\nname: Imported\n---\nImported prompt.";
+      const bytes = new TextEncoder().encode(contents);
       const file = new File([bytes], name, { type });
       Object.defineProperty(file, "arrayBuffer", {
         configurable: true,
@@ -922,6 +1067,9 @@ describe("AgentsView entry points", () => {
           files: [importTextFile("team.agent.json", "application/json")],
         },
       });
+      await userEvent.click(
+        await screen.findByRole("button", { name: "importDialog.import" }),
+      );
 
       await waitFor(() =>
         expect(mockTrackAgentCreateCompleted).toHaveBeenCalledTimes(2),
@@ -947,6 +1095,9 @@ describe("AgentsView entry points", () => {
           files: [importTextFile("reviewer.persona.md", "text/markdown")],
         },
       });
+      await userEvent.click(
+        await screen.findByRole("button", { name: "importDialog.import" }),
+      );
 
       await waitFor(() => expect(toast.error).toHaveBeenCalled());
       expect(mockTrackAgentCreateCompleted).not.toHaveBeenCalled();
@@ -961,6 +1112,9 @@ describe("AgentsView entry points", () => {
       fireEvent.change(input as HTMLInputElement, {
         target: { files: [agentImageFixtureFile()] },
       });
+      await userEvent.click(
+        await screen.findByRole("button", { name: "importDialog.import" }),
+      );
       await screen.findByRole("heading", { name: "imageImport.description" });
       expect(mockTrackAgentCreateCompleted).not.toHaveBeenCalled();
 
@@ -986,6 +1140,9 @@ describe("AgentsView entry points", () => {
       fireEvent.change(input as HTMLInputElement, {
         target: { files: [agentImageFixtureFile()] },
       });
+      await userEvent.click(
+        await screen.findByRole("button", { name: "importDialog.import" }),
+      );
       await screen.findByRole("heading", { name: "imageImport.description" });
 
       const user = userEvent.setup();

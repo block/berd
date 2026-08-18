@@ -133,6 +133,10 @@ export function AgentsView({
   const [deletingPersona, setDeletingPersona] = useState<Persona | null>(null);
   const [sharingPersonaId, setSharingPersonaId] = useState<string | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [galleryImportFile, setGalleryImportFile] = useState<{
+    bytes: Uint8Array;
+    name: string;
+  } | null>(null);
   const [imageImport, setImageImport] = useState<{
     snapshot: SnapshotV1;
     bytes: Uint8Array;
@@ -482,31 +486,31 @@ export function AgentsView({
       preview?: { snapshot?: ReturnType<typeof decodeAgentImage> },
     ) => {
       try {
-        // A .zip name only reaches this handler from the gallery drop zone;
-        // the import dialog always passes the extracted inner file.
-        const extracted = isAgentZipFileName(fileName)
-          ? await extractAgentFileFromZipInWorker(fileBytes)
-          : { bytes: fileBytes, name: fileName };
-        if (isAgentImageFileName(extracted.name)) {
+        // The import dialog extracts ZIPs before this handler runs, so these
+        // bytes are always a directly importable agent file.
+        if (isAgentImageFileName(fileName)) {
           setImageImport({
-            snapshot: preview?.snapshot ?? decodeAgentImage(extracted.bytes),
-            bytes: extracted.bytes,
+            snapshot: preview?.snapshot ?? decodeAgentImage(fileBytes),
+            bytes: fileBytes,
           });
           return;
         }
-        await handleImportContents(
-          decodeImportFileBytes(extracted.bytes),
-          extracted.name,
-        );
+        await handleImportContents(decodeImportFileBytes(fileBytes), fileName);
       } catch (err) {
-        toast.error(
-          err instanceof AgentZipImportError
-            ? formatAgentZipImportError(err, t)
-            : formatAgentError(err, t("view.importFailed")),
-        );
+        toast.error(formatAgentError(err, t("view.importFailed")));
       }
     },
     [handleImportContents, t],
+  );
+
+  const handleGalleryImportFile = useCallback(
+    (fileBytes: Uint8Array, fileName: string) => {
+      // Gallery drops share the dialog's preparation flow (worker extraction,
+      // cancellation, preview, confirmation) instead of importing directly.
+      setGalleryImportFile({ bytes: fileBytes, name: fileName });
+      setImportDialogOpen(true);
+    },
+    [],
   );
 
   const dialogs = (
@@ -514,7 +518,11 @@ export function AgentsView({
       {importDialogOpen ? (
         <AgentImportDialog
           open
-          onOpenChange={setImportDialogOpen}
+          onOpenChange={(nextOpen) => {
+            setImportDialogOpen(nextOpen);
+            if (!nextOpen) setGalleryImportFile(null);
+          }}
+          initialFile={galleryImportFile}
           onImportFile={handleImportFileBytes}
           prepareImport={async (bytes, name, signal) => {
             let extracted: ExtractedAgentFile;
@@ -666,7 +674,7 @@ export function AgentsView({
           onImportAgentImage={() => setImportDialogOpen(true)}
           onContinueDraft={handleContinueDraft}
           onDeleteDraft={handleDeleteDraft}
-          onImportFile={handleImportFileBytes}
+          onImportFile={handleGalleryImportFile}
           validateImportFile={validateImportFile}
           onImportError={handleImportError}
           maxImportBytes={MAX_SNAPSHOT_PNG_BYTES}

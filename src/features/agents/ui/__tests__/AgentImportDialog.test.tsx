@@ -123,8 +123,11 @@ describe("AgentImportDialog", () => {
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await waitFor(() => expect(preparationSignal).toBeDefined());
 
-    // Pending preparation announces busy status and localized progress copy.
-    expect(screen.getByText("importDialog.preparing")).toBeInTheDocument();
+    // Pending preparation announces busy status and localized progress copy
+    // in both the drop-zone status text and the loading button label.
+    expect(
+      screen.getAllByText("importDialog.preparing").length,
+    ).toBeGreaterThanOrEqual(2);
     expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true");
 
     rerender(<AgentImportDialog {...props} open={false} />);
