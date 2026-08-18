@@ -226,7 +226,10 @@ export function ExperimentsSettings({
         window.dispatchEvent(new Event("starter-tasks-state-reset"));
         setResetAllConfirmationOpen(false);
         resetSucceeded = true;
-        if (resetResult.cameraConfirmed) {
+        if (
+          resetResult.cameraConfirmed &&
+          resetResult.starterAgentsConfirmed !== false
+        ) {
           toast.success(t("experiments.onboarding.resetAllSuccess"));
         }
       } else {

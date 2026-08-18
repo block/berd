@@ -18,9 +18,13 @@ import { ExperimentsSettings } from "../ExperimentsSettings";
 import { EXPERIMENT_PREFERENCES_STORAGE_KEY } from "../experimentPreferences";
 import { i18n } from "@/shared/i18n";
 import { renderWithProviders } from "@/test/render";
+import type { OnboardingHomeResetResult } from "@/features/home/stores/homeWidgetStore";
 
 const resetHomeForOnboardingExperienceMock = vi.hoisted(() =>
-  vi.fn(async () => ({ itemsConfirmed: true, cameraConfirmed: true })),
+  vi.fn<() => Promise<OnboardingHomeResetResult>>(async () => ({
+    itemsConfirmed: true,
+    cameraConfirmed: true,
+  })),
 );
 const syncOnboardingExperimentStateMock = vi.hoisted(() =>
   vi.fn(async () => {}),
@@ -199,6 +203,34 @@ describe("ExperimentsSettings", () => {
     resetHomeForOnboardingExperienceMock.mockResolvedValueOnce({
       itemsConfirmed: true,
       cameraConfirmed: false,
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<ExperimentsSettings />);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: i18n.t("experiments.onboarding.resetAll", { ns: "settings" }),
+      }),
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: i18n.t("experiments.onboarding.confirm", { ns: "settings" }),
+      }),
+    );
+
+    expect(
+      screen.queryByText(
+        i18n.t("experiments.onboarding.resetAllSuccess", { ns: "settings" }),
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not report full reset success while starter agents are recovering", async () => {
+    vi.stubEnv("DEV", true);
+    resetHomeForOnboardingExperienceMock.mockResolvedValueOnce({
+      itemsConfirmed: true,
+      cameraConfirmed: true,
+      starterAgentsConfirmed: false,
     });
     const user = userEvent.setup();
     renderWithProviders(<ExperimentsSettings />);

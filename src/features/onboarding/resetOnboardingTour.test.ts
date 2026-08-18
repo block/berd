@@ -129,6 +129,7 @@ describe("onboarding tour experience controls", () => {
     await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
       itemsConfirmed: true,
       cameraConfirmed: true,
+      starterAgentsConfirmed: true,
     });
 
     expect(storeMocks.initialize).toHaveBeenCalledOnce();
@@ -163,7 +164,6 @@ describe("onboarding tour experience controls", () => {
 
     await resetHomeForOnboardingExperience();
 
-    expect(storeMocks.setPersonas).toHaveBeenCalledOnce();
     expect(storeMocks.addMissingStarterAgentPins).toHaveBeenCalledOnce();
     expect(haveStarterAgentPinsBeenSeeded()).toBe(true);
   });
@@ -178,6 +178,7 @@ describe("onboarding tour experience controls", () => {
     await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
       itemsConfirmed: true,
       cameraConfirmed: true,
+      starterAgentsConfirmed: false,
     });
 
     expect(haveStarterAgentPinsBeenSeeded()).toBe(false);
@@ -196,6 +197,7 @@ describe("onboarding tour experience controls", () => {
     await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
       itemsConfirmed: true,
       cameraConfirmed: true,
+      starterAgentsConfirmed: false,
     });
 
     expect(haveStarterAgentPinsBeenSeeded()).toBe(false);
@@ -218,14 +220,16 @@ describe("onboarding tour experience controls", () => {
     expect(areStarterAgentPinsEligible()).toBe(false);
   });
 
-  it("keeps a partial starter-agent reset eligible for recovery", async () => {
-    storeMocks.setInstances([]);
+  it("keeps recovery eligible when only one starter persona is available", async () => {
+    storeMocks.listPersonas.mockResolvedValueOnce([starterPersona("tinker")]);
 
     await expect(resetHomeForOnboardingExperience()).resolves.toEqual({
       itemsConfirmed: true,
       cameraConfirmed: true,
+      starterAgentsConfirmed: false,
     });
 
+    expect(storeMocks.addMissingStarterAgentPins).not.toHaveBeenCalled();
     expect(haveStarterAgentPinsBeenSeeded()).toBe(false);
     expect(areStarterAgentPinsEligible()).toBe(true);
   });

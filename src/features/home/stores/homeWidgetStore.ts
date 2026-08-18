@@ -189,6 +189,7 @@ function createAddedCleanUpSnapshotItem(
 export type OnboardingHomeResetResult = {
   itemsConfirmed: boolean;
   cameraConfirmed: boolean;
+  starterAgentsConfirmed?: boolean;
 };
 
 interface HomeWidgetStore extends HomeWidgetState {
