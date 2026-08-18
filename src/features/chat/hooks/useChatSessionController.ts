@@ -2227,18 +2227,53 @@ export function useChatSessionController({
     isQueuePreparationReady,
   );
   const pendingBuilderActivationRef = useRef<
-    Record<string, Promise<ChatSession | null>>
+    Record<
+      string,
+      {
+        promise: Promise<ChatSession | null>;
+        queueRecordId?: string;
+      }
+    >
   >({});
 
+  const isQueuedAgentBuilderRecordAuthoritative = useCallback(
+    (recordId: string) => {
+      const record =
+        useChatStore.getState().queuedMessageBySession[stateSessionId]?.[0];
+      return Boolean(
+        record?.recordId === recordId &&
+          record.kind === "transport-ready" &&
+          isAgentBuilderSkillSendOptions(record.payload.sendOptions),
+      );
+    },
+    [stateSessionId],
+  );
+
   const ensureCurrentSessionIsAgentBuilder = useCallback(
-    async (options?: { requireSelectedSkill?: boolean }) => {
+    async (options?: {
+      requireSelectedSkill?: boolean;
+      queueRecordId?: string;
+    }) => {
       if (!sessionId) {
         return null;
       }
 
       const pendingActivation = pendingBuilderActivationRef.current[sessionId];
       if (pendingActivation) {
-        return pendingActivation;
+        if (
+          !options?.queueRecordId ||
+          pendingActivation.queueRecordId === options.queueRecordId
+        ) {
+          return pendingActivation.promise;
+        }
+        await pendingActivation.promise;
+      }
+
+      if (
+        options?.queueRecordId &&
+        !isQueuedAgentBuilderRecordAuthoritative(options.queueRecordId)
+      ) {
+        return null;
       }
 
       const activation = (async () => {
@@ -2259,6 +2294,16 @@ export function useChatSessionController({
         }
 
         const target = await preSeedDraftAgent(sessionId);
+        if (
+          options?.queueRecordId &&
+          !isQueuedAgentBuilderRecordAuthoritative(options.queueRecordId)
+        ) {
+          await deletePersonaSource(target.path).catch((error) => {
+            console.error("Failed to delete superseded agent draft:", error);
+          });
+          return null;
+        }
+
         const liveChatSessions = useChatSessionStore.getState();
         const liveSession = liveChatSessions.getSession(sessionId);
         const liveSkills =
@@ -2308,29 +2353,44 @@ export function useChatSessionController({
         return { ...currentSession, ...patch };
       })();
 
-      pendingBuilderActivationRef.current[sessionId] = activation;
+      const pendingEntry = {
+        promise: activation,
+        queueRecordId: options?.queueRecordId,
+      };
+      pendingBuilderActivationRef.current[sessionId] = pendingEntry;
       try {
         return await activation;
       } finally {
-        if (pendingBuilderActivationRef.current[sessionId] === activation) {
+        if (pendingBuilderActivationRef.current[sessionId] === pendingEntry) {
           delete pendingBuilderActivationRef.current[sessionId];
         }
       }
     },
-    [sessionId, stateSessionId],
+    [isQueuedAgentBuilderRecordAuthoritative, sessionId, stateSessionId],
   );
 
   useEffect(() => {
     if (!queuedAgentBuilderSendNeedsPreparation || !sessionId) {
       return;
     }
-    void ensureCurrentSessionIsAgentBuilder().catch((error) => {
-      console.error("Failed to prepare queued agent builder:", error);
-      markAgentBuilderSessionPreparationFailed(sessionId);
-    });
+    const queueRecordId = queuedHead?.recordId;
+    if (!queueRecordId) {
+      return;
+    }
+    void ensureCurrentSessionIsAgentBuilder({ queueRecordId }).catch(
+      (error) => {
+        if (!isQueuedAgentBuilderRecordAuthoritative(queueRecordId)) {
+          return;
+        }
+        console.error("Failed to prepare queued agent builder:", error);
+        markAgentBuilderSessionPreparationFailed(sessionId);
+      },
+    );
   }, [
     ensureCurrentSessionIsAgentBuilder,
+    isQueuedAgentBuilderRecordAuthoritative,
     queuedAgentBuilderSendNeedsPreparation,
+    queuedHead?.recordId,
     sessionId,
   ]);
 
