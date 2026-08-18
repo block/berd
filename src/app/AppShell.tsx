@@ -220,7 +220,6 @@ import {
   isSystemNotification,
 } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
-import { FIRST_RUN_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { OnboardingFlow } from "@/features/onboarding/ui/OnboardingFlow";
 import { useOnboardingState } from "@/features/onboarding/model";
@@ -772,9 +771,6 @@ export function AppShell({
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [globalComposerFocusRequest, setGlobalComposerFocusRequest] =
     useState(0);
-  const onboardingExperiment = useExperiment(
-    FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
-  );
   const onboardingState = useOnboardingState();
   const omittedStarterTaskIds = useMemo<ReadonlySet<StarterTaskId>>(
     () =>
@@ -4952,10 +4948,7 @@ export function AppShell({
     );
   }
 
-  const shouldShowOnboarding =
-    onboardingExperiment?.enabled === true &&
-    onboardingState.lifecycle !== "completed";
-  if (shouldShowOnboarding) {
+  if (onboardingState.lifecycle !== "completed") {
     return <OnboardingFlow />;
   }
 

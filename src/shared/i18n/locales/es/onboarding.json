@@ -3,12 +3,11 @@
     "goBack": "Volver"
   },
   "welcome": {
-    "title": "Te damos la bienvenida a Berd",
-    "projects": "Un lugar para crear proyectos",
-    "agents": "trabajar con agentes",
-    "and": "y",
-    "done": "completar tu trabajo",
-    "getStarted": "Comenzar"
+    "title": "Te damos la bienvenida a Berd.",
+    "subtitle": "Tu lugar para hacer.",
+    "getStarted": "Vamos",
+    "usageConsent": "Comparte datos de uso anónimos para ayudar a mejorar Berd.",
+    "learnMore": "Más información"
   },
   "workTypes": {
     "title": "¿Para qué tipo de trabajo usarás Berd?",

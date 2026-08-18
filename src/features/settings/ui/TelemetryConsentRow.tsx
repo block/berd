@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useProfileCapability } from "@/shared/profile/capabilities";
+import { Button } from "@/shared/ui/button";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import { SettingsSection } from "@/shared/ui/settings-section";
 import { Switch } from "@/shared/ui/switch";
@@ -11,6 +12,7 @@ import {
   updateTelemetryEnabled,
   useTelemetryConsentStore,
 } from "@/shared/telemetry/consent";
+import { UsageDataDialog } from "./UsageDataDialog";
 
 // The telemetry consent toggle: a plain persisted write against the
 // Rust-owned setting (default OFF), applied immediately by the per-event and
@@ -40,6 +42,7 @@ export function TelemetryConsentRow() {
   const loaded = useTelemetryConsentStore((state) => state.loaded);
   const enabled = useTelemetryConsentStore((state) => state.enabled);
   const [saving, setSaving] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   // The consent read normally happens during telemetry init, but that is
   // skipped in dev and consent-disabled sessions — the toggle still has to
@@ -68,7 +71,19 @@ export function TelemetryConsentRow() {
     <SettingsSection title={t("privacy.title")}>
       <SettingsRow
         label={t("privacy.telemetry.label")}
-        description={t("privacy.telemetry.description")}
+        description={
+          <>
+            {t("privacy.telemetry.description")}{" "}
+            <Button
+              type="button"
+              variant="link"
+              className="text-xs"
+              onClick={() => setDetailsOpen(true)}
+            >
+              {t("privacy.telemetry.learnMore")}
+            </Button>
+          </>
+        }
       >
         <Switch
           checked={enabled}
@@ -77,6 +92,7 @@ export function TelemetryConsentRow() {
           aria-label={t("privacy.telemetry.label")}
         />
       </SettingsRow>
+      <UsageDataDialog open={detailsOpen} onOpenChange={setDetailsOpen} />
     </SettingsSection>
   );
 }

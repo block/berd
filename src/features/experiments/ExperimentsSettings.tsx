@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import {
   BERDY_ONBOARDING_EXPERIMENT_ID,
   EXPERIMENT_DEFINITIONS,
-  HIDDEN_EXPERIMENT_IDS,
   type ExperimentDefinition,
 } from "./experimentDefinitions";
 import { ExperimentConfigControls } from "./ExperimentConfigControls";
@@ -62,8 +61,7 @@ export function ExperimentsSettings({
     () =>
       getVisibleExperimentRegistry(registry).filter(
         (definition) =>
-          !HIDDEN_EXPERIMENT_IDS.has(definition.id) &&
-          (definition.settingsVisibility !== "dev" || import.meta.env.DEV),
+          definition.settingsVisibility !== "dev" || import.meta.env.DEV,
       ),
     [registry],
   );

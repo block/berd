@@ -15,7 +15,10 @@ import { App } from "@/app/App";
 import { GitStateEvents } from "@/app/GitStateEvents";
 import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
 import { RendererTelemetry } from "@/app/RendererTelemetry";
+import { StartupLoadingView } from "@/app/ui/StartupLoadingView";
 import { BackgroundQueuedMessageDrain } from "@/features/chat/ui/BackgroundQueuedMessageDrain";
+import { getInstallationCohort } from "@/features/onboarding/api/installationCohort";
+import { initializeOnboardingGraduation } from "@/features/onboarding/model";
 import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
 import { I18nProvider } from "@/shared/i18n";
 import { initTelemetry, trackAppLaunched } from "@/shared/telemetry/client";
@@ -170,30 +173,52 @@ if (bootError) {
   // screen's Reload button). Re-initializing is the point — the reloaded
   // renderer needs a live pipeline — while trackAppLaunched() reports only on
   // the first load of this window session, since a reload is not an app start.
+  // Running before consent is answered is safe by design: events buffer
+  // through the consent gate and are dropped unless the persisted setting
+  // loads as enabled, so a fresh install sends nothing until the user opts in
+  // on the welcome page or in Settings.
   initTelemetry();
   trackAppLaunched();
 
   reactRoot.render(
     <React.StrictMode>
-      <TooltipProvider>
-        <RendererErrorBoundary>
-          <QueryClientProvider client={queryClient}>
-            <AcpToolsEvents />
-            <GitStateEvents />
-            <LocalMediaCacheEvents />
-            <BackgroundQueuedMessageDrain />
-            <OptionalBerdctlBridge />
-            <RendererTelemetry />
-            <I18nProvider>
-              <ThemeProvider>
-                <UpdaterProvider>
-                  <App />
-                </UpdaterProvider>
-              </ThemeProvider>
-            </I18nProvider>
-          </QueryClientProvider>
-        </RendererErrorBoundary>
-      </TooltipProvider>
+      <I18nProvider>
+        <StartupLoadingView />
+      </I18nProvider>
     </React.StrictMode>,
   );
+  getInstallationCohort()
+    .then((cohort) => {
+      initializeOnboardingGraduation(cohort);
+    })
+    .catch((error) => {
+      console.error("Failed to resolve installation cohort:", error);
+      reportRendererError("installation_cohort_failed", error);
+      initializeOnboardingGraduation("unknown");
+    })
+    .finally(() => {
+      reactRoot.render(
+        <React.StrictMode>
+          <TooltipProvider>
+            <RendererErrorBoundary>
+              <QueryClientProvider client={queryClient}>
+                <AcpToolsEvents />
+                <GitStateEvents />
+                <LocalMediaCacheEvents />
+                <BackgroundQueuedMessageDrain />
+                <OptionalBerdctlBridge />
+                <RendererTelemetry />
+                <I18nProvider>
+                  <ThemeProvider>
+                    <UpdaterProvider>
+                      <App />
+                    </UpdaterProvider>
+                  </ThemeProvider>
+                </I18nProvider>
+              </QueryClientProvider>
+            </RendererErrorBoundary>
+          </TooltipProvider>
+        </React.StrictMode>,
+      );
+    });
 }

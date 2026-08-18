@@ -218,11 +218,6 @@
     "defaultLabel": "default",
     "description": "Opt into in-progress Berd features on this device. Experiments can change, break, or disappear.",
     "emptyDescription": "New experiments will appear here when they are ready for opt-in testing.",
-    "firstRunOnboarding": {
-      "description": "Preview the new first-install onboarding flow. Unfinished progress resumes when the experiment is enabled again.",
-      "replay": "Replay onboarding",
-      "title": "First-run onboarding"
-    },
     "onboarding": {
       "cancel": "Cancel",
       "confirm": "Reset canvas",
@@ -468,7 +463,16 @@
     "telemetry": {
       "description": "Help improve Berd by sharing usage events, like which features are used. Chat content is never sent.",
       "label": "Share usage data",
-      "saveError": "Couldn't update the usage data setting. Try again."
+      "learnMore": "Learn more",
+      "saveError": "Couldn't update the usage data setting. Try again.",
+      "usageDialog": {
+        "collectBody": "Usage events, such as features used, errors, and performance, tied to a random installation ID.",
+        "collectTitle": "What we collect",
+        "intro": "We use a random installation ID, not your identity, to see how Berd is used and fix what’s broken.",
+        "notCollectBody": "Your name, email, or account. Berd has no login, so there’s nothing to tie data to.",
+        "notCollectTitle": "What we don’t collect",
+        "title": "Sharing usage data"
+      }
     },
     "title": "Privacy"
   },

@@ -21,6 +21,10 @@ vi.mock("@/app/RendererTelemetry", () => ({
   RendererTelemetry: () => null,
 }));
 
+vi.mock("@/app/ui/StartupLoadingView", () => ({
+  StartupLoadingView: () => <div data-testid="startup-loading" />,
+}));
+
 vi.mock("@/app/SessionWindowApp", () => ({
   SessionWindowApp: ({ sessionId }: { sessionId: string }) => (
     <div data-testid="session-app">{sessionId}</div>
@@ -72,24 +76,45 @@ describe("main entrypoint telemetry startup", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    localStorage.clear();
+    mockInvoke.mockResolvedValue("fresh-with-landing-v1");
     globalThis.fetch = vi.fn() as typeof globalThis.fetch;
   });
 
   afterEach(() => {
     document.body.innerHTML = "";
+    localStorage.clear();
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
-  it("runs the production startup path without telemetry network or native-command work", async () => {
+  // The one native command the main window's boot may issue is the
+  // installation-cohort lookup — telemetry itself stays off the network and
+  // off native commands in this build.
+  it("resolves the installation cohort before rendering the main app, with no telemetry work", async () => {
     await loadMainAt("");
 
     await screen.findByTestId("main-app");
     expect(globalThis.fetch).not.toHaveBeenCalled();
-    expect(mockInvoke).not.toHaveBeenCalled();
+    expect(mockInvoke).toHaveBeenCalledOnce();
+    expect(mockInvoke).toHaveBeenCalledWith("get_installation_cohort");
     expect(mockInstallRendererDiagnostics).toHaveBeenCalledWith({
       windowKind: "main",
     });
+  });
+
+  it("reports cohort lookup failures without blocking startup", async () => {
+    const error = new Error("state unavailable");
+    mockInvoke.mockRejectedValueOnce(error);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await loadMainAt("");
+
+    await screen.findByTestId("main-app");
+    expect(mockReportRendererError).toHaveBeenCalledWith(
+      "installation_cohort_failed",
+      error,
+    );
   });
 
   it("runs the session window startup path without telemetry network or native-command work", async () => {

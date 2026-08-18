@@ -3,12 +3,11 @@
     "goBack": "Go back"
   },
   "welcome": {
-    "title": "Welcome to Berd",
-    "projects": "A place to build projects",
-    "agents": "work with agents",
-    "and": "and",
-    "done": "get work done",
-    "getStarted": "Get started"
+    "title": "Welcome to Berd.",
+    "subtitle": "Your place for doing.",
+    "getStarted": "Let’s go",
+    "usageConsent": "Share anonymous usage data to help improve Berd.",
+    "learnMore": "Learn more"
   },
   "workTypes": {
     "title": "What type of work will you use Berd for?",

@@ -25,6 +25,7 @@ pub mod git;
 pub mod git_changes;
 pub mod global_shortcut;
 pub mod home_widget_media;
+pub mod installation;
 pub mod layout;
 pub mod local_mcp_inventory;
 pub mod message_queues;

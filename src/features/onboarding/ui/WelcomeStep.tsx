@@ -1,9 +1,16 @@
+import { useEffect, useId, useRef, useState, type PointerEvent } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/shared/ui/button";
-import { BerdIcon } from "@/shared/ui/icons/BerdIcon";
-import { useArtifacts } from "@/shared/hooks/useArtifacts";
-import { selectCollectionImageUrl } from "@/shared/api/artifacts";
+import { Checkbox } from "@/shared/ui/checkbox";
+import { ProjectArtifactPreview } from "@/features/projects/artifact/ProjectArtifactPreview";
+import type { ProjectArtifactMotionImpulse } from "@/features/projects/artifact/types";
+import { UsageDataDialog } from "@/features/settings/ui/UsageDataDialog";
+import { useProfileCapability } from "@/shared/profile/capabilities";
+import {
+  telemetryConsentEnforced,
+  updateTelemetryEnabled,
+} from "@/shared/telemetry/consent";
 import { OnboardingShell } from "./OnboardingShell";
 
 interface WelcomeStepProps {
@@ -15,79 +22,198 @@ const reveal = {
   visible: { opacity: 1, y: 0 },
 };
 
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
 export function WelcomeStep({ onStart }: WelcomeStepProps) {
   const { t } = useTranslation("onboarding");
-  const reduceMotion = useReducedMotion();
-  const duration = reduceMotion ? 0 : 0.28;
-  const { data: artifacts } = useArtifacts();
-  const projectThumbnail = selectCollectionImageUrl(
-    artifacts,
-    "onboarding",
-    "project-cube",
-  );
-  const avatarThumbnail = selectCollectionImageUrl(
-    artifacts,
-    "onboarding",
-    "avatar-thumbnail",
+  const reduceMotion = useReducedMotion() === true;
+  const checkboxId = useId();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  // The landing page is the one consent surface that defaults to sharing ON:
+  // the persisted Rust-owned setting stays at its opt-in default (OFF) until
+  // the user advances, so declining is just leaving the page.
+  const [shareUsageData, setShareUsageData] = useState(true);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  // Mirrors TelemetryConsentRow's gate: enforced builds decide consent as
+  // build policy, and capability-less sessions can never emit an event, so in
+  // both cases asking would be noise. Hiding also skips the write on start,
+  // leaving the persisted choice untouched.
+  const consentAvailable = useProfileCapability("telemetry");
+  const consentHidden = telemetryConsentEnforced() || !consentAvailable;
+  const [cubeMotion, setCubeMotion] = useState<ProjectArtifactMotionImpulse>();
+  const lastPointer = useRef<{ x: number; y: number; time: number } | null>(
+    null,
   );
 
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
+
+  const updateCubeMotion = (event: PointerEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const current = {
+      x: event.clientX,
+      y: event.clientY,
+      time: event.timeStamp,
+    };
+    const previous = lastPointer.current;
+    lastPointer.current = current;
+    const hoverX = clamp(
+      ((event.clientX - rect.left) / rect.width) * 2 - 1,
+      -1,
+      1,
+    );
+    const hoverY = clamp(
+      -(((event.clientY - rect.top) / rect.height) * 2 - 1),
+      -1,
+      1,
+    );
+    const elapsed = Math.max(
+      current.time - (previous?.time ?? current.time),
+      8,
+    );
+    const deltaX = previous ? (current.x - previous.x) / rect.width : 0;
+    const deltaY = previous ? (current.y - previous.y) / rect.height : 0;
+    const velocityBoost = clamp(
+      1 + (Math.hypot(deltaX, deltaY) / (elapsed / 1000)) * 0.22,
+      0.9,
+      3.1,
+    );
+    setCubeMotion((motion) => ({
+      sequence: (motion?.sequence ?? 0) + 1,
+      deltaX: clamp(deltaX * velocityBoost, -0.3, 0.3),
+      deltaY: clamp(deltaY * velocityBoost, -0.3, 0.3),
+      hoverX: Math.abs(hoverX) < 0.08 ? 0.22 : hoverX,
+      hoverY: Math.abs(hoverY) < 0.08 ? 0.16 : hoverY,
+    }));
+  };
+
+  const resetCubeMotion = () => {
+    lastPointer.current = null;
+    setCubeMotion((motion) =>
+      motion
+        ? {
+            ...motion,
+            sequence: motion.sequence + 1,
+            deltaX: 0,
+            deltaY: 0,
+            hoverX: 0,
+            hoverY: 0,
+          }
+        : motion,
+    );
+  };
+
   return (
-    <OnboardingShell>
+    <OnboardingShell contentClassName="max-[760px]:overflow-x-hidden max-[760px]:overflow-y-auto">
       <motion.div
-        className="flex h-full items-center justify-center px-8 pb-4"
+        className="relative grid h-full w-full grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)] items-center gap-[clamp(3rem,8vw,10rem)] px-[clamp(0rem,4vw,5rem)] pt-[var(--spacing-app-top-bar)] max-[760px]:grid-cols-1 max-[760px]:gap-0 max-[760px]:px-8"
         initial="hidden"
         animate="visible"
-        transition={{ staggerChildren: reduceMotion ? 0 : 0.32 }}
+        transition={{ staggerChildren: reduceMotion ? 0 : 0.12 }}
       >
-        <div className="text-center">
-          <motion.h1
-            variants={reveal}
-            transition={{ duration }}
-            className="text-[48px] leading-tight font-normal text-foreground"
+        <motion.div
+          variants={reveal}
+          transition={{ duration: reduceMotion ? 0 : 0.35 }}
+          className="flex h-[min(92vh,980px)] w-[min(62vw,980px)] translate-x-16 items-center justify-self-end overflow-visible max-[760px]:absolute max-[760px]:bottom-[calc(-18vh-80px)] max-[760px]:left-1/2 max-[760px]:h-[62vh] max-[760px]:w-full max-[760px]:-translate-x-1/2 max-[760px]:justify-center"
+          aria-hidden="true"
+          onPointerEnter={reduceMotion ? undefined : updateCubeMotion}
+          onPointerMove={reduceMotion ? undefined : updateCubeMotion}
+          onPointerLeave={reduceMotion ? undefined : resetCubeMotion}
+        >
+          <div className="h-[120%] w-[120%] shrink-0 -translate-x-64 scale-[1.0875] max-[760px]:h-[145%] max-[760px]:w-[145%] max-[760px]:translate-x-0 max-[760px]:translate-y-12 max-[760px]:scale-[1.15]">
+            <ProjectArtifactPreview
+              input={{
+                projectId: "berd-welcome",
+                name: "Welcome to Berd",
+                color: "olive",
+                artifact: {
+                  seed: 18,
+                  color: "olive",
+                  mood: "serene",
+                  moodIntensity: 0.72,
+                  contentMode: "cube",
+                },
+              }}
+              variant="tile"
+              cameraDistanceScale={1.2}
+              motionImpulse={reduceMotion ? undefined : cubeMotion}
+              gestureFreezeActive={reduceMotion}
+              className="h-full w-full"
+            />
+          </div>
+        </motion.div>
+
+        <motion.section
+          variants={reveal}
+          transition={{ duration: reduceMotion ? 0 : 0.35 }}
+          className="w-full max-w-[390px] justify-self-start max-[760px]:absolute max-[760px]:top-[42%] max-[760px]:left-1/2 max-[760px]:-translate-x-1/2 max-[760px]:-translate-y-1/2 max-[760px]:text-center"
+        >
+          <h1
+            ref={headingRef}
+            tabIndex={-1}
+            className="text-[clamp(2.25rem,3.2vw,3.5rem)] leading-[0.98] font-normal tracking-[-0.045em] text-foreground outline-none"
           >
             {t("welcome.title")}
-          </motion.h1>
-          <div className="mt-3 text-[48px] leading-[1.28] text-muted-foreground">
-            <motion.div variants={reveal} transition={{ duration }}>
-              {t("welcome.projects")}{" "}
-              {projectThumbnail ? (
-                <img
-                  src={projectThumbnail}
-                  alt=""
-                  className="inline h-[64px] w-auto object-contain align-middle"
-                />
-              ) : null}
-              ,
-            </motion.div>
-            <motion.div variants={reveal} transition={{ duration }}>
-              {t("welcome.agents")}{" "}
-              {avatarThumbnail ? (
-                <img
-                  src={avatarThumbnail}
-                  alt=""
-                  className="inline h-[76px] w-auto object-contain align-middle"
-                />
-              ) : null}
-              , {t("welcome.and")}
-            </motion.div>
-            <motion.div variants={reveal} transition={{ duration }}>
-              {t("welcome.done")}{" "}
-              <span className="inline-flex size-12 rotate-[-10deg] items-center justify-center rounded-[8px] bg-foreground align-middle text-background">
-                <BerdIcon className="size-8" />
-              </span>
-            </motion.div>
-          </div>
-          <motion.div
-            variants={reveal}
-            transition={{ duration }}
-            className="mt-7"
+            <br />
+            {t("welcome.subtitle")}
+          </h1>
+
+          <Button
+            type="button"
+            size="lg"
+            className="mt-9 w-[calc(100%-80px)] max-[760px]:mx-auto"
+            onClick={() => {
+              // Fire-and-forget: the landing page advances regardless of
+              // whether the native write lands. A failed write fails closed —
+              // the Rust-owned setting keeps its OFF default, so nothing is
+              // sent — and the Settings toggle remains the repair path. No
+              // explicit pipeline start either: telemetry initialized at boot,
+              // and the consent store update brings the pipeline up.
+              if (!consentHidden) {
+                updateTelemetryEnabled(shareUsageData).catch((error) => {
+                  console.warn(
+                    "Failed to persist the usage-data choice:",
+                    error,
+                  );
+                });
+              }
+              onStart();
+            }}
           >
-            <Button type="button" className="w-[230px]" onClick={onStart}>
-              {t("welcome.getStarted")}
-            </Button>
-          </motion.div>
-        </div>
+            {t("welcome.getStarted")}
+          </Button>
+
+          {consentHidden ? null : (
+            <div className="mt-6 flex w-[calc(100%-72px)] items-start gap-2.5 text-left text-xs leading-[1.15] text-muted-foreground max-[760px]:mx-auto">
+              <Checkbox
+                id={checkboxId}
+                checked={shareUsageData}
+                onCheckedChange={(checked) =>
+                  setShareUsageData(checked === true)
+                }
+                aria-describedby={`${checkboxId}-description`}
+              />
+              <p id={`${checkboxId}-description`}>
+                <label htmlFor={checkboxId}>{t("welcome.usageConsent")}</label>{" "}
+                <Button
+                  type="button"
+                  variant="link"
+                  className="text-xs"
+                  onClick={() => setDetailsOpen(true)}
+                >
+                  {t("welcome.learnMore")}
+                </Button>
+              </p>
+            </div>
+          )}
+        </motion.section>
       </motion.div>
+
+      <UsageDataDialog open={detailsOpen} onOpenChange={setDetailsOpen} />
     </OnboardingShell>
   );
 }

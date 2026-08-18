@@ -3,18 +3,96 @@ import { INITIAL_ONBOARDING_STATE } from "./onboardingState";
 import {
   dispatchOnboarding,
   getOnboardingSnapshot,
+  initializeOnboardingGraduation,
   ONBOARDING_STORAGE_KEY,
   ONBOARDING_STORAGE_VERSION,
   replayOnboarding,
   resetOnboarding,
   resetOnboardingStoreForTests,
+  setOnboardingStorageForTests,
   subscribeToOnboarding,
 } from "./onboardingStore";
 
 describe("onboarding persistence", () => {
   beforeEach(() => {
+    setOnboardingStorageForTests(undefined);
     window.localStorage.clear();
     resetOnboardingStoreForTests();
+  });
+
+  it("keeps onboarding pending for a fresh installation", () => {
+    initializeOnboardingGraduation("fresh-with-landing-v1");
+    resetOnboardingStoreForTests();
+
+    expect(getOnboardingSnapshot()).toEqual(INITIAL_ONBOARDING_STATE);
+  });
+
+  it("marks an established installation complete during graduation", () => {
+    initializeOnboardingGraduation("established-before-landing-v1");
+    resetOnboardingStoreForTests();
+
+    expect(getOnboardingSnapshot()).toMatchObject({
+      lifecycle: "completed",
+      step: "complete",
+    });
+  });
+
+  it("graduates established installations when storage is unavailable or fails", () => {
+    setOnboardingStorageForTests(null);
+    initializeOnboardingGraduation("established-before-landing-v1");
+    expect(getOnboardingSnapshot().lifecycle).toBe("completed");
+
+    setOnboardingStorageForTests({
+      getItem: () => {
+        throw new Error("unavailable");
+      },
+    } as unknown as Storage);
+    initializeOnboardingGraduation("established-before-landing-v1");
+    expect(getOnboardingSnapshot().lifecycle).toBe("completed");
+
+    setOnboardingStorageForTests({
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("full");
+      },
+    } as unknown as Storage);
+    initializeOnboardingGraduation("established-before-landing-v1");
+    expect(getOnboardingSnapshot().lifecycle).toBe("completed");
+  });
+
+  it("graduates malformed current state but preserves a newer record", () => {
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "not json");
+    initializeOnboardingGraduation("established-before-landing-v1");
+    resetOnboardingStoreForTests();
+    expect(getOnboardingSnapshot().lifecycle).toBe("completed");
+
+    const newerRecord = JSON.stringify({
+      version: ONBOARDING_STORAGE_VERSION + 1,
+      state: { future: true },
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, newerRecord);
+    initializeOnboardingGraduation("established-before-landing-v1");
+    expect(window.localStorage.getItem(ONBOARDING_STORAGE_KEY)).toBe(
+      newerRecord,
+    );
+  });
+
+  it("does not graduate when the cohort is unknown", () => {
+    initializeOnboardingGraduation("unknown");
+    resetOnboardingStoreForTests();
+    expect(getOnboardingSnapshot()).toEqual(INITIAL_ONBOARDING_STATE);
+  });
+
+  it("preserves existing onboarding progress during graduation", () => {
+    dispatchOnboarding({ type: "start" });
+
+    initializeOnboardingGraduation("fresh-with-landing-v1");
+    resetOnboardingStoreForTests();
+
+    expect(getOnboardingSnapshot()).toMatchObject({
+      lifecycle: "in-progress",
+      step: "welcome",
+    });
   });
 
   it("persists versioned state and hydrates it on a new lifecycle", () => {

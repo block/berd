@@ -127,6 +127,30 @@ describe("TelemetryConsentRow", () => {
     consoleWarn.mockRestore();
   });
 
+  it("presents the usage-data details from the learn-more link", async () => {
+    renderWithProviders(<TelemetryConsentRow />);
+
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: enSettings.privacy.telemetry.learnMore,
+      }),
+    );
+
+    expect(
+      screen.getByRole("dialog", {
+        name: enSettings.privacy.telemetry.usageDialog.title,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(enSettings.privacy.telemetry.usageDialog.collectTitle),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        enSettings.privacy.telemetry.usageDialog.notCollectTitle,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("renders nothing in enforced builds", () => {
     enforced.mockReturnValue(true);
     const { container } = renderWithProviders(<TelemetryConsentRow />);
