@@ -5,6 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WelcomeStep } from "./WelcomeStep";
 
 const motionMocks = vi.hoisted(() => ({ reduced: false }));
+const telemetryMocks = vi.hoisted(() => ({ start: vi.fn() }));
+
+vi.mock("@/shared/telemetry/startup", () => ({
+  startTelemetryIfConsented: telemetryMocks.start,
+}));
 
 vi.mock("motion/react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("motion/react")>();
@@ -45,6 +50,7 @@ function renderStep(onStart = vi.fn()) {
 describe("WelcomeStep", () => {
   afterEach(() => {
     motionMocks.reduced = false;
+    telemetryMocks.start.mockReset();
     localStorage.clear();
   });
 
@@ -76,6 +82,27 @@ describe("WelcomeStep", () => {
     await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
 
     expect(localStorage.getItem("berd:telemetry-consent:v1")).toBe("false");
+    expect(onStart).toHaveBeenCalledOnce();
+  });
+
+  it("advances even when telemetry startup throws", async () => {
+    telemetryMocks.start.mockImplementation(() => {
+      throw new Error("analytics unavailable");
+    });
+    // React re-throws handler errors to window.onerror; keep the expected
+    // failure from registering as an unhandled test error.
+    const swallowExpectedError = (event: ErrorEvent) => event.preventDefault();
+    window.addEventListener("error", swallowExpectedError);
+    const onStart = renderStep();
+
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
+    } finally {
+      window.removeEventListener("error", swallowExpectedError);
+    }
+
+    expect(telemetryMocks.start).toHaveBeenCalledOnce();
+    expect(localStorage.getItem("berd:telemetry-consent:v1")).toBe("true");
     expect(onStart).toHaveBeenCalledOnce();
   });
 

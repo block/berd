@@ -166,10 +166,15 @@ export function WelcomeStep({ onStart }: WelcomeStepProps) {
             size="lg"
             className="mt-9 w-[calc(100%-80px)] max-[760px]:mx-auto"
             onClick={() => {
-              if (setTelemetryConsent(shareUsageData) && shareUsageData) {
-                startTelemetryIfConsented();
+              // Consent is persisted before telemetry starts, so onboarding has
+              // to advance regardless of how the telemetry seam behaves.
+              try {
+                if (setTelemetryConsent(shareUsageData) && shareUsageData) {
+                  startTelemetryIfConsented();
+                }
+              } finally {
+                onStart();
               }
-              onStart();
             }}
           >
             {t("welcome.getStarted")}

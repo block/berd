@@ -181,8 +181,6 @@ if (bootError) {
       initializeOnboardingGraduation("unknown");
     })
     .finally(() => {
-      startTelemetryIfConsented();
-
       reactRoot.render(
         <React.StrictMode>
           <TooltipProvider>
@@ -206,5 +204,8 @@ if (bootError) {
           </TooltipProvider>
         </React.StrictMode>,
       );
+
+      // After render, so telemetry startup can never gate booting the app.
+      startTelemetryIfConsented();
     });
 }

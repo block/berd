@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mockInstallRendererDiagnostics = vi.hoisted(() => vi.fn());
 const mockReportRendererError = vi.hoisted(() => vi.fn());
 const mockInvoke = vi.hoisted(() => vi.fn());
+const mockInitTelemetry = vi.hoisted(() => vi.fn());
+const mockTrackAppLaunched = vi.hoisted(() => vi.fn());
 
 vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 vi.mock("@/shared/styles/globals.css", () => ({}));
@@ -56,6 +58,11 @@ vi.mock("@/shared/i18n", () => ({
   I18nProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
+vi.mock("@/shared/telemetry/client", () => ({
+  initTelemetry: mockInitTelemetry,
+  trackAppLaunched: mockTrackAppLaunched,
+}));
+
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mockInvoke }));
 
 vi.mock("@/shared/theme/ThemeProvider", () => ({
@@ -76,12 +83,16 @@ describe("main entrypoint telemetry startup", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    localStorage.clear();
+    mockInitTelemetry.mockReset();
+    mockTrackAppLaunched.mockReset();
     mockInvoke.mockResolvedValue("fresh-with-landing-v1");
     globalThis.fetch = vi.fn() as typeof globalThis.fetch;
   });
 
   afterEach(() => {
     document.body.innerHTML = "";
+    localStorage.clear();
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
   });
@@ -108,6 +119,24 @@ describe("main entrypoint telemetry startup", () => {
     await screen.findByTestId("main-app");
     expect(mockReportRendererError).toHaveBeenCalledWith(
       "installation_cohort_failed",
+      error,
+    );
+  });
+
+  it("reports telemetry init failures without blocking startup", async () => {
+    const error = new Error("analytics unavailable");
+    mockInitTelemetry.mockImplementation(() => {
+      throw error;
+    });
+    localStorage.setItem("berd:telemetry-consent:v1", "true");
+
+    await loadMainAt("");
+
+    await screen.findByTestId("main-app");
+    expect(mockInitTelemetry).toHaveBeenCalledOnce();
+    expect(mockTrackAppLaunched).not.toHaveBeenCalled();
+    expect(mockReportRendererError).toHaveBeenCalledWith(
+      "telemetry_init_failed",
       error,
     );
   });
