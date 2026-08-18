@@ -1,10 +1,7 @@
 import type { Persona } from "@/shared/types/agents";
 
 export const BERDY_AGENT_FILE_NAME = "berdy.md";
-const BERDY_GLOBAL_AGENT_PATH_SUFFIXES = [
-  `/.agents/agents/${BERDY_AGENT_FILE_NAME}`,
-  "/.agents/agents/berdy2.md",
-];
+const BERDY_GLOBAL_AGENT_PATH_SUFFIX = `/.agents/agents/${BERDY_AGENT_FILE_NAME}`;
 
 export function findBerdyPersonaId(
   personas: readonly Persona[],
@@ -18,12 +15,10 @@ export function findBerdyPersonaId(
       "berdBundled" in metadata &&
       metadata.berdBundled === true;
     return (
-      BERDY_GLOBAL_AGENT_PATH_SUFFIXES.some((suffix) =>
-        normalizedPath.endsWith(suffix),
-      ) &&
+      normalizedPath.endsWith(BERDY_GLOBAL_AGENT_PATH_SUFFIX) &&
       isBerdBundled &&
       persona.displayName.trim().toLowerCase() === "berdy" &&
-      persona.avatar === "app-avatar:gloopies-14"
+      persona.avatar === "app-avatar:gloopies-22"
     );
   });
 

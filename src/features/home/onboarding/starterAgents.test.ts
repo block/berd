@@ -5,7 +5,6 @@ import {
   markStarterAgentPinsSeeded,
   resetStarterAgentPinsSeeded,
   selectStarterAgentPersonas,
-  shouldRemoveLegacyBerdyPin,
   STARTER_AGENT_NAMES,
 } from "./starterAgents";
 
@@ -14,7 +13,9 @@ function persona(
   options: { bundled?: boolean; id?: string } = {},
 ): Persona {
   return {
-    id: options.id ?? `/Users/test/.agents/agents/${displayName}.md`,
+    id:
+      options.id ??
+      `/Users/test/.agents/agents/${displayName.toLowerCase()}.md`,
     displayName,
     systemPrompt: "Help.",
     isBuiltin: false,
@@ -28,24 +29,32 @@ function persona(
 describe("starter agents", () => {
   beforeEach(() => localStorage.clear());
 
-  it("selects block.md and Builderbot without duplicating Berdy", () => {
-    expect(STARTER_AGENT_NAMES).toEqual(["block.md", "Builderbot"]);
+  it("selects Tinker and Wildcard in pinned order", () => {
+    expect(STARTER_AGENT_NAMES).toEqual(["Tinker", "Wildcard"]);
     expect(
       selectStarterAgentPersonas([
-        persona("Builderbot"),
+        persona("Wildcard"),
         persona("Berdy"),
-        persona("block.md"),
+        persona("Tinker"),
       ]).map((agent) => agent.displayName),
-    ).toEqual(["block.md", "Builderbot"]);
+    ).toEqual(["Tinker", "Wildcard"]);
   });
 
-  it("does not treat similarly named user agents as starter agents", () => {
+  it("accepts only bundled starter identities", () => {
     expect(
       selectStarterAgentPersonas([
-        persona("Berdy", { bundled: false }),
-        persona("Builderbot copy"),
-      ]),
-    ).toEqual([]);
+        persona("Unmarked Tinker", {
+          id: "/Users/test/.agents/agents/tinker.md",
+          bundled: false,
+        }),
+        persona("Wrong-path Tinker", {
+          id: "/Users/test/.agents/agents/tinker2.md",
+        }),
+        persona("Bundled Wildcard", {
+          id: "/Users/test/.agents/agents/wildcard.md",
+        }),
+      ]).map((agent) => agent.displayName),
+    ).toEqual(["Bundled Wildcard"]);
   });
 
   it("clears starter-agent seeding for onboarding reset", () => {
@@ -55,19 +64,5 @@ describe("starter agents", () => {
     resetStarterAgentPinsSeeded();
 
     expect(haveStarterAgentPinsBeenSeeded()).toBe(false);
-  });
-
-  it("migrates the legacy three-agent seed marker", () => {
-    localStorage.setItem("goose:home:starter-agent-pins-seeded", "1");
-    expect(shouldRemoveLegacyBerdyPin()).toBe(true);
-    expect(haveStarterAgentPinsBeenSeeded()).toBe(false);
-
-    markStarterAgentPinsSeeded();
-
-    expect(haveStarterAgentPinsBeenSeeded()).toBe(true);
-    expect(shouldRemoveLegacyBerdyPin()).toBe(false);
-    expect(
-      localStorage.getItem("goose:home:starter-agent-pins-seeded"),
-    ).toBeNull();
   });
 });

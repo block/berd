@@ -32,9 +32,8 @@ export const STARTER_HOME_LAYOUT = {
   clock: { x: 533.5, y: -266.5, width: 173, height: 173 },
   tasks: { x: 440, y: 120, width: 256, height: 224 },
   agents: [
-    { x: 228, y: -380, width: 200, height: 220 },
     { x: -292, y: 260, width: 200, height: 220 },
-    { x: 348, y: 300, width: 200, height: 220 },
+    { x: 228, y: -380, width: 200, height: 220 },
   ],
 } as const;
 
