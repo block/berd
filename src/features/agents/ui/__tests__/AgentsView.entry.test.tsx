@@ -45,15 +45,19 @@ const mockDraftSource = vi.hoisted(() => ({
   },
 }));
 
+const mockExtractInWorker = vi.hoisted(() => vi.fn());
+
 vi.mock("@/features/agents/lib/agentZipImport", async (importOriginal) => {
   const actual =
     await importOriginal<
       typeof import("@/features/agents/lib/agentZipImport")
     >();
+  mockExtractInWorker.mockImplementation(async (bytes: Uint8Array) =>
+    actual.extractAgentFileFromZip(bytes),
+  );
   return {
     ...actual,
-    extractAgentFileFromZipInWorker: async (bytes: Uint8Array) =>
-      actual.extractAgentFileFromZip(bytes),
+    extractAgentFileFromZipInWorker: mockExtractInWorker,
   };
 });
 
@@ -418,6 +422,32 @@ describe("AgentsView entry points", () => {
       await screen.findByRole("heading", { name: "imageImport.description" }),
     ).toBeInTheDocument();
     expect(screen.getByDisplayValue("Test Agent Display")).toBeInTheDocument();
+  });
+
+  it("routes gallery ZIP drops through worker-backed extraction", async () => {
+    vi.mocked(importPersonas).mockResolvedValue([]);
+    const archive = zipSync({
+      "reviewer.persona.md": new TextEncoder().encode("---\n---\nReview."),
+    });
+    const file = new File([archive], "reviewer.zip", {
+      type: "application/zip",
+    });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(archive.buffer),
+    });
+    const { container } = render(<AgentsView />);
+    const dropZone = container.querySelector(".\\@container") as HTMLElement;
+
+    fireEvent.drop(dropZone, { dataTransfer: { files: [file] } });
+
+    await waitFor(() => expect(mockExtractInWorker).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(importPersonas).toHaveBeenCalledWith(
+        expect.stringContaining("Review."),
+        "reviewer.persona.md",
+      ),
+    );
   });
 
   it("shows a localized error for an ambiguous agent ZIP", async () => {

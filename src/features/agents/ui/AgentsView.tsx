@@ -59,7 +59,6 @@ import { isSafePngAvatarDataUrl } from "@/shared/lib/avatarUrl";
 import {
   AgentZipImportError,
   type ExtractedAgentFile,
-  extractAgentFileFromZip,
   extractAgentFileFromZipInWorker,
   isAgentZipFileName,
 } from "@/features/agents/lib/agentZipImport";
@@ -483,8 +482,10 @@ export function AgentsView({
       preview?: { snapshot?: ReturnType<typeof decodeAgentImage> },
     ) => {
       try {
+        // A .zip name only reaches this handler from the gallery drop zone;
+        // the import dialog always passes the extracted inner file.
         const extracted = isAgentZipFileName(fileName)
-          ? extractAgentFileFromZip(fileBytes)
+          ? await extractAgentFileFromZipInWorker(fileBytes)
           : { bytes: fileBytes, name: fileName };
         if (isAgentImageFileName(extracted.name)) {
           setImageImport({
