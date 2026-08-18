@@ -206,7 +206,9 @@ export function HomeView({
     const availableStarterAgents = haveSeededStarterAgents
       ? []
       : selectStarterAgentPersonas(personas);
-    if (availableStarterAgents.length === 0) return;
+    if (availableStarterAgents.length !== STARTER_HOME_LAYOUT.agents.length) {
+      return;
+    }
 
     const pinnedAgentIds = new Set(
       instances
@@ -258,7 +260,7 @@ export function HomeView({
       starterAgentPersonas.map((persona) => persona.id),
     );
     const hasCompleteStarterSet =
-      starterAgentPersonas.length > 0 &&
+      starterAgentPersonas.length === STARTER_HOME_LAYOUT.agents.length &&
       starterAgentPersonas.every((persona) =>
         instances.some(
           (instance) =>

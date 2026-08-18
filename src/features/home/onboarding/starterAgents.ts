@@ -9,21 +9,16 @@ const SEEDED_STARTER_AGENTS_STORAGE_KEY =
 const STARTER_AGENT_PINS_ELIGIBLE_STORAGE_KEY =
   "goose:home:starter-agent-pins-eligible-v1";
 
-function isBundledPersona(persona: Persona): boolean {
-  const metadata = persona.sourceProperties?.metadata;
-  return (
-    typeof metadata === "object" &&
-    metadata !== null &&
-    "berdBundled" in metadata &&
-    metadata.berdBundled === true
-  );
-}
-
 function starterAgentIndex(persona: Persona): number {
-  const normalizedPath = persona.id.replaceAll("\\", "/").toLowerCase();
-  return STARTER_AGENT_FILE_NAMES.findIndex((fileName) =>
-    normalizedPath.endsWith(`/.agents/agents/${fileName}`),
-  );
+  const metadata = persona.sourceProperties?.metadata;
+  if (typeof metadata !== "object" || metadata === null) return -1;
+  const sourceId = Reflect.get(metadata, "berdBundledAllocationSource");
+  const managed = Reflect.get(metadata, "berdManagedBundledCopy") === true;
+  return managed && typeof sourceId === "string"
+    ? STARTER_AGENT_FILE_NAMES.findIndex(
+        (fileName) => fileName.slice(0, -3) === sourceId,
+      )
+    : -1;
 }
 
 export function haveStarterAgentPinsBeenSeeded(): boolean {
@@ -78,7 +73,6 @@ export function selectStarterAgentPersonas(
     () => undefined,
   );
   for (const persona of personas) {
-    if (!isBundledPersona(persona)) continue;
     const index = starterAgentIndex(persona);
     if (index >= 0 && !selected[index]) selected[index] = persona;
   }

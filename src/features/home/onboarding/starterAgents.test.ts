@@ -10,7 +10,7 @@ import {
 
 function persona(
   displayName: string,
-  options: { bundled?: boolean; id?: string } = {},
+  options: { bundled?: boolean; id?: string; managedSource?: string } = {},
 ): Persona {
   return {
     id:
@@ -21,7 +21,15 @@ function persona(
     isBuiltin: false,
     writable: true,
     sourceProperties: {
-      metadata: { berdBundled: options.bundled ?? true },
+      metadata: {
+        berdBundled: options.bundled ?? true,
+        ...(options.managedSource
+          ? {
+              berdManagedBundledCopy: true,
+              berdBundledAllocationSource: options.managedSource,
+            }
+          : {}),
+      },
     },
   };
 }
@@ -33,26 +41,29 @@ describe("starter agents", () => {
     expect(STARTER_AGENT_NAMES).toEqual(["Tinker", "Wildcard"]);
     expect(
       selectStarterAgentPersonas([
-        persona("Wildcard"),
-        persona("Berdy"),
-        persona("Tinker"),
+        persona("Wildcard", { managedSource: "wildcard" }),
+        persona("Berdy", { managedSource: "berdy" }),
+        persona("Tinker", { managedSource: "tinker" }),
       ]).map((agent) => agent.displayName),
     ).toEqual(["Tinker", "Wildcard"]);
   });
 
-  it("uses canonical bundled filenames instead of similar names", () => {
+  it("accepts only verified managed starter identities", () => {
     expect(
       selectStarterAgentPersonas([
-        persona("Tinker copy"),
-        persona("Wildcard", { bundled: false }),
-        persona("Workbench", {
+        persona("Self-declared Tinker", {
           id: "/Users/test/.agents/agents/tinker.md",
         }),
-        persona("Surprise", {
+        persona("Managed Tinker", {
+          id: "/Users/test/.agents/agents/tinker2.md",
+          managedSource: "tinker",
+        }),
+        persona("Managed Wildcard", {
           id: "/Users/test/.agents/agents/wildcard.md",
+          managedSource: "wildcard",
         }),
       ]).map((agent) => agent.displayName),
-    ).toEqual(["Workbench", "Surprise"]);
+    ).toEqual(["Managed Tinker", "Managed Wildcard"]);
   });
 
   it("clears starter-agent seeding for onboarding reset", () => {

@@ -229,7 +229,13 @@ describe("HomeView", () => {
       systemPrompt: "Help.",
       isBuiltin: false,
       writable: true,
-      sourceProperties: { metadata: { berdBundled: true } },
+      sourceProperties: {
+        metadata: {
+          berdBundled: true,
+          berdManagedBundledCopy: true,
+          berdBundledAllocationSource: displayName.toLowerCase(),
+        },
+      },
     });
     const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
     useAgentStore.setState({ personas, personasLoading: false });
@@ -309,7 +315,13 @@ describe("HomeView", () => {
       systemPrompt: "Help.",
       isBuiltin: false,
       writable: true,
-      sourceProperties: { metadata: { berdBundled: true } },
+      sourceProperties: {
+        metadata: {
+          berdBundled: true,
+          berdManagedBundledCopy: true,
+          berdBundledAllocationSource: displayName.toLowerCase(),
+        },
+      },
     });
     const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
     useAgentStore.setState({ personas, personasLoading: false });
@@ -476,7 +488,13 @@ describe("HomeView", () => {
       systemPrompt: "Help.",
       isBuiltin: false,
       writable: true,
-      sourceProperties: { metadata: { berdBundled: true } },
+      sourceProperties: {
+        metadata: {
+          berdBundled: true,
+          berdManagedBundledCopy: true,
+          berdBundledAllocationSource: displayName.toLowerCase(),
+        },
+      },
     });
     useAgentStore.setState({
       personas: [
@@ -508,7 +526,13 @@ describe("HomeView", () => {
       systemPrompt: "Help.",
       isBuiltin: false,
       writable: true,
-      sourceProperties: { metadata: { berdBundled: true } },
+      sourceProperties: {
+        metadata: {
+          berdBundled: true,
+          berdManagedBundledCopy: true,
+          berdBundledAllocationSource: "berdy",
+        },
+      },
     } satisfies Persona;
     vi.mocked(getLayout).mockResolvedValue(
       layout({
@@ -557,7 +581,13 @@ describe("HomeView", () => {
       systemPrompt: "Help.",
       isBuiltin: false,
       writable: true,
-      sourceProperties: { metadata: { berdBundled: true } },
+      sourceProperties: {
+        metadata: {
+          berdBundled: true,
+          berdManagedBundledCopy: true,
+          berdBundledAllocationSource: displayName.toLowerCase(),
+        },
+      },
     });
     const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
     useAgentStore.setState({ personas, personasLoading: false });
