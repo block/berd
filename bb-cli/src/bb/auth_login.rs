@@ -7,8 +7,9 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use builderbot_auth::auth_login::{
     build_auth_http_client, exchange_login_code_and_verify, login_url, logout_session_credential,
-    verify_session_credential, AuthMeResponse,
+    verify_session_credential, AuthMeResponse, VerifiedLoginSession,
 };
+use builderbot_auth::auth_storage::StoredSessionCredential;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tiny_http::{Header, Response, Server, StatusCode};
@@ -39,6 +40,15 @@ pub struct BrowserLoginSummary {
     pub credential_sha256_prefix: Option<String>,
 }
 
+struct BrowserLoginOutcome {
+    summary: BrowserLoginSummary,
+}
+
+pub struct VerifiedStoredSession {
+    pub credential: StoredSessionCredential,
+    pub me: AuthMeResponse,
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BrowserLoginCredentialSource {
@@ -50,6 +60,13 @@ pub fn run_browser_login(
     config: &SkillsConfig,
     storage: &dyn SessionCredentialStorage,
 ) -> Result<BrowserLoginSummary> {
+    run_browser_login_inner(config, storage).map(|outcome| outcome.summary)
+}
+
+fn run_browser_login_inner(
+    config: &SkillsConfig,
+    storage: &dyn SessionCredentialStorage,
+) -> Result<BrowserLoginOutcome> {
     let service_url = kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path);
     let client = build_auth_http_client(Duration::from_secs(30))?;
     let storage_key = session_storage_key_from_config(config);
@@ -70,15 +87,17 @@ pub fn run_browser_login(
                     ),
                 );
                 let workspace_name = me.active_workspace_name()?.to_string();
-                return Ok(BrowserLoginSummary {
-                    kgoose_base_url: config.kgoose_base_url.clone(),
-                    kgoose_service_path: config.kgoose_service_path.clone(),
-                    storage: storage.kind().to_string(),
-                    source: BrowserLoginCredentialSource::Stored,
-                    workspace_name,
-                    expires_at: me.expires_at.or(stored.expires_at),
-                    credential_prefix: None,
-                    credential_sha256_prefix: None,
+                return Ok(BrowserLoginOutcome {
+                    summary: BrowserLoginSummary {
+                        kgoose_base_url: config.kgoose_base_url.clone(),
+                        kgoose_service_path: config.kgoose_service_path.clone(),
+                        storage: storage.kind().to_string(),
+                        source: BrowserLoginCredentialSource::Stored,
+                        workspace_name,
+                        expires_at: me.expires_at.or_else(|| stored.expires_at.clone()),
+                        credential_prefix: None,
+                        credential_sha256_prefix: None,
+                    },
                 });
             }
             auth_info(
@@ -129,10 +148,8 @@ pub fn run_browser_login(
         .context("loopback auth server stopped before login completed")??;
     let verified =
         exchange_login_code_and_verify(&client, config.playpen.as_deref(), &service_url, &code)?;
-    let stored = verified.credential;
-    let me = verified.me;
-    let workspace_name = me.active_workspace_name()?.to_string();
-    storage.set(&storage_key, &stored)?;
+    let (stored, me, workspace_name) =
+        validate_and_store_login_credential(storage, &storage_key, verified)?;
     auth_info(
         config,
         &format!(
@@ -141,30 +158,66 @@ pub fn run_browser_login(
         ),
     );
 
-    Ok(BrowserLoginSummary {
-        kgoose_base_url: config.kgoose_base_url.clone(),
-        kgoose_service_path: config.kgoose_service_path.clone(),
-        storage: storage.kind().to_string(),
-        source: BrowserLoginCredentialSource::BrowserLogin,
-        workspace_name,
-        expires_at: me.expires_at.or_else(|| stored.expires_at.clone()),
-        credential_prefix: Some(safe_prefix(&stored.session_credential)),
-        credential_sha256_prefix: Some(sha256_prefix(&stored.session_credential)),
+    Ok(BrowserLoginOutcome {
+        summary: BrowserLoginSummary {
+            kgoose_base_url: config.kgoose_base_url.clone(),
+            kgoose_service_path: config.kgoose_service_path.clone(),
+            storage: storage.kind().to_string(),
+            source: BrowserLoginCredentialSource::BrowserLogin,
+            workspace_name,
+            expires_at: me.expires_at.or_else(|| stored.expires_at.clone()),
+            credential_prefix: Some(safe_prefix(&stored.session_credential)),
+            credential_sha256_prefix: Some(sha256_prefix(&stored.session_credential)),
+        },
     })
 }
 
 pub fn verify_stored_session(
     config: &SkillsConfig,
     storage: &dyn SessionCredentialStorage,
-) -> Result<Option<AuthMeResponse>> {
+) -> Result<Option<VerifiedStoredSession>> {
     let service_url = kgoose_service_url(&config.kgoose_base_url, &config.kgoose_service_path);
     let client = build_auth_http_client(Duration::from_secs(30))?;
     let storage_key = session_storage_key_from_config(config);
-    let Some(stored) = storage.get(&storage_key)? else {
+    verify_stored_session_with(storage, &storage_key, |stored| {
+        verify_session_credential(&client, config.playpen.as_deref(), &service_url, stored)
+    })
+}
+
+fn verify_stored_session_with<F>(
+    storage: &dyn SessionCredentialStorage,
+    storage_key: &super::auth_storage::SessionStorageKey,
+    verify: F,
+) -> Result<Option<VerifiedStoredSession>>
+where
+    F: FnOnce(&StoredSessionCredential) -> Result<Option<AuthMeResponse>>,
+{
+    let Some(stored) = storage.get(storage_key)? else {
         return Ok(None);
     };
+    Ok(verify(&stored)?.map(|me| VerifiedStoredSession {
+        credential: stored,
+        me,
+    }))
+}
 
-    verify_session_credential(&client, config.playpen.as_deref(), &service_url, &stored)
+fn store_login_credential(
+    storage: &dyn SessionCredentialStorage,
+    storage_key: &super::auth_storage::SessionStorageKey,
+    credential: StoredSessionCredential,
+) -> Result<StoredSessionCredential> {
+    storage.set(storage_key, &credential)?;
+    Ok(credential)
+}
+
+fn validate_and_store_login_credential(
+    storage: &dyn SessionCredentialStorage,
+    storage_key: &super::auth_storage::SessionStorageKey,
+    verified: VerifiedLoginSession,
+) -> Result<(StoredSessionCredential, AuthMeResponse, String)> {
+    let workspace_name = verified.me.active_workspace_name()?.to_string();
+    let stored = store_login_credential(storage, storage_key, verified.credential)?;
+    Ok((stored, verified.me, workspace_name))
 }
 
 pub fn logout_stored_session(
@@ -308,7 +361,142 @@ fn auth_info(config: &SkillsConfig, message: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{auth_callback_page, AuthCallbackPage};
+    use std::cell::{Cell, RefCell};
+    use std::collections::VecDeque;
+
+    use anyhow::Result;
+    use builderbot_auth::auth_login::{
+        AuthMeResponse, AuthMeWorkspace, AuthMeWorkspaces, VerifiedLoginSession,
+    };
+    use builderbot_auth::auth_storage::{
+        SessionCredentialStorage, SessionStorageKey, StoredSessionCredential,
+    };
+
+    use super::{
+        auth_callback_page, store_login_credential, validate_and_store_login_credential,
+        verify_stored_session_with, AuthCallbackPage,
+    };
+
+    struct SwappingStorage {
+        reads: RefCell<VecDeque<StoredSessionCredential>>,
+        read_count: Cell<usize>,
+        writes: RefCell<Vec<StoredSessionCredential>>,
+    }
+
+    impl SwappingStorage {
+        fn new(reads: impl IntoIterator<Item = StoredSessionCredential>) -> Self {
+            Self {
+                reads: RefCell::new(reads.into_iter().collect()),
+                read_count: Cell::new(0),
+                writes: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl SessionCredentialStorage for SwappingStorage {
+        fn kind(&self) -> &'static str {
+            "swapping"
+        }
+
+        fn get(&self, _key: &SessionStorageKey) -> Result<Option<StoredSessionCredential>> {
+            self.read_count.set(self.read_count.get() + 1);
+            Ok(self.reads.borrow_mut().pop_front())
+        }
+
+        fn set(
+            &self,
+            _key: &SessionStorageKey,
+            credential: &StoredSessionCredential,
+        ) -> Result<()> {
+            self.writes.borrow_mut().push(credential.clone());
+            Ok(())
+        }
+
+        fn delete(&self, _key: &SessionStorageKey) -> Result<bool> {
+            Ok(false)
+        }
+    }
+
+    fn stored(value: &str) -> StoredSessionCredential {
+        StoredSessionCredential {
+            session_credential: value.to_string(),
+            expires_at: None,
+        }
+    }
+
+    fn auth_me() -> AuthMeResponse {
+        AuthMeResponse {
+            subject: None,
+            email: None,
+            name: None,
+            expires_at: None,
+            workspaces: AuthMeWorkspaces {
+                active: vec![AuthMeWorkspace {
+                    name: "Test Workspace".to_string(),
+                }],
+            },
+        }
+    }
+
+    #[test]
+    fn verification_returns_the_exact_credential_that_was_checked() {
+        let storage = SwappingStorage::new([stored("verified-a"), stored("substituted-b")]);
+        let key = SessionStorageKey::new("default", "https://kgoose.example");
+
+        let verified = verify_stored_session_with(&storage, &key, |credential| {
+            assert_eq!(credential.session_credential, "verified-a");
+            Ok(Some(auth_me()))
+        })
+        .expect("verify stored session")
+        .expect("verified session");
+
+        assert_eq!(verified.credential.session_credential, "verified-a");
+        assert_eq!(storage.read_count.get(), 1);
+        assert_eq!(
+            storage
+                .get(&key)
+                .expect("read substituted credential")
+                .expect("substituted credential")
+                .session_credential,
+            "substituted-b"
+        );
+    }
+
+    #[test]
+    fn interactive_login_completion_returns_issued_credential_without_rereading_storage() {
+        let storage = SwappingStorage::new([stored("substituted-b")]);
+        let key = SessionStorageKey::new("default", "https://kgoose.example");
+
+        let returned = store_login_credential(&storage, &key, stored("issued-a"))
+            .expect("store completed login");
+
+        assert_eq!(returned.session_credential, "issued-a");
+        assert_eq!(storage.read_count.get(), 0);
+        assert_eq!(storage.writes.borrow()[0].session_credential, "issued-a");
+    }
+
+    #[test]
+    fn browser_login_does_not_store_a_session_without_an_active_workspace() {
+        let storage = SwappingStorage::new([]);
+        let key = SessionStorageKey::new("default", "https://kgoose.example");
+        let verified = VerifiedLoginSession {
+            credential: stored("issued-without-workspace"),
+            me: AuthMeResponse {
+                subject: None,
+                email: None,
+                name: None,
+                expires_at: None,
+                workspaces: AuthMeWorkspaces { active: vec![] },
+            },
+        };
+
+        let error = validate_and_store_login_credential(&storage, &key, verified)
+            .expect_err("reject login without an active workspace");
+
+        assert!(error.to_string().contains("no active workspaces"));
+        assert!(storage.writes.borrow().is_empty());
+        assert!(storage.get(&key).expect("read storage").is_none());
+    }
 
     #[test]
     fn callback_pages_are_self_contained_and_themed() {

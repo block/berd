@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use super::auth_login::{
     logout_stored_session, run_browser_login, verify_stored_session, BrowserLoginCredentialSource,
 };
-use super::auth_storage::{default_session_storage, PurposeTokenStorageKey};
+use super::auth_storage::default_session_storage;
 use super::description::describe_command_tree;
 use super::display::{print_json, stdin_is_tty, terminal_safe_text, Style};
 use super::org_routing::{normalize_org, resolve_org_kgoose_base_url};
@@ -575,7 +575,7 @@ fn config_with_login_org(config: &SkillsConfig) -> Result<SkillsConfig> {
 
 fn auth_status(config: &SkillsConfig) -> Result<()> {
     let storage = default_session_storage(config)?;
-    let Some(me) = verify_stored_session(config, storage.as_ref())? else {
+    let Some(verified) = verify_stored_session(config, storage.as_ref())? else {
         if !config.json {
             println!("BuilderBot CLI auth");
             println!("  profile: {}", config.profile);
@@ -591,6 +591,7 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
             "profile": config.profile,
         }));
     };
+    let me = verified.me;
 
     if !config.json {
         let workspace_name = me.active_workspace_name()?;
@@ -655,7 +656,6 @@ fn auth_login_browser(config: &SkillsConfig) -> Result<()> {
 fn auth_logout_browser(config: &SkillsConfig) -> Result<()> {
     let storage = default_session_storage(config)?;
     let storage_key = super::auth_storage::session_storage_key_from_config(config);
-    let purpose_token_key = PurposeTokenStorageKey::new(&storage_key, "compose");
     let mut warnings = Vec::new();
     let server_revoked = match logout_stored_session(config, storage.as_ref()) {
         Ok(server_revoked) => server_revoked,
@@ -671,14 +671,15 @@ fn auth_logout_browser(config: &SkillsConfig) -> Result<()> {
             false
         }
     };
-    let purpose_token_removed = match storage.delete_purpose_token(&purpose_token_key) {
+    let purpose_token_removed = match storage.delete_legacy_purpose_token_cache(&storage_key) {
         Ok(removed) => removed,
         Err(err) => {
-            warnings.push(format!("failed to remove cached Compose credential: {err}"));
+            warnings.push(format!(
+                "failed to remove legacy cached Compose credential: {err}"
+            ));
             false
         }
     };
-
     if config.json {
         return print_json(&json!({
             "profile": config.profile,
