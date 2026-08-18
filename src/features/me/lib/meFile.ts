@@ -92,9 +92,9 @@ for you — agents never see them.*
 
 ## About me
 
-*A quick introduction, in a sentence or two — your name, where you live,
-what you do with your days, who and what matters to you. Whatever helps
-an agent get who it's talking to.*
+*A quick introduction, in a sentence or two — your name, your pronouns,
+where you live, what you do with your days, who and what matters to you.
+Whatever helps an agent get who it's talking to.*
 
 ## How to work with me
 
