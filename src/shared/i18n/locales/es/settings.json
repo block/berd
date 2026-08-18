@@ -142,8 +142,8 @@
       "retrying": "Intentando…"
     },
     "askAgent": "Agregar conexión",
-    "askAgentTitle": "Agregar un MCP",
-    "askAgentPrompt": "Ayúdame a agregar un servidor MCP. Pregunta cuál quiero, explica qué acceso necesita y usa el método de configuración compatible con mi agente activo. Pregunta antes de cambiar cualquier configuración y nunca muestres ni copies credenciales."
+    "askAgentTitle": "Agregar una conexión",
+    "askAgentPrompt": "Ayúdame a agregar una conexión. Primero pregunta si quiero un servicio administrado por la empresa o un MCP local; después explica la configuración y los requisitos de acceso. Pregunta antes de cambiar cualquier configuración y nunca muestres ni copies credenciales."
   },
   "deleteProject": {
     "description": "Este proyecto y todos sus datos se eliminarán de forma permanente.",

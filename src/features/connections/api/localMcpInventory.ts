@@ -24,7 +24,6 @@ export type McpSourceStatus = "found" | "missing" | "error";
 export interface McpConfigSource {
   scope: McpConfigScope;
   label: string;
-  path?: string | null;
 }
 
 export interface McpCheckedLocation extends McpConfigSource {
@@ -39,8 +38,6 @@ export interface McpConfiguredServer {
   name: string;
   transport: McpTransportKind;
   enabled?: boolean | null;
-  command?: string | null;
-  urlHost?: string | null;
 }
 
 export interface McpHarnessInventory {

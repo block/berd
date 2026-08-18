@@ -1,7 +1,8 @@
 use std::{
-    collections::HashSet,
+    collections::{hash_map::DefaultHasher, HashSet},
     env, fs,
-    path::{Path, PathBuf},
+    hash::{Hash, Hasher},
+    path::PathBuf,
 };
 
 use serde::Serialize;
@@ -55,7 +56,6 @@ pub enum McpInventoryStatus {
 pub struct McpConfigSource {
     pub scope: McpConfigScope,
     pub label: String,
-    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -67,9 +67,6 @@ pub struct McpConfiguredServer {
     pub config_key: String,
     pub name: String,
     pub transport: McpTransportKind,
-    pub enabled: Option<bool>,
-    pub command: Option<String>,
-    pub url_host: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -85,7 +82,6 @@ pub enum McpSourceStatus {
 pub struct McpCheckedLocation {
     pub scope: McpConfigScope,
     pub label: String,
-    pub path: Option<String>,
     pub status: McpSourceStatus,
 }
 
@@ -291,7 +287,6 @@ fn source_from_file(file: &ConfigFile) -> McpConfigSource {
     McpConfigSource {
         scope: file.scope,
         label: file.label.clone(),
-        path: Some(file.path.to_string_lossy().into_owned()),
     }
 }
 
@@ -299,7 +294,6 @@ fn checked_location_from_file(file: &ConfigFile, status: McpSourceStatus) -> Mcp
     McpCheckedLocation {
         scope: file.scope,
         label: file.label.clone(),
-        path: Some(file.path.to_string_lossy().into_owned()),
         status,
     }
 }
@@ -325,13 +319,10 @@ fn read_json_config(
             record_checked_location(inventory, file, McpSourceStatus::Found);
             Some(value)
         }
-        Err(error) => {
+        Err(_error) => {
             record_checked_location(inventory, file, McpSourceStatus::Error);
             messages.push(format!("{} could not be parsed.", file.label));
-            log::warn!(
-                "failed to parse MCP JSON config {}: {error}",
-                file.path.display()
-            );
+            log::warn!("failed to parse {}", file.label);
             None
         }
     }
@@ -348,13 +339,10 @@ fn read_yaml_config(
             record_checked_location(inventory, file, McpSourceStatus::Found);
             Some(value)
         }
-        Err(error) => {
+        Err(_error) => {
             record_checked_location(inventory, file, McpSourceStatus::Error);
             messages.push(format!("{} could not be parsed.", file.label));
-            log::warn!(
-                "failed to parse MCP YAML config {}: {error}",
-                file.path.display()
-            );
+            log::warn!("failed to parse {}", file.label);
             None
         }
     }
@@ -371,13 +359,10 @@ fn read_toml_config(
             record_checked_location(inventory, file, McpSourceStatus::Found);
             serde_json::to_value(value).ok()
         }
-        Err(error) => {
+        Err(_error) => {
             record_checked_location(inventory, file, McpSourceStatus::Error);
             messages.push(format!("{} could not be parsed.", file.label));
-            log::warn!(
-                "failed to parse MCP TOML config {}: {error}",
-                file.path.display()
-            );
+            log::warn!("failed to parse {}", file.label);
             None
         }
     }
@@ -397,10 +382,7 @@ fn read_config_file(
         Err(error) => {
             record_checked_location(inventory, file, McpSourceStatus::Error);
             messages.push(format!("{} could not be inspected.", file.label));
-            log::warn!(
-                "failed to inspect MCP config {}: {error}",
-                file.path.display()
-            );
+            log::warn!("failed to inspect {}: {}", file.label, error.kind());
             return None;
         }
     };
@@ -422,7 +404,7 @@ fn read_config_file(
         Err(error) => {
             record_checked_location(inventory, file, McpSourceStatus::Error);
             messages.push(format!("{} could not be read.", file.label));
-            log::warn!("failed to read MCP config {}: {error}", file.path.display());
+            log::warn!("failed to read {}: {}", file.label, error.kind());
             None
         }
     }
@@ -448,34 +430,19 @@ fn collect_goose_servers(
             continue;
         };
         let extension_type = yaml_lookup_string(extension_map, "type");
-        let enabled = yaml_lookup(extension_map, "enabled").and_then(YamlValue::as_bool);
         let name = yaml_lookup_string(extension_map, "name")
             .or_else(|| yaml_lookup_string(extension_map, "display_name"))
             .unwrap_or_else(|| config_key.to_string());
 
-        let (transport, command, url_host) = match extension_type.as_deref() {
-            Some("stdio") => (
-                McpTransportKind::Stdio,
-                yaml_lookup_string(extension_map, "cmd")
-                    .as_deref()
-                    .map(command_basename),
-                None,
-            ),
-            Some("streamable_http") | Some("http") => (
-                McpTransportKind::Http,
-                None,
-                yaml_lookup_string(extension_map, "uri").and_then(|url| url_host(&url)),
-            ),
-            Some("sse") => (
-                McpTransportKind::Sse,
-                None,
-                yaml_lookup_string(extension_map, "uri").and_then(|url| url_host(&url)),
-            ),
-            Some("acp") => (McpTransportKind::Acp, None, None),
+        let transport = match extension_type.as_deref() {
+            Some("stdio") => McpTransportKind::Stdio,
+            Some("streamable_http") | Some("http") => McpTransportKind::Http,
+            Some("sse") => McpTransportKind::Sse,
+            Some("acp") => McpTransportKind::Acp,
             Some("builtin") | Some("platform") | Some("frontend") | Some("inline_python") => {
-                (McpTransportKind::Builtin, None, None)
+                McpTransportKind::Builtin
             }
-            _ => (McpTransportKind::Unknown, None, None),
+            _ => McpTransportKind::Unknown,
         };
 
         // Connections inventories MCP servers, not Goose-native capabilities.
@@ -494,9 +461,6 @@ fn collect_goose_servers(
                 config_key: config_key.to_string(),
                 name,
                 transport,
-                enabled,
-                command,
-                url_host,
             },
         );
     }
@@ -588,26 +552,18 @@ fn json_server_from_value(
         .and_then(JsonValue::as_str);
     let transport = infer_transport(server_type, command, url);
 
-    let duplicate_in_same_source = servers.iter().any(|server| {
-        server.harness == harness
-            && server.source.path == source_from_file(file).path
-            && server.source.scope == file.scope
-            && server.config_key == config_key
-    });
-    if duplicate_in_same_source {
+    let id = server_id(harness, file, config_key);
+    if servers.iter().any(|server| server.id == id) {
         return None;
     }
 
     Some(McpConfiguredServer {
-        id: server_id(harness, file, config_key),
+        id,
         harness,
         source: source_from_file(file),
         config_key: config_key.to_string(),
         name,
         transport,
-        enabled: object.get("enabled").and_then(JsonValue::as_bool),
-        command: command.map(command_basename),
-        url_host: url.and_then(url_host),
     })
 }
 
@@ -731,26 +687,14 @@ fn yaml_lookup_string(map: &yaml_serde::Mapping, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn command_basename(command: &str) -> String {
-    Path::new(command)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(command)
-        .to_string()
-}
-
-fn url_host(raw_url: &str) -> Option<String> {
-    url::Url::parse(raw_url)
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_string))
-}
-
 fn server_id(harness: McpHarnessId, file: &ConfigFile, config_key: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    file.path.hash(&mut hasher);
     format!(
-        "{:?}:{:?}:{}:{}",
+        "{:?}:{:?}:{:016x}:{}",
         harness,
         file.scope,
-        file.path.to_string_lossy(),
+        hasher.finish(),
         config_key
     )
 }
@@ -758,6 +702,7 @@ fn server_id(harness: McpHarnessId, file: &ConfigFile, config_key: &str) -> Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use tempfile::tempdir;
 
     fn file(path: &Path, contents: &str) {
@@ -799,12 +744,40 @@ mod tests {
         collect_claude_code_servers(&mut servers, &config, &value, &[]);
 
         assert_eq!(servers.len(), 2);
-        assert_eq!(servers[0].command.as_deref(), Some("npx"));
-        assert_eq!(servers[1].url_host.as_deref(), Some("api.example.com"));
         let rendered = serde_json::to_string(&servers).unwrap();
         assert!(!rendered.contains("ghp_secret"));
         assert!(!rendered.contains("Bearer"));
         assert!(!rendered.contains("token=secret"));
+    }
+
+    #[test]
+    fn serialized_inventory_contains_no_paths_or_secret_values() {
+        let dir = tempdir().unwrap();
+        let config = ConfigFile {
+            path: dir.path().join("private-home").join(".mcp.json"),
+            scope: McpConfigScope::Project,
+            label: "Claude Code project config".to_string(),
+        };
+        file(
+            &config.path,
+            r#"{"mcpServers":{"github":{"command":"npx","args":["--token","secret-argument"],"env":{"TOKEN":"secret-env"},"headers":{"Authorization":"Bearer secret-header"},"url":"https://user:pass@example.com/mcp?token=secret-query"}}}"#,
+        );
+        let mut inventory = empty_inventory(McpHarnessId::ClaudeCode);
+        let value = read_json_config(&config, &mut inventory, &mut Vec::new()).unwrap();
+        collect_claude_code_servers(&mut inventory.servers, &config, &value, &[]);
+        inventory = finish_inventory(inventory, Vec::new());
+
+        let serialized = serde_json::to_string(&inventory).unwrap();
+        for forbidden in [
+            "private-home",
+            "secret-argument",
+            "secret-env",
+            "secret-header",
+            "secret-query",
+            "user:pass",
+        ] {
+            assert!(!serialized.contains(forbidden), "leaked {forbidden}");
+        }
     }
 
     #[test]
@@ -842,8 +815,6 @@ extensions:
         assert_eq!(servers.len(), 1);
         assert_eq!(servers[0].name, "GitHub");
         assert_eq!(servers[0].transport, McpTransportKind::Stdio);
-        assert_eq!(servers[0].enabled, Some(false));
-        assert_eq!(servers[0].command.as_deref(), Some("npx"));
         let rendered = serde_json::to_string(&servers).unwrap();
         assert!(!rendered.contains("ghp_secret"));
     }
@@ -878,7 +849,6 @@ url = "https://mcp.example.test/sse?api_key=secret"
         assert_eq!(servers[0].name, "context7");
         assert_eq!(servers[0].transport, McpTransportKind::Stdio);
         assert_eq!(servers[1].transport, McpTransportKind::Sse);
-        assert_eq!(servers[1].url_host.as_deref(), Some("mcp.example.test"));
         assert!(!serde_json::to_string(&servers).unwrap().contains("api_key"));
     }
 
@@ -908,14 +878,10 @@ url = "https://mcp.example.test/sse?api_key=secret"
             source: McpConfigSource {
                 scope: McpConfigScope::User,
                 label: "Codex user config".to_string(),
-                path: None,
             },
             config_key: "context7".to_string(),
             name: "Context7".to_string(),
             transport: McpTransportKind::Http,
-            enabled: None,
-            command: None,
-            url_host: Some("mcp.context7.com".to_string()),
         });
 
         inventory = finish_inventory(

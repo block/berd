@@ -32,11 +32,14 @@ function normalizeIdentity(value: string): string {
 }
 
 export function mcpIdentityKey(server: McpConfiguredServer): string {
-  return (
-    normalizeIdentity(server.configKey) ||
-    normalizeIdentity(server.name) ||
-    server.id
-  );
+  const configKey = normalizeIdentity(server.configKey);
+  const name = normalizeIdentity(server.name);
+  if (!configKey || !name) return server.id;
+
+  // A shared key alone is not identity: generic names such as `server` and
+  // `default` commonly point at unrelated implementations. Reconcile only
+  // when independently authored name and transport evidence also agree.
+  return `${configKey}:${name}:${server.transport}`;
 }
 
 function displayNameForGroup(entries: McpConfiguredServer[]): string {
@@ -104,21 +107,12 @@ export function filterMcpGroups(
         entry.source.label,
         entry.source.scope,
         entry.transport,
-        entry.command ?? "",
-        entry.urlHost ?? "",
       ]),
     ]
       .join(" ")
       .toLowerCase();
     return searchable.includes(query);
   });
-}
-
-export function configuredServerCount(inventory: McpInventory | undefined) {
-  return (inventory?.harnesses ?? []).reduce(
-    (count, harness) => count + harness.servers.length,
-    0,
-  );
 }
 
 export function harnessesWithErrors(

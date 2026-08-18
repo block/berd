@@ -11,9 +11,11 @@ import {
 import { OAUTH_PROVIDERS } from "@/features/connections/catalog";
 import { resolveConnectionStatus } from "@/features/connections/lib/connectionStatus";
 import {
+  compareGridItems,
   filterGridItems,
   type ConnectionGridItem,
 } from "@/features/connections/lib/connectionGrid";
+import type { SetupChatRequest } from "@/features/chat/lib/setupChatRequest";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import { Button } from "@/shared/ui/button";
@@ -33,7 +35,10 @@ function SectionSkeleton({ title }: { title: string }) {
   return (
     <SettingsSection title={title}>
       {[1, 2, 3].map((item) => (
-        <div key={item} className="flex items-center gap-3 p-3">
+        <div
+          key={item}
+          className="flex items-center gap-3 rounded-md bg-card p-3"
+        >
           <Skeleton className="size-4.5 rounded-full" />
           <Skeleton className="h-4 w-32 rounded-sm" />
         </div>
@@ -48,7 +53,7 @@ function SectionSkeleton({ title }: { title: string }) {
  * configured locally for Goose, Claude Code, and Codex.
  */
 export interface ConnectionsSettingsProps {
-  onAskAgentToAddMcp?: (request: { title: string; prompt: string }) => void;
+  onAskAgentToAddMcp?: (request: SetupChatRequest) => void;
 }
 
 export function ConnectionsSettings({
@@ -97,15 +102,15 @@ export function ConnectionsSettings({
   const managedItems = useMemo<ConnectionGridItem[]>(
     () =>
       showManagedConnections
-        ? OAUTH_PROVIDERS.filter((entry) => entry.hidden !== true).map(
-            (entry) => ({
+        ? OAUTH_PROVIDERS.filter((entry) => entry.hidden !== true)
+            .map((entry) => ({
               kind: "oauth" as const,
               entry,
               status: resolveConnectionStatus(
                 connectionsByName.get(entry.provider),
               ),
-            }),
-          )
+            }))
+            .sort(compareGridItems)
         : [],
     [connectionsByName, showManagedConnections],
   );
@@ -113,6 +118,12 @@ export function ConnectionsSettings({
     () => filterGridItems(managedItems, searchTerm),
     [managedItems, searchTerm],
   );
+  const askAgentToAddConnection = () => {
+    onAskAgentToAddMcp?.({
+      title: t("connections.askAgentTitle"),
+      prompt: t("connections.askAgentPrompt"),
+    });
+  };
 
   return (
     <div className="flex flex-col gap-6">
@@ -128,14 +139,9 @@ export function ConnectionsSettings({
               type="button"
               variant="outline"
               size="sm"
-              leftIcon={<IconPlus />}
-              onClick={() =>
-                onAskAgentToAddMcp({
-                  title: t("connections.askAgentTitle"),
-                  prompt: t("connections.askAgentPrompt"),
-                })
-              }
+              onClick={askAgentToAddConnection}
             >
+              <IconPlus className="size-3.5" />
               {t("connections.askAgent")}
             </Button>
           ) : null
@@ -178,6 +184,9 @@ export function ConnectionsSettings({
         <LocalMcpSection
           searchTerm={searchTerm}
           workspacePaths={workspacePaths}
+          onAddConnection={
+            onAskAgentToAddMcp ? askAgentToAddConnection : undefined
+          }
         />
       </SettingsSections>
     </div>

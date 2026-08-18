@@ -15,6 +15,7 @@ import { ConnectionsSettings } from "@/features/connections/ui/ConnectionsSettin
 import { VoiceSettings } from "@/features/voice-conversation/ui/VoiceSettings";
 import type { AuthStatus } from "@/features/auth/api/auth";
 import { SettingsPane } from "@/shared/ui/SettingsPage";
+import type { SetupChatRequest } from "@/features/chat/lib/setupChatRequest";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import { refreshDoctorReportFreshness } from "@/shared/api/useDoctorReport";
 import { useProfileCapability } from "@/shared/profile/capabilities";
@@ -26,6 +27,7 @@ interface SettingsViewProps {
   onStartTroubleshootingChat?: (
     request: AgentSetupTroubleshootingRequest,
   ) => void;
+  onStartConnectionSetupChat?: (request: SetupChatRequest) => void;
   onReturnToAgentDraft?: () => void;
 }
 
@@ -44,6 +46,7 @@ export function SettingsView({
   authStatus,
   onLoggedOut,
   onStartTroubleshootingChat,
+  onStartConnectionSetupChat,
   onReturnToAgentDraft,
 }: SettingsViewProps) {
   const queryClient = useQueryClient();
@@ -72,7 +75,7 @@ export function SettingsView({
       {activeSection === "appearance" && <AppearanceSettings />}
       {activeSection === "behavior" && <BehaviorSettings />}
       {activeSection === "connections" && (
-        <ConnectionsSettings onAskAgentToAddMcp={onStartTroubleshootingChat} />
+        <ConnectionsSettings onAskAgentToAddMcp={onStartConnectionSetupChat} />
       )}
       {activeSection === "providers" && (
         <ProvidersSettings

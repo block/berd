@@ -142,8 +142,8 @@
       "retrying": "Trying…"
     },
     "askAgent": "Add connection",
-    "askAgentTitle": "Add an MCP",
-    "askAgentPrompt": "Help me add an MCP server. Ask which one I want, explain what access it needs, and use the supported setup path for my active agent. Ask before changing any configuration and never print or copy credentials."
+    "askAgentTitle": "Add a connection",
+    "askAgentPrompt": "Help me add a connection. First ask whether I want a company-managed service or a local MCP, then explain the setup and access requirements. Ask before changing any configuration and never print or copy credentials."
   },
   "deleteProject": {
     "description": "Removes the project and all its data. You can't undo this.",

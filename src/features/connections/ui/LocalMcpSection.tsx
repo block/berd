@@ -18,9 +18,11 @@ import { LocalMcpConnectionCard } from "./LocalMcpConnectionCard";
 export function LocalMcpSection({
   searchTerm,
   workspacePaths,
+  onAddConnection,
 }: {
   searchTerm: string;
   workspacePaths: string[];
+  onAddConnection?: () => void;
 }) {
   const { t } = useTranslation("settings");
   const query = useQuery({
@@ -37,7 +39,10 @@ export function LocalMcpSection({
     return (
       <SettingsSection title={t("connections.sections.local")}>
         {[1, 2, 3].map((item) => (
-          <div key={item} className="flex items-center gap-3 p-3">
+          <div
+            key={item}
+            className="flex items-center gap-3 rounded-md bg-card p-3"
+          >
             <Skeleton className="size-4.5 rounded-full" />
             <Skeleton className="h-4 w-32 rounded-sm" />
           </div>
@@ -69,7 +74,32 @@ export function LocalMcpSection({
     );
   }
 
-  if (groups.length === 0) return null;
+  if (groups.length === 0) {
+    return (
+      <SettingsSection title={t("connections.sections.local")}>
+        <div className="flex flex-col items-start gap-2 p-3">
+          <div>
+            <p className="text-sm text-foreground">
+              {t("connections.empty.title")}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t("connections.empty.description")}
+            </p>
+          </div>
+          {onAddConnection ? (
+            <Button
+              type="button"
+              variant="subtle"
+              size="sm"
+              onClick={onAddConnection}
+            >
+              {t("connections.askAgent")}
+            </Button>
+          ) : null}
+        </div>
+      </SettingsSection>
+    );
+  }
 
   return (
     <SettingsSection title={t("connections.sections.local")}>
@@ -77,7 +107,17 @@ export function LocalMcpSection({
         <Alert>
           <AlertTitle>{t("connections.localError.partialTitle")}</AlertTitle>
           <AlertDescription>
-            {t("connections.localError.partialDescription")}
+            <span>{t("connections.localError.partialDescription")}</span>
+            <Button
+              type="button"
+              variant="alert"
+              size="xs"
+              feedbackState={query.isFetching ? "loading" : "idle"}
+              loadingLabel={t("connections.localError.retrying")}
+              onClick={() => void query.refetch()}
+            >
+              {t("connections.localError.retry")}
+            </Button>
           </AlertDescription>
         </Alert>
       ) : null}

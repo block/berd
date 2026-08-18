@@ -1,10 +1,34 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConnectionsSettings } from "./ConnectionsSettings";
 
-const testState = vi.hoisted(() => ({ managed: false }));
+const testState = vi.hoisted(() => ({
+  managed: false,
+  projectId: null as string | null,
+  inventoryMode: "configured" as "configured" | "empty" | "error" | "partial",
+  inventoryCalls: [] as string[][],
+}));
+
+const configuredServers = [
+  {
+    id: "goose:user:github",
+    harness: "goose",
+    source: { scope: "user", label: "Goose user config" },
+    configKey: "github",
+    name: "GitHub",
+    transport: "stdio",
+  },
+  {
+    id: "codex:user:github",
+    harness: "codex",
+    source: { scope: "user", label: "Codex user config" },
+    configKey: "github",
+    name: "GitHub",
+    transport: "stdio",
+  },
+];
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -23,7 +47,17 @@ vi.mock("@/shared/profile/capabilities", () => ({
 
 vi.mock("@/features/projects/stores/projectStore", () => ({
   useProjectStore: (selector: (state: object) => unknown) =>
-    selector({ projects: [], activeProjectId: null }),
+    selector({
+      activeProjectId: testState.projectId,
+      projects: testState.projectId
+        ? [
+            {
+              id: testState.projectId,
+              workingDirs: [`/${testState.projectId}`],
+            },
+          ]
+        : [],
+    }),
 }));
 
 vi.mock("@/features/connections/api/connections", () => ({
@@ -34,75 +68,70 @@ vi.mock("@/features/connections/api/connections", () => ({
 
 vi.mock("@/features/connections/api/localMcpInventory", () => ({
   LOCAL_MCP_INVENTORY_QUERY_KEY: ["local-mcp-inventory"],
-  listLocalMcpInventory: async () => ({
-    harnesses: [
-      {
-        harness: "goose",
-        status: "configured",
-        checkedLocations: [],
-        servers: [
-          {
-            id: "goose:user:github",
-            harness: "goose",
-            source: { scope: "user", label: "Goose user config" },
-            configKey: "github",
-            name: "GitHub",
-            transport: "stdio",
-          },
-        ],
-      },
-      {
-        harness: "codex",
-        status: "configured",
-        checkedLocations: [],
-        servers: [
-          {
-            id: "codex:user:github",
-            harness: "codex",
-            source: { scope: "user", label: "Codex user config" },
-            configKey: "github",
-            name: "GitHub",
-            transport: "stdio",
-          },
-        ],
-      },
-    ],
-  }),
+  listLocalMcpInventory: async (workspacePaths: string[]) => {
+    testState.inventoryCalls.push(workspacePaths);
+    if (testState.inventoryMode === "error") throw new Error("unavailable");
+    if (testState.inventoryMode === "empty") return { harnesses: [] };
+    return {
+      harnesses: [
+        {
+          harness: "goose",
+          status: "configured",
+          checkedLocations: [],
+          servers: configuredServers.slice(0, 1),
+        },
+        {
+          harness: "codex",
+          status:
+            testState.inventoryMode === "partial" ? "partial" : "configured",
+          checkedLocations: [],
+          servers: configuredServers.slice(1),
+          message:
+            testState.inventoryMode === "partial"
+              ? "Codex project config could not be parsed."
+              : null,
+        },
+      ],
+    };
+  },
 }));
 
-function renderConnectionsSettings() {
-  return render(
-    <QueryClientProvider
-      client={
-        new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      }
-    >
-      <ConnectionsSettings />
+function renderConnectionsSettings(
+  onAskAgentToAddMcp?: (request: { title: string; prompt: string }) => void,
+) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const view = render(
+    <QueryClientProvider client={client}>
+      <ConnectionsSettings onAskAgentToAddMcp={onAskAgentToAddMcp} />
     </QueryClientProvider>,
   );
+  return { ...view, client };
 }
 
 describe("ConnectionsSettings", () => {
-  it("renders passive local inventory without a distribution section", async () => {
-    renderConnectionsSettings();
+  beforeEach(() => {
+    testState.managed = false;
+    testState.projectId = null;
+    testState.inventoryMode = "configured";
+    testState.inventoryCalls = [];
+  });
 
+  it("renders passive local inventory without managed connections", async () => {
+    renderConnectionsSettings();
     expect(await screen.findByText("GitHub")).toBeInTheDocument();
     expect(
       screen.getByText("connections.worksWith:Goose, Codex"),
     ).toBeInTheDocument();
-    expect(screen.getByText("connections.sections.local")).toBeInTheDocument();
     expect(
       screen.queryByText("connections.sections.managed"),
     ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /configure|remove|connect/i }),
-    ).not.toBeInTheDocument();
   });
 
-  it("organizes the managed catalog and local inventory without installed or available sections", async () => {
+  it("organizes managed and local connections without installed or available sections", async () => {
     testState.managed = true;
     renderConnectionsSettings();
-
     expect(
       await screen.findByText("connections.sections.managed"),
     ).toBeInTheDocument();
@@ -115,22 +144,72 @@ describe("ConnectionsSettings", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("uses one search across managed and local sections", async () => {
-    const user = userEvent.setup();
-    testState.managed = true;
-    renderConnectionsSettings();
-
-    await screen.findByText("GitHub");
-    await user.type(
-      screen.getByRole("searchbox", { name: "connections.search" }),
-      "Codex",
-    );
-
-    expect(screen.getByText("GitHub")).toBeInTheDocument();
+  it("distinguishes successful empty inventory from failure", async () => {
+    testState.inventoryMode = "empty";
+    const empty = renderConnectionsSettings(vi.fn());
     expect(
-      screen.getByText("connections.worksWith:Goose, Codex"),
+      await screen.findByText("connections.empty.title"),
     ).toBeInTheDocument();
-    expect(screen.getByText("connections.noResults")).toBeInTheDocument();
+    expect(
+      screen.queryByText("connections.localError.title"),
+    ).not.toBeInTheDocument();
+    empty.unmount();
+
+    testState.inventoryMode = "error";
+    renderConnectionsSettings(vi.fn());
+    expect(
+      await screen.findByText("connections.localError.title"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("connections.empty.title"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("preserves confirmed rows and offers retry for partial inventory", async () => {
+    testState.inventoryMode = "partial";
+    const user = userEvent.setup();
+    renderConnectionsSettings();
+    expect(await screen.findByText("GitHub")).toBeInTheDocument();
+    expect(
+      screen.getByText("connections.localError.partialTitle"),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "connections.localError.retry" }),
+    );
+    await waitFor(() =>
+      expect(testState.inventoryCalls.length).toBeGreaterThan(1),
+    );
+    expect(screen.getByText("GitHub")).toBeInTheDocument();
+  });
+
+  it("re-queries local project configuration when the active project changes", async () => {
+    testState.projectId = "project-a";
+    const view = renderConnectionsSettings();
+    await screen.findByText("GitHub");
+    expect(testState.inventoryCalls).toContainEqual(["/project-a"]);
+
+    testState.projectId = "project-b";
+    view.rerender(
+      <QueryClientProvider client={view.client}>
+        <ConnectionsSettings />
+      </QueryClientProvider>,
+    );
+    await waitFor(() =>
+      expect(testState.inventoryCalls).toContainEqual(["/project-b"]),
+    );
+  });
+
+  it("starts Add connection through the neutral setup request", async () => {
+    const onAdd = vi.fn();
+    const user = userEvent.setup();
+    renderConnectionsSettings(onAdd);
+    await user.click(
+      screen.getByRole("button", { name: "connections.askAgent" }),
+    );
+    expect(onAdd).toHaveBeenCalledWith({
+      title: "connections.askAgentTitle",
+      prompt: "connections.askAgentPrompt",
+    });
   });
 
   it("renders no page wrapper so the caller owns the settings pane", () => {

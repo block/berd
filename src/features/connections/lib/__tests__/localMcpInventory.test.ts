@@ -16,13 +16,11 @@ const inventory: McpInventory = {
         {
           id: "goose:github",
           harness: "goose",
-          source: { scope: "user", label: "Goose user config", path: "/g" },
+          source: { scope: "user", label: "Goose user config" },
           configKey: "github",
           name: "GitHub",
           transport: "stdio",
           enabled: true,
-          command: "npx",
-          urlHost: null,
         },
       ],
       message: null,
@@ -38,14 +36,11 @@ const inventory: McpInventory = {
           source: {
             scope: "project",
             label: "Claude Code project config",
-            path: "/repo/.mcp.json",
           },
           configKey: "github",
-          name: "github",
-          transport: "http",
+          name: "GitHub",
+          transport: "stdio",
           enabled: null,
-          command: null,
-          urlHost: "api.githubcopilot.com",
         },
         {
           id: "claude:context7",
@@ -53,14 +48,11 @@ const inventory: McpInventory = {
           source: {
             scope: "project",
             label: "Claude Code project config",
-            path: "/repo/.mcp.json",
           },
           configKey: "context7",
           name: "Context7",
           transport: "http",
           enabled: null,
-          command: null,
-          urlHost: "mcp.context7.com",
         },
       ],
       message: null,
@@ -83,13 +75,48 @@ describe("MCP inventory grouping", () => {
       "Context7",
       "GitHub",
     ]);
-    expect(groups.find((group) => group.id === "github")?.harnesses).toEqual([
-      "goose",
-      "claudeCode",
-    ]);
-    expect(groups.find((group) => group.id === "github")?.entries).toHaveLength(
-      2,
-    );
+    const github = groups.find((group) => group.displayName === "GitHub");
+    expect(github?.harnesses).toEqual(["goose", "claudeCode"]);
+    expect(github?.entries).toHaveLength(2);
+  });
+
+  it("does not merge same-key servers with different structural evidence", () => {
+    const collidingInventory: McpInventory = {
+      harnesses: [
+        {
+          harness: "goose",
+          status: "configured",
+          checkedLocations: [],
+          servers: [
+            {
+              id: "goose:default",
+              harness: "goose",
+              source: { scope: "user", label: "Goose user config" },
+              configKey: "default",
+              name: "GitHub",
+              transport: "stdio",
+            },
+          ],
+        },
+        {
+          harness: "codex",
+          status: "configured",
+          checkedLocations: [],
+          servers: [
+            {
+              id: "codex:default",
+              harness: "codex",
+              source: { scope: "user", label: "Codex user config" },
+              configKey: "default",
+              name: "Context7",
+              transport: "http",
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(groupMcpServers(collidingInventory)).toHaveLength(2);
   });
 
   it("does not merge punctuation-distinct config keys", () => {
@@ -131,12 +158,12 @@ describe("MCP inventory grouping", () => {
     expect(groupMcpServers(collidingInventory)).toHaveLength(2);
   });
 
-  it("filters by harness, source, transport, and safe endpoint host", () => {
+  it("filters by visible identity, harness, source, and transport", () => {
     const groups = groupMcpServers(inventory);
 
     expect(filterMcpGroups(groups, "context7")).toHaveLength(1);
     expect(filterMcpGroups(groups, "Claude Code")).toHaveLength(2);
-    expect(filterMcpGroups(groups, "mcp.context7.com")[0].id).toBe("context7");
+    expect(filterMcpGroups(groups, "http")).toHaveLength(1);
   });
 
   it("exposes harness errors separately from configured groups", () => {

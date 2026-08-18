@@ -22,6 +22,7 @@ import type { SkillInfo } from "@/features/skills/api/skills";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { WorkspaceNameRequest } from "@/features/chat/hooks/useChatSessionController";
 import type { ExtensionEntry } from "@/features/extensions/types";
+import type { SetupChatRequest } from "@/features/chat/lib/setupChatRequest";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type { ForkSessionHandler } from "@/features/sessions/hooks/useForkSession";
 import type { CommandOutcome } from "@/features/berdctl/navigation";
@@ -115,6 +116,7 @@ interface AppShellContentProps {
   onStartProviderTroubleshootingChat: (
     request: AgentSetupTroubleshootingRequest,
   ) => void;
+  onStartConnectionSetupChat: (request: SetupChatRequest) => void;
   onReturnToAgentDraft?: () => void;
   onOpenProvidersSettings: () => void;
   homeProviderSetupRequired?: boolean;
@@ -176,6 +178,7 @@ export function AppShellContent({
   onHydratePinnedChatSessions,
   onLoggedOut,
   onStartProviderTroubleshootingChat,
+  onStartConnectionSetupChat,
   onReturnToAgentDraft,
   onOpenProvidersSettings,
   homeProviderSetupRequired = false,
@@ -271,6 +274,7 @@ export function AppShellContent({
     onStartChatFromProject,
     onStartChatWithSkill,
     onStartProviderTroubleshootingChat,
+    onStartConnectionSetupChat,
     renderedSession,
     setupRequiredContent,
   });
@@ -358,6 +362,7 @@ interface RenderRouteContentOptions {
   onStartProviderTroubleshootingChat: (
     request: AgentSetupTroubleshootingRequest,
   ) => void;
+  onStartConnectionSetupChat: (request: SetupChatRequest) => void;
   onReturnToAgentDraft?: () => void;
   renderedSession?: ChatSession;
   setupRequiredContent: ReactNode | null;
@@ -410,6 +415,7 @@ function renderRouteContent({
   onStartChatFromProject,
   onStartChatWithSkill,
   onStartProviderTroubleshootingChat,
+  onStartConnectionSetupChat,
   setupRequiredContent,
   renderedSession,
 }: RenderRouteContentOptions) {
@@ -431,6 +437,7 @@ function renderRouteContent({
           authStatus={authStatus}
           onLoggedOut={onLoggedOut}
           onStartTroubleshootingChat={onStartProviderTroubleshootingChat}
+          onStartConnectionSetupChat={onStartConnectionSetupChat}
           onReturnToAgentDraft={onReturnToAgentDraft}
         />
       );
