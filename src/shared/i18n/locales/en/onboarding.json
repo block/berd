@@ -49,8 +49,11 @@
     "title": "Your recommended agents",
     "description": "Meet a few agents picked for your work. You can configure them later.",
     "adopting": "Adopting…",
+    "waitingForRuntime": "Getting ready…",
     "keep": "Keep ’em",
     "skip": "Skip for now",
+    "runtimeUnavailable": "Berd couldn’t finish starting, so agents can’t be added yet.",
+    "retryRuntime": "Try again",
     "genericError": "Some agents could not be adopted. Try again.",
     "adoptionError": "Couldn’t adopt {{names}}. The other agents were kept; try again for the rest.",
     "agents": {

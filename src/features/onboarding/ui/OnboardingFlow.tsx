@@ -21,6 +21,7 @@ import {
   isWorkTypeId,
   recommendationsForWorkTypes,
   type CuratedHarnessId,
+  type OnboardingRuntimeState,
   type RecommendedAgent,
   useOnboardingState,
 } from "../model";
@@ -77,7 +78,16 @@ function decodeImage(src: string | undefined): void {
   void image.decode?.().catch(() => {});
 }
 
-export function OnboardingFlow() {
+interface OnboardingFlowProps {
+  // The flow renders before AppShell's startup gates, so the chat runtime can
+  // still be starting — or have failed — while a step is on screen. Adoption is
+  // the only step that talks to it: welcome, the work-type picker, and the
+  // harness picker are static, and harness setup runs on native doctor and
+  // agent-setup commands that do not need the `goosed` sidecar.
+  runtime: OnboardingRuntimeState;
+}
+
+export function OnboardingFlow({ runtime }: OnboardingFlowProps) {
   const state = useOnboardingState();
   const queryClient = useQueryClient();
   const selectedWorkTypes = state.selectedWorkTypeIds.filter(isWorkTypeId);
@@ -145,6 +155,7 @@ export function OnboardingFlow() {
     return (
       <RecommendationsStep
         agents={recommendations}
+        runtime={runtime}
         onBack={() => dispatchOnboarding({ type: "go-to", step: "work-types" })}
         onKeep={async () => {
           const result = await adoptAgents(recommendations);

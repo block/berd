@@ -1,12 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
-import { dispatchOnboarding } from "@/features/onboarding/model";
+import {
+  dispatchOnboarding,
+  resetOnboarding,
+} from "@/features/onboarding/model";
 import { AppShell } from "./AppShell";
 
 const mocks = vi.hoisted(() => ({
@@ -96,6 +99,22 @@ vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
 
 vi.mock("./ui/AppShellContent", () => ({
   AppShellContent: () => <section data-testid="app-shell-content" />,
+}));
+
+// The flow's own tests cover the steps; here only the gate order and the
+// runtime state AppShell hands down matter.
+vi.mock("@/features/onboarding/ui/OnboardingFlow", () => ({
+  OnboardingFlow: ({
+    runtime,
+  }: {
+    runtime: { ready: boolean; failed: boolean };
+  }) => (
+    <div
+      data-testid="onboarding-flow"
+      data-runtime-ready={String(runtime.ready)}
+      data-runtime-failed={String(runtime.failed)}
+    />
+  ),
 }));
 
 function renderAppShell() {
@@ -197,6 +216,61 @@ describe("AppShell startup diagnostics", () => {
     await user.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(mocks.startupRetry).toHaveBeenCalledTimes(1);
+  });
+
+  // First-run onboarding renders ahead of the startup gates: the welcome page
+  // is where a fresh install answers telemetry consent, and it needs nothing
+  // from the `goosed` sidecar.
+  it.each([
+    [
+      "startup has not settled",
+      () => {
+        mocks.startupState.ready = false;
+      },
+      { ready: "false", failed: "false" },
+    ],
+    [
+      "startup failed",
+      () => {
+        mocks.startupState.error = new Error(
+          "Failed to spawn goose serve (binary: goosed): denied",
+        );
+      },
+      { ready: "false", failed: "true" },
+    ],
+  ])("renders onboarding while %s", (_case, arrange, expected) => {
+    arrange();
+    resetOnboarding();
+
+    renderAppShell();
+
+    const flow = screen.getByTestId("onboarding-flow");
+    expect(flow).toHaveAttribute("data-runtime-ready", expected.ready);
+    expect(flow).toHaveAttribute("data-runtime-failed", expected.failed);
+    expect(
+      screen.queryByRole("status", { name: "Starting Berd" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Berd couldn't start" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("falls through to the startup gates once onboarding completes", () => {
+    mocks.startupState.error = new Error(
+      "Failed to spawn goose serve (binary: goosed): denied",
+    );
+    resetOnboarding();
+    renderAppShell();
+    expect(screen.getByTestId("onboarding-flow")).toBeInTheDocument();
+
+    act(() => {
+      dispatchOnboarding({ type: "complete" });
+    });
+
+    expect(
+      screen.getByRole("heading", { name: "Berd couldn't start" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("onboarding-flow")).not.toBeInTheDocument();
   });
 
   it("shows a blocking configuration unavailable startup error", () => {

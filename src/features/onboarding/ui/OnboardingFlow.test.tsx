@@ -9,6 +9,7 @@ import {
   dispatchOnboarding,
   resetOnboardingStoreForTests,
 } from "../model/onboardingStore";
+import type { OnboardingRuntimeState } from "../model";
 import { OnboardingFlow } from "./OnboardingFlow";
 
 const mockCreatePersona = vi.hoisted(() => vi.fn());
@@ -60,6 +61,15 @@ vi.mock("@/shared/ui/avatar-media", () => ({
   ),
 }));
 
+vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
+  ProjectArtifactPreview: () => <div data-testid="project-cube" />,
+}));
+
+vi.mock("@/shared/telemetry/consent", () => ({
+  updateTelemetryEnabled: vi.fn(async () => undefined),
+  telemetryConsentEnforced: () => false,
+}));
+
 function createdPersona(request: CreatePersonaRequest) {
   return {
     id: `/Users/x/.agents/agents/${request.displayName.toLowerCase()}.md`,
@@ -73,10 +83,16 @@ function createdPersona(request: CreatePersonaRequest) {
   };
 }
 
-function renderFlow() {
+const readyRuntime: OnboardingRuntimeState = {
+  ready: true,
+  failed: false,
+  retry: vi.fn(),
+};
+
+function renderFlow(runtime: OnboardingRuntimeState = readyRuntime) {
   return render(
     <QueryClientProvider client={new QueryClient()}>
-      <OnboardingFlow />
+      <OnboardingFlow runtime={runtime} />
     </QueryClientProvider>,
   );
 }
@@ -158,5 +174,57 @@ describe("OnboardingFlow agent adoption telemetry", () => {
     // which the count of two pins now that no id rides the event.
     expect(mockTrackAgentCreateCompleted).toHaveBeenCalledTimes(2);
     expect(toast.warning).toHaveBeenCalledTimes(1);
+  });
+});
+
+// AppShell renders the flow ahead of its startup gates, so the runtime-free
+// steps must not depend on the chat runtime having started.
+describe("OnboardingFlow runtime independence", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+    resetOnboardingStoreForTests();
+    dispatchOnboarding({ type: "start" });
+  });
+
+  it.each([
+    ["startup has not settled", { ready: false, failed: false }],
+    ["startup failed", { ready: false, failed: true }],
+  ])("renders the landing page while %s", (_case, runtime) => {
+    renderFlow({ ...runtime, retry: vi.fn() });
+
+    expect(
+      screen.getByRole("heading", {
+        name: "Welcome to Berd. Your place for doing.",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("moves on to the work-type picker without the runtime", async () => {
+    renderFlow({ ready: false, failed: false, retry: vi.fn() });
+
+    await userEvent.click(screen.getByRole("button", { name: "Let’s go" }));
+
+    expect(
+      screen.getByRole("heading", {
+        name: "What type of work will you use Berd for?",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("waits for the runtime before agent adoption can call ACP", async () => {
+    dispatchOnboarding({
+      type: "set-work-types",
+      workTypeIds: ["engineering"],
+    });
+    dispatchOnboarding({ type: "go-to", step: "recommendations" });
+    renderFlow({ ready: false, failed: false, retry: vi.fn() });
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Getting ready…" }),
+    );
+
+    expect(mockListPersonas).not.toHaveBeenCalled();
+    expect(mockCreatePersona).not.toHaveBeenCalled();
   });
 });
