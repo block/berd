@@ -156,15 +156,16 @@ const CANVAS_CAMERA = {
 
 function getCanvasCamera(
   variant: NonNullable<ProjectArtifactRendererProps["variant"]>,
+  distanceScale = 1,
 ) {
   const config =
     variant === "tile" ? CANVAS_CAMERA.tile : CANVAS_CAMERA.preview;
   return {
-    position: [config.position[0], config.position[1], config.position[2]] as [
-      number,
-      number,
-      number,
-    ],
+    position: [
+      config.position[0] * distanceScale,
+      config.position[1] * distanceScale,
+      config.position[2] * distanceScale,
+    ] as [number, number, number],
     fov: config.fov,
     near: 1,
     far: 100,
@@ -1748,6 +1749,7 @@ export function ProjectArtifactRenderer({
   environmentUrl,
   imageUrls,
   className,
+  cameraDistanceScale = 1,
   gestureFreezeActive = false,
   motionImpulse,
   onGlCanvasReady,
@@ -1934,7 +1936,7 @@ export function ProjectArtifactRenderer({
       >
         <Canvas
           key={canvasKey}
-          camera={getCanvasCamera(variant)}
+          camera={getCanvasCamera(variant, cameraDistanceScale)}
           className={cn(
             "relative h-full w-full [transform:translateZ(0)]",
             variant === "tile" ? "overflow-visible" : "rounded-[28px]",

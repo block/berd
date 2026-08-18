@@ -16,6 +16,7 @@ import {
 
 export const ONBOARDING_STORAGE_VERSION = 1;
 export const ONBOARDING_STORAGE_KEY = "berd:onboarding:v1";
+export const ONBOARDING_GRADUATION_STORAGE_KEY = "berd:onboarding:graduated-v1";
 
 interface PersistedOnboardingState {
   version: typeof ONBOARDING_STORAGE_VERSION;
@@ -39,6 +40,40 @@ function storage(): Storage | null {
     return typeof window === "undefined" ? null : window.localStorage;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Graduates first-run onboarding without sending established installations
+ * through a newly enabled flow. A blank storage area represents a fresh app
+ * profile; any pre-existing app state means Berd has run before.
+ */
+export function initializeOnboardingGraduation(): void {
+  const target = storage();
+  if (!target || target.getItem(ONBOARDING_GRADUATION_STORAGE_KEY) !== null) {
+    return;
+  }
+
+  try {
+    const hasOnboardingState = target.getItem(ONBOARDING_STORAGE_KEY) !== null;
+    const hasExistingAppState = target.length > 0;
+    if (!hasOnboardingState && hasExistingAppState) {
+      const completedState: OnboardingState = {
+        ...INITIAL_ONBOARDING_STATE,
+        lifecycle: "completed",
+        step: "complete",
+      };
+      target.setItem(
+        ONBOARDING_STORAGE_KEY,
+        JSON.stringify({
+          version: ONBOARDING_STORAGE_VERSION,
+          state: completedState,
+        } satisfies PersistedOnboardingState),
+      );
+    }
+    target.setItem(ONBOARDING_GRADUATION_STORAGE_KEY, "1");
+  } catch {
+    // Onboarding remains usable if localStorage is unavailable or full.
   }
 }
 

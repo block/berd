@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { IconChevronLeft } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/shared/ui/button";
+import { cn } from "@/shared/lib/cn";
 
 interface OnboardingShellProps {
   title?: ReactNode;
@@ -10,6 +11,7 @@ interface OnboardingShellProps {
   backDisabled?: boolean;
   children: ReactNode;
   actions?: ReactNode;
+  contentClassName?: string;
 }
 
 export function OnboardingShell({
@@ -19,6 +21,7 @@ export function OnboardingShell({
   backDisabled = false,
   children,
   actions,
+  contentClassName,
 }: OnboardingShellProps) {
   const { t } = useTranslation("onboarding");
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -61,7 +64,12 @@ export function OnboardingShell({
           ) : null}
         </header>
       ) : null}
-      <div className="relative z-10 flex min-h-0 flex-1 items-center justify-center overflow-y-auto">
+      <div
+        className={cn(
+          "relative z-10 flex min-h-0 flex-1 items-center justify-center overflow-y-auto",
+          contentClassName,
+        )}
+      >
         {children}
       </div>
       {actions ? (

@@ -206,11 +206,6 @@
     "defaultLabel": "default",
     "description": "Opt into in-progress Berd features on this device. Experiments can change, break, or disappear.",
     "emptyDescription": "New experiments will appear here when they are ready for opt-in testing.",
-    "firstRunOnboarding": {
-      "description": "Preview the new first-install onboarding flow. Unfinished progress resumes when the experiment is enabled again.",
-      "replay": "Replay onboarding",
-      "title": "First-run onboarding"
-    },
     "onboarding": {
       "cancel": "Cancel",
       "confirm": "Reset canvas",

@@ -206,11 +206,6 @@
     "defaultLabel": "predeterminado",
     "description": "Activa funciones de Berd en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
     "emptyDescription": "Los nuevos experimentos aparecerán aquí cuando estén listos para probarse.",
-    "firstRunOnboarding": {
-      "description": "Previsualiza el nuevo flujo de incorporación de la primera instalación. El progreso sin terminar se reanuda cuando se vuelve a activar el experimento.",
-      "replay": "Repetir incorporación",
-      "title": "Incorporación del primer inicio"
-    },
     "onboarding": {
       "cancel": "Cancelar",
       "confirm": "Restablecer lienzo",

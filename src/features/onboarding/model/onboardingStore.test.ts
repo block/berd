@@ -3,6 +3,8 @@ import { INITIAL_ONBOARDING_STATE } from "./onboardingState";
 import {
   dispatchOnboarding,
   getOnboardingSnapshot,
+  initializeOnboardingGraduation,
+  ONBOARDING_GRADUATION_STORAGE_KEY,
   ONBOARDING_STORAGE_KEY,
   ONBOARDING_STORAGE_VERSION,
   replayOnboarding,
@@ -15,6 +17,40 @@ describe("onboarding persistence", () => {
   beforeEach(() => {
     window.localStorage.clear();
     resetOnboardingStoreForTests();
+  });
+
+  it("keeps onboarding pending for a fresh installation", () => {
+    initializeOnboardingGraduation();
+    resetOnboardingStoreForTests();
+
+    expect(getOnboardingSnapshot()).toEqual(INITIAL_ONBOARDING_STATE);
+    expect(window.localStorage.getItem(ONBOARDING_GRADUATION_STORAGE_KEY)).toBe(
+      "1",
+    );
+  });
+
+  it("marks an established installation complete during graduation", () => {
+    window.localStorage.setItem("goose-theme-mode", "dark");
+
+    initializeOnboardingGraduation();
+    resetOnboardingStoreForTests();
+
+    expect(getOnboardingSnapshot()).toMatchObject({
+      lifecycle: "completed",
+      step: "complete",
+    });
+  });
+
+  it("preserves existing onboarding progress during graduation", () => {
+    dispatchOnboarding({ type: "start" });
+
+    initializeOnboardingGraduation();
+    resetOnboardingStoreForTests();
+
+    expect(getOnboardingSnapshot()).toMatchObject({
+      lifecycle: "in-progress",
+      step: "welcome",
+    });
   });
 
   it("persists versioned state and hydrates it on a new lifecycle", () => {

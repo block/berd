@@ -16,6 +16,7 @@ import { GitStateEvents } from "@/app/GitStateEvents";
 import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
 import { RendererTelemetry } from "@/app/RendererTelemetry";
 import { BackgroundQueuedMessageDrain } from "@/features/chat/ui/BackgroundQueuedMessageDrain";
+import { initializeOnboardingGraduation } from "@/features/onboarding/model";
 import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
 import { I18nProvider } from "@/shared/i18n";
 import { initTelemetry, trackAppLaunched } from "@/shared/telemetry/client";
@@ -32,6 +33,7 @@ try {
 } catch {
   // localStorage may be unavailable in some environments; ignore.
 }
+initializeOnboardingGraduation();
 
 // React Query's default focus detection relies on `visibilitychange`, which
 // the Tauri webview does not fire when the app window merely loses or regains
