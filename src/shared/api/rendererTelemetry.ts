@@ -19,16 +19,25 @@ export interface RendererStatsPayload {
 
 export type RendererLogLevel = "info" | "warn" | "error";
 
+/**
+ * Log target for dev-time telemetry-viewer lines. The Rust side validates to
+ * this closed set (anything else falls back to its default target) and its
+ * Stdout formatter renders these records grey in the `just dev` terminal;
+ * the file target prints them uncolored.
+ */
+export type RendererLogTarget = "telemetry";
+
 /** Forward a renderer lifecycle event to the backend app log. */
 export async function logRendererEvent(
   level: RendererLogLevel,
   message: string,
+  target?: RendererLogTarget,
 ): Promise<void> {
   if (typeof window === "undefined" || !window.__TAURI_INTERNALS__) {
     return;
   }
   try {
-    await invoke("log_renderer_event", { level, message });
+    await invoke("log_renderer_event", { level, message, target });
   } catch {
     // Logging is best-effort; never let it break the UI.
   }

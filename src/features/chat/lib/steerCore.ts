@@ -163,7 +163,6 @@ export async function steerPromptInSession(
     useChatSessionStore.getState().patchSession(sessionId, {
       updatedAt: new Date().toISOString(),
     });
-    return true;
   } catch (err) {
     const liveStore = useChatStore.getState();
     const liveMessage = liveStore.messagesBySession[sessionId]?.find(
@@ -172,26 +171,33 @@ export async function steerPromptInSession(
         message.metadata?.steeringRequestId === userMessage.id,
     );
     const deliveryWasEstablished = liveMessage?.metadata?.delivery === "steer";
-    if (deliveryWasEstablished) {
-      return true;
+    if (!deliveryWasEstablished) {
+      const liveMessageId = liveMessage?.id ?? userMessage.id;
+      liveStore.removeMessage(sessionId, liveMessageId);
+      if (
+        liveStore.getSessionRuntime(sessionId).pendingInterventionBoundary
+          ?.interventionMessageId === liveMessageId
+      ) {
+        liveStore.setPendingInterventionBoundary(sessionId, null);
+      }
+      const errorMessage = formatSteerErrorMessage(err);
+      liveStore.addMessage(
+        sessionId,
+        createSystemNotificationMessage(errorMessage, "error"),
+      );
+      if (options.throwOnError) {
+        throw new Error(errorMessage);
+      }
+      return false;
     }
-
-    const liveMessageId = liveMessage?.id ?? userMessage.id;
-    liveStore.removeMessage(sessionId, liveMessageId);
-    if (
-      liveStore.getSessionRuntime(sessionId).pendingInterventionBoundary
-        ?.interventionMessageId === liveMessageId
-    ) {
-      liveStore.setPendingInterventionBoundary(sessionId, null);
-    }
-    const errorMessage = formatSteerErrorMessage(err);
-    liveStore.addMessage(
-      sessionId,
-      createSystemNotificationMessage(errorMessage, "error"),
-    );
-    if (options.throwOnError) {
-      throw new Error(errorMessage);
-    }
-    return false;
   }
+  // Unlike sendCore, the user-message append above is provisional — the catch
+  // rolls it back when the steer never reached the backend. The commit
+  // callback therefore fires here instead, once the message is durably
+  // committed: after acknowledgement, or after delivery was established
+  // despite an acknowledgement error. It runs outside the try so a throwing
+  // callback cannot trip the rollback of an acknowledged steer. Callers that
+  // do not wire it (berdctl, voice conversation) get no commit notification.
+  sendOptions?.onUserMessageCommitted?.();
+  return true;
 }

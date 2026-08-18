@@ -773,6 +773,138 @@ describe("usePersonaSource", () => {
     expect(result.current.data?.name).toBe("Snark");
   });
 
+  it("notifies onWritePersisted with the persisted source when saveNow flushes edits", async () => {
+    const existingSource = {
+      ...sourceV1,
+      name: "Code Reviewer",
+      content: "Review code carefully.",
+      properties: { provider: "openai", model: "gpt-5" },
+    };
+    const persistedSource = { ...existingSource, name: "Code Reviewer Deluxe" };
+    listMock.mockResolvedValue([existingSource]);
+    updateMock.mockResolvedValue(persistedSource);
+    const onWritePersisted = vi.fn();
+
+    const { result } = renderHook(() =>
+      usePersonaSource(path, { builderSessionId: "sess-1", onWritePersisted }),
+    );
+    await flushPromises();
+
+    act(() => result.current.update({ name: "Code Reviewer Deluxe" }));
+    expect(onWritePersisted).not.toHaveBeenCalled();
+
+    let saved = false;
+    await act(async () => {
+      saved = await result.current.saveNow();
+    });
+
+    expect(saved).toBe(true);
+    expect(onWritePersisted).toHaveBeenCalledTimes(1);
+    expect(onWritePersisted).toHaveBeenCalledWith(persistedSource);
+  });
+
+  it("does not notify onWritePersisted when saveNow has nothing to flush", async () => {
+    const existingSource = {
+      ...sourceV1,
+      name: "Code Reviewer",
+      content: "Review code carefully.",
+      properties: {},
+    };
+    listMock.mockResolvedValue([existingSource]);
+    const onWritePersisted = vi.fn();
+
+    const { result } = renderHook(() =>
+      usePersonaSource(path, { builderSessionId: "sess-1", onWritePersisted }),
+    );
+    await flushPromises();
+
+    let saved = false;
+    await act(async () => {
+      saved = await result.current.saveNow();
+    });
+
+    expect(saved).toBe(true);
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(onWritePersisted).not.toHaveBeenCalled();
+  });
+
+  it("does not notify onWritePersisted when the flush fails", async () => {
+    listMock.mockResolvedValue([sourceV1]);
+    updateMock.mockRejectedValue(new Error("write failed"));
+    const onWritePersisted = vi.fn();
+
+    const { result } = renderHook(() =>
+      usePersonaSource(path, { onWritePersisted }),
+    );
+    await flushPromises();
+
+    act(() => result.current.update({ name: "Snark" }));
+    await act(async () => {
+      await result.current.saveNow();
+    });
+
+    expect(onWritePersisted).not.toHaveBeenCalled();
+  });
+
+  it("contains a throwing onWritePersisted observer without re-queuing the persisted write", async () => {
+    const persistedSource = { ...sourceV1, name: "Snark" };
+    listMock.mockResolvedValue([sourceV1]);
+    updateMock.mockResolvedValue(persistedSource);
+    const onWritePersisted = vi.fn(() => {
+      throw new Error("observer exploded");
+    });
+
+    const { result } = renderHook(() =>
+      usePersonaSource(path, { onWritePersisted }),
+    );
+    await flushPromises();
+
+    act(() => result.current.update({ name: "Snark" }));
+
+    let saved = false;
+    await act(async () => {
+      saved = await result.current.saveNow();
+    });
+
+    expect(saved).toBe(true);
+    expect(onWritePersisted).toHaveBeenCalledTimes(1);
+    expect(result.current.saveStatus).toBe("saved");
+    expect(updateMock).toHaveBeenCalledTimes(1);
+
+    // Nothing was merged back into the pending patch: a follow-up flush
+    // finds no work, so the durable write is not repeated (and the observer
+    // does not hear a second persisted edit).
+    await act(async () => {
+      saved = await result.current.saveNow();
+    });
+    expect(saved).toBe(true);
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(onWritePersisted).toHaveBeenCalledTimes(1);
+  });
+
+  it("notifies onWritePersisted for debounced draft auto-saves", async () => {
+    const persistedDraft = { ...sessionPlaceholderSource, name: "Snark" };
+    listMock.mockResolvedValue([sessionPlaceholderSource]);
+    readSourceMock.mockResolvedValue(sessionPlaceholderSource);
+    updateMock.mockResolvedValue(persistedDraft);
+    const onWritePersisted = vi.fn();
+
+    const { result } = renderHook(() =>
+      usePersonaSource(path, { builderSessionId: "sess-1", onWritePersisted }),
+    );
+    await flushPromises();
+
+    act(() => result.current.update({ name: "Snark" }));
+    await act(async () => {
+      vi.advanceTimersByTime(450);
+      await Promise.resolve();
+    });
+
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(onWritePersisted).toHaveBeenCalledTimes(1);
+    expect(onWritePersisted).toHaveBeenCalledWith(persistedDraft);
+  });
+
   it("preserves local model and avatar choices when the agent updates text fields", async () => {
     const firstSave = deferred<unknown>();
     const localChoices = {

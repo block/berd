@@ -12,9 +12,14 @@ import { resolve } from "node:path";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { toast } from "sonner";
+import { importPersonas } from "@/shared/api/agents";
+import type { CreatePersonaRequest } from "@/shared/types/agents";
 import { AgentsView } from "../AgentsView";
 
 const mockCreatePersona = vi.hoisted(() => vi.fn());
+const mockUpdatePersona = vi.hoisted(() => vi.fn());
+const mockTrackAgentCreateCompleted = vi.hoisted(() => vi.fn());
+const mockTrackAgentEditCompleted = vi.hoisted(() => vi.fn());
 
 const mockDraftSource = vi.hoisted(() => ({
   type: "agent",
@@ -95,9 +100,16 @@ vi.mock("sonner", () => ({
   },
 }));
 
+vi.mock("@/features/agents/lib/agentTelemetry", () => ({
+  trackAgentCreateCompleted: mockTrackAgentCreateCompleted,
+  trackAgentEditCompleted: mockTrackAgentEditCompleted,
+  trackAgentDeleteCompleted: vi.fn(),
+}));
+
 vi.mock("@/features/agents/hooks/usePersonas", () => ({
   usePersonas: () => ({
     createPersona: mockCreatePersona,
+    updatePersona: mockUpdatePersona,
     deletePersona: vi.fn(),
     refreshFromDisk: vi.fn(),
   }),
@@ -166,6 +178,28 @@ describe("AgentsView entry points", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Mirrors the real API: the created persona carries the persisted
+    // identity the telemetry call sites are expected to report.
+    mockCreatePersona.mockImplementation(
+      async (request: CreatePersonaRequest) => ({
+        id: "/Users/x/.agents/agents/created.md",
+        displayName: request.displayName,
+        systemPrompt: request.systemPrompt,
+        provider: request.provider,
+        modelProviderId: request.modelProviderId,
+        model: request.model,
+        isBuiltin: false,
+        writable: true,
+      }),
+    );
+    // Mirrors the real API: the updated persona carries the persisted
+    // identity the telemetry call site is expected to report.
+    mockUpdatePersona.mockImplementation(
+      async (existing: typeof persona, request: Record<string, unknown>) => ({
+        ...existing,
+        ...request,
+      }),
+    );
     useAgentStore.setState({
       personas: [],
       personasLoading: false,
@@ -519,6 +553,233 @@ describe("AgentsView entry points", () => {
         model: "gpt-5.6",
       }),
     );
+  });
+
+  describe("berd_agent Create Completed", () => {
+    function agentImageFixtureFile(): File {
+      const fixtureBytes = readFileSync(
+        resolve(
+          process.cwd(),
+          "src/features/agents/agent-snapshot/fixtures/buzz-v1-config-only.agent.png",
+        ),
+      );
+      const file = new File([fixtureBytes], "shared.png", {
+        type: "image/png",
+      });
+      Object.defineProperty(file, "arrayBuffer", {
+        configurable: true,
+        value: vi
+          .fn()
+          .mockResolvedValue(
+            fixtureBytes.buffer.slice(
+              fixtureBytes.byteOffset,
+              fixtureBytes.byteOffset + fixtureBytes.byteLength,
+            ),
+          ),
+      });
+      return file;
+    }
+
+    function importTextFile(name: string, type: string): File {
+      const bytes = new TextEncoder().encode("{}");
+      const file = new File([bytes], name, { type });
+      Object.defineProperty(file, "arrayBuffer", {
+        configurable: true,
+        value: vi.fn().mockResolvedValue(bytes.buffer),
+      });
+      return file;
+    }
+
+    async function duplicateActivePersona(): Promise<void> {
+      const user = userEvent.setup();
+      await user.click(
+        screen.getByRole("button", { name: "detail.moreActions" }),
+      );
+      await user.click(
+        screen.getByRole("menuitem", { name: "common:actions.duplicate" }),
+      );
+    }
+
+    it("fires once with the created copy's identity after a successful duplicate", async () => {
+      const qualifiedPersona = {
+        ...persona,
+        provider: "goose",
+        modelProviderId: "openai",
+        model: "gpt-5.6",
+      };
+      useAgentStore.setState({ personas: [qualifiedPersona] });
+      render(<AgentsView activePersonaId={qualifiedPersona.id} />);
+
+      await duplicateActivePersona();
+
+      await waitFor(() =>
+        expect(mockTrackAgentCreateCompleted).toHaveBeenCalledTimes(1),
+      );
+      expect(mockTrackAgentCreateCompleted).toHaveBeenCalledWith({
+        provider: "goose",
+        model: "gpt-5.6",
+      });
+    });
+
+    it("does not fire when duplicating fails", async () => {
+      mockCreatePersona.mockRejectedValueOnce(new Error("create failed"));
+      useAgentStore.setState({ personas: [persona] });
+      render(<AgentsView activePersonaId={persona.id} />);
+
+      await duplicateActivePersona();
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      expect(mockTrackAgentCreateCompleted).not.toHaveBeenCalled();
+    });
+
+    it("fires once per persona actually created by a file import", async () => {
+      vi.mocked(importPersonas).mockResolvedValue([
+        {
+          id: "/Users/x/.agents/agents/imported-one.md",
+          displayName: "Imported one",
+          systemPrompt: "One.",
+          provider: "goose",
+          model: "gpt-5.6",
+          isBuiltin: false,
+          writable: true,
+        },
+        {
+          id: "/Users/x/.agents/agents/imported-two.md",
+          displayName: "Imported two",
+          systemPrompt: "Two.",
+          isBuiltin: false,
+          writable: true,
+        },
+      ]);
+      const { container } = render(<AgentsView />);
+      const input =
+        container.querySelector<HTMLInputElement>('input[type="file"]');
+
+      fireEvent.change(input as HTMLInputElement, {
+        target: {
+          files: [importTextFile("team.agent.json", "application/json")],
+        },
+      });
+
+      await waitFor(() =>
+        expect(mockTrackAgentCreateCompleted).toHaveBeenCalledTimes(2),
+      );
+      expect(mockTrackAgentCreateCompleted).toHaveBeenCalledWith({
+        provider: "goose",
+        model: "gpt-5.6",
+      });
+      expect(mockTrackAgentCreateCompleted).toHaveBeenCalledWith({
+        provider: undefined,
+        model: undefined,
+      });
+    });
+
+    it("does not fire when a file import fails", async () => {
+      vi.mocked(importPersonas).mockRejectedValue(new Error("import failed"));
+      const { container } = render(<AgentsView />);
+      const input =
+        container.querySelector<HTMLInputElement>('input[type="file"]');
+
+      fireEvent.change(input as HTMLInputElement, {
+        target: {
+          files: [importTextFile("reviewer.persona.md", "text/markdown")],
+        },
+      });
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      expect(mockTrackAgentCreateCompleted).not.toHaveBeenCalled();
+    });
+
+    it("fires once after a confirmed agent-image import", async () => {
+      const { container } = render(<AgentsView />);
+      const input = container.querySelector<HTMLInputElement>(
+        'input[type="file"][accept*="image/png"]',
+      );
+
+      fireEvent.change(input as HTMLInputElement, {
+        target: { files: [agentImageFixtureFile()] },
+      });
+      await screen.findByRole("heading", { name: "imageImport.description" });
+      expect(mockTrackAgentCreateCompleted).not.toHaveBeenCalled();
+
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "imageImport.add" }));
+
+      await waitFor(() =>
+        expect(mockTrackAgentCreateCompleted).toHaveBeenCalledTimes(1),
+      );
+      expect(mockTrackAgentCreateCompleted).toHaveBeenCalledWith({
+        provider: undefined,
+        model: undefined,
+      });
+    });
+
+    it("does not fire when the agent-image import create fails", async () => {
+      mockCreatePersona.mockRejectedValueOnce(new Error("create failed"));
+      const { container } = render(<AgentsView />);
+      const input = container.querySelector<HTMLInputElement>(
+        'input[type="file"][accept*="image/png"]',
+      );
+
+      fireEvent.change(input as HTMLInputElement, {
+        target: { files: [agentImageFixtureFile()] },
+      });
+      await screen.findByRole("heading", { name: "imageImport.description" });
+
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "imageImport.add" }));
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      expect(mockTrackAgentCreateCompleted).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("berd_agent Edit Completed", () => {
+    async function saveCustomAvatarUrl(url: string): Promise<void> {
+      const user = userEvent.setup();
+      await user.click(
+        screen.getByRole("button", { name: "editor.customizeAvatar" }),
+      );
+      await user.type(screen.getByLabelText("editor.avatarUrl"), url);
+      await user.click(
+        screen.getByRole("button", { name: "common:actions.save" }),
+      );
+    }
+
+    it("fires once with the persisted identity after a detail-page avatar change", async () => {
+      const qualifiedPersona = {
+        ...persona,
+        provider: "goose",
+        model: "gpt-5.6",
+      };
+      useAgentStore.setState({ personas: [qualifiedPersona] });
+      render(<AgentsView activePersonaId={qualifiedPersona.id} />);
+
+      await saveCustomAvatarUrl("https://example.com/avatar.png");
+
+      await waitFor(() =>
+        expect(mockTrackAgentEditCompleted).toHaveBeenCalledTimes(1),
+      );
+      expect(mockUpdatePersona).toHaveBeenCalledWith(
+        expect.objectContaining({ id: qualifiedPersona.id }),
+        { avatar: "https://example.com/avatar.png" },
+      );
+      expect(mockTrackAgentEditCompleted).toHaveBeenCalledWith({
+        provider: "goose",
+        model: "gpt-5.6",
+      });
+    });
+
+    it("does not fire when the avatar update fails", async () => {
+      mockUpdatePersona.mockRejectedValueOnce(new Error("update failed"));
+      useAgentStore.setState({ personas: [persona] });
+      render(<AgentsView activePersonaId={persona.id} />);
+
+      await saveCustomAvatarUrl("https://example.com/avatar.png");
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      expect(mockTrackAgentEditCompleted).not.toHaveBeenCalled();
+    });
   });
 
   it("starts a gallery-to-profile view transition when opening detail", () => {

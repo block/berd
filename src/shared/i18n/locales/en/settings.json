@@ -464,6 +464,14 @@
     },
     "title": "Notifications"
   },
+  "privacy": {
+    "telemetry": {
+      "description": "Help improve Berd by sharing usage events, like which features are used. Chat content is never sent.",
+      "label": "Share usage data",
+      "saveError": "Couldn't update the usage data setting. Try again."
+    },
+    "title": "Privacy"
+  },
   "projects": {
     "empty": "Archived projects will show here.",
     "sectionTitle": "Archived projects",

@@ -7,6 +7,7 @@ import {
   type PersonaSourcePatch,
 } from "@/features/agents/lib/agentBuilderSourceLifecycle";
 import { isEmptyPlaceholderDraft } from "@/features/agents/lib/agentBuilderIdentity";
+import { perfLog } from "@/shared/lib/perfLog";
 
 export type { PersonaSourcePatch } from "@/features/agents/lib/agentBuilderSourceLifecycle";
 
@@ -34,18 +35,26 @@ interface UsePersonaSourceResult {
 interface UsePersonaSourceOptions {
   builderSessionId?: string;
   onResolvedPathChange?: (source: AgentSourceEntry) => void;
+  /**
+   * Called with the persisted source after a flush write durably completes.
+   * A saveNow with nothing pending never reaches it, and a failed write never
+   * reaches it, so callers can treat every invocation as one real persisted
+   * edit (drafts included — filtering draft writes is the caller's call).
+   */
+  onWritePersisted?: (source: AgentSourceEntry) => void;
 }
 
 export function usePersonaSource(
   path: string | null,
   options: UsePersonaSourceOptions = {},
 ): UsePersonaSourceResult {
-  const { builderSessionId, onResolvedPathChange } = options;
+  const { builderSessionId, onResolvedPathChange, onWritePersisted } = options;
   const [data, setData] = useState<AgentSourceEntry | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<PersonaSourceError>(null);
   const dataRef = useRef<AgentSourceEntry | null>(null);
   const onResolvedPathChangeRef = useRef(onResolvedPathChange);
+  const onWritePersistedRef = useRef(onWritePersisted);
   const missingPollsRef = useRef(0);
   const pendingPatchRef = useRef<PersonaSourcePatch | null>(null);
   const inFlightPatchRef = useRef<PersonaSourcePatch | null>(null);
@@ -308,6 +317,19 @@ export function usePersonaSource(
     writePromise = (async (): Promise<boolean> => {
       try {
         const updated = await updateAgentBuilderSource(writePath, patch);
+        // The write is durable no matter what the guards below decide about
+        // component state, so persisted-write observers hear about it even
+        // when the hook has since unmounted or switched sources. The call is
+        // contained so a throwing observer cannot fall through to the write's
+        // catch, which would re-queue — and later re-write — a patch that
+        // already persisted.
+        try {
+          onWritePersistedRef.current?.(updated);
+        } catch (observerError) {
+          perfLog(
+            `[telemetry] persisted-write observer failed: ${String(observerError)}`,
+          );
+        }
         if (
           externalOverrideVersion !== externalOverrideVersionRef.current ||
           saveIdentityRef.current !== identity ||
@@ -392,6 +414,10 @@ export function usePersonaSource(
   useEffect(() => {
     onResolvedPathChangeRef.current = onResolvedPathChange;
   }, [onResolvedPathChange]);
+
+  useEffect(() => {
+    onWritePersistedRef.current = onWritePersisted;
+  }, [onWritePersisted]);
 
   useEffect(() => {
     const updatePollingState = () => {

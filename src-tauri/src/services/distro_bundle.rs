@@ -20,6 +20,45 @@ pub struct DistroManifest {
     pub diagnostics: Option<DiagnosticsDistroConfig>,
     pub distribution: Option<DistributionDistroConfig>,
     pub marketplace: Option<MarketplaceDistroConfig>,
+    pub telemetry: Option<TelemetryDistroConfig>,
+}
+
+/// The build-artifact channel telemetry reports as the `distribution.channel`
+/// OTel resource attribute: which distribution this install came from, not who
+/// the user is. Closed set — the ingestion gateway allowlists exactly these
+/// values — with `Public` as the universal fallback (no distro bundle, no
+/// `telemetry` section, or an unrecognized value).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase", from = "String")]
+pub enum TelemetryChannel {
+    #[default]
+    Public,
+    Internal,
+}
+
+impl From<String> for TelemetryChannel {
+    /// Closed-set validation with a fail-back-to-`Public`: an unrecognized
+    /// channel mislabels the install's traffic as public rather than failing
+    /// the whole distro manifest (which would also cost the bundle's kgoose
+    /// and distribution config).
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "public" => Self::Public,
+            "internal" => Self::Internal,
+            other => {
+                log::warn!(
+                    "Unknown telemetry.channel '{other}' in distro manifest; defaulting to public"
+                );
+                Self::Public
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TelemetryDistroConfig {
+    pub channel: TelemetryChannel,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -125,11 +164,8 @@ impl DistroBundleState {
                 config_path: None,
                 bin_dir: None,
                 manifest: DistroManifest {
-                    app_version: None,
                     kgoose: Some(kgoose),
-                    diagnostics: None,
-                    distribution: None,
-                    marketplace: None,
+                    ..DistroManifest::default()
                 },
             }),
         }
@@ -143,11 +179,8 @@ impl DistroBundleState {
                 config_path: None,
                 bin_dir: None,
                 manifest: DistroManifest {
-                    app_version: None,
-                    kgoose: None,
                     diagnostics: Some(DiagnosticsDistroConfig { checks }),
-                    distribution: None,
-                    marketplace: None,
+                    ..DistroManifest::default()
                 },
             }),
         }
@@ -195,6 +228,17 @@ impl DistroBundleState {
         self.bundle
             .as_ref()
             .and_then(|bundle| bundle.manifest.distribution.as_ref())
+    }
+
+    /// The distribution channel telemetry stamps as `distribution.channel`:
+    /// `Public` unless a staged distro manifest explicitly declares
+    /// `"telemetry": { "channel": "internal" }`.
+    pub fn telemetry_channel(&self) -> TelemetryChannel {
+        self.bundle
+            .as_ref()
+            .and_then(|bundle| bundle.manifest.telemetry.as_ref())
+            .map(|telemetry| telemetry.channel)
+            .unwrap_or_default()
     }
 }
 
@@ -380,14 +424,11 @@ mod tests {
                 config_path: None,
                 bin_dir: None,
                 manifest: DistroManifest {
-                    app_version: None,
                     kgoose: Some(KgooseDistroConfig {
                         base_url: Some("https://kgoose.example.test/".to_string()),
                         path: None,
                     }),
-                    diagnostics: None,
-                    distribution: None,
-                    marketplace: None,
+                    ..DistroManifest::default()
                 },
             }),
         };
@@ -505,6 +546,59 @@ mod tests {
                 "{error}"
             );
         }
+    }
+
+    #[test]
+    fn parses_the_internal_telemetry_channel() {
+        let manifest = parse_manifest(r#"{"telemetry":{"channel":"internal"}}"#)
+            .expect("telemetry section should parse");
+
+        let telemetry = manifest.telemetry.expect("telemetry should be present");
+        assert_eq!(telemetry.channel, TelemetryChannel::Internal);
+        // The wire spelling the renderer and the gateway both key on.
+        assert_eq!(
+            serde_json::to_value(telemetry.channel).expect("channel should serialize"),
+            serde_json::json!("internal")
+        );
+    }
+
+    #[test]
+    fn unknown_telemetry_channel_fails_back_to_public() {
+        // Fail-back, not rejection: a typo'd channel must not cost the whole
+        // manifest (kgoose/distribution config included) — it just mislabels
+        // this install's traffic as public.
+        let manifest = parse_manifest(r#"{"telemetry":{"channel":"beta"}}"#)
+            .expect("unknown channel should not fail the manifest");
+
+        assert_eq!(
+            manifest
+                .telemetry
+                .expect("telemetry should be present")
+                .channel,
+            TelemetryChannel::Public
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_telemetry_fields() {
+        assert!(
+            parse_manifest(r#"{"telemetry":{"channel":"internal","endpoint":"https://x"}}"#)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn telemetry_channel_defaults_to_public() {
+        // No bundle at all (a public build), and a bundle without the section.
+        assert_eq!(
+            DistroBundleState::empty_for_tests().telemetry_channel(),
+            TelemetryChannel::Public
+        );
+        assert_eq!(
+            DistroBundleState::with_kgoose_for_tests(KgooseDistroConfig::default())
+                .telemetry_channel(),
+            TelemetryChannel::Public
+        );
     }
 
     #[test]

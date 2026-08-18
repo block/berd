@@ -120,7 +120,11 @@ pub fn run() {
                     APP_LOG_ARCHIVES_KEPT,
                 ))
                 .targets([
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    // The Stdout formatter greys dev-time telemetry-viewer
+                    // records; the LogDir target keeps no formatter so the
+                    // ANSI escapes never reach `berd.log`.
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout)
+                        .format(commands::renderer::stdout_log_format),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
                         file_name: Some("berd".into()),
                     }),
@@ -211,6 +215,9 @@ pub fn run() {
             app.manage(commands::pocket_voice::PocketVoiceState::default());
             app.manage(commands::native_voice::NativeVoiceState::default());
             app.manage(commands::voice_capture::VoiceCaptureState::default());
+            app.manage(commands::telemetry::TelemetryAuthState::new(
+                app_data_dir.clone(),
+            ));
             let release_channel_state = commands::updates::ReleaseChannelState::load(app.handle())?;
             app.manage(release_channel_state);
 
@@ -484,6 +491,10 @@ pub fn run() {
             commands::builderbot::update_builderbot_scheduled_trigger,
             #[cfg(feature = "block-builderbot")]
             commands::builderbot::update_builderbot_routing_rule,
+            commands::telemetry::export_otel_logs,
+            commands::telemetry::get_telemetry_resource,
+            commands::telemetry::get_telemetry_settings,
+            commands::telemetry::set_telemetry_enabled,
             commands::whoami::whoami,
             commands::acp::get_goose_serve_url,
             commands::acp::get_goose_serve_host_info,

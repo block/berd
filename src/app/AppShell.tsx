@@ -36,6 +36,7 @@ import {
 } from "@/features/settings/lib/settingsEvents";
 import type { ExtensionEntry } from "@/features/extensions/types";
 import { acceptFirstSend } from "@/features/chat/lib/firstWorkspaceSend";
+import { CHAT_SOURCE_SURFACE } from "@/features/chat/lib/chatTelemetry";
 import {
   admitSystemInheritedQueuedMessage,
   personaIntentFromComposer,
@@ -2955,9 +2956,15 @@ export function AppShell({
               : {}),
             persona: personaIntentFromComposer(options?.personaId),
             attachments: options?.attachments,
-            ...(options?.sendOptions
-              ? { sendOptions: options.sendOptions }
-              : {}),
+            sendOptions: {
+              ...options?.sendOptions,
+              // A deferred first send is dispatched by the background
+              // queued-send pipeline, which reads this surface for `berd_chat`
+              // send telemetry. MAIN_CHAT for parity with this composer's
+              // non-deferred sends, which drain through the ChatView
+              // controller and report the same surface.
+              telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT,
+            },
           },
           { queueReady: true, onNeedsName: enqueueWorkspaceNameRequest },
         );

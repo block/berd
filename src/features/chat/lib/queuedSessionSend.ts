@@ -13,6 +13,11 @@ import {
 
 import { loadWorkspaceInstructionFiles } from "@/features/chat/api/workspaceContext";
 import { sendPromptInBackground } from "@/features/chat/lib/backgroundSend";
+import { isFirstCommittedUserMessage } from "@/features/chat/lib/chatFirstMessage";
+import {
+  trackChatMessageSent,
+  trackChatSessionStarted,
+} from "@/features/chat/lib/chatTelemetry";
 import { loadSessionMessages } from "@/features/chat/lib/sessionActivation";
 import {
   SessionDispatchContentionError,
@@ -41,6 +46,7 @@ import {
   type SessionExecutionTarget,
 } from "@/features/chat/lib/sessionExecutionTarget";
 import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
+import { perfLog } from "@/shared/lib/perfLog";
 
 async function findPersona(personaId: string): Promise<Persona> {
   const cached = useAgentStore.getState().getPersonaById(personaId);
@@ -342,6 +348,56 @@ export async function sendQueuedPromptToExistingSessionInBackground(
         sendOptions.systemPrompt ?? workspaceContextPrompt,
       );
     assertSessionExecutionTarget(sessionId, preparedExecutionTarget);
+    // A foreground composer send that was deferred for workspace setup is
+    // dispatched here, not by its controller, so its `berd_chat` send
+    // telemetry anchors to this dispatch's user-message commit — the same
+    // anchor the foreground path uses (fireChatSendTelemetry in
+    // useChatSessionController): a pre-commit failure emits nothing, and each
+    // accepted send emits exactly once. The surface rides in the payload
+    // (`telemetrySourceSurface`); berdctl/background payloads never carry one
+    // and stay untracked by design.
+    const telemetrySourceSurface = sendOptions.telemetrySourceSurface;
+    const fireSendTelemetry = telemetrySourceSurface
+      ? () => {
+          // Observation only, structurally (matching fireChatSendTelemetry):
+          // this runs inside sendCore's commit callback, where a throw would
+          // reject a send the backend already accepted and skip the state
+          // transitions that follow the commit.
+          try {
+            // Post-commit read, matching the foreground anchor: the user
+            // message this send committed is already in the transcript, so
+            // "first" means it is the only user message there, once the
+            // session's history has landed (see chatFirstMessage).
+            const isFirstMessage = isFirstCommittedUserMessage(sessionId);
+            const hasPersona = Boolean(persona);
+            const provider = preparedExecutionTarget.harnessId;
+            const model = preparedExecutionTarget.modelId;
+            if (isFirstMessage) {
+              trackChatSessionStarted({
+                sessionId,
+                sourceSurface: telemetrySourceSurface,
+                hasProject: Boolean(
+                  useChatSessionStore.getState().getSession(sessionId)
+                    ?.projectId,
+                ),
+                hasPersona,
+                provider,
+                model,
+              });
+            }
+            trackChatMessageSent({
+              sessionId,
+              isFirstMessage,
+              hasAttachments: (payload.attachments?.length ?? 0) > 0,
+              hasPersona,
+              provider,
+              model,
+            });
+          } catch (error) {
+            perfLog(`[telemetry] chat send telemetry failed: ${String(error)}`);
+          }
+        }
+      : undefined;
     await sendPromptInBackground(
       sessionId,
       payload.text,
@@ -353,7 +409,7 @@ export async function sendQueuedPromptToExistingSessionInBackground(
       },
       payload.attachments,
       beforeUserMessageCommitted,
-      undefined,
+      fireSendTelemetry,
       () => assertSessionExecutionTarget(sessionId, preparedExecutionTarget),
       onPromptDispatched,
     );

@@ -35,6 +35,7 @@ etcetera = "0.11.0"
 flate2 = "1"
 hex = "0.4"
 ignore = "0.4.25"
+fern = "0.7"
 infer = "0.19.0"
 libc = "0.2"
 log = "0.4.29"
@@ -51,7 +52,20 @@ audioadapter-buffers = "3.0"
 earshot = "1.0"
 rubato = "3.0"
 tar = "0.4"
-sherpa-onnx = "1.12"
+# Held below 1.13: sherpa-onnx-sys downloads prebuilt native libs into a
+# version-stamped dir under the target dir, and rust-cache strips the files out
+# of it when saving. The restored empty skeleton defeats the build script's
+# `lib_dir.is_dir()` early return, so it never re-downloads and linking fails
+# with "could not find native static library `sherpa-onnx-c-api`". CI's Linux
+# cache is poisoned for v1.13.5; this pin resolves to a path the cache has
+# never gutted. Tilde, not caret — `^1.12` floats back to 1.13.5.
+#
+# NOTE: sherpa-onnx-sys is the crate whose version actually names that path,
+# and it declares `^1.12.40`, so nothing in this manifest constrains it — it is
+# held at 1.12.40 by Cargo.lock alone. A bare `cargo update` floats it back to
+# 1.13.5 and reintroduces the CI failure; re-pin it with
+# `cargo update -p sherpa-onnx-sys --precise 1.12.40`.
+sherpa-onnx = "~1.12.40"
 ssstretch = "0.1.0"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
@@ -133,6 +147,11 @@ block-automations = []
 block-builderbot = []
 block-feedback = []
 block-managed-connections = []
+# Forces telemetry consent ON, skipping the user's telemetry-settings.json
+# (the renderer hides the toggle via the paired VITE_TELEMETRY_ENFORCED flag).
+# For managed internal distributions where consent is an employment-policy
+# fact, not a per-user choice.
+block-telemetry-enforced = []
 block-voice-dictation = []
 # Admin runtime-config endpoint fetch. Default-OFF: a normal build never
 # compiles the kgoose-backed fetch/cache path and instead loads the bundled

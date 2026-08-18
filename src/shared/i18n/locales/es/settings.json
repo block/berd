@@ -467,6 +467,14 @@
     },
     "title": "Notificaciones"
   },
+  "privacy": {
+    "telemetry": {
+      "description": "Ayuda a mejorar Berd compartiendo eventos de uso, como qué funciones se usan. El contenido de los chats nunca se envía.",
+      "label": "Compartir datos de uso",
+      "saveError": "No se pudo actualizar la configuración de datos de uso. Inténtalo de nuevo."
+    },
+    "title": "Privacidad"
+  },
   "projects": {
     "empty": "No hay proyectos archivados.",
     "sectionTitle": "Proyectos archivados",

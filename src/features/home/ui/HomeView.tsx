@@ -8,6 +8,11 @@ import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
+import {
+  recordHomeItemPinIntent,
+  recordHomeItemUnpinIntent,
+} from "../lib/homePinTelemetry";
+import { entityPinTargetFromWidget } from "../lib/homePinTargets";
 import { clampLayoutCamera } from "../lib/layoutCamera";
 import { getPinnedHomeChatSessionIds } from "../lib/pinnedHomeChats";
 import { useHomeWidgetStore } from "../stores/homeWidgetStore";
@@ -123,6 +128,7 @@ export function HomeView({
     retryInitialize,
     copyErrorDetails,
     widgetMutations,
+    seedWidget,
     camera,
     constraints,
     saveCamera,
@@ -228,7 +234,7 @@ export function HomeView({
       const center = placement
         ? starterLayoutCenter(placement)
         : { x: -420 + index * 220, y: 410 };
-      return widgetMutations.addWidget(
+      return seedWidget(
         "agentPin",
         center.x,
         center.y,
@@ -241,7 +247,7 @@ export function HomeView({
       starterAgentSeedAttemptedRef.current = true;
       pendingStarterAgentSeedRef.current = true;
     }
-  }, [instances, loadStatus, personas, personasLoading, widgetMutations]);
+  }, [instances, loadStatus, personas, personasLoading, seedWidget]);
 
   useEffect(() => {
     if (
@@ -780,23 +786,62 @@ function useHomeWidgetLayoutController() {
     void initialize();
   }, [initialize]);
 
+  // The canvas-native pin/unpin paths bypass usePinToHomeWidget: the WidgetPicker
+  // adds entity pins (and utility widgets) via addWidget, and the widget frame /
+  // UnpinPill removes them via removeWidget. Wrap both here — the single point
+  // both flow through — to record berd_home pin intents, filtered to the pinnable
+  // entity kinds (clock/note/checklist widgets map to null and record nothing).
+  // The intent becomes an event only if the change survives persistence; see
+  // homePinTelemetry.ts.
+  const addWidgetWithTelemetry = useCallback<typeof addWidget>(
+    (type, x, y, state, bounds, options) => {
+      const added = addWidget(type, x, y, state, bounds, options);
+      if (!added) {
+        return added;
+      }
+      const target = entityPinTargetFromWidget(type, state);
+      if (target) {
+        recordHomeItemPinIntent({ kind: target.kind, itemId: target.id });
+      }
+      return added;
+    },
+    [addWidget],
+  );
+
+  const removeWidgetWithTelemetry = useCallback<typeof removeWidget>(
+    (id) => {
+      // Resolve the entity before removal, while the instance still exists.
+      const instance = useHomeWidgetStore
+        .getState()
+        .instances.find((candidate) => candidate.id === id);
+      const target = instance
+        ? entityPinTargetFromWidget(instance.type, instance.state)
+        : null;
+      removeWidget(id);
+      if (target) {
+        recordHomeItemUnpinIntent({ kind: target.kind, itemId: target.id });
+      }
+    },
+    [removeWidget],
+  );
+
   const widgetMutations = useMemo(
     () => ({
-      addWidget,
+      addWidget: addWidgetWithTelemetry,
       moveWidget,
       resizeWidget,
       bumpZ,
       applyStarterLayout,
-      removeWidget,
+      removeWidget: removeWidgetWithTelemetry,
       updateWidgetState,
     }),
     [
-      addWidget,
+      addWidgetWithTelemetry,
       moveWidget,
       resizeWidget,
       bumpZ,
       applyStarterLayout,
-      removeWidget,
+      removeWidgetWithTelemetry,
       updateWidgetState,
     ],
   );
@@ -808,6 +853,11 @@ function useHomeWidgetLayoutController() {
     retryInitialize,
     copyErrorDetails,
     widgetMutations,
+    // The raw store mutation, for programmatic seeding. Unlike
+    // widgetMutations.addWidget it records no Pin Pinned intent: the
+    // first-run starter-agent seed (and its re-run after a discarded save)
+    // is not a user pin and must not count as one.
+    seedWidget: addWidget,
     camera,
     constraints,
     saveCamera,

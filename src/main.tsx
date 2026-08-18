@@ -135,6 +135,11 @@ if (bootError) {
   renderBootError(bootError);
 } else if (sessionId) {
   const decodedSessionId = sessionId;
+  // Detached session windows run the same instrumented chat send paths as the
+  // main window, so they need the full telemetry pipeline — without it their
+  // events buffer forever and are silently dropped. Deliberately no
+  // trackAppLaunched(): opening a session window is not an app start.
+  initTelemetry();
   Promise.all([
     import("@/app/SessionWindowApp"),
     import("@/app/SessionWindowRuntime"),
@@ -161,6 +166,10 @@ if (bootError) {
       renderBootError("The session window bundle could not be loaded.");
     });
 } else {
+  // Both run again whenever the renderer reloads (a WebKit reap, the crash
+  // screen's Reload button). Re-initializing is the point — the reloaded
+  // renderer needs a live pipeline — while trackAppLaunched() reports only on
+  // the first load of this window session, since a reload is not an app start.
   initTelemetry();
   trackAppLaunched();
 

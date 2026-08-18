@@ -24,6 +24,7 @@ describe("buildProfile", () => {
       feedback: false,
       managedConnections: false,
       telemetry: true,
+      telemetryEnforced: false,
       voiceConversation: true,
       voiceDictation: false,
       securityMl: false,
@@ -98,6 +99,18 @@ describe("buildProfile", () => {
     );
 
     expect(getFreshBuildFeatureState().telemetry).toBe(true);
+  });
+
+  it("enforces telemetry consent only when VITE_TELEMETRY_ENFORCED is exactly 1", async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_TELEMETRY_ENFORCED", "1");
+    const { getBuildFeatureState: enforced } = await import("./buildProfile");
+    expect(enforced().telemetryEnforced).toBe(true);
+
+    vi.resetModules();
+    vi.stubEnv("VITE_TELEMETRY_ENFORCED", "true");
+    const { getBuildFeatureState: nonOptIn } = await import("./buildProfile");
+    expect(nonOptIn().telemetryEnforced).toBe(false);
   });
 
   it("keeps managed connections off for a non-opt-in value", async () => {

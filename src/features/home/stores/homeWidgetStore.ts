@@ -693,6 +693,10 @@ function createHomeWidgetStore() {
           ),
         );
       },
+      // Promotion rewrites a pinned draft chat's id in place, so a pinned chat
+      // can be stored under two ids over its life. Pin telemetry resolves that
+      // through the session store rather than watching this write; see
+      // lib/chatPinIdentity.ts.
       replaceChatPinSessionId: (draftSessionId, backendSessionId) => {
         applyMutation((instances) => {
           let changed = false;

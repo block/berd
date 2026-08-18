@@ -12,7 +12,10 @@ import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStor
 import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import type { Persona } from "@/shared/types/agents";
-import type { ChatAttachmentDraft } from "@/shared/types/messages";
+import {
+  type ChatAttachmentDraft,
+  createUserMessage,
+} from "@/shared/types/messages";
 import { useChatStore } from "../../stores/chatStore";
 import {
   type ChatSession,
@@ -36,6 +39,8 @@ const mockSupportedModelsList = vi.fn();
 const mockToastError = vi.fn();
 const mockUseChatSendMessage = vi.fn();
 const mockUseChatSteerMessage = vi.fn();
+const mockTrackChatMessageSent = vi.fn();
+const mockTrackChatSessionStarted = vi.fn();
 const mockUseChatHook = vi.fn();
 const mockUseMessageQueue = vi.fn();
 const mockPickerOpen = vi.fn();
@@ -264,6 +269,19 @@ vi.mock("../useAgentModelPickerState", () => ({
   }),
 }));
 
+// Wrappers are mocked so the tests can pin the fire points; CHAT_SOURCE_SURFACE
+// and the rest of the module stay real.
+vi.mock("@/features/chat/lib/chatTelemetry", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/features/chat/lib/chatTelemetry")
+  >()),
+  trackChatMessageSent: (...args: unknown[]) =>
+    mockTrackChatMessageSent(...args),
+  trackChatSessionStarted: (...args: unknown[]) =>
+    mockTrackChatSessionStarted(...args),
+}));
+
+import { CHAT_SOURCE_SURFACE } from "../../lib/chatTelemetry";
 import { useChatSessionController } from "../useChatSessionController";
 
 function latestMessageQueueArgs() {
@@ -554,6 +572,7 @@ describe("useChatSessionController", () => {
       draftAttachmentsBySession: {},
       queuedMessageBySession: {},
       scrollTargetMessageBySession: {},
+      loadingSessionIds: new Set(),
       activeSessionId: null,
       isConnected: true,
     });
@@ -1634,7 +1653,7 @@ describe("useChatSessionController", () => {
       "next poem",
       undefined,
       undefined,
-      undefined,
+      { telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT },
       undefined,
     );
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();
@@ -1662,7 +1681,7 @@ describe("useChatSessionController", () => {
       "help me with Berd",
       undefined,
       undefined,
-      undefined,
+      { telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT },
       undefined,
     );
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();
@@ -1727,7 +1746,11 @@ describe("useChatSessionController", () => {
 
     const queuedSendOptions = enqueue.mock.calls[0]?.[3];
     const queuedExecutionTarget = enqueue.mock.calls[0]?.[5];
-    expect(queuedSendOptions).toBeUndefined();
+    // Only the telemetry surface stamp is captured this early — no execution
+    // context may freeze before the workspace context is ready.
+    expect(queuedSendOptions).toEqual({
+      telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT,
+    });
     expect(queuedExecutionTarget).toBeUndefined();
     expect(mockUseChatSendMessage).not.toHaveBeenCalled();
 
@@ -1949,7 +1972,11 @@ describe("useChatSessionController", () => {
     expect(mockUseChatSteerMessage).toHaveBeenCalledWith(
       "make it shorter",
       undefined,
-      { displayText: "make it shorter" },
+      expect.objectContaining({
+        displayText: "make it shorter",
+        // The controller always wires the send-telemetry commit anchor.
+        onUserMessageCommitted: expect.any(Function),
+      }),
     );
   });
 
@@ -2709,7 +2736,9 @@ describe("useChatSessionController", () => {
         text: "no persona",
         personaId: null,
         personaName: undefined,
-        sendOptions: undefined,
+        sendOptions: {
+          telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT,
+        },
       },
       {
         text: "plan",
@@ -2717,6 +2746,7 @@ describe("useChatSessionController", () => {
         personaName: "Codex Planner",
         sendOptions: {
           capturedPersonaSystemPrompt: expect.stringContaining("Plan clearly."),
+          telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT,
         },
       },
       {
@@ -2726,6 +2756,7 @@ describe("useChatSessionController", () => {
         sendOptions: {
           capturedPersonaSystemPrompt:
             expect.stringContaining("Review carefully."),
+          telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT,
         },
       },
     ]);
@@ -5053,6 +5084,9 @@ describe("useChatSessionController", () => {
       persona: { kind: "inherit" },
       text: "",
       attachments: [imageDraft],
+      sendOptions: {
+        telemetrySourceSurface: CHAT_SOURCE_SURFACE.GLOBAL_COMPOSER,
+      },
     });
 
     useChatSessionStore.setState((state) => ({
@@ -5081,6 +5115,11 @@ describe("useChatSessionController", () => {
         persona: { kind: "inherit" },
         text: "",
         attachments: [imageDraft],
+        // The migrated record keeps its Home-composer surface stamp so a
+        // deferred-workspace release still reports where it was accepted.
+        sendOptions: {
+          telemetrySourceSurface: CHAT_SOURCE_SURFACE.GLOBAL_COMPOSER,
+        },
       });
     });
     expect(
@@ -5543,5 +5582,493 @@ describe("useChatSessionController", () => {
       expect.anything(),
     );
     consoleError.mockRestore();
+  });
+
+  // Regression coverage for the `berd_chat` send-telemetry anchor: both events
+  // fire from the user-message-commit callback, so an attempt that fails
+  // before committing emits nothing and the queue's automatic retry of the
+  // same payload emits exactly once, when it finally commits.
+  describe("chat send telemetry", () => {
+    type DrainSend = (
+      text: string,
+      overridePersona?: { id: string | null; name?: string },
+      attachments?: ChatAttachmentDraft[],
+      sendOptions?: ChatSendOptions,
+    ) => boolean | Promise<boolean>;
+
+    // Mimics sendCore's commit contract: the user message is appended to the
+    // transcript, then the commit callback fires synchronously.
+    function commitUserMessage(
+      sessionId: string,
+      text: string,
+      sendOptions?: ChatSendOptions,
+    ) {
+      useChatStore.getState().addMessage(sessionId, createUserMessage(text));
+      sendOptions?.onUserMessageCommitted?.();
+    }
+
+    function latestDrainSend(): DrainSend {
+      return latestMessageQueueArgs()[2] as DrainSend;
+    }
+
+    function commitOnSendOnce() {
+      mockUseChatSendMessage.mockImplementationOnce(
+        async (
+          options?: { __sessionId?: string },
+          text?: string,
+          _persona?: unknown,
+          _attachments?: unknown,
+          sendOptions?: ChatSendOptions,
+        ) => {
+          commitUserMessage(
+            options?.__sessionId ?? "session-1",
+            text ?? "",
+            sendOptions,
+          );
+          return true;
+        },
+      );
+    }
+
+    it("emits Session Started and Message Sent once, only at the user-message commit", async () => {
+      // Captured for the outer assertions — an expect() inside the async send
+      // mock would be swallowed by the queue's void'ed send promise.
+      let trackCallsBeforeCommit = -1;
+      mockUseChatSendMessage.mockImplementationOnce(
+        async (
+          options?: { __sessionId?: string },
+          text?: string,
+          _persona?: unknown,
+          _attachments?: unknown,
+          sendOptions?: ChatSendOptions,
+        ) => {
+          trackCallsBeforeCommit =
+            mockTrackChatSessionStarted.mock.calls.length +
+            mockTrackChatMessageSent.mock.calls.length;
+          commitUserMessage(
+            options?.__sessionId ?? "session-1",
+            text ?? "",
+            sendOptions,
+          );
+          return true;
+        },
+      );
+      const { result } = renderHook(() =>
+        useChatSessionController({ sessionId: "session-1" }),
+      );
+
+      await act(async () => {
+        await result.current.handleSend("hello");
+      });
+
+      expect(mockUseChatSendMessage).toHaveBeenCalledTimes(1);
+      // Nothing fired before the user message was committed.
+      expect(trackCallsBeforeCommit).toBe(0);
+      expect(mockTrackChatSessionStarted).toHaveBeenCalledTimes(1);
+      expect(mockTrackChatSessionStarted).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "session-1",
+          sourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT,
+        }),
+      );
+      expect(mockTrackChatMessageSent).toHaveBeenCalledTimes(1);
+      expect(mockTrackChatMessageSent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionId: "session-1",
+          isFirstMessage: true,
+        }),
+      );
+    });
+
+    // The anchor is observation-only by construction: it runs inside the
+    // send/steer commit callbacks, so a throwing wrapper contained here can
+    // never reject a dispatch the backend already accepted.
+    it("contains a throwing telemetry wrapper so a committed send still resolves", async () => {
+      mockTrackChatMessageSent.mockImplementationOnce(() => {
+        throw new Error("telemetry exploded");
+      });
+      commitOnSendOnce();
+      renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+      const drainSend = latestDrainSend();
+
+      let accepted: boolean | undefined;
+      await act(async () => {
+        accepted = await drainSend("hello");
+      });
+
+      expect(accepted).toBe(true);
+      expect(mockTrackChatMessageSent).toHaveBeenCalledTimes(1);
+    });
+
+    it("emits nothing on a pre-commit failure and once when the automatic retry commits", async () => {
+      renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+      const drainSend = latestDrainSend();
+      const queueCommitMarker = vi.fn();
+
+      // First attempt: preparation/dispatch fails before the user message is
+      // committed, so the queue keeps the record for its automatic retry.
+      mockUseChatSendMessage.mockImplementationOnce(async () => false);
+      await act(async () => {
+        await drainSend("hello", undefined, undefined, {
+          onUserMessageCommitted: queueCommitMarker,
+        });
+      });
+
+      expect(mockTrackChatSessionStarted).not.toHaveBeenCalled();
+      expect(mockTrackChatMessageSent).not.toHaveBeenCalled();
+      expect(queueCommitMarker).not.toHaveBeenCalled();
+
+      // The retry re-dispatches the same payload; this time it commits. No
+      // user message committed before it, so it is still the first message.
+      commitOnSendOnce();
+      await act(async () => {
+        await drainSend("hello", undefined, undefined, {
+          onUserMessageCommitted: queueCommitMarker,
+        });
+      });
+
+      expect(mockTrackChatSessionStarted).toHaveBeenCalledTimes(1);
+      expect(mockTrackChatMessageSent).toHaveBeenCalledTimes(1);
+      expect(mockTrackChatMessageSent).toHaveBeenCalledWith(
+        expect.objectContaining({ isFirstMessage: true }),
+      );
+      // The queue's own commit callback still fires through the telemetry
+      // wrapper — it is what stops the queue from retrying a committed send.
+      expect(queueCommitMarker).toHaveBeenCalledTimes(1);
+    });
+
+    it("emits Message Sent as not-first and no Session Started once a user message exists", async () => {
+      useChatStore
+        .getState()
+        .addMessage("session-1", createUserMessage("earlier message"));
+      commitOnSendOnce();
+      renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+      const drainSend = latestDrainSend();
+
+      await act(async () => {
+        await drainSend("follow up");
+      });
+
+      expect(mockTrackChatSessionStarted).not.toHaveBeenCalled();
+      expect(mockTrackChatMessageSent).toHaveBeenCalledTimes(1);
+      expect(mockTrackChatMessageSent).toHaveBeenCalledWith(
+        expect.objectContaining({ isFirstMessage: false }),
+      );
+    });
+
+    // A resumed session replays its history asynchronously and nothing gates
+    // sending on that load, so the transcript a commit reads can still be
+    // empty for a conversation that started long ago. Those sends must report
+    // as follow-ups, not as a brand-new session.
+    describe("session history that has not replayed", () => {
+      it("emits Message Sent as not-first and no Session Started while the history is still replaying", async () => {
+        useChatSessionStore.setState({
+          sessions: [sessionFixture({ messageCount: 12 })],
+        });
+        // The session was just opened: its replay is in flight, so the
+        // transcript is empty until the load flushes it.
+        useChatStore.getState().setSessionLoading("session-1", true);
+        commitOnSendOnce();
+        renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+        const drainSend = latestDrainSend();
+
+        await act(async () => {
+          await drainSend("typed before the transcript landed");
+        });
+
+        expect(mockTrackChatSessionStarted).not.toHaveBeenCalled();
+        expect(mockTrackChatMessageSent).toHaveBeenCalledTimes(1);
+        expect(mockTrackChatMessageSent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sessionId: "session-1",
+            isFirstMessage: false,
+          }),
+        );
+      });
+
+      it("emits Message Sent as not-first when a settled load left the session's history unreplayed", async () => {
+        // A failed load settles with an empty transcript (its error notice is
+        // a system message), so the record's backend count is what remains.
+        useChatSessionStore.setState({
+          sessions: [sessionFixture({ messageCount: 12 })],
+        });
+        commitOnSendOnce();
+        renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+        const drainSend = latestDrainSend();
+
+        await act(async () => {
+          await drainSend("typed after a failed load");
+        });
+
+        expect(mockTrackChatSessionStarted).not.toHaveBeenCalled();
+        expect(mockTrackChatMessageSent).toHaveBeenCalledTimes(1);
+        expect(mockTrackChatMessageSent).toHaveBeenCalledWith(
+          expect.objectContaining({ isFirstMessage: false }),
+        );
+      });
+    });
+
+    // Steer sends commit a real user message through steerCore, whose commit
+    // callback fires only once the backend acknowledges the steer — so both
+    // steer paths ride the same anchor as regular sends: a rejected steer
+    // emits nothing, an accepted one emits Message Sent exactly once.
+    describe("steer sends", () => {
+      // Mimics steerCore's commit contract: the acknowledged steer's user
+      // message is in the transcript when the commit callback fires.
+      function commitOnSteerOnce() {
+        mockUseChatSteerMessage.mockImplementationOnce(
+          async (
+            text?: string,
+            _attachments?: unknown,
+            sendOptions?: ChatSendOptions,
+          ) => {
+            useChatStore
+              .getState()
+              .addMessage("session-1", createUserMessage(text ?? ""));
+            sendOptions?.onUserMessageCommitted?.();
+            return true;
+          },
+        );
+      }
+
+      it("emits Message Sent once, only at the commit of a steered draft", async () => {
+        // Steering happens mid-run, so an earlier user message exists.
+        useChatStore
+          .getState()
+          .addMessage("session-1", createUserMessage("start the run"));
+        mockUseChatRuntime.chatState = "streaming";
+        let trackCallsBeforeCommit = -1;
+        mockUseChatSteerMessage.mockImplementationOnce(
+          async (
+            text?: string,
+            _attachments?: unknown,
+            sendOptions?: ChatSendOptions,
+          ) => {
+            trackCallsBeforeCommit =
+              mockTrackChatSessionStarted.mock.calls.length +
+              mockTrackChatMessageSent.mock.calls.length;
+            useChatStore
+              .getState()
+              .addMessage("session-1", createUserMessage(text ?? ""));
+            sendOptions?.onUserMessageCommitted?.();
+            return true;
+          },
+        );
+        const { result } = renderHook(() =>
+          useChatSessionController({ sessionId: "session-1" }),
+        );
+
+        let accepted: boolean | undefined;
+        await act(async () => {
+          accepted = await result.current.steerDraftMessage("make it shorter");
+        });
+
+        expect(accepted).toBe(true);
+        // Nothing fired before the steer was acknowledged and committed.
+        expect(trackCallsBeforeCommit).toBe(0);
+        expect(mockTrackChatMessageSent).toHaveBeenCalledTimes(1);
+        expect(mockTrackChatMessageSent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sessionId: "session-1",
+            isFirstMessage: false,
+          }),
+        );
+        expect(mockTrackChatSessionStarted).not.toHaveBeenCalled();
+      });
+
+      it("emits nothing for a steered draft rejected before commit", async () => {
+        mockUseChatRuntime.chatState = "streaming";
+        // A rejected steer rolls its user message back and never invokes the
+        // commit callback.
+        mockUseChatSteerMessage.mockResolvedValueOnce(false);
+        const { result } = renderHook(() =>
+          useChatSessionController({ sessionId: "session-1" }),
+        );
+
+        let accepted: boolean | undefined;
+        await act(async () => {
+          accepted = await result.current.steerDraftMessage("make it shorter");
+        });
+
+        expect(accepted).toBe(false);
+        expect(mockTrackChatSessionStarted).not.toHaveBeenCalled();
+        expect(mockTrackChatMessageSent).not.toHaveBeenCalled();
+      });
+
+      it("emits Message Sent once for a steered queued message, chaining the record's own commit callback", async () => {
+        useChatStore
+          .getState()
+          .addMessage("session-1", createUserMessage("start the run"));
+        const recordCommitMarker = vi.fn();
+        const dismiss = vi.fn();
+        mockUseMessageQueue.mockImplementation(() => ({
+          queuedMessage: {
+            text: "queued follow-up",
+            attachments: [],
+            sendOptions: {
+              telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT,
+              onUserMessageCommitted: recordCommitMarker,
+            },
+          },
+          enqueue: vi.fn(),
+          dismiss,
+        }));
+        commitOnSteerOnce();
+        const { result } = renderHook(() =>
+          useChatSessionController({ sessionId: "session-1" }),
+        );
+
+        let accepted: boolean | undefined;
+        await act(async () => {
+          accepted = await result.current.steerQueuedMessage();
+        });
+
+        expect(accepted).toBe(true);
+        expect(mockTrackChatMessageSent).toHaveBeenCalledTimes(1);
+        expect(mockTrackChatMessageSent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            sessionId: "session-1",
+            isFirstMessage: false,
+          }),
+        );
+        expect(mockTrackChatSessionStarted).not.toHaveBeenCalled();
+        // The payload's own commit callback still fires through the wrapper.
+        expect(recordCommitMarker).toHaveBeenCalledTimes(1);
+        expect(dismiss).toHaveBeenCalledTimes(1);
+      });
+
+      // A throw escaping the anchor here would reject steerQueuedMessage
+      // after the backend acknowledged the steer, skipping queue.dismiss() —
+      // the already-steered record would then drain again as a duplicate
+      // user turn (LAWS/CHAT.md: at most one user turn per message).
+      it("dismisses the queued record even when the telemetry wrapper throws at the steer commit", async () => {
+        useChatStore
+          .getState()
+          .addMessage("session-1", createUserMessage("start the run"));
+        const dismiss = vi.fn();
+        mockUseMessageQueue.mockImplementation(() => ({
+          queuedMessage: { text: "queued follow-up" },
+          enqueue: vi.fn(),
+          dismiss,
+        }));
+        mockTrackChatMessageSent.mockImplementationOnce(() => {
+          throw new Error("telemetry exploded");
+        });
+        commitOnSteerOnce();
+        const { result } = renderHook(() =>
+          useChatSessionController({ sessionId: "session-1" }),
+        );
+
+        let accepted: boolean | undefined;
+        await act(async () => {
+          accepted = await result.current.steerQueuedMessage();
+        });
+
+        expect(accepted).toBe(true);
+        expect(mockTrackChatMessageSent).toHaveBeenCalledTimes(1);
+        expect(dismiss).toHaveBeenCalledTimes(1);
+      });
+
+      it("emits nothing when a queued-message steer is rejected, keeping the record for the instrumented drain", async () => {
+        const dismiss = vi.fn();
+        mockUseMessageQueue.mockImplementation(() => ({
+          queuedMessage: { text: "queued follow-up" },
+          enqueue: vi.fn(),
+          dismiss,
+        }));
+        mockUseChatSteerMessage.mockResolvedValueOnce(false);
+        const { result } = renderHook(() =>
+          useChatSessionController({ sessionId: "session-1" }),
+        );
+
+        let accepted: boolean | undefined;
+        await act(async () => {
+          accepted = await result.current.steerQueuedMessage();
+        });
+
+        expect(accepted).toBe(false);
+        expect(mockTrackChatSessionStarted).not.toHaveBeenCalled();
+        expect(mockTrackChatMessageSent).not.toHaveBeenCalled();
+        expect(dismiss).not.toHaveBeenCalled();
+      });
+    });
+
+    // Captured payloads carry the surface that accepted them: a queued record
+    // can be released to the background queued-send pipeline by the
+    // deferred-workspace flow, which cannot recompute this controller's
+    // surface, so losing the stamp would silence that send's telemetry.
+    describe("captured payload surface stamp", () => {
+      function renderWithCapturingQueue(
+        options: Parameters<typeof useChatSessionController>[0],
+      ) {
+        const enqueue = vi.fn();
+        mockUseMessageQueue.mockImplementation(() => ({
+          queuedMessage: null,
+          enqueue,
+          dismiss: vi.fn(),
+        }));
+        const { result } = renderHook(() => useChatSessionController(options));
+        return { result, enqueue };
+      }
+
+      it("stamps main-chat sends", () => {
+        const { result, enqueue } = renderWithCapturingQueue({
+          sessionId: "session-1",
+        });
+
+        act(() => {
+          result.current.handleSend("hello");
+        });
+
+        expect(enqueue).toHaveBeenCalledTimes(1);
+        expect(enqueue.mock.calls[0]?.[3]).toMatchObject({
+          telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT,
+        });
+      });
+
+      it("stamps Home composer sends as global composer", () => {
+        const { result, enqueue } = renderWithCapturingQueue({
+          sessionId: null,
+          isHomeSession: true,
+        });
+
+        act(() => {
+          result.current.handleSend("hello");
+        });
+
+        expect(enqueue).toHaveBeenCalledTimes(1);
+        expect(enqueue.mock.calls[0]?.[3]).toMatchObject({
+          telemetrySourceSurface: CHAT_SOURCE_SURFACE.GLOBAL_COMPOSER,
+        });
+      });
+
+      it("stamps builder-session sends as agent builder", () => {
+        useChatSessionStore.setState({
+          sessions: [
+            sessionFixture({
+              intent: "build-agent",
+              executionTarget: {
+                harnessId: "goose",
+                modelProviderId: "openai",
+                modelId: "gpt-4o",
+                modelName: "GPT-4o",
+              },
+            }),
+          ],
+        });
+        const { result, enqueue } = renderWithCapturingQueue({
+          sessionId: "session-1",
+        });
+
+        act(() => {
+          result.current.handleSend("hello");
+        });
+
+        expect(enqueue).toHaveBeenCalledTimes(1);
+        expect(enqueue.mock.calls[0]?.[3]).toMatchObject({
+          telemetrySourceSurface: CHAT_SOURCE_SURFACE.AGENT_BUILDER,
+        });
+      });
+    });
   });
 });

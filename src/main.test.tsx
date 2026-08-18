@@ -92,12 +92,14 @@ describe("main entrypoint telemetry startup", () => {
     });
   });
 
-  it("does not start launch telemetry for session windows", async () => {
+  it("runs the session window startup path without telemetry network or native-command work", async () => {
     await loadMainAt("?sessionKey=c2Vzc2lvbi0xMjM");
 
     expect(await screen.findByTestId("session-app")).toHaveTextContent(
       "session-123",
     );
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mockInvoke).not.toHaveBeenCalled();
     expect(mockInstallRendererDiagnostics).toHaveBeenCalledWith({
       windowKind: "session",
     });
@@ -123,5 +125,65 @@ describe("main entrypoint telemetry startup", () => {
       windowKind: "main",
     });
     consoleError.mockRestore();
+  });
+
+  // Pins which boot branches initialize the telemetry pipeline vs. fire the
+  // launch event. Session windows run the same instrumented chat send paths as
+  // the main window, so they must initialize the pipeline (or every event they
+  // track is silently dropped) — but opening one is not an app start, so they
+  // must never emit the launch event.
+  describe("per-window-kind telemetry wiring", () => {
+    const mockInitTelemetry = vi.fn();
+    const mockTrackAppLaunched = vi.fn();
+
+    beforeEach(() => {
+      vi.doMock("@/shared/telemetry/client", () => ({
+        initTelemetry: mockInitTelemetry,
+        track: vi.fn(),
+        trackAppLaunched: mockTrackAppLaunched,
+      }));
+    });
+
+    afterEach(() => {
+      vi.doUnmock("@/shared/telemetry/client");
+    });
+
+    it("main window initializes telemetry, then fires the launch event once", async () => {
+      await loadMainAt("");
+
+      await screen.findByTestId("main-app");
+      expect(mockInitTelemetry).toHaveBeenCalledTimes(1);
+      expect(mockTrackAppLaunched).toHaveBeenCalledTimes(1);
+      expect(mockInitTelemetry.mock.invocationCallOrder[0]).toBeLessThan(
+        mockTrackAppLaunched.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("session window initializes telemetry without firing the launch event", async () => {
+      await loadMainAt("?sessionKey=c2Vzc2lvbi0xMjM");
+
+      await screen.findByTestId("session-app");
+      expect(mockInitTelemetry).toHaveBeenCalledTimes(1);
+      expect(mockTrackAppLaunched).not.toHaveBeenCalled();
+    });
+
+    it("malformed session window boot error initializes nothing", async () => {
+      const consoleError = vi
+        .spyOn(console, "error")
+        .mockImplementation(() => {});
+
+      await loadMainAt("?sessionKey=*");
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("heading", {
+            name: "Session window failed to load",
+          }),
+        ).toBeInTheDocument();
+      });
+      expect(mockInitTelemetry).not.toHaveBeenCalled();
+      expect(mockTrackAppLaunched).not.toHaveBeenCalled();
+      consoleError.mockRestore();
+    });
   });
 });

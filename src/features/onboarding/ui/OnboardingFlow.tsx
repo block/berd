@@ -15,6 +15,7 @@ import { toast } from "sonner";
 import { i18n } from "@/shared/i18n";
 import { CURATED_PROVIDER_CATALOG_BY_ID } from "@/features/providers/curatedProviders";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { trackAgentCreateCompleted } from "@/features/agents/lib/agentTelemetry";
 import {
   dispatchOnboarding,
   isWorkTypeId,
@@ -54,6 +55,12 @@ async function adoptAgents(
         systemPrompt: `You are ${agent.canonicalName}, ${agent.canonicalPromptDescription.toLowerCase()} Help the user thoughtfully and directly.`,
       });
       useAgentStore.getState().addPersona(persona);
+      // Completed once per persona actually created, on confirmed success.
+      // Already-adopted names above create nothing and emit nothing.
+      trackAgentCreateCompleted({
+        provider: persona.provider,
+        model: persona.model,
+      });
       existingNames.add(agent.canonicalName.toLowerCase());
       adopted.push(agent.canonicalName);
     } catch {

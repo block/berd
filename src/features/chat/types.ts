@@ -1,6 +1,7 @@
 import type { ReactNode, RefObject } from "react";
 import type { AcpProvider } from "@/shared/api/acp";
 import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
+import type { BerdChatChatSourceSurface } from "@/shared/telemetry/events";
 import type { Persona } from "@/shared/types/agents";
 import type {
   ChatAttachmentDraft,
@@ -56,6 +57,15 @@ export interface ChatSendOptions {
   onUserMessageCommitted?: () => void;
   /** Fully composed execution prompt captured for a queued send. */
   executionSystemPrompt?: string;
+  /**
+   * Composer surface that accepted this send, captured for `berd_chat` send
+   * telemetry. A queued record can outlive the surface that accepted it — a
+   * deferred-workspace first send is released to the background queued-send
+   * pipeline, which cannot recompute the surface — so it rides with the
+   * payload. berdctl/background-origin payloads never set it; their sends
+   * stay untracked by design.
+   */
+  telemetrySourceSurface?: BerdChatChatSourceSurface;
   /** Persona-only prompt captured while workspace context is still loading. */
   capturedPersonaSystemPrompt?: string;
   displayText?: string;

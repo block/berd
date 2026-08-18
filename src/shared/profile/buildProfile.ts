@@ -7,6 +7,7 @@ export type BuildFeature =
   | "feedback"
   | "managedConnections"
   | "telemetry"
+  | "telemetryEnforced"
   | "voiceConversation"
   | "voiceDictation"
   | "securityMl"
@@ -30,6 +31,12 @@ function readBuildFeatures(): Record<BuildFeature, boolean> {
     feedback: import.meta.env.VITE_FEEDBACK === "1",
     managedConnections: import.meta.env.VITE_MANAGED_CONNECTIONS === "1",
     telemetry: import.meta.env.VITE_TELEMETRY !== "0",
+    // Managed internal distributions force telemetry consent ON: the user
+    // setting is skipped and the settings toggle is hidden. A positive opt-in
+    // like the Block-service gates; public builds leave it unset. Paired with
+    // the `block-telemetry-enforced` Cargo feature (see
+    // scripts/block-feature-gates.sh) so the native export gate agrees.
+    telemetryEnforced: import.meta.env.VITE_TELEMETRY_ENFORCED === "1",
     // Native Voice Conversation is public functionality and deliberately does
     // not share dictation's KGoose-backed build gate.
     voiceConversation: true,

@@ -52,6 +52,10 @@ import {
   type WorkspaceAddCandidate,
 } from "@/features/chat/ui/widgets/WorkspaceAddDialog";
 import { WorkspaceIdentity } from "@/features/chat/ui/widgets/WorkspaceIdentity";
+import {
+  trackProjectCreateCompleted,
+  trackProjectEditCompleted,
+} from "../lib/projectTelemetry";
 import { buildEditorText, parseEditorText } from "../lib/projectPromptText";
 import { useProjectIconSelection } from "../hooks/useProjectIconSelection";
 import { DEFAULT_PROJECT_ICON } from "../lib/projectIcons";
@@ -632,6 +636,9 @@ export function CreateProjectDialog({
           useWorktrees: editingProject.useWorktrees,
           projectWorkspaces: sanitizedProjectWorkspaces,
         });
+        // Completed only after the persist resolves; the returned ProjectInfo is
+        // authoritative for has_working_dir / has_prompt.
+        trackProjectEditCompleted(savedProject);
       } else {
         savedProject = await createProject(
           name.trim(),
@@ -643,6 +650,7 @@ export function CreateProjectDialog({
           false,
           sanitizedProjectWorkspaces,
         );
+        trackProjectCreateCompleted(savedProject);
       }
       onCreated(savedProject);
       onClose();

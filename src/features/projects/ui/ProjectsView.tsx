@@ -30,6 +30,7 @@ import {
 import { CreateProjectDialog } from "./CreateProjectDialog";
 import { ProjectIcon } from "./ProjectIcon";
 import { deleteProject, type ProjectInfo } from "../api/projects";
+import { trackProjectDeleteCompleted } from "../lib/projectTelemetry";
 import { useProjectStore } from "../stores/projectStore";
 
 function ProjectCardMenu({
@@ -125,6 +126,9 @@ export function ProjectsView({ onStartChat }: ProjectsViewProps) {
     if (!deletingProject) return;
     try {
       await deleteProject(deletingProject.id);
+      // Completed only after the delete resolves; `deletingProject` is the
+      // pre-deletion snapshot for had_working_dir / had_artifact.
+      trackProjectDeleteCompleted(deletingProject);
       await loadProjects();
     } catch {
       // best-effort

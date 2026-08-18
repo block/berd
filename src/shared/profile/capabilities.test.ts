@@ -28,6 +28,7 @@ const enabledBuildFeatures: Record<BuildFeature, boolean> = {
   feedback: true,
   managedConnections: true,
   telemetry: true,
+  telemetryEnforced: false,
   voiceConversation: true,
   voiceDictation: true,
   securityMl: true,
