@@ -214,10 +214,18 @@ pub fn run() {
             let (installation_cohort_sender, installation_cohort_state) =
                 services::installation_cohort::installation_cohort_channel();
             app.manage(installation_cohort_state);
+            let current_layout_exists =
+                services::installation_cohort::layout_database_exists(&app_data_dir);
+            let legacy_layout_exists = if app.try_state::<services::e2e_mode::E2eMode>().is_some() {
+                Ok(false)
+            } else {
+                services::app_data_migration::legacy_layout_database_exists(app.handle())
+            };
             let installation_cohort =
                 services::installation_cohort::initialize_installation_cohort(
                     &app_data_dir,
-                    services::app_data_migration::legacy_layout_database_exists(app.handle()),
+                    current_layout_exists,
+                    legacy_layout_exists,
                 )
                 .unwrap_or_else(|error| {
                     log::warn!("Failed to initialize installation cohort: {error}");

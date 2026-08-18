@@ -31,6 +31,18 @@ struct InstallationCohortRecord {
     cohort: InstallationCohort,
 }
 
+pub fn layout_database_exists(app_data_dir: &Path) -> Result<bool, String> {
+    file_exists(&app_data_dir.join(CURRENT_LAYOUT_DATABASE))
+}
+
+pub(crate) fn file_exists(path: &Path) -> Result<bool, String> {
+    match fs::metadata(path) {
+        Ok(metadata) => Ok(metadata.is_file()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!("Failed to inspect {}: {error}", path.display())),
+    }
+}
+
 pub fn installation_cohort_channel() -> (
     watch::Sender<InstallationCohortReadiness>,
     InstallationCohortState,
@@ -41,6 +53,7 @@ pub fn installation_cohort_channel() -> (
 
 pub fn initialize_installation_cohort(
     app_data_dir: &Path,
+    current_layout_exists: Result<bool, String>,
     legacy_layout_exists: Result<bool, String>,
 ) -> Result<InstallationCohort, String> {
     fs::create_dir_all(app_data_dir)
@@ -59,8 +72,9 @@ pub fn initialize_installation_cohort(
         return Ok(record.cohort);
     }
 
+    let current_layout_exists = current_layout_exists?;
     let legacy_layout_exists = legacy_layout_exists?;
-    let cohort = if app_data_dir.join(CURRENT_LAYOUT_DATABASE).is_file() || legacy_layout_exists {
+    let cohort = if current_layout_exists || legacy_layout_exists {
         InstallationCohort::EstablishedBeforeLandingV1
     } else {
         InstallationCohort::FreshWithLandingV1
@@ -87,7 +101,11 @@ fn persist_marker(path: &Path, cohort: InstallationCohort) -> Result<Installatio
 
     match temporary.persist_noclobber(path) {
         Ok(_) => {
-            sync_parent_directory(path)?;
+            if let Err(error) = sync_parent_directory(path) {
+                log::warn!(
+                    "Installation cohort marker was published but directory sync failed: {error}"
+                );
+            }
             Ok(cohort)
         }
         Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -134,11 +152,11 @@ mod tests {
     #[test]
     fn classifies_and_persists_a_fresh_installation() {
         let root = tempdir().unwrap();
-        let first = initialize_installation_cohort(root.path(), Ok(false)).unwrap();
+        let first = initialize_installation_cohort(root.path(), Ok(false), Ok(false)).unwrap();
         assert_eq!(first, InstallationCohort::FreshWithLandingV1);
 
         fs::write(root.path().join(CURRENT_LAYOUT_DATABASE), b"later").unwrap();
-        let second = initialize_installation_cohort(root.path(), Ok(false)).unwrap();
+        let second = initialize_installation_cohort(root.path(), Ok(false), Ok(false)).unwrap();
         assert_eq!(second, InstallationCohort::FreshWithLandingV1);
     }
 
@@ -147,13 +165,13 @@ mod tests {
         let current = tempdir().unwrap();
         fs::write(current.path().join(CURRENT_LAYOUT_DATABASE), b"existing").unwrap();
         assert_eq!(
-            initialize_installation_cohort(current.path(), Ok(false)).unwrap(),
+            initialize_installation_cohort(current.path(), Ok(true), Ok(false)).unwrap(),
             InstallationCohort::EstablishedBeforeLandingV1
         );
 
         let legacy = tempdir().unwrap();
         assert_eq!(
-            initialize_installation_cohort(legacy.path(), Ok(true)).unwrap(),
+            initialize_installation_cohort(legacy.path(), Ok(false), Ok(true)).unwrap(),
             InstallationCohort::EstablishedBeforeLandingV1
         );
     }
@@ -170,7 +188,7 @@ mod tests {
             let barrier = Arc::clone(&barrier);
             std::thread::spawn(move || {
                 barrier.wait();
-                initialize_installation_cohort(&path, Ok(legacy_exists)).unwrap()
+                initialize_installation_cohort(&path, Ok(false), Ok(legacy_exists)).unwrap()
             })
         });
         barrier.wait();
@@ -179,7 +197,7 @@ mod tests {
         assert_eq!(cohorts[0], InstallationCohort::FreshWithLandingV1);
         assert_eq!(cohorts[1], cohorts[0]);
         assert_eq!(
-            initialize_installation_cohort(&path, Ok(false)).unwrap(),
+            initialize_installation_cohort(&path, Ok(false), Ok(false)).unwrap(),
             cohorts[0]
         );
     }
@@ -187,7 +205,12 @@ mod tests {
     #[test]
     fn detection_failure_does_not_publish_a_fresh_marker() {
         let root = tempdir().unwrap();
-        assert!(initialize_installation_cohort(root.path(), Err("unavailable".into())).is_err());
+        assert!(initialize_installation_cohort(
+            root.path(),
+            Err("metadata unavailable".into()),
+            Ok(false),
+        )
+        .is_err());
         assert!(!root.path().join(MARKER_FILE_NAME).exists());
     }
 
@@ -202,7 +225,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            initialize_installation_cohort(root.path(), Ok(false)).unwrap(),
+            initialize_installation_cohort(root.path(), Ok(false), Ok(false)).unwrap(),
             InstallationCohort::Unknown
         );
         assert!(String::from_utf8(fs::read(marker).unwrap())
