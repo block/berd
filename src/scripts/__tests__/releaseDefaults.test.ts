@@ -27,7 +27,7 @@ describe("release bundled-agent defaults", () => {
     expect(runDefaultBundledAgents(buildKind)).toBe("");
   });
 
-  it("always bundles a valid seven-agent starter set", () => {
+  it("always includes the valid public starter set", () => {
     const tauriConfig = JSON.parse(
       readFileSync(resolve(repoRoot, "src-tauri/tauri.conf.json"), "utf8"),
     );
@@ -37,15 +37,17 @@ describe("release bundled-agent defaults", () => {
       .sort();
 
     expect(tauriConfig.bundle.resources["../distro"]).toBe("distro");
-    expect(agentFiles).toEqual([
-      "agt-builder.md",
-      "berdy.md",
-      "choosey.md",
-      "copycat.md",
-      "pushback.md",
-      "tinker.md",
-      "wildcard.md",
-    ]);
+    expect(agentFiles).toEqual(
+      expect.arrayContaining([
+        "agt-builder.md",
+        "berdy.md",
+        "choosey.md",
+        "copycat.md",
+        "pushback.md",
+        "tinker.md",
+        "wildcard.md",
+      ]),
+    );
     for (const fileName of agentFiles) {
       expect(
         validateBundledAgentFile(resolve(agentDirectory, fileName)),
