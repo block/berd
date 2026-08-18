@@ -256,6 +256,25 @@ export const ToolContent = ({ className, ...props }: ToolContentProps) => (
   />
 );
 
+export type ToolDetailsViewportProps = ComponentProps<"div">;
+
+export const ToolDetailsViewport = ({
+  className,
+  ...props
+}: ToolDetailsViewportProps) => (
+  // Scrollable regions need a tab stop so keyboard users can operate them.
+  <div
+    role="region"
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: focus transfers keyboard scrolling to this overflow viewport.
+    tabIndex={0}
+    className={cn(
+      "rounded-sm outline-none transition-[color,box-shadow] focus-visible:ring-1 focus-visible:ring-ring/50",
+      className,
+    )}
+    {...props}
+  />
+);
+
 export type ToolSectionProps = ComponentProps<"div"> & {
   label: string;
 };

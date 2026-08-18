@@ -27,6 +27,7 @@ import type {
   ToolCallStatus,
 } from "@/shared/types/messages";
 import type { TranscriptAgentWorkPayload } from "@/features/chat/transcript/projection/transcriptItemTypes";
+import { useTranscriptRowStateAdapter } from "@/features/chat/transcript/row-state";
 import { ToolCallAdapter } from "./ToolCallAdapter";
 
 interface ToolTimelineItem {
@@ -351,6 +352,7 @@ export function AgentWorkPanel({
 }) {
   const { t } = useTranslation("chat");
   const prefersReducedMotion = useReducedMotion();
+  const { markRowInteracted, pinScrollAnchor } = useTranscriptRowStateAdapter();
   const items = useMemo(
     () => buildAgentWorkTimeline(payload.content),
     [payload.content],
@@ -423,7 +425,12 @@ export function AgentWorkPanel({
   return (
     <Collapsible
       open={open}
-      onOpenChange={setOpen}
+      onOpenChange={(nextOpen) => {
+        markRowInteracted("agent-work-disclosure");
+        pinScrollAnchor();
+        setOpen(nextOpen);
+      }}
+      data-role="agent-work-panel"
       className="mt-3 w-full min-w-0 max-w-full"
     >
       <div>
@@ -484,7 +491,11 @@ export function AgentWorkPanel({
               >
                 <Collapsible
                   open={previousStepsOpen}
-                  onOpenChange={setPreviousStepsOpen}
+                  onOpenChange={(nextOpen) => {
+                    markRowInteracted("agent-work-previous-steps");
+                    pinScrollAnchor();
+                    setPreviousStepsOpen(nextOpen);
+                  }}
                 >
                   <CollapsibleTrigger asChild>
                     <Button

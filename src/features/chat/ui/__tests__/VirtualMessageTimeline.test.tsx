@@ -1104,6 +1104,54 @@ describe("VirtualMessageTimeline", () => {
     expect(screen.queryByTestId("message-assistant-work:answer")).toBeNull();
   });
 
+  it("keeps a revealed agent-work row anchored as its measured height grows", () => {
+    mockTranscriptElementMeasurements();
+    const animationFrame = mockRequestAnimationFrame();
+    const assistant: Message = {
+      id: "assistant-work",
+      role: "assistant",
+      created: Date.UTC(2026, 5, 4, 12, 1, 0),
+      metadata: { userVisible: true },
+      content: [
+        { type: "thinking", text: "Planning" },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "scan",
+          arguments: {},
+          status: "completed",
+        },
+        { type: "text", text: "Final answer" },
+      ],
+    };
+    renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={[assistant]} />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    const scrollTo = attachScrollTo(scroller);
+    setScrollMetrics(scroller, {
+      scrollTop: 500,
+      scrollHeight: 1000,
+      clientHeight: 500,
+    });
+    animationFrame.runAll(0);
+    scrollTo.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: /previous steps?/ }));
+    animationFrame.runAll(100);
+    scrollTo.mockClear();
+
+    const agentWorkRow = screen.getByTestId(
+      "virtual-transcript-row-message:assistant-work:agent-work",
+    );
+    agentWorkRow.setAttribute("data-mock-row-height", "480");
+    triggerResizeObservers();
+    animationFrame.runAll(200);
+
+    expect(scroller.scrollTop).toBe(500);
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
   it("mounts a just-settled agent-work row open before collapsing", async () => {
     const animationFrame = mockRequestAnimationFrame();
     const user = textMessage("user-1", "user", "Please inspect");

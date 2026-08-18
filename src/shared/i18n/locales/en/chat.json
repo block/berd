@@ -547,6 +547,7 @@
   },
   "tools": {
     "content": "Content",
+    "details": "Tool details",
     "error": "Error",
     "input": "Input",
     "result": "Result",
