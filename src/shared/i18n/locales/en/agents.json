@@ -95,6 +95,7 @@
     "avatarLoading": "Loading",
     "avatarRetry": "Retry",
     "avatarBackToProfile": "Back to profile",
+    "changeAvatar": "Change avatar",
     "avatarUrl": "Custom avatar URL",
     "avatarUrlInvalid": "Enter a valid http or https URL without credentials.",
     "avatarUrlPlaceholder": "https://example.com/avatar.png",

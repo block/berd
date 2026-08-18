@@ -48,6 +48,9 @@ import { AgentProfileLayout } from "@/features/agents/ui/AgentProfileLayout";
 import { AgentIdentityRail } from "@/features/agents/ui/AgentIdentityRail";
 import { useAvatarLibrary } from "@/features/agents/hooks/useAvatarLibrary";
 import { AgentAvatarSection } from "@/features/agents/ui/AgentAvatarSection";
+import { AvatarCollectionOverlay } from "@/features/agents/ui/AvatarCollectionOverlay";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { AVATAR_COLLECTION_PAGE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
   AVATAR_CUSTOMIZE_LABEL_CLASS,
   AVATAR_CUSTOMIZE_SURFACE_CLASS,
@@ -121,6 +124,12 @@ export function AgentDetailPage({
   const [avatarPreviewFailed, setAvatarPreviewFailed] = useState(false);
   const [avatarSavePending, setAvatarSavePending] = useState(false);
   const [showAvatarSection, setShowAvatarSection] = useState(false);
+  const [showAvatarOverlay, setShowAvatarOverlay] = useState(false);
+  // Same gate as the agent builder: when on, avatar picking happens in the
+  // full-surface collection gallery instead of the inline customize section.
+  const avatarCollectionOverlayEnabled = Boolean(
+    useExperiment(AVATAR_COLLECTION_PAGE_EXPERIMENT_ID)?.enabled,
+  );
   const [previousPersonaAvatarValue, setPreviousPersonaAvatarValue] =
     useState(personaAvatarValue);
   const [previousPersonaId, setPreviousPersonaId] = useState(persona.id);
@@ -182,11 +191,19 @@ export function AgentDetailPage({
   if (previousPersonaId !== persona.id) {
     setPreviousPersonaId(persona.id);
     setShowAvatarSection(false);
+    setShowAvatarOverlay(false);
   }
 
   const handleOpenAvatarSection = useCallback(() => {
+    // With the collection canvas experiment on, avatar picking opens the
+    // full-surface gallery takeover (same surface as the agent builder)
+    // instead of swapping the profile body for the inline customize section.
+    if (avatarCollectionOverlayEnabled) {
+      setShowAvatarOverlay(true);
+      return;
+    }
     runAgentViewTransition(() => setShowAvatarSection(true));
-  }, []);
+  }, [avatarCollectionOverlayEnabled]);
 
   const handleCloseAvatarSection = useCallback(() => {
     runAgentViewTransition(() => setShowAvatarSection(false));
@@ -249,10 +266,25 @@ export function AgentDetailPage({
     [commitAvatar],
   );
 
+  const handleSelectOverlayAvatar = useCallback(
+    (avatarId: string) => {
+      setShowAvatarOverlay(false);
+      handleSelectAvatar(avatarId);
+    },
+    [handleSelectAvatar],
+  );
+
+  const handleCloseAvatarOverlay = useCallback(() => {
+    setShowAvatarOverlay(false);
+  }, []);
+
   const avatarPreview = (
     <div className={AVATAR_CUSTOMIZE_SURFACE_CLASS}>
       <div
         className="h-full w-full"
+        // The gallery takeover's funnel exit collapses toward this preview,
+        // so selecting an avatar visibly lands it here.
+        data-avatar-funnel-target=""
         style={{ viewTransitionName: avatarTransitionName }}
       >
         {avatarMedia ? (
@@ -287,7 +319,7 @@ export function AgentDetailPage({
             className={AVATAR_CUSTOMIZE_LABEL_CLASS}
             aria-hidden="true"
           >
-            {t("builderRail.changeAvatar")}
+            {t("editor.changeAvatar")}
           </Badge>
         </>
       ) : null}
@@ -429,67 +461,78 @@ export function AgentDetailPage({
     </Button>
   );
 
+  const avatarCollectionOverlayNode = showAvatarOverlay ? (
+    <AvatarCollectionOverlay
+      library={avatarLibrary}
+      onSelectAvatar={handleSelectOverlayAvatar}
+      onClose={handleCloseAvatarOverlay}
+    />
+  ) : null;
+
   return (
-    <AgentProfileLayout
-      animateSections={false}
-      fieldsTransitionName={AGENT_PROFILE_FIELDS_TRANSITION_NAME}
-      header={profileHeader}
-      identityRail={
-        <AgentIdentityRail
-          avatar={avatarPreview}
-          leadingControl={null}
-          metadata={showAvatarSection ? [] : metadata}
-          modeControl={showAvatarSection ? backToProfileControl : null}
-        />
-      }
-    >
-      {showAvatarSection ? (
-        <AgentAvatarSection
-          avatarPreviewFailed={avatarPreviewFailed}
-          avatarPickerDisabled={avatarSavePending}
-          avatarUrlError={avatarUrlError}
-          avatarUrlInputId="agent-detail-avatar-url"
-          canSaveCustomAvatar={canSaveCustomAvatar}
-          clearDisabled={avatarSavePending}
-          customAvatarUrlValue={customAvatarUrlValue}
-          fieldGroupClassName="space-y-2"
-          fieldInputClassName={AVATAR_FIELD_INPUT_CLASS}
-          fieldLabelClassName={AVATAR_FIELD_LABEL_CLASS}
-          library={avatarLibrary}
-          onAvatarUrlChange={handleAvatarUrlChange}
-          onClearAvatar={handleClearAvatar}
-          onPreviewError={() => setAvatarPreviewFailed(true)}
-          onSaveCustomAvatar={handleSaveCustomAvatar}
-          onSelectAvatar={handleSelectAvatar}
-          selectedAvatarRef={selectedBundledAvatarRef}
-          showClearAvatar={trimmedAvatarValue.length > 0}
-          title={t("editor.customizeAvatar")}
-        />
-      ) : (
-        <div className="space-y-6">
-          <section
-            className="agents-unpaired-enter space-y-3 pt-6"
-            style={{ animationDelay: "80ms" }}
-            aria-labelledby="agent-instructions"
-          >
-            <h2 id="agent-instructions" className={CONTEXT_LABEL_CLASS}>
-              {t("view.instructions")}
-            </h2>
-            <div className={INSTRUCTIONS_PANEL_CLASS}>
-              <section
-                className={INSTRUCTIONS_SCROLL_CLASS}
-                // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to focus this nested scroll region.
-                tabIndex={0}
-                aria-labelledby="agent-instructions"
-              >
-                <MessageResponse className="min-w-0 pb-4 text-sm leading-relaxed">
-                  {persona.systemPrompt || " "}
-                </MessageResponse>
-              </section>
-            </div>
-          </section>
-        </div>
-      )}
-    </AgentProfileLayout>
+    <>
+      <AgentProfileLayout
+        animateSections={false}
+        fieldsTransitionName={AGENT_PROFILE_FIELDS_TRANSITION_NAME}
+        header={profileHeader}
+        identityRail={
+          <AgentIdentityRail
+            avatar={avatarPreview}
+            leadingControl={null}
+            metadata={showAvatarSection ? [] : metadata}
+            modeControl={showAvatarSection ? backToProfileControl : null}
+          />
+        }
+      >
+        {showAvatarSection ? (
+          <AgentAvatarSection
+            avatarPreviewFailed={avatarPreviewFailed}
+            avatarPickerDisabled={avatarSavePending}
+            avatarUrlError={avatarUrlError}
+            avatarUrlInputId="agent-detail-avatar-url"
+            canSaveCustomAvatar={canSaveCustomAvatar}
+            clearDisabled={avatarSavePending}
+            customAvatarUrlValue={customAvatarUrlValue}
+            fieldGroupClassName="space-y-2"
+            fieldInputClassName={AVATAR_FIELD_INPUT_CLASS}
+            fieldLabelClassName={AVATAR_FIELD_LABEL_CLASS}
+            library={avatarLibrary}
+            onAvatarUrlChange={handleAvatarUrlChange}
+            onClearAvatar={handleClearAvatar}
+            onPreviewError={() => setAvatarPreviewFailed(true)}
+            onSaveCustomAvatar={handleSaveCustomAvatar}
+            onSelectAvatar={handleSelectAvatar}
+            selectedAvatarRef={selectedBundledAvatarRef}
+            showClearAvatar={trimmedAvatarValue.length > 0}
+            title={t("editor.customizeAvatar")}
+          />
+        ) : (
+          <div className="space-y-6">
+            <section
+              className="agents-unpaired-enter space-y-3 pt-6"
+              style={{ animationDelay: "80ms" }}
+              aria-labelledby="agent-instructions"
+            >
+              <h2 id="agent-instructions" className={CONTEXT_LABEL_CLASS}>
+                {t("view.instructions")}
+              </h2>
+              <div className={INSTRUCTIONS_PANEL_CLASS}>
+                <section
+                  className={INSTRUCTIONS_SCROLL_CLASS}
+                  // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to focus this nested scroll region.
+                  tabIndex={0}
+                  aria-labelledby="agent-instructions"
+                >
+                  <MessageResponse className="min-w-0 pb-4 text-sm leading-relaxed">
+                    {persona.systemPrompt || " "}
+                  </MessageResponse>
+                </section>
+              </div>
+            </section>
+          </div>
+        )}
+      </AgentProfileLayout>
+      {avatarCollectionOverlayNode}
+    </>
   );
 }

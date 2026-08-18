@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +14,14 @@ import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { toast } from "sonner";
 import { importPersonas } from "@/shared/api/agents";
+import { useAvatarLibrary } from "@/features/agents/hooks/useAvatarLibrary";
+import type { AvatarLibraryState } from "@/features/agents/hooks/useAvatarLibrary";
 import type { CreatePersonaRequest } from "@/shared/types/agents";
+import {
+  EXPERIMENT_PREFERENCES_STORAGE_KEY,
+  EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+} from "@/features/experiments/experimentPreferences";
+import { AVATAR_COLLECTION_PAGE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { AgentsView } from "../AgentsView";
 
 const mockCreatePersona = vi.hoisted(() => vi.fn());
@@ -120,19 +128,67 @@ vi.mock("@/features/agents/ui/PersonaFields/ProviderModelFields", () => ({
 }));
 
 vi.mock("@/features/agents/hooks/useAvatarLibrary", () => ({
-  useAvatarLibrary: () => ({
-    catalog: null,
-    cachedAvatarMediaById: {},
-    loading: false,
-    cacheChecking: false,
-    error: false,
-    errorCode: null,
-    mediaError: false,
-    mediaErrorCode: null,
-    retryCatalog: () => {},
-    retryMedia: () => {},
-  }),
+  useAvatarLibrary: vi.fn(),
 }));
+
+const EMPTY_AVATAR_LIBRARY: AvatarLibraryState = {
+  catalog: null,
+  cachedAvatarMediaById: {},
+  loading: false,
+  cacheChecking: false,
+  error: false,
+  errorCode: null,
+  mediaError: false,
+  mediaErrorCode: null,
+  retryCatalog: () => {},
+  retryMedia: () => {},
+};
+
+/**
+ * A one-avatar library, cached and ready, so the collection gallery renders a
+ * real selectable tile instead of an empty canvas.
+ */
+function singleAvatarLibrary(avatarId: string): AvatarLibraryState {
+  const variant = (extension: string, mimeType: string) => ({
+    path: `${avatarId}.${extension}`,
+    mimeType,
+    byteSize: 1,
+    sha256: avatarId,
+  });
+
+  return {
+    ...EMPTY_AVATAR_LIBRARY,
+    catalog: {
+      schemaVersion: 1,
+      catalogVersion: "v1",
+      collections: [
+        {
+          id: "gloopies",
+          label: "Gloopies",
+          coverAvatarId: avatarId,
+          avatarIds: [avatarId],
+        },
+      ],
+      assets: [
+        {
+          id: avatarId,
+          label: avatarId,
+          collectionId: "gloopies",
+          variants: {
+            webm: variant("webm", "video/webm"),
+            hevc: variant("mov", "video/quicktime"),
+          },
+        },
+      ],
+    },
+    cachedAvatarMediaById: {
+      [avatarId]: {
+        catalogVersion: "v1",
+        media: { src: `cached-${avatarId}`, mediaType: "image" },
+      },
+    },
+  };
+}
 
 const persona = {
   id: "/Users/x/.agents/agents/code-reviewer.md",
@@ -173,11 +229,25 @@ describe("AgentsView entry points", () => {
     });
     delete document.documentElement.dataset.agentTransition;
     Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
     vi.restoreAllMocks();
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(useAvatarLibrary).mockReturnValue(EMPTY_AVATAR_LIBRARY);
+    // These tests exercise the inline customize section, so the collection
+    // gallery experiment (auto-enabled in dev/test) is pinned off.
+    // Gallery-specific tests re-enable it explicitly.
+    localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+        experiments: {
+          [AVATAR_COLLECTION_PAGE_EXPERIMENT_ID]: { enabled: false },
+        },
+      }),
+    );
     // Mirrors the real API: the created persona carries the persisted
     // identity the telemetry call sites are expected to report.
     mockCreatePersona.mockImplementation(
@@ -447,12 +517,95 @@ describe("AgentsView entry points", () => {
     const customizeAvatar = screen.getByRole("button", {
       name: "editor.customizeAvatar",
     });
-    expect(screen.getByText("builderRail.changeAvatar")).toBeInTheDocument();
+    expect(screen.getByText("editor.changeAvatar")).toBeInTheDocument();
     customizeAvatar.focus();
     expect(customizeAvatar).toHaveFocus();
     await user.keyboard("{Enter}");
 
     expect(screen.getByText("editor.avatarUrl")).toBeInTheDocument();
+  });
+
+  it("opens the avatar collection gallery instead of the inline section when the experiment is on", async () => {
+    localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+        experiments: {
+          [AVATAR_COLLECTION_PAGE_EXPERIMENT_ID]: { enabled: true },
+        },
+      }),
+    );
+    useAgentStore.setState({ personas: [persona] });
+    const user = userEvent.setup();
+
+    render(<AgentsView activePersonaId={persona.id} />);
+
+    await user.click(
+      screen.getByRole("button", { name: "editor.customizeAvatar" }),
+    );
+
+    // The full-surface gallery takeover renders; the inline customize
+    // section (with its duplicate custom-URL form) never appears.
+    expect(screen.getByTestId("avatar-collection-overlay")).toBeInTheDocument();
+    expect(screen.queryByText("editor.avatarUrl")).not.toBeInTheDocument();
+  });
+
+  it("persists the avatar picked in the collection gallery and closes the takeover", async () => {
+    vi.mocked(useAvatarLibrary).mockReturnValue(
+      singleAvatarLibrary("gloopies-1"),
+    );
+    // jsdom reports zero rects; give the gallery canvas a real size so the
+    // scatter layout has a tile to lay avatars into.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 1200,
+      bottom: 800,
+      width: 1200,
+      height: 800,
+      toJSON: () => ({}),
+    } as DOMRect);
+    localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+        experiments: {
+          [AVATAR_COLLECTION_PAGE_EXPERIMENT_ID]: { enabled: true },
+        },
+      }),
+    );
+    useAgentStore.setState({ personas: [persona] });
+    const user = userEvent.setup();
+
+    render(<AgentsView activePersonaId={persona.id} />);
+
+    await user.click(
+      screen.getByRole("button", { name: "editor.customizeAvatar" }),
+    );
+
+    // Picking is two-step in the gallery: click highlights, Select commits.
+    const overlay = within(screen.getByTestId("avatar-collection-overlay"));
+    await user.click(overlay.getAllByRole("button", { name: "gloopies-1" })[0]);
+    await user.click(
+      overlay.getAllByRole("button", { name: "collectionPage.select" })[0],
+    );
+
+    // The selection is persisted as an app-avatar ref, not a raw id.
+    await waitFor(() =>
+      expect(mockUpdatePersona).toHaveBeenCalledWith(
+        expect.objectContaining({ id: persona.id }),
+        { avatar: "app-avatar:gloopies-1" },
+      ),
+    );
+
+    // The takeover hands control back to the profile after committing.
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("avatar-collection-overlay"),
+      ).not.toBeInTheDocument(),
+    );
   });
 
   it("clicking detail Start chat calls onStartChatWithAgent with the persona id", () => {
