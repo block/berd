@@ -161,6 +161,7 @@ export interface SessionListCapabilityProps {
   onReorderProject?: (fromId: string, toId: string) => void;
   onSelectSession?: (sessionId: string) => void;
   onSessionSelectForScroll?: (sessionId: string) => void;
+  onProjectCreatedRevisionHandled?: (revision: number) => void;
   projectCreatedRevision?: number;
   projects: ProjectInfo[];
   surface: SessionListSurfaceOptions;
@@ -480,6 +481,7 @@ export function SessionListCapability({
   onReorderProject,
   onSelectSession,
   onSessionSelectForScroll,
+  onProjectCreatedRevisionHandled,
   projectCreatedRevision = 0,
   projects,
   surface,
@@ -554,15 +556,17 @@ export function SessionListCapability({
     () => new Set(projects.map((project) => project.id)),
     [projects],
   );
-  const initialProjectCreatedRevisionRef = useRef(projectCreatedRevision);
   useEffect(() => {
-    if (projectCreatedRevision === initialProjectCreatedRevisionRef.current) {
-      return;
-    }
+    if (projectCreatedRevision === 0) return;
     setSectionVisibility((current) =>
       current.projects ? current : { ...current, projects: true },
     );
-  }, [projectCreatedRevision, setSectionVisibility]);
+    onProjectCreatedRevisionHandled?.(projectCreatedRevision);
+  }, [
+    onProjectCreatedRevisionHandled,
+    projectCreatedRevision,
+    setSectionVisibility,
+  ]);
   const projectsById = useMemo(
     () => new Map(projects.map((project) => [project.id, project])),
     [projects],

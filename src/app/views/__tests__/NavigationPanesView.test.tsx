@@ -551,6 +551,25 @@ describe("NavigationPanesView", () => {
     expect(screen.getByRole("button", { name: "Project Two" })).toBeVisible();
   });
 
+  it("handles project creation when the session list mounts after the signal", async () => {
+    localStorage.setItem(
+      "goose:sidebar:section-visibility",
+      JSON.stringify({ pinned: true, projects: false, recents: true }),
+    );
+    const onProjectCreatedRevisionHandled = vi.fn();
+
+    renderSidebar({
+      projects: [mockProject()],
+      projectCreatedRevision: 1,
+      onProjectCreatedRevisionHandled,
+    });
+
+    expect(screen.getByRole("button", { name: "Project One" })).toBeVisible();
+    await waitFor(() =>
+      expect(onProjectCreatedRevisionHandled).toHaveBeenCalledWith(1),
+    );
+  });
+
   it("shows the projects info moment next to the header for a fresh user", async () => {
     const user = userEvent.setup();
 

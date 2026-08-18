@@ -5016,6 +5016,10 @@ export function AppShell({
           activeView,
           activeSettingsSection,
           activeSessionId,
+          onProjectCreatedRevisionHandled: (revision) =>
+            setProjectCreatedRevision((current) =>
+              current === revision ? 0 : current,
+            ),
           projectCreatedRevision,
           projects,
           className: "h-full rounded-md",
