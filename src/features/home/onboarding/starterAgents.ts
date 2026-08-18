@@ -124,12 +124,18 @@ export function selectStarterAgentPersonas(
   const selected: Array<Persona | undefined> = STARTER_AGENT_FILE_NAMES.map(
     () => undefined,
   );
+  const haveManagedCopies = personas.some(isManagedBundledCopy);
   for (const persona of personas) {
-    if (!isBundledPersona(persona) && !isManagedBundledCopy(persona)) continue;
+    if (
+      haveManagedCopies
+        ? !isManagedBundledCopy(persona)
+        : !isBundledPersona(persona)
+    ) {
+      continue;
+    }
     const index = starterAgentIndex(persona);
     if (index < 0) continue;
-    const existing = selected[index];
-    if (!existing || isManagedBundledCopy(persona)) selected[index] = persona;
+    if (!selected[index]) selected[index] = persona;
   }
   return selected.filter(
     (persona): persona is Persona => persona !== undefined,

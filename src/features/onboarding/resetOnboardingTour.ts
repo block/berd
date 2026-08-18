@@ -39,17 +39,15 @@ export async function resetHomeForOnboardingExperience(): Promise<OnboardingHome
     let starterPersonas = selectStarterAgentPersonas(
       useAgentStore.getState().personas,
     );
-    if (starterPersonas.length !== STARTER_HOME_LAYOUT.agents.length) {
-      try {
-        const personas = await listPersonas();
-        useAgentStore.getState().setPersonas(personas);
-        starterPersonas = selectStarterAgentPersonas(personas);
-      } catch (error) {
-        console.error(
-          "Failed to load starter agents during onboarding reset:",
-          error,
-        );
-      }
+    try {
+      const personas = await listPersonas();
+      useAgentStore.getState().setPersonas(personas);
+      starterPersonas = selectStarterAgentPersonas(personas);
+    } catch (error) {
+      console.error(
+        "Failed to load starter agents during onboarding reset:",
+        error,
+      );
     }
     if (starterPersonas.length === STARTER_HOME_LAYOUT.agents.length) {
       try {

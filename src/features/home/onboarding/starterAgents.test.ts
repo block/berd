@@ -106,6 +106,29 @@ describe("starter agents", () => {
     expect(selectStarterAgentPersonas([managed, edited])).toEqual([managed]);
   });
 
+  it("does not mix unmanaged claims with verified managed copies", () => {
+    const managedTinker = persona("Tinker", {
+      id: "/Users/test/.agents/agents/tinker2.md",
+      sourceId: "tinker",
+    });
+    managedTinker.sourceProperties = {
+      metadata: {
+        berdBundled: true,
+        berdBundledSource: "tinker",
+        berdManagedBundledCopy: true,
+        berdBundledAllocationSource: "tinker",
+      },
+    };
+    const claimedWildcard = persona("Wildcard", {
+      id: "/Users/test/.agents/agents/wildcard.md",
+      sourceId: "wildcard",
+    });
+
+    expect(
+      selectStarterAgentPersonas([managedTinker, claimedWildcard]),
+    ).toEqual([managedTinker]);
+  });
+
   it("clears recovery eligibility after starter pins are seeded", () => {
     markStarterAgentPinsEligible();
     expect(areStarterAgentPinsEligible()).toBe(true);

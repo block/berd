@@ -135,15 +135,19 @@ describe("onboarding tour experience controls", () => {
     expect(storeMocks.resetHomeForOnboarding).toHaveBeenCalledOnce();
   });
 
-  it("persists loaded starter agents as part of the reset", async () => {
+  it("refreshes stale starter agents before persisting the reset", async () => {
     storeMocks.setPersonaRecords([
+      { ...starterPersona("tinker"), id: "/stale/tinker.md" },
+      { ...starterPersona("wildcard"), id: "/stale/wildcard.md" },
+    ]);
+    storeMocks.listPersonas.mockResolvedValueOnce([
       starterPersona("tinker"),
       starterPersona("wildcard"),
     ]);
 
     await resetHomeForOnboardingExperience();
 
-    expect(storeMocks.listPersonas).not.toHaveBeenCalled();
+    expect(storeMocks.listPersonas).toHaveBeenCalledOnce();
     expect(storeMocks.addMissingStarterAgentPins).toHaveBeenCalledWith([
       "/Users/test/.agents/agents/tinker.md",
       "/Users/test/.agents/agents/wildcard.md",
