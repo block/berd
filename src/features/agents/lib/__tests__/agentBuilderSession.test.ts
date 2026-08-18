@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   createPersonaSource: vi.fn(),
   deletePersonaSource: vi.fn(),
   promotePersonaSource: vi.fn(),
+  updatePersonaSource: vi.fn(),
   listPersonaSources: vi.fn(),
   readAgentSourceFile: vi.fn(),
 }));
@@ -89,6 +90,7 @@ vi.mock("@/shared/api/agents", () => ({
   createPersonaSource: mocks.createPersonaSource,
   deletePersonaSource: mocks.deletePersonaSource,
   promotePersonaSource: mocks.promotePersonaSource,
+  updatePersonaSource: mocks.updatePersonaSource,
   listPersonaSources: mocks.listPersonaSources,
   readAgentSourceFile: mocks.readAgentSourceFile,
 }));
@@ -103,6 +105,7 @@ import {
   discardDraftAgentSession,
   hasAgentBuilderSessionUserContent,
   isEmptyDraftAgentSession,
+  migratePendingDraftAgent,
   promoteDraft,
   recoverDraftAgent,
   reconcileAgentBuilderSessions,
@@ -169,6 +172,17 @@ describe("agentBuilderSession", () => {
     mocks.createPersonaSource.mockReset();
     mocks.deletePersonaSource.mockReset();
     mocks.promotePersonaSource.mockReset();
+    mocks.updatePersonaSource.mockReset();
+    mocks.updatePersonaSource.mockImplementation(async (path, patch) => {
+      const existing = await mocks.readAgentSourceFile(path, undefined);
+      return {
+        ...existing,
+        ...patch,
+        properties: patch.properties
+          ? { ...(existing?.properties ?? {}), ...patch.properties }
+          : existing?.properties,
+      };
+    });
     mocks.listPersonaSources.mockReset();
     mocks.readAgentSourceFile.mockReset();
     mocks.readAgentSourceFile.mockImplementation(
@@ -822,6 +836,83 @@ describe("agentBuilderSession", () => {
       slug: "draft-sess-1",
     });
     expect(mocks.createPersonaSource).toHaveBeenCalled();
+  });
+
+  it("migrates a pending builder draft to the promoted session id", async () => {
+    const localDraft = {
+      ...draftSource,
+      path: "/Users/x/.agents/agents/draft-local-session.md",
+      name: "Untitled agent local-sessio",
+      properties: { draft: true, builderSessionId: "local-session" },
+    };
+    chatState.sessions = [
+      {
+        id: "backend-session",
+        clientSessionId: "local-session",
+        intent: "build-agent",
+        targetAgentPath: localDraft.path,
+      },
+    ];
+    mocks.listPersonaSources.mockResolvedValue([localDraft]);
+    mocks.readAgentSourceFile.mockResolvedValue(localDraft);
+
+    await migratePendingDraftAgent("local-session", "backend-session");
+
+    expect(mocks.deletePersonaSource).not.toHaveBeenCalled();
+    expect(mocks.createPersonaSource).not.toHaveBeenCalled();
+    expect(mocks.patchSession).not.toHaveBeenCalled();
+    expect(mocks.promotePersonaSource).not.toHaveBeenCalled();
+    expect(mocks.updatePersonaSource).toHaveBeenCalledWith(localDraft.path, {
+      name: "Untitled agent backend-sess",
+      properties: {
+        draft: true,
+        builderSessionId: "backend-session",
+      },
+    });
+  });
+
+  it("rejects migration when the draft path belongs to another session", async () => {
+    const collidingDraft = {
+      ...draftSource,
+      path: "/Users/x/.agents/agents/colliding-draft.md",
+      name: "Collision",
+      properties: { draft: true, builderSessionId: "other-session" },
+    };
+    mocks.listPersonaSources.mockResolvedValue([collidingDraft]);
+    mocks.readAgentSourceFile.mockResolvedValue(collidingDraft);
+
+    await expect(
+      migratePendingDraftAgent(
+        "local-session",
+        "backend-session",
+        collidingDraft.path,
+      ),
+    ).rejects.toThrow(
+      "Pending Agent Builder draft belongs to a different session.",
+    );
+
+    expect(mocks.updatePersonaSource).not.toHaveBeenCalled();
+  });
+
+  it("does not rebind an existing non-draft agent target", async () => {
+    const existingAgent = {
+      ...draftSource,
+      path: "/Users/x/.agents/agents/reviewer.md",
+      name: "Reviewer",
+      properties: { draft: false },
+    };
+    mocks.listPersonaSources.mockResolvedValue([existingAgent]);
+    mocks.readAgentSourceFile.mockResolvedValue(existingAgent);
+
+    await expect(
+      migratePendingDraftAgent(
+        "local-session",
+        "backend-session",
+        existingAgent.path,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(mocks.updatePersonaSource).not.toHaveBeenCalled();
   });
 
   it("startup reconciliation patches loaded sessions from draft frontmatter", async () => {

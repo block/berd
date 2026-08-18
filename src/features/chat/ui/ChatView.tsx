@@ -671,8 +671,6 @@ export function ChatView({
   let sendDisabledReason: string | undefined;
   if (readOnlyStatus) {
     sendDisabledReason = readOnlyStatus;
-  } else if (effectiveSession?.creationState === "pending") {
-    sendDisabledReason = t("toolbar.sessionStarting");
   } else if (effectiveSession?.creationState === "failed") {
     sendDisabledReason =
       effectiveSession.creationError ?? t("toolbar.sessionStartFailed");
@@ -792,7 +790,7 @@ export function ChatView({
               controller.isCompactingContext,
             sendDisabled:
               isReadOnly ||
-              effectiveSession?.creationState != null ||
+              effectiveSession?.creationState === "failed" ||
               isAgentBuilderTargetPending ||
               controller.workspaceSetupInProgress,
             sendDisabledReason,

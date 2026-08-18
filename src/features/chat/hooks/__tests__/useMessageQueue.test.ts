@@ -59,6 +59,75 @@ describe("useMessageQueue", () => {
     });
   });
 
+  it("admits under a pending draft id, then dispatches once after promotion", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "draft-session",
+          clientSessionId: "draft-session",
+          title: "Chat",
+          executionTarget: { harnessId: "goose" },
+          creationState: "pending",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+    const dispatch = vi.fn().mockReturnValue(true);
+    const { result, rerender } = renderHook(
+      ({ sessionId, ready }: { sessionId: string; ready: boolean }) =>
+        useMessageQueue(
+          sessionId,
+          ready ? "idle" : "thinking",
+          (text, persona, attachments, options) =>
+            dispatch(sessionId, text, persona, attachments, options),
+          false,
+          false,
+          ready,
+        ),
+      {
+        initialProps: { sessionId: "draft-session", ready: false },
+      },
+    );
+
+    act(() => {
+      expect(result.current.enqueue("send when ready")).toBe(true);
+    });
+
+    expect(
+      useChatStore.getState().queuedMessageBySession["draft-session"]?.[0],
+    ).toMatchObject({
+      kind: "transport-ready",
+      payload: { text: "send when ready" },
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore
+        .getState()
+        .promoteSessionId("draft-session", "backend-session");
+      useChatSessionStore
+        .getState()
+        .promoteDraftSession("draft-session", "backend-session");
+    });
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession["backend-session"]?.[0],
+    ).toMatchObject({ payload: { text: "send when ready" } });
+
+    rerender({ sessionId: "backend-session", ready: true });
+
+    await waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
+    expect(dispatch.mock.calls[0]?.slice(0, 2)).toEqual([
+      "backend-session",
+      "send when ready",
+    ]);
+    expect(
+      useChatStore.getState().queuedMessageBySession["backend-session"],
+    ).toBeUndefined();
+  });
+
   it("drains an exact head once when its session gains a target", async () => {
     const sendMessage = vi.fn().mockReturnValue(true);
     useChatSessionStore

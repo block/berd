@@ -79,7 +79,10 @@ import { composeBuilderSendOptions } from "./useBuilderSendInterceptor";
 import { moveSessionToProject } from "../stores/chatSessionOperations";
 import { acpSetSessionConfigOption } from "@/shared/api/acp";
 import { updateSessionProject } from "@/shared/api/acpApi";
-import { preSeedDraftAgent } from "@/features/agents/lib/agentBuilderSession";
+import {
+  migratePendingDraftAgent,
+  preSeedDraftAgent,
+} from "@/features/agents/lib/agentBuilderSession";
 import { personaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
 import { deletePersonaSource } from "@/shared/api/agents";
 import type { Persona } from "@/shared/types/agents";
@@ -1732,9 +1735,23 @@ export function useChatSessionController({
           submittedDraftGeneration,
         );
       }
-      const wasSubmittedWithoutDraftOwnership =
+      let wasSubmittedWithoutDraftOwnership =
         submittedDraftGeneration === null &&
         takeDraftPreservingSubmission(acceptedSessionId, submittedText);
+      if (
+        submittedDraftGeneration === null &&
+        !wasSubmittedWithoutDraftOwnership
+      ) {
+        const clientSessionId = useChatSessionStore
+          .getState()
+          .getSession(acceptedSessionId)?.clientSessionId;
+        if (clientSessionId && clientSessionId !== acceptedSessionId) {
+          wasSubmittedWithoutDraftOwnership = takeDraftPreservingSubmission(
+            clientSessionId,
+            submittedText,
+          );
+        }
+      }
       const draftSnapshot = getDraftSnapshot(acceptedSessionId);
       const hasNewerDraftEdit =
         submittedDraftGeneration !== null &&
@@ -2224,7 +2241,11 @@ export function useChatSessionController({
 
       const activation = (async () => {
         const chatSessions = useChatSessionStore.getState();
-        const currentSession = chatSessions.getSession(sessionId);
+        const currentSession = chatSessions.sessions.find(
+          (candidate) =>
+            candidate.id === sessionId ||
+            candidate.clientSessionId === sessionId,
+        );
         if (!currentSession) {
           return null;
         }
@@ -2233,7 +2254,9 @@ export function useChatSessionController({
           currentSession.targetAgentPath
         ) {
           if (currentSession.agentBuilderOpen !== true) {
-            chatSessions.patchSession(sessionId, { agentBuilderOpen: true });
+            chatSessions.patchSession(currentSession.id, {
+              agentBuilderOpen: true,
+            });
             return { ...currentSession, agentBuilderOpen: true };
           }
           return currentSession;
@@ -2241,14 +2264,21 @@ export function useChatSessionController({
 
         const target = await preSeedDraftAgent(sessionId);
         const liveChatSessions = useChatSessionStore.getState();
-        const liveSession = liveChatSessions.getSession(sessionId);
+        const liveSession = liveChatSessions.sessions.find(
+          (candidate) =>
+            candidate.id === sessionId ||
+            candidate.clientSessionId === sessionId,
+        );
+        const liveSessionId = liveSession?.id;
         const liveSkills =
-          useChatStore.getState().skillDraftsBySession[stateSessionId] ??
-          EMPTY_SKILL_DRAFTS;
+          useChatStore.getState().skillDraftsBySession[
+            liveSessionId ?? stateSessionId
+          ] ?? EMPTY_SKILL_DRAFTS;
 
         if (
           !liveSession ||
           liveSession.archivedAt ||
+          liveSession.creationState === "failed" ||
           (options?.requireSelectedSkill &&
             !hasAgentBuilderSkillDraft(liveSkills))
         ) {
@@ -2256,6 +2286,14 @@ export function useChatSessionController({
             console.error("Failed to delete canceled agent draft:", error);
           });
           return null;
+        }
+
+        if (liveSession.id !== sessionId) {
+          await migratePendingDraftAgent(
+            sessionId,
+            liveSession.id,
+            target.path,
+          );
         }
 
         if (
@@ -2275,18 +2313,18 @@ export function useChatSessionController({
           targetAgentSlug: target.slug,
         };
 
-        liveChatSessions.patchSession(sessionId, patch);
+        liveChatSessions.patchSession(liveSession.id, patch);
 
         const chatStateNow = useChatStore.getState();
         const currentSkills =
-          chatStateNow.skillDraftsBySession[stateSessionId] ??
+          chatStateNow.skillDraftsBySession[liveSession.id] ??
           EMPTY_SKILL_DRAFTS;
         chatStateNow.setSkillDrafts(
-          stateSessionId,
+          liveSession.id,
           ensureAgentBuilderSkillDraft(currentSkills),
         );
 
-        return { ...currentSession, ...patch };
+        return { ...liveSession, ...patch };
       })();
 
       pendingBuilderActivationRef.current[sessionId] = activation;
@@ -2404,17 +2442,24 @@ export function useChatSessionController({
           ? selectedPersona.displayName
           : useAgentStore.getState().getPersonaById(personaId)?.displayName
         : undefined;
-      const enqueueMessage = (options = sendOptions) => {
-        const accepted = enqueueCapturedMessage(
-          captureSessionSelection({
-            text,
-            persona: personaIntentFromComposer(personaId, personaName),
-            attachments,
-            sendOptions: options,
-          }),
-        );
+      const enqueueMessage = (
+        options = sendOptions,
+        targetSessionId = stateSessionId,
+      ) => {
+        const payload = captureSessionSelection({
+          text,
+          persona: personaIntentFromComposer(personaId, personaName),
+          attachments,
+          sendOptions: options,
+        });
+        const accepted =
+          targetSessionId === stateSessionId
+            ? enqueueCapturedMessage(payload)
+            : useChatStore
+                .getState()
+                .enqueueTransportReadyMessage(targetSessionId, payload);
         if (accepted && sessionId) {
-          recordDraftPreservingSubmission(sessionId, text);
+          recordDraftPreservingSubmission(targetSessionId, text);
         }
         return accepted;
       };
@@ -2437,6 +2482,7 @@ export function useChatSessionController({
         return (async () => {
           const builderSession = await ensureCurrentSessionIsAgentBuilder();
           if (!builderSession) return false;
+          const builderSessionId = builderSession.id;
           const onBuilderWorkspaceNameRequest = onWorkspaceNameRequest
             ? (request: WorkspaceNameRequest) =>
                 onWorkspaceNameRequest({
@@ -2445,17 +2491,19 @@ export function useChatSessionController({
                     request.cancel();
                     const liveSession = useChatSessionStore
                       .getState()
-                      .getSession(sessionId);
+                      .getSession(builderSessionId);
                     if (
                       liveSession?.intent === "build-agent" &&
                       liveSession.targetAgentPath ===
                         builderSession.targetAgentPath
                     ) {
-                      useChatSessionStore.getState().patchSession(sessionId, {
-                        intent: undefined,
-                        targetAgentPath: undefined,
-                        targetAgentSlug: undefined,
-                      });
+                      useChatSessionStore
+                        .getState()
+                        .patchSession(builderSessionId, {
+                          intent: undefined,
+                          targetAgentPath: undefined,
+                          targetAgentSlug: undefined,
+                        });
                       if (builderSession.targetAgentPath) {
                         void deletePersonaSource(
                           builderSession.targetAgentPath,
@@ -2475,14 +2523,14 @@ export function useChatSessionController({
             sendOptions,
           );
           if (
-            (useChatStore.getState().queuedMessageBySession[stateSessionId]
+            (useChatStore.getState().queuedMessageBySession[builderSessionId]
               ?.length ?? 0) > 0
           ) {
-            enqueueMessage(deferredSendOptions);
+            enqueueMessage(deferredSendOptions, builderSessionId);
             return true;
           }
           const firstSend = acceptFirstSend(
-            sessionId,
+            builderSessionId,
             captureSessionSelection({
               text,
               persona: personaIntentFromComposer(personaId, personaName),
@@ -2497,8 +2545,8 @@ export function useChatSessionController({
             },
           );
           if (firstSend.accepted) {
-            recordDraftPreservingSubmission(sessionId, text);
-            onMessageAccepted?.(sessionId);
+            recordDraftPreservingSubmission(builderSessionId, text);
+            onMessageAccepted?.(builderSessionId);
             if (personaId && personaId !== selectedPersonaId) {
               handlePersonaChange(personaId);
             }
@@ -2506,17 +2554,20 @@ export function useChatSessionController({
           }
           if (firstSend.needsName || firstSend.occupied) return false;
           if (personaId && personaId !== selectedPersonaId) {
-            const accepted = enqueueMessage(deferredSendOptions);
+            const accepted = enqueueMessage(
+              deferredSendOptions,
+              builderSessionId,
+            );
             if (accepted) {
               handlePersonaChange(personaId);
             }
             return accepted;
           }
           if (!workspaceContextReady) {
-            enqueueMessage(deferredSendOptions);
+            enqueueMessage(deferredSendOptions, builderSessionId);
             return true;
           }
-          return enqueueMessage(deferredSendOptions);
+          return enqueueMessage(deferredSendOptions, builderSessionId);
         })();
       }
 

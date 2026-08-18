@@ -587,6 +587,66 @@ describe("ChatView MCP app messaging", () => {
     expect(timelineProps.showPlaceholder).toBe(false);
   });
 
+  it("keeps the composer enabled while a blank draft session is pending", () => {
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      messages: [],
+    });
+
+    render(
+      <ChatView
+        sessionId="draft-session"
+        activeSession={{
+          ...chatSessionWithWorkingDir("~/goose artifacts"),
+          id: "draft-session",
+          creationState: "pending",
+        }}
+      />,
+    );
+
+    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+      composerActions?: {
+        onSend?: (text: string) => boolean;
+        sendDisabled?: boolean;
+        sendDisabledReason?: string;
+      };
+    };
+    expect(chatInputProps.composerActions?.sendDisabled).toBe(false);
+    expect(chatInputProps.composerActions?.sendDisabledReason).toBeUndefined();
+
+    act(() => {
+      expect(
+        chatInputProps.composerActions?.onSend?.("queue while starting"),
+      ).toBe(true);
+    });
+    expect(mocks.handleSend).toHaveBeenCalledWith("queue while starting");
+  });
+
+  it("keeps the composer blocked after draft session creation fails", () => {
+    render(
+      <ChatView
+        sessionId="draft-session"
+        activeSession={{
+          ...chatSessionWithWorkingDir("~/goose artifacts"),
+          id: "draft-session",
+          creationState: "failed",
+          creationError: "Session failed to start",
+        }}
+      />,
+    );
+
+    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+      composerActions?: {
+        sendDisabled?: boolean;
+        sendDisabledReason?: string;
+      };
+    };
+    expect(chatInputProps.composerActions?.sendDisabled).toBe(true);
+    expect(chatInputProps.composerActions?.sendDisabledReason).toBe(
+      "Session failed to start",
+    );
+  });
+
   it("keeps the empty-state placeholder visible while a blank draft session is pending", () => {
     mocks.useChatSessionController.mockReturnValue({
       ...mocks.useChatSessionController(),
