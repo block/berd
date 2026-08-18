@@ -164,6 +164,7 @@ import {
   getChatSessionIdsWithTerminals,
   setTerminalRenderingSuspended,
 } from "@/features/terminal/lib/terminalSessionManager";
+import type { SetupChatRequest } from "@/features/chat/lib/setupChatRequest";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { toChatSkillDraft } from "@/features/skills/lib/skillChatPrompt";
@@ -3316,6 +3317,26 @@ export function AppShell({
     );
   }, [handleGlobalVoiceConversationStart]);
 
+  const handleStartConnectionSetupChat = useCallback(
+    (request: SetupChatRequest) => {
+      guardAppNavigation(() => {
+        const harnessId = selectedProviderRef.current ?? "goose";
+        void createNewTab(request.title, undefined, {
+          executionTarget: { harnessId },
+        })
+          .then((session) => {
+            if (!session) return;
+            const sessionId = resolveLiveSessionId(session.id) ?? session.id;
+            useChatStore.getState().setDraft(sessionId, request.prompt);
+          })
+          .catch((error) => {
+            console.error("Failed to start connection setup chat:", error);
+          });
+      });
+    },
+    [guardAppNavigation, createNewTab],
+  );
+
   const handleStartProviderTroubleshootingChat = useCallback(
     (request: AgentSetupTroubleshootingRequest) => {
       guardAppNavigation(() => {
@@ -5147,6 +5168,7 @@ export function AppShell({
               onStartProviderTroubleshootingChat={
                 handleStartProviderTroubleshootingChat
               }
+              onStartConnectionSetupChat={handleStartConnectionSetupChat}
               onReturnToAgentDraft={
                 agentBuilderSettingsReturnTarget
                   ? returnToAgentBuilderSettingsTarget

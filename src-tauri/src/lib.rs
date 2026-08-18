@@ -524,6 +524,7 @@ pub fn run() {
             commands::message_queues::persist_message_queue_updates,
             commands::model_setup::start_model_setup,
             commands::model_setup::get_model_setup_status,
+            commands::local_mcp_inventory::list_local_mcp_inventory,
             commands::model_setup::list_model_setup_status,
             commands::model_setup::clear_model_setup_status,
             commands::notifications::show_completion_notification,

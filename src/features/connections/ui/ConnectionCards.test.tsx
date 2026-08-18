@@ -33,6 +33,22 @@ describe("connection rows", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("spaces disconnect and reconnect actions", () => {
+    const slack = OAUTH_PROVIDERS.find((entry) => entry.provider === "slack");
+    if (!slack) throw new Error("Slack fixture is missing");
+
+    renderCard(
+      <OAuthConnectionCard entry={slack} status={{ kind: "expired" }} />,
+    );
+
+    const disconnect = screen.getByRole("button", { name: "Disconnect" });
+    const actions = disconnect.parentElement;
+    expect(actions).toHaveClass("flex", "items-center", "gap-2");
+    expect(
+      screen.getByRole("button", { name: "Reconnect" }).parentElement,
+    ).toBe(actions);
+  });
+
   it("keeps Configure for editable user-added MCP servers", () => {
     const onSelect = vi.fn();
     const extension: ExtensionEntry = {

@@ -121,7 +121,7 @@ export function OAuthConnectionActions({
 
   if (labelKey !== null) {
     return (
-      <>
+      <div className="flex items-center gap-2">
         {canDisconnect ? (
           <Button
             type="button"
@@ -145,7 +145,7 @@ export function OAuthConnectionActions({
         >
           {t(labelKey)}
         </Button>
-      </>
+      </div>
     );
   }
 

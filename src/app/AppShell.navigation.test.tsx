@@ -577,6 +577,7 @@ vi.mock("./ui/AppShellContent", () => ({
     onSelectSession,
     onStartProjectChat,
     onResolveBerdyAgent,
+    onStartConnectionSetupChat,
   }) => {
     const starterTasks = useStarterTasks();
     const activeView = targetLocation.view;
@@ -606,6 +607,17 @@ vi.mock("./ui/AppShellContent", () => ({
           {renderedSession?.id ?? "none"}
         </div>
         <div data-testid="settings-section">{activeSettingsSection}</div>
+        <button
+          type="button"
+          onClick={() =>
+            onStartConnectionSetupChat({
+              title: "Add a connection",
+              prompt: "Which connection?",
+            })
+          }
+        >
+          Test connection setup
+        </button>
         <div data-testid="skill-route">{activeSkillsSkillId ?? "list"}</div>
         <div data-testid="agent-route">{activeAgentsPersonaId ?? "list"}</div>
         <div data-testid="automation-route">
@@ -4689,6 +4701,31 @@ describe("AppShell global navigation", () => {
     });
     expect(screen.getByTestId("active-view")).toHaveTextContent("home");
     expect(useChatSessionStore.getState().activeSessionId).toBeNull();
+  });
+
+  it("starts connection setup as an editable draft in the selected harness", async () => {
+    selectCodexProvider();
+    mockAgentStatus.readyAgentIds = new Set(["codex-acp"]);
+    seedProviderModels("codex-acp", [
+      { id: "gpt-5.5", name: "GPT-5.5", recommended: true },
+    ]);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Test connection setup" }),
+    );
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "codex-acp",
+        expect.any(String),
+        expect.any(Object),
+      );
+    });
+    expect(useChatStore.getState().draftsBySession["created-session"]).toBe(
+      "Which connection?",
+    );
   });
 
   it("opens extension search results in Settings Connections", async () => {
