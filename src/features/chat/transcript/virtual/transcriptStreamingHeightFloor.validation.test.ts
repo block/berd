@@ -1,27 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { TranscriptRowDescriptor } from "../projection/transcriptItemTypes";
-import {
-  createTranscriptTanStackVirtualAdapter,
-  createTranscriptVirtualController,
-} from "./index";
+import { createTranscriptVirtualController } from "./index";
 import type { TranscriptVirtualMeasurementToken } from "./transcriptVirtualTypes";
 
 const SESSION_ID = "session-a";
 const WIDTH_SCOPE = "w:720";
 
-type EngineUnderTest =
-  | ReturnType<typeof createTranscriptVirtualController>
-  | ReturnType<typeof createTranscriptTanStackVirtualAdapter>;
+type EngineUnderTest = ReturnType<typeof createTranscriptVirtualController>;
 
 describe("streaming transcript height jitter validation", () => {
   for (const { name, createEngine } of [
     {
       name: "controller",
       createEngine: () => createController(),
-    },
-    {
-      name: "tanstack adapter",
-      createEngine: () => createAdapter(),
     },
   ]) {
     it(`${name} keeps an active streaming row size monotonic across revisions and measurements`, () => {
@@ -86,17 +77,6 @@ describe("streaming transcript height jitter validation", () => {
 
 function createController() {
   return createTranscriptVirtualController({
-    sessionId: SESSION_ID,
-    sessionEpoch: 1,
-    widthScope: WIDTH_SCOPE,
-    viewportHeight: 300,
-    footerHeight: 0,
-    scrollTop: 0,
-  });
-}
-
-function createAdapter() {
-  return createTranscriptTanStackVirtualAdapter({
     sessionId: SESSION_ID,
     sessionEpoch: 1,
     widthScope: WIDTH_SCOPE,
