@@ -29,6 +29,7 @@ import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import { dispatchOnboarding } from "@/features/onboarding/model";
 import {
   resetHomeWidgetStoreForTests,
   useHomeWidgetStore,
@@ -893,6 +894,7 @@ describe("AppShell global navigation", () => {
   afterEach(cleanup);
 
   beforeEach(() => {
+    dispatchOnboarding({ type: "complete" });
     resetHomeWidgetStoreForTests();
     resetStarterWidgetPickerRequestForTests();
     mockRepairManagedGooseModelSelection.mockReset();

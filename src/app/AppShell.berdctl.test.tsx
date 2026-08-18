@@ -11,6 +11,7 @@ import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/goos
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import { dispatchOnboarding } from "@/features/onboarding/model";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { useDefaultProviderReadinessStore } from "@/features/providers/stores/defaultProviderReadinessStore";
@@ -253,6 +254,7 @@ describe("AppShell berdctl integration", () => {
     vi.stubEnv("VITE_AUTOMATIONS", "1");
     window.history.replaceState(null, "", "/");
     window.localStorage.clear();
+    dispatchOnboarding({ type: "complete" });
     useShortcutsDialogStore.setState({ open: false });
     mockAcpCreateSession.mockReset();
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
