@@ -395,6 +395,24 @@ describe("HomeView", () => {
       width: 173,
       height: 173,
     });
+    const savedPersonas = vi
+      .mocked(saveLayoutItems)
+      .mock.calls.flatMap(([request]) => request.items)
+      .filter((item) => item.kind === "persona");
+    expect(savedPersonas).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetId: personas[0].id,
+          centerX: -192,
+          centerY: 370,
+        }),
+        expect.objectContaining({
+          targetId: personas[1].id,
+          centerX: 328,
+          centerY: -270,
+        }),
+      ]),
+    );
   });
 
   it("does not offer starter tasks when the experiment is disabled", async () => {
