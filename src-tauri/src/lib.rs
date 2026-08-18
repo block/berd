@@ -211,13 +211,23 @@ pub fn run() {
             app.manage(commands::pocket_voice::PocketVoiceState::default());
             app.manage(commands::native_voice::NativeVoiceState::default());
             app.manage(commands::voice_capture::VoiceCaptureState::default());
+            let (installation_cohort_sender, installation_cohort_state) =
+                services::installation_cohort::installation_cohort_channel();
+            app.manage(installation_cohort_state);
             let installation_cohort =
                 services::installation_cohort::initialize_installation_cohort(
                     &app_data_dir,
                     services::app_data_migration::legacy_layout_database_exists(app.handle()),
                 )
-                .map_err(std::io::Error::other)?;
-            app.manage(installation_cohort);
+                .unwrap_or_else(|error| {
+                    log::warn!("Failed to initialize installation cohort: {error}");
+                    services::installation_cohort::InstallationCohort::Unknown
+                });
+            installation_cohort_sender.send_replace(
+                services::installation_cohort::InstallationCohortReadiness::Ready(
+                    installation_cohort,
+                ),
+            );
             let release_channel_state = commands::updates::ReleaseChannelState::load(app.handle())?;
             app.manage(release_channel_state);
 

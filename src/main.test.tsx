@@ -94,6 +94,20 @@ describe("main entrypoint telemetry startup", () => {
     });
   });
 
+  it("reports cohort lookup failures without blocking startup", async () => {
+    const error = new Error("state unavailable");
+    mockInvoke.mockRejectedValueOnce(error);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await loadMainAt("");
+
+    await screen.findByTestId("main-app");
+    expect(mockReportRendererError).toHaveBeenCalledWith(
+      "installation_cohort_failed",
+      error,
+    );
+  });
+
   it("does not start launch telemetry for session windows", async () => {
     await loadMainAt("?sessionKey=c2Vzc2lvbi0xMjM");
 

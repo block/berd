@@ -35,6 +35,29 @@ describe("onboarding persistence", () => {
     });
   });
 
+  it("graduates malformed current state but preserves a newer record", () => {
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "not json");
+    initializeOnboardingGraduation("established-before-landing-v1");
+    resetOnboardingStoreForTests();
+    expect(getOnboardingSnapshot().lifecycle).toBe("completed");
+
+    const newerRecord = JSON.stringify({
+      version: ONBOARDING_STORAGE_VERSION + 1,
+      state: { future: true },
+    });
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, newerRecord);
+    initializeOnboardingGraduation("established-before-landing-v1");
+    expect(window.localStorage.getItem(ONBOARDING_STORAGE_KEY)).toBe(
+      newerRecord,
+    );
+  });
+
+  it("does not graduate when the cohort is unknown", () => {
+    initializeOnboardingGraduation("unknown");
+    resetOnboardingStoreForTests();
+    expect(getOnboardingSnapshot()).toEqual(INITIAL_ONBOARDING_STATE);
+  });
+
   it("preserves existing onboarding progress during graduation", () => {
     dispatchOnboarding({ type: "start" });
 

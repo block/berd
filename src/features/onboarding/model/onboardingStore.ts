@@ -19,7 +19,8 @@ export const ONBOARDING_STORAGE_KEY = "berd:onboarding:v1";
 
 export type InstallationCohort =
   | "fresh-with-landing-v1"
-  | "established-before-landing-v1";
+  | "established-before-landing-v1"
+  | "unknown";
 
 interface PersistedOnboardingState {
   version: typeof ONBOARDING_STORAGE_VERSION;
@@ -54,10 +55,26 @@ export function initializeOnboardingGraduation(
   if (!target) return;
 
   try {
-    if (
-      target.getItem(ONBOARDING_STORAGE_KEY) === null &&
-      cohort === "established-before-landing-v1"
-    ) {
+    const raw = target.getItem(ONBOARDING_STORAGE_KEY);
+    const preserveExisting = (() => {
+      if (raw === null) return false;
+      try {
+        const value: unknown = JSON.parse(raw);
+        if (!value || typeof value !== "object") return false;
+        const record = value as Partial<PersistedOnboardingState>;
+        return (
+          (typeof record.version === "number" &&
+            record.version > ONBOARDING_STORAGE_VERSION) ||
+          (record.version === ONBOARDING_STORAGE_VERSION &&
+            isValidPersistedState(
+              record.state as Partial<OnboardingState> | undefined,
+            ))
+        );
+      } catch {
+        return false;
+      }
+    })();
+    if (!preserveExisting && cohort === "established-before-landing-v1") {
       const completedState: OnboardingState = {
         ...INITIAL_ONBOARDING_STATE,
         lifecycle: "completed",
@@ -92,14 +109,38 @@ function isLifecycle(value: unknown): value is OnboardingLifecycle {
   );
 }
 
+function isValidPersistedState(
+  state: Partial<OnboardingState> | undefined,
+): state is OnboardingState {
+  return Boolean(
+    state &&
+      isLifecycle(state.lifecycle) &&
+      isStep(state.step) &&
+      isStringArray(state.selectedWorkTypeIds) &&
+      state.selectedWorkTypeIds.every((id) => workTypeIds.has(id)) &&
+      (state.selectedAgentId === null ||
+        (typeof state.selectedAgentId === "string" &&
+          agentIds.has(state.selectedAgentId))) &&
+      (state.selectedHarnessId === null ||
+        (typeof state.selectedHarnessId === "string" &&
+          harnessIds.has(state.selectedHarnessId))) &&
+      (state.completedHarnessSetupIds === undefined ||
+        (isStringArray(state.completedHarnessSetupIds) &&
+          state.completedHarnessSetupIds.every((id) => harnessIds.has(id)))) &&
+      (state.step === "complete") === (state.lifecycle === "completed") &&
+      (state.step !== "harness-setup" || state.selectedHarnessId !== null),
+  );
+}
+
 function parsePersisted(raw: string | null): OnboardingState {
   hasUnsupportedNewerRecord = false;
   if (raw === null) return { ...INITIAL_ONBOARDING_STATE };
 
   try {
     const value: unknown = JSON.parse(raw);
-    if (!value || typeof value !== "object")
+    if (!value || typeof value !== "object") {
       return { ...INITIAL_ONBOARDING_STATE };
+    }
     const record = value as Partial<PersistedOnboardingState>;
     if (record.version !== ONBOARDING_STORAGE_VERSION) {
       hasUnsupportedNewerRecord =
@@ -108,29 +149,7 @@ function parsePersisted(raw: string | null): OnboardingState {
       return { ...INITIAL_ONBOARDING_STATE };
     }
     const state = record.state as Partial<OnboardingState> | undefined;
-    if (
-      !state ||
-      !isLifecycle(state.lifecycle) ||
-      !isStep(state.step) ||
-      !isStringArray(state.selectedWorkTypeIds) ||
-      !state.selectedWorkTypeIds.every((id) => workTypeIds.has(id)) ||
-      !(
-        state.selectedAgentId === null ||
-        (typeof state.selectedAgentId === "string" &&
-          agentIds.has(state.selectedAgentId))
-      ) ||
-      !(
-        state.selectedHarnessId === null ||
-        (typeof state.selectedHarnessId === "string" &&
-          harnessIds.has(state.selectedHarnessId))
-      ) ||
-      (state.completedHarnessSetupIds !== undefined &&
-        (!isStringArray(state.completedHarnessSetupIds) ||
-          !state.completedHarnessSetupIds.every((id) => harnessIds.has(id)))) ||
-      (state.step === "complete" && state.lifecycle !== "completed") ||
-      (state.step !== "complete" && state.lifecycle === "completed") ||
-      (state.step === "harness-setup" && state.selectedHarnessId === null)
-    ) {
+    if (!isValidPersistedState(state)) {
       return { ...INITIAL_ONBOARDING_STATE };
     }
     return {

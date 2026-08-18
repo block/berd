@@ -74,14 +74,12 @@ struct AppDataMigrationSummary {
 /// Copy old app-owned local data before Berd services open files in the new
 /// location. Failures are logged and non-fatal so a single locked/cache file
 /// does not prevent app startup.
-pub(crate) fn legacy_layout_database_exists<R: Runtime>(app: &AppHandle<R>) -> bool {
-    legacy_directory_pairs(app)
-        .ok()
-        .into_iter()
-        .flatten()
-        .any(|pair| {
-            pair.kind == AppDirectoryKind::Data && pair.old.join(OLD_LAYOUT_DATABASE).is_file()
-        })
+pub(crate) fn legacy_layout_database_exists<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<bool, String> {
+    Ok(legacy_directory_pairs(app)?.into_iter().any(|pair| {
+        pair.kind == AppDirectoryKind::Data && pair.old.join(OLD_LAYOUT_DATABASE).is_file()
+    }))
 }
 
 pub(crate) fn migrate_legacy_app_data<R: Runtime>(app: &AppHandle<R>) {

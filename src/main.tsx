@@ -170,7 +170,7 @@ if (bootError) {
     .catch((error) => {
       console.error("Failed to resolve installation cohort:", error);
       reportRendererError("installation_cohort_failed", error);
-      initializeOnboardingGraduation("established-before-landing-v1");
+      initializeOnboardingGraduation("unknown");
     })
     .finally(() => {
       initTelemetry();
