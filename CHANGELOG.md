@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.6.2](https://github.com/block/berd/releases/tag/v0.6.2) - 2026-08-18
+
+Berd 0.6.1 expands the starter agent collection, improves agent sharing, and makes connections and agent activity easier to navigate.
+
+- **More starter agents:** Explore seven bundled agents, including Agt Builder, Choosey, Copycat, Pushback, Tinker, and Wildcard. New Home canvases feature Tinker and Wildcard, while existing layouts remain unchanged.
+- **Slack-friendly agent sharing:** Download agent cards as ZIP files so their instructions and settings remain intact when shared through Slack. PNG and Markdown exports remain available from the same download menu.
+- **Organized connections:** Connections are now grouped into company-managed services and local MCPs configured for Goose, Claude Code, or Codex. A shared search and agent-guided setup flow make connections easier to find and add.
+- **More stable Agent Work details:** Expanding previous steps no longer causes the conversation to jump unexpectedly. Long tool details now stay compact in a scrollable, keyboard-accessible area.
+
+**Full Changelog**: https://github.com/block/berd/compare/v0.6.1...fc0cced1
+
 ## [v0.6.1](https://github.com/block/berd/releases/tag/v0.6.1) - 2026-08-17
 
 Berd 0.6.0 improves queued messaging, long-chat reliability, agent cards, and the Home experience, alongside smoother installation and updates.
