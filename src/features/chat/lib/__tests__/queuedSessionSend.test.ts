@@ -46,6 +46,20 @@ function seedSession(creationState?: "pending" | "failed"): void {
   });
 }
 
+function agentBuilderRecord(): QueuedMessageRecord & {
+  kind: "transport-ready";
+} {
+  return {
+    kind: "transport-ready",
+    recordId: "builder-record",
+    payload: {
+      text: "make a reviewer",
+      persona: { kind: "inherit" },
+      sendOptions: { chips: [{ label: "agent-builder", type: "skill" }] },
+    },
+  };
+}
+
 function queuedRecord(): QueuedMessageRecord & { kind: "transport-ready" } {
   return {
     kind: "transport-ready",
@@ -192,6 +206,28 @@ describe("sendQueuedPromptToExistingSessionInBackground", () => {
     vi.clearAllMocks();
     resetSessionTargetCoordinatorsForTests();
     mocks.loadSessionMessages.mockResolvedValue(true);
+  });
+
+  it("rejects an Agent Builder send until the session owns a prepared draft target", async () => {
+    seedSession();
+    useChatSessionStore.setState((state) => ({
+      sessions: state.sessions.map((session) => ({
+        ...session,
+        intent: "build-agent" as const,
+        agentBuilderOpen: true,
+      })),
+    }));
+    const beforeUserMessageCommitted = vi.fn();
+
+    const error = await sendQueuedPromptToExistingSessionInBackground(
+      SESSION_ID,
+      agentBuilderRecord(),
+      beforeUserMessageCommitted,
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(PreCommitSendRejectedError);
+    expect(mocks.loadSessionMessages).not.toHaveBeenCalled();
+    expect(beforeUserMessageCommitted).not.toHaveBeenCalled();
   });
 
   it("rejects a send to a creating session without committing anything", async () => {

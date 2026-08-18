@@ -86,6 +86,22 @@ function releasedRecord(): QueuedMessageRecord & { kind: "transport-ready" } {
   };
 }
 
+function agentBuilderRecord(): QueuedMessageRecord & {
+  kind: "transport-ready";
+} {
+  return {
+    kind: "transport-ready",
+    recordId: "agent-builder-record",
+    payload: {
+      text: "make a reviewer",
+      persona: { kind: "inherit" },
+      sendOptions: {
+        chips: [{ label: "agent-builder", type: "skill" }],
+      },
+    },
+  };
+}
+
 function ordinaryRecord(): QueuedMessageRecord & { kind: "transport-ready" } {
   return {
     kind: "transport-ready",
@@ -1208,6 +1224,53 @@ describe("useBackgroundQueuedMessageDrain", () => {
         (call) => call[0],
       ),
     ).toEqual([BACKEND_SESSION_ID]);
+  });
+
+  it("keeps an unmounted Agent Builder head parked after promotion until its draft target is prepared", async () => {
+    const builder = agentBuilderRecord();
+    seedDraftSession();
+    useChatStore.setState({
+      queuedMessageBySession: { [DRAFT_SESSION_ID]: [builder] },
+    });
+
+    render(<DrainHarness />);
+    act(() => promoteDraft());
+
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().queuedMessageBySession[BACKEND_SESSION_ID]?.[0],
+    ).toBe(builder);
+
+    const releaseOwner = registerForegroundQueueOwner(BACKEND_SESSION_ID);
+    act(() => {
+      useChatSessionStore.getState().patchSession(BACKEND_SESSION_ID, {
+        intent: "build-agent",
+        agentBuilderOpen: true,
+        targetAgentPath: "/Users/x/.agents/agents/reviewer.md",
+        targetAgentSlug: "reviewer",
+      });
+    });
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).not.toHaveBeenCalled();
+
+    act(() => releaseOwner());
+
+    await waitFor(() =>
+      expect(
+        mocks.sendQueuedPromptToExistingSessionInBackground,
+      ).toHaveBeenCalledOnce(),
+    );
+    expect(
+      mocks.sendQueuedPromptToExistingSessionInBackground,
+    ).toHaveBeenCalledWith(
+      BACKEND_SESSION_ID,
+      builder,
+      expect.any(Function),
+      expect.any(Function),
+    );
   });
 
   it("keeps a queued head parked without toasting when creation failed", async () => {

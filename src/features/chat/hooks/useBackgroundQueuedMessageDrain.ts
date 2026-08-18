@@ -5,6 +5,7 @@ import { i18n } from "@/shared/i18n";
 import {
   assertQueuedSessionReady,
   isQueuedSessionReady,
+  QueuedSessionNotReadyError,
 } from "@/features/chat/lib/queuedMessageReadiness";
 import { PreCommitSendRejectedError } from "@/features/chat/lib/preCommitSendRejection";
 import {
@@ -17,6 +18,7 @@ import {
   subscribeForegroundQueueOwnership,
 } from "@/features/chat/lib/foregroundQueueOwnership";
 import { isBerdctlCrossSessionQueuedMessage } from "@/features/chat/lib/queuedMessageOrigin";
+import { isAgentBuilderQueuePreparationReady } from "@/features/chat/lib/agentBuilderQueueReadiness";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import {
   type QueuedMessageRecord,
@@ -138,7 +140,13 @@ function isBackgroundDrainableHead(
   record: QueuedMessageRecord & { kind: "transport-ready" },
   sessionId: string,
 ): boolean {
-  if (isBerdctlCrossSessionQueuedMessage(record)) {
+  if (
+    isBerdctlCrossSessionQueuedMessage(record) ||
+    !isAgentBuilderQueuePreparationReady(
+      record,
+      useChatSessionStore.getState().getSession(sessionId),
+    )
+  ) {
     return false;
   }
   if (record.releasedFromDeferred) {
@@ -246,6 +254,14 @@ function drainQueuedMessage(sessionId: string, ownerId: string): void {
         queuedMessage,
       );
       assertQueuedSessionReady(state.getSessionRuntime(sessionId));
+      if (
+        !isAgentBuilderQueuePreparationReady(
+          queuedMessage,
+          useChatSessionStore.getState().getSession(sessionId),
+        )
+      ) {
+        throw new QueuedSessionNotReadyError();
+      }
     },
     () => {
       useChatStore
