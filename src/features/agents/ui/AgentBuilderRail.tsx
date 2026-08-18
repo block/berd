@@ -35,6 +35,10 @@ import {
   type PersonaSourcePatch,
 } from "@/features/agents/hooks/usePersonaSource";
 import {
+  trackAgentCreateCompleted,
+  trackAgentEditCompleted,
+} from "@/features/agents/lib/agentTelemetry";
+import {
   fileStem,
   isPlaceholderAgentName,
   PLACEHOLDER_AGENT_BODY,
@@ -104,10 +108,26 @@ export function AgentBuilderRail({
     },
     [onDraftTargetChanged],
   );
+  // Edit Completed is anchored to the persisted write itself: every saveNow
+  // entry point (the Save button, the leave-builder "Keep" save, closing the
+  // builder) funnels through the same flush, a no-op save never persists
+  // anything, and the event must not depend on the post-save promoteDraft
+  // lookup succeeding. Draft writes are the create flow's incremental saves;
+  // creation is tracked once, on the confirmed promote.
+  const handleWritePersisted = useCallback((source: AgentSourceEntry) => {
+    if (source.properties?.draft === true) {
+      return;
+    }
+    trackAgentEditCompleted({
+      provider: source.properties?.provider,
+      model: source.properties?.model,
+    });
+  }, []);
   const { data, isLoading, error, update, saveStatus, saveNow } =
     usePersonaSource(targetAgentPath, {
       builderSessionId: sessionId,
       onResolvedPathChange: handleResolvedPathChange,
+      onWritePersisted: handleWritePersisted,
     });
   const [isPromoting, setIsPromoting] = useState(false);
   const [avatarPanel, setAvatarPanel] = useState<"closed" | "library">(
@@ -412,6 +432,17 @@ export function AgentBuilderRail({
       }
       const promoted = await promoteDraft(sessionId);
       if (promoted) {
+        if (requiresNewDraftFields) {
+          // Create Completed on confirmed promote success. The promoted
+          // source is authoritative: its properties carry the configured
+          // provider/model. Edits are not tracked here — Edit Completed rides
+          // the persisted write (handleWritePersisted), which a no-op save
+          // never reaches and a failed post-save lookup cannot lose.
+          trackAgentCreateCompleted({
+            provider: promoted.properties?.provider,
+            model: promoted.properties?.model,
+          });
+        }
         onDraftPromoted?.(promoted);
       }
     } finally {

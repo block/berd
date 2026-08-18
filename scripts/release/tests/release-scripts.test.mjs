@@ -448,16 +448,7 @@ describe("local macOS bundle version propagation", () => {
 });
 
 describe("local macOS bundle feature-gate propagation", () => {
-  const gates = [
-    ["VITE_AGENT_TOOLS", "block-agent-tools"],
-    ["VITE_AUTOMATIONS", "block-automations"],
-    ["VITE_BUILDERBOT", "block-builderbot"],
-    ["VITE_FEEDBACK", "block-feedback"],
-    ["VITE_MANAGED_CONNECTIONS", "block-managed-connections"],
-    ["VITE_VOICE_DICTATION", "block-voice-dictation"],
-  ];
-
-  it("maps all six positive opt-ins in both release and debug recipes", async () => {
+  it("resolves gates through the shared mapper in both release and debug recipes", async () => {
     const justfile = await readFile(join(repo, "justfile"), "utf8");
     const releaseRecipe = justfile.slice(
       justfile.indexOf("_bundle-unix:"),
@@ -468,16 +459,22 @@ describe("local macOS bundle feature-gate propagation", () => {
       justfile.indexOf("# ── Test"),
     );
 
+    // Both recipes delegate the whole gate table so a new gate reaches the
+    // bundle without a second edit; only the posture bases differ.
+    expect(releaseRecipe).toContain(
+      `CARGO_FEATURES_CSV="$(./scripts/block-feature-gates.sh berdctl)"`,
+    );
+    expect(debugRecipe).toContain(
+      `CARGO_FEATURES_CSV="$(./scripts/block-feature-gates.sh berdctl,devtools)"`,
+    );
+
     for (const recipe of [releaseRecipe, debugRecipe]) {
-      for (const [viteGate, cargoFeature] of gates) {
-        expect(recipe).toContain(`\${${viteGate}:-0}`);
-        expect(recipe).toContain(cargoFeature);
-      }
       expect(recipe).toContain(`VITE_AUTH_GATE="\${VITE_AUTH_GATE:-0}"`);
       expect(recipe).toContain(
         `VITE_BYO_KEY_PROVIDERS="\${VITE_BYO_KEY_PROVIDERS:-1}"`,
       );
-      expect(recipe).toContain("no-voice-dictation");
+      // Resource staging is not gate mapping, so it stays in the recipe.
+      expect(recipe).toContain(`\${VITE_AGENT_TOOLS:-0}`);
       expect(recipe).toContain("prepare-bb-cli-resource.sh");
       expect(recipe).toContain('"../resources/bb"');
       expect(recipe).toContain(`VITE_FEEDBACK="\${VITE_FEEDBACK:-0}"`);
@@ -2136,6 +2133,24 @@ fi
   });
 });
 
+// The renderer build gates and their Cargo features, read out of the mapper
+// that dev and the bash bundle paths already share, so the drift guards below
+// pick up a new gate without being edited.
+async function canonicalGates() {
+  const source = await readFile(
+    join(repo, "scripts/block-feature-gates.sh"),
+    "utf8",
+  );
+  const envNames = source.match(/^for name in (.+); do$/m)?.[1].split(/\s+/);
+  expect(envNames).toBeDefined();
+  return envNames.map((env) => ({
+    env,
+    feature: source.match(
+      new RegExp(`\\$\\{${env}:-0\\}" == "1" \\]\\];?[^(]*\\(?(block-[a-z-]+)`),
+    )?.[1],
+  }));
+}
+
 describe("Block feature gate propagation", () => {
   it("maps every updater-off default to the fail-closed Cargo posture", () => {
     const result = run("bash", ["scripts/block-feature-gates.sh", "berdctl"]);
@@ -2143,13 +2158,14 @@ describe("Block feature gate propagation", () => {
     expect(result.stdout.trim()).toBe("berdctl,no-voice-dictation");
   });
 
-  it("maps the six independent renderer gates to matching Cargo features", () => {
+  it("maps the seven independent renderer gates to matching Cargo features", () => {
     const env = {
       VITE_AGENT_TOOLS: "1",
       VITE_AUTOMATIONS: "1",
       VITE_BUILDERBOT: "1",
       VITE_FEEDBACK: "1",
       VITE_MANAGED_CONNECTIONS: "1",
+      VITE_TELEMETRY_ENFORCED: "1",
       VITE_VOICE_DICTATION: "1",
     };
     const result = run(
@@ -2166,6 +2182,7 @@ describe("Block feature gate propagation", () => {
       "block-builderbot",
       "block-feedback",
       "block-managed-connections",
+      "block-telemetry-enforced",
       "block-voice-dictation",
     ]);
   });
@@ -2176,5 +2193,57 @@ describe("Block feature gate propagation", () => {
     });
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("VITE_AUTOMATIONS must be 0 or 1");
+  });
+
+  // A renderer gate that reaches vite but not the Cargo feature set builds an
+  // app whose UI hides the feature while the backend rejects it (or the other
+  // way round). Only bash callers can share the mapper, so the resolvers that
+  // re-implement it are pinned against it here.
+  it("resolves every canonical gate in the resolvers that cannot call the mapper", async () => {
+    const gates = await canonicalGates();
+    expect(gates.map((gate) => gate.env)).toContain("VITE_TELEMETRY_ENFORCED");
+    for (const gate of gates) {
+      expect(gate.feature).toMatch(/^block-/);
+    }
+
+    const [windowsDev, macosBuild, dockerBuild] = await Promise.all([
+      readFile(join(repo, "scripts/windows/WindowsDev.psm1"), "utf8"),
+      readFile(join(repo, "scripts/release/build-macos.sh"), "utf8"),
+      readFile(join(repo, "scripts/build_linux_docker.sh"), "utf8"),
+    ]);
+
+    // Windows has no guaranteed bash in the release image, so Get-BerdAppFeatures
+    // re-implements the table for every Windows lane including bundle-windows.
+    const windowsGates = windowsDev.match(
+      /\$gates = @\(([\s\S]*?)\n\s*\)/,
+    )?.[1];
+    expect(windowsGates).toBeDefined();
+    for (const gate of gates) {
+      expect(windowsGates).toContain(
+        `@{ Env = "${gate.env}"; Feature = "${gate.feature}" }`,
+      );
+    }
+
+    // build-macos.sh maps inline so it can reject release-owned overrides; the
+    // resolved value has to reach both the Cargo features and the vite env.
+    for (const gate of gates) {
+      expect(macosBuild).toContain(`${gate.env}_VALUE="\${${gate.env}:-0}"`);
+      expect(macosBuild).toContain(gate.feature);
+      expect(macosBuild).toContain(`${gate.env}="$${gate.env}_VALUE"`);
+    }
+
+    // Docker bundles only see the gates the wrapper forwards into the container.
+    const forwarded = dockerBuild
+      .match(/vite_env_names=\(([\s\S]*?)\n\)/)?.[1]
+      ?.split(/\s+/);
+    expect(forwarded).toBeDefined();
+    for (const gate of gates) {
+      expect(forwarded).toContain(gate.env);
+    }
+  });
+
+  it("keeps recipes from re-forking gate policy into a hand-built feature list", async () => {
+    const justfile = await readFile(join(repo, "justfile"), "utf8");
+    expect(justfile).not.toContain("CARGO_FEATURES+=(block-");
   });
 });

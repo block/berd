@@ -25,6 +25,7 @@ import { useArtifactRootPreference } from "@/shared/artifacts/useArtifactRootPre
 import { useTerminalFallbackCwdPreference } from "@/features/terminal/lib/terminalCwdPreference";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import { RuntimeConfigSettings } from "./RuntimeConfigSettings";
+import { TelemetryConsentRow } from "./TelemetryConsentRow";
 import { DoctorSettings } from "./DoctorSettings";
 import { useDoctorStatusSummary } from "@/shared/api/useDoctorReport";
 import {
@@ -348,6 +349,11 @@ export function SystemSettings() {
             </SettingsRow>
           ) : null}
         </SettingsSection>
+
+        {/* Renders nothing in enforced builds, where telemetry consent is
+          build policy and not a user choice, or when the `telemetry`
+          capability is off, where no event can emit whatever consent says. */}
+        <TelemetryConsentRow />
 
         {/* bb CLI and Runtime config are both one-off developer-facing rows
           (not a growing list), so they share a single "Developer tools"

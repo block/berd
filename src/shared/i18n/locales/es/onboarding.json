@@ -3,12 +3,11 @@
     "goBack": "Volver"
   },
   "welcome": {
-    "title": "Te damos la bienvenida a Berd",
-    "projects": "Un lugar para crear proyectos",
-    "agents": "trabajar con agentes",
-    "and": "y",
-    "done": "completar tu trabajo",
-    "getStarted": "Comenzar"
+    "title": "Te damos la bienvenida a Berd.",
+    "subtitle": "Tu lugar para hacer.",
+    "getStarted": "Vamos",
+    "usageConsent": "Comparte datos de uso anónimos para ayudar a mejorar Berd.",
+    "learnMore": "Más información"
   },
   "workTypes": {
     "title": "¿Para qué tipo de trabajo usarás Berd?",
@@ -50,8 +49,11 @@
     "title": "Tus agentes recomendados",
     "description": "Conoce algunos agentes elegidos para tu trabajo. Puedes configurarlos más tarde.",
     "adopting": "Añadiendo…",
+    "waitingForRuntime": "Preparando…",
     "keep": "Conservar",
     "skip": "Omitir por ahora",
+    "runtimeUnavailable": "Berd no terminó de iniciarse, así que aún no se pueden añadir agentes.",
+    "retryRuntime": "Reintentar",
     "genericError": "No se pudieron añadir algunos agentes. Inténtalo de nuevo.",
     "adoptionError": "No se pudo añadir a {{names}}. Los demás agentes se conservaron; inténtalo de nuevo para añadir el resto.",
     "agents": {

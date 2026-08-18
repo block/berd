@@ -20,6 +20,7 @@ import {
   type ProjectInfo,
 } from "@/features/projects/api/projects";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
+import { trackProjectDeleteCompleted } from "@/features/projects/lib/projectTelemetry";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 
 export function ArchivedProjectsSection() {
@@ -47,10 +48,13 @@ export function ArchivedProjectsSection() {
     }
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(project: ProjectInfo) {
     try {
-      await deleteProject(id);
-      setArchivedProjects((prev) => prev.filter((p) => p.id !== id));
+      await deleteProject(project.id);
+      // Completed only after the delete resolves; `project` is the pre-deletion
+      // snapshot for had_working_dir / had_artifact.
+      trackProjectDeleteCompleted(project);
+      setArchivedProjects((prev) => prev.filter((p) => p.id !== project.id));
     } catch {
       // best-effort
     }
@@ -126,7 +130,7 @@ export function ArchivedProjectsSection() {
               })}
               onClick={() => {
                 if (deletingProject) {
-                  void handleDelete(deletingProject.id);
+                  void handleDelete(deletingProject);
                   setDeletingProject(null);
                 }
               }}

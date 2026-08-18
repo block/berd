@@ -15,6 +15,8 @@ import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { sessionSearchStamp } from "@/shared/api/sessionSearch";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
 import { SearchView } from "../SearchView";
 
 const mockListSkills = vi.hoisted(() => vi.fn());
@@ -110,6 +112,12 @@ describe("SearchView", () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    // Profile capabilities resolve from this store, so a test that disables a
+    // feature toggle has to hand the next one an unloaded store back.
+    useRuntimeConfigStore.setState({
+      loaded: false,
+      config: DEFAULT_RUNTIME_CONFIG,
+    });
   });
 
   it("does not render stale or duplicate extension results", async () => {
@@ -323,6 +331,69 @@ describe("SearchView", () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("tab", { name: /Settings navigation/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("finds the telemetry toggle while the telemetry capability is available", async () => {
+    const user = userEvent.setup();
+    render(
+      <SearchView
+        variant="dialog"
+        onExit={vi.fn()}
+        onSelectSearchResult={vi.fn()}
+        onOpenExtension={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenAutomation={vi.fn()}
+        onOpenSkill={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole("textbox", { name: "Universal search" });
+    await user.type(input, "usage data");
+
+    expect(
+      await screen.findByRole("button", {
+        name: "Open Share usage data settings",
+      }),
+    ).toHaveTextContent("Settings > Share usage data");
+  });
+
+  // The row itself is hidden without the capability (TelemetryConsentRow), so
+  // the search hit has to go with it — otherwise the result navigates to a
+  // System page that renders no such control.
+  it("hides the telemetry toggle when runtime config disables telemetry", async () => {
+    useRuntimeConfigStore.setState({
+      loaded: true,
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        featureToggles: { telemetry: false },
+      },
+    });
+    mockListSkills.mockResolvedValue([]);
+    useAgentStore.setState({ personas: [] });
+    const user = userEvent.setup();
+    render(
+      <SearchView
+        variant="dialog"
+        onExit={vi.fn()}
+        onSelectSearchResult={vi.fn()}
+        onOpenExtension={vi.fn()}
+        onOpenAgent={vi.fn()}
+        onOpenAutomation={vi.fn()}
+        onOpenSkill={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    const input = screen.getByRole("textbox", { name: "Universal search" });
+    await user.type(input, "usage data");
+
+    expect(
+      await screen.findByText('No matches for "usage data"'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open Share usage data settings" }),
     ).not.toBeInTheDocument();
   });
 

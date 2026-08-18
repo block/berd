@@ -7,9 +7,17 @@ const toastMocks = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
+const agentTelemetryMocks = vi.hoisted(() => ({
+  trackAgentCreateCompleted: vi.fn(),
+  trackAgentEditCompleted: vi.fn(),
+  trackAgentDeleteCompleted: vi.fn(),
+}));
+
 vi.mock("sonner", () => ({
   toast: toastMocks,
 }));
+
+vi.mock("@/features/agents/lib/agentTelemetry", () => agentTelemetryMocks);
 
 vi.mock("@/features/agents/hooks/usePersonaSource", () => ({
   usePersonaSource: vi.fn(),
@@ -121,6 +129,9 @@ describe("AgentBuilderRail", () => {
     vi.mocked(promoteDraft).mockReset();
     toastMocks.success.mockReset();
     toastMocks.error.mockReset();
+    agentTelemetryMocks.trackAgentCreateCompleted.mockReset();
+    agentTelemetryMocks.trackAgentEditCompleted.mockReset();
+    agentTelemetryMocks.trackAgentDeleteCompleted.mockReset();
     vi.mocked(useAvatarLibrary).mockReturnValue({
       catalog: null,
       cachedAvatarMediaById: {},
@@ -463,6 +474,14 @@ describe("AgentBuilderRail", () => {
       expect(promoteDraft).toHaveBeenCalledWith("s1");
       expect(onDraftPromoted).toHaveBeenCalledWith(promotedSource);
     });
+    expect(agentTelemetryMocks.trackAgentCreateCompleted).toHaveBeenCalledTimes(
+      1,
+    );
+    expect(agentTelemetryMocks.trackAgentCreateCompleted).toHaveBeenCalledWith({
+      provider: "openai",
+      model: "gpt-5",
+    });
+    expect(agentTelemetryMocks.trackAgentEditCompleted).not.toHaveBeenCalled();
   });
 
   it("does not promote when flushing rail edits fails", async () => {
@@ -533,6 +552,142 @@ describe("AgentBuilderRail", () => {
     await waitFor(() => {
       expect(saveNow).toHaveBeenCalled();
       expect(promoteDraft).toHaveBeenCalledWith("s1");
+    });
+  });
+
+  describe("berd_agent Edit Completed", () => {
+    const existingAgentSource: AgentSourceEntry = {
+      ...baseSource,
+      path: "/Users/x/.agents/agents/code-reviewer.md",
+      name: "Code Reviewer",
+      content: "Review code carefully.",
+      properties: { provider: "openai", model: "gpt-5" },
+    };
+
+    function lastPersonaSourceOptions() {
+      return vi.mocked(usePersonaSource).mock.calls.at(-1)?.[1];
+    }
+
+    // A saveNow double that behaves like the real flush persisting
+    // `persisted`: it reports the write through the rail's onWritePersisted
+    // before resolving, exactly as usePersonaSource does.
+    function persistingSaveNow(persisted: AgentSourceEntry) {
+      return vi.fn().mockImplementation(async () => {
+        lastPersonaSourceOptions()?.onWritePersisted?.(persisted);
+        return true;
+      });
+    }
+
+    function renderExistingAgentRail() {
+      return renderWithProviders(
+        <AgentBuilderRail
+          sessionId="s1"
+          targetAgentPath={existingAgentSource.path}
+          targetAgentSlug="code-reviewer"
+        />,
+      );
+    }
+
+    it("does not fire for a no-op Save with nothing to persist", async () => {
+      const { saveNow } = mockHook({ data: existingAgentSource });
+      vi.mocked(promoteDraft).mockResolvedValue(existingAgentSource);
+      renderExistingAgentRail();
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+      await waitFor(() => {
+        expect(saveNow).toHaveBeenCalled();
+        expect(promoteDraft).toHaveBeenCalledWith("s1");
+      });
+      expect(
+        agentTelemetryMocks.trackAgentEditCompleted,
+      ).not.toHaveBeenCalled();
+      expect(
+        agentTelemetryMocks.trackAgentCreateCompleted,
+      ).not.toHaveBeenCalled();
+    });
+
+    it("fires once from the persisted write when a real edit saves", async () => {
+      const persisted = {
+        ...existingAgentSource,
+        name: "Code Reviewer Deluxe",
+      };
+      mockHook({
+        data: existingAgentSource,
+        saveNow: persistingSaveNow(persisted),
+      });
+      vi.mocked(promoteDraft).mockResolvedValue(persisted);
+      renderExistingAgentRail();
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+      await waitFor(() => {
+        expect(promoteDraft).toHaveBeenCalledWith("s1");
+      });
+      expect(agentTelemetryMocks.trackAgentEditCompleted).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(agentTelemetryMocks.trackAgentEditCompleted).toHaveBeenCalledWith({
+        provider: "openai",
+        model: "gpt-5",
+      });
+      expect(
+        agentTelemetryMocks.trackAgentCreateCompleted,
+      ).not.toHaveBeenCalled();
+    });
+
+    it("still fires when the post-save source lookup comes back empty", async () => {
+      const persisted = {
+        ...existingAgentSource,
+        name: "Code Reviewer Deluxe",
+      };
+      const saveNow = persistingSaveNow(persisted);
+      mockHook({ data: existingAgentSource, saveNow });
+      vi.mocked(promoteDraft).mockResolvedValue(null);
+      renderExistingAgentRail();
+
+      fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+      await waitFor(() => {
+        expect(saveNow).toHaveBeenCalled();
+        expect(promoteDraft).toHaveBeenCalledWith("s1");
+      });
+      expect(agentTelemetryMocks.trackAgentEditCompleted).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(agentTelemetryMocks.trackAgentEditCompleted).toHaveBeenCalledWith({
+        provider: "openai",
+        model: "gpt-5",
+      });
+    });
+
+    it("tracks non-draft persisted writes and stays silent for draft writes", () => {
+      mockHook();
+      renderWithProviders(
+        <AgentBuilderRail
+          sessionId="s1"
+          targetAgentPath={baseSource.path}
+          targetAgentSlug="draft-1"
+        />,
+      );
+      const options = lastPersonaSourceOptions();
+
+      // A draft write is the create flow's incremental auto-save.
+      options?.onWritePersisted?.(baseSource);
+      expect(
+        agentTelemetryMocks.trackAgentEditCompleted,
+      ).not.toHaveBeenCalled();
+
+      // A non-draft write is a real edit no matter which caller ran saveNow
+      // (Save button, leave-builder Keep, builder close).
+      options?.onWritePersisted?.(existingAgentSource);
+      expect(agentTelemetryMocks.trackAgentEditCompleted).toHaveBeenCalledTimes(
+        1,
+      );
+      expect(agentTelemetryMocks.trackAgentEditCompleted).toHaveBeenCalledWith({
+        provider: "openai",
+        model: "gpt-5",
+      });
     });
   });
 

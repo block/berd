@@ -5,7 +5,6 @@ import {
   submitFeedbackIssue,
 } from "@/shared/api/feedback";
 import { getPlatform } from "@/shared/lib/platform";
-import { trackFeedbackSubmitted } from "@/shared/telemetry/client";
 
 export interface SubmitFeedbackReportInput {
   title: string;
@@ -44,7 +43,7 @@ export async function submitFeedbackReport(
   }
 
   input.beforeSubmit?.();
-  const result = await submitFeedbackIssue({
+  return await submitFeedbackIssue({
     title: `${input.title.trim()}${input.titleSuffix ?? ""}`,
     description: buildEnhancedDescription(
       input.description.trim(),
@@ -58,8 +57,6 @@ export async function submitFeedbackReport(
     doctorReport,
     labelIds: input.labelIds,
   });
-  trackFeedbackSubmitted();
-  return result;
 }
 
 export function buildEnhancedDescription(

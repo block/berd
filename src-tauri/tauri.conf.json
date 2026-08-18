@@ -34,7 +34,7 @@
     "security": {
       "csp": {
         "default-src": "'self' asset:",
-        "connect-src": "'self' ipc: asset: http://asset.localhost http://ipc.localhost http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:* data: https:",
+        "connect-src": "'self' ipc: asset: http://asset.localhost http://ipc.localhost http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:* data: https: https://otel.berd.xyz/v1/logs https://otel.berd.xyz/v1/bootstrap https://otel.test.blockstaging.build/v1/logs https://otel.test.blockstaging.build/v1/bootstrap https://otlp.invalid.goose-internal.example/v1/logs https://otlp.invalid.goose-internal.example/v1/bootstrap",
         "font-src": "'self'",
         "img-src": "'self' asset: http://asset.localhost blob: data: https://models.dev",
         "media-src": "'self' asset: http://asset.localhost blob: data:",

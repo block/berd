@@ -26,6 +26,7 @@ import {
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
+import { telemetryConsentEnforced } from "@/shared/telemetry/consent";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { selectLocalMessageCountsBySession } from "@/features/chat/stores/chatSelectors";
 import {
@@ -186,10 +187,22 @@ export function SearchView({
         enabled: Boolean(onOpenSettings),
         translate: (key) => t(`settings:${key}`),
         visibleSections: visibleSettingsSections,
-        hiddenItemIds: capabilities.agentTools ? [] : ["chat-tips"],
+        // Hidden entries mirror rows their pages do not render: chat tips
+        // without agent tools, and the telemetry toggle both in enforced
+        // builds and without the `telemetry` capability, which is what
+        // TelemetryConsentRow itself hides on
+        // (telemetryConsentEnforced() is a build constant, so it needs no
+        // memo dependency; the capability is reactive and does).
+        hiddenItemIds: [
+          ...(capabilities.agentTools ? [] : ["chat-tips"]),
+          ...(telemetryConsentEnforced() || !capabilities.telemetry
+            ? ["telemetry"]
+            : []),
+        ],
       }),
     [
       capabilities.agentTools,
+      capabilities.telemetry,
       onOpenSettings,
       t,
       trimmedDebouncedQuery,

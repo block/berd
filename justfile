@@ -213,7 +213,10 @@ _tauri-check-unix:
 _tauri-check-windows:
     just tauri-check-windows
 
-# Run the Rust plugin tests with external sidecars disabled.
+# Run the Rust plugin and app-crate telemetry tests with external sidecars
+# disabled. The telemetry lanes filter the app lib's tests by name — the
+# `commands::telemetry` module path matches wholesale — and run twice because
+# the `block-telemetry-enforced` feature swaps in the enforced-consent tests.
 tauri-test:
     just _tauri-test-{{ os_family() }}
 
@@ -221,11 +224,15 @@ tauri-test:
 _tauri-test-unix:
     just _tauri-cargo-unix test -p tauri-plugin-berdctl --features server
     just _tauri-cargo-unix test -p berdctl
+    just _tauri-cargo-unix test --lib telemetry
+    just _tauri-cargo-unix test --lib --features block-telemetry-enforced telemetry
 
 [windows]
 _tauri-test-windows:
     just _tauri-cargo-windows test -p tauri-plugin-berdctl --features server
     just _tauri-cargo-windows test -p berdctl
+    just _tauri-cargo-windows test --lib telemetry
+    just _tauri-cargo-windows test --lib --features block-telemetry-enforced telemetry
 
 # Run the local CI gate.
 ci: release-version-check check tauri-fmt-check tauri-check tauri-test clippy test release-scripts-test build
@@ -334,21 +341,10 @@ _bundle-unix:
     VITE_FEEDBACK="${VITE_FEEDBACK:-0}" CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-catch-sidecar.sh
 
-    CARGO_FEATURES=(berdctl)
-    [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]] && CARGO_FEATURES+=(block-agent-tools)
-    [[ "${VITE_AUTOMATIONS:-0}" == "1" ]] && CARGO_FEATURES+=(block-automations)
-    [[ "${VITE_BUILDERBOT:-0}" == "1" ]] && CARGO_FEATURES+=(block-builderbot)
-    [[ "${VITE_FEEDBACK:-0}" == "1" ]] && CARGO_FEATURES+=(block-feedback)
-    [[ "${VITE_MANAGED_CONNECTIONS:-0}" == "1" ]] && CARGO_FEATURES+=(block-managed-connections)
-    if [[ "${VITE_VOICE_DICTATION:-0}" == "1" ]]; then
-      CARGO_FEATURES+=(block-voice-dictation)
-    else
-      CARGO_FEATURES+=(no-voice-dictation)
-    fi
+    CARGO_FEATURES_CSV="$(./scripts/block-feature-gates.sh berdctl)"
     if [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]]; then
       ./scripts/prepare-bb-cli-resource.sh
     fi
-    CARGO_FEATURES_CSV="$(IFS=,; echo "${CARGO_FEATURES[*]}")"
 
     # Derive a git-based version so non-release bundles don't ship the 0.1.0
     # placeholder. Injected via a temp --config overlay to keep the tree clean.
@@ -424,21 +420,10 @@ _bundle-debug-unix:
     VITE_FEEDBACK="${VITE_FEEDBACK:-0}" CARGO_TARGET_DIR="$TAURI_CARGO_TARGET_DIR" ./scripts/prepare-berdctl-sidecar.sh
     ./scripts/prepare-catch-sidecar.sh
 
-    CARGO_FEATURES=(berdctl devtools)
-    [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]] && CARGO_FEATURES+=(block-agent-tools)
-    [[ "${VITE_AUTOMATIONS:-0}" == "1" ]] && CARGO_FEATURES+=(block-automations)
-    [[ "${VITE_BUILDERBOT:-0}" == "1" ]] && CARGO_FEATURES+=(block-builderbot)
-    [[ "${VITE_FEEDBACK:-0}" == "1" ]] && CARGO_FEATURES+=(block-feedback)
-    [[ "${VITE_MANAGED_CONNECTIONS:-0}" == "1" ]] && CARGO_FEATURES+=(block-managed-connections)
-    if [[ "${VITE_VOICE_DICTATION:-0}" == "1" ]]; then
-      CARGO_FEATURES+=(block-voice-dictation)
-    else
-      CARGO_FEATURES+=(no-voice-dictation)
-    fi
+    CARGO_FEATURES_CSV="$(./scripts/block-feature-gates.sh berdctl,devtools)"
     if [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]]; then
       ./scripts/prepare-bb-cli-resource.sh
     fi
-    CARGO_FEATURES_CSV="$(IFS=,; echo "${CARGO_FEATURES[*]}")"
 
     # Use a temporary config overlay so normal release bundles keep devtools
     # disabled, and fold in the git-derived version so the bundle doesn't ship

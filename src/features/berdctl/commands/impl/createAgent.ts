@@ -48,6 +48,10 @@ Result:
       import("@/features/agents/stores/agentStore"),
       import("@/shared/api/agents"),
     ]);
+    // Deliberately no berd_agent Create Completed telemetry: berdctl creates
+    // are agent/automation-driven, and the event tracks human-driven UI
+    // surfaces only — matching the documented berdctl exclusion in the chat
+    // send path (fireChatSendTelemetry in useChatSessionController).
     const persona = await createPersona({
       displayName: args.name,
       systemPrompt: args.system_prompt,

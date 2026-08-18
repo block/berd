@@ -2,7 +2,18 @@ import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { LayoutConstraints } from "@/features/layout/api/layout";
-import { areSkillPinIdsEquivalent } from "@/features/home/lib/skillPinIdentity";
+import {
+  recordHomeItemPinIntent,
+  recordHomeItemUnpinIntent,
+} from "../lib/homePinTelemetry";
+import {
+  findPinnedHomeWidgetId,
+  isPinnedToHome,
+  normalizedTargetId,
+  PIN_TARGET_CONFIG,
+  type PinToHomeTarget,
+  type PinToHomeTargetKind,
+} from "../lib/homePinTargets";
 import { clampToLayoutConstraints, snapPoint } from "../lib/snapToGrid";
 import { useHomeWidgetStore } from "../stores/homeWidgetStore";
 import {
@@ -11,31 +22,9 @@ import {
 } from "../widgets/catalog";
 import type { WidgetInstance, WidgetSize } from "../widgets/types";
 
-const PIN_TARGET_CONFIG = {
-  agent: { widgetType: "agentPin", stateKey: "agentId" },
-  chat: { widgetType: "chatPin", stateKey: "sessionId" },
-  project: { widgetType: "projectArtifactPin", stateKey: "projectId" },
-  automation: { widgetType: "automationOutputPin", stateKey: "automationId" },
-  skill: { widgetType: "skillPin", stateKey: "skillId" },
-} as const;
-
 const PLACEMENT_PADDING = 24;
 const PLACEMENT_STEP = 72;
 const PLACEMENT_ATTEMPTS = 36;
-
-export type PinToHomeTargetKind = keyof typeof PIN_TARGET_CONFIG;
-
-export interface PinToHomeTarget {
-  kind: PinToHomeTargetKind;
-  id: string | null | undefined;
-  /** All historical pin ids this target's current id should still resolve
-   *  for. See areSkillPinIdsEquivalent. */
-  legacyIds?: readonly string[] | null;
-}
-
-function normalizedTargetId(id: string | null | undefined): string | null {
-  return typeof id === "string" && id.trim() ? id.trim() : null;
-}
 
 function rectsOverlap(
   left: { x: number; y: number; width: number; height: number },
@@ -151,38 +140,6 @@ export function choosePinPlacementCenter({
   return centerForTopLeft(topLeft, defaultSize);
 }
 
-export function isPinnedToHome(
-  instances: WidgetInstance[],
-  target: PinToHomeTarget,
-): boolean {
-  return findPinnedHomeWidgetId(instances, target) !== null;
-}
-
-function findPinnedHomeWidgetId(
-  instances: WidgetInstance[],
-  target: PinToHomeTarget,
-): string | null {
-  const targetId = normalizedTargetId(target.id);
-  if (!targetId) {
-    return null;
-  }
-
-  const config = PIN_TARGET_CONFIG[target.kind];
-  return (
-    instances.find((instance) => {
-      if (instance.type !== config.widgetType) return false;
-      const pinnedId = instance.state?.[config.stateKey];
-      return target.kind === "skill"
-        ? areSkillPinIdsEquivalent(
-            typeof pinnedId === "string" ? pinnedId : null,
-            targetId,
-            target.legacyIds,
-          )
-        : pinnedId === targetId;
-    })?.id ?? null
-  );
-}
-
 export function usePinToHomeWidget(target: PinToHomeTarget) {
   const { t } = useTranslation("home");
   const [isPinning, setIsPinning] = useState(false);
@@ -219,6 +176,7 @@ export function usePinToHomeWidget(target: PinToHomeTarget) {
       }
 
       state.removeWidget(currentPinnedWidgetId);
+      recordHomeItemUnpinIntent({ kind, itemId: targetId, legacyIds });
       toast.success(t("widgets.unpinFromHome.success"));
     } catch {
       toast.error(t("widgets.unpinFromHome.error"));
@@ -270,6 +228,7 @@ export function usePinToHomeWidget(target: PinToHomeTarget) {
         { [config.stateKey]: targetId },
         readyState.constraints ?? undefined,
       );
+      recordHomeItemPinIntent({ kind, itemId: targetId, legacyIds });
       toast.success(t("widgets.pinToHome.success"));
     } catch {
       toast.error(t("widgets.pinToHome.error"));
@@ -373,6 +332,7 @@ export function usePinBatchToHome() {
             { [config.stateKey]: id },
             readyState.constraints ?? undefined,
           );
+          recordHomeItemPinIntent({ kind, itemId: id });
         });
 
         if (skipped > 0) {
@@ -423,6 +383,7 @@ export function usePinBatchToHome() {
           });
           if (widgetId) {
             state.removeWidget(widgetId);
+            recordHomeItemUnpinIntent({ kind, itemId: id });
             removed += 1;
           }
         }

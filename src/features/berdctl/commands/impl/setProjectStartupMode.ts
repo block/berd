@@ -172,6 +172,13 @@ Result:
       );
     }
 
+    // Deliberately no berd_project Edit Completed telemetry: this rewrite of
+    // projectWorkspaces/workingDirs/useWorktrees is a genuine configuration
+    // edit by the event's own params, but berdctl mutations are
+    // agent/automation-driven and the event tracks human-driven UI surfaces
+    // only — matching the documented berdctl exclusions in the chat send path
+    // (fireChatSendTelemetry in useChatSessionController) and `berdctl agent
+    // create` (createAgent.ts).
     const updated = await useProjectStore.getState().editProject(
       project.id,
       project.name,

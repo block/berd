@@ -17,6 +17,10 @@ export interface OnboardingState {
   selectedAgentId: string | null;
   selectedHarnessId: string | null;
   completedHarnessSetupIds: string[];
+  // null means the welcome consent ceremony has never been completed; the
+  // answer is recorded when the user advances past the landing page, not per
+  // checkbox toggle, so declining is still just leaving the page.
+  shareUsageData: boolean | null;
 }
 
 export const INITIAL_ONBOARDING_STATE: Readonly<OnboardingState> = {
@@ -26,6 +30,7 @@ export const INITIAL_ONBOARDING_STATE: Readonly<OnboardingState> = {
   selectedAgentId: null,
   selectedHarnessId: null,
   completedHarnessSetupIds: [],
+  shareUsageData: null,
 };
 
 export type OnboardingAction =
@@ -38,6 +43,7 @@ export type OnboardingAction =
   | { type: "select-agent"; agentId: string | null }
   | { type: "select-harness"; harnessId: string | null }
   | { type: "complete-harness-setup"; harnessId: string }
+  | { type: "set-share-usage-data"; shareUsageData: boolean }
   | { type: "complete" }
   | { type: "replay" }
   | { type: "reset" };
@@ -107,6 +113,8 @@ export function onboardingReducer(
           action.harnessId,
         ]),
       };
+    case "set-share-usage-data":
+      return { ...state, shareUsageData: action.shareUsageData };
     case "complete":
       return { ...state, lifecycle: "completed", step: "complete" };
     case "replay":
@@ -115,8 +123,10 @@ export function onboardingReducer(
         lifecycle: "in-progress",
         step: "welcome",
         // Replay resets the presentation, not durable product outcomes. A
-        // provider configured during onboarding remains configured.
+        // provider configured during onboarding remains configured, and a
+        // consent answer already given stays answered.
         completedHarnessSetupIds: state.completedHarnessSetupIds,
+        shareUsageData: state.shareUsageData,
       };
     case "reset":
       return { ...INITIAL_ONBOARDING_STATE };

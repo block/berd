@@ -218,11 +218,6 @@
     "defaultLabel": "predeterminado",
     "description": "Activa funciones de Berd en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
     "emptyDescription": "Los nuevos experimentos aparecerán aquí cuando estén listos para probarse.",
-    "firstRunOnboarding": {
-      "description": "Previsualiza el nuevo flujo de incorporación de la primera instalación. El progreso sin terminar se reanuda cuando se vuelve a activar el experimento.",
-      "replay": "Repetir incorporación",
-      "title": "Incorporación del primer inicio"
-    },
     "onboarding": {
       "cancel": "Cancelar",
       "confirm": "Restablecer lienzo",
@@ -466,6 +461,23 @@
       "youHaveGotGoose": "Twinkle"
     },
     "title": "Notificaciones"
+  },
+  "privacy": {
+    "telemetry": {
+      "description": "Ayuda a mejorar Berd compartiendo eventos de uso, como qué funciones se usan. El contenido de los chats nunca se envía.",
+      "label": "Compartir datos de uso",
+      "learnMore": "Más información",
+      "saveError": "No se pudo actualizar la configuración de datos de uso. Inténtalo de nuevo.",
+      "usageDialog": {
+        "collectBody": "Eventos de uso, como las funciones utilizadas, errores y rendimiento, vinculados a un identificador de instalación aleatorio.",
+        "collectTitle": "Qué recopilamos",
+        "intro": "Usamos un identificador de instalación aleatorio, no tu identidad, para saber cómo se usa Berd y corregir lo que no funciona.",
+        "notCollectBody": "Tu nombre, correo electrónico o cuenta. Berd no requiere iniciar sesión, así que no hay nada que vincule los datos contigo.",
+        "notCollectTitle": "Qué no recopilamos",
+        "title": "Compartir datos de uso"
+      }
+    },
+    "title": "Privacidad"
   },
   "projects": {
     "empty": "No hay proyectos archivados.",

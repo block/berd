@@ -46,6 +46,11 @@ import {
 } from "@/features/agents/lib/personaImport";
 import { isEmptyAgentsGallerySimulated } from "@/features/agents/lib/emptyGallerySimulation";
 import { canDeletePersona } from "@/features/agents/lib/personaPresentation";
+import {
+  trackAgentCreateCompleted,
+  trackAgentDeleteCompleted,
+  trackAgentEditCompleted,
+} from "@/features/agents/lib/agentTelemetry";
 import { runAgentViewTransition } from "@/features/agents/lib/agentViewTransitions";
 import { deleteDraftAgentSession } from "@/features/agents/lib/agentBuilderSession";
 import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
@@ -274,13 +279,18 @@ export function AgentsView({
   const handleDuplicatePersona = useCallback(
     async (persona: Persona) => {
       try {
-        await createPersona({
+        const created = await createPersona({
           displayName: t("view.copyName", { name: persona.displayName }),
           avatar: persona.avatar ?? undefined,
           systemPrompt: persona.systemPrompt,
           provider: persona.provider,
           modelProviderId: persona.modelProviderId,
           model: persona.model,
+        });
+        // Completed on confirmed success, after the duplicate is persisted.
+        trackAgentCreateCompleted({
+          provider: created.provider,
+          model: created.model,
         });
         toast.success(t("editor.duplicated"));
       } catch (error) {
@@ -293,7 +303,12 @@ export function AgentsView({
   const handleUpdateAvatar = useCallback(
     async (persona: Persona, avatar: string | null) => {
       try {
-        await updatePersonaViaHook(persona, { avatar });
+        const updated = await updatePersonaViaHook(persona, { avatar });
+        // Completed on confirmed success, after the avatar edit persists.
+        trackAgentEditCompleted({
+          provider: updated.provider,
+          model: updated.model,
+        });
         toast.success(t("editor.updated"));
       } catch (error) {
         toast.error(formatAgentError(error, t("editor.saveFailed")));
@@ -316,6 +331,8 @@ export function AgentsView({
     if (!deletingPersona) return;
     try {
       await deletePersona(deletingPersona.id);
+      // Completed on confirmed success, after the delete resolves.
+      trackAgentDeleteCompleted();
       if (currentActivePersonaId === deletingPersona.id) {
         setActivePersona(null, { replace: true });
       }
@@ -374,6 +391,11 @@ export function AgentsView({
         // submits the reviewed selection. Do not independently reinterpret it
         // here or the persisted request can drift from what the user saw.
         const created = await createPersona(request);
+        // Completed on confirmed success, after the create resolves.
+        trackAgentCreateCompleted({
+          provider: created.provider,
+          model: created.model,
+        });
         setImageImport(null);
         setActivePersona(created.id);
         toast.success(t("imageImport.added"));
@@ -410,6 +432,14 @@ export function AgentsView({
     async (fileContents: string, fileName: string) => {
       try {
         const imported = await importPersonas(fileContents, fileName);
+        // Completed once per persona the import actually created (a native
+        // JSON export can carry several), after the creates resolve.
+        for (const persona of imported) {
+          trackAgentCreateCompleted({
+            provider: persona.provider,
+            model: persona.model,
+          });
+        }
         await refreshFromDisk();
         const message = formatImportSuccessMessage(imported.length);
         toast.success(t(message.key, message.options));

@@ -44,6 +44,11 @@ Result:
       import("@/features/projects/lib/projectIcons"),
       import("@/features/projects/stores/projectStore"),
     ]);
+    // Deliberately no berd_project Create Completed telemetry: berdctl
+    // creates are agent/automation-driven, and the event tracks human-driven
+    // UI surfaces only — matching the documented berdctl exclusions in the
+    // chat send path (fireChatSendTelemetry in useChatSessionController) and
+    // `berdctl agent create` (createAgent.ts).
     const project = await useProjectStore
       .getState()
       .addProject(

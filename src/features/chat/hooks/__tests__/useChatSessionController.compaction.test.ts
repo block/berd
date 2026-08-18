@@ -370,7 +370,13 @@ describe("useChatSessionController compaction behavior", () => {
     });
 
     expect(mockCompactConversation).toHaveBeenCalledOnce();
-    expect(mockSendMessage).toHaveBeenCalledWith("hello", undefined, undefined);
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      "hello",
+      undefined,
+      undefined,
+      // The chat send telemetry commit hook rides on every foreground send.
+      expect.objectContaining({ onUserMessageCommitted: expect.any(Function) }),
+    );
     expect(mockCompactConversation.mock.invocationCallOrder[0]).toBeLessThan(
       mockSendMessage.mock.invocationCallOrder[0],
     );
@@ -395,7 +401,13 @@ describe("useChatSessionController compaction behavior", () => {
     });
 
     expect(mockCompactConversation).toHaveBeenCalledOnce();
-    expect(mockSendMessage).toHaveBeenCalledWith("hello", undefined, undefined);
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      "hello",
+      undefined,
+      undefined,
+      // The chat send telemetry commit hook rides on every foreground send.
+      expect.objectContaining({ onUserMessageCommitted: expect.any(Function) }),
+    );
   });
 
   it("keeps compaction enabled for goose agent sessions backed by model providers", async () => {
@@ -424,7 +436,13 @@ describe("useChatSessionController compaction behavior", () => {
     });
 
     expect(mockCompactConversation).toHaveBeenCalledOnce();
-    expect(mockSendMessage).toHaveBeenCalledWith("hello", undefined, undefined);
+    expect(mockSendMessage).toHaveBeenCalledWith(
+      "hello",
+      undefined,
+      undefined,
+      // The chat send telemetry commit hook rides on every foreground send.
+      expect.objectContaining({ onUserMessageCommitted: expect.any(Function) }),
+    );
   });
 
   it("compacts the queued persona session before sending", async () => {
@@ -459,6 +477,7 @@ describe("useChatSessionController compaction behavior", () => {
       "hello",
       { id: "persona-a" },
       undefined,
+      expect.objectContaining({ onUserMessageCommitted: expect.any(Function) }),
     );
   });
 
@@ -490,6 +509,7 @@ describe("useChatSessionController compaction behavior", () => {
       "hello",
       { id: null },
       undefined,
+      expect.objectContaining({ onUserMessageCommitted: expect.any(Function) }),
     );
   });
 
@@ -534,6 +554,7 @@ describe("useChatSessionController compaction behavior", () => {
       "hello",
       { id: "persona-a" },
       undefined,
+      expect.objectContaining({ onUserMessageCommitted: expect.any(Function) }),
     );
   });
 
@@ -573,6 +594,7 @@ describe("useChatSessionController compaction behavior", () => {
       "hello",
       { id: "persona-a" },
       undefined,
+      expect.objectContaining({ onUserMessageCommitted: expect.any(Function) }),
     );
   });
 });

@@ -102,6 +102,9 @@ VITE_AUTOMATIONS_VALUE="${VITE_AUTOMATIONS:-0}"
 VITE_BUILDERBOT_VALUE="${VITE_BUILDERBOT:-0}"
 VITE_FEEDBACK_VALUE="${VITE_FEEDBACK:-0}"
 VITE_MANAGED_CONNECTIONS_VALUE="${VITE_MANAGED_CONNECTIONS:-0}"
+# Managed internal distributions force telemetry consent ON and hide the
+# settings toggle; public builds leave consent to the user (default OFF).
+VITE_TELEMETRY_ENFORCED_VALUE="${VITE_TELEMETRY_ENFORCED:-0}"
 VITE_VOICE_DICTATION_VALUE="${VITE_VOICE_DICTATION:-0}"
 VITE_BYO_KEY_PROVIDERS_VALUE="${VITE_BYO_KEY_PROVIDERS:-1}"
 # Public builds have no external security classifier. Internal distributions may
@@ -139,6 +142,9 @@ set_vite_env() {
       ;;
     VITE_MANAGED_CONNECTIONS)
       VITE_MANAGED_CONNECTIONS_VALUE="$value"
+      ;;
+    VITE_TELEMETRY_ENFORCED)
+      VITE_TELEMETRY_ENFORCED_VALUE="$value"
       ;;
     VITE_VOICE_DICTATION)
       VITE_VOICE_DICTATION_VALUE="$value"
@@ -395,10 +401,10 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
 fi
 
 
-# Resolve the six independent Block-service product gates into matching
+# Resolve the seven independent Block-service product gates into matching
 # renderer and backend/package gates. Values are positive opt-ins: absent is
 # public-off and no runtime config can revive a build-disabled family.
-for value in "$VITE_AGENT_TOOLS_VALUE" "$VITE_AUTOMATIONS_VALUE" "$VITE_BUILDERBOT_VALUE" "$VITE_FEEDBACK_VALUE" "$VITE_MANAGED_CONNECTIONS_VALUE" "$VITE_VOICE_DICTATION_VALUE"; do
+for value in "$VITE_AGENT_TOOLS_VALUE" "$VITE_AUTOMATIONS_VALUE" "$VITE_BUILDERBOT_VALUE" "$VITE_FEEDBACK_VALUE" "$VITE_MANAGED_CONNECTIONS_VALUE" "$VITE_TELEMETRY_ENFORCED_VALUE" "$VITE_VOICE_DICTATION_VALUE"; do
   [[ "$value" == "0" || "$value" == "1" ]] || { echo "Block-service feature gates must be 0 or 1" >&2; exit 1; }
 done
 [[ "$VITE_AGENT_TOOLS_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-agent-tools"
@@ -406,6 +412,10 @@ done
 [[ "$VITE_BUILDERBOT_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-builderbot"
 [[ "$VITE_FEEDBACK_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-feedback"
 [[ "$VITE_MANAGED_CONNECTIONS_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-managed-connections"
+# The renderer flag and the Cargo feature must move together: the flag skips
+# the user setting in Gate A and hides the toggle, the feature does the same
+# for the native Gate B in export_otel_logs.
+[[ "$VITE_TELEMETRY_ENFORCED_VALUE" == "1" ]] && CARGO_FEATURES="$CARGO_FEATURES,block-telemetry-enforced"
 if [[ "$VITE_VOICE_DICTATION_VALUE" == "1" ]]; then
   CARGO_FEATURES="$CARGO_FEATURES,block-voice-dictation"
 else
@@ -478,6 +488,7 @@ env \
   VITE_BUILDERBOT="$VITE_BUILDERBOT_VALUE" \
   VITE_FEEDBACK="$VITE_FEEDBACK_VALUE" \
   VITE_MANAGED_CONNECTIONS="$VITE_MANAGED_CONNECTIONS_VALUE" \
+  VITE_TELEMETRY_ENFORCED="$VITE_TELEMETRY_ENFORCED_VALUE" \
   VITE_VOICE_DICTATION="$VITE_VOICE_DICTATION_VALUE" \
   VITE_BYO_KEY_PROVIDERS="$VITE_BYO_KEY_PROVIDERS_VALUE" \
   VITE_SECURITY_ML="$VITE_SECURITY_ML_VALUE" \

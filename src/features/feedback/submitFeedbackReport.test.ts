@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { runDoctor } from "@/shared/api/doctor";
 import { submitFeedbackIssue } from "@/shared/api/feedback";
-import { trackFeedbackSubmitted } from "@/shared/telemetry/client";
 import { submitFeedbackReport } from "./submitFeedbackReport";
 
 const mockGetVersion = vi.hoisted(() => vi.fn());
@@ -10,9 +9,6 @@ vi.mock("@tauri-apps/api/app", () => ({ getVersion: mockGetVersion }));
 vi.mock("@/shared/lib/platform", () => ({ getPlatform: () => "mac" }));
 vi.mock("@/shared/api/doctor", () => ({ runDoctor: vi.fn() }));
 vi.mock("@/shared/api/feedback", () => ({ submitFeedbackIssue: vi.fn() }));
-vi.mock("@/shared/telemetry/client", () => ({
-  trackFeedbackSubmitted: vi.fn(),
-}));
 
 describe("submitFeedbackReport", () => {
   beforeEach(() => {
@@ -42,7 +38,6 @@ describe("submitFeedbackReport", () => {
       doctorReport: null,
       labelIds: undefined,
     });
-    expect(trackFeedbackSubmitted).toHaveBeenCalledOnce();
   });
 
   it("runs Doctor only after explicit diagnostics opt-in", async () => {
@@ -81,7 +76,7 @@ describe("submitFeedbackReport", () => {
     );
   });
 
-  it("does not track telemetry when submission fails", async () => {
+  it("propagates a submission failure to the caller", async () => {
     vi.mocked(submitFeedbackIssue).mockRejectedValue(new Error("offline"));
 
     await expect(
@@ -91,6 +86,5 @@ describe("submitFeedbackReport", () => {
         includeLogs: false,
       }),
     ).rejects.toThrow("offline");
-    expect(trackFeedbackSubmitted).not.toHaveBeenCalled();
   });
 });

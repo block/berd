@@ -33,9 +33,50 @@ function resolveAppVersion(): string {
   return process.env.VITE_APP_VERSION?.trim() || packageJson.version;
 }
 
+// Telemetry-gateway endpoints, in the shape the pipeline expects: the full
+// `https://<host>/v1/logs` URL. The native layer derives the anonymous
+// `/v1/bootstrap` URL from this same endpoint, so only the logs URL is ever
+// injected. An endpoint host lives at four sites that change together, with
+// no code-path changes: this default (or VITE_OTLP_LOGS_ENDPOINT in the build
+// env), ALLOWED_OTEL_LOGS_HOSTS in src-tauri/src/commands/telemetry.rs,
+// tauri.conf.json's CSP connect-src, and the pinned test values.
+//
+// The production gateway (squareup/berd-monitoring's production deployment) —
+// injected whenever VITE_ENVIRONMENT=production.
+const PRODUCTION_OTLP_LOGS_ENDPOINT = "https://otel.berd.xyz/v1/logs";
+
+// The staging gateway (squareup/berd-monitoring's staging deployment) —
+// injected whenever VITE_ENVIRONMENT=staging.
+const STAGING_OTLP_LOGS_ENDPOINT =
+  "https://otel.test.blockstaging.build/v1/logs";
+
+// DUMMY placeholder for development. The telemetry send path (OTel logs over
+// OTLP) is gated to production/staging, so this fake host is never contacted
+// in dev or external clones.
+const DUMMY_OTLP_LOGS_ENDPOINT =
+  "https://otlp.invalid.goose-internal.example/v1/logs";
+
+function resolveOtlpLogsEndpoint(): string {
+  const explicit = process.env.VITE_OTLP_LOGS_ENDPOINT?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  switch (resolveBuildEnvironment()) {
+    case "production":
+      return PRODUCTION_OTLP_LOGS_ENDPOINT;
+    case "staging":
+      return STAGING_OTLP_LOGS_ENDPOINT;
+    case "development":
+      return DUMMY_OTLP_LOGS_ENDPOINT;
+  }
+}
+
 export default defineConfig(async ({ command }) => {
   const define: Record<string, string> = {
     "import.meta.env.VITE_APP_VERSION": JSON.stringify(resolveAppVersion()),
+    "import.meta.env.VITE_OTLP_LOGS_ENDPOINT": JSON.stringify(
+      resolveOtlpLogsEndpoint(),
+    ),
   };
 
   // Generic builds must stay telemetry-inert unless a release/staging path

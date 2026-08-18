@@ -120,7 +120,11 @@ pub fn run() {
                     APP_LOG_ARCHIVES_KEPT,
                 ))
                 .targets([
-                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    // The Stdout formatter greys dev-time telemetry-viewer
+                    // records; the LogDir target keeps no formatter so the
+                    // ANSI escapes never reach `berd.log`.
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout)
+                        .format(commands::renderer::stdout_log_format),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
                         file_name: Some("berd".into()),
                     }),
@@ -211,6 +215,34 @@ pub fn run() {
             app.manage(commands::pocket_voice::PocketVoiceState::default());
             app.manage(commands::native_voice::NativeVoiceState::default());
             app.manage(commands::voice_capture::VoiceCaptureState::default());
+            app.manage(commands::telemetry::TelemetryAuthState::new(
+                app_data_dir.clone(),
+            ));
+            let (installation_cohort_sender, installation_cohort_state) =
+                services::installation_cohort::installation_cohort_channel();
+            app.manage(installation_cohort_state);
+            let current_layout_exists =
+                services::installation_cohort::layout_database_exists(&app_data_dir);
+            let legacy_layout_exists = if app.try_state::<services::e2e_mode::E2eMode>().is_some() {
+                Ok(false)
+            } else {
+                services::app_data_migration::legacy_layout_database_exists(app.handle())
+            };
+            let installation_cohort =
+                services::installation_cohort::initialize_installation_cohort(
+                    &app_data_dir,
+                    current_layout_exists,
+                    legacy_layout_exists,
+                )
+                .unwrap_or_else(|error| {
+                    log::warn!("Failed to initialize installation cohort: {error}");
+                    services::installation_cohort::InstallationCohort::Unknown
+                });
+            installation_cohort_sender.send_replace(
+                services::installation_cohort::InstallationCohortReadiness::Ready(
+                    installation_cohort,
+                ),
+            );
             let release_channel_state = commands::updates::ReleaseChannelState::load(app.handle())?;
             app.manage(release_channel_state);
 
@@ -484,6 +516,10 @@ pub fn run() {
             commands::builderbot::update_builderbot_scheduled_trigger,
             #[cfg(feature = "block-builderbot")]
             commands::builderbot::update_builderbot_routing_rule,
+            commands::telemetry::export_otel_logs,
+            commands::telemetry::get_telemetry_resource,
+            commands::telemetry::get_telemetry_settings,
+            commands::telemetry::set_telemetry_enabled,
             commands::whoami::whoami,
             commands::acp::get_goose_serve_url,
             commands::acp::get_goose_serve_host_info,
@@ -510,6 +546,7 @@ pub fn run() {
             commands::git::git_create_worktree,
             commands::git::git_remove_worktree,
             commands::home_widget_media::import_home_widget_photo,
+            commands::installation::get_installation_cohort,
             commands::layout::get_layout,
             commands::layout::save_layout_items,
             commands::layout::save_layout_camera,

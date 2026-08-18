@@ -105,6 +105,14 @@ import {
   recoverStrandedProviderSession,
   type RecreateSessionForProvider,
 } from "../model-selection/strandedProviderRecovery";
+import { perfLog } from "@/shared/lib/perfLog";
+import type { BerdChatChatSourceSurface } from "@/shared/telemetry/events";
+import { isFirstCommittedUserMessage } from "../lib/chatFirstMessage";
+import {
+  CHAT_SOURCE_SURFACE,
+  trackChatMessageSent,
+  trackChatSessionStarted,
+} from "../lib/chatTelemetry";
 import {
   isModelExecutionTarget,
   normalizeSessionExecutionTarget,
@@ -1882,6 +1890,90 @@ export function useChatSessionController({
       liveRuntime.activeRunId !== null || liveRuntime.isRunCancellationPending
     );
   }, [stateSessionId]);
+  // Entry point this chat surface maps to for `berd_chat` session telemetry. An
+  // agent-builder session takes precedence over the composer it was launched
+  // from; otherwise Home's global composer vs the main chat view.
+  const chatSourceSurface = useMemo<BerdChatChatSourceSurface>(() => {
+    if (session?.intent === "build-agent") {
+      return CHAT_SOURCE_SURFACE.AGENT_BUILDER;
+    }
+    return isHomeSession
+      ? CHAT_SOURCE_SURFACE.GLOBAL_COMPOSER
+      : CHAT_SOURCE_SURFACE.MAIN_CHAT;
+  }, [isHomeSession, session?.intent]);
+  // Fires `berd_chat` send telemetry for a foreground send dispatched by this
+  // controller. A foreground send released from the deferred-workspace flow is
+  // dispatched by the background queued-send pipeline instead and fires there
+  // (`sendQueuedPromptToExistingSessionInBackground`), keyed off the surface
+  // captured in its payload; berdctl/background sends carry no surface and
+  // bypass telemetry entirely. It runs from the send's user-message-commit
+  // callback — synchronously after sendCore appends the user message to the
+  // transcript, or, for the steer paths below, once steerCore's backend
+  // acknowledgement makes the steered user message durable — so a send that
+  // fails before committing emits nothing and the queue's automatic retry of
+  // it cannot double-fire; each accepted send emits exactly once.
+  // Message.Sent fires every send; Session.Started fires once, on the
+  // session's first user message — both are intended to co-fire on that first
+  // send per the schema.
+  const fireChatSendTelemetry = useCallback(
+    (
+      overridePersona?: { id: string | null; name?: string },
+      attachments?: ChatAttachmentDraft[],
+    ) => {
+      if (!sessionId) {
+        return;
+      }
+      // Observation only, structurally: this runs inside the send and steer
+      // commit callbacks, where a throw would reject a dispatch the backend
+      // already accepted — for steerQueuedMessage that skips queue.dismiss()
+      // and the retained record re-sends as a duplicate user turn
+      // (LAWS/CHAT.md: at most one user turn per message).
+      try {
+        // Post-commit read: the user message this send committed is already in
+        // the transcript, so "first" means it is the only user message there —
+        // and only once the session's history has landed, since an unreplayed
+        // old session shows the same empty transcript (see chatFirstMessage).
+        const isFirstMessage = isFirstCommittedUserMessage(sessionId);
+        // An override with `id: null` is an explicit "send without a persona";
+        // no override falls back to the session's selected persona.
+        const hasPersona = overridePersona
+          ? overridePersona.id !== null
+          : Boolean(selectedPersonaId);
+        const provider = selectedProvider;
+        const model =
+          session?.executionTarget?.modelId ?? effectiveModelSelection?.id;
+        if (isFirstMessage) {
+          trackChatSessionStarted({
+            sessionId,
+            sourceSurface: chatSourceSurface,
+            hasProject: Boolean(effectiveProjectId),
+            hasPersona,
+            provider,
+            model,
+          });
+        }
+        trackChatMessageSent({
+          sessionId,
+          isFirstMessage,
+          hasAttachments: (attachments?.length ?? 0) > 0,
+          hasPersona,
+          provider,
+          model,
+        });
+      } catch (error) {
+        perfLog(`[telemetry] chat send telemetry failed: ${String(error)}`);
+      }
+    },
+    [
+      chatSourceSurface,
+      effectiveModelSelection?.id,
+      effectiveProjectId,
+      selectedPersonaId,
+      selectedProvider,
+      session?.executionTarget?.modelId,
+      sessionId,
+    ],
+  );
   const sendWithAutoCompact = useCallback(
     (
       text: string,
@@ -1927,10 +2019,22 @@ export function useChatSessionController({
           recordSubmittedDraft(sessionId, text);
         }
       };
-      const dispatchSend = () =>
-        shouldPassSendOptions
-          ? sendMessage(text, overridePersona, attachments, nextSendOptions)
-          : sendMessage(text, overridePersona, attachments);
+      const dispatchSend = () => {
+        const baseSendOptions = shouldPassSendOptions
+          ? nextSendOptions
+          : undefined;
+        // Send telemetry is anchored to the user-message commit: firing it
+        // here, before dispatch, would emit for preparation/dispatch failures
+        // that commit nothing, and the queue's automatic retry of those would
+        // double-fire Message.Sent and Session.Started.
+        return sendMessage(text, overridePersona, attachments, {
+          ...baseSendOptions,
+          onUserMessageCommitted: () => {
+            baseSendOptions?.onUserMessageCommitted?.();
+            fireChatSendTelemetry(overridePersona, attachments);
+          },
+        });
+      };
 
       if (
         !canAutoCompactBeforeSend(
@@ -1967,6 +2071,7 @@ export function useChatSessionController({
       artifactFolderInstructions,
       canAutoCompactBeforeSend,
       compactConversation,
+      fireChatSendTelemetry,
       isQueuedSendBlockedNow,
       recordSubmittedDraft,
       sendMessage,
@@ -2215,19 +2320,20 @@ export function useChatSessionController({
             availableSkillsCatalogPrompt,
           )
         : undefined;
-      const sendOptions =
-        capturedPersonaSystemPrompt !== undefined ||
-        executionSystemPrompt !== undefined
-          ? {
-              ...payload.sendOptions,
-              ...(capturedPersonaSystemPrompt !== undefined
-                ? { capturedPersonaSystemPrompt }
-                : {}),
-              ...(executionSystemPrompt !== undefined
-                ? { executionSystemPrompt }
-                : {}),
-            }
-          : payload.sendOptions;
+      const sendOptions = {
+        ...payload.sendOptions,
+        ...(capturedPersonaSystemPrompt !== undefined
+          ? { capturedPersonaSystemPrompt }
+          : {}),
+        ...(executionSystemPrompt !== undefined
+          ? { executionSystemPrompt }
+          : {}),
+        // A captured payload can be dispatched outside this controller — a
+        // deferred-workspace first send is released to the background
+        // queued-send pipeline — so its send telemetry keeps the surface that
+        // accepted it instead of losing it to that pipeline.
+        telemetrySourceSurface: chatSourceSurface,
+      };
       return {
         ...payload,
         persona:
@@ -2243,6 +2349,7 @@ export function useChatSessionController({
     [
       appSkillsCatalogPrompt,
       availableSkillsCatalogPrompt,
+      chatSourceSurface,
       includedWorkspacesPrompt,
       selectedPersona,
       workspaceContextReady,
@@ -2512,13 +2619,30 @@ export function useChatSessionController({
     const accepted = await steerMessage(
       queuedMessage.text,
       queuedMessage.attachments,
-      queuedMessage.sendOptions,
+      {
+        ...queuedMessage.sendOptions,
+        // Same telemetry anchor as dispatchSend: steerCore fires this only
+        // once the backend acknowledges the steer (the provisional append is
+        // rolled back otherwise), so a rejected steer emits nothing and the
+        // retained record can still emit when it later drains or re-steers.
+        onUserMessageCommitted: () => {
+          queuedMessage.sendOptions?.onUserMessageCommitted?.();
+          fireChatSendTelemetry(undefined, queuedMessage.attachments);
+        },
+      },
     );
     if (accepted) {
       queue.dismiss();
     }
     return accepted;
-  }, [queue, readOnly, sessionId, steerMessage, supportsSteering]);
+  }, [
+    fireChatSendTelemetry,
+    queue,
+    readOnly,
+    sessionId,
+    steerMessage,
+    supportsSteering,
+  ]);
 
   const steerDraftMessage = useCallback(
     async (
@@ -2536,9 +2660,23 @@ export function useChatSessionController({
         return false;
       }
 
-      return steerMessage(text, attachments, sendOptions);
+      return steerMessage(text, attachments, {
+        ...sendOptions,
+        // Same telemetry anchor as dispatchSend; see steerQueuedMessage.
+        onUserMessageCommitted: () => {
+          sendOptions?.onUserMessageCommitted?.();
+          fireChatSendTelemetry(undefined, attachments);
+        },
+      });
     },
-    [chatState, readOnly, sessionId, steerMessage, supportsSteering],
+    [
+      chatState,
+      fireChatSendTelemetry,
+      readOnly,
+      sessionId,
+      steerMessage,
+      supportsSteering,
+    ],
   );
 
   const handleCreatePersona = useCallback(() => {

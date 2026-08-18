@@ -5,7 +5,7 @@ import { Button } from "@/shared/ui/button";
 import { useAvatarImage, useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { cn } from "@/shared/lib/cn";
-import type { RecommendedAgent } from "../model";
+import type { OnboardingRuntimeState, RecommendedAgent } from "../model";
 import { OnboardingShell } from "./OnboardingShell";
 
 function AgentChoice({
@@ -89,6 +89,9 @@ function AgentChoice({
 
 interface RecommendationsStepProps {
   agents: RecommendedAgent[];
+  // Keeping agents creates personas over ACP, so this step is the one that has
+  // to wait for the chat runtime the surrounding flow no longer waits for.
+  runtime: OnboardingRuntimeState;
   onBack: () => void;
   onKeep: () => Promise<void>;
   onSkip: () => void;
@@ -96,6 +99,7 @@ interface RecommendationsStepProps {
 
 export function RecommendationsStep({
   agents,
+  runtime,
   onBack,
   onKeep,
   onSkip,
@@ -105,6 +109,9 @@ export function RecommendationsStep({
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  // Startup has neither settled nor failed yet: agents cannot be created, but
+  // the step still renders and Skip still works.
+  const runtimeStarting = !runtime.ready && !runtime.failed;
 
   const keep = async () => {
     if (savingRef.current) return;
@@ -138,14 +145,31 @@ export function RecommendationsStep({
               {error}
             </p>
           ) : null}
-          <Button
-            type="button"
-            onClick={() => void keep()}
-            feedbackState={saving ? "loading" : "idle"}
-            loadingLabel={t("recommendations.adopting")}
-          >
-            {t("recommendations.keep")}
-          </Button>
+          {runtime.failed ? (
+            <>
+              <p role="alert" className="text-center text-xs text-destructive">
+                {t("recommendations.runtimeUnavailable")}
+              </p>
+              <Button type="button" onClick={runtime.retry}>
+                {t("recommendations.retryRuntime")}
+              </Button>
+            </>
+          ) : (
+            // A loading feedback state also disables the button, so Keep cannot
+            // fire an ACP call while the runtime is still starting.
+            <Button
+              type="button"
+              onClick={() => void keep()}
+              feedbackState={saving || runtimeStarting ? "loading" : "idle"}
+              loadingLabel={
+                saving
+                  ? t("recommendations.adopting")
+                  : t("recommendations.waitingForRuntime")
+              }
+            >
+              {t("recommendations.keep")}
+            </Button>
+          )}
           <Button
             type="button"
             variant="outline"

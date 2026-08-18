@@ -74,6 +74,16 @@ struct AppDataMigrationSummary {
 /// Copy old app-owned local data before Berd services open files in the new
 /// location. Failures are logged and non-fatal so a single locked/cache file
 /// does not prevent app startup.
+pub(crate) fn legacy_layout_database_exists<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<bool, String> {
+    let pair = legacy_directory_pairs(app)?
+        .into_iter()
+        .find(|pair| pair.kind == AppDirectoryKind::Data)
+        .ok_or_else(|| "Legacy app data directory is unavailable".to_string())?;
+    crate::services::installation_cohort::file_exists(&pair.old.join(OLD_LAYOUT_DATABASE))
+}
+
 pub(crate) fn migrate_legacy_app_data<R: Runtime>(app: &AppHandle<R>) {
     if app
         .try_state::<crate::services::e2e_mode::E2eMode>()

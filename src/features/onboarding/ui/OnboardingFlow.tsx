@@ -15,11 +15,13 @@ import { toast } from "sonner";
 import { i18n } from "@/shared/i18n";
 import { CURATED_PROVIDER_CATALOG_BY_ID } from "@/features/providers/curatedProviders";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { trackAgentCreateCompleted } from "@/features/agents/lib/agentTelemetry";
 import {
   dispatchOnboarding,
   isWorkTypeId,
   recommendationsForWorkTypes,
   type CuratedHarnessId,
+  type OnboardingRuntimeState,
   type RecommendedAgent,
   useOnboardingState,
 } from "../model";
@@ -54,6 +56,12 @@ async function adoptAgents(
         systemPrompt: `You are ${agent.canonicalName}, ${agent.canonicalPromptDescription.toLowerCase()} Help the user thoughtfully and directly.`,
       });
       useAgentStore.getState().addPersona(persona);
+      // Completed once per persona actually created, on confirmed success.
+      // Already-adopted names above create nothing and emit nothing.
+      trackAgentCreateCompleted({
+        provider: persona.provider,
+        model: persona.model,
+      });
       existingNames.add(agent.canonicalName.toLowerCase());
       adopted.push(agent.canonicalName);
     } catch {
@@ -70,7 +78,16 @@ function decodeImage(src: string | undefined): void {
   void image.decode?.().catch(() => {});
 }
 
-export function OnboardingFlow() {
+interface OnboardingFlowProps {
+  // The flow renders before AppShell's startup gates, so the chat runtime can
+  // still be starting — or have failed — while a step is on screen. Adoption is
+  // the only step that talks to it: welcome, the work-type picker, and the
+  // harness picker are static, and harness setup runs on native doctor and
+  // agent-setup commands that do not need the `goosed` sidecar.
+  runtime: OnboardingRuntimeState;
+}
+
+export function OnboardingFlow({ runtime }: OnboardingFlowProps) {
   const state = useOnboardingState();
   const queryClient = useQueryClient();
   const selectedWorkTypes = state.selectedWorkTypeIds.filter(isWorkTypeId);
@@ -114,6 +131,10 @@ export function OnboardingFlow() {
   if (state.step === "welcome") {
     return (
       <WelcomeStep
+        recordedShareUsageData={state.shareUsageData}
+        onRecordShareUsageData={(shareUsageData) =>
+          dispatchOnboarding({ type: "set-share-usage-data", shareUsageData })
+        }
         onStart={() =>
           dispatchOnboarding({ type: "go-to", step: "work-types" })
         }
@@ -138,6 +159,7 @@ export function OnboardingFlow() {
     return (
       <RecommendationsStep
         agents={recommendations}
+        runtime={runtime}
         onBack={() => dispatchOnboarding({ type: "go-to", step: "work-types" })}
         onKeep={async () => {
           const result = await adoptAgents(recommendations);

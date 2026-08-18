@@ -36,6 +36,7 @@ import {
 } from "@/features/settings/lib/settingsEvents";
 import type { ExtensionEntry } from "@/features/extensions/types";
 import { acceptFirstSend } from "@/features/chat/lib/firstWorkspaceSend";
+import { CHAT_SOURCE_SURFACE } from "@/features/chat/lib/chatTelemetry";
 import {
   admitSystemInheritedQueuedMessage,
   personaIntentFromComposer,
@@ -219,10 +220,12 @@ import {
   isSystemNotification,
 } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
-import { FIRST_RUN_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { OnboardingFlow } from "@/features/onboarding/ui/OnboardingFlow";
-import { useOnboardingState } from "@/features/onboarding/model";
+import {
+  type OnboardingRuntimeState,
+  useOnboardingState,
+} from "@/features/onboarding/model";
 import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { PocketVoiceSetupDialog } from "@/features/voice-conversation/ui/PocketVoiceSetupDialog";
@@ -771,9 +774,6 @@ export function AppShell({
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [globalComposerFocusRequest, setGlobalComposerFocusRequest] =
     useState(0);
-  const onboardingExperiment = useExperiment(
-    FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
-  );
   const onboardingState = useOnboardingState();
   const omittedStarterTaskIds = useMemo<ReadonlySet<StarterTaskId>>(
     () =>
@@ -2955,9 +2955,15 @@ export function AppShell({
               : {}),
             persona: personaIntentFromComposer(options?.personaId),
             attachments: options?.attachments,
-            ...(options?.sendOptions
-              ? { sendOptions: options.sendOptions }
-              : {}),
+            sendOptions: {
+              ...options?.sendOptions,
+              // A deferred first send is dispatched by the background
+              // queued-send pipeline, which reads this surface for `berd_chat`
+              // send telemetry. MAIN_CHAT for parity with this composer's
+              // non-deferred sends, which drain through the ChatView
+              // controller and report the same surface.
+              telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT,
+            },
           },
           { queueReady: true, onNeedsName: enqueueWorkspaceNameRequest },
         );
@@ -4317,6 +4323,18 @@ export function AppShell({
   const forceStartupLoading =
     import.meta.env.DEV &&
     new URLSearchParams(window.location.search).has("startupLoading");
+  // Onboarding renders ahead of the startup gates below, so the steps that do
+  // call the chat runtime need its state instead of being able to assume it is
+  // up. `startup.ready` only says startup settled — it is set even when startup
+  // threw — so a usable runtime is "settled without an issue".
+  const onboardingRuntime = useMemo<OnboardingRuntimeState>(
+    () => ({
+      ready: startup.ready && startupIssue === null,
+      failed: startupIssue !== null,
+      retry: startup.retry,
+    }),
+    [startup.ready, startup.retry, startupIssue],
+  );
   const isGlobalComposerHandoff = globalComposerPlacement === "handoff";
   const isGlobalComposerRouteDisallowed =
     targetLocation.view === "automations" &&
@@ -4935,7 +4953,26 @@ export function AppShell({
     setStarterTasksEligible(true);
   };
 
-  if (forceStartupLoading || !startup.ready || !startupLoadingMinElapsed) {
+  // The dev-only `?startupLoading` override still preempts everything, so the
+  // loader stays inspectable on a fresh install.
+  if (forceStartupLoading) {
+    return <StartupLoadingView />;
+  }
+
+  // Onboarding comes before the startup gates. The landing page — the surface
+  // that asks for telemetry consent — and the work-type picker need nothing
+  // from the `goosed` sidecar, so a slow or broken runtime must not turn a
+  // first-run user's first screen into a spinner or a connectivity diagnostic;
+  // it also masks normal startup latency behind reading the consent page. The
+  // steps that do use the runtime gate themselves on `onboardingRuntime`, and
+  // once onboarding completes the gates below apply as usual, so a still-broken
+  // runtime lands on the diagnostic with the consent and setup choices already
+  // captured.
+  if (onboardingState.lifecycle !== "completed") {
+    return <OnboardingFlow runtime={onboardingRuntime} />;
+  }
+
+  if (!startup.ready || !startupLoadingMinElapsed) {
     return <StartupLoadingView />;
   }
 
@@ -4943,13 +4980,6 @@ export function AppShell({
     return (
       <StartupDiagnosticView issue={startupIssue} onRetry={startup.retry} />
     );
-  }
-
-  const shouldShowOnboarding =
-    onboardingExperiment?.enabled === true &&
-    onboardingState.lifecycle !== "completed";
-  if (shouldShowOnboarding) {
-    return <OnboardingFlow />;
   }
 
   return (

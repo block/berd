@@ -16,6 +16,7 @@ declare global {
     readonly VITE_VOICE_DICTATION?: string;
     readonly VITE_MANAGED_CONNECTIONS?: string;
     readonly VITE_TELEMETRY_DEBUG?: string;
+    readonly VITE_OTLP_LOGS_ENDPOINT?: string;
     readonly VITE_DESIGN_SYSTEM_EXPLORER?: string;
     readonly VITE_BERD_G2_BASE_URL?: string;
     /** @deprecated use VITE_BERD_G2_BASE_URL. */

@@ -7,7 +7,6 @@ import {
   BERDY_ONBOARDING_EXPERIMENT_ID,
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
   EXPERIMENT_DEFINITIONS,
-  FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
   SKILL_DISCOVERY_EXPERIMENT_ID,
   STARTER_TASKS_EXPERIMENT_ID,
   TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
@@ -137,7 +136,6 @@ describe("ExperimentsSettings", () => {
       VOICE_CONVERSATION_EXPERIMENT_ID,
       AVATAR_COLLECTION_PAGE_EXPERIMENT_ID,
       BERDY_ONBOARDING_EXPERIMENT_ID,
-      FIRST_RUN_ONBOARDING_EXPERIMENT_ID,
     ]);
   });
 
@@ -193,11 +191,6 @@ describe("ExperimentsSettings", () => {
       ),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByText(
-        i18n.t("experiments.firstRunOnboarding.title", { ns: "settings" }),
-      ),
-    ).not.toBeInTheDocument();
-    expect(
       screen.queryByRole("region", {
         name: i18n.t("experiments.onboarding.title", { ns: "settings" }),
       }),
@@ -220,22 +213,6 @@ describe("ExperimentsSettings", () => {
         name: i18n.t("experiments.onboarding.confirm", { ns: "settings" }),
       }),
     );
-  });
-
-  it("keeps first-run onboarding registered but hidden from settings", () => {
-    vi.stubEnv("DEV", true);
-    window.localStorage.setItem(
-      EXPERIMENT_PREFERENCES_STORAGE_KEY,
-      JSON.stringify({
-        version: 2,
-        experiments: {
-          [FIRST_RUN_ONBOARDING_EXPERIMENT_ID]: { enabled: true },
-        },
-      }),
-    );
-    renderWithProviders(<ExperimentsSettings />);
-
-    expect(screen.queryByText("First-run onboarding")).not.toBeInTheDocument();
   });
 
   it("resets Berdy onboarding from its experiment card", async () => {

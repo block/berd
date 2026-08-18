@@ -90,3 +90,91 @@ describe("steerPromptInSession payload budget", () => {
     expect(mockAcpSteerMessage).toHaveBeenCalledTimes(1);
   });
 });
+
+// A steer's user-message append is provisional until the backend acknowledges
+// it, so the ChatSendOptions commit callback — the anchor `berd_chat` send
+// telemetry rides on — must fire exactly at the durable commit: never at the
+// append, never for a rolled-back steer, and still for a steer whose delivery
+// was established even though the acknowledgement errored.
+describe("steerPromptInSession commit callback", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useChatStore.setState({
+      messagesBySession: {},
+      sessionStateById: {},
+      activeSessionId: null,
+      isConnected: true,
+    });
+  });
+
+  it("fires only once the backend acknowledges the steer", async () => {
+    const onUserMessageCommitted = vi.fn();
+    let commitCallsAtDispatch = -1;
+    mockAcpSteerMessage.mockImplementation(async () => {
+      // The provisional user-message append has already happened by the time
+      // the ACP call goes out; the commit callback must not have fired yet.
+      commitCallsAtDispatch = onUserMessageCommitted.mock.calls.length;
+      return { runId: "run-1", messageId: "msg-1" };
+    });
+
+    const accepted = await steerPromptInSession(
+      "session-1",
+      "make it shorter",
+      undefined,
+      { onUserMessageCommitted },
+    );
+
+    expect(accepted).toBe(true);
+    expect(commitCallsAtDispatch).toBe(0);
+    expect(onUserMessageCommitted).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fire for a steer that is rolled back", async () => {
+    const onUserMessageCommitted = vi.fn();
+    mockAcpSteerMessage.mockRejectedValue(new Error("backend down"));
+
+    const accepted = await steerPromptInSession(
+      "session-1",
+      "make it shorter",
+      undefined,
+      { onUserMessageCommitted },
+    );
+
+    expect(accepted).toBe(false);
+    expect(onUserMessageCommitted).not.toHaveBeenCalled();
+    // The rollback removed the provisional user message; only the error
+    // notification remains.
+    const messages =
+      useChatStore.getState().messagesBySession["session-1"] ?? [];
+    expect(messages.some((message) => message.role === "user")).toBe(false);
+  });
+
+  it("fires when delivery was established despite an acknowledgement error", async () => {
+    const onUserMessageCommitted = vi.fn();
+    mockAcpSteerMessage.mockImplementation(async () => {
+      // The backend delivered the steer (the notification handler flips the
+      // message's delivery metadata) before the acknowledgement was lost, so
+      // the user message stays committed.
+      const store = useChatStore.getState();
+      const userMessage = store.messagesBySession["session-1"]?.find(
+        (message) => message.role === "user",
+      );
+      if (!userMessage) throw new Error("provisional user message missing");
+      store.updateMessage("session-1", userMessage.id, (message) => ({
+        ...message,
+        metadata: { ...message.metadata, delivery: "steer" },
+      }));
+      throw new Error("acknowledgement lost");
+    });
+
+    const accepted = await steerPromptInSession(
+      "session-1",
+      "make it shorter",
+      undefined,
+      { onUserMessageCommitted },
+    );
+
+    expect(accepted).toBe(true);
+    expect(onUserMessageCommitted).toHaveBeenCalledTimes(1);
+  });
+});
