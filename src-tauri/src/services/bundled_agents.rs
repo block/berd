@@ -673,14 +673,18 @@ fn read_current_seed_marker(target_root: &Path) -> Result<Option<SeedMarker>, St
             Ok(marker) if marker.version == 1 => {
                 if validate_manifest_shape(&marker).is_err() {
                     quarantine_invalid_marker(&path)?;
-                    return Ok(Some(SeedMarker::default()));
+                    let failed_closed = SeedMarker::default();
+                    write_seed_marker(target_root, &failed_closed)?;
+                    return Ok(Some(failed_closed));
                 }
                 return Ok(Some(marker));
             }
             Ok(_) => return Ok(Some(SeedMarker::default())), // Established pre-manifest install: fail closed.
             Err(_) => {
                 quarantine_invalid_marker(&path)?;
-                return Ok(Some(SeedMarker::default()));
+                let failed_closed = SeedMarker::default();
+                write_seed_marker(target_root, &failed_closed)?;
+                return Ok(Some(failed_closed));
             }
         }
     }
@@ -1068,7 +1072,13 @@ mod tests {
 
         assert_eq!(result.seeded_count, 0);
         assert!(!target.path().join("tinker.md").exists());
-        assert!(read_current_seed_marker(target.path()).unwrap().is_none());
+        assert_eq!(
+            read_current_seed_marker(target.path())
+                .unwrap()
+                .unwrap()
+                .version,
+            0
+        );
         assert!(fs::read_dir(target.path()).unwrap().any(|entry| {
             entry
                 .unwrap()
