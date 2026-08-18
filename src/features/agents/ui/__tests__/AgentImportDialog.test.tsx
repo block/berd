@@ -20,7 +20,68 @@ vi.mock("motion/react", async (importOriginal) => {
   return { ...actual, useReducedMotion: () => false };
 });
 
+function importDialogProps(overrides: Record<string, unknown> = {}) {
+  return {
+    open: true,
+    onOpenChange: vi.fn(),
+    onImportFile: vi.fn(),
+    prepareImport: () => ({
+      displayName: "Reviewer",
+      systemPrompt: "Review carefully.",
+      identity: "agent.agent.png",
+    }),
+    validateImportFile: () => null,
+    onImportError: vi.fn(),
+    maxImportBytes: 1024,
+    importTooLargeMessage: "Too large",
+    ...overrides,
+  };
+}
+
 describe("AgentImportDialog", () => {
+  it("clears a prepared import when a replacement file is rejected", async () => {
+    const firstBytes = Uint8Array.from([1, 2, 3]);
+    const firstFile = new File([firstBytes], "agent.agent.png", {
+      type: "image/png",
+    });
+    Object.defineProperty(firstFile, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(firstBytes.buffer),
+    });
+    const rejectedFile = new File([new Uint8Array([9])], "broken.zip", {
+      type: "application/zip",
+    });
+    const onImportError = vi.fn();
+    render(
+      <AgentImportDialog
+        {...importDialogProps({
+          validateImportFile: (file: File) =>
+            file.name === "broken.zip" ? "Invalid ZIP" : null,
+          onImportError,
+        })}
+      />,
+    );
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+
+    fireEvent.change(input as HTMLInputElement, {
+      target: { files: [firstFile] },
+    });
+    expect(
+      await screen.findByRole("button", { name: "importDialog.import" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(input as HTMLInputElement, {
+      target: { files: [rejectedFile] },
+    });
+
+    expect(onImportError).toHaveBeenCalledWith("Invalid ZIP");
+    expect(
+      screen.queryByRole("button", { name: "importDialog.import" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Reviewer")).not.toBeInTheDocument();
+  });
+
   it("tilts the rendered import card toward the pointer and resets", async () => {
     vi.spyOn(window, "matchMedia").mockReturnValue({
       matches: false,

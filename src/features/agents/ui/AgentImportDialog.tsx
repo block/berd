@@ -133,7 +133,10 @@ export function AgentImportDialog({
         onImportError(error instanceof Error ? error.message : String(error));
       }
     },
-    validateFile: validateImportFile,
+    validateFile: (file) => {
+      setPrepared(null);
+      return validateImportFile(file);
+    },
     onImportError,
     maxBytes: maxImportBytes,
     fileTooLargeMessage: importTooLargeMessage,
