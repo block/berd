@@ -6,6 +6,7 @@ import { cn } from "@/shared/lib/cn";
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 
 type DropdownMenuVariant = "default" | "raised";
+type DropdownMenuLayer = "default" | "modal";
 
 const DropdownMenuVariantContext =
   React.createContext<DropdownMenuVariant>("default");
@@ -56,9 +57,11 @@ function DropdownMenuContent({
   variant = "default",
   onInteractOutside,
   onCloseAutoFocus,
+  layer = "default",
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content> & {
   variant?: DropdownMenuVariant;
+  layer?: DropdownMenuLayer;
 }) {
   const isRaised = variant === "raised";
   const interactedOutsideRef = React.useRef(false);
@@ -71,7 +74,7 @@ function DropdownMenuContent({
             slot: "dropdown-menu-content",
             source: "src/shared/ui/dropdown-menu.tsx",
             variant,
-            props: { sideOffset },
+            props: { sideOffset, layer },
             customClassName:
               typeof className === "string" ? className : undefined,
           })}
@@ -94,6 +97,7 @@ function DropdownMenuContent({
             isRaised
               ? "bg-popover-raised text-popover-raised-foreground shadow-popover-raised rounded-[10px] px-2 py-1.5"
               : "bg-popover text-foreground rounded-md p-1.5",
+            layer === "modal" && "z-[70]",
             className,
           )}
           {...props}
