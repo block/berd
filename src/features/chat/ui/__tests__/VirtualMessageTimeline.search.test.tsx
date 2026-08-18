@@ -99,6 +99,11 @@ vi.mock(
           })),
           scrollToRow: mockState.scrollToRow ?? vi.fn(() => true),
           scrollToBottom: vi.fn(() => true),
+          resumeFollowingLatest: vi.fn(() => true),
+          getScrollPresentation: vi.fn(() => ({
+            intent: "following-latest" as const,
+            detached: false,
+          })),
           setRowFocused: vi.fn(),
           markRowInteracted: vi.fn(),
         };

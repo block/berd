@@ -103,6 +103,11 @@ export class TranscriptScrollCoordinationAuthority {
     );
   }
 
+  /** Reclaim following-latest ownership after physical arrival at browser bottom. */
+  resumeFollowingLatest(): TranscriptScrollOperationResult {
+    return this.startOperation({ type: "bottom" }, "follow");
+  }
+
   /** Start and execute one authority-owned row target operation. */
   startTargetOperation(
     rowId: string,

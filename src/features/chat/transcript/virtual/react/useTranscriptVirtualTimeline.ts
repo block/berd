@@ -1450,6 +1450,17 @@ export function useTranscriptVirtualTimeline({
     [commitSnapshot],
   );
 
+  const resumeFollowingLatest = useCallback(() => {
+    const authority = runtimeRef.current.authority;
+    if (!authority) {
+      return false;
+    }
+    const result = authority.resumeFollowingLatest();
+    authority.complete(result.operation);
+    commitSnapshot();
+    return true;
+  }, [commitSnapshot]);
+
   const scrollToBottom = useCallback(
     (
       behavior: ScrollBehavior = "smooth",
@@ -1720,6 +1731,7 @@ export function useTranscriptVirtualTimeline({
     getScrollPresentation,
     scrollToRow,
     scrollToBottom,
+    resumeFollowingLatest,
     writeScrollTop,
     readRealRowCoverage,
     setRowFocused,

@@ -416,6 +416,46 @@ describe("useTranscriptVirtualTimeline", () => {
     expect(effectSnapshots).toHaveLength(1);
   });
 
+  it("resumes following through the authority before acknowledging its exact operation", () => {
+    const container = createContainer({ scrollHeight: 1000 });
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = Array.from({ length: 10 }, (_, index) =>
+      row(`row-${index}`, 100),
+    );
+    const loadedTranscript = createLoadedTranscriptState(SESSION_ID, 1);
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        loadedTranscript,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+    const authority = loadedTranscript.virtualTimeline.authority;
+    if (!authority) {
+      throw new Error("expected initialized transcript authority");
+    }
+    authority.detachAtScrollPosition(200);
+    const resumeSpy = vi.spyOn(authority, "resumeFollowingLatest");
+    const completeSpy = vi.spyOn(authority, "complete");
+
+    act(() => {
+      expect(result.current.resumeFollowingLatest()).toBe(true);
+    });
+
+    expect(resumeSpy).toHaveBeenCalledOnce();
+    const resumed = resumeSpy.mock.results[0]?.value;
+    expect(resumed).toBeDefined();
+    expect(completeSpy).toHaveBeenCalledWith(resumed?.operation);
+    expect(result.current.getScrollPresentation()).toEqual({
+      intent: "following-latest",
+      detached: false,
+    });
+  });
+
   it("keeps an authority target pending until browser acknowledgement and lets user input interrupt it", () => {
     const container = createContainer({ scrollHeight: 1000 });
     const containerRef = {

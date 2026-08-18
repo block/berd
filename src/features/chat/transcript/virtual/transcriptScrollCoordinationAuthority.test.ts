@@ -253,6 +253,61 @@ describe("TranscriptScrollCoordinationAuthority", () => {
     }
   });
 
+  it("reclaims bottom ownership before later streaming growth", () => {
+    const engine = createEngine();
+    const authority = new TranscriptScrollCoordinationAuthority(engine);
+    authority.setRows([
+      row("a", 100),
+      row("b", 100),
+      row("c", 100),
+      row("tail", 200, { anchorPriority: "streaming" }),
+    ]);
+    authority.detachAtScrollPosition(150);
+
+    const resume = authority.resumeFollowingLatest();
+    expect(resume.operation).toMatchObject({ generation: 1, cause: "follow" });
+    expect(authority.getTrackedAnchor()).toEqual({ type: "bottom" });
+    expect(authority.getPendingOperation()).toEqual(resume.operation);
+    expect(authority.complete(resume.operation)).toBe(true);
+
+    const growth = authority.setRows([
+      row("a", 100),
+      row("b", 100),
+      row("c", 100),
+      row("tail", 400, {
+        anchorPriority: "streaming",
+        heightRevision: "tail:2",
+      }),
+    ]);
+    expect(growth.correction).toMatchObject({ nextScrollTop: 400 });
+  });
+
+  it.each([
+    "wheel",
+    "touch",
+  ] as const)("reclaims bottom ownership after %s input reaches physical latest", (userInputKind) => {
+    const engine = createEngine();
+    const authority = new TranscriptScrollCoordinationAuthority(engine);
+    authority.setRows([row("a", 100), row("b", 100), row("c", 400)]);
+
+    authority.observeUserInput(
+      {
+        scrollTop: 120,
+        viewportHeight: 300,
+        footerHeight: 0,
+        widthScope: WIDTH_SCOPE,
+      },
+      userInputKind,
+    );
+    const resume = authority.resumeFollowingLatest();
+
+    expect(resume.operation).toMatchObject({
+      generation: 2,
+      cause: "follow",
+    });
+    expect(authority.getTrackedAnchor()).toEqual({ type: "bottom" });
+  });
+
   it("returns an operation for at-anchor and correcting starts through one contract", () => {
     const engine = createEngine();
     const authority = new TranscriptScrollCoordinationAuthority(engine);
