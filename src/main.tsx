@@ -15,6 +15,7 @@ import { App } from "@/app/App";
 import { GitStateEvents } from "@/app/GitStateEvents";
 import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
 import { RendererTelemetry } from "@/app/RendererTelemetry";
+import { StartupLoadingView } from "@/app/ui/StartupLoadingView";
 import { BackgroundQueuedMessageDrain } from "@/features/chat/ui/BackgroundQueuedMessageDrain";
 import { getInstallationCohort } from "@/features/onboarding/api/installationCohort";
 import { initializeOnboardingGraduation } from "@/features/onboarding/model";
@@ -163,6 +164,13 @@ if (bootError) {
       renderBootError("The session window bundle could not be loaded.");
     });
 } else {
+  reactRoot.render(
+    <React.StrictMode>
+      <I18nProvider>
+        <StartupLoadingView />
+      </I18nProvider>
+    </React.StrictMode>,
+  );
   getInstallationCohort()
     .then((cohort) => {
       initializeOnboardingGraduation(cohort);

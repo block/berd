@@ -21,6 +21,10 @@ vi.mock("@/app/RendererTelemetry", () => ({
   RendererTelemetry: () => null,
 }));
 
+vi.mock("@/app/ui/StartupLoadingView", () => ({
+  StartupLoadingView: () => <div data-testid="startup-loading" />,
+}));
+
 vi.mock("@/app/SessionWindowApp", () => ({
   SessionWindowApp: ({ sessionId }: { sessionId: string }) => (
     <div data-testid="session-app">{sessionId}</div>
