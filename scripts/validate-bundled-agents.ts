@@ -12,8 +12,8 @@
 // Run via pnpm exec: `pnpm exec tsx scripts/validate-bundled-agents.ts <path>...`
 // Exits 0 on success, 1 on any validation failure, 2 on usage error.
 
-import { readFileSync, realpathSync } from "node:fs";
-import { basename } from "node:path";
+import { readFileSync, realpathSync, readdirSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
 
@@ -33,7 +33,7 @@ interface BundledAgentFrontmatter {
 }
 
 const USAGE =
-  "usage: pnpm exec tsx scripts/validate-bundled-agents.ts <agent.md>...";
+  "usage: pnpm exec tsx scripts/validate-bundled-agents.ts <agent.md-or-directory>...";
 
 function error(message: string, file?: string): string {
   return file ? `${file}: ${message}` : message;
@@ -151,6 +151,23 @@ export function validateBundledAgentFile(filePath: string): string[] {
   }
 }
 
+export function expandBundledAgentPaths(paths: string[]): string[] {
+  return paths.flatMap((inputPath) => {
+    try {
+      if (!statSync(inputPath).isDirectory()) return [inputPath];
+      const markdownFiles = readdirSync(inputPath)
+        .filter((name) => name.endsWith(".md"))
+        .sort()
+        .map((name) => join(inputPath, name));
+      // Keep the directory as an invalid input when it contains no agents so
+      // packaging cannot silently validate an empty bundle.
+      return markdownFiles.length > 0 ? markdownFiles : [inputPath];
+    } catch {
+      return [inputPath];
+    }
+  });
+}
+
 function main(paths: string[]): number {
   if (paths.length === 0) {
     console.error(USAGE);
@@ -159,7 +176,7 @@ function main(paths: string[]): number {
 
   const allErrors: string[] = [];
 
-  for (const filePath of paths) {
+  for (const filePath of expandBundledAgentPaths(paths)) {
     const errors = validateBundledAgentFile(filePath);
     if (errors.length === 0) {
       console.log(`:white_check_mark: ${basename(filePath)}`);

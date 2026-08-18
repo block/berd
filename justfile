@@ -313,7 +313,7 @@ bb-cli-docker-acceptance:
 
 # Stage the pinned Goose backend into src-tauri/binaries/goosed-<target> and build bundles.
 bundle:
-    pnpm validate:bundled-agents distro/agents/*.md
+    pnpm validate:bundled-agents distro/agents
     just _bundle-{{ os_family() }}
 
 # Windows staging is native (real *-<triple>.exe, PE-validated, no Catch stub)

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  expandBundledAgentPaths,
   validateBundledAgent,
   validateBundledAgentFile,
 } from "../../../scripts/validate-bundled-agents";
@@ -28,6 +29,29 @@ afterEach(() => {
 });
 
 describe("validateBundledAgent", () => {
+  it("expands a directory without relying on shell globbing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "bundled-agents-"));
+    tempDirs.push(dir);
+    writeFileSync(join(dir, "b.md"), VALID_AGENT);
+    writeFileSync(join(dir, "a.md"), VALID_AGENT);
+    writeFileSync(join(dir, "ignore.txt"), "ignored");
+
+    expect(expandBundledAgentPaths([dir])).toEqual([
+      join(dir, "a.md"),
+      join(dir, "b.md"),
+    ]);
+  });
+
+  it("does not silently accept an empty directory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "empty-bundled-agents-"));
+    tempDirs.push(dir);
+
+    expect(expandBundledAgentPaths([dir])).toEqual([dir]);
+    expect(validateBundledAgentFile(dir)).toEqual([
+      expect.stringContaining("failed to read file"),
+    ]);
+  });
+
   it("accepts a valid bundled agent", () => {
     expect(validateBundledAgent("support-bot.md", VALID_AGENT)).toEqual([]);
   });
