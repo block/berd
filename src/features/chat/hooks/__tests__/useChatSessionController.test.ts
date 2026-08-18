@@ -1188,6 +1188,48 @@ describe("useChatSessionController", () => {
     });
   });
 
+  it("discards in-flight Agent Builder preparation when its queue record is removed", async () => {
+    const pendingDraft = deferred<{ path: string; slug: string }>();
+    mockPreSeedDraftAgent.mockReturnValueOnce(pendingDraft.promise);
+    useChatStore.getState().enqueueTransportReadyMessage("session-1", {
+      persona: { kind: "inherit" },
+      text: "make a reviewer",
+      sendOptions: {
+        chips: [{ label: "agent-builder", type: "skill" }],
+      },
+    });
+    const queuedRecord =
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0];
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    await waitFor(() => {
+      expect(mockPreSeedDraftAgent).toHaveBeenCalledWith("session-1");
+    });
+    act(() => {
+      useChatStore
+        .getState()
+        .dismissQueuedMessage("session-1", queuedRecord?.recordId);
+    });
+    await act(async () => {
+      pendingDraft.resolve({
+        path: "/Users/x/.agents/agents/removed-queue-record.md",
+        slug: "removed-queue-record",
+      });
+      await pendingDraft.promise;
+    });
+
+    await waitFor(() => {
+      expect(mockDeletePersonaSource).toHaveBeenCalledWith(
+        "/Users/x/.agents/agents/removed-queue-record.md",
+      );
+    });
+    const session = useChatSessionStore.getState().getSession("session-1");
+    expect(session?.intent).toBeUndefined();
+    expect(session?.targetAgentPath).toBeUndefined();
+    expect(mockUseChatSendMessage).not.toHaveBeenCalled();
+  });
+
   it("marks queued Agent Builder preparation as failed without dropping its send", async () => {
     mockPreSeedDraftAgent.mockRejectedValueOnce(
       new Error("draft creation failed"),
