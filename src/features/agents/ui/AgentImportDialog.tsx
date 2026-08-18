@@ -77,6 +77,7 @@ export function AgentImportDialog({
     null,
   );
   const preparationRef = useRef<AbortController | null>(null);
+  const [preparing, setPreparing] = useState(false);
   const [prepared, setPrepared] = useState<{
     bytes: Uint8Array;
     name: string;
@@ -144,6 +145,7 @@ export function AgentImportDialog({
     onImportFile: async (bytes, name) => {
       const controller = new AbortController();
       preparationRef.current = controller;
+      setPreparing(true);
       try {
         const result = await prepareImport(bytes, name, controller.signal);
         if (controller.signal.aborted) return;
@@ -159,6 +161,7 @@ export function AgentImportDialog({
       } finally {
         if (preparationRef.current === controller) {
           preparationRef.current = null;
+          setPreparing(false);
         }
       }
     },
@@ -232,6 +235,8 @@ export function AgentImportDialog({
           ) : (
             <div
               {...dropHandlers}
+              role="status"
+              aria-busy={preparing}
               className={cn(
                 "flex min-h-56 flex-col items-center justify-center gap-4 rounded-md border border-dashed border-border bg-muted/40 px-6 text-center",
                 isDragOver && "border-ring bg-muted/70",
@@ -241,11 +246,16 @@ export function AgentImportDialog({
                 className="size-10 text-muted-foreground"
                 aria-hidden="true"
               />
-              <p className="text-sm">{t("importDialog.dropTitle")}</p>
+              <p className="text-sm">
+                {preparing
+                  ? t("importDialog.preparing")
+                  : t("importDialog.dropTitle")}
+              </p>
               <Button
                 type="button"
                 variant="outline"
                 leftIcon={<IconUpload />}
+                feedbackState={preparing ? "loading" : "idle"}
                 onClick={openFilePicker}
               >
                 {t("importDialog.openFinder")}

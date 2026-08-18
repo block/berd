@@ -273,6 +273,7 @@
     "title": "Import an agent",
     "description": "Import an agent with a ZIP, image, .md, or JSON file.",
     "dropTitle": "Drag and drop an agent file here",
+    "preparing": "Opening agent file…",
     "openFinder": "Open Finder",
     "previewAlt": "Preview of {{name}}",
     "import": "Import agent"

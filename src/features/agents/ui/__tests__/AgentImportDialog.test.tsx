@@ -1,4 +1,5 @@
 import {
+  act,
   createEvent,
   fireEvent,
   render,
@@ -122,19 +123,24 @@ describe("AgentImportDialog", () => {
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
     await waitFor(() => expect(preparationSignal).toBeDefined());
 
+    // Pending preparation announces busy status and localized progress copy.
+    expect(screen.getByText("importDialog.preparing")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true");
+
     rerender(<AgentImportDialog {...props} open={false} />);
     expect(preparationSignal?.aborted).toBe(true);
 
-    preparation.resolve({
-      bytes,
-      name: "stale.md",
-      preview: {
-        displayName: "Stale",
-        systemPrompt: "Stale",
-        identity: "stale.md",
-      },
+    await act(async () => {
+      preparation.resolve({
+        bytes,
+        name: "stale.md",
+        preview: {
+          displayName: "Stale",
+          systemPrompt: "Stale",
+          identity: "stale.md",
+        },
+      });
     });
-    await Promise.resolve();
     expect(screen.queryByText("Stale")).not.toBeInTheDocument();
   });
 
