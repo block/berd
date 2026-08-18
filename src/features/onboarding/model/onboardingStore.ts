@@ -34,12 +34,14 @@ let storageListening = false;
 let snapshot: OnboardingState = { ...INITIAL_ONBOARDING_STATE };
 let hydrated = false;
 let hasUnsupportedNewerRecord = false;
+let storageOverrideForTests: Storage | null | undefined;
 
 const workTypeIds = new Set<string>(WORK_TYPE_IDS);
 const agentIds = new Set(RECOMMENDED_AGENTS.map((agent) => agent.id));
 const harnessIds = new Set<string>(CURATED_HARNESS_IDS);
 
 function storage(): Storage | null {
+  if (storageOverrideForTests !== undefined) return storageOverrideForTests;
   try {
     return typeof window === "undefined" ? null : window.localStorage;
   } catch {
@@ -51,8 +53,20 @@ function storage(): Storage | null {
 export function initializeOnboardingGraduation(
   cohort: InstallationCohort,
 ): void {
+  const completedState: OnboardingState = {
+    ...INITIAL_ONBOARDING_STATE,
+    lifecycle: "completed",
+    step: "complete",
+  };
   const target = storage();
-  if (!target) return;
+  if (!target) {
+    if (cohort === "established-before-landing-v1") {
+      snapshot = completedState;
+      hydrated = true;
+      emit();
+    }
+    return;
+  }
 
   try {
     const raw = target.getItem(ONBOARDING_STORAGE_KEY);
@@ -75,11 +89,9 @@ export function initializeOnboardingGraduation(
       }
     })();
     if (!preserveExisting && cohort === "established-before-landing-v1") {
-      const completedState: OnboardingState = {
-        ...INITIAL_ONBOARDING_STATE,
-        lifecycle: "completed",
-        step: "complete",
-      };
+      snapshot = completedState;
+      hydrated = true;
+      emit();
       target.setItem(
         ONBOARDING_STORAGE_KEY,
         JSON.stringify({
@@ -89,6 +101,11 @@ export function initializeOnboardingGraduation(
       );
     }
   } catch {
+    if (cohort === "established-before-landing-v1") {
+      snapshot = completedState;
+      hydrated = true;
+      emit();
+    }
     // Onboarding remains usable if localStorage is unavailable or full.
   }
 }
@@ -285,4 +302,12 @@ export function resetOnboardingStoreForTests(): void {
   snapshot = { ...INITIAL_ONBOARDING_STATE };
   hydrated = false;
   hasUnsupportedNewerRecord = false;
+}
+
+/** Test-only storage override for restricted WebView behavior. */
+export function setOnboardingStorageForTests(
+  target: Storage | null | undefined,
+): void {
+  storageOverrideForTests = target;
+  resetOnboardingStoreForTests();
 }

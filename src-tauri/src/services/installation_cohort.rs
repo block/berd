@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tokio::sync::watch;
 
 const MARKER_FILE_NAME: &str = "installation-cohort-v1.json";
@@ -65,32 +65,50 @@ pub fn initialize_installation_cohort(
     } else {
         InstallationCohort::FreshWithLandingV1
     };
-    persist_marker(&marker_path, cohort)?;
-    Ok(cohort)
+    persist_marker(&marker_path, cohort)
 }
 
-fn persist_marker(path: &Path, cohort: InstallationCohort) -> Result<(), String> {
+fn persist_marker(path: &Path, cohort: InstallationCohort) -> Result<InstallationCohort, String> {
     let record = InstallationCohortRecord {
         version: MARKER_VERSION,
         cohort,
     };
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Installation cohort marker has no parent directory".to_string())?;
     let bytes = serde_json::to_vec(&record)
         .map_err(|error| format!("Failed to serialize installation cohort marker: {error}"))?;
-    let part_path = part_path(path);
-    let result = (|| {
-        let mut file = fs::File::create(&part_path)
-            .map_err(|error| format!("Failed to create installation cohort marker: {error}"))?;
-        file.write_all(&bytes)
-            .and_then(|_| file.sync_all())
-            .map_err(|error| format!("Failed to write installation cohort marker: {error}"))?;
-        fs::rename(&part_path, path)
-            .map_err(|error| format!("Failed to publish installation cohort marker: {error}"))?;
-        sync_parent_directory(path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&part_path);
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|error| format!("Failed to create installation cohort marker: {error}"))?;
+    temporary
+        .write_all(&bytes)
+        .and_then(|_| temporary.as_file().sync_all())
+        .map_err(|error| format!("Failed to write installation cohort marker: {error}"))?;
+
+    match temporary.persist_noclobber(path) {
+        Ok(_) => {
+            sync_parent_directory(path)?;
+            Ok(cohort)
+        }
+        Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+            read_published_cohort(path)
+        }
+        Err(error) => Err(format!(
+            "Failed to publish installation cohort marker: {}",
+            error.error
+        )),
     }
-    result
+}
+
+fn read_published_cohort(path: &Path) -> Result<InstallationCohort, String> {
+    let bytes = fs::read(path)
+        .map_err(|error| format!("Failed to read published installation cohort marker: {error}"))?;
+    let record: InstallationCohortRecord = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Invalid published installation cohort marker: {error}"))?;
+    if record.version != MARKER_VERSION || record.cohort == InstallationCohort::Unknown {
+        return Err("Published installation cohort marker is unsupported".to_string());
+    }
+    Ok(record.cohort)
 }
 
 #[cfg(unix)]
@@ -106,10 +124,6 @@ fn sync_parent_directory(path: &Path) -> Result<(), String> {
 #[cfg(not(unix))]
 fn sync_parent_directory(_path: &Path) -> Result<(), String> {
     Ok(())
-}
-
-fn part_path(path: &Path) -> PathBuf {
-    path.with_extension("json.part")
 }
 
 #[cfg(test)]
@@ -141,6 +155,32 @@ mod tests {
         assert_eq!(
             initialize_installation_cohort(legacy.path(), Ok(true)).unwrap(),
             InstallationCohort::EstablishedBeforeLandingV1
+        );
+    }
+
+    #[test]
+    fn concurrent_initializers_use_the_published_winner() {
+        use std::sync::{Arc, Barrier};
+
+        let root = tempdir().unwrap();
+        let path = Arc::new(root.path().to_path_buf());
+        let barrier = Arc::new(Barrier::new(3));
+        let handles = [false, false].map(|legacy_exists| {
+            let path = Arc::clone(&path);
+            let barrier = Arc::clone(&barrier);
+            std::thread::spawn(move || {
+                barrier.wait();
+                initialize_installation_cohort(&path, Ok(legacy_exists)).unwrap()
+            })
+        });
+        barrier.wait();
+
+        let cohorts = handles.map(|handle| handle.join().unwrap());
+        assert_eq!(cohorts[0], InstallationCohort::FreshWithLandingV1);
+        assert_eq!(cohorts[1], cohorts[0]);
+        assert_eq!(
+            initialize_installation_cohort(&path, Ok(false)).unwrap(),
+            cohorts[0]
         );
     }
 

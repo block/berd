@@ -1,7 +1,18 @@
 import type * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Slot } from "@radix-ui/react-slot";
-import { XIcon } from "lucide-react";
+function SolidXIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 16 16"
+      fill="currentColor"
+    >
+      <path d="M3.76 2.35a1 1 0 0 0-1.41 1.41L6.59 8l-4.24 4.24a1 1 0 1 0 1.41 1.41L8 9.41l4.24 4.24a1 1 0 0 0 1.41-1.41L9.41 8l4.24-4.24a1 1 0 0 0-1.41-1.41L8 6.59 3.76 2.35Z" />
+    </svg>
+  );
+}
 
 import { cn } from "@/shared/lib/cn";
 
@@ -81,6 +92,7 @@ function DialogContent({
   overlayClassName,
   positionerClassName,
   showCloseButton = true,
+  closeLabel = "Close",
   size = "lg",
   surface = "glass",
   ...props
@@ -88,6 +100,7 @@ function DialogContent({
   overlayClassName?: string;
   positionerClassName?: string;
   showCloseButton?: boolean;
+  closeLabel?: string;
   size?: DialogSize;
   surface?: DialogSurface;
 }) {
@@ -123,8 +136,8 @@ function DialogContent({
               data-slot="dialog-close"
               className="focus-visible:ring-ring/50 data-[state=open]:bg-muted data-[state=open]:text-muted-foreground absolute top-4 right-4 rounded-xs opacity-70 transition-opacity hover:opacity-100 focus-visible:ring-2 focus-visible:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4"
             >
-              <XIcon />
-              <span className="sr-only">Close</span>
+              <SolidXIcon />
+              <span className="sr-only">{closeLabel}</span>
             </DialogPrimitive.Close>
           )}
         </DialogPrimitive.Content>

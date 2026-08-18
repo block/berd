@@ -5,7 +5,6 @@ import { Button } from "@/shared/ui/button";
 import { Checkbox } from "@/shared/ui/checkbox";
 import {
   Dialog,
-  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -189,23 +188,10 @@ export function WelcomeStep({ onStart }: WelcomeStepProps) {
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
         <DialogContent
           size="xl"
+          closeLabel={t("actions.close", { ns: "common" })}
           className="gap-5 rounded-[28px] p-10 pr-12"
           overlayClassName="bg-background/45 [backdrop-filter:blur(14px)_saturate(80%)] [-webkit-backdrop-filter:blur(14px)_saturate(80%)]"
-          showCloseButton={false}
         >
-          <DialogClose className="absolute top-5 right-5 flex size-7 items-center justify-center rounded-full text-foreground/80 transition-opacity hover:opacity-60 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none">
-            <svg
-              aria-hidden="true"
-              className="size-4"
-              viewBox="0 0 16 16"
-              fill="currentColor"
-            >
-              <path d="M3.76 2.35a1 1 0 0 0-1.41 1.41L6.59 8l-4.24 4.24a1 1 0 1 0 1.41 1.41L8 9.41l4.24 4.24a1 1 0 0 0 1.41-1.41L9.41 8l4.24-4.24a1 1 0 0 0-1.41-1.41L8 6.59 3.76 2.35Z" />
-            </svg>
-            <span className="sr-only">
-              {t("actions.close", { ns: "common" })}
-            </span>
-          </DialogClose>
           <DialogHeader>
             <DialogTitle className="text-[20px] font-normal">
               {t("welcome.usageDialog.title")}

@@ -9,11 +9,13 @@ import {
   replayOnboarding,
   resetOnboarding,
   resetOnboardingStoreForTests,
+  setOnboardingStorageForTests,
   subscribeToOnboarding,
 } from "./onboardingStore";
 
 describe("onboarding persistence", () => {
   beforeEach(() => {
+    setOnboardingStorageForTests(undefined);
     window.localStorage.clear();
     resetOnboardingStoreForTests();
   });
@@ -33,6 +35,29 @@ describe("onboarding persistence", () => {
       lifecycle: "completed",
       step: "complete",
     });
+  });
+
+  it("graduates established installations when storage is unavailable or fails", () => {
+    setOnboardingStorageForTests(null);
+    initializeOnboardingGraduation("established-before-landing-v1");
+    expect(getOnboardingSnapshot().lifecycle).toBe("completed");
+
+    setOnboardingStorageForTests({
+      getItem: () => {
+        throw new Error("unavailable");
+      },
+    } as unknown as Storage);
+    initializeOnboardingGraduation("established-before-landing-v1");
+    expect(getOnboardingSnapshot().lifecycle).toBe("completed");
+
+    setOnboardingStorageForTests({
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("full");
+      },
+    } as unknown as Storage);
+    initializeOnboardingGraduation("established-before-landing-v1");
+    expect(getOnboardingSnapshot().lifecycle).toBe("completed");
   });
 
   it("graduates malformed current state but preserves a newer record", () => {
