@@ -1047,12 +1047,12 @@ describe("VirtualMessageTimeline", () => {
 
     expect(scroller.scrollTop).toBe(120);
 
+    // The canonical virtual transcript contains only the split live tail, so
+    // authority still owns a bottom anchor. React presents that state rather
+    // than manufacturing a detached intent from browser-only tail geometry.
     expect(
-      screen.getByRole("button", { name: "Jump to latest" }),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
-
-    expect(scroller.scrollTop).toBe(4700);
+      screen.queryByRole("button", { name: "Jump to latest" }),
+    ).not.toBeInTheDocument();
   });
 
   it("updates live agent work text before the turn completes", () => {
@@ -2431,7 +2431,7 @@ describe("VirtualMessageTimeline", () => {
     );
   });
 
-  it("inspects and recovers a blank viewport after resize with an unchanged range", async () => {
+  it("inspects and recovers a blank viewport from browser-owned geometry after resize", async () => {
     vi.spyOn(performance, "now").mockReturnValue(1_000);
     const animationFrame = mockRequestAnimationFrame();
     let realRowsOffscreen = false;
@@ -2463,11 +2463,12 @@ describe("VirtualMessageTimeline", () => {
     triggerResizeObservers();
     animationFrame.runAll(1_000);
 
-    expect(
-      Array.from(list.querySelectorAll("[data-virtual-row-id]"), (row) =>
-        row.getAttribute("data-virtual-row-id"),
-      ),
-    ).toEqual(renderedRowIdsBeforeResize);
+    const renderedRowIdsAfterResize = Array.from(
+      list.querySelectorAll("[data-virtual-row-id]"),
+      (row) => row.getAttribute("data-virtual-row-id"),
+    );
+    expect(renderedRowIdsAfterResize).not.toEqual(renderedRowIdsBeforeResize);
+    expect(renderedRowIdsAfterResize).toContain("message:message-0");
     await waitFor(() =>
       expect(list).toHaveAttribute(
         "data-virtual-blank-viewport-recovery-attempts",

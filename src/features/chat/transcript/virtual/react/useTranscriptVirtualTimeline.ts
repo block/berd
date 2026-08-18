@@ -758,12 +758,11 @@ export function useTranscriptVirtualTimeline({
         protectedRowIds,
         state,
       });
-      const previousAuthority = runtimeRef.current.authority;
       runtimeRef.current.controller = replacement;
-      runtimeRef.current.authority = createAuthority(
-        replacement,
-        previousAuthority?.getTrackedAnchor(),
-      );
+      // createController already restores the survivor state. Seed authority
+      // from that state without reinstalling an anchor before scroll writes
+      // can be suspended for the rebuild below.
+      runtimeRef.current.authority = createAuthority(replacement);
       runtimeRef.current.controllerScrollElement = containerRef.current;
       const liveViewportBeforeRows = readViewportGeometry(
         containerRef.current,

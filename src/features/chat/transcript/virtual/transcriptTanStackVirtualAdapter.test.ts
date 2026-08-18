@@ -118,6 +118,12 @@ describe("TranscriptTanStackVirtualAdapter", () => {
       engine: adapter,
       getFooterHeight: () => 0,
     });
+    const internals = adapter as unknown as {
+      applyCorrection: (correction: unknown) => void;
+      virtualizer: { _willUpdate: () => void; scrollOffset: number | null };
+    };
+    const applyCorrection = vi.spyOn(internals, "applyCorrection");
+    const updateVirtualizer = vi.spyOn(internals.virtualizer, "_willUpdate");
     const ordinaryGeometry = () => ({
       scrollTop: container.scrollTop,
       viewportHeight: 200,
@@ -147,6 +153,9 @@ describe("TranscriptTanStackVirtualAdapter", () => {
     expect(container.scrollTop).toBe(120);
     expect(adapter.getScrollTop()).toBe(120);
     expect(adapter.getState().scrollTop).toBe(120);
+    expect(applyCorrection).toHaveBeenCalledWith(correction);
+    expect(internals.virtualizer.scrollOffset).toBe(120);
+    expect(updateVirtualizer).toHaveBeenCalled();
   });
 
   it("uses updated TanStack end-anchor APIs while preserving Goose bottom follow", () => {
