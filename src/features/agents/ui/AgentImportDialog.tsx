@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { IconPhotoPlus, IconUpload } from "@tabler/icons-react";
 
 import { useTranslation } from "react-i18next";
@@ -37,6 +37,12 @@ export interface AgentImportPreview extends PersonaImportPreview {
 interface AgentImportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * A file already validated and read by another import surface (the gallery
+   * drop zone). The dialog prepares it through the same flow as picker files
+   * so every entry point shares one preview/confirmation owner.
+   */
+  initialFile?: { bytes: Uint8Array; name: string } | null;
   onImportFile: (
     fileBytes: Uint8Array,
     fileName: string,
@@ -45,7 +51,14 @@ interface AgentImportDialogProps {
   prepareImport: (
     fileBytes: Uint8Array,
     fileName: string,
-  ) => AgentImportPreview;
+    signal: AbortSignal,
+  ) =>
+    | AgentImportPreview
+    | Promise<{
+        bytes: Uint8Array;
+        name: string;
+        preview: AgentImportPreview;
+      }>;
   validateImportFile: (
     file: Pick<File, "name" | "type" | "size">,
   ) => string | null;
@@ -57,6 +70,7 @@ interface AgentImportDialogProps {
 export function AgentImportDialog({
   open,
   onOpenChange,
+  initialFile,
   onImportFile,
   prepareImport,
   validateImportFile,
@@ -69,6 +83,8 @@ export function AgentImportDialog({
   const [importAccentColor, setImportAccentColor] = useState<string | null>(
     null,
   );
+  const preparationRef = useRef<AbortController | null>(null);
+  const [preparing, setPreparing] = useState(false);
   const [prepared, setPrepared] = useState<{
     bytes: Uint8Array;
     name: string;
@@ -76,8 +92,18 @@ export function AgentImportDialog({
   } | null>(null);
 
   useEffect(() => {
-    if (!open) setPrepared(null);
+    if (!open) {
+      preparationRef.current?.abort();
+      setPrepared(null);
+    }
   }, [open]);
+
+  useEffect(
+    () => () => {
+      preparationRef.current?.abort();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!prepared?.preview.cardImageUrl) {
@@ -116,6 +142,71 @@ export function AgentImportDialog({
     [prepared?.preview.cardImageUrl],
   );
 
+  const startPreparation = useCallback(
+    (bytes: Uint8Array, name: string): AbortController => {
+      preparationRef.current?.abort();
+      const controller = new AbortController();
+      preparationRef.current = controller;
+      setPreparing(true);
+      void (async () => {
+        try {
+          const result = await prepareImport(bytes, name, controller.signal);
+          if (controller.signal.aborted) {
+            // A discarded result never reaches prepared state, so the cleanup
+            // effect will not revoke its preview URL; dispose of it here.
+            const staleUrl = ("preview" in result ? result.preview : result)
+              .cardImageUrl;
+            if (staleUrl) URL.revokeObjectURL(staleUrl);
+            return;
+          }
+          // The cleanup effect keyed by cardImageUrl revokes the previous URL
+          // exactly once when this prepared preview replaces it.
+          setPrepared(
+            "preview" in result ? result : { bytes, name, preview: result },
+          );
+        } catch (error) {
+          if (!controller.signal.aborted) {
+            onImportError(
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        } finally {
+          if (preparationRef.current === controller) {
+            preparationRef.current = null;
+            setPreparing(false);
+          }
+        }
+      })();
+      return controller;
+    },
+    [onImportError, prepareImport],
+  );
+
+  const consumedInitialFileRef = useRef<typeof initialFile>(null);
+  useEffect(() => {
+    if (!open) {
+      consumedInitialFileRef.current = null;
+      return;
+    }
+    if (!initialFile || consumedInitialFileRef.current === initialFile) {
+      return;
+    }
+    consumedInitialFileRef.current = initialFile;
+    const controller = startPreparation(initialFile.bytes, initialFile.name);
+    return () => {
+      // Lifecycle cleanup (StrictMode replay, unmount) aborts this attempt.
+      // If it is still the active preparation, un-consume the file so a
+      // replayed effect can restart it; a picker selection that replaced
+      // this attempt keeps ownership and the marker stays consumed.
+      if (preparationRef.current === controller) {
+        controller.abort();
+        preparationRef.current = null;
+        setPreparing(false);
+        consumedInitialFileRef.current = null;
+      }
+    };
+  }, [open, initialFile, startPreparation]);
+
   const {
     fileInputRef,
     isDragOver,
@@ -123,17 +214,12 @@ export function AgentImportDialog({
     handleFileChange,
     openFilePicker,
   } = useFileImportZone({
-    onImportFile: (bytes, name) => {
-      try {
-        const preview = prepareImport(bytes, name);
-        // The cleanup effect keyed by cardImageUrl revokes the previous URL
-        // exactly once when this prepared preview replaces it.
-        setPrepared({ bytes, name, preview });
-      } catch (error) {
-        onImportError(error instanceof Error ? error.message : String(error));
-      }
+    onImportFile: startPreparation,
+    validateFile: (file) => {
+      preparationRef.current?.abort();
+      setPrepared(null);
+      return validateImportFile(file);
     },
-    validateFile: validateImportFile,
     onImportError,
     maxBytes: maxImportBytes,
     fileTooLargeMessage: importTooLargeMessage,
@@ -199,6 +285,8 @@ export function AgentImportDialog({
           ) : (
             <div
               {...dropHandlers}
+              role="status"
+              aria-busy={preparing}
               className={cn(
                 "flex min-h-56 flex-col items-center justify-center gap-4 rounded-md border border-dashed border-border bg-muted/40 px-6 text-center",
                 isDragOver && "border-ring bg-muted/70",
@@ -208,11 +296,17 @@ export function AgentImportDialog({
                 className="size-10 text-muted-foreground"
                 aria-hidden="true"
               />
-              <p className="text-sm">{t("importDialog.dropTitle")}</p>
+              <p className="text-sm">
+                {preparing
+                  ? t("importDialog.preparing")
+                  : t("importDialog.dropTitle")}
+              </p>
               <Button
                 type="button"
                 variant="outline"
                 leftIcon={<IconUpload />}
+                feedbackState={preparing ? "loading" : "idle"}
+                loadingLabel={t("importDialog.preparing")}
                 onClick={openFilePicker}
               >
                 {t("importDialog.openFinder")}
@@ -222,7 +316,7 @@ export function AgentImportDialog({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".agent.png,.png,.persona.md,.md,.json,image/png,text/markdown,text/plain,application/json"
+            accept=".agent.zip,.zip,.agent.png,.png,.persona.md,.md,.json,application/zip,application/x-zip-compressed,image/png,text/markdown,text/plain,application/json"
             className="hidden"
             onChange={handleFileChange}
           />

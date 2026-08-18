@@ -225,8 +225,8 @@
     "deleted": "\"{{name}}\" deleted.",
     "exportFailed": "Failed to export agent.",
     "exportedTo": "Exported to {{filename}}",
-    "importInvalidExtension": "Unsupported file type. Choose a .persona.md or .json file.",
-    "importInvalidMimeType": "Unsupported file type. Choose a persona markdown or JSON file.",
+    "importInvalidExtension": "Unsupported file type. Choose an agent ZIP, PNG, .persona.md, or JSON file.",
+    "importInvalidMimeType": "Unsupported file type. Choose an agent ZIP, PNG, persona markdown, or JSON file.",
     "importTooLarge": "Import file must be {{maxSize}} or smaller.",
     "importFailed": "Failed to import agent.",
     "imported_one": "Imported {{count}} agent.",
@@ -263,10 +263,17 @@
     "tooLarge": "Agent image must be 10 MB or smaller.",
     "pngOnly": "Agent image must be a PNG file."
   },
+  "zipImport": {
+    "invalid": "The agent ZIP is invalid or damaged.",
+    "tooManyFiles": "The agent ZIP contains too many files.",
+    "missingAgent": "The ZIP doesn’t contain a supported agent file.",
+    "multipleAgents": "The ZIP must contain exactly one agent file."
+  },
   "importDialog": {
     "title": "Import an agent",
-    "description": "Import an agent with an image, .md, or JSON file.",
+    "description": "Import an agent with a ZIP, image, .md, or JSON file.",
     "dropTitle": "Drag and drop an agent file here",
+    "preparing": "Opening agent file…",
     "openFinder": "Open Finder",
     "previewAlt": "Preview of {{name}}",
     "import": "Import agent"

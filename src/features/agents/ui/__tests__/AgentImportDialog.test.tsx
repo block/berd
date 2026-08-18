@@ -1,4 +1,5 @@
 import {
+  act,
   createEvent,
   fireEvent,
   render,
@@ -6,7 +7,18 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { AgentImportDialog } from "../AgentImportDialog";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+import {
+  AgentImportDialog,
+  type AgentImportPreview,
+} from "../AgentImportDialog";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -20,7 +32,176 @@ vi.mock("motion/react", async (importOriginal) => {
   return { ...actual, useReducedMotion: () => false };
 });
 
+function importDialogProps(overrides: Record<string, unknown> = {}) {
+  return {
+    open: true,
+    onOpenChange: vi.fn(),
+    onImportFile: vi.fn(),
+    prepareImport: () => ({
+      displayName: "Reviewer",
+      systemPrompt: "Review carefully.",
+      identity: "agent.agent.png",
+    }),
+    validateImportFile: () => null,
+    onImportError: vi.fn(),
+    maxImportBytes: 1024,
+    importTooLargeMessage: "Too large",
+    ...overrides,
+  };
+}
+
 describe("AgentImportDialog", () => {
+  it("clears a prepared import when a replacement file is rejected", async () => {
+    const firstBytes = Uint8Array.from([1, 2, 3]);
+    const firstFile = new File([firstBytes], "agent.agent.png", {
+      type: "image/png",
+    });
+    Object.defineProperty(firstFile, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(firstBytes.buffer),
+    });
+    const rejectedFile = new File([new Uint8Array([9])], "broken.zip", {
+      type: "application/zip",
+    });
+    const onImportError = vi.fn();
+    render(
+      <AgentImportDialog
+        {...importDialogProps({
+          validateImportFile: (file: File) =>
+            file.name === "broken.zip" ? "Invalid ZIP" : null,
+          onImportError,
+        })}
+      />,
+    );
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+
+    fireEvent.change(input as HTMLInputElement, {
+      target: { files: [firstFile] },
+    });
+    expect(
+      await screen.findByRole("button", { name: "importDialog.import" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(input as HTMLInputElement, {
+      target: { files: [rejectedFile] },
+    });
+
+    expect(onImportError).toHaveBeenCalledWith("Invalid ZIP");
+    expect(
+      screen.queryByRole("button", { name: "importDialog.import" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Reviewer")).not.toBeInTheDocument();
+  });
+
+  it("revokes the preview URL of an aborted preparation result", async () => {
+    const revokeSpy = vi
+      .spyOn(URL, "revokeObjectURL")
+      .mockImplementation(() => {});
+    const preparation = deferred<{
+      bytes: Uint8Array;
+      name: string;
+      preview: AgentImportPreview;
+    }>();
+    const bytes = Uint8Array.from([1]);
+    const file = new File([bytes], "agent.zip", { type: "application/zip" });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(bytes.buffer),
+    });
+    let preparationSignal: AbortSignal | undefined;
+    const props = importDialogProps({
+      prepareImport: (
+        _bytes: Uint8Array,
+        _name: string,
+        signal: AbortSignal,
+      ) => {
+        preparationSignal = signal;
+        return preparation.promise;
+      },
+    });
+    const { rerender } = render(<AgentImportDialog {...props} />);
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
+    await waitFor(() => expect(preparationSignal).toBeDefined());
+
+    // Close aborts the preparation before its result lands.
+    rerender(<AgentImportDialog {...props} open={false} />);
+    expect(preparationSignal?.aborted).toBe(true);
+
+    // The aborted result carries a blob URL that no state will ever own.
+    await act(async () => {
+      preparation.resolve({
+        bytes,
+        name: "stale.agent.png",
+        preview: {
+          displayName: "Stale",
+          systemPrompt: "Stale",
+          identity: "stale.agent.png",
+          cardImageUrl: "blob:stale-card",
+        },
+      });
+    });
+
+    expect(revokeSpy).toHaveBeenCalledWith("blob:stale-card");
+    expect(screen.queryByText("Stale")).not.toBeInTheDocument();
+    revokeSpy.mockRestore();
+  });
+
+  it("cancels in-flight preparation when the dialog closes", async () => {
+    const preparation = deferred<{
+      bytes: Uint8Array;
+      name: string;
+      preview: AgentImportPreview;
+    }>();
+    const bytes = Uint8Array.from([1]);
+    const file = new File([bytes], "agent.zip", { type: "application/zip" });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(bytes.buffer),
+    });
+    let preparationSignal: AbortSignal | undefined;
+    const props = importDialogProps({
+      prepareImport: (
+        _bytes: Uint8Array,
+        _name: string,
+        signal: AbortSignal,
+      ) => {
+        preparationSignal = signal;
+        return preparation.promise;
+      },
+    });
+    const { rerender } = render(<AgentImportDialog {...props} />);
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
+    await waitFor(() => expect(preparationSignal).toBeDefined());
+
+    // Pending preparation announces busy status and localized progress copy
+    // in both the drop-zone status text and the loading button label.
+    expect(
+      screen.getAllByText("importDialog.preparing").length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole("status")).toHaveAttribute("aria-busy", "true");
+
+    rerender(<AgentImportDialog {...props} open={false} />);
+    expect(preparationSignal?.aborted).toBe(true);
+
+    await act(async () => {
+      preparation.resolve({
+        bytes,
+        name: "stale.md",
+        preview: {
+          displayName: "Stale",
+          systemPrompt: "Stale",
+          identity: "stale.md",
+        },
+      });
+    });
+    expect(screen.queryByText("Stale")).not.toBeInTheDocument();
+  });
+
   it("tilts the rendered import card toward the pointer and resets", async () => {
     vi.spyOn(window, "matchMedia").mockReturnValue({
       matches: false,
