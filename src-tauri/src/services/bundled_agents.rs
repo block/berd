@@ -95,7 +95,10 @@ pub fn verified_managed_agent_allocations(
             _ => continue,
         };
         let _ = metadata;
-        if source.is_file() && digest_file(&target)? == allocation.installed_digest {
+        if source.is_file()
+            && digest_file(&source)? == allocation.installed_digest
+            && digest_file(&target)? == allocation.installed_digest
+        {
             verified.insert(
                 target.to_string_lossy().into_owned(),
                 source_name.trim_end_matches(".md").to_string(),
@@ -179,7 +182,12 @@ fn repair_bundled_agent_from_dir(
         allocations: BTreeMap::new(),
     });
     if marker.version != 1 {
-        return Err("Bundled agent manifest is invalid; refusing automatic repair".to_string());
+        marker = SeedMarker {
+            version: 1,
+            install_state: InstallState::Complete,
+            seeded_files: BTreeSet::new(),
+            allocations: BTreeMap::new(),
+        };
     }
     let source_digest = digest_file(&source)?;
     let claimed = marker
@@ -242,6 +250,30 @@ fn installed_agent_path_state(path: &Path) -> Result<InstalledAgentPathState, St
             path.display()
         )),
     }
+}
+
+fn is_plain_markdown_filename(value: &str) -> bool {
+    let path = Path::new(value);
+    path.file_name().and_then(|name| name.to_str()) == Some(value)
+        && path.extension().and_then(|extension| extension.to_str()) == Some("md")
+}
+
+fn validate_manifest_shape(marker: &SeedMarker) -> Result<(), String> {
+    if marker.version != 1 {
+        return Ok(());
+    }
+    let mut targets = BTreeSet::new();
+    for (source, allocation) in &marker.allocations {
+        if !is_plain_markdown_filename(source)
+            || !is_plain_markdown_filename(&allocation.target_file_name)
+            || !targets.insert(&allocation.target_file_name)
+        {
+            return Err(
+                "Bundled agent manifest contains an unsafe or duplicate allocation".to_string(),
+            );
+        }
+    }
+    Ok(())
 }
 
 fn digest_file(path: &Path) -> Result<String, String> {
@@ -380,6 +412,27 @@ fn seed_bundled_agents_from_dir(
             marker
         }
     };
+
+    // Existing digestless markers are intentionally not migrated by this clean-install feature.
+    if marker.version != 1 {
+        return Ok(SeedBundledAgentsResult::default());
+    }
+    let source_digests = sources
+        .iter()
+        .map(|(name, _, digest)| (name.as_str(), digest.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    if marker
+        .allocations
+        .keys()
+        .any(|name| !source_digests.contains_key(name.as_str()))
+        || marker.allocations.iter().any(|(name, allocation)| {
+            allocation.status == AllocationStatus::Pending
+                && source_digests.get(name.as_str()).copied()
+                    != Some(allocation.installed_digest.as_str())
+        })
+    {
+        return Ok(SeedBundledAgentsResult::default());
+    }
 
     let mut seeded_count = 0;
     let mut avatar_refs_to_warm = BTreeSet::new();
@@ -563,11 +616,17 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
                 ));
             }
         }
-        fs::rename(&temp_path, target).map_err(|err| {
+        fs::hard_link(&temp_path, target).map_err(|err| {
             format!(
-                "Failed to install bundled agent '{}' at '{}': {err}",
+                "Failed to install bundled agent '{}' without replacing '{}' : {err}",
                 source.display(),
                 target.display()
+            )
+        })?;
+        fs::remove_file(&temp_path).map_err(|err| {
+            format!(
+                "Failed to remove temporary bundled agent '{}': {err}",
+                temp_path.display()
             )
         })
     })();
@@ -611,7 +670,13 @@ fn read_current_seed_marker(target_root: &Path) -> Result<Option<SeedMarker>, St
             continue;
         }
         match read_seed_marker_file(&path) {
-            Ok(marker) if marker.version == 1 => return Ok(Some(marker)),
+            Ok(marker) if marker.version == 1 => {
+                if validate_manifest_shape(&marker).is_err() {
+                    quarantine_invalid_marker(&path)?;
+                    return Ok(Some(SeedMarker::default()));
+                }
+                return Ok(Some(marker));
+            }
             Ok(_) => return Ok(Some(SeedMarker::default())), // Established pre-manifest install: fail closed.
             Err(_) => {
                 quarantine_invalid_marker(&path)?;
@@ -827,7 +892,7 @@ mod tests {
     }
 
     #[test]
-    fn reads_and_migrates_legacy_seed_marker() {
+    fn preserves_legacy_seed_marker_without_retrofitting() {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         write_agent(
@@ -845,8 +910,8 @@ mod tests {
 
         assert_eq!(result.seeded_count, 0);
         assert!(!target.path().join("builderbot.md").exists());
-        assert!(target.path().join(MARKER_FILE_NAME).exists());
-        assert!(!target.path().join(LEGACY_MARKER_FILE_NAME).exists());
+        assert!(!target.path().join(MARKER_FILE_NAME).exists());
+        assert!(target.path().join(LEGACY_MARKER_FILE_NAME).exists());
     }
 
     #[test]
@@ -1003,6 +1068,13 @@ mod tests {
 
         assert_eq!(result.seeded_count, 0);
         assert!(!target.path().join("tinker.md").exists());
-        assert!(read_current_seed_marker(target.path()).unwrap().is_some());
+        assert!(read_current_seed_marker(target.path()).unwrap().is_none());
+        assert!(fs::read_dir(target.path()).unwrap().any(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".berd-bundled-agents-invalid-")
+        }));
     }
 }
