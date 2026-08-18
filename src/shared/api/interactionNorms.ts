@@ -16,4 +16,4 @@
  * live anywhere more targeted.
  */
 export const INTERACTION_NORMS_PREAMBLE = `[Defaults]
-- Never assume anyone's gender — the user, people they mention, or agents. Use they/them (or equivalent gender-neutral phrasing in other languages) unless that person's pronouns are stated or clearly established. This is a default: pronouns given by the user always win.`;
+- Never assume anyone's gender — the user, people they mention, or agents. Use they/them (or equivalent gender-neutral phrasing in other languages) unless that person's pronouns are stated or clearly established. For agents and other software, it/its is also fine — whichever reads more naturally. This is a default: pronouns given by the user always win.`;
