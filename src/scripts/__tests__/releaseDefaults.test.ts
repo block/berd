@@ -1,7 +1,8 @@
 // @vitest-environment node
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
+import { validateBundledAgentFile } from "../../../scripts/validate-bundled-agents";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -26,17 +27,30 @@ describe("release bundled-agent defaults", () => {
     expect(runDefaultBundledAgents(buildKind)).toBe("");
   });
 
-  it("always bundles Berdy from the distro resources", () => {
+  it("always bundles a valid seven-agent starter set", () => {
     const tauriConfig = JSON.parse(
       readFileSync(resolve(repoRoot, "src-tauri/tauri.conf.json"), "utf8"),
     );
-    const berdy = readFileSync(
-      resolve(repoRoot, "distro/agents/berdy.md"),
-      "utf8",
-    );
+    const agentDirectory = resolve(repoRoot, "distro/agents");
+    const agentFiles = readdirSync(agentDirectory)
+      .filter((name) => name.endsWith(".md"))
+      .sort();
 
     expect(tauriConfig.bundle.resources["../distro"]).toBe("distro");
-    expect(berdy).toContain("berdBundled: true");
+    expect(agentFiles).toEqual([
+      "agt-builder.md",
+      "berdy.md",
+      "choosey.md",
+      "copycat.md",
+      "pushback.md",
+      "tinker.md",
+      "wildcard.md",
+    ]);
+    for (const fileName of agentFiles) {
+      expect(
+        validateBundledAgentFile(resolve(agentDirectory, fileName)),
+      ).toEqual([]);
+    }
   });
 
   it("rejects an invalid build kind", () => {

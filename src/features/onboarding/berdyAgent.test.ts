@@ -6,7 +6,7 @@ function persona(overrides: Partial<Persona> = {}): Persona {
   return {
     id: "/Users/test/.agents/agents/berdy.md",
     displayName: "Berdy",
-    avatar: "app-avatar:gloopies-14",
+    avatar: "app-avatar:gloopies-22",
     systemPrompt: "Help people use Berd.",
     isBuiltin: false,
     writable: true,
@@ -20,14 +20,6 @@ describe("findBerdyPersonaId", () => {
     expect(findBerdyPersonaId([persona()])).toBe(
       "/Users/test/.agents/agents/berdy.md",
     );
-  });
-
-  it("finds the fallback Berdy agent when the primary filename was occupied", () => {
-    expect(
-      findBerdyPersonaId([
-        persona({ id: "/Users/test/.agents/agents/berdy2.md" }),
-      ]),
-    ).toBe("/Users/test/.agents/agents/berdy2.md");
   });
 
   it("does not select another agent that only shares Berdy's name", () => {

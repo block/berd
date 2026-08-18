@@ -2928,7 +2928,7 @@ describe("AppShell global navigation", () => {
         {
           id: personaId,
           displayName: "Berdy",
-          avatar: "app-avatar:gloopies-14",
+          avatar: "app-avatar:gloopies-22",
           systemPrompt: "Help people use Berd.",
           isBuiltin: false,
           writable: true,
@@ -2953,7 +2953,7 @@ describe("AppShell global navigation", () => {
       {
         id: personaId,
         displayName: "Berdy",
-        avatar: "app-avatar:gloopies-14",
+        avatar: "app-avatar:gloopies-22",
         systemPrompt: "Help people use Berd.",
         isBuiltin: false,
         writable: false,
@@ -2980,13 +2980,13 @@ describe("AppShell global navigation", () => {
   });
 
   it("refreshes personas when repair reports an error after changing disk", async () => {
-    const personaId = "/Users/test/.agents/agents/berdy2.md";
+    const personaId = "/Users/test/.agents/agents/berdy.md";
     mockRepairBundledAgent.mockRejectedValue(new Error("marker write failed"));
     mockListPersonas.mockResolvedValue([
       {
         id: personaId,
         displayName: "Berdy",
-        avatar: "app-avatar:gloopies-14",
+        avatar: "app-avatar:gloopies-22",
         systemPrompt: "Help people use Berd.",
         isBuiltin: false,
         writable: false,

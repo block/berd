@@ -13,8 +13,6 @@ const GLOBAL_AGENTS_DIR_NAME: &str = ".agents";
 const AGENTS_DIR_NAME: &str = "agents";
 const MARKER_FILE_NAME: &str = ".berd-bundled-agents.json";
 const LEGACY_MARKER_FILE_NAME: &str = ".goose-internal-bundled-agents.json";
-const BERDY_AGENT_FILE_NAME: &str = "berdy.md";
-const BERDY_FALLBACK_FILE_NAME: &str = "berdy2.md";
 static INSTALL_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -118,38 +116,9 @@ fn repair_bundled_agent_from_dir(
     }
 
     let mut marker = read_seed_marker(target_root)?;
-    let primary_target = target_root.join(file_name);
-    let target = match installed_agent_path_state(&primary_target)? {
-        InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => primary_target,
-        InstalledAgentPathState::UserOwned => {
-            let fallback_file_name = fallback_file_name(file_name)?;
-            let fallback_target = target_root.join(&fallback_file_name);
-            match installed_agent_path_state(&fallback_target)? {
-                InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {
-                    fallback_target
-                }
-                InstalledAgentPathState::UserOwned => {
-                    return Err(format!(
-                        "Cannot restore bundled agent because '{}' and '{}' are owned by the user",
-                        primary_target.display(),
-                        fallback_target.display()
-                    ));
-                }
-            }
-        }
-    };
-
+    let target = target_root.join(file_name);
     install_agent_file(&source, &target)?;
     marker.seeded_files.insert(file_name.to_string());
-    if target.file_name().and_then(|name| name.to_str()) != Some(file_name) {
-        marker.seeded_files.insert(
-            target
-                .file_name()
-                .and_then(|name| name.to_str())
-                .ok_or_else(|| "Bundled agent target is missing a valid filename".to_string())?
-                .to_string(),
-        );
-    }
     write_seed_marker(target_root, &marker)
 }
 
@@ -180,13 +149,6 @@ fn installed_agent_path_state(path: &Path) -> Result<InstalledAgentPathState, St
             path.display()
         )),
     }
-}
-
-fn fallback_file_name(file_name: &str) -> Result<String, String> {
-    file_name
-        .strip_suffix(".md")
-        .map(|stem| format!("{stem}2.md"))
-        .ok_or_else(|| "Bundled agent filename must end in .md".to_string())
 }
 
 /// Extracts an agent file's `app-avatar:*` ref from its raw contents, if the
@@ -251,19 +213,7 @@ fn seed_bundled_agents_from_dir(
         }
 
         let file_name = entry.file_name().to_string_lossy().into_owned();
-        let primary_target = target_root.join(&file_name);
-        let fallback_target = target_root.join(BERDY_FALLBACK_FILE_NAME);
-        let use_berdy_fallback = file_name == BERDY_AGENT_FILE_NAME
-            && marker.seeded_files.contains(BERDY_FALLBACK_FILE_NAME)
-            && matches!(
-                installed_agent_path_state(&fallback_target)?,
-                InstalledAgentPathState::Bundled
-            );
-        let target = if use_berdy_fallback {
-            fallback_target
-        } else {
-            primary_target
-        };
+        let target = target_root.join(&file_name);
         let was_previously_seeded = marker.seeded_files.contains(&file_name);
         let installed_or_refreshed =
             if should_install_agent(&source, &target, was_previously_seeded)? {
@@ -554,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_repair_uses_a_fallback_for_an_unmarked_user_agent() {
+    fn explicit_repair_preserves_an_unmarked_user_agent() {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
         write_agent(
@@ -564,50 +514,15 @@ mod tests {
         );
         write_agent(target.path(), "berdy.md", "---\nname: Mine\n---\nPersonal.");
 
-        repair_bundled_agent_from_dir(source.path(), target.path(), "berdy.md").unwrap();
+        let error =
+            repair_bundled_agent_from_dir(source.path(), target.path(), "berdy.md").unwrap_err();
 
+        assert!(error.contains("user-owned"));
         assert_eq!(
             fs::read_to_string(target.path().join("berdy.md")).unwrap(),
             "---\nname: Mine\n---\nPersonal."
         );
-        assert_eq!(
-            fs::read_to_string(target.path().join("berdy2.md")).unwrap(),
-            "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nBundled."
-        );
-    }
-
-    #[test]
-    fn startup_refreshes_the_repaired_fallback_without_touching_the_user_agent() {
-        let source = tempdir().unwrap();
-        let target = tempdir().unwrap();
-        write_agent(
-            source.path(),
-            BERDY_AGENT_FILE_NAME,
-            "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nVersion one.",
-        );
-        write_agent(
-            target.path(),
-            BERDY_AGENT_FILE_NAME,
-            "---\nname: Personal Berdy\n---\nPersonal.",
-        );
-        repair_bundled_agent_from_dir(source.path(), target.path(), BERDY_AGENT_FILE_NAME).unwrap();
-        write_agent(
-            source.path(),
-            BERDY_AGENT_FILE_NAME,
-            "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nVersion two.",
-        );
-
-        let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
-
-        assert_eq!(result.seeded_count, 1);
-        assert_eq!(
-            fs::read_to_string(target.path().join(BERDY_AGENT_FILE_NAME)).unwrap(),
-            "---\nname: Personal Berdy\n---\nPersonal."
-        );
-        assert_eq!(
-            fs::read_to_string(target.path().join(BERDY_FALLBACK_FILE_NAME)).unwrap(),
-            "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nVersion two."
-        );
+        assert!(!target.path().join("berdy2.md").exists());
     }
 
     #[cfg(unix)]
@@ -618,41 +533,13 @@ mod tests {
         let outside = tempdir().unwrap().path().join("outside.md");
         write_agent(
             source.path(),
-            BERDY_AGENT_FILE_NAME,
+            "berdy.md",
             "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nBundled.",
         );
-        std::os::unix::fs::symlink(&outside, target.path().join(BERDY_AGENT_FILE_NAME)).unwrap();
+        std::os::unix::fs::symlink(&outside, target.path().join("berdy.md")).unwrap();
 
         let error =
-            repair_bundled_agent_from_dir(source.path(), target.path(), BERDY_AGENT_FILE_NAME)
-                .unwrap_err();
-
-        assert!(error.contains("must not be a symbolic link"));
-        assert!(!outside.exists());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn explicit_repair_rejects_a_broken_fallback_symlink() {
-        let source = tempdir().unwrap();
-        let target = tempdir().unwrap();
-        let outside_dir = tempdir().unwrap();
-        let outside = outside_dir.path().join("outside.md");
-        write_agent(
-            source.path(),
-            BERDY_AGENT_FILE_NAME,
-            "---\nname: Berdy\nmetadata:\n  berdBundled: true\n---\nBundled.",
-        );
-        write_agent(
-            target.path(),
-            BERDY_AGENT_FILE_NAME,
-            "---\nname: Personal Berdy\n---\nPersonal.",
-        );
-        std::os::unix::fs::symlink(&outside, target.path().join(BERDY_FALLBACK_FILE_NAME)).unwrap();
-
-        let error =
-            repair_bundled_agent_from_dir(source.path(), target.path(), BERDY_AGENT_FILE_NAME)
-                .unwrap_err();
+            repair_bundled_agent_from_dir(source.path(), target.path(), "berdy.md").unwrap_err();
 
         assert!(error.contains("must not be a symbolic link"));
         assert!(!outside.exists());

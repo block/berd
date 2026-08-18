@@ -18,7 +18,7 @@ vi.mock("@/shared/hooks/useArtifacts", () => ({
 
 vi.mock("@/shared/hooks/useAvatarSrc", () => ({
   useAvatarMedia: () => ({
-    src: "asset://localhost/gloopies-14.webm",
+    src: "asset://localhost/gloopies-22.webm",
     mediaType: "video",
   }),
 }));
@@ -68,11 +68,15 @@ describe("OnboardingTourWidget", () => {
         {
           id: "/Users/test/.agents/agents/berdy.md",
           displayName: "Berdy",
-          avatar: "app-avatar:gloopies-14",
+          avatar: "app-avatar:gloopies-22",
           systemPrompt: "Help people use Berd.",
           isBuiltin: false,
           writable: true,
-          sourceProperties: { metadata: { berdBundled: true } },
+          sourceProperties: {
+            metadata: {
+              berdBundled: true,
+            },
+          },
         },
       ],
     });
@@ -270,11 +274,15 @@ describe("OnboardingTourWidget", () => {
           {
             id: "/Users/test/.agents/agents/berdy.md",
             displayName: "Berdy",
-            avatar: "app-avatar:gloopies-14",
+            avatar: "app-avatar:gloopies-22",
             systemPrompt: "Help people use Berd.",
             isBuiltin: false,
             writable: true,
-            sourceProperties: { metadata: { berdBundled: true } },
+            sourceProperties: {
+              metadata: {
+                berdBundled: true,
+              },
+            },
           },
         ],
       });
