@@ -26,11 +26,15 @@ import {
   type TranscriptRowStateRegistry,
 } from "../../row-state";
 import {
+  createTranscriptScrollCoordinationAuthority,
   createTranscriptTanStackVirtualAdapter,
+  type TranscriptScrollCoordinationAuthority,
   TranscriptViewportCoordinator,
   type TranscriptScrollAlign,
   type TranscriptScrollAnchor,
+  type TranscriptScrollCause,
   type TranscriptScrollCorrection,
+  type TranscriptUserInputKind,
   type TranscriptVirtualControllerState,
   type TranscriptVirtualDiagnostics,
   type TranscriptVirtualEngine,
@@ -255,6 +259,7 @@ export interface TranscriptVirtualTimelineState {
   rows: readonly TranscriptRowDescriptor[];
   normalizedProtectedRowIds: readonly string[];
   controller: TranscriptVirtualEngine | null;
+  authority: TranscriptScrollCoordinationAuthority | null;
   controllerScrollElement: HTMLDivElement | null;
   measurementScheduler: TranscriptMeasurementScheduler | null;
   protectedRowKey: string;
@@ -290,6 +295,7 @@ function createTranscriptVirtualTimelineState(): TranscriptVirtualTimelineState 
     rows: [],
     normalizedProtectedRowIds: [],
     controller: null,
+    authority: null,
     controllerScrollElement: null,
     measurementScheduler: null,
     protectedRowKey: "",
@@ -407,6 +413,7 @@ export function useTranscriptVirtualTimeline({
     });
     controller.setRows(rows);
     runtimeRef.current.controller = controller;
+    runtimeRef.current.authority = createAuthority(controller);
     runtimeRef.current.controllerScrollElement = container;
   }
 
@@ -752,6 +759,7 @@ export function useTranscriptVirtualTimeline({
         state,
       });
       runtimeRef.current.controller = replacement;
+      runtimeRef.current.authority = createAuthority(replacement);
       runtimeRef.current.controllerScrollElement = containerRef.current;
       const liveViewportBeforeRows = readViewportGeometry(
         containerRef.current,
@@ -886,7 +894,13 @@ export function useTranscriptVirtualTimeline({
       }
 
       const previousWidthScope = controller.getState().widthScope;
-      const result = controller.syncViewport(liveViewport, options);
+      const authority = runtimeRef.current.authority;
+      const result =
+        options.source === "browser" && authority
+          ? authority.observeScroll(liveViewport, {
+              userScrollIntent: options.userScrollIntent,
+            })
+          : controller.syncViewport(liveViewport, options);
       if (controller.getState().widthScope !== previousWidthScope) {
         invalidateWidthScopedMeasurementReplay();
       }
@@ -1417,72 +1431,123 @@ export function useTranscriptVirtualTimeline({
       }
 
       const result = controller.scrollToRow(rowId, align);
-      applyCorrection(result.correction, "scroll-to-row");
-      commitSnapshot();
-      return result.found;
-    },
-    [applyCorrection, commitSnapshot],
-  );
-
-  const scrollToBottom = useCallback(
-    (behavior: ScrollBehavior = "smooth") => {
-      const controller = runtimeRef.current.controller;
-      const container = containerRef.current;
-      if (!controller || !container) {
+      if (!result.found) {
         return false;
       }
-
-      const liveViewport = readViewportGeometry(container, footerHeight);
-      const controllerState = controller.getState();
-      const liveBottomScrollTop = getLiveBottomScrollTop(
-        controllerState,
-        liveViewport,
+      const authorityResult = runtimeRef.current.authority?.startOperation(
+        controller.getState().anchor,
+        "target",
       );
-      const nextScrollTop = Math.max(
-        controllerState.bottomScrollTop,
-        liveBottomScrollTop,
-      );
-      const nextViewport = {
-        ...liveViewport,
-        scrollTop: nextScrollTop,
-      };
-      if (
-        Math.abs(liveViewport.scrollTop - nextScrollTop) <=
-          TRANSCRIPT_LAYOUT_SYNC_EPSILON_PX &&
-        Math.abs(controllerState.scrollTop - nextScrollTop) <=
-          TRANSCRIPT_LAYOUT_SYNC_EPSILON_PX &&
-        !shouldSyncViewport(controllerState, nextViewport)
-      ) {
-        return true;
+      if (authorityResult) {
+        runtimeRef.current.authority?.complete(authorityResult.operation);
       }
-
-      if (controller.scrollToEnd) {
-        controller.scrollToEnd({ behavior });
-      }
-
-      controller.writeScrollTop?.(nextScrollTop, {
-        behavior,
-        source: "programmatic",
-        userScrollIntent: true,
-      });
-      const nextLiveViewport = readViewportGeometry(container, footerHeight);
-      const targetReachableInCurrentDom =
-        nextScrollTop <= getBrowserBottomScrollTop(liveViewport) + 1;
-      const result = controller.syncViewport(
-        behavior !== "auto" && targetReachableInCurrentDom
-          ? {
-              ...nextLiveViewport,
-              scrollTop: nextScrollTop,
-            }
-          : nextLiveViewport,
-        { source: "browser", userScrollIntent: true },
-      );
-      applyCorrection(result.correction, "scroll-to-bottom-sync");
       commitSnapshot();
       return true;
     },
-    [applyCorrection, commitSnapshot, containerRef, footerHeight],
+    [commitSnapshot],
   );
+
+  const scrollToBottom = useCallback(
+    (
+      behavior: ScrollBehavior = "smooth",
+      cause: Extract<TranscriptScrollCause, "follow" | "jump"> = "follow",
+    ) => {
+      const controller = runtimeRef.current.controller;
+      const authority = runtimeRef.current.authority;
+      const container = containerRef.current;
+      if (!controller || !authority || !container) {
+        return false;
+      }
+
+      // The authority owns the operation even when the browser is already at
+      // the anchor and no correction is needed. installAuthorityAnchor reaches
+      // the adapter/coordinator synchronously; completion is its browser ack.
+      const result = authority.startOperation({ type: "bottom" }, cause);
+      const liveViewport = readViewportGeometry(container, footerHeight);
+      const liveBottomScrollTop = getLiveBottomScrollTop(
+        controller.getState(),
+        liveViewport,
+      );
+      // The split live tail is intentionally outside canonical virtual geometry
+      // until E10. Keep its browser-only extension under the same authority
+      // operation rather than manufacturing a second React operation.
+      controller.writeScrollTop?.(
+        Math.max(controller.getState().bottomScrollTop, liveBottomScrollTop),
+        {
+          behavior,
+          source: "programmatic",
+          operation: result.operation,
+        },
+      );
+      authority.complete(result.operation);
+      commitSnapshot();
+      return true;
+    },
+    [commitSnapshot, containerRef, footerHeight],
+  );
+
+  const interruptScroll = useCallback(
+    (kind: TranscriptUserInputKind) => {
+      const authority = runtimeRef.current.authority;
+      const controller = runtimeRef.current.controller;
+      if (!authority || !controller) {
+        return false;
+      }
+      const interrupted = authority.interrupt(kind);
+      const liveViewport = readViewportGeometry(
+        containerRef.current,
+        footerHeight,
+      );
+      // Translate physical input into one authority-owned observation. React
+      // supplies the event kind; the engine resolves the anchor and the
+      // authority owns/retire its operation identity.
+      const observation = controller.syncViewport(liveViewport, {
+        source: "browser",
+        userScrollIntent: true,
+        preserveScrollPosition: true,
+      });
+      const operation = authority.startOperation(
+        controller.getState().anchor,
+        "user-input",
+        kind,
+      );
+      authority.complete(operation.operation);
+      void observation;
+      commitSnapshot();
+      return interrupted !== null;
+    },
+    [commitSnapshot, containerRef, footerHeight],
+  );
+
+  const reconcileResize = useCallback(() => {
+    const authority = runtimeRef.current.authority;
+    if (!authority) {
+      return null;
+    }
+    authority.reconcileResize(
+      readViewportGeometry(containerRef.current, footerHeight),
+    );
+    commitSnapshot();
+    return authority.getState();
+  }, [commitSnapshot, containerRef, footerHeight]);
+
+  const getScrollPresentation = useCallback(() => {
+    const authority = runtimeRef.current.authority;
+    if (!authority) {
+      return { intent: "following-latest" as const, detached: false };
+    }
+    const pending = authority.getPendingOperation();
+    const anchor = authority.getTrackedAnchor();
+    return {
+      intent:
+        pending?.cause === "target"
+          ? ("targeting-message" as const)
+          : anchor.type === "bottom"
+            ? ("following-latest" as const)
+            : ("user-detached" as const),
+      detached: anchor.type !== "bottom",
+    };
+  }, []);
 
   const writeScrollTop = useCallback(
     (
@@ -1631,6 +1696,9 @@ export function useTranscriptVirtualTimeline({
     measureOffscreenRealElement,
     remeasureVisibleRowsSync,
     syncViewportFromDom,
+    reconcileResize,
+    interruptScroll,
+    getScrollPresentation,
     scrollToRow,
     scrollToBottom,
     writeScrollTop,
@@ -1746,6 +1814,19 @@ function getMeasurementStats(
     cacheWrites: diagnostics.cache.writes,
     cacheEvictions: diagnostics.cache.evictions,
   };
+}
+
+function createAuthority(
+  engine: TranscriptVirtualEngine,
+): TranscriptScrollCoordinationAuthority {
+  if (!engine.installAuthorityAnchor || !engine.getMeasurementToken) {
+    throw new Error(
+      "Transcript scroll authority requires a coordinated engine",
+    );
+  }
+  return createTranscriptScrollCoordinationAuthority(
+    engine as Parameters<typeof createTranscriptScrollCoordinationAuthority>[0],
+  );
 }
 
 function createController({
@@ -1898,15 +1979,6 @@ function getLiveBottomScrollTop(
     0,
     state.virtualScrollHeight - viewport.viewportHeight,
     browserScrollHeight - viewport.viewportHeight,
-  );
-}
-
-function getBrowserBottomScrollTop(
-  viewport: TranscriptViewportGeometry,
-): number {
-  return Math.max(
-    0,
-    (viewport.browserScrollHeight ?? 0) - viewport.viewportHeight,
   );
 }
 

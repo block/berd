@@ -1201,6 +1201,9 @@ function VirtualMessageTimelineSession({
     measureOffscreenRealElement,
     scrollToRow: scrollVirtualToRow,
     syncViewportFromDom,
+    reconcileResize: reconcileAuthorityResize,
+    interruptScroll: interruptAuthorityScroll,
+    getScrollPresentation,
     writeScrollTop: writeVirtualScrollTop,
     readRealRowCoverage,
   } = virtualTimeline;
@@ -1701,7 +1704,8 @@ function VirtualMessageTimelineSession({
   }, []);
 
   const syncJumpToLatestVisibility = useCallback(
-    (intent: TimelineScrollIntent = scrollIntentRef.current) => {
+    (_intent: TimelineScrollIntent = scrollIntentRef.current) => {
+      const intent = getScrollPresentation().intent;
       const container = containerRef.current;
       if (!container) {
         setShowJumpToLatest(false);
@@ -1716,7 +1720,7 @@ function VirtualMessageTimelineSession({
         }),
       );
     },
-    [],
+    [getScrollPresentation],
   );
 
   const stopStreamingBottomFollow = useCallback(() => {
@@ -2020,7 +2024,7 @@ function VirtualMessageTimelineSession({
     const shouldRestoreProgrammaticFollow =
       !hasScrollDetachIntent &&
       !userDetachedRef.current &&
-      scrollIntentRef.current === "following-latest";
+      getScrollPresentation().intent === "following-latest";
     const shouldResumeFromDom =
       !suppressFollowResumeFromProgrammaticScrollRef.current &&
       (domPinnedToLatest ||
@@ -2131,6 +2135,7 @@ function VirtualMessageTimelineSession({
     streamingMessageId,
     syncJumpToLatestVisibility,
     syncViewportFromDom,
+    getScrollPresentation,
   ]);
 
   const scrollToBottomIfNearBottom = useCallback(
@@ -2332,13 +2337,15 @@ function VirtualMessageTimelineSession({
         return;
       }
 
-      let virtualState = syncViewportFromDom({
-        source: pointerScrollIntentActiveRef.current
-          ? "browser"
-          : "programmatic",
-        userScrollIntent: pointerScrollIntentActiveRef.current,
-        preserveScrollPosition: pointerScrollIntentActiveRef.current,
-      });
+      let virtualState =
+        reconcileAuthorityResize() ??
+        syncViewportFromDom({
+          source: pointerScrollIntentActiveRef.current
+            ? "browser"
+            : "programmatic",
+          userScrollIntent: pointerScrollIntentActiveRef.current,
+          preserveScrollPosition: pointerScrollIntentActiveRef.current,
+        });
       if (
         virtualState &&
         userDetachedRef.current &&
@@ -2396,6 +2403,7 @@ function VirtualMessageTimelineSession({
     };
   }, [
     clearUserScrollIntent,
+    reconcileAuthorityResize,
     remeasureVisibleRowsSync,
     scrollToBottom,
     setDetachedFromLatest,
@@ -3097,6 +3105,8 @@ function VirtualMessageTimelineSession({
     );
 
     if (event.deltaY < 0) {
+      cancelJumpToLatestAnimation();
+      interruptAuthorityScroll("wheel");
       detachFromBottomFollow();
       // Push the detach into the controller immediately so it captures a row
       // anchor at the current position. Otherwise the controller can keep a
@@ -3130,8 +3140,9 @@ function VirtualMessageTimelineSession({
     if (event.type !== "pointerdown") {
       handleStreamingUserScrollIntent();
     }
-    // A real wheel/touch interrupts an in-flight jump-to-latest glide so the
-    // user keeps control of the scroll position.
+    interruptAuthorityScroll(
+      event.type === "pointerdown" ? "pointer" : "touch",
+    );
     cancelJumpToLatestAnimation();
   };
 
@@ -3154,6 +3165,7 @@ function VirtualMessageTimelineSession({
             : "away-from-latest",
         );
         handleStreamingUserScrollIntent();
+        interruptAuthorityScroll("key");
         cancelJumpToLatestAnimation();
         break;
       default:
@@ -3187,64 +3199,15 @@ function VirtualMessageTimelineSession({
 
   const handleJumpToLatest = () => {
     clearProgrammaticFollowResumeSuppression();
-    setDetachedFromLatest(false);
-    isNearBottomRef.current = true;
-
-    const container = containerRef.current;
     cancelJumpToLatestAnimation();
-
-    // While streaming the bottom is a moving target (the follow logic owns it),
-    // and reduced-motion users want no glide — both take the instant path.
-    if (
-      streamingMessageId ||
-      !container ||
-      window.matchMedia(REDUCED_MOTION_QUERY).matches
-    ) {
-      scrollToBottom(streamingMessageId ? "auto" : "smooth");
-      if (streamingMessageId) {
-        scheduleCappedStreamingBottomFollow();
-      }
+    if (!scrollVirtualToBottom("smooth", "jump")) {
       return;
     }
-
-    const startScrollTop = container.scrollTop;
-    const initialBottom = getBottomScrollTop(container);
-    if (Math.abs(initialBottom - startScrollTop) <= 1) {
-      scrollToBottom("auto");
-      return;
+    isNearBottomRef.current = true;
+    setDetachedFromLatest(false);
+    if (streamingMessageId) {
+      scheduleCappedStreamingBottomFollow();
     }
-
-    // Drive scrollTop directly with an eased rAF loop (mirrors the classic
-    // renderer). The native "smooth" path can't be used here because the
-    // virtual controller synchronously corrects scrollTop, snapping the glide.
-    let startTime: number | null = null;
-    const animate = (now: number) => {
-      const nextContainer = containerRef.current;
-      if (!nextContainer) {
-        jumpToLatestFrameRef.current = null;
-        return;
-      }
-      startTime ??= now;
-      const progress = Math.min(
-        1,
-        (now - startTime) / JUMP_TO_LATEST_SCROLL_MS,
-      );
-      const bottomScrollTop = getBottomScrollTop(nextContainer);
-      writeVirtualScrollTop(
-        startScrollTop +
-          (bottomScrollTop - startScrollTop) * easeOutCubic(progress),
-        { source: "programmatic" },
-      );
-      if (progress < 1) {
-        jumpToLatestFrameRef.current = requestAnimationFrame(animate);
-        return;
-      }
-      jumpToLatestFrameRef.current = null;
-      // Final exact landing through the controller so virtual state, position,
-      // and detached flag all settle on the true bottom.
-      scrollToBottom("auto");
-    };
-    jumpToLatestFrameRef.current = requestAnimationFrame(animate);
   };
 
   const scrollResponseStartElement = useCallback(
