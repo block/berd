@@ -36,6 +36,35 @@ describe("agent ZIP import", () => {
     expect(extractAgentFileFromZip(archive).name).toBe("reviewer.agent.png");
   });
 
+  it("rejects duplicate supported paths before extraction collapses them", () => {
+    const archive = zipSync({
+      "one.md": new Uint8Array([1]),
+      "two.md": new Uint8Array([2]),
+    });
+    const duplicatePathArchive = new Uint8Array(archive);
+    const originalName = new TextEncoder().encode("two.md");
+    const duplicateName = new TextEncoder().encode("one.md");
+    for (
+      let offset = 0;
+      offset <= duplicatePathArchive.length - originalName.length;
+      offset += 1
+    ) {
+      if (
+        originalName.every(
+          (byte, index) => duplicatePathArchive[offset + index] === byte,
+        )
+      ) {
+        duplicatePathArchive.set(duplicateName, offset);
+      }
+    }
+
+    expect(() => extractAgentFileFromZip(duplicatePathArchive)).toThrow(
+      expect.objectContaining<Partial<AgentZipImportError>>({
+        code: "multipleAgents",
+      }),
+    );
+  });
+
   it("rejects ambiguous archives with a typed error", () => {
     const archive = zipSync({
       "one.persona.md": new Uint8Array([1]),

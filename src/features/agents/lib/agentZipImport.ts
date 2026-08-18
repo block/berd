@@ -60,6 +60,7 @@ export function extractAgentFileFromZip(
   archiveBytes: Uint8Array,
 ): ExtractedAgentFile {
   let entryCount = 0;
+  let supportedEntryCount = 0;
   let totalUncompressedBytes = 0;
   let archive: Record<string, Uint8Array>;
   try {
@@ -74,14 +75,19 @@ export function extractAgentFileFromZip(
           throw new AgentZipImportError("tooLarge", MAX_SNAPSHOT_PNG_BYTES);
         }
         const name = entry.name.split("/").at(-1) ?? "";
-        if (
+        const isSupportedEntry =
           !entry.name.endsWith("/") &&
           !entry.name.split("/").includes("__MACOSX") &&
           !name.startsWith(".") &&
-          isSupportedAgentFileName(name) &&
-          entry.originalSize > maxAgentFileBytes(name)
-        ) {
-          throw new AgentZipImportError("tooLarge", maxAgentFileBytes(name));
+          isSupportedAgentFileName(name);
+        if (isSupportedEntry) {
+          supportedEntryCount += 1;
+          if (supportedEntryCount > 1) {
+            throw new AgentZipImportError("multipleAgents");
+          }
+          if (entry.originalSize > maxAgentFileBytes(name)) {
+            throw new AgentZipImportError("tooLarge", maxAgentFileBytes(name));
+          }
         }
         return !entry.name.endsWith("/");
       },
