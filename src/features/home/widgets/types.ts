@@ -39,6 +39,10 @@ export interface WidgetSizeBounds {
 export interface WidgetSizeProfile {
   defaultSize: WidgetSize;
   sizeBounds: WidgetSizeBounds;
+  /** Offset of the profile's primary visual content from the widget frame. */
+  contentOffset?:
+    | { x: number; y: number }
+    | ((size: WidgetSize) => { x: number; y: number });
 }
 
 export interface WidgetInstance {
@@ -101,6 +105,8 @@ export interface WidgetCatalogEntry {
   resolveProfile?: (instance: WidgetInstance) => WidgetSizeProfile;
   /** Keep the current rendered width when state switches size profiles. */
   preserveWidthOnProfileChange?: boolean;
+  /** Keep the top-left position when state switches size profiles. */
+  preservePositionOnProfileChange?: boolean;
   /** Keep each instance's resolved size when organizing the canvas. */
   preserveSizeOnCleanUp?: boolean;
   /** Renderable component for this widget type. Entries without a Component

@@ -6,6 +6,14 @@ import { OnboardingTourDialog } from "@/features/onboarding/ui/OnboardingTourDia
 import { BERDY_ONBOARDING_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
+import { useAgentStore } from "@/features/agents/stores/agentStore";
+import {
+  areStarterAgentPinsEligible,
+  markStarterAgentPinsEligible,
+  markStarterAgentPinsSeeded,
+  selectStarterAgentPersonas,
+  shouldRemoveLegacyBerdyPin,
+} from "@/features/home/onboarding/starterAgents";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { perfLog } from "@/shared/lib/perfLog";
 import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
@@ -26,31 +34,16 @@ import type { WidgetInstance } from "../widgets/types";
 import { WidgetCanvas } from "./WidgetCanvas";
 import { useStarterTasks } from "@/features/home/onboarding/StarterTasksContext";
 import {
-  HOME_CAMERA_SAVE_CONFIRMED_EVENT,
-  HOME_CAMERA_SAVE_DISCARDED_EVENT,
-  HOME_WIDGET_SAVE_CONFIRMED_EVENT,
-  HOME_WIDGET_SAVE_DISCARDED_EVENT,
-} from "@/features/home/onboarding/homeWidgetSaveLifecycle";
-import {
-  areStarterAgentPinsEligible,
-  haveStarterAgentPinsBeenSeeded,
-  markStarterAgentPinsSeeded,
-  selectStarterAgentPersonas,
-} from "@/features/home/onboarding/starterAgents";
-import {
   STARTER_PROJECT_ID,
   STARTER_TASKS_NOTE_ID,
 } from "@/features/home/onboarding/starterTasks";
 import {
   clearStarterHomeLayoutEligibility,
   getStarterTasksHeight,
-  hasArrangedStarterHome,
   isStarterHomeLayoutEligible,
-  markStarterHomeArranged,
   starterLayoutCenter,
   STARTER_HOME_LAYOUT,
 } from "@/features/home/onboarding/starterHomeLayout";
-import { useAgentStore } from "@/features/agents/stores/agentStore";
 
 const RETIRED_EDUCATIONAL_STICKY_IDS = new Set([
   "onboarding:welcome",
@@ -108,11 +101,6 @@ export function HomeView({
   const setTopBarActions = useSetTopBarActions();
   useInvalidateHomeWidgetSkillsOnChange();
   const [layoutMotionActive, setLayoutMotionActive] = useState(false);
-  const pendingStarterAgentSeedRef = useRef(false);
-  const pendingStarterLayoutArrangementRef = useRef(false);
-  const starterLayoutItemsConfirmedRef = useRef(false);
-  const starterLayoutCameraConfirmedRef = useRef(false);
-  const starterAgentSeedAttemptedRef = useRef(false);
   const starterLayoutArrangementAttemptedRef = useRef(false);
 
   const [tourOpen, setTourOpen] = useState(false);
@@ -129,7 +117,6 @@ export function HomeView({
     retryInitialize,
     copyErrorDetails,
     widgetMutations,
-    seedWidget,
     camera,
     constraints,
     saveCamera,
@@ -140,231 +127,96 @@ export function HomeView({
   } = useHomeWidgetLayoutController();
 
   useEffect(() => {
-    const finishStarterLayoutIfConfirmed = () => {
-      if (
-        pendingStarterLayoutArrangementRef.current &&
-        starterLayoutItemsConfirmedRef.current &&
-        starterLayoutCameraConfirmedRef.current
-      ) {
-        pendingStarterLayoutArrangementRef.current = false;
-        markStarterHomeArranged();
-      }
-    };
-    const confirmItems = () => {
-      if (pendingStarterAgentSeedRef.current) {
-        pendingStarterAgentSeedRef.current = false;
-        markStarterAgentPinsSeeded();
-      }
-      if (pendingStarterLayoutArrangementRef.current) {
-        starterLayoutItemsConfirmedRef.current = true;
-        finishStarterLayoutIfConfirmed();
-      }
-    };
-    const confirmCamera = () => {
-      if (!pendingStarterLayoutArrangementRef.current) return;
-      starterLayoutCameraConfirmedRef.current = true;
-      finishStarterLayoutIfConfirmed();
-    };
-    const discard = () => {
-      pendingStarterAgentSeedRef.current = false;
-      pendingStarterLayoutArrangementRef.current = false;
-      starterLayoutItemsConfirmedRef.current = false;
-      starterLayoutCameraConfirmedRef.current = false;
-      starterAgentSeedAttemptedRef.current = false;
-      starterLayoutArrangementAttemptedRef.current = false;
-    };
-    window.addEventListener(HOME_WIDGET_SAVE_CONFIRMED_EVENT, confirmItems);
-    window.addEventListener(HOME_WIDGET_SAVE_DISCARDED_EVENT, discard);
-    window.addEventListener(HOME_CAMERA_SAVE_CONFIRMED_EVENT, confirmCamera);
-    window.addEventListener(HOME_CAMERA_SAVE_DISCARDED_EVENT, discard);
-    return () => {
-      window.removeEventListener(
-        HOME_WIDGET_SAVE_CONFIRMED_EVENT,
-        confirmItems,
-      );
-      window.removeEventListener(HOME_WIDGET_SAVE_DISCARDED_EVENT, discard);
-      window.removeEventListener(
-        HOME_CAMERA_SAVE_CONFIRMED_EVENT,
-        confirmCamera,
-      );
-      window.removeEventListener(HOME_CAMERA_SAVE_DISCARDED_EVENT, discard);
-    };
-  }, []);
-
-  useEffect(() => {
+    const shouldMigrateLegacyPins = shouldRemoveLegacyBerdyPin();
+    if (shouldMigrateLegacyPins) markStarterAgentPinsEligible();
     if (
       loadStatus !== "ready" ||
       personasLoading ||
-      pendingStarterAgentSeedRef.current ||
-      starterAgentSeedAttemptedRef.current
+      !areStarterAgentPinsEligible()
     ) {
       return;
     }
-
-    const haveSeededStarterAgents = haveStarterAgentPinsBeenSeeded();
-    const starterAgentPinsEligible = areStarterAgentPinsEligible();
-    // A missing marker is not proof of a new Home: every existing user lacks
-    // this newly introduced key. Only a layout seeded from empty is eligible;
-    // otherwise migrate the marker without touching the user's canvas.
-    if (!haveSeededStarterAgents && !starterAgentPinsEligible) {
-      markStarterAgentPinsSeeded();
-      return;
-    }
-    const availableStarterAgents = haveSeededStarterAgents
-      ? []
-      : selectStarterAgentPersonas(personas);
-    if (availableStarterAgents.length !== STARTER_HOME_LAYOUT.agents.length) {
-      return;
-    }
-
-    const pinnedAgentIds = new Set(
-      instances
-        .filter((instance) => instance.type === "agentPin")
-        .map((instance) => instance.state?.agentId)
-        .filter((agentId): agentId is string => typeof agentId === "string"),
-    );
-    const missingAgents = availableStarterAgents
-      .map((persona, index) => ({ persona, index }))
-      .filter(({ persona }) => !pinnedAgentIds.has(persona.id));
-    if (missingAgents.length === 0) {
-      markStarterAgentPinsSeeded();
-      return;
-    }
-    const allSeeded = missingAgents.every(({ persona, index }) => {
-      const placement = STARTER_HOME_LAYOUT.agents[index];
-      const center = placement
-        ? starterLayoutCenter(placement)
-        : { x: -420 + index * 220, y: 410 };
-      return seedWidget(
-        "agentPin",
-        center.x,
-        center.y,
-        { agentId: persona.id },
-        undefined,
-        { notifyStarterTask: false },
-      );
-    });
-    if (allSeeded) {
-      starterAgentSeedAttemptedRef.current = true;
-      pendingStarterAgentSeedRef.current = true;
-    }
-  }, [instances, loadStatus, personas, personasLoading, seedWidget]);
+    const starterPersonas = selectStarterAgentPersonas(personas);
+    if (starterPersonas.length !== STARTER_HOME_LAYOUT.agents.length) return;
+    void useHomeWidgetStore
+      .getState()
+      .addMissingStarterAgentPins(starterPersonas.map(({ id }) => id))
+      .then((didPersist) => {
+        if (didPersist) markStarterAgentPinsSeeded();
+      });
+  }, [loadStatus, personas, personasLoading]);
 
   useEffect(() => {
     if (
       loadStatus !== "ready" ||
-      !starterTasks?.visible ||
-      personasLoading ||
-      hasArrangedStarterHome() ||
-      pendingStarterLayoutArrangementRef.current ||
+      !isStarterHomeLayoutEligible() ||
       starterLayoutArrangementAttemptedRef.current
-    ) {
+    )
       return;
-    }
-
-    const starterAgentPersonas = selectStarterAgentPersonas(personas);
-    const starterAgentIds = new Set(
-      starterAgentPersonas.map((persona) => persona.id),
+    const starterPersonas = selectStarterAgentPersonas(personas);
+    const starterAgentIds = new Set(starterPersonas.map(({ id }) => id));
+    const haveAllStarterPins = starterPersonas.every(({ id }) =>
+      instances.some(
+        (instance) =>
+          instance.type === "agentPin" && instance.state?.agentId === id,
+      ),
     );
     const hasCompleteStarterSet =
-      starterAgentPersonas.length === STARTER_HOME_LAYOUT.agents.length &&
-      starterAgentPersonas.every((persona) =>
-        instances.some(
-          (instance) =>
-            instance.type === "agentPin" &&
-            instance.state?.agentId === persona.id,
-        ),
-      ) &&
-      instances.some((instance) => instance.type === "clock") &&
+      starterPersonas.length === STARTER_HOME_LAYOUT.agents.length &&
+      haveAllStarterPins &&
       instances.some((instance) => instance.type === "onboardingTour") &&
+      instances.some((instance) => instance.type === "clock") &&
       instances.some(
         (instance) => instance.state?.noteId === STARTER_TASKS_NOTE_ID,
       ) &&
       instances.some(
-        (instance) =>
-          instance.type === "onboardingProjectArtifact" ||
-          instance.state?.onboardingStarterProject === true,
+        (instance) => instance.type === "onboardingProjectArtifact",
       );
-    if (!hasCompleteStarterSet || !isStarterHomeLayoutEligible()) {
-      return;
-    }
-
-    // Guard against synchronous Zustand re-entry while the layout mutations
-    // are queued. The durable marker is written only after the runtime confirms
-    // the save, so a discarded save can retry on the next render.
+    if (!hasCompleteStarterSet) return;
     starterLayoutArrangementAttemptedRef.current = true;
-    pendingStarterLayoutArrangementRef.current = true;
-    starterLayoutItemsConfirmedRef.current = false;
-    starterLayoutCameraConfirmedRef.current = camera === null;
 
-    const starterClock = instances
-      .filter((instance) => instance.type === "clock")
-      .sort((left, right) => left.z - right.z)[0];
-
-    const berdyTour = instances.find(
-      (instance) => instance.type === "onboardingTour",
-    );
     const maxZ = Math.max(0, ...instances.map((instance) => instance.z));
-    const arrangedInstances = instances.map((instance) => {
-      const noteId = instance.state?.noteId;
-      if (instance.id === starterClock?.id) {
+    const arranged = instances.map((instance) => {
+      if (instance.type === "clock")
         return { ...instance, ...STARTER_HOME_LAYOUT.clock };
-      }
       if (instance.type === "onboardingTour") {
-        return {
-          ...instance,
-          x: STARTER_HOME_LAYOUT.berdy.x,
-          y: STARTER_HOME_LAYOUT.berdy.y,
-          z: instance.id === berdyTour?.id ? maxZ + 1 : instance.z,
-        };
+        return { ...instance, ...STARTER_HOME_LAYOUT.berdy, z: maxZ + 1 };
       }
       if (
         instance.type === "agentPin" &&
         typeof instance.state?.agentId === "string" &&
         starterAgentIds.has(instance.state.agentId)
       ) {
-        const starterAgentIndex = starterAgentPersonas.findIndex(
-          (persona) => persona.id === instance.state?.agentId,
+        const index = starterPersonas.findIndex(
+          ({ id }) => id === instance.state?.agentId,
         );
-        const placement = STARTER_HOME_LAYOUT.agents[starterAgentIndex];
-        return placement
-          ? { ...instance, x: placement.x, y: placement.y }
-          : instance;
+        return { ...instance, ...STARTER_HOME_LAYOUT.agents[index] };
       }
-      if (noteId === STARTER_TASKS_NOTE_ID) {
+      if (instance.state?.noteId === STARTER_TASKS_NOTE_ID) {
         return {
           ...instance,
-          x: STARTER_HOME_LAYOUT.tasks.x,
-          y: STARTER_HOME_LAYOUT.tasks.y,
-          width: STARTER_HOME_LAYOUT.tasks.width,
+          ...STARTER_HOME_LAYOUT.tasks,
           height: starterTasksHeight,
         };
       }
-      if (
-        instance.type === "onboardingProjectArtifact" ||
-        instance.state?.onboardingStarterProject === true
-      ) {
+      if (instance.type === "onboardingProjectArtifact") {
         return { ...instance, ...STARTER_HOME_LAYOUT.project };
       }
       return instance;
     });
-    widgetMutations.applyStarterLayout(arrangedInstances);
-    if (camera) {
-      saveCamera({
-        ...camera,
-        centerX: 80,
-        centerY: 44,
-        zoomBps: 9_000,
+    void widgetMutations
+      .applyStarterLayout(
+        arranged,
+        camera ? { ...camera, centerX: 80, centerY: 44, zoomBps: 9_000 } : null,
+      )
+      .then((confirmed) => {
+        if (!confirmed) starterLayoutArrangementAttemptedRef.current = false;
       });
-    }
   }, [
     camera,
     instances,
     loadStatus,
     personas,
-    personasLoading,
-    saveCamera,
-    starterTasks?.visible,
     starterTasksHeight,
     widgetMutations,
   ]);
@@ -871,11 +723,6 @@ function useHomeWidgetLayoutController() {
     retryInitialize,
     copyErrorDetails,
     widgetMutations,
-    // The raw store mutation, for programmatic seeding. Unlike
-    // widgetMutations.addWidget it records no Pin Pinned intent: the
-    // first-run starter-agent seed (and its re-run after a discarded save)
-    // is not a user pin and must not count as one.
-    seedWidget: addWidget,
     camera,
     constraints,
     saveCamera,

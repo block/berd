@@ -344,7 +344,7 @@ const BerdyContent = memo(function BerdyContent({
                   </filter>
                 </defs>
                 <path
-                  className="fill-card dark:fill-card-glass"
+                  className="fill-card dark:fill-secondary"
                   d={SETTLED_BUBBLE_PATH}
                   filter={`url(#${bubbleShadowId})`}
                 />
@@ -368,13 +368,13 @@ const BerdyContent = memo(function BerdyContent({
                 onAnimationComplete={() => setIsBubbleSettled(true)}
               >
                 <path
-                  className="fill-card dark:fill-card-glass"
+                  className="fill-card dark:fill-secondary"
                   d={SETTLED_BUBBLE_PATH}
                 />
               </motion.svg>
               <motion.div
                 data-onboarding-tour-caret-dot="small"
-                className="absolute -bottom-9 left-1 size-3 origin-top rounded-full bg-card dark:bg-card-glass"
+                className="absolute -bottom-9 left-1 size-3 origin-top rounded-full bg-card dark:bg-secondary"
                 initial={
                   shouldReduceMotion
                     ? false
@@ -394,7 +394,7 @@ const BerdyContent = memo(function BerdyContent({
               />
               <motion.div
                 data-onboarding-tour-caret-dot="large"
-                className="absolute -bottom-4 left-4 size-8 origin-top rounded-full bg-card dark:bg-card-glass"
+                className="absolute -bottom-4 left-4 size-8 origin-top rounded-full bg-card dark:bg-secondary"
                 initial={
                   shouldReduceMotion ? false : { opacity: 0, scale: 0, x: -5 }
                 }
@@ -412,11 +412,11 @@ const BerdyContent = memo(function BerdyContent({
               >
                 <span
                   data-onboarding-tour-connector-fillet="top"
-                  className="absolute top-2 -left-0.5 size-2 rounded-full bg-card dark:bg-card-glass"
+                  className="absolute top-2 -left-0.5 size-2 rounded-full bg-card dark:bg-secondary"
                 />
                 <span
                   data-onboarding-tour-connector-fillet="bottom"
-                  className="absolute top-2 -right-0.5 size-2 rounded-full bg-card dark:bg-card-glass"
+                  className="absolute top-2 -right-0.5 size-2 rounded-full bg-card dark:bg-secondary"
                 />
               </motion.div>
             </div>

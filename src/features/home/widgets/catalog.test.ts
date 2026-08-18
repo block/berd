@@ -47,11 +47,31 @@ describe("photo size profiles", () => {
   });
 });
 
+describe("onboarding tour size profiles", () => {
+  it("shrinks the frame to the avatar after the welcome bubble is dismissed", () => {
+    const dismissedTour: WidgetInstance = {
+      id: "tour-1",
+      type: "onboardingTour",
+      x: 0,
+      y: 0,
+      z: 1,
+      width: 448,
+      height: 180,
+      state: { welcomeDismissed: true },
+    };
+
+    expect(widgetSizeForInstance(dismissedTour)).toEqual({
+      width: 160,
+      height: 160,
+    });
+  });
+});
+
 describe("clock size profiles", () => {
   it("uses the analog (square) profile by default", () => {
     expect(widgetSizeForInstance(baseClock)).toEqual({
-      width: 173,
-      height: 173,
+      width: 156,
+      height: 156,
     });
   });
 

@@ -550,20 +550,17 @@ export function createDefaultClockLayoutItem(
 }
 
 export function createDefaultOnboardingTourWidget(
-  clock?: WidgetInstance,
+  clock = createDefaultClockWidget(),
 ): WidgetInstance {
   const width = 448;
   const height = 180;
-  const clockSize = clock ? widgetSizeForInstance(clock) : null;
+  const clockSize = widgetSizeForInstance(clock);
 
   return {
     id: crypto.randomUUID(),
     type: "onboardingTour",
-    x: clock && clockSize ? clock.x + clockSize.width / 2 - width / 2 : 678.5,
-    y:
-      clock && clockSize
-        ? clock.y + clockSize.height + ONBOARDING_CLOCK_GAP
-        : 245,
+    x: clock.x + clockSize.width / 2 - width / 2,
+    y: clock.y + clockSize.height + ONBOARDING_CLOCK_GAP,
     z: 1,
     width,
     height,
