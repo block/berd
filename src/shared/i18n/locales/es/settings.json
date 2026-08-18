@@ -227,6 +227,7 @@
       "description": "Prueba y restablece las experiencias de incorporación juntas.",
       "resetAll": "Restablecer toda la incorporación",
       "resetAllError": "No se pudieron restablecer todas las experiencias de incorporación. Inténtalo de nuevo.",
+      "resetAllPartial": "Se restableció la incorporación. Los agentes iniciales aparecerán cuando estén disponibles.",
       "resetAllSuccess": "Se restablecieron todas las experiencias de incorporación.",
       "title": "Incorporación"
     },

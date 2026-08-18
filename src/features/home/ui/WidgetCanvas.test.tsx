@@ -440,7 +440,7 @@ describe("WidgetCanvas", () => {
     expect(widgetNode.style.height).toBe("300px");
     expect(
       Number(widgetNode.style.getPropertyValue("--widget-text-scale")),
-    ).toBeCloseTo((240 / 173) * 1.08);
+    ).toBeCloseTo((240 / 156) * 1.08);
     expect(widgetContent.style.transform).toBe("scale(1.25)");
     expect(widgetContent.style.transformOrigin).toBe("top left");
     expect(widgetContent.style.width).toBe("240px");

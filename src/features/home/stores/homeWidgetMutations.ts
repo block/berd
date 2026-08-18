@@ -170,9 +170,9 @@ function profileKey(profile: WidgetSizeProfile): string {
   return `${profile.defaultSize.width}x${profile.defaultSize.height}`;
 }
 
-const LEGACY_CLOCK_PROFILE_KEYS: Record<string, string> = {
-  "173x173": "240x240",
-  "224x88": "264x104",
+const LEGACY_CLOCK_PROFILE_KEYS: Record<string, string[]> = {
+  "156x156": ["173x173", "240x240"],
+  "224x88": ["264x104"],
 };
 
 function rememberedSizeForProfile(
@@ -184,7 +184,9 @@ function rememberedSizeForProfile(
   return (
     sizeMemory[key] ??
     (type === "clock"
-      ? sizeMemory[LEGACY_CLOCK_PROFILE_KEYS[key] ?? ""]
+      ? LEGACY_CLOCK_PROFILE_KEYS[key]
+          ?.map((legacyKey) => sizeMemory[legacyKey])
+          .find((size) => size !== undefined)
       : undefined)
   );
 }
@@ -538,14 +540,32 @@ export function updateWidgetStateMutation(
     : inheritedSize
       ? clampWidgetSizeForInstance(nextInstance, inheritedSize)
       : nextProfile.defaultSize;
+  const preservePosition =
+    HOME_WIDGET_CATALOG_BY_ID[target.type]?.preservePositionOnProfileChange;
   const prevSize = widgetSizeForInstance(target);
-  const centeredPosition = {
-    x: Math.round(target.x + (prevSize.width - nextSize.width) / 2),
-    y: Math.round(target.y + (prevSize.height - nextSize.height) / 2),
+  const resolvedContentOffset = (
+    profile: WidgetSizeProfile,
+    size: { width: number; height: number },
+  ) => {
+    if (typeof profile.contentOffset === "function") {
+      return profile.contentOffset(size);
+    }
+    return profile.contentOffset ?? { x: 0, y: 0 };
   };
+  const prevContentOffset = resolvedContentOffset(prevProfile, prevSize);
+  const nextContentOffset = resolvedContentOffset(nextProfile, nextSize);
+  const requestedPosition = preservePosition
+    ? {
+        x: target.x + prevContentOffset.x - nextContentOffset.x,
+        y: target.y + prevContentOffset.y - nextContentOffset.y,
+      }
+    : {
+        x: Math.round(target.x + (prevSize.width - nextSize.width) / 2),
+        y: Math.round(target.y + (prevSize.height - nextSize.height) / 2),
+      };
   const position = isLayoutConstraints(bounds)
-    ? clampToLayoutConstraints(centeredPosition, nextSize, bounds)
-    : centeredPosition;
+    ? clampToLayoutConstraints(requestedPosition, nextSize, bounds)
+    : requestedPosition;
 
   const sized: WidgetInstance = {
     ...nextInstance,

@@ -393,8 +393,8 @@ describe("homeLayoutMapper", () => {
     expect(item).toMatchObject({
       kind: "clock",
       targetId: `widget:${item.id}`,
-      centerX: 902.5,
-      centerY: 134.5,
+      centerX: 894,
+      centerY: 126,
     });
   });
 
@@ -415,7 +415,7 @@ describe("homeLayoutMapper", () => {
     expect(
       widgets.slice(0, 6).map((widget) => ({ x: widget.x, y: widget.y })),
     ).toEqual([
-      { x: 678.5, y: 245 },
+      { x: 670, y: 236 },
       { x: -96, y: -240 },
       { x: 168, y: -240 },
       { x: -360, y: 0 },
@@ -445,7 +445,7 @@ describe("homeLayoutMapper", () => {
   it("locates Berdy's avatar for initial camera centering", () => {
     const widget = createDefaultOnboardingTourWidget();
 
-    expect(onboardingTourAvatarCenter(widget)).toEqual({ x: 750.5, y: 335 });
+    expect(onboardingTourAvatarCenter(widget)).toEqual({ x: 742, y: 326 });
   });
 
   it("persists the completed welcome callout for Berdy", () => {
@@ -477,7 +477,7 @@ describe("homeLayoutMapper", () => {
     expect(onboardingTour.x + (onboardingTour.width ?? 0) / 2).toBeCloseTo(
       clock.x + (clock.width ?? 0) / 2,
     );
-    expect(onboardingTour.y - (clock.y + (clock.height ?? 0))).toBe(24);
+    expect(onboardingTour.y - (clock.y + (clock.height ?? 0))).toBe(32);
   });
 
   describe("clock mode persistence round-trip", () => {

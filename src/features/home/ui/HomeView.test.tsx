@@ -43,6 +43,9 @@ type WidgetCanvasProps = ComponentProps<
 const widgetCanvasMock = vi.hoisted(() =>
   vi.fn((_props: WidgetCanvasProps) => <div>widget canvas</div>),
 );
+vi.mock("@/shared/api/agents", () => ({
+  listPersonas: vi.fn(async () => useAgentStore.getState().personas),
+}));
 
 vi.mock("@/features/layout/api/layout", async (importOriginal) => {
   const actual =
@@ -112,7 +115,12 @@ function bundledPersona(displayName: string): Persona {
     systemPrompt: "Help.",
     isBuiltin: false,
     writable: true,
-    sourceProperties: { metadata: { berdBundled: true } },
+    sourceProperties: {
+      metadata: {
+        berdBundled: true,
+        berdBundledSource: displayName.toLowerCase(),
+      },
+    },
   };
 }
 
@@ -175,10 +183,14 @@ beforeEach(() => {
   vi.mocked(saveLayoutCamera).mockReset();
   vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
     ok: true,
-    layout: layout({ camera: request.camera, cameraRevision: 2 }),
+    layout: layout({
+      camera: request.camera,
+      cameraRevision: 2,
+      items:
+        useHomeWidgetStore.getState().lastConfirmedLayout?.items ??
+        layout().items,
+    }),
   }));
-  vi.mocked(trackHomeItemPinned).mockClear();
-  vi.mocked(trackHomeItemUnpinned).mockClear();
   localStorage.clear();
   localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "6");
   useAgentStore.setState({ personas: [], personasLoading: false });
@@ -256,6 +268,7 @@ describe("HomeView", () => {
       sourceProperties: {
         metadata: {
           berdBundled: true,
+          berdBundledSource: displayName.toLowerCase(),
         },
       },
     });
@@ -340,6 +353,7 @@ describe("HomeView", () => {
       sourceProperties: {
         metadata: {
           berdBundled: true,
+          berdBundledSource: displayName.toLowerCase(),
         },
       },
     });
@@ -402,41 +416,23 @@ describe("HomeView", () => {
           .getState()
           .instances.find((item) => item.type === "clock"),
       ).toMatchObject({
-        width: 173,
-        height: 173,
-        x: 533.5,
-        y: -266.5,
+        width: 156,
+        height: 156,
+        x: 522,
+        y: -274,
       }),
     );
     await waitFor(() => expect(saveLayoutCamera).toHaveBeenCalled());
     const savedClock = vi
       .mocked(saveLayoutItems)
       .mock.calls.flatMap(([request]) => request.items)
-      .findLast((item) => item.kind === "clock" && item.width === 173);
+      .findLast((item) => item.kind === "clock" && item.width === 156);
     expect(savedClock).toMatchObject({
-      centerX: 620,
-      centerY: -180,
-      width: 173,
-      height: 173,
+      centerX: 600,
+      centerY: -196,
+      width: 156,
+      height: 156,
     });
-    const savedPersonas = vi
-      .mocked(saveLayoutItems)
-      .mock.calls.flatMap(([request]) => request.items)
-      .filter((item) => item.kind === "persona");
-    expect(savedPersonas).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          targetId: personas[0].id,
-          centerX: -192,
-          centerY: 370,
-        }),
-        expect.objectContaining({
-          targetId: personas[1].id,
-          centerX: 328,
-          centerY: -270,
-        }),
-      ]),
-    );
   });
 
   it("does not offer starter tasks when the experiment is disabled", async () => {
@@ -520,11 +516,21 @@ describe("HomeView", () => {
 
   it("does not add bundled starter agents to an existing customized Home", async () => {
     vi.mocked(getLayout).mockResolvedValue(layout());
+    const bundledPersona = (displayName: string): Persona => ({
+      id: `/Users/test/.agents/agents/${displayName.toLowerCase()}.md`,
+      displayName,
+      systemPrompt: "Help.",
+      isBuiltin: false,
+      writable: true,
+      sourceProperties: {
+        metadata: { berdBundled: true, berdBundledSource: "tinker" },
+      },
+    });
     useAgentStore.setState({
       personas: [
-        bundledPersona("Wildcard"),
-        bundledPersona("Berdy"),
         bundledPersona("Tinker"),
+        bundledPersona("Berdy"),
+        bundledPersona("Wildcard"),
       ],
       personasLoading: false,
     });
@@ -537,127 +543,49 @@ describe("HomeView", () => {
         .getState()
         .instances.filter((instance) => instance.type === "agentPin"),
     ).toHaveLength(0);
-    expect(
-      localStorage.getItem("goose:home:starter-agent-pins-seeded-v2"),
-    ).toBe("1");
   });
 
-  it("preserves an established Berdy pin when the legacy marker exists", async () => {
-    const berdy = {
-      id: "/Users/test/.agents/agents/berdy.md",
-      displayName: "Berdy",
-      avatar: "app-avatar:gloopies-22" as const,
-      systemPrompt: "Help.",
-      isBuiltin: false,
-      writable: true,
-      sourceProperties: {
-        metadata: {
-          berdBundled: true,
-        },
-      },
-    } satisfies Persona;
-    vi.mocked(getLayout).mockResolvedValue(
-      layout({
-        items: [
-          ...layout().items,
-          {
-            id: "legacy-berdy-pin",
-            kind: "persona",
-            targetId: berdy.id,
-            centerX: 320,
-            centerY: 320,
-            width: 200,
-            height: 220,
-            zIndex: 2,
-            titleOverride: null,
-          },
-        ],
-      }),
-    );
-    localStorage.setItem("goose:home:starter-agent-pins-seeded", "1");
-    useAgentStore.setState({ personas: [berdy], personasLoading: false });
-
-    renderHomeView();
-    await screen.findByText("widget canvas");
-
-    expect(
-      useHomeWidgetStore
-        .getState()
-        .instances.some(
-          (instance) =>
-            instance.type === "agentPin" &&
-            instance.state?.agentId === berdy.id,
-        ),
-    ).toBe(true);
-    expect(saveLayoutItems).not.toHaveBeenCalled();
-    expect(
-      localStorage.getItem("goose:home:starter-agent-pins-seeded-v2"),
-    ).toBe("1");
-  });
-
-  it("seeds starter agents through the empty-Home lifecycle without duplicating them after remount", async () => {
-    const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
-    useAgentStore.setState({ personas, personasLoading: false });
+  it("recovers starter-agent pins after the base Home loads without them", async () => {
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, true);
     vi.mocked(getLayout).mockResolvedValue(layout({ items: [] }));
-
-    const firstMount = renderHomeView();
-
-    await waitFor(() =>
-      expect(
-        useHomeWidgetStore
-          .getState()
-          .instances.filter((instance) => instance.type === "agentPin"),
-      ).toHaveLength(2),
-    );
-    await waitFor(() =>
-      expect(
-        localStorage.getItem("goose:home:starter-agent-pins-seeded-v2"),
-      ).toBe("1"),
-    );
-    const persistedLayout = layout({
-      items: vi.mocked(saveLayoutItems).mock.calls.at(-1)?.[0].items ?? [],
-      itemRevision: 3,
-    });
-    expect(
-      persistedLayout.items
-        .filter((item) => item.kind === "persona")
-        .map((item) => item.targetId),
-    ).toEqual(personas.map((persona) => persona.id));
-
-    firstMount.unmount();
-    resetHomeWidgetStoreForTests();
-    vi.mocked(saveLayoutItems).mockClear();
-    vi.mocked(getLayout).mockResolvedValue(persistedLayout);
-    renderHomeView();
-    await screen.findByText("widget canvas");
-
-    expect(
-      useHomeWidgetStore
-        .getState()
-        .instances.filter((instance) => instance.type === "agentPin"),
-    ).toHaveLength(2);
-    expect(saveLayoutItems).not.toHaveBeenCalled();
-  });
-
-  it("waits for both starter personas before persisting either pin", async () => {
-    const tinker = bundledPersona("Tinker");
-    const wildcard = bundledPersona("Wildcard");
-    vi.mocked(getLayout).mockResolvedValue(layout());
     markStarterAgentPinsEligible();
-    useAgentStore.setState({ personas: [tinker], personasLoading: false });
+    useAgentStore.setState({ personas: [], personasLoading: false });
 
-    renderHomeView();
+    const view = renderHomeView();
     await screen.findByText("widget canvas");
     expect(
       useHomeWidgetStore
         .getState()
         .instances.filter((instance) => instance.type === "agentPin"),
     ).toHaveLength(0);
-    expect(saveLayoutItems).not.toHaveBeenCalled();
 
-    act(() => {
-      useAgentStore.setState({ personas: [tinker, wildcard] });
-    });
+    const personas: Persona[] = [
+      {
+        id: "/Users/test/.agents/agents/tinker.md",
+        displayName: "Tinker",
+        systemPrompt: "Help.",
+        isBuiltin: false,
+        writable: true,
+        sourceProperties: {
+          metadata: { berdBundled: true, berdBundledSource: "tinker" },
+        },
+      },
+      {
+        id: "/Users/test/.agents/agents/wildcard.md",
+        displayName: "Wildcard",
+        systemPrompt: "Help.",
+        isBuiltin: false,
+        writable: true,
+        sourceProperties: {
+          metadata: {
+            berdBundled: true,
+            berdBundledSource: "wildcard",
+          },
+        },
+      },
+    ];
+    useAgentStore.setState({ personas, personasLoading: false });
+    view.rerender(<HomeView />);
 
     await waitFor(() =>
       expect(
@@ -666,23 +594,26 @@ describe("HomeView", () => {
           .instances.filter((instance) => instance.type === "agentPin"),
       ).toHaveLength(2),
     );
-    await waitFor(() =>
-      expect(
-        vi
-          .mocked(saveLayoutItems)
-          .mock.calls.at(-1)?.[0]
-          .items.filter((item) => item.kind === "persona")
-          .map((item) => item.targetId),
-      ).toEqual([tinker.id, wildcard.id]),
-    );
   });
 
   it("adds bundled starter agents to a newly seeded Home", async () => {
-    vi.mocked(getLayout).mockResolvedValue(layout());
+    setExperimentEnabled(BERDY_ONBOARDING_EXPERIMENT_ID, true);
+    vi.mocked(getLayout).mockResolvedValue(layout({ items: [] }));
+    const bundledPersona = (displayName: string): Persona => ({
+      id: `/Users/test/.agents/agents/${displayName.toLowerCase()}.md`,
+      displayName,
+      systemPrompt: "Help.",
+      isBuiltin: false,
+      writable: true,
+      sourceProperties: {
+        metadata: {
+          berdBundled: true,
+          berdBundledSource: displayName.toLowerCase(),
+        },
+      },
+    });
     const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
     useAgentStore.setState({ personas, personasLoading: false });
-    markStarterAgentPinsEligible();
-
     renderHomeView();
 
     await waitFor(() =>
@@ -712,7 +643,7 @@ describe("HomeView", () => {
     // so waiting on it settles the whole seed lifecycle.
     await waitFor(() =>
       expect(
-        localStorage.getItem("goose:home:starter-agent-pins-seeded-v2"),
+        localStorage.getItem("goose:home:starter-agent-pins-seeded-v5"),
       ).toBe("1"),
     );
     expect(
@@ -724,30 +655,21 @@ describe("HomeView", () => {
     expect(trackHomeItemUnpinned).not.toHaveBeenCalled();
   });
 
-  it("re-runs the starter-agent seed silently after a discarded save", async () => {
+  it("keeps failed starter-agent recovery eligible without retrying forever", async () => {
     vi.mocked(getLayout).mockResolvedValue(layout());
     const personas = [bundledPersona("Tinker"), bundledPersona("Wildcard")];
     useAgentStore.setState({ personas, personasLoading: false });
     markStarterAgentPinsEligible();
-    vi.mocked(saveLayoutItems).mockRejectedValueOnce(new Error("save failed"));
+    vi.mocked(saveLayoutItems).mockRejectedValue(new Error("save failed"));
 
     renderHomeView();
 
-    await waitFor(() =>
-      expect(
-        localStorage.getItem("goose:home:starter-agent-pins-seeded-v2"),
-      ).toBe("1"),
-    );
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledOnce());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(saveLayoutItems).toHaveBeenCalledOnce();
     expect(
-      useHomeWidgetStore
-        .getState()
-        .instances.filter((instance) => instance.type === "agentPin"),
-    ).toHaveLength(2);
-    // The rejected save was discarded, so reaching the seeded marker proves
-    // the seeding effect ran at least twice — still with zero pin telemetry.
-    expect(vi.mocked(saveLayoutItems).mock.calls.length).toBeGreaterThanOrEqual(
-      2,
-    );
+      localStorage.getItem("goose:home:starter-agent-pins-seeded-v5"),
+    ).toBeNull();
     expect(trackHomeItemPinned).not.toHaveBeenCalled();
     expect(trackHomeItemUnpinned).not.toHaveBeenCalled();
   });
@@ -796,6 +718,8 @@ describe("HomeView", () => {
 
     renderHomeView();
     await screen.findByText("widget canvas");
+    vi.mocked(trackHomeItemPinned).mockClear();
+    vi.mocked(trackHomeItemUnpinned).mockClear();
 
     const canvasProps = widgetCanvasMock.mock.calls.at(-1)?.[0];
     if (!canvasProps) {

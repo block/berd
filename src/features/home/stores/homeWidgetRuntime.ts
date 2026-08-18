@@ -12,7 +12,13 @@ import {
 } from "@/features/layout/api/layout";
 import { i18n } from "@/shared/i18n";
 import { markStarterAgentPinsEligible } from "@/features/home/onboarding/starterAgents";
-import { markStarterHomeLayoutEligible } from "@/features/home/onboarding/starterHomeLayout";
+import {
+  clearPendingStarterHomeCamera,
+  getPendingStarterHomeCamera,
+  markStarterHomeCameraPending,
+  markStarterHomeLayoutEligible,
+} from "@/features/home/onboarding/starterHomeLayout";
+import { createStarterHomeWidgets } from "@/features/home/onboarding/createStarterHomeWidgets";
 import {
   notifyHomeCameraSaveConfirmed,
   notifyHomeCameraSaveDiscarded,
@@ -20,12 +26,10 @@ import {
 import {
   createDefaultHomeLayoutItems,
   createDefaultOnboardingWidgets,
-  createDefaultOnboardingTourWidget,
   defaultStickyNoteId,
   homeWidgetsToLayoutItems,
   HOME_LAYOUT_REPLACE_KINDS,
   layoutItemsToHomeWidgets,
-  onboardingTourAvatarCenter,
   reconcileOnboardingExperimentWidgets,
 } from "../lib/homeLayoutMapper";
 import type { WidgetInstance } from "../widgets/types";
@@ -440,15 +444,22 @@ export function createHomeWidgetRuntime({
   }
 
   function setReadyLayout(layout: Layout, generation: number): void {
-    if (generation !== runtime.generation) {
-      return;
-    }
-
+    if (generation !== runtime.generation) return;
     setState({
       ...adoptLayout(layout),
       loadStatus: "ready",
       error: null,
     });
+
+    const pending = getPendingStarterHomeCamera();
+    if (!pending) return;
+    if (pending.expectedRevision !== layout.cameraRevision) {
+      clearPendingStarterHomeCamera();
+      return;
+    }
+    setState({ camera: pending.camera });
+    enqueueCameraSave(pending.camera);
+    void waitForPendingSaves();
   }
 
   async function loadFromBackend(generation: number): Promise<void> {
@@ -501,25 +512,33 @@ export function createHomeWidgetRuntime({
           return;
         }
 
-        // Empty layout — seed default onboarding widgets so first-run users
-        // have something on the canvas. If the user later unpins them, that
-        // choice is respected: only an empty layout re-seeds.
-        const defaultItems = createDefaultHomeLayoutItems(
-          undefined,
-          berdyOnboardingEnabled,
-        );
+        if (!berdyOnboardingEnabled) {
+          const defaultItems = createDefaultHomeLayoutItems(undefined, false);
+          const result = await saveLayoutItems({
+            layoutId: HOME_LAYOUT_ID,
+            expectedRevision: layout.itemRevision,
+            replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
+            items: defaultItems,
+          });
+          if (generation !== runtime.generation) return;
+          if (hasStickyNote(layoutItemsToHomeWidgets(result.layout.items))) {
+            markOnboardingStickiesSeen();
+          }
+          setReadyLayout(result.layout, generation);
+          return;
+        }
+
+        // Starter-agent pins are optional enrichment. Persist the usable Home
+        // immediately, then let Home recover pins when persona discovery is ready.
+        const starterWidgets = createStarterHomeWidgets([]);
+
         const result = await saveLayoutItems({
           layoutId: HOME_LAYOUT_ID,
           expectedRevision: layout.itemRevision,
           replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
-          items: defaultItems,
+          items: homeWidgetsToLayoutItems(starterWidgets),
         });
-        if (generation !== runtime.generation) {
-          return;
-        }
-        // During default seeding, a revision conflict means another writer
-        // already created a newer backend layout. There are no local edits to
-        // preserve yet, so initialization adopts the returned conflict layout.
+        if (generation !== runtime.generation) return;
         if (hasStickyNote(layoutItemsToHomeWidgets(result.layout.items))) {
           markOnboardingStickiesSeen();
         }
@@ -527,36 +546,33 @@ export function createHomeWidgetRuntime({
           setReadyLayout(result.layout, generation);
           return;
         }
+
         markStarterAgentPinsEligible();
-        if (berdyOnboardingEnabled) {
-          markStarterHomeLayoutEligible();
-        }
+        markStarterHomeLayoutEligible();
 
-        const seededCamera = {
+        const starterCamera = {
           ...result.layout.camera,
-          zoomBps: 9_000,
+          centerX: 0,
+          centerY: 40,
+          zoomBps: 10_000,
         };
-        if (!berdyOnboardingEnabled) {
-          setReadyLayout(
-            { ...result.layout, camera: seededCamera },
-            generation,
-          );
-          enqueueCameraSave(seededCamera);
-          return;
+        const cameraRevisionBeforeSave = result.layout.cameraRevision;
+        setReadyLayout({ ...result.layout, camera: starterCamera }, generation);
+        enqueueCameraSave(starterCamera);
+        await waitForPendingSaves();
+        if (generation !== runtime.generation) return;
+        const savedState = getState();
+        const cameraSaved =
+          savedState.cameraRevision !== cameraRevisionBeforeSave &&
+          savedState.camera?.centerX === starterCamera.centerX &&
+          savedState.camera.centerY === starterCamera.centerY &&
+          savedState.camera.zoomBps === starterCamera.zoomBps;
+        if (!cameraSaved) {
+          markStarterHomeCameraPending({
+            expectedRevision: cameraRevisionBeforeSave,
+            camera: starterCamera,
+          });
         }
-
-        const onboardingTour = createDefaultOnboardingTourWidget();
-        const avatarCenter = onboardingTourAvatarCenter(onboardingTour);
-        const centeredCamera = {
-          ...seededCamera,
-          centerX: avatarCenter.x,
-          centerY: avatarCenter.y,
-        };
-        setReadyLayout(
-          { ...result.layout, camera: centeredCamera },
-          generation,
-        );
-        enqueueCameraSave(centeredCamera);
         return;
       } catch (error) {
         if (generation !== runtime.generation) {
@@ -776,7 +792,10 @@ export function createHomeWidgetRuntime({
                 : result.layout.camera,
               error: null,
             }));
-            if (!runtime.queuedCamera) notifyHomeCameraSaveConfirmed();
+            if (!runtime.queuedCamera) {
+              clearPendingStarterHomeCamera();
+              notifyHomeCameraSaveConfirmed();
+            }
           } catch {
             if (generation !== runtime.generation) {
               break;

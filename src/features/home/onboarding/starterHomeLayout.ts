@@ -1,12 +1,23 @@
-const STARTER_HOME_LAYOUT_STORAGE_KEY = "goose:home:starter-layout-v16";
+import type { LayoutCamera } from "@/features/layout/api/layout";
+
+const STARTER_HOME_LAYOUT_STORAGE_KEY = "goose:home:starter-layout-v19";
 const PREVIOUS_STARTER_HOME_LAYOUT_STORAGE_KEYS = [
   "goose:home:starter-layout-v14",
   "goose:home:starter-layout-v15",
+  "goose:home:starter-layout-v16",
+  "goose:home:starter-layout-v18",
 ] as const;
 const STARTER_HOME_LAYOUT_ELIGIBLE_STORAGE_KEY =
   "goose:home:starter-layout-eligible-v1";
+const STARTER_HOME_CAMERA_PENDING_STORAGE_KEY =
+  "goose:home:starter-camera-pending-v2";
 
 const STARTER_TASK_ROW_HEIGHT = 28;
+
+export type PendingStarterHomeCamera = {
+  expectedRevision: number;
+  camera: LayoutCamera;
+};
 
 export function getStarterTasksHeight(omittedTaskCount: number): number {
   return Math.max(
@@ -27,13 +38,13 @@ export function starterLayoutCenter(rect: {
 
 export const STARTER_HOME_LAYOUT = {
   project: { x: -266, y: -334, width: 748, height: 748 },
-  berdy: { x: -352, y: -180 },
-  // Preserve the former 240×240 clock's center while shrinking its footprint.
-  clock: { x: 533.5, y: -266.5, width: 173, height: 173 },
-  tasks: { x: 440, y: 120, width: 256, height: 224 },
+  berdy: { x: -368, y: -180 },
+  // Keep the clock centered in its existing slot while shrinking it by 10%.
+  clock: { x: 522, y: -274, width: 156, height: 156 },
+  tasks: { x: -476, y: 218, width: 224, height: 196 },
   agents: [
-    { x: -292, y: 260, width: 200, height: 220 },
-    { x: 228, y: -380, width: 200, height: 220 },
+    { x: 410, y: 191, width: 180, height: 198 },
+    { x: 214, y: -369, width: 180, height: 198 },
   ],
 } as const;
 
@@ -76,10 +87,52 @@ export function clearStarterHomeLayoutEligibility(): void {
   }
 }
 
+export function getPendingStarterHomeCamera(): PendingStarterHomeCamera | null {
+  try {
+    const raw = localStorage.getItem(STARTER_HOME_CAMERA_PENDING_STORAGE_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as Partial<PendingStarterHomeCamera>;
+    if (
+      typeof value.expectedRevision !== "number" ||
+      !value.camera ||
+      typeof value.camera.centerX !== "number" ||
+      typeof value.camera.centerY !== "number" ||
+      typeof value.camera.zoomBps !== "number"
+    ) {
+      return null;
+    }
+    return value as PendingStarterHomeCamera;
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingStarterHomeCamera(): void {
+  try {
+    localStorage.removeItem(STARTER_HOME_CAMERA_PENDING_STORAGE_KEY);
+  } catch {
+    // Home remains usable when localStorage is unavailable.
+  }
+}
+
 export function markStarterHomeArranged(): void {
   try {
     localStorage.setItem(STARTER_HOME_LAYOUT_STORAGE_KEY, "1");
     clearStarterHomeLayoutEligibility();
+    clearPendingStarterHomeCamera();
+  } catch {
+    // Home remains usable when localStorage is unavailable.
+  }
+}
+
+export function markStarterHomeCameraPending(
+  pending: PendingStarterHomeCamera,
+): void {
+  try {
+    localStorage.setItem(
+      STARTER_HOME_CAMERA_PENDING_STORAGE_KEY,
+      JSON.stringify(pending),
+    );
   } catch {
     // Home remains usable when localStorage is unavailable.
   }
@@ -89,6 +142,7 @@ export function resetStarterHomeArrangement(): void {
   try {
     localStorage.removeItem(STARTER_HOME_LAYOUT_STORAGE_KEY);
     localStorage.removeItem(STARTER_HOME_LAYOUT_ELIGIBLE_STORAGE_KEY);
+    clearPendingStarterHomeCamera();
     for (const key of PREVIOUS_STARTER_HOME_LAYOUT_STORAGE_KEYS) {
       localStorage.removeItem(key);
     }

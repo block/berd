@@ -189,7 +189,7 @@ function fontSizeBodyClassName(size: StickyNoteFontSize): string {
     case "small":
       return "text-[13px] leading-5";
     case "medium":
-      return "text-[15px] leading-6";
+      return "text-[14px] leading-5";
     case "large":
       return "text-[18px] leading-7";
     default: {
