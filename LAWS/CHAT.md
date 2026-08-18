@@ -5,7 +5,6 @@
 - The composer MUST queue every accepted message into the selected chat's queue, including before that chat's session is ready.
 - The composer MUST queue accepted messages into the selected chat's queue in their acceptance order.
 - The selected chat's queue MUST retain the message and persona intent most recently accepted from the composer or a user edit.
-- A chat's queue MUST dispatch each message to that chat's session with the model and provider shown when the composer queued it.
 - A chat's queue MUST NOT dispatch a message to that chat's session before every message ahead of it in the queue.
 - A message MUST NOT be dispatched from the queue until its session is ready.
 - A session MUST be ready for dispatch from its queue only when it can begin processing that queue's first message.
