@@ -14,6 +14,7 @@ import {
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
+import { useComposerPickerCloseFocus } from "@/features/chat/hooks/useComposerPickerCloseFocus";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { ComposerActionButton } from "@/shared/ui/composer-action-button";
@@ -59,6 +60,7 @@ interface AgentModelPickerProps {
   open?: boolean;
   onOpen?: () => void;
   onOpenChange?: (open: boolean) => void;
+  onRequestComposerFocus?: () => void;
   reasoningEffort?: ChatInputReasoningEffort;
   contentAlign?: PopoverContentAlign | "smart";
   contentCollisionPadding?: number;
@@ -178,6 +180,7 @@ export function AgentModelPicker({
   open: controlledOpen,
   onOpen,
   onOpenChange,
+  onRequestComposerFocus,
   reasoningEffort,
   contentAlign = "start",
   contentCollisionPadding = 16,
@@ -194,6 +197,15 @@ export function AgentModelPicker({
   };
   const triggerRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const {
+    beginOpenCycle,
+    preserveFocusDestination,
+    classifyOutsideInteraction,
+    handleCloseAutoFocus,
+  } = useComposerPickerCloseFocus({
+    triggerRef,
+    onRequestComposerFocus,
+  });
   const modelListRef = useRef<RecommendedModelListHandle>(null);
   const [providerRevealed, setProviderRevealed] = useState(false);
   const [modelBrowsing, setModelBrowsing] = useState(false);
@@ -342,6 +354,7 @@ export function AgentModelPicker({
 
   const handleAgentSelect = (agent: AgentPickerOption) => {
     if (agent.readiness && agent.readiness !== "ready") {
+      preserveFocusDestination();
       requestOpenSettings("providers");
       setOpen(false);
       return;
@@ -426,6 +439,7 @@ export function AgentModelPicker({
       open={open}
       onOpenChange={(nextOpen) => {
         if (nextOpen) {
+          beginOpenCycle();
           setResolvedContentAlign(resolveContentAlign());
         }
         setOpen(nextOpen);
@@ -486,6 +500,10 @@ export function AgentModelPicker({
           "flex max-h-[min(24rem,50vh)] flex-col overflow-hidden p-1 transition-[width] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)]",
           isWidePicker ? "w-[37.25rem]" : "w-[26.25rem]",
         )}
+        onInteractOutside={(event) => {
+          classifyOutsideInteraction(event.target);
+        }}
+        onCloseAutoFocus={handleCloseAutoFocus}
         onOpenAutoFocus={(e) => {
           // Prefer the selected row of the first visible column, then that
           // column's first enabled row, then the reveal footer. Without the

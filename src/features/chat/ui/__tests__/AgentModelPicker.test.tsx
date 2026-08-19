@@ -42,7 +42,10 @@ describe("AgentModelPicker", () => {
   it("routes not-ready Goose to Providers settings with a connect action", async () => {
     const user = userEvent.setup();
     const onAgentChange = vi.fn();
-    const openSettings = vi.fn();
+    const onRequestComposerFocus = vi.fn();
+    const settingsDestination = document.createElement("button");
+    document.body.appendChild(settingsDestination);
+    const openSettings = vi.fn(() => settingsDestination.focus());
     window.addEventListener(OPEN_SETTINGS_EVENT, openSettings);
 
     render(
@@ -60,6 +63,7 @@ describe("AgentModelPicker", () => {
         onAgentChange={onAgentChange}
         availableModels={[]}
         onModelChange={vi.fn()}
+        onRequestComposerFocus={onRequestComposerFocus}
       />,
     );
 
@@ -77,6 +81,8 @@ describe("AgentModelPicker", () => {
     expect(openSettings).toHaveBeenCalledWith(
       expect.objectContaining({ detail: { section: "providers" } }),
     );
+    expect(settingsDestination).toHaveFocus();
+    expect(onRequestComposerFocus).not.toHaveBeenCalled();
     window.removeEventListener(OPEN_SETTINGS_EVENT, openSettings);
   });
 

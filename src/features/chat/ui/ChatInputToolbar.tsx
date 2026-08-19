@@ -100,6 +100,7 @@ interface ChatInputToolbarProps {
   projectPicker: ChatInputProjectPicker;
   contextUsage: ChatInputContextUsage;
   composerActions: ChatInputToolbarComposerActions;
+  onRequestComposerFocus?: () => void;
   isCompact: boolean;
 }
 
@@ -109,6 +110,7 @@ export function ChatInputToolbar({
   projectPicker,
   contextUsage,
   composerActions,
+  onRequestComposerFocus,
   isCompact,
 }: ChatInputToolbarProps) {
   const { t } = useTranslation("chat");
@@ -367,6 +369,7 @@ export function ChatInputToolbar({
               open={openMenu === "model"}
               onOpen={onPickerOpen}
               onOpenChange={handleMenuOpenChange("model")}
+              onRequestComposerFocus={onRequestComposerFocus}
               loading={providersLoading}
               isCompact={isCompact}
               triggerIconOnly={isCompact}
@@ -383,6 +386,7 @@ export function ChatInputToolbar({
             onCreateProject={onCreateProject}
             open={openMenu === "project"}
             onOpenChange={handleMenuOpenChange("project")}
+            onRequestComposerFocus={onRequestComposerFocus}
             modal={false}
             triggerIconOnly={isCompact}
           />

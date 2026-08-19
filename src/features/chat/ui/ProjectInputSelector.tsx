@@ -14,6 +14,7 @@ interface ProjectInputSelectorProps {
   onCreateProject?: ChatInputProjectPicker["onCreateProject"];
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  onRequestComposerFocus?: () => void;
   triggerTabIndex?: number;
   triggerIconOnly?: boolean;
   triggerVariant?: "default" | "toolbar";
@@ -32,6 +33,7 @@ export function ProjectInputSelector({
   onCreateProject,
   open,
   onOpenChange,
+  onRequestComposerFocus,
   triggerTabIndex,
   triggerVariant = "toolbar",
   triggerSize = "default",
@@ -80,6 +82,7 @@ export function ProjectInputSelector({
       }
       open={open}
       onOpenChange={onOpenChange}
+      onRequestComposerFocus={onRequestComposerFocus}
       triggerTabIndex={triggerTabIndex}
       triggerIconOnly={triggerIconOnly}
       triggerVariant={triggerVariant}
@@ -132,6 +135,7 @@ export function ProjectInputSelector({
         },
       ].filter((section) => section.items.length > 0)}
       onValueChange={handleValueChange}
+      preservesExternalFocus={(value) => value === CREATE_PROJECT_VALUE}
     />
   );
 }

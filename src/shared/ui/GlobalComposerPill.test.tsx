@@ -429,6 +429,72 @@ describe("GlobalComposerPill", () => {
     ).toHaveAttribute("tabindex", "0");
   });
 
+  it.each([
+    ["model", /choose agent and model/i],
+    ["project", /select project/i],
+  ])("returns focus to the quick composer when the %s picker closes", async (_, triggerName) => {
+    const user = userEvent.setup();
+    renderGlobalComposer();
+    const composer = screen.getByRole("textbox");
+
+    await user.click(composer);
+    await user.click(screen.getByRole("button", { name: triggerName }));
+    expect(composer).not.toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    expect(composer).toHaveFocus();
+  });
+
+  it("returns focus to the quick composer when the model picker trigger closes it", async () => {
+    const user = userEvent.setup();
+    renderGlobalComposer();
+    const composer = screen.getByRole("textbox");
+
+    await user.click(composer);
+    const trigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    await user.click(trigger);
+    await user.click(trigger);
+
+    expect(composer).toHaveFocus();
+  });
+
+  it.each([
+    ["model", /choose agent and model/i],
+    ["project", /select project/i],
+  ])("returns focus to the quick composer when clicking blank space outside the %s picker", async (_, triggerName) => {
+    const user = userEvent.setup();
+    renderGlobalComposer();
+    const composer = screen.getByRole("textbox");
+    const blankSpace = document.createElement("div");
+    document.body.appendChild(blankSpace);
+
+    await user.click(composer);
+    await user.click(screen.getByRole("button", { name: triggerName }));
+    await user.click(blankSpace);
+
+    expect(composer).toHaveFocus();
+  });
+
+  it("preserves an interactive destination when closing a quick-composer picker", async () => {
+    const user = userEvent.setup();
+    renderGlobalComposer();
+    const destination = document.createElement("button");
+    destination.type = "button";
+    destination.textContent = "Outside action";
+    document.body.appendChild(destination);
+
+    await user.click(screen.getByRole("textbox"));
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(destination);
+
+    expect(destination).toHaveFocus();
+  });
+
   it("toggles voice dictation with the default platform shortcut without submitting or changing the draft", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn();
