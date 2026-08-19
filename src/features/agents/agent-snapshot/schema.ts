@@ -17,6 +17,7 @@ export const MAX_SNAPSHOT_AVATAR_DATA_URL_LENGTH =
   Math.ceil((2 * 1024 * 1024) / 3) * 4 + "data:image/png;base64,".length;
 export const MAX_SNAPSHOT_AVATAR_URL_LENGTH = 2_048;
 export const MAX_SNAPSHOT_PROVIDER_MODEL_LENGTH = 512;
+const MAX_SNAPSHOT_CARD_COPY_RAW_LENGTH = 4_096;
 
 export interface SnapshotV1Definition {
   name?: string;
@@ -156,15 +157,15 @@ export function validateSnapshotV1(value: unknown): SnapshotV1 {
   const profile = isRecord(value.profile) ? value.profile : undefined;
   if (profile) {
     optionalString(profile, "displayName", MAX_SNAPSHOT_NAME_LENGTH);
-    optionalString(profile, "about");
+    optionalString(profile, "about", MAX_SNAPSHOT_CARD_COPY_RAW_LENGTH);
     if (
       typeof profile.about === "string" &&
       graphemeCount(profile.about.trim()) > 110
     ) {
       throw new AgentSnapshotError("about is too long", "invalid-snapshot");
     }
-    optionalString(profile, "goodFor");
-    optionalString(profile, "vibes");
+    optionalString(profile, "goodFor", MAX_SNAPSHOT_CARD_COPY_RAW_LENGTH);
+    optionalString(profile, "vibes", MAX_SNAPSHOT_CARD_COPY_RAW_LENGTH);
     if (
       typeof profile.goodFor === "string" &&
       graphemeCount(profile.goodFor.trim()) > 44
