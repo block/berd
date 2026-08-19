@@ -105,6 +105,9 @@
     "title": "Compactación"
   },
   "connections": {
+    "askAgent": "Agregar conexión",
+    "askAgentPrompt": "Ayúdame a agregar una conexión. Primero pregunta si quiero un servicio administrado por la empresa o un MCP local; después explica la configuración y los requisitos de acceso. Pregunta antes de cambiar cualquier configuración y nunca muestres ni copies credenciales.",
+    "askAgentTitle": "Agregar una conexión",
     "configure": "Configurar",
     "connect": "Conectar",
     "connectError": "No se pudo abrir el flujo de conexión. Inténtalo de nuevo.",
@@ -119,12 +122,20 @@
     "expiresToday": "Caduca hoy",
     "expiresTomorrow": "Caduca mañana",
     "extendAccess": "Ampliar acceso",
+    "localError": {
+      "description": "Inténtalo de nuevo en unos instantes.",
+      "partialDescription": "Berd no pudo leer todas las fuentes de configuración local.",
+      "partialTitle": "Es posible que falten algunos MCP locales",
+      "retry": "Intentar de nuevo",
+      "retrying": "Intentando…",
+      "title": "No se pudieron cargar tus MCP locales"
+    },
     "noResults": "Ninguna conexión coincide con tu búsqueda.",
     "reconnect": "Reconectar",
     "search": "Buscar conexiones",
     "sections": {
-      "managed": "Administradas por la empresa",
-      "local": "Locales"
+      "local": "Locales",
+      "managed": "Administradas por la empresa"
     },
     "status": {
       "active": "Activa",
@@ -132,18 +143,7 @@
       "expired": "Caducada"
     },
     "title": "Conexiones",
-    "worksWith": "Funciona con: {{harnesses}}",
-    "localError": {
-      "title": "No se pudieron cargar tus MCP locales",
-      "description": "Inténtalo de nuevo en unos instantes.",
-      "partialTitle": "Es posible que falten algunos MCP locales",
-      "partialDescription": "Berd no pudo leer todas las fuentes de configuración local.",
-      "retry": "Intentar de nuevo",
-      "retrying": "Intentando…"
-    },
-    "askAgent": "Agregar conexión",
-    "askAgentTitle": "Agregar una conexión",
-    "askAgentPrompt": "Ayúdame a agregar una conexión. Primero pregunta si quiero un servicio administrado por la empresa o un MCP local; después explica la configuración y los requisitos de acceso. Pregunta antes de cambiar cualquier configuración y nunca muestres ni copies credenciales."
+    "worksWith": "Funciona con: {{harnesses}}"
   },
   "deleteProject": {
     "description": "Este proyecto y todos sus datos se eliminarán de forma permanente.",
@@ -425,6 +425,12 @@
     "editTab": "Editar",
     "editorLabel": "Editar tu me.md",
     "emptyHint": "Tu archivo estará en ~/.me/me.md, un archivo markdown simple en tu computadora. Todo lo que Berd agregue aparece aquí y puedes eliminarlo.",
+    "history": {
+      "empty": "Aún no hay cambios registrados.",
+      "hide": "Ocultar historial",
+      "loading": "Leyendo historial...",
+      "show": "Mostrar historial"
+    },
     "loadError": "No se pudo leer tu archivo. Es posible que se haya movido o eliminado.",
     "newTopicDescription": "Un tema es su propio documento. Los agentes lo leen solo cuando esa parte de tu vida es lo que está pasando.",
     "newTopicError": "No se pudo crear ese tema. Puede que ya exista un tema con un nombre similar.",

@@ -105,6 +105,9 @@
     "title": "Compaction"
   },
   "connections": {
+    "askAgent": "Add connection",
+    "askAgentPrompt": "Help me add a connection. First ask whether I want a company-managed service or a local MCP, then explain the setup and access requirements. Ask before changing any configuration and never print or copy credentials.",
+    "askAgentTitle": "Add a connection",
     "configure": "Configure",
     "connect": "Connect",
     "connectError": "Couldn't open the connect flow. Try again.",
@@ -119,12 +122,20 @@
     "expiresToday": "Expires today",
     "expiresTomorrow": "Expires tomorrow",
     "extendAccess": "Extend access",
+    "localError": {
+      "description": "Try again in a moment.",
+      "partialDescription": "Berd couldn’t read every local configuration source.",
+      "partialTitle": "Some local MCPs may be missing",
+      "retry": "Try again",
+      "retrying": "Trying…",
+      "title": "Couldn’t load your local MCPs"
+    },
     "noResults": "No connections match your search.",
     "reconnect": "Reconnect",
     "search": "Search connections",
     "sections": {
-      "managed": "Company managed",
-      "local": "Local"
+      "local": "Local",
+      "managed": "Company managed"
     },
     "status": {
       "active": "Active",
@@ -132,18 +143,7 @@
       "expired": "Expired"
     },
     "title": "Connections",
-    "worksWith": "Works with: {{harnesses}}",
-    "localError": {
-      "title": "Couldn’t load your local MCPs",
-      "description": "Try again in a moment.",
-      "partialTitle": "Some local MCPs may be missing",
-      "partialDescription": "Berd couldn’t read every local configuration source.",
-      "retry": "Try again",
-      "retrying": "Trying…"
-    },
-    "askAgent": "Add connection",
-    "askAgentTitle": "Add a connection",
-    "askAgentPrompt": "Help me add a connection. First ask whether I want a company-managed service or a local MCP, then explain the setup and access requirements. Ask before changing any configuration and never print or copy credentials."
+    "worksWith": "Works with: {{harnesses}}"
   },
   "deleteProject": {
     "description": "Removes the project and all its data. You can't undo this.",
@@ -425,6 +425,12 @@
     "editTab": "Edit",
     "editorLabel": "Edit your me.md",
     "emptyHint": "Your file will live at ~/.me/me.md, a plain markdown file on your computer. Anything Berd adds shows up here, and you can delete it.",
+    "history": {
+      "empty": "No changes recorded yet.",
+      "hide": "Hide history",
+      "loading": "Reading history...",
+      "show": "Show history"
+    },
     "loadError": "Couldn't read your file. It may have been moved or deleted.",
     "newTopicDescription": "A topic is its own document. Agents read it only when that part of your life is what's going on.",
     "newTopicError": "Couldn't create that topic. A topic with a similar name may already exist.",

@@ -16,6 +16,7 @@ import { SettingsRow } from "@/shared/ui/settings-row";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Switch } from "@/shared/ui/switch";
 import { revealInFileManager } from "@/shared/lib/fileManager";
+import { MemoryHistory } from "./MemoryHistory";
 import {
   createMeFile,
   loadMeFile,
@@ -546,6 +547,10 @@ export function MeSettings() {
                 />
               )}
             </SettingsSection>
+
+            {state.status === "present" && (
+              <MemoryHistory filePath={state.path} />
+            )}
           </>
         )}
       </SettingsSections>

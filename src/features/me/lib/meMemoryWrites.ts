@@ -174,9 +174,11 @@ export async function applyMemoryEntry(
     if (target) {
       const next = appendBullet(target.contents, candidate.content);
       await writeTextFile(target.path, next);
-      await recordMeHistory(target.path, agentSource(candidate)).catch(
-        () => {},
-      );
+      await recordMeHistory(
+        target.path,
+        agentSource(candidate),
+        candidate.content,
+      ).catch(() => {});
       return await record(candidate, target.label, target.path);
     }
     // Out-of-vocabulary with no existing match: keep the fact, but put it
@@ -201,7 +203,11 @@ async function applyToSpine(
     candidate.content,
   );
   await writeTextFile(state.path, next);
-  await recordMeHistory(state.path, agentSource(candidate)).catch(() => {});
+  await recordMeHistory(
+    state.path,
+    agentSource(candidate),
+    candidate.content,
+  ).catch(() => {});
   await publishMeFile(next).catch(() => {});
   return await record(candidate, null, state.path);
 }
@@ -234,9 +240,11 @@ export async function deleteAddedEntry(entry: AddedMemoryEntry): Promise<void> {
     const next = removeBullet(payload.contents, entry.content);
     if (next !== payload.contents) {
       await writeTextFile(entry.path, next);
-      // Attributed to the user: they're the one undoing it, and the trail
-      // should show the removal, not just the add.
-      await recordMeHistory(entry.path, "user").catch(() => {});
+      // A removal, not an edit: the trail's most useful question is whether
+      // something deleted came back, which needs the two to read differently.
+      await recordMeHistory(entry.path, "delete", entry.content).catch(
+        () => {},
+      );
       if (entry.topic === null) {
         await publishMeFile(next).catch(() => {});
       }

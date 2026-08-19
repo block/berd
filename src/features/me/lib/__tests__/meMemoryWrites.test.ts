@@ -91,10 +91,12 @@ describe("applyMemoryEntry", () => {
     expect(files[topicPath]).toContain("- Existing.");
     expect(entry?.topic).toBe("Home");
     expect(entry?.path).toBe(topicPath);
-    // Attribution names the agent that surfaced it.
+    // Attribution names the agent that surfaced it, and the record carries
+    // the entry so the history says what was added.
     expect(mocks.recordMeHistory).toHaveBeenCalledWith(
       topicPath,
       "agent:noticer",
+      "Kids' soccer is Mondays.",
     );
     expect(files[RECENT]).toContain("Kids' soccer is Mondays.");
   });
@@ -184,8 +186,13 @@ describe("deleteAddedEntry", () => {
 
     expect(files[topicPath]).not.toContain("Kids' soccer is Mondays.");
     expect(files[topicPath]).toContain("- Keep this.");
-    // The removal is attributed to the user, who did the undoing.
-    expect(mocks.recordMeHistory).toHaveBeenCalledWith(topicPath, "user");
+    // Removals are their own operation, not an edit, so a deleted entry
+    // coming back is visible in the history.
+    expect(mocks.recordMeHistory).toHaveBeenCalledWith(
+      topicPath,
+      "delete",
+      "Kids' soccer is Mondays.",
+    );
     // Tombstoned so nothing re-adds it.
     expect(files[DISMISSED]).toContain("Kids' soccer is Mondays.");
     expect(await listAddedEntries()).toHaveLength(0);

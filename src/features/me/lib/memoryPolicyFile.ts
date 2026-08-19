@@ -3,6 +3,7 @@ import {
   getHomeDir,
   pathExists,
   readTextFile,
+  recordMeHistory,
   writeTextFile,
 } from "@/shared/api/system";
 
@@ -79,6 +80,11 @@ export async function writeMemoryPolicy(enabled: boolean): Promise<void> {
     } else {
       await createTextFile(path, body);
     }
+    await recordMeHistory(
+      path,
+      "policy",
+      enabled ? "Memory turned on" : "Memory turned off",
+    ).catch(() => {});
   } catch (error) {
     console.warn("[me:policy] failed to mirror the memory switch", error);
   }

@@ -202,15 +202,18 @@ export interface MeHistoryEntry {
 
 /**
  * Record the current state of the user's me.md in its invisible local
- * history, attributed to a source ("created" | "user" | "external" |
- * "agent:<name>"). Best-effort by design: callers must treat failures as
+ * history, attributed to a source ("created" | "user" | "delete" | "external" |
+ * "agent:<name>" | "agent-edit:<name>"). Pass `summary` — the affected entry —
+ * when the caller knows it, so the record says what changed and not only who
+ * changed it. Best-effort by design: callers must treat failures as
  * non-fatal — history must never break a write.
  */
 export async function recordMeHistory(
   filePath: string,
   source: string,
+  summary?: string,
 ): Promise<boolean> {
-  return invoke("record_me_history", { filePath, source });
+  return invoke("record_me_history", { filePath, source, summary });
 }
 
 /** The recorded timeline for the user's me.md, newest first. */

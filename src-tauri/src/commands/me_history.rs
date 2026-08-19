@@ -22,12 +22,18 @@ fn signature_for(source: &str) -> Result<Signature<'static>, String> {
     let (name, email) = match source {
         "created" => ("Berd (starter template)", "berd@local"),
         "user" => ("You (edited in Berd)", "you@local"),
+        "delete" => ("You (deleted in Berd)", "you@local"),
+        "policy" => ("You (changed the switch)", "you@local"),
         "external" => ("Edited outside Berd", "outside@local"),
         other => {
             if let Some(agent) = other.strip_prefix("agent:") {
                 if !agent.trim().is_empty() {
+                    // "recorded", not "approved": memory is written when an
+                    // agent notices it, and the person removes what they
+                    // don't want. Saying approved would claim a consent step
+                    // that no longer happens.
                     return Signature::now(
-                        &format!("{} (approved in chat)", agent.trim()),
+                        &format!("{} (recorded in chat)", agent.trim()),
                         "agent@local",
                     )
                     .map_err(|error| error.to_string());
@@ -48,17 +54,50 @@ fn signature_for(source: &str) -> Result<Signature<'static>, String> {
     Signature::now(name, email).map_err(|error| error.to_string())
 }
 
-fn message_for(source: &str, is_first: bool) -> String {
+/// The commit subject: what happened, and to what.
+///
+/// `summary` is the entry text when the caller knows it — an added or removed
+/// bullet — so the log answers "what changed?" without reading a diff. Adds
+/// and removes must read differently: the most important question a person
+/// asks of this trail is whether something they deleted came back.
+fn message_for(source: &str, summary: Option<&str>, is_first: bool) -> String {
     if is_first {
         return "Begin history".to_string();
     }
+    let detail = summary
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(shorten);
     match source {
         "created" => "Create me.md with starter template".to_string(),
-        "user" => "Edit in Berd".to_string(),
+        "user" => "Edit".to_string(),
         "external" => "Edit outside Berd".to_string(),
-        s if s.starts_with("agent-edit:") => "Agent edit in chat".to_string(),
-        _ => "Entry approved in chat".to_string(),
+        "delete" => match detail {
+            Some(text) => format!("Remove: {text}"),
+            None => "Remove entry".to_string(),
+        },
+        "policy" => match detail {
+            Some(text) => text,
+            None => "Change the memory switch".to_string(),
+        },
+        s if s.starts_with("agent-edit:") => "Edit in chat".to_string(),
+        _ => match detail {
+            Some(text) => format!("Add: {text}"),
+            None => "Add entry".to_string(),
+        },
     }
+}
+
+/// Commit subjects stay one line. Memory entries are short by design, but a
+/// hand-written rule can run long.
+fn shorten(text: &str) -> String {
+    let single_line = text.replace('\n', " ");
+    let trimmed = single_line.trim();
+    if trimmed.chars().count() <= 72 {
+        return trimmed.to_string();
+    }
+    let head: String = trimmed.chars().take(69).collect();
+    format!("{}...", head.trim_end())
 }
 
 /// Resolve the history home for a memory file, plus the file's path relative
@@ -83,13 +122,19 @@ fn history_root(file: &Path) -> Option<(&Path, PathBuf)> {
 }
 
 /// Record the current state of `file_path` in the memory history, attributed
-/// to `source` ("created" | "user" | "external" | "agent:<name>"). Initializes
-/// the history on first use. Returns `true` when a change was recorded, `false`
-/// when the file is unchanged since the last record. Cheap when unchanged, so
-/// callers may invoke it opportunistically (e.g. on every load) to sweep up
-/// edits made outside Berd.
+/// to `source` ("created" | "user" | "delete" | "external" | "agent:<name>" |
+/// "agent-edit:<name>"). `summary` is the affected entry when the caller knows
+/// it, so the commit subject can say what changed rather than only who changed
+/// it. Initializes the history on first use. Returns `true` when a change was
+/// recorded, `false` when the file is unchanged since the last record. Cheap
+/// when unchanged, so callers may invoke it opportunistically (e.g. on every
+/// load) to sweep up edits made outside Berd.
 #[tauri::command]
-pub fn record_me_history(file_path: String, source: String) -> Result<bool, String> {
+pub fn record_me_history(
+    file_path: String,
+    source: String,
+    summary: Option<String>,
+) -> Result<bool, String> {
     let file = Path::new(file_path.trim());
     if !file.is_file() {
         return Err(format!("Not a file: {}", file.display()));
@@ -131,7 +176,7 @@ pub fn record_me_history(file_path: String, source: String) -> Result<bool, Stri
 
     let tree = repo.find_tree(tree_id).map_err(|error| error.to_string())?;
     let signature = signature_for(&source)?;
-    let message = message_for(&source, parent.is_none());
+    let message = message_for(&source, summary.as_deref(), parent.is_none());
     let parents: Vec<&git2::Commit> = parent.iter().collect();
     repo.commit(
         Some("HEAD"),
@@ -221,11 +266,11 @@ mod tests {
     fn topic_docs_share_the_me_root_history() {
         let (_dir, spine, topic) = setup_me_tree();
         assert!(
-            record_me_history(spine.to_string_lossy().into_owned(), "created".into())
+            record_me_history(spine.to_string_lossy().into_owned(), "created".into(), None)
                 .expect("record spine")
         );
         assert!(
-            record_me_history(topic.to_string_lossy().into_owned(), "user".into())
+            record_me_history(topic.to_string_lossy().into_owned(), "user".into(), None)
                 .expect("record topic")
         );
 
@@ -243,8 +288,12 @@ mod tests {
     #[test]
     fn topic_history_is_readable_from_the_spine_path() {
         let (_dir, spine, topic) = setup_me_tree();
-        record_me_history(topic.to_string_lossy().into_owned(), "agent:Berdy".into())
-            .expect("record topic");
+        record_me_history(
+            topic.to_string_lossy().into_owned(),
+            "agent:Berdy".into(),
+            None,
+        )
+        .expect("record topic");
         let entries = list_me_history(spine.to_string_lossy().into_owned()).expect("list");
         assert_eq!(entries.len(), 1);
         assert!(entries[0].author.contains("Berdy"));
@@ -253,8 +302,9 @@ mod tests {
     #[test]
     fn first_record_initializes_history() {
         let (_dir, file) = setup();
-        let recorded = record_me_history(file.to_string_lossy().into_owned(), "created".into())
-            .expect("record");
+        let recorded =
+            record_me_history(file.to_string_lossy().into_owned(), "created".into(), None)
+                .expect("record");
         assert!(recorded);
         let entries = list_me_history(file.to_string_lossy().into_owned()).expect("list");
         assert_eq!(entries.len(), 1);
@@ -265,39 +315,90 @@ mod tests {
     fn unchanged_file_records_nothing() {
         let (_dir, file) = setup();
         let path = file.to_string_lossy().into_owned();
-        assert!(record_me_history(path.clone(), "created".into()).expect("first"));
-        assert!(!record_me_history(path.clone(), "external".into()).expect("second"));
+        assert!(record_me_history(path.clone(), "created".into(), None).expect("first"));
+        assert!(!record_me_history(path.clone(), "external".into(), None).expect("second"));
         assert_eq!(list_me_history(path).expect("list").len(), 1);
+    }
+
+    #[test]
+    fn adds_and_removes_read_differently() {
+        // The most important question this trail answers is whether something
+        // the person deleted came back, so the two operations must not share
+        // a subject line.
+        let (_dir, file) = setup();
+        record_me_history(file.to_string_lossy().into_owned(), "created".into(), None)
+            .expect("seed");
+        fs::write(&file, "# Me\n- Prefers aisle seats.\n").expect("add");
+        record_me_history(
+            file.to_string_lossy().into_owned(),
+            "agent:noticer".into(),
+            Some("Prefers aisle seats.".into()),
+        )
+        .expect("record add");
+        fs::write(&file, "# Me\n").expect("remove");
+        record_me_history(
+            file.to_string_lossy().into_owned(),
+            "delete".into(),
+            Some("Prefers aisle seats.".into()),
+        )
+        .expect("record remove");
+
+        let entries = list_me_history(file.to_string_lossy().into_owned()).expect("history");
+        assert_eq!(entries[0].message, "Remove: Prefers aisle seats.");
+        assert_eq!(entries[0].author, "You (deleted in Berd)");
+        assert_eq!(entries[1].message, "Add: Prefers aisle seats.");
+        assert_eq!(entries[1].author, "noticer (recorded in chat)");
+    }
+
+    #[test]
+    fn long_entries_stay_one_line() {
+        let long = "a".repeat(200);
+        let message = message_for("delete", Some(&long), false);
+        assert!(message.starts_with("Remove: "));
+        assert!(message.lines().count() == 1);
+        assert!(
+            message.len() < 100,
+            "subject should be shortened: {message}"
+        );
+    }
+
+    #[test]
+    fn missing_summaries_fall_back_to_the_operation() {
+        // External sweeps and hand edits don't know an entry, and a subject
+        // that invents one would be worse than a general description.
+        assert_eq!(message_for("agent:noticer", None, false), "Add entry");
+        assert_eq!(message_for("delete", None, false), "Remove entry");
+        assert_eq!(message_for("user", Some("ignored"), false), "Edit");
     }
 
     #[test]
     fn changes_are_attributed_to_their_source() {
         let (_dir, file) = setup();
         let path = file.to_string_lossy().into_owned();
-        record_me_history(path.clone(), "created".into()).expect("first");
+        record_me_history(path.clone(), "created".into(), None).expect("first");
 
         fs::write(&file, "# Me\n\n- Keep answers brief.\n").expect("edit");
-        record_me_history(path.clone(), "user".into()).expect("user edit");
+        record_me_history(path.clone(), "user".into(), None).expect("user edit");
 
         fs::write(
             &file,
             "# Me\n\n- Keep answers brief.\n- Ask before deleting.\n",
         )
         .expect("edit 2");
-        record_me_history(path.clone(), "agent:Berdy".into()).expect("agent edit");
+        record_me_history(path.clone(), "agent:Berdy".into(), None).expect("agent edit");
 
         let entries = list_me_history(path).expect("list");
         assert_eq!(entries.len(), 3);
-        assert_eq!(entries[0].author, "Berdy (approved in chat)");
-        assert_eq!(entries[0].message, "Entry approved in chat");
+        assert_eq!(entries[0].author, "Berdy (recorded in chat)");
+        assert_eq!(entries[0].message, "Add entry");
         assert_eq!(entries[1].author, "You (edited in Berd)");
-        assert_eq!(entries[1].message, "Edit in Berd");
+        assert_eq!(entries[1].message, "Edit");
     }
 
     #[test]
     fn unknown_source_is_rejected() {
         let (_dir, file) = setup();
-        let result = record_me_history(file.to_string_lossy().into_owned(), "mystery".into());
+        let result = record_me_history(file.to_string_lossy().into_owned(), "mystery".into(), None);
         assert!(result.is_err());
     }
 
@@ -313,7 +414,7 @@ mod tests {
         let (dir, file) = setup();
         fs::write(dir.path().join("other-tool.txt"), "not ours").expect("other");
         let path = file.to_string_lossy().into_owned();
-        record_me_history(path.clone(), "created".into()).expect("record");
+        record_me_history(path.clone(), "created".into(), None).expect("record");
 
         let repo = Repository::open(dir.path()).expect("open");
         let head = repo.head().expect("head").peel_to_tree().expect("tree");
