@@ -7,7 +7,9 @@ import hashlib
 import io
 import json
 import os
+import subprocess
 import sys
+import time
 import unittest
 from unittest.mock import patch
 
@@ -66,6 +68,17 @@ class BuzzRuntimeTests(unittest.TestCase):
             result = buzz_runtime.run_bounded(command, timeout=5)
         self.assertTrue(result.exceeded_output_limit)
         self.assertLessEqual(len(result.stdout), 16)
+
+    def test_timeout_includes_blocked_stdin_write(self) -> None:
+        command = [sys.executable, "-c", "import time; time.sleep(10)"]
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            buzz_runtime.run_bounded(
+                command,
+                input_bytes=b"x" * (2 * 1024 * 1024),
+                timeout=0.1,
+            )
+        self.assertLess(time.monotonic() - started, 2)
 
 
 class ThreadParsingTests(unittest.TestCase):
@@ -176,7 +189,11 @@ class PostingTests(unittest.TestCase):
         content = b"approved message"
         digest = post_message.approval_digest(CHANNEL, EVENT, content)
         completed = buzz_runtime.CommandResult(
-            0, json.dumps({"id": EVENT}).encode(), False
+            0,
+            json.dumps(
+                {"event_id": EVENT, "accepted": True, "message": "stored"}
+            ).encode(),
+            False,
         )
         argv = [
             "post_message.py",
@@ -201,6 +218,55 @@ class PostingTests(unittest.TestCase):
         self.assertEqual(kwargs["input_bytes"], content)
         self.assertIn("-", args[0])
         self.assertNotIn(content.decode(), args[0])
+
+    def test_rejected_response_is_not_reported_as_posted(self) -> None:
+        content = b"approved message"
+        digest = post_message.approval_digest(CHANNEL, None, content)
+        completed = buzz_runtime.CommandResult(
+            0,
+            json.dumps(
+                {"event_id": EVENT, "accepted": False, "message": "rejected"}
+            ).encode(),
+            False,
+        )
+        argv = [
+            "post_message.py",
+            "--channel",
+            CHANNEL,
+            "--approved-sha256",
+            digest,
+        ]
+        stderr = io.StringIO()
+        with patch.object(post_message, "require_runtime"):
+            with patch.object(post_message.sys, "argv", argv):
+                with patch.object(post_message.sys, "stdin") as stdin:
+                    stdin.buffer.read.return_value = content
+                    with patch.object(post_message, "run_bounded", return_value=completed):
+                        with patch("sys.stderr", stderr), self.assertRaises(SystemExit):
+                            post_message.main()
+        self.assertIn("rejected", stderr.getvalue())
+        self.assertNotIn('"posted": true', stderr.getvalue())
+
+    def test_unrecognized_success_response_has_unknown_outcome(self) -> None:
+        content = b"approved message"
+        digest = post_message.approval_digest(CHANNEL, None, content)
+        completed = buzz_runtime.CommandResult(0, json.dumps({"id": EVENT}).encode(), False)
+        argv = [
+            "post_message.py",
+            "--channel",
+            CHANNEL,
+            "--approved-sha256",
+            digest,
+        ]
+        stderr = io.StringIO()
+        with patch.object(post_message, "require_runtime"):
+            with patch.object(post_message.sys, "argv", argv):
+                with patch.object(post_message.sys, "stdin") as stdin:
+                    stdin.buffer.read.return_value = content
+                    with patch.object(post_message, "run_bounded", return_value=completed):
+                        with patch("sys.stderr", stderr), self.assertRaises(SystemExit):
+                            post_message.main()
+        self.assertIn("unrecognized", stderr.getvalue())
 
     def test_mismatched_approval_never_posts(self) -> None:
         argv = [

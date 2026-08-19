@@ -20,6 +20,9 @@ This skill requires:
 - `BUZZ_PRIVATE_KEY` configured in the agent process environment
 - `BUZZ_AUTH_TAG` when required by the configured identity
 
+In commands below, replace `<python>` with `python3` on macOS/Linux or `py -3`
+on Windows. Confirm the selected interpreter is Python 3.10 or newer before use.
+
 Before reading or writing, check only whether the required variables exist.
 Never print their values:
 
@@ -36,8 +39,8 @@ credential store, app-data files, or managed-agent records.
 ## Read workflows
 
 ```bash
-python3 <skill-directory>/scripts/read_buzz_thread.py '<buzz://message?...>'
-python3 <skill-directory>/scripts/read_buzz_channel.py '<channel-uuid>' --limit 100
+<python> <skill-directory>/scripts/read_buzz_thread.py '<buzz://message?...>'
+<python> <skill-directory>/scripts/read_buzz_channel.py '<channel-uuid>' --limit 100
 ```
 
 1. Pass the URL or channel UUID exactly as supplied.
@@ -61,7 +64,7 @@ Every write requires approval of the exact content, channel, and reply target:
 2. Pipe it to the preview command:
 
 ```bash
-printf '%s' "$DRAFT_CONTENT" | python3 <skill-directory>/scripts/post_message.py \
+printf '%s' "$DRAFT_CONTENT" | <python> <skill-directory>/scripts/post_message.py \
   --channel '<channel-uuid>' [--reply-to '<event-id>'] --preview
 ```
 
@@ -73,7 +76,7 @@ printf '%s' "$DRAFT_CONTENT" | python3 <skill-directory>/scripts/post_message.py
    exact content and destination:
 
 ```bash
-printf '%s' "$DRAFT_CONTENT" | python3 <skill-directory>/scripts/post_message.py \
+printf '%s' "$DRAFT_CONTENT" | <python> <skill-directory>/scripts/post_message.py \
   --channel '<channel-uuid>' [--reply-to '<event-id>'] \
   --approved-sha256 '<digest>'
 ```

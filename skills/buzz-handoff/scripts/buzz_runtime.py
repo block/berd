@@ -111,13 +111,19 @@ def run_bounded(
     for thread in threads:
         thread.start()
 
+    writer: threading.Thread | None = None
     if input_bytes is not None:
         assert process.stdin is not None
-        try:
-            process.stdin.write(input_bytes)
-            process.stdin.close()
-        except BrokenPipeError:
-            pass
+
+        def write_stdin() -> None:
+            try:
+                process.stdin.write(input_bytes)
+                process.stdin.close()
+            except (BrokenPipeError, OSError):
+                pass
+
+        writer = threading.Thread(target=write_stdin, daemon=True)
+        writer.start()
 
     try:
         process.wait(timeout=timeout)
@@ -126,9 +132,13 @@ def run_bounded(
         process.wait()
         for thread in threads:
             thread.join()
+        if writer is not None:
+            writer.join()
         raise
     for thread in threads:
         thread.join()
+    if writer is not None:
+        writer.join()
     return CommandResult(process.returncode, bytes(streams["stdout"]), exceeded.is_set())
 
 

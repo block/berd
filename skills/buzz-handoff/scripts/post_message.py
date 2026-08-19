@@ -114,6 +114,13 @@ def main() -> None:
             "Buzz may have posted the message but returned an unexpected response. Verify in Buzz before retrying.",
             4,
         )
+    if not isinstance(response, dict) or not isinstance(response.get("accepted"), bool):
+        fail(
+            "Buzz returned an unrecognized write response. Verify in Buzz before retrying.",
+            4,
+        )
+    if not response["accepted"]:
+        fail("Buzz confirmed that the relay rejected the message; it was not posted.", 2)
     print(json.dumps({"posted": True, "result": response}, ensure_ascii=False))
 
 

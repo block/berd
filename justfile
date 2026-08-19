@@ -89,7 +89,20 @@ check: design-system-check berdctl-contract-check frontend-fmt-check lint i18n-c
 
 # Validate the dependency-free tests shipped with public Agent Skills.
 public-skills-test:
+    just _public-skills-test-{{ os_family() }}
+
+[unix]
+_public-skills-test-unix:
     python3 scripts/test-public-skills.py
+
+[windows]
+[script("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File")]
+_public-skills-test-windows:
+    Import-Module (Join-Path (Get-Location) "scripts/windows/WindowsDev.psm1") -Force -DisableNameChecking
+    $python = Find-RunnablePython
+    if ($null -eq $python) { throw "No runnable Python 3 interpreter found. Run: just doctor-windows" }
+    & $python.Path scripts/test-public-skills.py
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # Regenerate the berdctl CLI contract artifacts from the command registry.
 berdctl-contract-generate:
