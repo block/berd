@@ -424,7 +424,7 @@
     "description": "The file every agent reads in every chat. Includes core details about you, standing rules and preferences, and other information you'd rather not repeat.",
     "editTab": "Edit",
     "editorLabel": "Edit your me.md",
-    "emptyHint": "Anything Berd adds shows up here, and you can delete it.",
+    "emptyHint": "No file yet.",
     "history": {
       "description": "This log tracks every change to your memory files, including what made the change and when. Kept as a git history inside the ~/.me folder.",
       "empty": "No changes recorded yet.",
@@ -439,8 +439,7 @@
     "newTopicPlaceholder": "Style, Family, Travel…",
     "noTopics": "No topics yet. Topics hold deeper knowledge, like style, family, or work, that only loads when it's relevant.",
     "offBanner": {
-      "description": "Agents and other tools won't access these files through Berd. Chats and session history still work normally.",
-      "title": "Berd isn't reading or writing memory files"
+      "description": "Berd isn't reading or writing your memory files. Agents and other tools won't access them through Berd, and your files are untouched. Chats and session history still work normally."
     },
     "openTopic": "View",
     "previewTab": "Preview",

@@ -13,7 +13,6 @@ import {
   SettingsSections,
 } from "@/shared/ui/settings-section";
 import { SettingsRow } from "@/shared/ui/settings-row";
-import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Switch } from "@/shared/ui/switch";
 import { MemoryHistory } from "./MemoryHistory";
 import { StorePathLink } from "./StorePathLink";
@@ -353,23 +352,11 @@ export function MeSettings() {
         </SettingsSection>
 
         {!memoryEnabled && (
-          <Alert>
-            <AlertTitle>{t("me.offBanner.title")}</AlertTitle>
-            <AlertDescription>
-              <p>
-                {t("me.offBanner.description")}{" "}
-                {storeFolder && (
-                  <>
-                    <StorePathLink
-                      path={storeFolder.path}
-                      label={storeFolder.display}
-                    />
-                    .
-                  </>
-                )}
-              </p>
-            </AlertDescription>
-          </Alert>
+          <div className="rounded-md border bg-muted/50 px-4 py-3">
+            <p className="text-xs text-muted-foreground">
+              {t("me.offBanner.description")}
+            </p>
+          </div>
         )}
 
         {memoryEnabled && added.length > 0 && (
@@ -438,18 +425,18 @@ export function MeSettings() {
                 )}
 
                 {state.status === "missing" && (
-                  <div className="space-y-2">
-                    <Button onClick={() => void handleCreate()} size="sm">
+                  <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/50 px-4 py-3">
+                    <p className="text-xs text-muted-foreground">
+                      {t("me.emptyHint")}
+                    </p>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      onClick={() => void handleCreate()}
+                    >
                       {t("me.create")}
                     </Button>
-                    <p className="text-xs text-muted-foreground">
-                      {t("me.emptyHint")} {t("me.livesIn")}{" "}
-                      <StorePathLink
-                        path={state.path.replace(/\/[^/]+$/, "")}
-                        label={state.displayPath.replace(/\/[^/]+$/, "")}
-                      />
-                      .
-                    </p>
                   </div>
                 )}
 

@@ -424,7 +424,7 @@
     "description": "El archivo que cada agente lee en cada chat. Incluye detalles esenciales sobre ti, reglas y preferencias fijas, y otra información que preferirías no repetir.",
     "editTab": "Editar",
     "editorLabel": "Editar tu me.md",
-    "emptyHint": "Todo lo que Berd añada aparecerá aquí y puedes eliminarlo.",
+    "emptyHint": "Aún no hay archivo.",
     "history": {
       "description": "Este registro rastrea cada cambio en tus archivos de memoria, incluido qué lo hizo y cuándo. Se guarda como historial de git dentro de la carpeta ~/.me.",
       "empty": "Aún no hay cambios registrados.",
@@ -439,8 +439,7 @@
     "newTopicPlaceholder": "Estilo, Familia, Viajes…",
     "noTopics": "Aún no hay temas. Los temas guardan conocimiento más profundo, como estilo, familia o trabajo, que solo se carga cuando es relevante.",
     "offBanner": {
-      "description": "Los agentes y otras herramientas no accederán a estos archivos a través de Berd. Los chats y el historial siguen funcionando con normalidad.",
-      "title": "Berd no está leyendo ni escribiendo archivos de memoria"
+      "description": "Berd no está leyendo ni escribiendo tus archivos de memoria. Los agentes y otras herramientas no accederán a ellos a través de Berd, y tus archivos permanecen intactos. Los chats y el historial de sesiones siguen funcionando con normalidad."
     },
     "openTopic": "Ver",
     "previewTab": "Vista previa",
