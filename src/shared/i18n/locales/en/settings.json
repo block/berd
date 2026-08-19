@@ -424,13 +424,16 @@
     "description": "The file every agent reads in every chat. Includes core details about you, standing rules and preferences, and other information you'd rather not repeat.",
     "editTab": "Edit",
     "editorLabel": "Edit your me.md",
-    "emptyHint": "Your file will live at ~/.me/me.md, a plain markdown file on your computer. Anything Berd adds shows up here, and you can delete it.",
+    "emptyHint": "Anything Berd adds shows up here, and you can delete it.",
     "history": {
+      "description": "This log tracks every change to your memory files, including what made the change and when. Kept as a git history inside the ~/.me folder.",
       "empty": "No changes recorded yet.",
-      "hide": "Hide history",
+      "hide": "Close history",
       "loading": "Reading history...",
-      "show": "Show history"
+      "show": "View history",
+      "title": "History"
     },
+    "livesIn": "Lives in plain text files on your machine at",
     "loadError": "Couldn't read your file. It may have been moved or deleted.",
     "newTopicDescription": "A topic is its own document. Agents read it only when that part of your life is what's going on.",
     "newTopicError": "Couldn't create that topic. A topic with a similar name may already exist.",
@@ -439,20 +442,17 @@
     "noTopics": "No topics yet. Topics hold deeper knowledge, like style, family, or work, that only loads when it's relevant.",
     "offBanner": {
       "description": "Agents and other tools won't access these files through Berd. Chats and session history still work normally.",
-      "link": "View memory files.",
       "title": "Berd isn't reading or writing memory files"
     },
     "openTopic": "View",
-    "path": "Lives at {{path}}.",
     "previewTab": "Preview",
     "refresh": "Refresh",
-    "reveal": "Go to file.",
     "save": "Save",
     "saveError": "Couldn't save your changes. Your edits are still here, so try again.",
     "spineTitle": "About you",
     "title": "Memory",
     "toggle": {
-      "description": "Memory is what Berd knows about you and how you want it to work. It all lives in plain text files on your machine and fills in over time. Read, edit, or delete anything anytime from here.",
+      "description": "Memory is what Berd knows about you and how you want it to work. It fills in over time, and you can read, edit, or delete anything anytime.",
       "label": "Use memory"
     },
     "topicsHint": "Topics provide more specific knowledge that only loads when it's relevant. Agents can add or update topics as they get to know you.",

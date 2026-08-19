@@ -15,8 +15,8 @@ import {
 import { SettingsRow } from "@/shared/ui/settings-row";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Switch } from "@/shared/ui/switch";
-import { revealInFileManager } from "@/shared/lib/fileManager";
 import { MemoryHistory } from "./MemoryHistory";
+import { StorePathLink } from "./StorePathLink";
 import {
   createMeFile,
   loadMeFile,
@@ -260,12 +260,15 @@ export function MeSettings() {
     void writeMemoryPolicy(enabled).catch(() => {});
   };
 
-  const handleReveal = () => {
-    if (state.status !== "present") return;
-    void revealInFileManager(state.path).catch(() => {
-      // Best-effort convenience; the path is shown right next to the link.
-    });
-  };
+  // The store folder, derived from wherever the spine actually is, so a file
+  // still at a legacy location links to the folder it really lives in.
+  const storeFolder =
+    state.status === "present"
+      ? {
+          path: state.path.replace(/\/[^/]+$/, ""),
+          display: state.displayPath.replace(/\/[^/]+$/, ""),
+        }
+      : null;
 
   const handleCreateTopic = async () => {
     const name = newTopicName.trim();
@@ -301,7 +304,21 @@ export function MeSettings() {
         >
           <SettingsRow
             label={t("me.toggle.label")}
-            description={t("me.toggle.description")}
+            description={
+              <>
+                {t("me.toggle.description")}{" "}
+                {storeFolder && (
+                  <>
+                    {t("me.livesIn")}{" "}
+                    <StorePathLink
+                      path={storeFolder.path}
+                      label={storeFolder.display}
+                    />
+                    .
+                  </>
+                )}
+              </>
+            }
           >
             <Switch
               checked={memoryEnabled}
@@ -317,14 +334,14 @@ export function MeSettings() {
             <AlertDescription>
               <p>
                 {t("me.offBanner.description")}{" "}
-                {state.status === "present" && (
-                  <button
-                    type="button"
-                    onClick={handleReveal}
-                    className="underline underline-offset-2 hover:text-foreground"
-                  >
-                    {t("me.offBanner.link")}
-                  </button>
+                {storeFolder && (
+                  <>
+                    <StorePathLink
+                      path={storeFolder.path}
+                      label={storeFolder.display}
+                    />
+                    .
+                  </>
                 )}
               </p>
             </AlertDescription>
@@ -402,7 +419,12 @@ export function MeSettings() {
                       {t("me.create")}
                     </Button>
                     <p className="text-xs text-muted-foreground">
-                      {t("me.emptyHint")}
+                      {t("me.emptyHint")} {t("me.livesIn")}{" "}
+                      <StorePathLink
+                        path={state.path.replace(/\/[^/]+$/, "")}
+                        label={state.displayPath.replace(/\/[^/]+$/, "")}
+                      />
+                      .
                     </p>
                   </div>
                 )}
@@ -416,18 +438,6 @@ export function MeSettings() {
                     }}
                     refreshLabel={t("me.refresh")}
                     onRefresh={() => void refresh()}
-                    footer={
-                      <>
-                        {t("me.path", { path: state.displayPath })}{" "}
-                        <button
-                          type="button"
-                          onClick={handleReveal}
-                          className="underline underline-offset-2 hover:text-foreground"
-                        >
-                          {t("me.reveal")}
-                        </button>
-                      </>
-                    }
                     {...docStrings}
                   />
                 )}

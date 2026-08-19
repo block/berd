@@ -424,13 +424,16 @@
     "description": "El archivo que cada agente lee en cada chat. Incluye detalles esenciales sobre ti, reglas y preferencias fijas, y otra información que preferirías no repetir.",
     "editTab": "Editar",
     "editorLabel": "Editar tu me.md",
-    "emptyHint": "Tu archivo estará en ~/.me/me.md, un archivo markdown simple en tu computadora. Todo lo que Berd agregue aparece aquí y puedes eliminarlo.",
+    "emptyHint": "Todo lo que Berd añada aparecerá aquí y puedes eliminarlo.",
     "history": {
+      "description": "Este registro rastrea cada cambio en tus archivos de memoria, incluido qué lo hizo y cuándo. Se guarda como historial de git dentro de la carpeta ~/.me.",
       "empty": "Aún no hay cambios registrados.",
-      "hide": "Ocultar historial",
+      "hide": "Cerrar historial",
       "loading": "Leyendo historial...",
-      "show": "Mostrar historial"
+      "show": "Ver historial",
+      "title": "Historial"
     },
+    "livesIn": "Se encuentra en archivos de texto sin formato en tu equipo, en",
     "loadError": "No se pudo leer tu archivo. Es posible que se haya movido o eliminado.",
     "newTopicDescription": "Un tema es su propio documento. Los agentes lo leen solo cuando esa parte de tu vida es lo que está pasando.",
     "newTopicError": "No se pudo crear ese tema. Puede que ya exista un tema con un nombre similar.",
@@ -439,20 +442,17 @@
     "noTopics": "Aún no hay temas. Los temas guardan conocimiento más profundo, como estilo, familia o trabajo, que solo se carga cuando es relevante.",
     "offBanner": {
       "description": "Los agentes y otras herramientas no accederán a estos archivos a través de Berd. Los chats y el historial siguen funcionando con normalidad.",
-      "link": "Ver archivos de memoria.",
       "title": "Berd no está leyendo ni escribiendo archivos de memoria"
     },
     "openTopic": "Ver",
-    "path": "Vive en {{path}}.",
     "previewTab": "Vista previa",
     "refresh": "Actualizar",
-    "reveal": "Ir al archivo.",
     "save": "Guardar",
     "saveError": "No se pudieron guardar tus cambios. Tus ediciones siguen aquí, inténtalo de nuevo.",
     "spineTitle": "Sobre ti",
     "title": "Memoria",
     "toggle": {
-      "description": "La memoria es lo que Berd sabe de ti y cómo quieres que funcione. Todo vive en archivos de texto simple en tu máquina y se completa con el tiempo. Lee, edita o elimina lo que quieras desde aquí.",
+      "description": "La memoria es lo que Berd sabe sobre ti y cómo quieres que funcione. Se completa con el tiempo y puedes leer, editar o eliminar cualquier cosa cuando quieras.",
       "label": "Usar memoria"
     },
     "topicsHint": "Los temas aportan conocimiento más específico que solo se carga cuando es relevante. Los agentes pueden agregar o actualizar temas al conocerte.",
