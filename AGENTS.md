@@ -14,9 +14,12 @@ UI can handle operations that are not yet in ACP or are client specific.
 - `sdk/` — vendored `@aaif/goose-sdk` package and generated ACP types
 - `distro/` — bundled app defaults and packaged distribution assets
 - `goose-backend.lock.json` — pinned upstream Goose backend used by dev and bundles
+- `acp-tools.lock.json` — release-controlled `package.json` + `package-lock.json`
+  the managed ACP bridges are installed from with `npm ci`
 - `scripts/ensure-local-goose.sh` — managed local Goose checkout for dev
 - `scripts/prepare-goose-sidecar.sh` — stages the pinned or explicit Goose binary for Tauri bundling
 - `scripts/update-goose-backend-lock.sh` — resolves and records a new Goose backend pin
+- `scripts/update-acp-tools-lock.mjs` — resolves and records a new managed ACP bridge pin
 - `src/features/berdctl/` — berdctl command registry
 - `src-tauri/plugins/berdctl/` — berdctl broker
 - `src-tauri/crates/berdctl/` — bundled berdctl CLI

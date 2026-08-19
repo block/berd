@@ -221,6 +221,20 @@ pub fn node_runtime_lock() -> &'static NodeRuntimeLock {
     })
 }
 
+/// Every target triple Berd manages a Node runtime for — the artifact keys of
+/// the embedded `node-runtime.lock.json`, which is the one place that set is
+/// written down. [`current_target_triple`] returns a member of this set on any
+/// host Berd ships to, so downstream per-target data (npm target selectors,
+/// `acp-tools.lock.json`'s `nativeExecutables`) must cover exactly these.
+/// Exists so those tests read one list instead of keeping hand copies.
+#[cfg(test)]
+pub(crate) fn supported_target_triples() -> impl Iterator<Item = &'static str> {
+    node_runtime_lock()
+        .artifacts
+        .keys()
+        .map(std::string::String::as_str)
+}
+
 pub(crate) fn current_target_triple() -> Option<&'static str> {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         Some("aarch64-apple-darwin")
