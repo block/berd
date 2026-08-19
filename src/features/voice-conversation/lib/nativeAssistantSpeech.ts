@@ -11,6 +11,28 @@ type SpeakableSegment = {
   sourceText: string;
 };
 
+const STREAMING_SPEECH_BOUNDARY = /(?:[.!?](?:["')\]}]+)?(?=\s|$)|\n+)/g;
+
+function splitSpeakableText(
+  text: string,
+  flushRemainder: boolean,
+): { segments: string[]; consumedLength: number } {
+  const segments: string[] = [];
+  let start = 0;
+  for (const match of text.matchAll(STREAMING_SPEECH_BOUNDARY)) {
+    const end = (match.index ?? 0) + match[0].length;
+    const segment = text.slice(start, end).trim();
+    if (segment) segments.push(segment);
+    start = end;
+  }
+  if (flushRemainder) {
+    const remainder = text.slice(start).trim();
+    if (remainder) segments.push(remainder);
+    return { segments, consumedLength: text.length };
+  }
+  return { segments, consumedLength: start };
+}
+
 let stopSubscription: (() => void) | null = null;
 let stopVoiceSubscription: (() => void) | null = null;
 let playbackQueue = Promise.resolve();
@@ -66,7 +88,7 @@ function setSegmentStatus(
       content: message.content.map((content, index) =>
         index === segment.contentIndex &&
         content.type === "text" &&
-        content.text.trim() === segment.sourceText
+        content.text.trim().startsWith(segment.sourceText)
           ? { ...content, speech: { status } }
           : content,
       ),
@@ -105,7 +127,7 @@ export function startNativeAssistantSpeech(
   const initialMessages =
     useChatStore.getState().messagesBySession[sessionId] ?? [];
   const toolCountByMessage = new Map<string, number>();
-  const spokenTextBySlot = new Map<string, string>();
+  const consumedTextBySlot = new Map<string, string>();
   const completedMessages = new Set<string>();
   for (const message of initialMessages) {
     toolCountByMessage.set(
@@ -119,7 +141,7 @@ export function startNativeAssistantSpeech(
     let textOrdinal = 0;
     message.content.forEach((content) => {
       if (content.type === "text") {
-        spokenTextBySlot.set(
+        consumedTextBySlot.set(
           `${message.id}\0text:${textOrdinal}`,
           content.text.trim(),
         );
@@ -156,8 +178,6 @@ export function startNativeAssistantSpeech(
       const crossedToolBoundary = toolCount > priorToolCount;
       toolCountByMessage.set(message.id, toolCount);
       if (completed) completedMessages.add(message.id);
-      if (!crossedToolBoundary && !completed) continue;
-
       let textOrdinal = 0;
       message.content.forEach((content, contentIndex) => {
         if (content.type !== "text") return;
@@ -165,19 +185,28 @@ export function startNativeAssistantSpeech(
         const slot = `${message.id}\0text:${textOrdinal}`;
         textOrdinal += 1;
         if (!sourceText) return;
-        const spokenText = spokenTextBySlot.get(slot) ?? "";
-        if (sourceText === spokenText) return;
-        const text = sourceText.startsWith(spokenText)
-          ? sourceText.slice(spokenText.length).trim()
-          : sourceText;
-        spokenTextBySlot.set(slot, sourceText);
-        if (!text) return;
-        segments.push({
-          key: `${slot}\0${spokenText.length}\0${sourceText.length}`,
-          messageId: message.id,
-          contentIndex,
-          text,
-          sourceText,
+        const consumedText = consumedTextBySlot.get(slot) ?? "";
+        const consumedPrefix = sourceText.startsWith(consumedText)
+          ? consumedText
+          : "";
+        const pendingText = sourceText.slice(consumedPrefix.length);
+        const split = splitSpeakableText(
+          pendingText,
+          crossedToolBoundary || completed,
+        );
+        if (split.consumedLength === 0) return;
+        consumedTextBySlot.set(
+          slot,
+          sourceText.slice(0, consumedPrefix.length + split.consumedLength),
+        );
+        split.segments.forEach((text, segmentIndex) => {
+          segments.push({
+            key: `${slot}\0${consumedPrefix.length}\0${sourceText.length}\0${segmentIndex}`,
+            messageId: message.id,
+            contentIndex,
+            text,
+            sourceText,
+          });
         });
       });
     }

@@ -104,13 +104,77 @@ describe("native assistant speech queue", () => {
     });
   });
 
+  it("starts speaking complete sentences while the response is streaming", async () => {
+    mocks.speakPocketVoice.mockResolvedValue();
+    startNativeAssistantSpeech("session-1", vi.fn());
+
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "The first sentence is ready." }]),
+      ]);
+    await vi.waitFor(() => {
+      expect(mocks.speakPocketVoice).toHaveBeenCalledWith(
+        "The first sentence is ready.",
+      );
+    });
+
+    useChatStore.getState().setMessages("session-1", [
+      assistant([
+        {
+          type: "text",
+          text: "The first sentence is ready. The second is still streaming",
+        },
+      ]),
+    ]);
+    await Promise.resolve();
+    expect(mocks.speakPocketVoice).toHaveBeenCalledTimes(1);
+
+    useChatStore.getState().setMessages("session-1", [
+      assistant([
+        {
+          type: "text",
+          text: "The first sentence is ready. The second is still streaming!",
+        },
+      ]),
+    ]);
+    await vi.waitFor(() => {
+      expect(mocks.speakPocketVoice).toHaveBeenNthCalledWith(
+        2,
+        "The second is still streaming!",
+      );
+    });
+  });
+
+  it("flushes an unfinished streamed sentence when the response completes", async () => {
+    mocks.speakPocketVoice.mockResolvedValue();
+    startNativeAssistantSpeech("session-1", vi.fn());
+
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "An unfinished tail" }]),
+      ]);
+    await Promise.resolve();
+    expect(mocks.speakPocketVoice).not.toHaveBeenCalled();
+
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "An unfinished tail" }], "completed"),
+      ]);
+    await vi.waitFor(() => {
+      expect(mocks.speakPocketVoice).toHaveBeenCalledWith("An unfinished tail");
+    });
+  });
+
   it("speaks text at tool boundaries even when tools normalize before text", async () => {
     mocks.speakPocketVoice.mockResolvedValue();
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
       .getState()
       .setMessages("session-1", [
-        assistant([{ type: "text", text: "First block." }]),
+        assistant([{ type: "text", text: "First block" }]),
       ]);
     await Promise.resolve();
     expect(mocks.speakPocketVoice).not.toHaveBeenCalled();
@@ -124,11 +188,11 @@ describe("native assistant speech queue", () => {
           arguments: {},
           status: "completed",
         },
-        { type: "text", text: "First block." },
+        { type: "text", text: "First block" },
       ]),
     ]);
     await vi.waitFor(() => {
-      expect(mocks.speakPocketVoice).toHaveBeenCalledWith("First block.");
+      expect(mocks.speakPocketVoice).toHaveBeenCalledWith("First block");
     });
 
     useChatStore.getState().setMessages("session-1", [
@@ -140,7 +204,7 @@ describe("native assistant speech queue", () => {
           arguments: {},
           status: "completed",
         },
-        { type: "text", text: "First block. Second block." },
+        { type: "text", text: "First block Second block" },
       ]),
     ]);
     await Promise.resolve();
@@ -162,14 +226,11 @@ describe("native assistant speech queue", () => {
           arguments: {},
           status: "completed",
         },
-        { type: "text", text: "First block. Second block." },
+        { type: "text", text: "First block Second block" },
       ]),
     ]);
     await vi.waitFor(() => {
-      expect(mocks.speakPocketVoice).toHaveBeenNthCalledWith(
-        2,
-        "Second block.",
-      );
+      expect(mocks.speakPocketVoice).toHaveBeenNthCalledWith(2, "Second block");
     });
   });
 
