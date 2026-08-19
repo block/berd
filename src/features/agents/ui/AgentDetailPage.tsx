@@ -167,7 +167,7 @@ export function AgentDetailPage({
   const metadata = [
     descriptionValue
       ? {
-          label: t("view.description"),
+          label: t("view.description", { defaultValue: "Description" }),
           value: descriptionValue,
           multiline: true,
         }

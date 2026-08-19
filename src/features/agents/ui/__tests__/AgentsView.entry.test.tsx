@@ -64,10 +64,14 @@ vi.mock("@/features/agents/lib/agentZipImport", async (importOriginal) => {
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, options?: Record<string, unknown>) =>
-      key === "view.exportedTo" && typeof options?.filename === "string"
-        ? `${key}:${options.filename}`
-        : key,
+    t: (key: string, options?: Record<string, unknown>) => {
+      if (key === "view.exportedTo" && typeof options?.filename === "string") {
+        return `${key}:${options.filename}`;
+      }
+      return typeof options?.defaultValue === "string"
+        ? options.defaultValue
+        : key;
+    },
   }),
 }));
 
@@ -791,7 +795,7 @@ describe("AgentsView entry points", () => {
 
     render(<AgentsView activePersonaId={persona.id} />);
 
-    expect(screen.getByText("view.description")).toBeInTheDocument();
+    expect(screen.getByText("Description")).toBeInTheDocument();
     expect(
       screen.getByText("Reviews your code carefully."),
     ).toBeInTheDocument();
@@ -802,7 +806,7 @@ describe("AgentsView entry points", () => {
 
     render(<AgentsView activePersonaId={persona.id} />);
 
-    expect(screen.queryByText("view.description")).not.toBeInTheDocument();
+    expect(screen.queryByText("Description")).not.toBeInTheDocument();
   });
 
   it("shows and activates the avatar customization affordance", async () => {

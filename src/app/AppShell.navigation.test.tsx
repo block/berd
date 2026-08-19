@@ -569,6 +569,7 @@ vi.mock("./ui/AppShellContent", () => ({
     onBuilderbotBreadcrumbLabelChange,
     onAutomationBuilderLeaveActionChange,
     onCreatePersona,
+    onAgentBuilderCompleted,
     onExitSearch,
     onArchiveChat,
     onOpenAgent,
@@ -816,6 +817,14 @@ vi.mock("./ui/AppShellContent", () => ({
         {activeView === "agents" ? (
           <button type="button" onClick={onCreatePersona}>
             Create agent
+          </button>
+        ) : null}
+        {activeView === "chat" ? (
+          <button
+            type="button"
+            onClick={() => onAgentBuilderCompleted?.("/saved-agent.md")}
+          >
+            Complete agent builder
           </button>
         ) : null}
         {activeView === "search" ? (
@@ -3832,6 +3841,28 @@ describe("AppShell global navigation", () => {
       screen.queryByText("Save this agent draft?"),
     ).not.toBeInTheDocument();
     await waitForCreatedAgentBuilderTarget();
+  });
+
+  it("opens the saved agent detail after finishing the agent builder", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    await user.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "Complete agent builder" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
+      expect(screen.getByTestId("agent-route")).toHaveTextContent(
+        "/saved-agent.md",
+      );
+    });
   });
 
   it("shows the new agent builder before the draft target is ready", async () => {

@@ -15,7 +15,11 @@ import {
 } from "@/features/agents/ui/AgentBuilderRail";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
-import { listPersonas, type AgentSourceEntry } from "@/shared/api/agents";
+import {
+  agentSourceToPersona,
+  listPersonas,
+  type AgentSourceEntry,
+} from "@/shared/api/agents";
 
 /** Design width hosts should use when laying out the chat-rail render mode. */
 export const AGENT_BUILDER_RAIL_DESIGN_WIDTH =
@@ -33,6 +37,7 @@ export interface AgentBuilderCapabilityProps {
   /** Reopens the collapsed chat column while in full-page mode. */
   onExpandChat?: () => void;
   onDraftPromoted?: (source: AgentSourceEntry) => void;
+  onAgentBuilderCompleted?: (agentId: string) => void;
 }
 
 export function AgentBuilderCapability({
@@ -41,6 +46,7 @@ export function AgentBuilderCapability({
   fullPage = false,
   onExpandChat,
   onDraftPromoted,
+  onAgentBuilderCompleted,
 }: AgentBuilderCapabilityProps) {
   const { t } = useTranslation("agents");
   const patchSession = useChatSessionStore((state) => state.patchSession);
@@ -54,15 +60,28 @@ export function AgentBuilderCapability({
     (source: AgentSourceEntry, refreshErrorMessage: string) => {
       clearBuilderSessionState(session.id);
 
-      void refreshPersonas()
-        .catch((error) => {
-          console.error(refreshErrorMessage, error);
-        })
-        .finally(() => {
-          onDraftPromoted?.(source);
-        });
+      // Promotion is the durable source of truth. Seed the store immediately
+      // so the destination profile exists even if the follow-up disk refresh
+      // fails or has not observed the promoted source yet.
+      const promotedPersona = agentSourceToPersona(source);
+      const agentStore = useAgentStore.getState();
+      const existingPersona = agentStore.personas.find(
+        (persona) => persona.id === promotedPersona.id,
+      );
+      if (existingPersona) {
+        agentStore.updatePersona(promotedPersona.id, promotedPersona);
+      } else {
+        agentStore.addPersona(promotedPersona);
+      }
+
+      onDraftPromoted?.(source);
+      onAgentBuilderCompleted?.(promotedPersona.id);
+
+      void refreshPersonas().catch((error) => {
+        console.error(refreshErrorMessage, error);
+      });
     },
-    [onDraftPromoted, refreshPersonas, session.id],
+    [onAgentBuilderCompleted, onDraftPromoted, refreshPersonas, session.id],
   );
 
   const handleDraftPromoted = useCallback(
