@@ -63,6 +63,36 @@ describe("reconcileManagedDefaultProviderSelection", () => {
     mockGetStoredModelPreference.mockReturnValue(null);
   });
 
+  it("does not wait for model inventory for provider-only defaults", async () => {
+    useRuntimeConfigStore.setState({
+      loaded: true,
+      config: managedRuntimeConfig,
+      result: {
+        status: "ready",
+        source: "bundledFile",
+        config: managedRuntimeConfig,
+      },
+    });
+    const supportedModelsList = vi.fn().mockReturnValue(new Promise(() => {}));
+    mockGetClient.mockResolvedValue({
+      goose: {
+        GooseUnstableDefaultsRead: vi.fn().mockResolvedValue({
+          providerId: "databricks_v2",
+          modelId: undefined,
+        }),
+        GooseUnstableDefaultsSave: defaultsSave,
+        GooseUnstableProvidersSupportedModelsList: supportedModelsList,
+      },
+    } as never);
+
+    await expect(reconcileManagedDefaultProviderSelection()).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: undefined,
+    });
+    expect(supportedModelsList).not.toHaveBeenCalled();
+    expect(defaultsSave).not.toHaveBeenCalled();
+  });
+
   it("repairs a persisted Goose harness sentinel to the managed default", async () => {
     useRuntimeConfigStore.setState({
       loaded: true,

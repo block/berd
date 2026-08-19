@@ -193,6 +193,14 @@ async function initializeConnection(
   perfLog(
     `[perf:conn] get_goose_serve_url in ${(performance.now() - tStart).toFixed(1)}ms`,
   );
+  if (
+    currentAttempt !== attempt ||
+    attempt.generation !== connectionGeneration
+  ) {
+    throw new Error(
+      "ACP connection initialization was superseded; retry the operation.",
+    );
+  }
 
   const tStream = performance.now();
   const stream = createWebSocketStream(wsUrl);

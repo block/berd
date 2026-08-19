@@ -1468,6 +1468,27 @@ describe("acpCreateSession", () => {
     });
   });
 
+  it("applies the complete resolved migration pair for provider-only input", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    mockSupportedModelsList.mockResolvedValueOnce({
+      models: ["goose-gpt-5-5"],
+    });
+    mockNewSession.mockResolvedValue({ sessionId: "migrated-session" });
+    const { acpCreateSession } = await import("../acp");
+
+    await acpCreateSession("goose", "/tmp/project");
+
+    expect(mockSetProvider).toHaveBeenCalledWith(
+      "migrated-session",
+      "databricks_v2",
+    );
+    expect(mockSetModel).toHaveBeenCalledWith(
+      "migrated-session",
+      "goose-gpt-5-5",
+      noRequestModelContext("databricks_v2"),
+    );
+  });
+
   it("does not mutate ACP when managed provider migration cannot prove support", async () => {
     await setRuntimeConfig(managedRuntimeConfig);
     mockSupportedModelsList.mockRejectedValueOnce(new Error("offline"));

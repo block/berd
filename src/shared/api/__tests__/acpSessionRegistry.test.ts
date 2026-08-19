@@ -305,6 +305,42 @@ describe("applySessionModel", () => {
     expect(prompt).toHaveBeenCalledWith("anthropic");
   });
 
+  it("holds prompt transport behind pending configuration intent until it clears", async () => {
+    const registry = await importPreparedRegistry("openai", "gpt-4.1");
+    const supersession = registry.supersedeSessionMutation("session-1");
+    const prompt = vi.fn().mockResolvedValue("complete");
+
+    const result = registry.runPreparedSessionPrompt("session-1", prompt);
+    await Promise.resolve();
+    expect(prompt).not.toHaveBeenCalled();
+
+    supersession.clear();
+    await expect(result).resolves.toBe("complete");
+    expect(prompt).toHaveBeenCalledWith("openai");
+  });
+
+  it("holds prompt transport until pending configuration is consumed", async () => {
+    const registry = await importPreparedRegistry("openai", "gpt-4.1");
+    const supersession = registry.supersedeSessionMutation("session-1");
+    const prompt = vi.fn().mockResolvedValue("complete");
+
+    const result = registry.runPreparedSessionPrompt("session-1", prompt);
+    const configure = registry.configureSession(
+      "session-1",
+      "anthropic",
+      "/project",
+      "claude-fable",
+      {},
+      supersession,
+    );
+    await expect(configure).resolves.toEqual({
+      model: { modelId: "claude-fable", modelName: "claude-fable" },
+      reasoningEffort: null,
+    });
+    await expect(result).resolves.toBe("complete");
+    expect(prompt).toHaveBeenCalledWith("anthropic");
+  });
+
   it("does not time out a long-running prompt or admit config work mid-turn", async () => {
     vi.useFakeTimers();
     try {
@@ -455,6 +491,26 @@ describe("applySessionModel", () => {
     await registry.applySessionModel("session-1", "claude-fable");
 
     expect(mockSetModel).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the acknowledged requested model when setModel omits a snapshot", async () => {
+    const registry = await importPreparedRegistry("openai", "gpt-4.1");
+    mockSetProvider.mockResolvedValueOnce(
+      modelConfigResponse("claude-sonnet", "Claude Sonnet"),
+    );
+    mockSetModel.mockResolvedValueOnce(undefined);
+
+    await expect(
+      registry.configureSession(
+        "session-1",
+        "anthropic",
+        "/project",
+        "claude-fable",
+      ),
+    ).resolves.toEqual({
+      model: { modelId: "claude-fable", modelName: "claude-fable" },
+      reasoningEffort: null,
+    });
   });
 
   it("returns the final model snapshot without provider-default fields", async () => {

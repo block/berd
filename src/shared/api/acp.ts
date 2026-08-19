@@ -413,7 +413,7 @@ async function applyResolvedSessionSelection(
   options: AcpSessionConfigApplyOptions,
   supersession: AcpSessionConfigurationIntent,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
-  const applyResolvedModel = Boolean(options.modelId);
+  const applyResolvedModel = Boolean(selection.modelId);
   return applyResolvedModel && selection.modelId
     ? sessionRegistry.configureSession(
         sessionId,

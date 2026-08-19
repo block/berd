@@ -438,9 +438,15 @@ export async function configureSession(
       concreteModelId ? {} : options,
     );
     if (concreteModelId) {
-      snapshots =
-        (await applySessionModelNow(sessionId, concreteModelId, options)) ??
-        snapshots;
+      const modelSnapshots = await applySessionModelNow(
+        sessionId,
+        concreteModelId,
+        options,
+      );
+      snapshots = modelSnapshots ?? {
+        model: { modelId: concreteModelId, modelName: concreteModelId },
+        reasoningEffort: null,
+      };
     }
     return snapshots;
   });
@@ -491,10 +497,15 @@ export function requireSessionInvocationSelection(
 }
 
 /** Run prompt setup and transport without allowing session config to interleave. */
-export function runPreparedSessionPrompt<T>(
+export async function runPreparedSessionPrompt<T>(
   sessionId: string,
   prompt: (providerId: string) => Promise<T>,
 ): Promise<T> {
+  let pending = mutationQueues.get(sessionId)?.pendingSupersession;
+  while (pending) {
+    await pending.settled;
+    pending = mutationQueues.get(sessionId)?.pendingSupersession;
+  }
   return serializeSessionMutation(
     sessionId,
     () => prompt(requireSessionInvocationSelection(sessionId).providerId),

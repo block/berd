@@ -99,6 +99,9 @@ export async function repairManagedGooseModelSelection(
   if (initial.providerId !== selection.providerId) {
     return resolveValidatedManagedGooseProviderSelection(config, selection);
   }
+  if (!selection.modelId) {
+    return initial;
+  }
 
   const targetModelIds = await validatedModelIds(initial.providerId);
   const repaired = resolveManagedGooseProviderSelection(config, selection, {
