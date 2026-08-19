@@ -501,7 +501,11 @@ function legacyPersonaToCreateRequest(parsed: Record<string, unknown>) {
   return {
     type: AGENT_SOURCE_TYPE,
     name: parsed.displayName as string,
-    description: AGENT_DESCRIPTION,
+    description: hasRealAgentDescription(
+      trimmedPropertyString(parsed.description),
+    )
+      ? (trimmedPropertyString(parsed.description) as string)
+      : AGENT_DESCRIPTION,
     content: parsed.systemPrompt as string,
     target: { scope: "global" } as const,
     properties: legacyPersonaProperties(parsed),

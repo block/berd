@@ -1073,6 +1073,7 @@ describe("agents API", () => {
       version: 1,
       displayName: "Scout",
       systemPrompt: "Research carefully.",
+      description: "Finds relevant evidence.",
       provider: "openai",
       model: "gpt-4.1",
       avatar: { type: "url", value: "https://example.test/scout.png" },
@@ -1083,7 +1084,7 @@ describe("agents API", () => {
     expect(mockGooseSourcesCreate).toHaveBeenCalledWith({
       type: "agent",
       name: "Scout",
-      description: "Agent",
+      description: "Finds relevant evidence.",
       content: "Research carefully.",
       target: { scope: "global" },
       properties: {
