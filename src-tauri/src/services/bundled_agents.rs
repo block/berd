@@ -345,6 +345,26 @@ fn agent_frontmatter(contents: &str) -> Option<&str> {
     Some(&contents[..end])
 }
 
+fn reserve_legacy_backup_dir(parent: &Path) -> Result<PathBuf, String> {
+    loop {
+        let sequence = INSTALL_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let path = parent.join(format!(
+            ".berd-agent-legacy-backup-{}-{sequence}",
+            std::process::id()
+        ));
+        match fs::create_dir(&path) {
+            Ok(()) => return Ok(path),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(format!(
+                    "Failed to reserve legacy agent backup '{}': {err}",
+                    path.display()
+                ));
+            }
+        }
+    }
+}
+
 fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
     let parent = target
         .parent()
@@ -374,10 +394,6 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
         ".berd-agent-install-{}-{sequence}.tmp",
         std::process::id()
     ));
-    let legacy_claim_path = parent.join(format!(
-        ".berd-agent-legacy-backup-{}-{sequence}.bak",
-        std::process::id()
-    ));
     let install_result = (|| -> Result<(), String> {
         let mut temp = OpenOptions::new()
             .write(true)
@@ -405,7 +421,9 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
             installed_agent_path_state(target)?,
             InstalledAgentPathState::UserOwned
         ) && is_known_legacy_agt_builder(target)?;
-        if claimed_legacy {
+        let legacy_claim_path = if claimed_legacy {
+            let backup_dir = reserve_legacy_backup_dir(parent)?;
+            let legacy_claim_path = backup_dir.join(LEGACY_AGT_BUILDER_FILE_NAME);
             fs::rename(target, &legacy_claim_path).map_err(|err| {
                 format!(
                     "Failed to claim legacy bundled agent '{}': {err}",
@@ -429,6 +447,7 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
                     target.display()
                 ));
             }
+            Some(legacy_claim_path)
         } else if !matches!(
             installed_agent_path_state(target)?,
             InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled
@@ -437,15 +456,17 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
                 "Cannot install bundled agent over user-owned file '{}'",
                 target.display()
             ));
-        }
-        if claimed_legacy {
+        } else {
+            None
+        };
+        if let Some(legacy_claim_path) = legacy_claim_path {
             // Publish without replacement: if another writer recreates the
             // target after our claim, preserve their file and restore the
             // claimed legacy file only when the path is still empty.
             if let Err(err) = fs::hard_link(&temp_path, target) {
-                if !target.exists() {
-                    let _ = fs::rename(&legacy_claim_path, target);
-                }
+                // Restore with the same no-replace primitive. A concurrent
+                // writer that recreated the target always wins.
+                let _ = fs::hard_link(&legacy_claim_path, target);
                 return Err(format!(
                     "Failed to install bundled agent '{}' at '{}': {err}",
                     source.display(),
@@ -712,13 +733,54 @@ mod tests {
                     .file_name()
                     .to_string_lossy()
                     .starts_with(".berd-agent-legacy-backup-")
+                    && entry.path().is_dir()
             })
             .collect();
         assert_eq!(backups.len(), 1);
         assert_eq!(
-            fs::read_to_string(backups[0].path()).unwrap(),
+            fs::read_to_string(backups[0].path().join(LEGACY_AGT_BUILDER_FILE_NAME)).unwrap(),
             include_str!("../../test-fixtures/legacy-agt-builder.md")
         );
+    }
+
+    #[test]
+    fn preserves_an_existing_recovery_backup() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let collision = target.path().join(format!(
+            ".berd-agent-legacy-backup-{}-0",
+            std::process::id()
+        ));
+        fs::create_dir(&collision).unwrap();
+        fs::write(collision.join(LEGACY_AGT_BUILDER_FILE_NAME), "older backup").unwrap();
+        fs::write(
+            source.path().join(LEGACY_AGT_BUILDER_FILE_NAME),
+            "---\nname: Agt. Builder\ndescription: Current\nmetadata:\n  berdBundled: true\n---\nCurrent instructions.",
+        )
+        .unwrap();
+        fs::write(
+            target.path().join(LEGACY_AGT_BUILDER_FILE_NAME),
+            include_str!("../../test-fixtures/legacy-agt-builder.md"),
+        )
+        .unwrap();
+
+        seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(
+            fs::read_to_string(collision.join(LEGACY_AGT_BUILDER_FILE_NAME)).unwrap(),
+            "older backup"
+        );
+        let backup_count = fs::read_dir(target.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".berd-agent-legacy-backup-")
+            })
+            .count();
+        assert_eq!(backup_count, 2);
     }
 
     #[test]
