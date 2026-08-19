@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { IconPhotoPlus, IconPlus } from "@tabler/icons-react";
+import { IconArrowDownToArc, IconPlus } from "@tabler/icons-react";
 import { selectAvatarImageUrl } from "@/shared/api/artifacts";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
@@ -410,7 +410,7 @@ export function PersonaGallery({
                     onImportAgentImage();
                   }}
                 >
-                  <IconPhotoPlus />
+                  <IconArrowDownToArc className="size-3.5" />
                   {t("gallery.importViaImage")}
                 </AgentAddChoiceButton>
               ) : null}

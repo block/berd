@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { IconPhotoPlus, IconUpload } from "@tabler/icons-react";
-
 import { useTranslation } from "react-i18next";
 import type { PersonaImportPreview } from "@/shared/api/agents";
 import type { SnapshotV1 } from "@/features/agents/agent-snapshot";
@@ -292,10 +290,6 @@ export function AgentImportDialog({
                 isDragOver && "border-ring bg-muted/70",
               )}
             >
-              <IconPhotoPlus
-                className="size-10 text-muted-foreground"
-                aria-hidden="true"
-              />
               <p className="text-sm">
                 {preparing
                   ? t("importDialog.preparing")
@@ -304,7 +298,6 @@ export function AgentImportDialog({
               <Button
                 type="button"
                 variant="outline"
-                leftIcon={<IconUpload />}
                 feedbackState={preparing ? "loading" : "idle"}
                 loadingLabel={t("importDialog.preparing")}
                 onClick={openFilePicker}
