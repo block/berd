@@ -39,6 +39,17 @@ describe("deriveAgentCardDescription", () => {
     ).toBe("Scout ayuda con tareas específicas.");
   });
 
+  it("counts appended punctuation within the description limit", () => {
+    const description = "x".repeat(110);
+    expect(
+      deriveAgentCardDescription(
+        `You are Scout. Your purpose is ${description}. More follows.`,
+        "Scout",
+        "Bounded fallback.",
+      ),
+    ).toBe("Bounded fallback.");
+  });
+
   it("uses a bounded fallback when instructions cannot form a short sentence", () => {
     expect(deriveAgentCardDescription("x".repeat(500), "Scout")).toBe(
       "Scout helps with focused work.",

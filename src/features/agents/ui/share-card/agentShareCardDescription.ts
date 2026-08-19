@@ -34,10 +34,11 @@ function toThirdPerson(value: string): string {
 
 function sentenceWithinLimit(value: string): string | undefined {
   const sentence = value.trim().replace(/[,;:]?\s*$/u, "");
-  if (!sentence || graphemeCount(sentence) > MAX_CARD_DESCRIPTION_CHARACTERS) {
-    return undefined;
-  }
-  return /[.!?]$/u.test(sentence) ? sentence : `${sentence}.`;
+  if (!sentence) return undefined;
+  const punctuated = /[.!?]$/u.test(sentence) ? sentence : `${sentence}.`;
+  return graphemeCount(punctuated) <= MAX_CARD_DESCRIPTION_CHARACTERS
+    ? punctuated
+    : undefined;
 }
 
 function descriptiveJob(text: string): string | undefined {
