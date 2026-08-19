@@ -138,6 +138,27 @@ function mergeState(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
+function persistedChatStateFromItem(
+  item: LayoutItem,
+): Record<string, unknown> | undefined {
+  if (typeof item.widgetState !== "object" || item.widgetState === null) {
+    return undefined;
+  }
+
+  const state: Record<string, unknown> = {};
+  if (
+    item.widgetState.presentation === "expanded" ||
+    item.widgetState.presentation === "collapsed"
+  ) {
+    state.presentation = item.widgetState.presentation;
+  }
+  const sizeByProfile = readSizeByProfile(item.widgetState);
+  if (sizeByProfile) {
+    state[SIZE_BY_PROFILE_STATE_KEY] = sizeByProfile;
+  }
+  return Object.keys(state).length > 0 ? state : undefined;
+}
+
 function persistedClockStateFromItem(
   item: LayoutItem,
 ): Record<string, unknown> | undefined {
@@ -283,7 +304,10 @@ function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
     case "persona":
       return { agentId: item.targetId };
     case "session":
-      return { sessionId: item.targetId };
+      return mergeState(
+        { sessionId: item.targetId },
+        persistedChatStateFromItem(item),
+      );
     case "project":
       return { projectId: item.targetId };
     case "automation":
@@ -382,8 +406,21 @@ function widgetStateForLayoutItem(
     }
     case "photo":
       return sanitizePhotoState(instance.state);
+    case "session": {
+      const state: Record<string, unknown> = {};
+      if (
+        instance.state?.presentation === "expanded" ||
+        instance.state?.presentation === "collapsed"
+      ) {
+        state.presentation = instance.state.presentation;
+      }
+      const sizeByProfile = readSizeByProfile(instance.state);
+      if (sizeByProfile) {
+        state[SIZE_BY_PROFILE_STATE_KEY] = sizeByProfile;
+      }
+      return Object.keys(state).length > 0 ? state : undefined;
+    }
     case "persona":
-    case "session":
     case "project":
     case "automation":
     case "skill":
