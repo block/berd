@@ -249,10 +249,7 @@ fn seed_bundled_agents_from_dir(
     })
 }
 
-fn is_known_legacy_agt_builder(path: &Path) -> Result<bool, String> {
-    if path.file_name().and_then(|name| name.to_str()) != Some(LEGACY_AGT_BUILDER_FILE_NAME) {
-        return Ok(false);
-    }
+fn has_known_legacy_agt_builder_contents(path: &Path) -> Result<bool, String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|err| format!("Failed to inspect legacy agent '{}': {err}", path.display()))?;
     if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
@@ -262,6 +259,13 @@ fn is_known_legacy_agt_builder(path: &Path) -> Result<bool, String> {
         .map_err(|err| format!("Failed to read legacy agent '{}': {err}", path.display()))?;
     let digest = format!("{:x}", Sha256::digest(contents));
     Ok(digest == LEGACY_AGT_BUILDER_FILE_SHA256)
+}
+
+fn is_known_legacy_agt_builder(path: &Path) -> Result<bool, String> {
+    if path.file_name().and_then(|name| name.to_str()) != Some(LEGACY_AGT_BUILDER_FILE_NAME) {
+        return Ok(false);
+    }
+    has_known_legacy_agt_builder_contents(path)
 }
 
 fn should_install_agent(
@@ -370,6 +374,10 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
         ".berd-agent-install-{}-{sequence}.tmp",
         std::process::id()
     ));
+    let legacy_claim_path = parent.join(format!(
+        ".berd-agent-legacy-claim-{}-{sequence}.tmp",
+        std::process::id()
+    ));
     let install_result = (|| -> Result<(), String> {
         let mut temp = OpenOptions::new()
             .write(true)
@@ -393,23 +401,47 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
                 temp_path.display()
             )
         })?;
-        match installed_agent_path_state(target)? {
-            InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {}
-            InstalledAgentPathState::UserOwned if is_known_legacy_agt_builder(target)? => {}
-            InstalledAgentPathState::UserOwned => {
+        let claimed_legacy = matches!(
+            installed_agent_path_state(target)?,
+            InstalledAgentPathState::UserOwned
+        ) && is_known_legacy_agt_builder(target)?;
+        if claimed_legacy {
+            fs::rename(target, &legacy_claim_path).map_err(|err| {
+                format!(
+                    "Failed to claim legacy bundled agent '{}': {err}",
+                    target.display()
+                )
+            })?;
+            if !has_known_legacy_agt_builder_contents(&legacy_claim_path)? {
+                let _ = fs::rename(&legacy_claim_path, target);
                 return Err(format!(
-                    "Cannot install bundled agent over user-owned file '{}'",
+                    "Legacy bundled agent changed before replacement at '{}'",
                     target.display()
                 ));
             }
+        } else if !matches!(
+            installed_agent_path_state(target)?,
+            InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled
+        ) {
+            return Err(format!(
+                "Cannot install bundled agent over user-owned file '{}'",
+                target.display()
+            ));
         }
-        fs::rename(&temp_path, target).map_err(|err| {
-            format!(
+        if let Err(err) = fs::rename(&temp_path, target) {
+            if claimed_legacy {
+                let _ = fs::rename(&legacy_claim_path, target);
+            }
+            return Err(format!(
                 "Failed to install bundled agent '{}' at '{}': {err}",
                 source.display(),
                 target.display()
-            )
-        })
+            ));
+        }
+        if claimed_legacy {
+            let _ = fs::remove_file(&legacy_claim_path);
+        }
+        Ok(())
     })();
     if install_result.is_err() {
         let _ = fs::remove_file(&temp_path);
