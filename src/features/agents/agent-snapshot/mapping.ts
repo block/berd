@@ -44,7 +44,7 @@ export function snapshotToCreatePersonaRequest(
   }
   const about = snapshot.profile?.about;
   if (typeof about === "string" && about.trim()) {
-    request.description = about.trim();
+    request.description = truncateCardGraphemes(about.trim(), 110);
   }
   const goodFor = snapshot.profile?.goodFor;
   const vibes = snapshot.profile?.vibes;

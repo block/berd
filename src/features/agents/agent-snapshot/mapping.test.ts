@@ -154,6 +154,18 @@ describe("snapshot mappings", () => {
     );
   });
 
+  it("accepts long v1 descriptions and bounds the imported presentation copy", () => {
+    const value = snapshot({
+      profile: {
+        displayName: "Display name",
+        about: "a".repeat(200),
+      },
+    });
+    expect(snapshotToCreatePersonaRequest(value).description).toBe(
+      "a".repeat(110),
+    );
+  });
+
   it("round-trips grapheme-bounded Unicode share-card metadata", () => {
     const goodFor = "👨‍👩‍👧‍👦".repeat(44);
     const vibes = "😀".repeat(32);

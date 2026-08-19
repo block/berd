@@ -158,12 +158,6 @@ export function validateSnapshotV1(value: unknown): SnapshotV1 {
   if (profile) {
     optionalString(profile, "displayName", MAX_SNAPSHOT_NAME_LENGTH);
     optionalString(profile, "about", MAX_SNAPSHOT_CARD_COPY_RAW_LENGTH);
-    if (
-      typeof profile.about === "string" &&
-      graphemeCount(profile.about.trim()) > 110
-    ) {
-      throw new AgentSnapshotError("about is too long", "invalid-snapshot");
-    }
     optionalString(profile, "goodFor", MAX_SNAPSHOT_CARD_COPY_RAW_LENGTH);
     optionalString(profile, "vibes", MAX_SNAPSHOT_CARD_COPY_RAW_LENGTH);
     if (
