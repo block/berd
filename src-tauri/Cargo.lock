@@ -11,7 +11,7 @@ dependencies = [
  "base64 0.22.1",
  "block2",
  "builderbot-auth",
- "buzz-voice",
+ "berd-voice",
  "bytes",
  "bzip2 0.6.1",
  "chrono",
@@ -713,9 +713,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
-name = "buzz-voice"
+name = "berd-voice"
 version = "0.1.0"
-source = "git+https://github.com/block/buzz?rev=b1426cac2dcc24cfd1f62abe4652ff414c3dbf14#b1426cac2dcc24cfd1f62abe4652ff414c3dbf14"
 dependencies = [
  "ort",
  "ort-sys",

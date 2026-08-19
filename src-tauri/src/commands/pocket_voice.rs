@@ -11,9 +11,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 #[cfg(target_os = "macos")]
-use buzz_voice::SAMPLE_RATE;
+use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
-use buzz_voice::{load_text_to_speech, load_voice_style, SynthesisOutcome};
+use berd_voice::{load_text_to_speech, load_voice_style, SynthesisOutcome};
 use futures_util::StreamExt;
 #[cfg(target_os = "macos")]
 use rodio::buffer::SamplesBuffer;

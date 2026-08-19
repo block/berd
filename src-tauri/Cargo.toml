@@ -14,7 +14,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # <plugin> --features ...` only works for workspace members. app-test-driver
 # stays excluded (a plain path dependency, as before this workspace existed).
 [workspace]
-members = ["crates/berdctl", "plugins/berdctl"]
+members = ["crates/berd-voice", "crates/berdctl", "plugins/berdctl"]
 exclude = ["plugins/app-test-driver"]
 
 [build-dependencies]
@@ -26,7 +26,7 @@ base64 = "0.22"
 builderbot-auth = { path = "../crates/builderbot-auth", features = ["blocking-client"] }
 bytes = "1"
 bzip2 = "0.6"
-buzz-voice = { git = "https://github.com/block/buzz", rev = "b1426cac2dcc24cfd1f62abe4652ff414c3dbf14", features = ["static"] }
+berd-voice = { path = "crates/berd-voice", features = ["static"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0.0"
 dunce = "1"
