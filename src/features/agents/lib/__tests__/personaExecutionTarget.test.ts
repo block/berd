@@ -70,15 +70,8 @@ describe("personaExecutionTarget", () => {
       [],
     );
 
-    expect(personaExecutionTarget(persona, targetContext)).toEqual({
-      harnessId: "goose",
-      modelProviderId: "openai",
-    });
-    expect(personaTargetMigration(persona, targetContext)).toEqual({
-      provider: "goose",
-      modelProviderId: "openai",
-      model: null,
-    });
+    expect(personaExecutionTarget(persona, targetContext)).toBeUndefined();
+    expect(personaTargetMigration(persona, targetContext)).toBeNull();
   });
 
   it("rejects an agent harness persisted as a Goose model provider", () => {
@@ -128,8 +121,8 @@ describe("personaExecutionTarget", () => {
       persona: { provider: "goose", modelProviderId: "openai", model: "gpt-5" },
       models: [],
       authoritativeProviderIds: ["openai"],
-      target: { harnessId: "goose", modelProviderId: "openai" },
-      migration: { provider: "goose", modelProviderId: "openai", model: null },
+      target: undefined,
+      migration: null,
     },
     {
       name: "external harness with foreign provider and supported model",
@@ -161,12 +154,8 @@ describe("personaExecutionTarget", () => {
       },
       models: [],
       authoritativeProviderIds: ["claude-acp"],
-      target: { harnessId: "claude-acp", modelProviderId: "claude-acp" },
-      migration: {
-        provider: "claude-acp",
-        modelProviderId: "claude-acp",
-        model: null,
-      },
+      target: undefined,
+      migration: null,
     },
     {
       name: "external harness with unavailable inventory",
@@ -200,13 +189,14 @@ describe("personaExecutionTarget", () => {
 
     expect(personaExecutionTarget(persona, targetContext)).toEqual(target);
     expect(personaTargetMigration(persona, targetContext)).toEqual(migration);
+    const actualTarget = personaExecutionTarget(persona, targetContext);
+    if (!target) {
+      expect(gooseServeSelectionFromExecutionTarget(actualTarget)).toEqual({});
+      return;
+    }
     const wireProviderId =
       target.harnessId === "goose" ? target.modelProviderId : target.harnessId;
-    expect(
-      gooseServeSelectionFromExecutionTarget(
-        personaExecutionTarget(persona, targetContext),
-      ),
-    ).toEqual({
+    expect(gooseServeSelectionFromExecutionTarget(actualTarget)).toEqual({
       providerId: wireProviderId,
       modelId: target.modelId,
       modelName: target.modelName,

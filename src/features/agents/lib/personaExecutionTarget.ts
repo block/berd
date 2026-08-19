@@ -190,7 +190,9 @@ export function personaExecutionTarget(
     isModelInventoryAuthoritative?.(modelProviderId ?? harnessId) ?? false;
 
   if (modelId && !provenModel && inventoryIsAuthoritative) {
-    return normalizeSessionExecutionTarget({ harnessId, modelProviderId });
+    // Preserve the saved configuration for repair, but do not expose an
+    // incomplete execution target: agents require both provider and model.
+    return undefined;
   }
 
   return normalizeSessionExecutionTarget({

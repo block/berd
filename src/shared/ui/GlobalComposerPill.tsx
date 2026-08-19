@@ -714,8 +714,13 @@ export function GlobalComposerPill({
       selectedProviderForPicker,
     ],
   );
+  const personaHasSavedExecutionTarget = Boolean(
+    selectedPersona?.provider ||
+      selectedPersona?.modelProviderId ||
+      selectedPersona?.model,
+  );
   const effectiveExecutionTarget =
-    !personaSelectionOverridden && personaTarget
+    !personaSelectionOverridden && personaHasSavedExecutionTarget
       ? personaTarget
       : (localExecutionTarget ?? currentExecutionTarget ?? undefined);
   const canSend =

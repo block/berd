@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
-  const initializations: Array<() => void> = [];
+  const initializations: Array<{
+    resolve: () => void;
+    reject: (error: Error) => void;
+  }> = [];
   const streams: Array<{ writable: { abort: ReturnType<typeof vi.fn> } }> = [];
   class MockGooseClient {
     closed = new Promise<void>(() => {});
     async initialize(): Promise<void> {
-      await new Promise<void>((resolve) => initializations.push(resolve));
+      await new Promise<void>((resolve, reject) =>
+        initializations.push({ resolve, reject }),
+      );
     }
   }
   return { initializations, streams, MockGooseClient };
@@ -41,11 +46,45 @@ describe("ACP connection lifecycle", () => {
     expect(mocks.streams[0]?.writable.abort).toHaveBeenCalledOnce();
     const retry = connection.getClient();
     await vi.waitFor(() => expect(mocks.initializations).toHaveLength(2));
-    mocks.initializations[1]?.();
+    mocks.initializations[1]?.resolve();
     const client = await retry;
-    mocks.initializations[0]?.();
-    await stale;
+    mocks.initializations[0]?.resolve();
+    await expect(stale).rejects.toThrow(
+      "ACP connection initialization was superseded",
+    );
     expect(connection.getClientSync()).toBe(client);
+    expect(mocks.streams[1]?.writable.abort).not.toHaveBeenCalled();
+  });
+
+  it("rejects every waiter for a retired initialization", async () => {
+    const connection = await import("./acpConnection");
+    const first = connection.getClient();
+    const second = connection.getClient();
+    await vi.waitFor(() => expect(mocks.initializations).toHaveLength(1));
+
+    await connection.invalidateClientConnection();
+    mocks.initializations[0]?.resolve();
+
+    await expect(first).rejects.toThrow("initialization was superseded");
+    await expect(second).rejects.toThrow("initialization was superseded");
+    expect(mocks.streams[0]?.writable.abort).toHaveBeenCalledOnce();
+  });
+
+  it("aborts a transport when initialization rejects and preserves the error", async () => {
+    const connection = await import("./acpConnection");
+    const failed = connection.getClient();
+    await vi.waitFor(() => expect(mocks.initializations).toHaveLength(1));
+
+    mocks.initializations[0]?.reject(new Error("handshake failed"));
+
+    await expect(failed).rejects.toThrow("handshake failed");
+    expect(mocks.streams[0]?.writable.abort).toHaveBeenCalledOnce();
+    expect(connection.getClientSync()).toBeNull();
+
+    const retry = connection.getClient();
+    await vi.waitFor(() => expect(mocks.initializations).toHaveLength(2));
+    mocks.initializations[1]?.resolve();
+    await expect(retry).resolves.toBeTruthy();
     expect(mocks.streams[1]?.writable.abort).not.toHaveBeenCalled();
   });
 });

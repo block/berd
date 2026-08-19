@@ -783,7 +783,7 @@ describe("GlobalComposerPill", () => {
     });
   });
 
-  it("keeps the Composer target when a persona has no plausible target", async () => {
+  it("blocks a persona that has saved model metadata but no plausible target", async () => {
     const user = userEvent.setup();
     useAgentStore.setState({
       personas: [
@@ -802,11 +802,11 @@ describe("GlobalComposerPill", () => {
     });
 
     await user.type(screen.getByRole("textbox"), "Hello");
-    await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expectSent(onSend, "Hello", {
-      personaId: "persona-1",
-    });
+    expect(
+      screen.getByRole("button", { name: /send message/i }),
+    ).toBeDisabled();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("applies a legacy persona target when inventory arrives", async () => {
@@ -888,18 +888,13 @@ describe("GlobalComposerPill", () => {
     });
 
     await user.type(screen.getByRole("textbox"), "Hello");
-    await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    // The mock inventory is authoritative and does not contain this legacy
-    // model, so the new provider remains selected but its unsupported model
-    // must not reach the execution target.
-    expectSent(onSend, "Hello", {
-      executionTarget: {
-        harnessId: "goose",
-        modelProviderId: "databricks_v2",
-      },
-      personaId: "persona-1",
-    });
+    // The authoritative inventory disproves this persona's saved model, so it
+    // has no runnable target until the user explicitly selects a supported one.
+    expect(
+      screen.getByRole("button", { name: /send message/i }),
+    ).toBeDisabled();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("does not synthesize an advisory model while inventory proof is unavailable", async () => {
@@ -1215,19 +1210,15 @@ describe("GlobalComposerPill", () => {
     expect(screen.getByText("UX Critic")).toBeInTheDocument();
 
     await user.type(screen.getByRole("textbox"), "Hello");
-    await user.click(screen.getByRole("button", { name: /send message/i }));
 
     // `goose-default` is absent from the authoritative mock inventory, so the
-    // selected harness/provider is retained but the model cannot be dispatched.
+    // newly selected persona cannot dispatch through an implicit fallback.
     expect(screen.queryByText("GPT-5.5")).not.toBeInTheDocument();
     expect(screen.getByText("Goose")).toBeInTheDocument();
-    expectSent(onSend, "Hello", {
-      executionTarget: {
-        harnessId: "goose",
-        modelProviderId: "databricks_v2",
-      },
-      personaId: "persona-2",
-    });
+    expect(
+      screen.getByRole("button", { name: /send message/i }),
+    ).toBeDisabled();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("keeps the selected provider/model after clearing the suggested persona", async () => {
@@ -1255,11 +1246,10 @@ describe("GlobalComposerPill", () => {
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    // Clearing the persona retains the selected external harness. Its model is
-    // absent from the authoritative inventory, so no stale provider/model
-    // metadata may be dispatched.
+    // The unsupported persona target never becomes a live selection, so
+    // clearing it retains the composer fallback without stale metadata.
     expectSent(onSend, "Hello", {
-      executionTarget: { harnessId: "claude-acp" },
+      executionTarget: { harnessId: "goose" },
     });
   });
 

@@ -66,9 +66,16 @@ let connectionGeneration = 0;
 interface ConnectionAttempt {
   generation: number;
   stream: ReturnType<typeof createWebSocketStream> | null;
+  streamAborted: boolean;
 }
 
 let currentAttempt: ConnectionAttempt | null = null;
+
+async function abortAttemptStream(attempt: ConnectionAttempt): Promise<void> {
+  if (!attempt.stream || attempt.streamAborted) return;
+  attempt.streamAborted = true;
+  await attempt.stream.writable.abort();
+}
 
 function createClientCallbacks(): () => Client {
   return () => ({
@@ -142,7 +149,9 @@ export async function invalidateClientConnection(): Promise<void> {
   activeStream = null;
   resolvedClient = null;
   clientPromise = null;
-  if (stream) {
+  if (attempt) {
+    await abortAttemptStream(attempt);
+  } else if (stream) {
     await stream.writable.abort();
   }
 }
@@ -224,6 +233,7 @@ export async function getClient(): Promise<GooseClient> {
     const attempt: ConnectionAttempt = {
       generation: connectionGeneration,
       stream: null,
+      streamAborted: false,
     };
     currentAttempt = attempt;
     const initialization = initializeConnection(attempt)
@@ -237,10 +247,20 @@ export async function getClient(): Promise<GooseClient> {
           monitorConnection(client, stream, attempt);
           return client;
         }
-        await stream.writable.abort();
-        return client;
+        await abortAttemptStream(attempt);
+        throw new Error(
+          "ACP connection initialization was superseded; retry the operation.",
+        );
       })
-      .catch((error) => {
+      .catch(async (error) => {
+        // initializeConnection may fail after opening the transport. Retire it
+        // before dropping the attempt while preserving the original failure.
+        await abortAttemptStream(attempt).catch((abortError) => {
+          console.warn(
+            "[acp] Failed to abort rejected connection attempt.",
+            abortError,
+          );
+        });
         if (currentAttempt === attempt) {
           currentAttempt = null;
           clientPromise = null;

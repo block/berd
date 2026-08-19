@@ -329,9 +329,10 @@ async function execute(
       throw new Error("Session execution target requires a provider boundary.");
     }
     const forceConfigRefresh =
-      request.requireReasoningEffort &&
-      !useChatSessionStore.getState().getSession(request.sessionId)
-        ?.reasoningEffort;
+      (request.requireReasoningEffort &&
+        !useChatSessionStore.getState().getSession(request.sessionId)
+          ?.reasoningEffort) ||
+      (request.target.modelId !== undefined && effective.modelId === undefined);
     const snapshot = await acpPrepareSession(
       request.sessionId,
       selection.providerId,
@@ -339,6 +340,7 @@ async function execute(
       {
         ...(selection.modelId ? { modelId: selection.modelId } : {}),
         ...(forceConfigRefresh ? { forceConfigRefresh: true } : {}),
+        selectionAlreadyResolved: true,
         ...(request.operationId || request.requestId
           ? { requestId: operationId }
           : {}),
@@ -361,11 +363,14 @@ async function execute(
       settleOperation(operation, { status: "session-missing", applied: false });
       return;
     }
-    const acknowledged =
-      !effective.modelId && snapshot?.model
-        ? (materializeSessionExecutionModel(effective, snapshot.model) ??
-          effective)
-        : effective;
+    // The ACP response is the acknowledgement of the configuration actually
+    // applied. Always reconcile from it: inventory can change between
+    // preflight resolution and preparation, and a provider reset can select a
+    // replacement model.
+    const acknowledged = snapshot?.model
+      ? (materializeSessionExecutionModel(effective, snapshot.model) ??
+        effective)
+      : effective;
     const legacyIntent = actor.selection
       ? {
           requestId: actor.selection.operationId,

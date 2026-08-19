@@ -81,6 +81,8 @@ export interface AcpSessionConfigApplyOptions {
   modelId?: string | null;
   /** UI selection intent that owns any response snapshots. */
   requestId?: string;
+  /** The coordinator already resolved this complete selection from inventory. */
+  selectionAlreadyResolved?: boolean;
 }
 
 export type AcpSessionConfigurationIntent =
@@ -403,6 +405,33 @@ async function resolveGooseSessionSelection(
   return managedSelection;
 }
 
+/** Apply a caller-resolved session selection without performing another inventory read. */
+async function applyResolvedSessionSelection(
+  sessionId: string,
+  selection: { providerId: string; modelId?: string },
+  workingDir: string,
+  options: AcpSessionConfigApplyOptions,
+  supersession: AcpSessionConfigurationIntent,
+): Promise<AcpSessionConfigSnapshots | undefined> {
+  const applyResolvedModel = Boolean(options.modelId);
+  return applyResolvedModel && selection.modelId
+    ? sessionRegistry.configureSession(
+        sessionId,
+        selection.providerId,
+        workingDir,
+        selection.modelId,
+        options,
+        supersession,
+      )
+    : sessionRegistry.prepareSession(
+        sessionId,
+        selection.providerId,
+        workingDir,
+        options,
+        supersession,
+      );
+}
+
 /** Prepare or warm an ACP session ahead of the first prompt. */
 export async function acpPrepareSession(
   sessionId: string,
@@ -419,29 +448,20 @@ export async function acpPrepareSession(
   const supersession = intent ?? reserveAcpSessionConfiguration(sessionId);
   const ownsSupersession = intent === undefined;
   try {
-    const selection = await resolveGooseSessionSelection(
-      providerId,
-      options.modelId,
+    const resolvedModelId = normalizeConcreteModelId(options.modelId);
+    const selection = options.selectionAlreadyResolved
+      ? {
+          providerId,
+          ...(resolvedModelId ? { modelId: resolvedModelId } : {}),
+        }
+      : await resolveGooseSessionSelection(providerId, options.modelId);
+    const snapshots = await applyResolvedSessionSelection(
+      sessionId,
+      selection,
+      workingDir,
+      options,
+      supersession,
     );
-    const applyResolvedModel =
-      Boolean(options.modelId) || selection.providerId !== providerId;
-    const snapshots =
-      applyResolvedModel && selection.modelId
-        ? await sessionRegistry.configureSession(
-            sessionId,
-            selection.providerId,
-            workingDir,
-            selection.modelId,
-            options,
-            supersession,
-          )
-        : await sessionRegistry.prepareSession(
-            sessionId,
-            selection.providerId,
-            workingDir,
-            options,
-            supersession,
-          );
     perfLog(
       `[perf:prepare] ${sid} acpPrepareSession done in ${(performance.now() - t0).toFixed(1)}ms`,
     );

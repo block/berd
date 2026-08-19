@@ -131,7 +131,7 @@ describe("session target coordinator", () => {
       "s",
       "openai",
       "/w",
-      { modelId: "c" },
+      { modelId: "c", selectionAlreadyResolved: true },
       expect.objectContaining({ clear: expect.any(Function) }),
     );
   });
@@ -414,7 +414,11 @@ describe("session target coordinator", () => {
       "s",
       "openai",
       "/w",
-      { modelId: "a", forceConfigRefresh: true },
+      {
+        modelId: "a",
+        forceConfigRefresh: true,
+        selectionAlreadyResolved: true,
+      },
       expect.objectContaining({ clear: expect.any(Function) }),
     );
   });

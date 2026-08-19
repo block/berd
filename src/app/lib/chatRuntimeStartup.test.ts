@@ -273,7 +273,7 @@ describe("runChatRuntimeStartup", () => {
     expect(mockMigratePersonaTargetIfUnchanged).not.toHaveBeenCalled();
   });
 
-  it("migrates an authoritative unsupported persona model without losing its harness", async () => {
+  it("leaves an authoritative unsupported persona persisted for explicit repair", async () => {
     mockAgentState.providers = [{ id: "claude-acp", label: "Claude Code" }];
     mockAgentState.personas = [
       {
@@ -298,16 +298,7 @@ describe("runChatRuntimeStartup", () => {
 
     const { runChatRuntimeStartup } = await import("./chatRuntimeStartup");
     await runChatRuntimeStartup();
-    await vi.waitFor(() => {
-      expect(mockMigratePersonaTargetIfUnchanged).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "persona-1" }),
-        {
-          provider: "claude-acp",
-          modelProviderId: "claude-acp",
-          model: null,
-        },
-      );
-    });
+    expect(mockMigratePersonaTargetIfUnchanged).not.toHaveBeenCalled();
   });
 
   it("stays latched after a successful run", async () => {

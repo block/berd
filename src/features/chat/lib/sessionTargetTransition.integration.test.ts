@@ -271,6 +271,11 @@ describe("transitionSessionTarget with managed Goose models", () => {
       "./sessionTargetCoordinator"
     );
 
+    mockSetProvider.mockResolvedValueOnce({
+      model: { modelId: "backend-fallback", modelName: "Backend fallback" },
+      reasoningEffort: null,
+    });
+
     await expect(
       transitionSessionTarget({
         sessionId: "no-default-session",
@@ -287,17 +292,32 @@ describe("transitionSessionTarget with managed Goose models", () => {
       resolvedTarget: {
         harnessId: "goose",
         modelProviderId: "databricks_v2",
+        modelId: "backend-fallback",
       },
     });
 
+    expect(mockSetProvider).toHaveBeenCalledWith(
+      "no-default-session",
+      "databricks_v2",
+      { requestId: undefined },
+    );
     expect(mockSetModel).not.toHaveBeenCalled();
+    expect(mockGetClient).toHaveBeenCalledTimes(1);
     expect(
       useChatSessionStore.getState().getSession("no-default-session"),
     ).toMatchObject({
       executionTarget: {
         harnessId: "goose",
         modelProviderId: "databricks_v2",
+        modelId: "backend-fallback",
       },
+    });
+    const { requireSessionInvocationSelection } = await import(
+      "@/shared/api/acpSessionRegistry"
+    );
+    expect(requireSessionInvocationSelection("no-default-session")).toEqual({
+      providerId: "databricks_v2",
+      modelId: "backend-fallback",
     });
   });
 

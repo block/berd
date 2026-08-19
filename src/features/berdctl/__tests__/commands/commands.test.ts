@@ -844,7 +844,9 @@ describe("sessions.create", () => {
     expect(mocks.acpCreateSession).toHaveBeenCalledWith(
       "codex-acp",
       "/resolved/cwd",
-      expect.objectContaining({ modelId: "gpt-6" }),
+      expect.objectContaining({
+        modelId: "gpt-6",
+      }),
     );
   });
 
@@ -1009,7 +1011,7 @@ describe("sessions.send", () => {
       "session-1",
       "codex-acp",
       "/resolved/cwd",
-      { modelId: "gpt-6" },
+      { modelId: "gpt-6", selectionAlreadyResolved: true },
       expect.objectContaining({ clear: expect.any(Function) }),
     );
     expect(controller.openSession).not.toHaveBeenCalled();
@@ -1087,7 +1089,7 @@ describe("sessions.send", () => {
       "session-1",
       "codex-acp",
       "/resolved/cwd",
-      {},
+      { selectionAlreadyResolved: true },
       expect.objectContaining({ clear: expect.any(Function) }),
     );
     expect(getPendingSessionWorkspaceActivation("session-1")).toBeNull();
@@ -1137,7 +1139,7 @@ describe("sessions.send", () => {
       "session-1",
       "old-provider",
       "/resolved/cwd",
-      { modelId: "old-model" },
+      { modelId: "old-model", selectionAlreadyResolved: true },
       expect.objectContaining({ clear: expect.any(Function) }),
     );
     await vi.waitFor(() => {

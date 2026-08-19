@@ -613,7 +613,7 @@ describe("loadSessionMessages", () => {
       "s-selection-race",
       "databricks_v2",
       "/resolved/existing/session",
-      { modelId: "goose-gpt-5-6-sol" },
+      { modelId: "goose-gpt-5-6-sol", selectionAlreadyResolved: true },
       expect.objectContaining({ clear: expect.any(Function) }),
     );
     expect(acpLoadSession.mock.invocationCallOrder[0]).toBeLessThan(
