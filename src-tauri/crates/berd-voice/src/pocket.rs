@@ -11,7 +11,8 @@
 //! - ONNX export: KevinAHM/pocket-tts-onnx, CC-BY-4.0.
 //! - Reference voice: Kyutai's Mary preset (VCTK p333), CC-BY-4.0.
 //!
-//! `huddle::models` writes the complete attribution beside the cached bytes.
+//! Berd's Pocket model installer writes the complete attribution beside the
+//! cached model files.
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
