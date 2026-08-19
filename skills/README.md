@@ -50,10 +50,25 @@ npx skills add block/berd --skill buzz-handoff -g
 Choose the agent harnesses where you want the skill available. Reload an open
 agent application after installation.
 
+To install it only for the current code project, omit `-g` and run the command
+from that project's root:
+
+```bash
+npx skills add block/berd --skill buzz-handoff
+```
+
 ### Update
+
+Update a global installation with:
 
 ```bash
 npx skills update buzz-handoff -g
+```
+
+Update a project installation from that project's root with:
+
+```bash
+npx skills update buzz-handoff --project
 ```
 
 Installed files are managed copies and may be replaced during an update. Make
