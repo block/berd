@@ -431,6 +431,19 @@ describe("SkillsView", () => {
     expect(revealItems[2]).toHaveStyle({ animationDelay: "110ms" });
   });
 
+  it("keeps toolbar actions within the wide-screen skill grid", async () => {
+    listSkills.mockResolvedValue(mockSkills);
+
+    const { container } = renderSkillsViewWithTopBarActions();
+    await screen.findByText("code-review");
+
+    expect(container.querySelector("section")).toHaveClass(
+      "mx-auto",
+      "w-full",
+      "max-w-[70rem]",
+    );
+  });
+
   it("filters skills with page-local search", async () => {
     listSkills.mockResolvedValue(mockSkills);
     const user = userEvent.setup();
