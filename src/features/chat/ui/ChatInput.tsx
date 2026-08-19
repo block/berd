@@ -1967,6 +1967,7 @@ export function ChatInput({
                   onCreateProject,
                 }}
                 reasoningEffort={reasoningEffort}
+                onRequestComposerFocus={() => textareaRef.current?.focus()}
                 contextUsage={{
                   contextTokens,
                   contextLimit,

@@ -1508,6 +1508,7 @@ export function GlobalComposerPill({
             onModelChange={handleModelChange}
             onOpen={handlePickerOpen}
             onOpenChange={setModelPickerOpen}
+            onRequestComposerFocus={() => textareaRef.current?.focus()}
             loading={providersLoading}
             isCompact
             triggerTabIndex={expanded ? 0 : -1}
@@ -1522,8 +1523,10 @@ export function GlobalComposerPill({
             onProjectChange={setSelectedProjectId}
             open={projectPickerOpen}
             onOpenChange={setProjectPickerOpen}
+            onRequestComposerFocus={() => textareaRef.current?.focus()}
             triggerTabIndex={expanded ? 0 : -1}
             contentSide="top"
+            modal={false}
           />
         </div>
 

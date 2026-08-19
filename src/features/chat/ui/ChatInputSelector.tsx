@@ -12,6 +12,7 @@ import {
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
 import { cn } from "@/shared/lib/cn";
+import { useComposerPickerCloseFocus } from "@/features/chat/hooks/useComposerPickerCloseFocus";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 
 export interface ChatInputSelectorItem {
@@ -35,6 +36,7 @@ interface ChatInputSelectorProps {
   icon?: ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  onRequestComposerFocus?: () => void;
   triggerTabIndex?: number;
   triggerIconOnly?: boolean;
   triggerVariant?: "default" | "toolbar";
@@ -42,6 +44,7 @@ interface ChatInputSelectorProps {
   menuLabel?: string;
   sections: ChatInputSelectorSection[];
   onValueChange: (value: string) => void;
+  preservesExternalFocus?: (value: string) => boolean;
   contentWidth?: "trigger" | "wide";
   contentSide?: "top" | "right" | "bottom" | "left";
   contentAlign?: "start" | "center" | "end";
@@ -57,12 +60,14 @@ export function ChatInputSelector({
   icon,
   open,
   onOpenChange,
+  onRequestComposerFocus,
   triggerTabIndex,
   triggerVariant = "default",
   triggerSize = "default",
   menuLabel,
   sections,
   onValueChange,
+  preservesExternalFocus,
   contentWidth = "trigger",
   contentSide,
   contentAlign = "start",
@@ -70,7 +75,16 @@ export function ChatInputSelector({
   modal,
   triggerIconOnly = false,
 }: ChatInputSelectorProps) {
-  const skipCloseAutoFocusRef = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const {
+    beginOpenCycle,
+    preserveFocusDestination,
+    classifyOutsideInteraction,
+    handleCloseAutoFocus,
+  } = useComposerPickerCloseFocus({
+    triggerRef,
+    onRequestComposerFocus,
+  });
   const buttonSize = triggerIconOnly
     ? "icon-pill-sm"
     : triggerSize === "sm"
@@ -81,11 +95,19 @@ export function ChatInputSelector({
     triggerVariant === "toolbar" ? ComposerActionButton : Button;
 
   return (
-    <DropdownMenu modal={modal} open={open} onOpenChange={onOpenChange}>
+    <DropdownMenu
+      modal={modal}
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) beginOpenCycle();
+        onOpenChange?.(nextOpen);
+      }}
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           <DropdownMenuTrigger asChild>
             <TriggerButton
+              ref={triggerRef}
               type="button"
               {...(triggerVariant === "toolbar"
                 ? {}
@@ -121,16 +143,10 @@ export function ChatInputSelector({
         align={contentAlign}
         side={contentSide}
         className={cn(contentWidth === "wide" ? "w-72" : "w-56")}
-        onInteractOutside={() => {
-          skipCloseAutoFocusRef.current = true;
+        onInteractOutside={(event) => {
+          classifyOutsideInteraction(event.target);
         }}
-        onCloseAutoFocus={(event) => {
-          if (!skipCloseAutoFocusRef.current) {
-            return;
-          }
-          skipCloseAutoFocusRef.current = false;
-          event.preventDefault();
-        }}
+        onCloseAutoFocus={handleCloseAutoFocus}
       >
         {menuLabel ? (
           <>
@@ -158,7 +174,12 @@ export function ChatInputSelector({
                     <DropdownMenuItem
                       key={item.value}
                       disabled={item.disabled}
-                      onSelect={() => onValueChange(item.value)}
+                      onSelect={() => {
+                        if (preservesExternalFocus?.(item.value)) {
+                          preserveFocusDestination();
+                        }
+                        onValueChange(item.value);
+                      }}
                       className={cn(
                         "justify-between gap-2",
                         isSelected && "bg-accent",

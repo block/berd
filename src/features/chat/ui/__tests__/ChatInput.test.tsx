@@ -734,6 +734,103 @@ describe("ChatInput", () => {
     expect(screen.getByText("No project")).toBeInTheDocument();
   });
 
+  it.each([
+    ["model", /choose agent and model/i],
+    ["project", /select project/i],
+  ])("returns focus to the composer when the %s picker closes", async (_, triggerName) => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+    const composer = screen.getByRole("textbox");
+
+    await user.click(screen.getByRole("button", { name: triggerName }));
+    expect(composer).not.toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    expect(composer).toHaveFocus();
+  });
+
+  it.each([
+    ["model", /choose agent and model/i],
+    ["project", /select project/i],
+  ])("returns focus to the composer when the %s picker trigger closes it", async (_, triggerName) => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+    const composer = screen.getByRole("textbox");
+    const trigger = screen.getByRole("button", { name: triggerName });
+
+    await user.click(trigger);
+    await user.click(trigger);
+
+    expect(composer).toHaveFocus();
+  });
+
+  it.each([
+    ["model", /choose agent and model/i],
+    ["project", /select project/i],
+  ])("returns focus to the composer when clicking blank space outside the %s picker", async (_, triggerName) => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+    const composer = screen.getByRole("textbox");
+    const blankSpace = document.createElement("div");
+    document.body.appendChild(blankSpace);
+
+    await user.click(screen.getByRole("button", { name: triggerName }));
+    await user.click(blankSpace);
+
+    expect(composer).toHaveFocus();
+  });
+
+  it("preserves an interactive destination when closing a picker", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+    const destination = document.createElement("button");
+    destination.type = "button";
+    destination.textContent = "Outside action";
+    document.body.appendChild(destination);
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(destination);
+
+    expect(destination).toHaveFocus();
+  });
+
+  it("preserves a custom focusable destination when closing a picker", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+    const destination = document.createElement("div");
+    destination.tabIndex = 0;
+    document.body.appendChild(destination);
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(destination);
+
+    expect(destination).toHaveFocus();
+  });
+
+  it("preserves project-creation focus when the picker hands off", async () => {
+    const user = userEvent.setup();
+    const projectDialog = document.createElement("button");
+    document.body.appendChild(projectDialog);
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        enabled
+        onCreateProject={() => projectDialog.focus()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /select project/i }));
+    await user.click(screen.getByRole("menuitem", { name: /create project/i }));
+
+    expect(projectDialog).toHaveFocus();
+    expect(screen.getByRole("textbox")).not.toHaveFocus();
+  });
+
   it("shows project color swatches in the project selector menu", async () => {
     const user = userEvent.setup();
     render(
