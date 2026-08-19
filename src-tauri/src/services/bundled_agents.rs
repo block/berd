@@ -375,7 +375,7 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
         std::process::id()
     ));
     let legacy_claim_path = parent.join(format!(
-        ".berd-agent-legacy-claim-{}-{sequence}.tmp",
+        ".berd-agent-legacy-backup-{}-{sequence}.bak",
         std::process::id()
     ));
     let install_result = (|| -> Result<(), String> {
@@ -423,12 +423,6 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
                             target.display()
                         )
                     })?;
-                    fs::remove_file(&legacy_claim_path).map_err(|err| {
-                        format!(
-                            "Failed to remove legacy agent claim '{}': {err}",
-                            legacy_claim_path.display()
-                        )
-                    })?;
                 }
                 return Err(format!(
                     "Legacy bundled agent changed before replacement at '{}'",
@@ -464,7 +458,8 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
                     temp_path.display()
                 )
             })?;
-            let _ = fs::remove_file(&legacy_claim_path);
+            // Keep the claimed inode as a recovery backup. A writer that had
+            // the old file open can still land edits after publication.
         } else {
             fs::rename(&temp_path, target).map_err(|err| {
                 format!(
@@ -688,6 +683,42 @@ mod tests {
         .unwrap();
 
         assert!(is_known_legacy_agt_builder(&path).unwrap());
+    }
+
+    #[test]
+    fn replaces_exact_legacy_agt_builder_and_keeps_recovery_backup() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let bundled = "---\nname: Agt. Builder\ndescription: Current\nmetadata:\n  berdBundled: true\n---\nCurrent instructions.";
+        fs::write(source.path().join(LEGACY_AGT_BUILDER_FILE_NAME), bundled).unwrap();
+        fs::write(
+            target.path().join(LEGACY_AGT_BUILDER_FILE_NAME),
+            include_str!("../../test-fixtures/legacy-agt-builder.md"),
+        )
+        .unwrap();
+
+        let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(result.seeded_count, 1);
+        assert_eq!(
+            fs::read_to_string(target.path().join(LEGACY_AGT_BUILDER_FILE_NAME)).unwrap(),
+            bundled
+        );
+        let backups: Vec<_> = fs::read_dir(target.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".berd-agent-legacy-backup-")
+            })
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(
+            fs::read_to_string(backups[0].path()).unwrap(),
+            include_str!("../../test-fixtures/legacy-agt-builder.md")
+        );
     }
 
     #[test]
