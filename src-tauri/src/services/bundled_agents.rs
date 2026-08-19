@@ -413,7 +413,23 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
                 )
             })?;
             if !has_known_legacy_agt_builder_contents(&legacy_claim_path)? {
-                let _ = fs::rename(&legacy_claim_path, target);
+                // Restore only into an empty path. If another writer recreated
+                // the target, preserve their file and retain the claim for
+                // recovery instead of replacing either file.
+                if !target.exists() {
+                    fs::hard_link(&legacy_claim_path, target).map_err(|err| {
+                        format!(
+                            "Failed to restore changed legacy agent '{}': {err}",
+                            target.display()
+                        )
+                    })?;
+                    fs::remove_file(&legacy_claim_path).map_err(|err| {
+                        format!(
+                            "Failed to remove legacy agent claim '{}': {err}",
+                            legacy_claim_path.display()
+                        )
+                    })?;
+                }
                 return Err(format!(
                     "Legacy bundled agent changed before replacement at '{}'",
                     target.display()
