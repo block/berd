@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  IconArrowDownToArc,
   IconChevronDown,
-  IconDownload,
   IconRefresh,
   IconPlus,
   IconSearch,
@@ -671,7 +671,7 @@ export function SkillsView({
     <PageShell contentWidth="full">
       <section
         aria-labelledby="skills-heading"
-        className="flex flex-col gap-10"
+        className="mx-auto flex w-full max-w-[70rem] flex-col gap-10"
       >
         <Tabs
           value={viewMode}
@@ -861,7 +861,7 @@ export function SkillsView({
                 tooltip={t("common:actions.import")}
                 onClick={openFilePicker}
               >
-                <IconDownload className="!size-4" />
+                <IconArrowDownToArc className="!size-4" />
               </PageToolbarButton>
               <PageToolbarButton
                 type="button"
