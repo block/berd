@@ -40,30 +40,20 @@ no independent compatibility guarantee for older Buzz CLI builds.
 
 ### Install the skill
 
-Install globally with the open Agent Skills CLI:
+Install it globally with the open Agent Skills CLI so Buzz Handoff is available
+across conversations and working folders:
 
 ```bash
-npx skills add \
-  https://github.com/block/berd/tree/main/skills/buzz-handoff \
-  --global
+npx skills add block/berd --skill buzz-handoff -g
 ```
 
 Choose the agent harnesses where you want the skill available. Reload an open
 agent application after installation.
 
-For a project-scoped installation, omit `--global` and run the command from that
-project's root.
-
 ### Update
 
 ```bash
-npx skills update buzz-handoff --global
-```
-
-For a project installation, run this from the same project:
-
-```bash
-npx skills update buzz-handoff --project
+npx skills update buzz-handoff -g
 ```
 
 Installed files are managed copies and may be replaced during an update. Make
