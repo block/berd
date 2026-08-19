@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  IconExternalLink,
-  IconGitPullRequest,
-  IconLoader2,
-} from "@tabler/icons-react";
+import { IconGitPullRequest, IconLoader2 } from "@tabler/icons-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useTranslation } from "react-i18next";
+import {
+  PullRequestListItem,
+  type PullRequestListItemStatus,
+} from "@/features/pull-requests/ui/PullRequestListItem";
 import {
   advanceRelatedPullRequestScan,
   type DetectedPullRequest,
@@ -19,7 +19,6 @@ import {
   type PullRequestChecksStatus,
   type PullRequestState,
 } from "@/shared/api/pullRequests";
-import { cn } from "@/shared/lib/cn";
 import { Widget } from "./Widget";
 
 interface PullRequestsWidgetProps {
@@ -36,16 +35,20 @@ interface SessionPullRequestsWidgetProps
 
 const EMPTY_MESSAGES: Message[] = [];
 
-const STATE_DOT_CLASS: Record<PullRequestState, string> = {
-  OPEN: "bg-success",
-  MERGED: "bg-primary",
-  CLOSED: "bg-destructive",
-};
+const STATE_TONE: Record<PullRequestState, PullRequestListItemStatus["tone"]> =
+  {
+    OPEN: "success",
+    MERGED: "primary",
+    CLOSED: "danger",
+  };
 
-const CHECKS_DOT_CLASS: Record<PullRequestChecksStatus, string> = {
-  SUCCESS: "bg-success",
-  PENDING: "bg-warning",
-  FAILURE: "bg-destructive",
+const CHECKS_TONE: Record<
+  PullRequestChecksStatus,
+  PullRequestListItemStatus["tone"]
+> = {
+  SUCCESS: "success",
+  PENDING: "warning",
+  FAILURE: "danger",
 };
 
 export function SessionPullRequestsWidget({
@@ -143,61 +146,35 @@ export function PullRequestsWidget({
             t("contextPanel.pullRequests.fallbackTitle", {
               number: pullRequest.number,
             });
+          const statuses: PullRequestListItemStatus[] = [];
+          if (state) {
+            statuses.push({
+              tone: STATE_TONE[state],
+              label: summary?.isDraft
+                ? t("contextPanel.pullRequests.state.DRAFT")
+                : t(`contextPanel.pullRequests.state.${state}`),
+            });
+          }
+          if (checksStatus) {
+            statuses.push({
+              tone: CHECKS_TONE[checksStatus],
+              label: t(`contextPanel.pullRequests.checks.${checksStatus}`),
+            });
+          }
 
           return (
-            <button
+            <PullRequestListItem
               key={pullRequest.url}
-              type="button"
-              className="group w-full rounded-lg border border-border/70 bg-background/45 px-3 py-2.5 text-left transition-colors hover:bg-background/75 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              aria-label={t("contextPanel.pullRequests.open", {
+              repo={pullRequest.repoSlug}
+              number={pullRequest.number}
+              title={title}
+              statuses={statuses}
+              ariaLabel={t("contextPanel.pullRequests.open", {
                 repo: pullRequest.repoSlug,
                 number: pullRequest.number,
               })}
-              onClick={() => void openUrl(pullRequest.url)}
-            >
-              <div className="flex items-start gap-2">
-                <IconGitPullRequest className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-xxs font-medium text-muted-foreground">
-                    {pullRequest.repoSlug} #{pullRequest.number}
-                  </div>
-                  <div className="mt-0.5 line-clamp-2 text-sm font-medium leading-4 text-foreground">
-                    {title}
-                  </div>
-                  {state || checksStatus ? (
-                    <div className="mt-2 flex min-w-0 items-center gap-2.5 text-xxs text-muted-foreground">
-                      {state ? (
-                        <span className="flex items-center gap-1">
-                          <span
-                            className={cn(
-                              "size-1.5 rounded-full",
-                              STATE_DOT_CLASS[state],
-                            )}
-                          />
-                          {summary?.isDraft
-                            ? t("contextPanel.pullRequests.state.DRAFT")
-                            : t(`contextPanel.pullRequests.state.${state}`)}
-                        </span>
-                      ) : null}
-                      {checksStatus ? (
-                        <span className="flex items-center gap-1">
-                          <span
-                            className={cn(
-                              "size-1.5 rounded-full",
-                              CHECKS_DOT_CLASS[checksStatus],
-                            )}
-                          />
-                          {t(
-                            `contextPanel.pullRequests.checks.${checksStatus}`,
-                          )}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-                <IconExternalLink className="mt-0.5 size-3.5 shrink-0 text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100" />
-              </div>
-            </button>
+              onOpen={() => void openUrl(pullRequest.url)}
+            />
           );
         })}
       </div>
