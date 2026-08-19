@@ -9,7 +9,7 @@ import { SettingsSection } from "@/shared/ui/settings-section";
  * The change history for the store.
  *
  * Built like the Topics section: a description and its action in the section
- * header, with the content below a rule. Read-only — the history records what
+ * header, with the log below when opened. Read-only — the history records what
  * happened rather than offering something to revise — so it borrows the
  * documents' inset panel for shape, not for editing.
  *
@@ -37,23 +37,26 @@ export function MemoryHistory({ filePath }: { filePath: string }) {
 
   return (
     <SettingsSection title={t("me.history.title")}>
-      {/* pr-4 matches SettingsRow's own right padding, so the action lines up
-          with the View buttons in the sections above. */}
-      <div className="flex items-center justify-between gap-6 pr-4 pb-3">
-        <p className="max-w-prose text-xs text-muted-foreground">
-          {t("me.history.description")}
-        </p>
-        <Button
-          size="sm"
-          variant="outline"
-          className="shrink-0"
-          onClick={() => setOpen((value) => !value)}
-        >
-          {open ? t("me.history.hide") : t("me.history.show")}
-        </Button>
-      </div>
-      {open && (
-        <div className="pt-3">
+      {/* One child, so the section's row divider can't draw a rule between
+          the description and the opened log. */}
+      <div>
+        {/* pr-4 matches SettingsRow's own right padding, so the action lines
+            up with the View buttons in the sections above. */}
+        <div className="flex items-start justify-between gap-4 pr-4 pb-3">
+          <p className="text-xs text-muted-foreground">
+            {t("me.history.description")}
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="min-w-16 shrink-0"
+            onClick={() => setOpen((value) => !value)}
+          >
+            {open ? t("me.closeTopic") : t("me.openTopic")}
+          </Button>
+        </div>
+
+        {open && (
           <div className="rounded-md border bg-muted/50 px-4 py-3">
             {entries === null && (
               <p className="text-xs text-muted-foreground">
@@ -87,8 +90,8 @@ export function MemoryHistory({ filePath }: { filePath: string }) {
               </ul>
             )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </SettingsSection>
   );
 }

@@ -226,6 +226,19 @@ export function MeSettings() {
     void refresh();
   }, [refresh]);
 
+  // Memory is on by default, so most people arrive here without ever having
+  // touched the switch. Seed the store on first visit for the same reason the
+  // toggle does: the file existing is the normal state, and asking for a
+  // decision the rest of the system makes silently is the odd one.
+  useEffect(() => {
+    if (!memoryEnabled || state.status !== "missing") return;
+    void createMeFile()
+      .then(setState)
+      .catch(() => {
+        // Best-effort: a failed seed leaves the create button in place.
+      });
+  }, [memoryEnabled, state.status]);
+
   const handleCreate = async () => {
     try {
       setState(await createMeFile());
@@ -247,6 +260,17 @@ export function MeSettings() {
   const handleMemoryToggle = (enabled: boolean) => {
     setMemoryPrefs({ enabled });
     setMemoryEnabled(enabled);
+    // Turning memory on seeds the store, so the page shows a real document
+    // instead of asking for a decision the rest of the system already makes
+    // on its own — agents create the file the moment they save anything.
+    // createMeFile is a no-op when the file already exists.
+    if (enabled) {
+      void createMeFile()
+        .then(setState)
+        .catch(() => {
+          // Best-effort: a failed seed leaves the create button in place.
+        });
+    }
     // Re-publish under the new setting: off removes our managed block from
     // the agent files other tools read; on restores it. Best-effort — the
     // toggle itself never fails.

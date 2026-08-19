@@ -428,9 +428,7 @@
     "history": {
       "description": "Este registro rastrea cada cambio en tus archivos de memoria, incluido qué lo hizo y cuándo. Se guarda como historial de git dentro de la carpeta ~/.me.",
       "empty": "Aún no hay cambios registrados.",
-      "hide": "Cerrar historial",
       "loading": "Leyendo historial...",
-      "show": "Ver historial",
       "title": "Historial"
     },
     "livesIn": "Se encuentra en archivos de texto sin formato en tu equipo, en",

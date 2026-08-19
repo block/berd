@@ -428,9 +428,7 @@
     "history": {
       "description": "This log tracks every change to your memory files, including what made the change and when. Kept as a git history inside the ~/.me folder.",
       "empty": "No changes recorded yet.",
-      "hide": "Close history",
       "loading": "Reading history...",
-      "show": "View history",
       "title": "History"
     },
     "livesIn": "Lives in plain text files on your machine at",
