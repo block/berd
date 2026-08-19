@@ -72,7 +72,7 @@ describe("agentShareCard", () => {
     expect(video.onloadeddata).toBeNull();
     lateLoaded?.call(video, new Event("loadeddata"));
   });
-  it("derives the card description from instructions, not metadata", () => {
+  it("prefers an authored public description over instructions", () => {
     expect(
       getAgentShareDescription({
         ...persona,
@@ -80,7 +80,7 @@ describe("agentShareCard", () => {
         systemPrompt:
           "You are Reviewer. Your job is to review code carefully. Keep internal policy private.",
       }),
-    ).toBe("Reviews code carefully.");
+    ).toBe("Unrelated metadata.");
   });
 
   it("creates a safe bounded filename", () => {
