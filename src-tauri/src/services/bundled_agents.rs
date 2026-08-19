@@ -428,18 +428,35 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
                 target.display()
             ));
         }
-        if let Err(err) = fs::rename(&temp_path, target) {
-            if claimed_legacy {
-                let _ = fs::rename(&legacy_claim_path, target);
-            }
-            return Err(format!(
-                "Failed to install bundled agent '{}' at '{}': {err}",
-                source.display(),
-                target.display()
-            ));
-        }
         if claimed_legacy {
+            // Publish without replacement: if another writer recreates the
+            // target after our claim, preserve their file and restore the
+            // claimed legacy file only when the path is still empty.
+            if let Err(err) = fs::hard_link(&temp_path, target) {
+                if !target.exists() {
+                    let _ = fs::rename(&legacy_claim_path, target);
+                }
+                return Err(format!(
+                    "Failed to install bundled agent '{}' at '{}': {err}",
+                    source.display(),
+                    target.display()
+                ));
+            }
+            fs::remove_file(&temp_path).map_err(|err| {
+                format!(
+                    "Failed to remove temporary bundled agent '{}': {err}",
+                    temp_path.display()
+                )
+            })?;
             let _ = fs::remove_file(&legacy_claim_path);
+        } else {
+            fs::rename(&temp_path, target).map_err(|err| {
+                format!(
+                    "Failed to install bundled agent '{}' at '{}': {err}",
+                    source.display(),
+                    target.display()
+                )
+            })?;
         }
         Ok(())
     })();
