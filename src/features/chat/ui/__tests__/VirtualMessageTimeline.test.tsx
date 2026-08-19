@@ -939,38 +939,20 @@ describe("VirtualMessageTimeline", () => {
     );
   });
 
-  it("renders an over-tall streaming assistant message as a live flow tail", async () => {
+  it("mounts active streaming rows through the canonical virtual history", async () => {
     mockTranscriptElementMeasurements();
-    const initialMessages = [
+    const messages = [
       textMessage("user-1", "user", "Question"),
-      textMessage("assistant-1", "assistant", "Short streaming answer"),
+      textMessage(
+        "assistant-1",
+        "assistant",
+        `${longText("streaming fragment", 120)}\n[height:650]`,
+      ),
     ];
-    const { rerender } = renderWithProviders(
+    renderWithProviders(
       <VirtualMessageTimeline
         sessionId="session-1"
-        messages={initialMessages}
-        streamingMessageId="assistant-1"
-      />,
-    );
-    const scroller = screen.getByTestId("message-timeline-scroll");
-    attachScrollTo(scroller);
-    setScrollMetrics(scroller, {
-      scrollTop: 4700,
-      scrollHeight: 5000,
-      clientHeight: 300,
-    });
-
-    rerender(
-      <VirtualMessageTimeline
-        sessionId="session-1"
-        messages={[
-          initialMessages[0],
-          textMessage(
-            "assistant-1",
-            "assistant",
-            `${longText("streaming fragment", 120)}\n[height:650]`,
-          ),
-        ]}
+        messages={messages}
         streamingMessageId="assistant-1"
       />,
     );
@@ -983,9 +965,13 @@ describe("VirtualMessageTimeline", () => {
       "data-virtual-row-anchor-priority",
       "streaming",
     );
-    const liveTail = screen.getByTestId("virtual-message-timeline-live-tail");
-    expect(liveTail).toContainElement(streamingRow);
-    expect(streamingRow).not.toHaveAttribute("data-virtual-row-protected");
+    const history = screen.getByTestId("virtual-message-timeline-history");
+    expect(history).toContainElement(streamingRow);
+    expect(streamingRow).toHaveAttribute("data-virtual-row-virtual-start");
+    expect(streamingRow).toHaveAttribute("data-virtual-row-visible", "true");
+    expect(
+      screen.queryByTestId("virtual-message-timeline-live-tail"),
+    ).not.toBeInTheDocument();
     expect(screen.getByTestId("bubble-assistant-1")).toHaveAttribute(
       "data-streaming",
       "true",
@@ -994,65 +980,7 @@ describe("VirtualMessageTimeline", () => {
       "data-virtual-fragment-rows",
       "0",
     );
-    expect(screen.getByTestId("virtual-message-timeline-list")).toHaveAttribute(
-      "data-virtual-live-tail-rows",
-      "3",
-    );
-    await waitFor(() => expect(scroller.scrollTop).toBe(4700));
-    expect(
-      screen.queryByRole("button", { name: "Jump to response start" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Jump to latest" }),
-    ).not.toBeInTheDocument();
-
-    rerender(
-      <VirtualMessageTimeline
-        sessionId="session-1"
-        messages={[
-          initialMessages[0],
-          textMessage(
-            "assistant-1",
-            "assistant",
-            `${longText("streaming fragment", 125)}\n[height:700]`,
-          ),
-        ]}
-        streamingMessageId="assistant-1"
-      />,
-    );
-    expect(scroller.scrollTop).toBe(4700);
-
-    fireEvent.wheel(scroller, { deltaY: -120 });
-    setScrollMetrics(scroller, {
-      scrollTop: 120,
-      scrollHeight: 5000,
-      clientHeight: 300,
-    });
-    fireEvent.scroll(scroller);
-
-    rerender(
-      <VirtualMessageTimeline
-        sessionId="session-1"
-        messages={[
-          initialMessages[0],
-          textMessage(
-            "assistant-1",
-            "assistant",
-            `${longText("streaming fragment", 125)}\n[height:700]`,
-          ),
-        ]}
-        streamingMessageId="assistant-1"
-      />,
-    );
-
-    expect(scroller.scrollTop).toBe(120);
-
-    expect(
-      screen.getByRole("button", { name: "Jump to latest" }),
-    ).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
-
-    expect(scroller.scrollTop).toBe(4700);
+    expect(history).toHaveAttribute("data-virtual-history-rows", "3");
   });
 
   it("updates live agent work text before the turn completes", () => {
@@ -1148,8 +1076,12 @@ describe("VirtualMessageTimeline", () => {
     );
 
     expect(
-      screen.getByTestId("virtual-message-timeline-live-tail"),
-    ).toBeInTheDocument();
+      screen.getByTestId("virtual-message-timeline-history"),
+    ).toContainElement(
+      screen.getByTestId(
+        "virtual-transcript-row-message:assistant-work:agent-work",
+      ),
+    );
 
     rerender(
       <VirtualMessageTimeline
@@ -1211,9 +1143,8 @@ describe("VirtualMessageTimeline", () => {
     );
   });
 
-  it("falls back to the mounted live tail element for active streaming scroll targets", async () => {
+  it("mounts active streaming scroll targets in canonical virtual history", async () => {
     mockTranscriptElementMeasurements();
-    const onScrollTargetHandled = vi.fn();
 
     renderWithProviders(
       <VirtualMessageTimeline
@@ -1228,7 +1159,6 @@ describe("VirtualMessageTimeline", () => {
         ]}
         streamingMessageId="assistant-1"
         scrollTargetMessageId="assistant-1"
-        onScrollTargetHandled={onScrollTargetHandled}
       />,
     );
 
@@ -1236,9 +1166,12 @@ describe("VirtualMessageTimeline", () => {
       "virtual-transcript-row-message:assistant-1",
     );
     expect(
-      screen.getByTestId("virtual-message-timeline-live-tail"),
+      screen.getByTestId("virtual-message-timeline-history"),
     ).toContainElement(streamingRow);
-    expect(onScrollTargetHandled).not.toHaveBeenCalled();
+    expect(streamingRow).toHaveAttribute("data-virtual-row-virtual-start");
+    expect(
+      screen.queryByTestId("virtual-message-timeline-live-tail"),
+    ).not.toBeInTheDocument();
   });
 
   it("shows the response-start hint when a completed assistant appears without an observed streaming transition", async () => {
@@ -1309,7 +1242,7 @@ describe("VirtualMessageTimeline", () => {
     );
   });
 
-  it("resumes following a live flow tail when the user scrolls down to latest", async () => {
+  it("resumes following streaming rows when the user scrolls down to latest", async () => {
     mockTranscriptElementMeasurements();
     const messages = [
       textMessage("user-1", "user", "Question"),
@@ -1403,7 +1336,7 @@ describe("VirtualMessageTimeline", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("resumes following a live flow tail when touch scrolling reaches latest", async () => {
+  it("resumes following streaming rows when touch scrolling reaches latest", async () => {
     mockTranscriptElementMeasurements();
     const messages = [
       textMessage("user-1", "user", "Question"),
@@ -1515,7 +1448,7 @@ describe("VirtualMessageTimeline", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("preserves detached near-bottom position when a live flow tail completes", async () => {
+  it("keeps an attached reader pinned when streaming completes", async () => {
     mockTranscriptElementMeasurements();
     const messages = [
       textMessage("user-1", "user", "Question"),
@@ -1541,58 +1474,11 @@ describe("VirtualMessageTimeline", () => {
       clientHeight: 300,
     });
     fireEvent.scroll(scroller);
-    fireEvent.wheel(scroller, { deltaY: -80 });
-    setScrollMetrics(scroller, {
-      scrollTop: 4650,
-      scrollHeight: 5000,
-      clientHeight: 300,
-    });
-    fireEvent.scroll(scroller);
-
-    rerender(
-      <VirtualMessageTimeline
-        sessionId="session-1"
-        messages={messages}
-        streamingMessageId={null}
-      />,
-    );
-
-    await waitFor(() => expect(scroller.scrollTop).toBe(4650));
-  });
-
-  it("bounds live-tail handoff ownership to one frame", async () => {
-    const animationFrame = mockRequestAnimationFrame();
-    mockTranscriptElementMeasurements();
-    const messages = [
-      textMessage("user-1", "user", "Question"),
-      textMessage(
-        "assistant-1",
-        "assistant",
-        `${longText("streaming fragment", 120)}\n[height:650]`,
-      ),
-    ];
-    const { rerender } = renderWithProviders(
-      <VirtualMessageTimeline
-        sessionId="session-1"
-        messages={messages}
-        streamingMessageId="assistant-1"
-      />,
-    );
-    const scroller = screen.getByTestId("message-timeline-scroll");
-    animationFrame.runAll(0);
     setScrollMetrics(scroller, {
       scrollTop: 4700,
-      scrollHeight: 5000,
+      scrollHeight: 5200,
       clientHeight: 300,
     });
-    fireEvent.scroll(scroller);
-    fireEvent.wheel(scroller, { deltaY: -80 });
-    setScrollMetrics(scroller, {
-      scrollTop: 4650,
-      scrollHeight: 5000,
-      clientHeight: 300,
-    });
-    fireEvent.scroll(scroller);
 
     rerender(
       <VirtualMessageTimeline
@@ -1601,10 +1487,14 @@ describe("VirtualMessageTimeline", () => {
         streamingMessageId={null}
       />,
     );
-    expect(animationFrame.run(1001)).toBe(true);
+
+    await waitFor(() => expect(scroller.scrollTop).toBe(4900));
+    expect(
+      screen.queryByRole("button", { name: "Jump to latest" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("releases the live-tail scroll-height floor after restoring a detached reader", async () => {
+  it("does not restore a stale scrollTop when a detached stream completes", async () => {
     mockTranscriptElementMeasurements();
     const messages = [
       ...Array.from({ length: 160 }, (_, index) =>
@@ -1636,15 +1526,23 @@ describe("VirtualMessageTimeline", () => {
     );
 
     const scroller = screen.getByTestId("message-timeline-scroll");
-    attachScrollTo(scroller);
-    const capturedDomScrollHeight = 80000;
+    const scrollTo = attachScrollTo(scroller);
+    const staleScrollTop = 100;
     setScrollMetrics(scroller, {
-      scrollTop: 100,
-      scrollHeight: capturedDomScrollHeight,
+      scrollTop: staleScrollTop,
+      scrollHeight: 80000,
       clientHeight: 300,
     });
     fireEvent.wheel(scroller, { deltaY: -120 });
     fireEvent.scroll(scroller);
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+
+    const currentDetachedScrollTop = 240;
+    scroller.scrollTop = currentDetachedScrollTop;
+    fireEvent.wheel(scroller, { deltaY: -1 });
+    scrollTo.mockClear();
 
     rerender(
       <VirtualMessageTimeline
@@ -1654,34 +1552,12 @@ describe("VirtualMessageTimeline", () => {
       />,
     );
 
-    await waitFor(() => {
-      const trailingSpacer = screen
-        .getAllByTestId("virtual-message-timeline-flow-spacer")
-        .at(-1) as HTMLElement;
-      expect(readPixelStyleValue(trailingSpacer, "height")).toBeLessThan(
-        capturedDomScrollHeight / 2,
-      );
-      expect(scroller.scrollTop).toBeLessThan(capturedDomScrollHeight / 2);
-    });
-    const restoredDetachedScrollTop = scroller.scrollTop;
-
-    // Render the completed state once more. The restore cleared its handoff,
-    // so this explicitly exercises the no-handoff cleanup path and proves the
-    // released floor cannot return on a later render.
-    rerender(
-      <VirtualMessageTimeline
-        sessionId="session-1"
-        messages={messages}
-        streamingMessageId={null}
-      />,
+    await waitFor(() =>
+      expect(scroller.scrollTop).toBe(currentDetachedScrollTop),
     );
-    const trailingSpacer = screen
-      .getAllByTestId("virtual-message-timeline-flow-spacer")
-      .at(-1) as HTMLElement;
-    expect(readPixelStyleValue(trailingSpacer, "height")).toBeLessThan(
-      capturedDomScrollHeight / 2,
+    expect(scrollTo).not.toHaveBeenCalledWith(
+      expect.objectContaining({ top: staleScrollTop }),
     );
-    expect(scroller.scrollTop).toBe(restoredDetachedScrollTop);
   });
 
   it("does not auto-scroll again for the same latest user message after detaching", async () => {
@@ -2205,7 +2081,7 @@ describe("VirtualMessageTimeline", () => {
         `Message ${index}`,
       ),
       created:
-        index < 40
+        index < 41
           ? Date.UTC(2026, 5, 4, 12, 0, 0)
           : Date.UTC(2026, 5, 5, 12, 0, 0),
     }));
@@ -2254,16 +2130,12 @@ describe("VirtualMessageTimeline", () => {
     const offscreenRealMountedRows = Number(
       list.getAttribute("data-virtual-offscreen-real-mounted-rows"),
     );
-    const liveTailRows = Number(
-      list.getAttribute("data-virtual-live-tail-rows"),
-    );
     expect(mountedRows).toBeGreaterThan(0);
     expect(mountedRows).toBeLessThan(82);
     expect(mountedRows).toBe(
       virtualRangeMountedRows +
         offscreenRealMountedRows +
-        offscreenShellMountedRows +
-        liveTailRows,
+        offscreenShellMountedRows,
     );
 
     const assistantRow = screen.getByTestId(
@@ -2278,7 +2150,7 @@ describe("VirtualMessageTimeline", () => {
       "ready",
     );
     const postDateShellRow = await screen.findByTestId(
-      "virtual-transcript-shell-row-message:message-40",
+      "virtual-transcript-shell-row-message:message-41",
     );
     expect(postDateShellRow).toHaveAttribute(
       "data-virtual-row-shell-spacing-block-size",

@@ -28,6 +28,7 @@ import {
   shouldShowAssistiveMoment,
 } from "@/shared/assistive-ux/runtime";
 import {
+  composeTranscriptRowsForTimeline,
   toDateBucket,
   type TranscriptProjectionSnapshot,
   type TranscriptRowDescriptor,
@@ -95,7 +96,6 @@ import {
 
 const RESIZE_SCROLL_SUPPRESSION_MS = 250;
 const DOCKED_FOOTER_BOTTOM_PADDING_PX = 44;
-const LIVE_TAIL_BOTTOM_PADDING_PX = 60;
 const STREAMING_BOTTOM_FOLLOW_MAX_STEP_PX = 48;
 const SCROLL_TARGET_MOUNT_RETRY_FRAMES = 120;
 const SCROLL_TARGET_VISIBLE_SETTLE_FRAMES = 8;
@@ -261,12 +261,6 @@ interface OffscreenShellMeasurementRow {
 interface OffscreenRealMeasurementRow {
   index: number;
   row: TranscriptRowDescriptor;
-}
-
-interface LiveStreamingTailSplit {
-  historyRows: readonly TranscriptRowDescriptor[];
-  liveRows: readonly TranscriptRowDescriptor[];
-  startIndex: number;
 }
 
 function formatDateSeparator(
@@ -669,48 +663,6 @@ function useStableMessageByRowId(
   }, [messageById, rows]);
 }
 
-function splitLiveStreamingTail({
-  messages,
-  rows,
-  streamingMessageId,
-}: {
-  messages: readonly Message[];
-  rows: readonly TranscriptRowDescriptor[];
-  streamingMessageId: string | null | undefined;
-}): LiveStreamingTailSplit | null {
-  if (!streamingMessageId) {
-    return null;
-  }
-
-  const streamingMessageIndex = messages.findIndex(
-    (message) => message.id === streamingMessageId,
-  );
-  const streamingMessage = messages[streamingMessageIndex];
-  if (!streamingMessage || streamingMessage.role !== "assistant") {
-    return null;
-  }
-
-  const previousMessage = messages[streamingMessageIndex - 1];
-  const liveStartMessageId =
-    previousMessage?.role === "user" ? previousMessage.id : streamingMessage.id;
-  let liveStartIndex = rows.findIndex(
-    (row) => row.messageId === liveStartMessageId && isMessageTurnRow(row),
-  );
-  if (liveStartIndex < 0) {
-    return null;
-  }
-
-  if (rows[liveStartIndex - 1]?.kind === "date-separator") {
-    liveStartIndex -= 1;
-  }
-
-  return {
-    historyRows: rows.slice(0, liveStartIndex),
-    liveRows: rows.slice(liveStartIndex),
-    startIndex: liveStartIndex,
-  };
-}
-
 function useStableMeasurementPlanByRowId(
   rows: readonly TranscriptRowDescriptor[],
   messageByRowId: ReadonlyMap<string, Message>,
@@ -838,45 +790,6 @@ function getRowsForMessage(
   return rows.filter(
     (row) => row.messageId === messageId && isMessageTurnRow(row),
   );
-}
-
-function getActiveStreamingProtectedRowIds(
-  rows: readonly TranscriptRowDescriptor[],
-  streamingMessageId: string | null | undefined,
-): readonly string[] {
-  if (!streamingMessageId) {
-    return [];
-  }
-
-  const activeRows = getRowsForMessage(rows, streamingMessageId);
-  if (activeRows.length === 0) {
-    return [];
-  }
-
-  const protectedRowIds = new Set<string>();
-  const firstRow = activeRows[0];
-  if (firstRow) {
-    protectedRowIds.add(firstRow.rowId);
-  }
-
-  const tailIndex = activeRows.findIndex(
-    (row) => row.fragment?.isStreamingTail,
-  );
-  if (tailIndex >= 0) {
-    const previousRow = activeRows[tailIndex - 1];
-    const tailRow = activeRows[tailIndex];
-    if (previousRow) {
-      protectedRowIds.add(previousRow.rowId);
-    }
-    if (tailRow) {
-      protectedRowIds.add(tailRow.rowId);
-    }
-  } else if (activeRows.length === 1) {
-    protectedRowIds.add(activeRows[0]?.rowId ?? "");
-  }
-
-  protectedRowIds.delete("");
-  return Array.from(protectedRowIds);
 }
 
 function applyTimelineDiagnosticSamples(
@@ -1046,12 +959,6 @@ function VirtualMessageTimelineSession({
   const responseStartHintSeenMessageIdsRef = useRef(new Set<string>());
   const responseStartHintRecordedMessageIdRef = useRef<string | null>(null);
   const detachedScrollTopRef = useRef<number | null>(null);
-  const liveTailHandoffRef = useRef<{
-    distanceFromBottom: number;
-    scrollTop: number;
-    scrollHeight: number;
-    wasDetached: boolean;
-  } | null>(null);
   const lastEffectiveVirtualScrollHeightRef = useRef<number | null>(null);
   const diagnosticsStartMsRef = useRef(getDiagnosticsNowMs());
   const diagnosticsAccumulatorRef = useRef(
@@ -1063,8 +970,6 @@ function VirtualMessageTimelineSession({
   >(null);
   const [responseStartHintInZone, setResponseStartHintInZone] = useState(false);
   const [footerHeightPx, setFooterHeightPx] = useState(0);
-  const [liveTailScrollHeightFloorPx, setLiveTailScrollHeightFloorPx] =
-    useState(0);
   const [pulsingMessageId, setPulsingMessageId] = useState<string | null>(null);
   const [browserRowCoverage, setBrowserRowCoverage] =
     useState<TranscriptBrowserRowCoverage | null>(null);
@@ -1104,6 +1009,16 @@ function VirtualMessageTimelineSession({
     ],
   );
   const stableRows = useStableTranscriptRows(snapshot.rows);
+  const composition = useMemo(
+    () =>
+      composeTranscriptRowsForTimeline({
+        rows: stableRows,
+        messages,
+        streamingMessageId,
+      }),
+    [messages, stableRows, streamingMessageId],
+  );
+  const virtualRows = composition.rows;
   const [settlingAgentWorkMessageId, setSettlingAgentWorkMessageId] = useState<
     string | null
   >(null);
@@ -1136,37 +1051,13 @@ function VirtualMessageTimelineSession({
 
     return () => window.clearTimeout(clearSettlingState);
   }, [streamingMessageId]);
-  const liveStreamingTailSplit = useMemo(
-    () =>
-      splitLiveStreamingTail({
-        messages,
-        rows: stableRows,
-        streamingMessageId,
-      }),
-    [messages, stableRows, streamingMessageId],
-  );
-  const virtualRows = useStableTranscriptRows(
-    liveStreamingTailSplit?.historyRows ?? stableRows,
-  );
-  const liveStreamingTailRows = useStableTranscriptRows(
-    liveStreamingTailSplit?.liveRows ?? [],
-  );
-  const liveStreamingTailStartIndex =
-    liveStreamingTailSplit?.startIndex ?? stableRows.length;
-  const hasLiveStreamingTail = liveStreamingTailRows.length > 0;
   const messageListBottomPaddingPx = hasFooter
-    ? hasLiveStreamingTail
-      ? LIVE_TAIL_BOTTOM_PADDING_PX
-      : DOCKED_FOOTER_BOTTOM_PADDING_PX
+    ? DOCKED_FOOTER_BOTTOM_PADDING_PX
     : (tailPaddingPx ?? 16);
   messageListBottomPaddingPxRef.current = messageListBottomPaddingPx;
   const stableMessageByRowId = useStableMessageByRowId(
     stableRows,
     snapshot.messageById,
-  );
-  const activeStreamingProtectedRowIds = useMemo(
-    () => getActiveStreamingProtectedRowIds(virtualRows, streamingMessageId),
-    [virtualRows, streamingMessageId],
   );
   const shouldPreserveVirtualScrollPosition = false;
   const shouldPreserveLiveVirtualScrollPosition = useCallback(
@@ -1176,9 +1067,8 @@ function VirtualMessageTimelineSession({
   const virtualTimeline = useTranscriptVirtualTimeline({
     loadedTranscript,
     rows: virtualRows,
-    protectedRowIds: activeStreamingProtectedRowIds,
     containerRef,
-    footerHeight: hasLiveStreamingTail ? 0 : messageListBottomPaddingPx,
+    footerHeight: messageListBottomPaddingPx,
     preserveScrollPosition: shouldPreserveVirtualScrollPosition,
     // React state trails refs by one render. Measurement flushes can run in
     // that gap immediately after wheel/pointer intent and must not replay the
@@ -1353,8 +1243,7 @@ function VirtualMessageTimelineSession({
   const mountedRows = isBoundedVirtualMode
     ? virtualRangeMountedRows +
       offscreenRealMountedRows +
-      offscreenShellMountedRows +
-      liveStreamingTailRows.length
+      offscreenShellMountedRows
     : stableRows.length;
   const protectedVisibleRowIds = new Set(
     virtualTimelineSnapshot.range.visibleRowIds,
@@ -1531,20 +1420,10 @@ function VirtualMessageTimelineSession({
               virtualTimelineSnapshot.keepAliveDecision?.diagnostics
                 .failThresholdExceeded ?? false,
           },
-          visibleRowIds: hasLiveStreamingTail
-            ? [
-                ...virtualTimelineSnapshot.range.visibleRowIds,
-                ...liveStreamingTailRows.map((row) => row.rowId),
-              ]
-            : virtualTimelineSnapshot.range.visibleRowIds,
+          visibleRowIds: virtualTimelineSnapshot.range.visibleRowIds,
           renderedRowIds: isBoundedVirtualMode
-            ? [
-                ...virtualTimelineSnapshot.range.renderedRowIds,
-                ...liveStreamingTailRows.map((row) => row.rowId),
-              ]
-            : [...virtualRows, ...liveStreamingTailRows].map(
-                (row) => row.rowId,
-              ),
+            ? virtualTimelineSnapshot.range.renderedRowIds
+            : virtualRows.map((row) => row.rowId),
           protectedRowIds: virtualTimelineSnapshot.range.protectedRowIds,
           fallbackReasons: virtualTimelineSnapshot.fallbackReasons,
           blockers: REMAINING_DEFAULT_ON_BLOCKERS,
@@ -1574,8 +1453,6 @@ function VirtualMessageTimelineSession({
       isBoundedVirtualMode,
       browserRowCoverage,
       blankViewportRecoveryAttempts,
-      hasLiveStreamingTail,
-      liveStreamingTailRows,
       mountedRows,
       offscreenShellMountedRows,
       offscreenRealMountedRows,
@@ -1607,11 +1484,11 @@ function VirtualMessageTimelineSession({
     if (
       accumulator.firstVisibleTailMs == null &&
       tailRowId &&
-      (hasLiveStreamingTail || diagnostics.visibleRowIds.includes(tailRowId))
+      diagnostics.visibleRowIds.includes(tailRowId)
     ) {
       accumulator.firstVisibleTailMs = elapsedMs;
     }
-  }, [diagnostics.visibleRowIds, hasLiveStreamingTail, stableRows]);
+  }, [diagnostics.visibleRowIds, stableRows]);
 
   useEffect(() => {
     const accumulator = diagnosticsAccumulatorRef.current;
@@ -1745,8 +1622,6 @@ function VirtualMessageTimelineSession({
   const clearDetachedBrowserEffects = useCallback(() => {
     userScrollDirectionRef.current = null;
     detachedScrollTopRef.current = null;
-    liveTailHandoffRef.current = null;
-    setLiveTailScrollHeightFloorPx(0);
     syncJumpToLatestVisibility();
   }, [syncJumpToLatestVisibility]);
 
@@ -1958,25 +1833,6 @@ function VirtualMessageTimelineSession({
     ],
   );
 
-  const captureLiveTailHandoff = useCallback(
-    (container: HTMLDivElement) => {
-      if (!hasLiveStreamingTail) {
-        return;
-      }
-
-      liveTailHandoffRef.current = {
-        distanceFromBottom: Math.max(
-          0,
-          getBottomScrollTop(container) - container.scrollTop,
-        ),
-        scrollHeight: container.scrollHeight,
-        scrollTop: container.scrollTop,
-        wasDetached: getScrollPresentation().detached,
-      };
-    },
-    [getBottomScrollTop, hasLiveStreamingTail, getScrollPresentation],
-  );
-
   const syncScrollState = useCallback(() => {
     const container = containerRef.current;
     if (!container) {
@@ -2060,7 +1916,6 @@ function VirtualMessageTimelineSession({
 
       lastScrollTopRef.current = scrollTop;
       clearUserScrollIntent();
-      captureLiveTailHandoff(container);
       return;
     }
 
@@ -2110,9 +1965,7 @@ function VirtualMessageTimelineSession({
 
     lastScrollTopRef.current = scrollTop;
     clearUserScrollIntent();
-    captureLiveTailHandoff(container);
   }, [
-    captureLiveTailHandoff,
     clearDetachedBrowserEffects,
     clearUserScrollIntent,
     detachFromLatest,
@@ -3117,7 +2970,6 @@ function VirtualMessageTimelineSession({
       }
       clearDetachedBrowserEffects();
       isNearBottomRef.current = true;
-      liveTailHandoffRef.current = null;
       syncViewportFromDom({ source: "browser", userScrollIntent: true });
       return;
     }
@@ -3209,14 +3061,7 @@ function VirtualMessageTimelineSession({
   };
 
   const scrollResponseStartElement = useCallback(
-    (
-      rowId: string,
-      {
-        syncVirtualViewport = true,
-      }: {
-        syncVirtualViewport?: boolean;
-      } = {},
-    ) => {
+    (rowId: string) => {
       const container = containerRef.current;
       const target = responseStartRowRefs.current.get(rowId);
       if (!container || !target?.isConnected) {
@@ -3231,7 +3076,7 @@ function VirtualMessageTimelineSession({
       );
 
       scrollToTargetWithControlledSmooth(targetScrollTop, {
-        syncVirtualViewport,
+        syncVirtualViewport: true,
         suppressFollowResume: true,
       });
       return true;
@@ -3266,11 +3111,7 @@ function VirtualMessageTimelineSession({
       stickyScrollUntilRef.current = 0;
       isNearBottomRef.current = false;
 
-      if (
-        scrollResponseStartElement(rowId, {
-          syncVirtualViewport: !hasLiveStreamingTail,
-        })
-      ) {
+      if (scrollResponseStartElement(rowId)) {
         return;
       }
 
@@ -3285,7 +3126,6 @@ function VirtualMessageTimelineSession({
     [
       cancelJumpToLatestAnimation,
       detachFromLatest,
-      hasLiveStreamingTail,
       scrollResponseStartElement,
       scrollVirtualToRow,
       stableRows,
@@ -3464,7 +3304,6 @@ function VirtualMessageTimelineSession({
     ? virtualTimelineSnapshot.range.virtualItems.at(-1)
     : undefined;
   const measuredTailScrollHeight =
-    !hasLiveStreamingTail &&
     lastRenderedVirtualItem?.index === virtualRows.length - 1
       ? lastRenderedVirtualItem.end + messageListBottomPaddingPx
       : null;
@@ -3473,10 +3312,7 @@ function VirtualMessageTimelineSession({
     measuredTailScrollHeight == null
       ? virtualScrollHeight
       : Math.max(virtualScrollHeight, measuredTailScrollHeight);
-  const effectiveVirtualScrollHeight = Math.max(
-    measuredEffectiveVirtualScrollHeight,
-    liveTailScrollHeightFloorPx,
-  );
+  const effectiveVirtualScrollHeight = measuredEffectiveVirtualScrollHeight;
   const virtualHistoryStyle = isBoundedVirtualMode
     ? {
         overflowAnchor: "none" as const,
@@ -3485,7 +3321,7 @@ function VirtualMessageTimelineSession({
     : undefined;
   const messageListStyle = isBoundedVirtualMode
     ? {
-        paddingBottom: hasLiveStreamingTail ? messageListBottomPaddingPx : 0,
+        paddingBottom: 0,
         overflowAnchor: "none" as const,
       }
     : {
@@ -3545,9 +3381,6 @@ function VirtualMessageTimelineSession({
   const renderedVirtualRows = isBoundedVirtualMode
     ? renderVirtualFlowSpacerRows()
     : virtualRows.map((row, index) => renderRow(row, index));
-  const renderedLiveStreamingTailRows = liveStreamingTailRows.map(
-    (row, tailIndex) => renderRow(row, liveStreamingTailStartIndex + tailIndex),
-  );
   const showPlaceholderContent = showPlaceholder || !hasMessageRows;
   const virtualRangeRevision = `${virtualTimelineSnapshot.range.renderRange.startIndex}:${virtualTimelineSnapshot.range.renderRange.endIndex}:${virtualTimelineSnapshot.range.virtualItems
     .map((item) => `${item.key}:${item.start}:${item.size}`)
@@ -3662,93 +3495,6 @@ function VirtualMessageTimelineSession({
   ]);
 
   useLayoutEffect(() => {
-    if (!isBoundedVirtualMode) {
-      liveTailHandoffRef.current = null;
-      setLiveTailScrollHeightFloorPx(0);
-      return;
-    }
-
-    const container = containerRef.current;
-    if (!container) {
-      return;
-    }
-
-    if (hasLiveStreamingTail) {
-      if (liveTailScrollHeightFloorPx !== 0) {
-        setLiveTailScrollHeightFloorPx(0);
-      }
-      captureLiveTailHandoff(container);
-      return;
-    }
-
-    const handoff = liveTailHandoffRef.current;
-    if (!handoff || streamingMessageId) {
-      // Once no handoff remains, the temporary DOM-height floor has no owner
-      // and must not survive as permanent empty space. This also covers a
-      // handoff cleared by a prior restore before this effect runs again.
-      if (!handoff && liveTailScrollHeightFloorPx > 0) {
-        setLiveTailScrollHeightFloorPx(0);
-      }
-      return;
-    }
-
-    const nextScrollHeightFloor = Math.max(0, Math.ceil(handoff.scrollHeight));
-    if (liveTailScrollHeightFloorPx < nextScrollHeightFloor) {
-      setLiveTailScrollHeightFloorPx(nextScrollHeightFloor);
-      return;
-    }
-
-    liveTailHandoffRef.current = null;
-    // The restore below reads the still-floored DOM geometry in this layout
-    // pass. Release the floor for the next render after it has served that
-    // purpose; detached readers keep their restored scrollTop, while the
-    // existing height-change effect re-pins readers following latest.
-    setLiveTailScrollHeightFloorPx(0);
-
-    const nextBottomScrollTop = getBottomScrollTop(container);
-    const wasNearLatest =
-      !handoff.wasDetached &&
-      handoff.distanceFromBottom < TIMELINE_AUTO_SCROLL_THRESHOLD_PX;
-    const nextScrollTop = wasNearLatest
-      ? nextBottomScrollTop
-      : Math.min(nextBottomScrollTop, Math.max(0, handoff.scrollTop));
-    if (Math.abs(container.scrollTop - nextScrollTop) > 1) {
-      writeVirtualScrollTop(nextScrollTop, { source: "programmatic" });
-    }
-    const distanceFromBottom = Math.max(
-      0,
-      getBottomScrollTop(container) - container.scrollTop,
-    );
-
-    isNearBottomRef.current = isTimelineNearLatest(container);
-    lastScrollTopRef.current = container.scrollTop;
-    markPendingScrollOwnership(null);
-
-    if (distanceFromBottom >= TIMELINE_AUTO_SCROLL_THRESHOLD_PX) {
-      stickyScrollUntilRef.current = 0;
-      detachFromLatest();
-    } else if (suppressFollowResumeFromProgrammaticScrollRef.current) {
-      syncJumpToLatestVisibility();
-    } else {
-      clearDetachedBrowserEffects();
-    }
-    syncViewportFromDom({ source: "browser", userScrollIntent: true });
-  }, [
-    captureLiveTailHandoff,
-    getBottomScrollTop,
-    hasLiveStreamingTail,
-    isBoundedVirtualMode,
-    liveTailScrollHeightFloorPx,
-    markPendingScrollOwnership,
-    clearDetachedBrowserEffects,
-    detachFromLatest,
-    streamingMessageId,
-    syncJumpToLatestVisibility,
-    syncViewportFromDom,
-    writeVirtualScrollTop,
-  ]);
-
-  useLayoutEffect(() => {
     if (!isBoundedVirtualMode || streamingMessageId) {
       lastEffectiveVirtualScrollHeightRef.current = null;
       return;
@@ -3790,10 +3536,6 @@ function VirtualMessageTimelineSession({
         snapshot.completedStreamingFragmentRowCount
       }
       data-virtual-streaming-tail-rows={snapshot.streamingTailRowCount}
-      data-virtual-live-tail-rows={liveStreamingTailRows.length}
-      data-virtual-live-tail-start-index={
-        hasLiveStreamingTail ? liveStreamingTailStartIndex : undefined
-      }
       data-virtual-whole-message-fallback-rows={
         snapshot.wholeMessageFallbackRowCount
       }
@@ -3856,14 +3598,6 @@ function VirtualMessageTimelineSession({
       ) : (
         renderedVirtualRows
       )}
-      {hasLiveStreamingTail ? (
-        <div
-          data-testid="virtual-message-timeline-live-tail"
-          data-virtual-live-tail-rows={liveStreamingTailRows.length}
-        >
-          {renderedLiveStreamingTailRows}
-        </div>
-      ) : null}
     </div>
   );
 
