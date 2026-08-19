@@ -38,8 +38,8 @@ import {
 import type { MemoryProposal } from "../meProposals";
 
 const HOME = "/home/u";
-const RECENT = `${HOME}/.me/.proposals/recent.jsonl`;
-const DISMISSED = `${HOME}/.me/.proposals/dismissed.jsonl`;
+const RECENT = `${HOME}/.me/proposals/recent.jsonl`;
+const DISMISSED = `${HOME}/.me/proposals/dismissed.jsonl`;
 
 function candidate(overrides: Partial<MemoryProposal> = {}): MemoryProposal {
   return {

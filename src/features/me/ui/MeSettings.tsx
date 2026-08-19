@@ -32,6 +32,7 @@ import { getMemoryPrefs, setMemoryPrefs } from "../lib/memoryPrefs";
 import { setMemoryMcpEnabled } from "@/shared/api/system";
 import { useAddedMemories } from "../hooks/useAddedMemories";
 import type { AddedMemoryEntry } from "../lib/meMemoryWrites";
+import { readMemoryPolicy, writeMemoryPolicy } from "../lib/memoryPolicyFile";
 import { publishMeFile } from "../lib/mePublish";
 
 type LoadState = { status: "loading" } | { status: "error" } | MeFileState;
@@ -208,6 +209,16 @@ export function MeSettings() {
       // rather than breaking the page.
       setTopics([]);
     }
+    // The store's policy wins over Berd's local preference: someone who turned
+    // memory off in another tool (or by editing policy.json) should find it
+    // off here too. No policy file means no opinion, so Berd's own preference
+    // stands.
+    const policy = await readMemoryPolicy();
+    if (policy && policy.enabled !== getMemoryPrefs().enabled) {
+      setMemoryPrefs({ enabled: policy.enabled });
+      setMemoryEnabled(policy.enabled);
+      void setMemoryMcpEnabled(policy.enabled).catch(() => {});
+    }
   }, []);
 
   useEffect(() => {
@@ -243,6 +254,9 @@ export function MeSettings() {
     // And (de)register the memory MCP server for future goose sessions:
     // off means the memory tools don't exist in the session at all.
     void setMemoryMcpEnabled(enabled).catch(() => {});
+    // Mirror the switch into the store, so another tool serving the same
+    // ~/.me/ honors the same decision instead of only Berd knowing.
+    void writeMemoryPolicy(enabled).catch(() => {});
   };
 
   const handleReveal = () => {

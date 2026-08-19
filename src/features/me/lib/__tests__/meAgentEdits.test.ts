@@ -10,7 +10,7 @@ describe("filterMemoryPaths", () => {
       "/home/u/.me/family.md",
       "/home/u/.me/me.md",
       "/home/u/projects/notes.md",
-      "/home/u/.me/.proposals/pending.jsonl",
+      "/home/u/.me/proposals/pending.jsonl",
       "/home/u/.me/nested/dir.md",
       "/home/u/.me/style.md",
     ];

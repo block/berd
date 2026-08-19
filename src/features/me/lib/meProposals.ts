@@ -14,7 +14,7 @@ import { createTopic, listTopics } from "./meTopics";
  * The memory proposals queue.
  *
  * The memory MCP server can't write memory — `propose_memory` appends to
- * `~/.me/.proposals/pending.jsonl` and this module is the other half:
+ * `~/.me/proposals/pending.jsonl` and this module is the other half:
  * Berd reads the queue, the user approves or dismisses each proposal in
  * Settings → Memory, and only an approval writes the entry into a memory
  * file (with agent attribution in the file history). Consent stays
@@ -44,7 +44,7 @@ export interface MemoryProposal {
 }
 
 function queuePath(homeDir: string): string {
-  return `${homeDir}/.me/.proposals/pending.jsonl`;
+  return `${homeDir}/.me/proposals/pending.jsonl`;
 }
 
 /**
@@ -52,7 +52,7 @@ function queuePath(homeDir: string): string {
  * so "don't propose this again" survives sessions.
  */
 function tombstonePath(homeDir: string): string {
-  return `${homeDir}/.me/.proposals/dismissed.jsonl`;
+  return `${homeDir}/.me/proposals/dismissed.jsonl`;
 }
 
 function parseLine(line: string): MemoryProposal | null {

@@ -4,7 +4,7 @@
 //! through three tools: `list_topics`, `recall`, and `propose_memory`.
 //!
 //! Consent is structural, not instructed: `propose_memory` never writes
-//! to a memory file. It appends the proposal to `~/.me/.proposals/
+//! to a memory file. It appends the proposal to `~/.me/proposals/
 //! pending.jsonl`, where Berd surfaces it for the user's approve/edit/
 //! reject. Only Berd — after a yes — writes memory.
 //!
@@ -310,7 +310,7 @@ fn propose_memory(content: &str, topic: Option<&str>) -> Result<String, String> 
     }
     let topic = topic.map(str::trim).filter(|t| !t.is_empty());
 
-    let dir = me_dir()?.join(".proposals");
+    let dir = me_dir()?.join("proposals");
     fs::create_dir_all(&dir).map_err(|e| format!("Couldn't queue the proposal: {e}"))?;
 
     // Dismissals are durable: a tombstoned proposal doesn't come back,
@@ -332,6 +332,7 @@ fn propose_memory(content: &str, topic: Option<&str>) -> Result<String, String> 
         "content": content,
         "topic": topic,
         "agent": std::env::var("BERD_AGENT_NAME").ok().filter(|a| !a.is_empty()),
+        "host": "berd",
     });
     let path = dir.join("pending.jsonl");
     let mut line = record.to_string();

@@ -127,7 +127,7 @@ export function parseNoticerOutput(
 }
 
 function proposalsDir(homeDir: string): string {
-  return `${homeDir}/.me/.proposals`;
+  return `${homeDir}/.me/proposals`;
 }
 
 async function readJsonlRecords(

@@ -1,4 +1,5 @@
 import { logRendererEvent } from "@/shared/api/rendererTelemetry";
+import { migrateProposalsDir } from "./proposalsMigration";
 import { applyMemoryEntry, type AddedMemoryEntry } from "./meMemoryWrites";
 import { isMemoryEnabled } from "./memoryPrefs";
 import { listProposals, removeFromQueue } from "./meProposals";
@@ -22,6 +23,9 @@ import { listProposals, removeFromQueue } from "./meProposals";
 let inFlight: Promise<AddedMemoryEntry[]> | null = null;
 
 export async function drainMemoryQueue(): Promise<AddedMemoryEntry[]> {
+  // Carry any queues from the old hidden dotfolder first, so a person
+  // upgrading doesn't lose their tombstones and see deleted memories return.
+  await migrateProposalsDir();
   if (inFlight) return inFlight;
   inFlight = run().finally(() => {
     inFlight = null;

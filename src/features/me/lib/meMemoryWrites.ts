@@ -58,7 +58,7 @@ export interface AddedMemoryEntry {
 }
 
 function recentPath(homeDir: string): string {
-  return `${homeDir}/.me/.proposals/recent.jsonl`;
+  return `${homeDir}/.me/proposals/recent.jsonl`;
 }
 
 /**
@@ -254,7 +254,7 @@ export async function deleteAddedEntry(entry: AddedMemoryEntry): Promise<void> {
 async function recordDeletionTombstone(entry: AddedMemoryEntry): Promise<void> {
   try {
     const homeDir = await getHomeDir();
-    const path = `${homeDir}/.me/.proposals/dismissed.jsonl`;
+    const path = `${homeDir}/.me/proposals/dismissed.jsonl`;
     const existing = (await pathExists(path))
       ? (await readTextFile(path)).contents
       : "";
