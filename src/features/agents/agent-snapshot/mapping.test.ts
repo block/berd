@@ -134,6 +134,15 @@ describe("snapshot mappings", () => {
     );
   });
 
+  it("round-trips the reviewed public description", () => {
+    const exported = personaToSnapshot(
+      persona({ sourceDescription: "Builds useful things." }),
+    );
+    expect(snapshotToCreatePersonaRequest(exported).description).toBe(
+      "Builds useful things.",
+    );
+  });
+
   it("round-trips grapheme-bounded Unicode share-card metadata", () => {
     const goodFor = "👨‍👩‍👧‍👦".repeat(44);
     const vibes = "😀".repeat(32);

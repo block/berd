@@ -156,6 +156,7 @@ export function validateSnapshotV1(value: unknown): SnapshotV1 {
   const profile = isRecord(value.profile) ? value.profile : undefined;
   if (profile) {
     optionalString(profile, "displayName", MAX_SNAPSHOT_NAME_LENGTH);
+    optionalString(profile, "about", 110);
     optionalString(profile, "goodFor");
     optionalString(profile, "vibes");
     if (

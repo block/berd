@@ -213,6 +213,7 @@ export function AgentShareDialog({
   const cardReady = Boolean(avatarSrc && avatarReadySrc === avatarSrc);
   const cardBase = getAgentShareCardBase(persona.id);
   const fallbackDescription = getAgentShareDescription(persona);
+  const locale = i18n?.resolvedLanguage ?? i18n?.language ?? "en";
   const [generatedDescriptionState, setGeneratedDescription] = useState<{
     identity: string;
     value: string;
@@ -220,6 +221,7 @@ export function AgentShareDialog({
   const [generationRequested, setGenerationRequested] = useState(false);
   const [generationPending, setGenerationPending] = useState(false);
   const descriptionIdentity = [
+    locale,
     persona.id,
     persona.displayName,
     persona.systemPrompt,
@@ -229,7 +231,6 @@ export function AgentShareDialog({
       ? generatedDescriptionState.value
       : undefined;
   const description = generatedDescription ?? fallbackDescription;
-  const locale = i18n?.resolvedLanguage ?? i18n?.language ?? "en";
   const cardCopy = resolveAgentShareCardCopy(persona.systemPrompt, t, {
     goodFor: persona.goodFor,
     vibes: persona.vibes,
@@ -368,6 +369,7 @@ export function AgentShareDialog({
         const snapshot = personaToSnapshot({
           ...persona,
           avatar: embeddedAvatar ?? persona.avatar,
+          sourceDescription: description,
         });
         let animation = null;
         const stillMatchesAnimation = Boolean(

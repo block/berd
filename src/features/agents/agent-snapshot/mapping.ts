@@ -41,6 +41,10 @@ export function snapshotToCreatePersonaRequest(
       snapshot.definition.modelProviderId?.trim() || undefined;
     request.model = model;
   }
+  const about = snapshot.profile?.about;
+  if (typeof about === "string" && about.trim()) {
+    request.description = about.trim();
+  }
   const goodFor = snapshot.profile?.goodFor;
   const vibes = snapshot.profile?.vibes;
   if (typeof goodFor === "string" && goodFor.trim()) {
@@ -83,7 +87,7 @@ export function personaToSnapshot(persona: Persona): SnapshotV1 {
     },
     profile: {
       displayName,
-      about: null,
+      about: persona.sourceDescription?.trim() || null,
       goodFor: persona.goodFor ?? null,
       vibes: persona.vibes ?? null,
       avatarDataUrl:
