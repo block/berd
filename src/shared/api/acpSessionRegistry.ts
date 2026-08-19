@@ -11,6 +11,7 @@ import {
   shortLogId,
 } from "@/shared/lib/reasoningEffortDiagnostics";
 import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
+import { isModelSelectionAllowedByCachedInventory } from "@/features/providers/stores/providerModelCacheStore";
 
 export interface AcpSessionExecutionSelection {
   providerId: string;
@@ -441,6 +442,16 @@ export function requireSessionInvocationSelection(
   if (!selection?.providerId || !selection.modelId) {
     throw new Error(
       "Session requires a configured provider and model before prompting. Re-prepare the session after completing provider setup.",
+    );
+  }
+  if (
+    !isModelSelectionAllowedByCachedInventory(
+      selection.providerId,
+      selection.modelId,
+    )
+  ) {
+    throw new Error(
+      `Session model ${selection.modelId} is no longer supported by provider ${selection.providerId}. Re-prepare the session before prompting.`,
     );
   }
   return { ...selection, modelId: selection.modelId };

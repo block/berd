@@ -161,6 +161,22 @@ export function isCachedModelInventoryAuthoritative(
   return entry != null && Array.isArray(entry.provenModelIds);
 }
 
+/**
+ * Return whether cached inventory still permits a concrete provider/model pair.
+ * Missing or provisional inventory cannot disprove a prepared selection; a
+ * successful authoritative response can.
+ */
+export function isModelSelectionAllowedByCachedInventory(
+  providerId: string,
+  modelId: string,
+): boolean {
+  const entry = useProviderModelCacheStore.getState().providers.get(providerId);
+  if (!isCachedModelInventoryAuthoritative(entry)) {
+    return true;
+  }
+  return entry?.provenModelIds?.includes(modelId) === true;
+}
+
 function isStale(entry: CachedProviderModels | undefined): boolean {
   if (!entry || !isCachedModelInventoryAuthoritative(entry)) {
     return true;

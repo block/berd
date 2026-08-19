@@ -897,6 +897,69 @@ describe("GlobalComposerPill", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("fails closed when authoritative inventory invalidates the active session model", async () => {
+    const user = userEvent.setup();
+    const activeTarget = {
+      harnessId: "goose",
+      modelProviderId: "databricks_v2",
+      modelId: "model-a",
+      modelName: "Model A",
+    };
+    mockGetModelsForAgent.mockReturnValue([
+      {
+        id: "model-a",
+        name: "Model A",
+        providerId: "databricks_v2",
+      },
+    ]);
+    mockGetProvenModelsForAgent.mockReturnValue([
+      {
+        id: "model-a",
+        name: "Model A",
+        providerId: "databricks_v2",
+      },
+    ]);
+    const onSend = vi.fn();
+    const { rerender } = render(
+      <GlobalComposerPill
+        onSend={onSend}
+        currentExecutionTarget={activeTarget}
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled();
+    expect(screen.getByText("Model A")).toBeInTheDocument();
+
+    // A successful refresh is now authoritative and excludes model A.
+    mockGetModelsForAgent.mockReturnValue([
+      {
+        id: "model-b",
+        name: "Model B",
+        providerId: "databricks_v2",
+      },
+    ]);
+    mockGetProvenModelsForAgent.mockReturnValue([
+      {
+        id: "model-b",
+        name: "Model B",
+        providerId: "databricks_v2",
+      },
+    ]);
+    rerender(
+      <GlobalComposerPill
+        onSend={onSend}
+        currentExecutionTarget={activeTarget}
+      />,
+    );
+
+    expect(screen.queryByText("Model A")).not.toBeInTheDocument();
+    const send = screen.getByRole("button", { name: /send message/i });
+    expect(send).toBeDisabled();
+    await user.click(send);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("does not synthesize an advisory model while inventory proof is unavailable", async () => {
     const user = userEvent.setup();
     mockProviderModelsState.inventoryAuthoritative = false;
@@ -1626,6 +1689,13 @@ describe("GlobalComposerPill", () => {
   it("expands with the controlled Home model", async () => {
     const user = userEvent.setup();
     const onExpand = vi.fn().mockResolvedValue(true);
+    mockGetModelsForAgent.mockReturnValue([
+      {
+        id: "goose-claude-fable",
+        name: "Claude Fable",
+        providerId: "anthropic",
+      },
+    ]);
     renderGlobalComposer(vi.fn(), {
       onExpand,
       currentExecutionTarget: {
@@ -1754,6 +1824,17 @@ describe("GlobalComposerPill", () => {
 
   it("uses a controlled external harness when the global provider differs", async () => {
     const user = userEvent.setup();
+    mockGetModelsForAgent.mockImplementation((agentId: string) =>
+      agentId === "claude-acp"
+        ? [
+            {
+              id: "claude-opus-4-1",
+              name: "Claude Opus 4.1",
+              providerId: "claude-acp",
+            },
+          ]
+        : [],
+    );
     const onSend = renderGlobalComposer(vi.fn(), {
       currentExecutionTarget: {
         harnessId: "claude-acp",

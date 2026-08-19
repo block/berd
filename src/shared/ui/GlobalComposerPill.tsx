@@ -668,13 +668,29 @@ export function GlobalComposerPill({
     if (!currentExecutionTarget?.modelId) {
       return null;
     }
+    const modelProviderId = currentExecutionTarget.modelProviderId;
+    if (
+      modelProviderId &&
+      isModelInventoryAuthoritative(modelProviderId) &&
+      !getProvenModelsForAgent(currentExecutionTarget.harnessId).some(
+        (model) =>
+          model.id === currentExecutionTarget.modelId &&
+          (!model.providerId || model.providerId === modelProviderId),
+      )
+    ) {
+      return null;
+    }
 
     return {
       modelProviderId: currentExecutionTarget.modelProviderId,
       modelId: currentExecutionTarget.modelId,
       modelName: currentExecutionTarget.modelName,
     };
-  }, [currentExecutionTarget]);
+  }, [
+    currentExecutionTarget,
+    getProvenModelsForAgent,
+    isModelInventoryAuthoritative,
+  ]);
   const hasLocalExecutionOverride =
     providerOverride !== null || modelOverride !== null;
   const personaSelectionOverridden =
@@ -719,10 +735,14 @@ export function GlobalComposerPill({
       selectedPersona?.modelProviderId ||
       selectedPersona?.model,
   );
+  const controlledTargetInvalidated =
+    currentExecutionTarget?.modelId != null && controlledModelSelection == null;
   const effectiveExecutionTarget =
     !personaSelectionOverridden && personaHasSavedExecutionTarget
       ? personaTarget
-      : (localExecutionTarget ?? currentExecutionTarget ?? undefined);
+      : (localExecutionTarget ??
+        (controlledTargetInvalidated ? undefined : currentExecutionTarget) ??
+        undefined);
   const canSend =
     hasSendableContent &&
     Boolean(effectiveExecutionTarget) &&

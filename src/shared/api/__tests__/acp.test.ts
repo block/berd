@@ -209,6 +209,47 @@ describe("acpSendMessage", () => {
     expect(mockPrompt).not.toHaveBeenCalled();
   });
 
+  it("blocks a prepared model disproved by cached authoritative inventory without network I/O", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const { useProviderModelCacheStore } = await import(
+      "@/features/providers/stores/providerModelCacheStore"
+    );
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+    sessionRegistry.registerPreparedSession(
+      "acp-session-invalidated-model",
+      "databricks_v2",
+      "/tmp/project",
+      "removed-model",
+    );
+    useProviderModelCacheStore.setState({
+      providers: new Map([
+        [
+          "databricks_v2",
+          {
+            providerId: "databricks_v2",
+            models: [
+              {
+                id: "supported-model",
+                name: "Supported model",
+                providerId: "databricks_v2",
+              },
+            ],
+            provenModelIds: ["supported-model"],
+            fetchedAt: Date.now(),
+          },
+        ],
+      ]),
+    });
+
+    await expect(
+      acpSendMessage("acp-session-invalidated-model", "hello"),
+    ).rejects.toThrow("removed-model is no longer supported");
+
+    expect(mockSupportedModelsList).not.toHaveBeenCalled();
+    expect(mockPrompt).not.toHaveBeenCalled();
+  });
+
   it("admits a managed-provider prompt without reading live model inventory", async () => {
     await setRuntimeConfig(managedRuntimeConfig);
     const sessionRegistry = await import("../acpSessionRegistry");

@@ -775,7 +775,11 @@ export function useResolvedAgentModelPicker({
       };
     }
 
-    if (isModelAlias(executionTarget.modelId)) {
+    if (
+      isModelAlias(executionTarget.modelId) ||
+      (executionTarget.modelProviderId &&
+        isModelInventoryAuthoritative(executionTarget.modelProviderId))
+    ) {
       return null;
     }
 
@@ -785,7 +789,7 @@ export function useResolvedAgentModelPicker({
       modelProviderId: executionTarget.modelProviderId,
       source: "explicit",
     };
-  }, [availableModels, session]);
+  }, [availableModels, isModelInventoryAuthoritative, session]);
 
   const availableDefaultModelSelection =
     useMemo<PreferredModelSelection | null>(() => {
