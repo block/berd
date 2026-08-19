@@ -891,7 +891,7 @@ describe("acpLoadSession", () => {
     );
   });
 
-  it("does not publish a load superseded by a rejected preflight", async () => {
+  it("publishes a deferred authoritative load when preflight rejects before mutation", async () => {
     await setRuntimeConfig(managedRuntimeConfig);
     const loadResponse = deferred<ReturnType<typeof executionConfigResponse>>();
     const supportedModels = deferred<{ models: string[] }>();
@@ -927,9 +927,21 @@ describe("acpLoadSession", () => {
     );
     await Promise.resolve();
 
-    expect(applyModelConfigSnapshot).not.toHaveBeenCalled();
+    expect(applyModelConfigSnapshot).toHaveBeenCalledWith(
+      "acp-session-load-before-rejected-preflight",
+      { modelId: "other-model", modelName: "other-model" },
+      { origin: "response" },
+    );
     expect(mockSetProvider).not.toHaveBeenCalled();
     expect(mockSetModel).not.toHaveBeenCalled();
+    const { requireSessionInvocationSelection } = await import(
+      "../acpSessionRegistry"
+    );
+    expect(
+      requireSessionInvocationSelection(
+        "acp-session-load-before-rejected-preflight",
+      ),
+    ).toEqual({ providerId: "other-managed", modelId: "other-model" });
   });
 
   it.each([

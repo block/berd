@@ -628,29 +628,37 @@ export async function acpLoadSession(
     sessionId: shortLogId(sessionId),
   });
   perfLog(`[perf:load] ${sid} acpLoadSession → client.loadSession`);
-  const { response, isCurrent, executionSelection } =
+  const { response, isCurrent, deferredCurrent, executionSelection } =
     await sessionRegistry.loadSession(sessionId, effectiveWorkingDir);
-  if (!isCurrent) {
+  const publish = () => {
+    const snapshots = readSessionConfigOptionsSnapshots(response);
+    logReasoningEffortInfo("acpLoadSession response", {
+      sessionId: shortLogId(sessionId),
+      hasReasoningEffortSnapshot: Boolean(snapshots.reasoningEffort),
+      ...reasoningEffortConfigLogFields(
+        "reasoningEffort",
+        snapshots.reasoningEffort,
+      ),
+    });
+    applySessionConfigOptionsSnapshot(sessionId, response, {
+      origin: "response",
+    });
     perfLog(
-      `[perf:load] ${sid} dropped superseded load snapshot in ${(performance.now() - t0).toFixed(1)}ms`,
+      `[perf:load] ${sid} client.loadSession resolved in ${(performance.now() - t0).toFixed(1)}ms`,
+    );
+  };
+  if (!isCurrent) {
+    if (deferredCurrent) {
+      void deferredCurrent.then((becameCurrent) => {
+        if (becameCurrent) publish();
+      });
+    }
+    perfLog(
+      `[perf:load] ${sid} deferred or dropped superseded load snapshot in ${(performance.now() - t0).toFixed(1)}ms`,
     );
     return undefined;
   }
-  const snapshots = readSessionConfigOptionsSnapshots(response);
-  logReasoningEffortInfo("acpLoadSession response", {
-    sessionId: shortLogId(sessionId),
-    hasReasoningEffortSnapshot: Boolean(snapshots.reasoningEffort),
-    ...reasoningEffortConfigLogFields(
-      "reasoningEffort",
-      snapshots.reasoningEffort,
-    ),
-  });
-  applySessionConfigOptionsSnapshot(sessionId, response, {
-    origin: "response",
-  });
-  perfLog(
-    `[perf:load] ${sid} client.loadSession resolved in ${(performance.now() - t0).toFixed(1)}ms`,
-  );
+  publish();
   return executionSelection;
 }
 

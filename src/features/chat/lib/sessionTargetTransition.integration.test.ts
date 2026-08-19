@@ -375,6 +375,68 @@ describe("transitionSessionTarget with managed Goose models", () => {
     expect(applyModelConfigSnapshot).not.toHaveBeenCalled();
   });
 
+  it("materializes the prepared model for a matching provider-only transition", async () => {
+    const sessionId = "provider-only-prepared-session";
+    const { useChatSessionStore } = await import(
+      "@/features/chat/stores/chatSessionStore"
+    );
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: sessionId,
+          title: "Prepared session",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "databricks_v2",
+          },
+          createdAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    const registry = await import("@/shared/api/acpSessionRegistry");
+    registry.registerPreparedSession(
+      sessionId,
+      "databricks_v2",
+      "/tmp/project",
+      "goose-gpt-5-5",
+    );
+    const { transitionSessionTarget } = await import(
+      "./sessionTargetCoordinator"
+    );
+
+    await expect(
+      transitionSessionTarget({
+        sessionId,
+        target: {
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+        },
+        workingDir: "/tmp/project",
+      }),
+    ).resolves.toMatchObject({
+      status: "committed",
+      target: {
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      },
+    });
+
+    expect(mockSetProvider).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession(sessionId)?.executionTarget,
+    ).toMatchObject({
+      modelProviderId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+    });
+    expect(registry.requireSessionInvocationSelection(sessionId)).toEqual({
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+    });
+  });
+
   it("finishes on the explicitly selected model instead of the managed default", async () => {
     const { transitionSessionTarget } = await import(
       "./sessionTargetCoordinator"

@@ -15,6 +15,14 @@ vi.mock("@/shared/api/acpConnection", () => ({
   invalidateClientConnection: () => mockInvalidateClientConnection(),
 }));
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 const managedConfig: RuntimeConfig = {
   schemaVersion: 1,
   goose: {
@@ -267,8 +275,37 @@ describe("resolveManagedGooseProviderSelection", () => {
     );
     await vi.advanceTimersByTimeAsync(60_000);
     await rejectedMigration;
+    expect(mockInvalidateClientConnection).not.toHaveBeenCalled();
     resolveInventory({ models: ["goose-gpt-5-5"] });
     await Promise.resolve();
+  });
+
+  it("does not abort a concurrent prompt when inventory proof times out", async () => {
+    vi.useFakeTimers();
+    const prompt = deferred<string>();
+    mockSupportedModelsList.mockReturnValue(new Promise(() => {}));
+    mockGetClient.mockResolvedValue({
+      goose: {
+        GooseUnstableProvidersSupportedModelsList: mockSupportedModelsList,
+        prompt: () => prompt.promise,
+      },
+    });
+
+    const client = await mockGetClient();
+    const activePrompt = client.goose.prompt();
+    const migration = resolveValidatedManagedGooseProviderSelection(
+      managedConfig,
+      { providerId: "disallowed" },
+    );
+    const rejectedMigration = expect(migration).rejects.toThrow(
+      "Cannot verify models for migrated provider databricks_v2",
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejectedMigration;
+
+    expect(mockInvalidateClientConnection).not.toHaveBeenCalled();
+    prompt.resolve("complete");
+    await expect(activePrompt).resolves.toBe("complete");
   });
 
   it("times out stalled ACP client acquisition", async () => {
@@ -284,7 +321,7 @@ describe("resolveManagedGooseProviderSelection", () => {
     );
     await vi.advanceTimersByTimeAsync(60_000);
     await rejectedMigration;
-    expect(mockInvalidateClientConnection).toHaveBeenCalledOnce();
+    expect(mockInvalidateClientConnection).not.toHaveBeenCalled();
     expect(mockSupportedModelsList).not.toHaveBeenCalled();
   });
 

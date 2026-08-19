@@ -35,7 +35,12 @@ interface SessionMutationQueue {
   latestSequence: number;
   tail: Promise<void>;
   /** Configuration intent awaiting async preflight before it can enqueue. */
-  pendingSupersession?: { sequence: number };
+  pendingSupersession?: {
+    sequence: number;
+    previousSequence: number;
+    settled: Promise<void>;
+    resolve: () => void;
+  };
 }
 
 /** Opaque ownership of a configuration intent that is awaiting preflight. */
@@ -172,7 +177,9 @@ function consumeSessionSupersession(
   if (queue?.pendingSupersession?.sequence !== supersession.sequence) {
     return false;
   }
+  const pending = queue.pendingSupersession;
   queue.pendingSupersession = undefined;
+  pending.resolve();
   scheduleQueueCleanup(sessionId, queue);
   return true;
 }
@@ -188,15 +195,32 @@ export function supersedeSessionMutation(
   // Retain preflight intent before its authoritative I/O completes so a load
   // cannot publish a snapshot that predates the requested configuration.
   const sequence = nextMutationSequence++;
+  const previousSequence =
+    queue.pendingSupersession?.previousSequence ?? queue.latestSequence;
+  queue.pendingSupersession?.resolve();
+  let resolveSettled!: () => void;
+  const settled = new Promise<void>((resolve) => {
+    resolveSettled = resolve;
+  });
   queue.latestSequence = sequence;
-  queue.pendingSupersession = { sequence };
+  queue.pendingSupersession = {
+    sequence,
+    previousSequence,
+    settled,
+    resolve: resolveSettled,
+  };
   scheduleQueueCleanup(sessionId, queue);
 
   return {
     sequence,
     clear() {
       if (queue?.pendingSupersession?.sequence !== sequence) return;
+      const pending = queue.pendingSupersession;
       queue.pendingSupersession = undefined;
+      if (queue.latestSequence === sequence) {
+        queue.latestSequence = pending.previousSequence;
+      }
+      pending.resolve();
       scheduleQueueCleanup(sessionId, queue);
     },
   };
@@ -268,6 +292,15 @@ async function prepareSessionNow(
     perfLog(
       `[perf:prepare] ${sid} reuse existing session (updates=${changed}) in ${(performance.now() - tReuse).toFixed(1)}ms`,
     );
+    if (!snapshots && existing.executionSelection?.modelId) {
+      return {
+        model: {
+          modelId: existing.executionSelection.modelId,
+          modelName: existing.executionSelection.modelId,
+        },
+        reasoningEffort: null,
+      };
+    }
     return snapshots;
   }
 
@@ -475,13 +508,26 @@ export async function loadSession(
 ): Promise<{
   response: Awaited<ReturnType<typeof acpApi.loadSession>>;
   isCurrent: boolean;
+  deferredCurrent?: Promise<boolean>;
   executionSelection?: AcpSessionExecutionSelection;
 }> {
   return serializeSessionMutation(
     sessionId,
-    async (isLatest) => {
+    async (isLatest, _sequence, queue) => {
       const response = await acpApi.loadSession(sessionId, workingDir);
+      const pendingAtResponse = queue.pendingSupersession;
       const isCurrentResult = isLatest();
+      const deferredCurrent = pendingAtResponse
+        ? (async () => {
+            let pending: SessionMutationQueue["pendingSupersession"] =
+              pendingAtResponse;
+            while (pending) {
+              await pending.settled;
+              pending = queue.pendingSupersession;
+            }
+            return isLatest();
+          })()
+        : undefined;
       const executionSnapshot = readSessionExecutionConfigSnapshot(response);
       prepared.set(sessionId, {
         workingDir,
@@ -490,6 +536,7 @@ export async function loadSession(
       return {
         response,
         isCurrent: isCurrentResult,
+        ...(deferredCurrent ? { deferredCurrent } : {}),
         executionSelection: executionSnapshot ?? undefined,
       };
     },
