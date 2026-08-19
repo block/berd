@@ -23,7 +23,6 @@ import {
   createAgentZip,
 } from "./AgentShareDialog";
 import { downloadBlob, renderAgentShareCard } from "./agentShareCard";
-import { generateAgentCardDescription } from "./agentShareCardDescriptionInference";
 
 const workerMocks = vi.hoisted(() => ({
   construct: vi.fn(),
@@ -117,10 +116,6 @@ vi.mock("./HolographicAgentCard", () => ({
   ),
 }));
 
-vi.mock("./agentShareCardDescriptionInference", () => ({
-  generateAgentCardDescription: vi.fn(async () => "Reviews code carefully."),
-}));
-
 vi.mock("./agentShareCard", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./agentShareCard")>();
   return {
@@ -172,94 +167,6 @@ describe("AgentShareDialog", () => {
     avatarHookMocks.image = "https://example.com/avatar.png";
     avatarHookMocks.media = undefined;
     vi.mocked(readCachedAvatarAnimation).mockResolvedValue(null);
-  });
-
-  it("finishes generation and requires a new click after reopening", async () => {
-    const onOpenChange = vi.fn();
-    const user = userEvent.setup();
-    const { rerender } = render(
-      <AgentShareDialog
-        open
-        persona={persona}
-        onOpenChange={onOpenChange}
-        onDownloadAgent={vi.fn()}
-      />,
-    );
-
-    await user.click(
-      screen.getByRole("button", {
-        name: "share.generateDescription",
-      }),
-    );
-    await waitFor(() =>
-      expect(generateAgentCardDescription).toHaveBeenCalledTimes(1),
-    );
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "share.generateDescription" }),
-      ).toBeEnabled(),
-    );
-
-    rerender(
-      <AgentShareDialog
-        open={false}
-        persona={persona}
-        onOpenChange={onOpenChange}
-        onDownloadAgent={vi.fn()}
-      />,
-    );
-    rerender(
-      <AgentShareDialog
-        open
-        persona={persona}
-        onOpenChange={onOpenChange}
-        onDownloadAgent={vi.fn()}
-      />,
-    );
-    await Promise.resolve();
-    expect(generateAgentCardDescription).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not restart generation after closing while it is pending", async () => {
-    const pending = deferred<string>();
-    vi.mocked(generateAgentCardDescription).mockReturnValueOnce(
-      pending.promise,
-    );
-    const user = userEvent.setup();
-    const { rerender } = render(
-      <AgentShareDialog
-        open
-        persona={persona}
-        onOpenChange={vi.fn()}
-        onDownloadAgent={vi.fn()}
-      />,
-    );
-    await user.click(
-      screen.getByRole("button", { name: "share.generateDescription" }),
-    );
-    await waitFor(() =>
-      expect(generateAgentCardDescription).toHaveBeenCalledTimes(1),
-    );
-
-    rerender(
-      <AgentShareDialog
-        open={false}
-        persona={persona}
-        onOpenChange={vi.fn()}
-        onDownloadAgent={vi.fn()}
-      />,
-    );
-    rerender(
-      <AgentShareDialog
-        open
-        persona={persona}
-        onOpenChange={vi.fn()}
-        onDownloadAgent={vi.fn()}
-      />,
-    );
-    await Promise.resolve();
-    expect(generateAgentCardDescription).toHaveBeenCalledTimes(1);
-    pending.resolve("Reviews code carefully.");
   });
 
   it("prevents duplicate agent-file downloads while one is pending", async () => {

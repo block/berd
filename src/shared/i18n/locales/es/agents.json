@@ -163,8 +163,7 @@
     "cardDownloaded": "Se descargó {{filename}}",
     "cardDownloadFailed": "No se pudo crear la tarjeta. Inténtalo de nuevo.",
     "loadingCard": "Cargando tarjeta",
-    "generateDescription": "Generar descripción con tu modelo configurado",
-    "generatingDescription": "Generando descripción…",
+    "descriptionFallback": "{{name}} ayuda con tareas específicas.",
     "avatarUnavailable": "Avatar no disponible",
     "cardLabels": {
       "goodFor": "Ideal para:",

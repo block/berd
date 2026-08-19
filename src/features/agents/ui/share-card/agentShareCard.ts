@@ -25,10 +25,17 @@ export function getAgentShareCardBase(_personaId: string): string {
   return cardFoil;
 }
 
-export function getAgentShareDescription(persona: Persona): string {
+export function getAgentShareDescription(
+  persona: Persona,
+  fallback?: string,
+): string {
   return (
     getRealPersonaDescription(persona) ??
-    deriveAgentCardDescription(persona.systemPrompt, persona.displayName)
+    deriveAgentCardDescription(
+      persona.systemPrompt,
+      persona.displayName,
+      fallback,
+    )
   );
 }
 

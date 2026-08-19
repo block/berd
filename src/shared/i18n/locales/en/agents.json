@@ -163,8 +163,7 @@
     "cardDownloaded": "Downloaded {{filename}}",
     "cardDownloadFailed": "Couldn't create the card. Try again.",
     "loadingCard": "Loading card",
-    "generateDescription": "Generate description with your configured model",
-    "generatingDescription": "Generating description…",
+    "descriptionFallback": "{{name}} helps with focused work.",
     "avatarUnavailable": "Avatar unavailable",
     "cardLabels": {
       "goodFor": "Good for:",

@@ -38,7 +38,6 @@ import {
 import { AgentShareCardPreview } from "./AgentShareCardPreview";
 import { AgentCardReveal } from "./AgentCardReveal";
 import { resolveAgentShareCardCopy } from "./agentShareCardCopy";
-import { generateAgentCardDescription } from "./agentShareCardDescriptionInference";
 import {
   blobToBytes,
   createAvatarPoster,
@@ -212,25 +211,11 @@ export function AgentShareDialog({
   // decoded. Cached animation/poster resolution may continue independently.
   const cardReady = Boolean(avatarSrc && avatarReadySrc === avatarSrc);
   const cardBase = getAgentShareCardBase(persona.id);
-  const fallbackDescription = getAgentShareDescription(persona);
   const locale = i18n?.resolvedLanguage ?? i18n?.language ?? "en";
-  const [generatedDescriptionState, setGeneratedDescription] = useState<{
-    identity: string;
-    value: string;
-  }>();
-  const [generationRequested, setGenerationRequested] = useState(false);
-  const [generationPending, setGenerationPending] = useState(false);
-  const descriptionIdentity = [
-    locale,
-    persona.id,
-    persona.displayName,
-    persona.systemPrompt,
-  ].join("\0");
-  const generatedDescription =
-    generatedDescriptionState?.identity === descriptionIdentity
-      ? generatedDescriptionState.value
-      : undefined;
-  const description = generatedDescription ?? fallbackDescription;
+  const description = getAgentShareDescription(
+    persona,
+    t("share.descriptionFallback", { name: persona.displayName }),
+  );
   const cardCopy = resolveAgentShareCardCopy(persona.systemPrompt, t, {
     goodFor: persona.goodFor,
     vibes: persona.vibes,
@@ -246,38 +231,6 @@ export function AgentShareDialog({
     persona.goodFor,
     persona.vibes,
   ].join("\0");
-
-  useEffect(() => {
-    if (!open || !generationRequested) {
-      setGenerationPending(false);
-      if (!open) {
-        setGeneratedDescription(undefined);
-        setGenerationRequested(false);
-      }
-      return;
-    }
-    const controller = new AbortController();
-    setGenerationPending(true);
-    void generateAgentCardDescription(
-      persona.systemPrompt,
-      persona.displayName,
-      { locale, signal: controller.signal },
-    ).then((value) => {
-      if (!controller.signal.aborted) {
-        setGeneratedDescription({ identity: descriptionIdentity, value });
-        setGenerationPending(false);
-        setGenerationRequested(false);
-      }
-    });
-    return () => controller.abort();
-  }, [
-    descriptionIdentity,
-    generationRequested,
-    locale,
-    open,
-    persona.displayName,
-    persona.systemPrompt,
-  ]);
 
   useEffect(() => {
     if (!open) {
@@ -587,17 +540,7 @@ export function AgentShareDialog({
           </AnimatePresence>
         </div>
 
-        <DialogFooter className="sm:items-center sm:justify-between">
-          <button
-            type="button"
-            className="text-sm text-muted-foreground underline-offset-4 hover:underline"
-            onClick={() => setGenerationRequested(true)}
-            disabled={generationPending}
-          >
-            {generationPending
-              ? t("share.generatingDescription")
-              : t("share.generateDescription")}
-          </button>
+        <DialogFooter>
           {agentDownloadPending ? (
             <span
               className="sr-only"

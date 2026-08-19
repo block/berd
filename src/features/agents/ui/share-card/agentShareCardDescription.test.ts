@@ -29,6 +29,16 @@ describe("deriveAgentCardDescription", () => {
     ).toBe("Scout helps with focused work.");
   });
 
+  it("uses a caller-provided localized fallback", () => {
+    expect(
+      deriveAgentCardDescription(
+        "Instrucciones privadas sin patrón reconocido.",
+        "Scout",
+        "Scout ayuda con tareas específicas.",
+      ),
+    ).toBe("Scout ayuda con tareas específicas.");
+  });
+
   it("uses a bounded fallback when instructions cannot form a short sentence", () => {
     expect(deriveAgentCardDescription("x".repeat(500), "Scout")).toBe(
       "Scout helps with focused work.",

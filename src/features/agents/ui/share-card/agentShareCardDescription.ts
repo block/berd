@@ -90,6 +90,7 @@ function descriptiveJob(text: string): string | undefined {
 export function deriveAgentCardDescription(
   instructions: string,
   displayName: string,
+  fallback = `${displayName.trim() || "This agent"} helps with focused work.`,
 ): string {
   const text = cleanInstructionText(instructions);
   const withoutIdentity = text.replace(
@@ -111,5 +112,5 @@ export function deriveAgentCardDescription(
     : undefined;
   if (purposeSentence) return purposeSentence;
 
-  return `${displayName.trim() || "This agent"} helps with focused work.`;
+  return fallback;
 }
