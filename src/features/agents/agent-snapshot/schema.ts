@@ -160,13 +160,13 @@ export function validateSnapshotV1(value: unknown): SnapshotV1 {
     optionalString(profile, "vibes");
     if (
       typeof profile.goodFor === "string" &&
-      graphemeCount(profile.goodFor) > 44
+      graphemeCount(profile.goodFor.trim()) > 44
     ) {
       throw new AgentSnapshotError("goodFor is too long", "invalid-snapshot");
     }
     if (
       typeof profile.vibes === "string" &&
-      graphemeCount(profile.vibes) > 32
+      graphemeCount(profile.vibes.trim()) > 32
     ) {
       throw new AgentSnapshotError("vibes is too long", "invalid-snapshot");
     }
