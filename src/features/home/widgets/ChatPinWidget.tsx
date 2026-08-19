@@ -1,4 +1,8 @@
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { CHAT_ON_CANVAS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { ChatCanvasCard } from "./ChatCanvasCard";
 import { IconMessageCircle } from "@tabler/icons-react";
 import { sessionActivityAt } from "@/features/chat/lib/sessionActivity";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
@@ -26,11 +30,14 @@ function resolveSession(sessions: ChatSession[], id: string | null) {
 
 export function ChatPinWidget({
   instance,
+  onUpdateState,
   shouldIgnoreActivation,
   onSelectSession,
 }: WidgetRenderProps) {
   const { t } = useTranslation("home");
   const { formatRelativeTimeToNow } = useLocaleFormatting();
+  const chatOnCanvasEnabled =
+    useExperiment(CHAT_ON_CANVAS_EXPERIMENT_ID)?.enabled === true;
   const sessions = useChatSessionStore((state) => state.sessions);
   const sessionId = getSessionId(instance.state);
   const isLoadingSession = useChatStore((state) =>
@@ -61,16 +68,43 @@ export function ChatPinWidget({
       .filter(Boolean)
       .join(" · ");
   }
+  const isExpanded =
+    chatOnCanvasEnabled && instance.state?.presentation === "expanded";
+  useEffect(() => {
+    if (!chatOnCanvasEnabled && instance.state?.presentation === "expanded") {
+      onUpdateState({ presentation: "collapsed" });
+    }
+  }, [chatOnCanvasEnabled, instance.state?.presentation, onUpdateState]);
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
-    if (session) onSelectSession?.(session.id);
+    if (!session) return;
+    if (chatOnCanvasEnabled) {
+      onUpdateState({ presentation: "expanded" });
+      return;
+    }
+    onSelectSession?.(session.id);
   });
+
+  if (isExpanded && session && !isUnavailable) {
+    return (
+      <ChatCanvasCard
+        session={session}
+        onCollapse={() => onUpdateState({ presentation: "collapsed" })}
+        onOpenFullChat={() => onSelectSession?.(session.id)}
+      />
+    );
+  }
   const isCompact = (instance.height ?? 80) <= 96;
 
   return (
     <button
       type="button"
       onClick={handleClick}
-      aria-label={t("widgets.chatPin.openAria", { title })}
+      aria-label={t(
+        chatOnCanvasEnabled
+          ? "widgets.chatPin.expandAria"
+          : "widgets.chatPin.openAria",
+        { title },
+      )}
       className="flex h-full w-full flex-col overflow-hidden rounded-md bg-card text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
       style={{
         padding: "clamp(0.75rem, calc(1rem * var(--widget-scale, 1)), 1.75rem)",

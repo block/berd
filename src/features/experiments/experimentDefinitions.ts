@@ -57,6 +57,8 @@ export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
 
 export const AVATAR_COLLECTION_PAGE_EXPERIMENT_ID = "avatar-collection-page";
 
+export const CHAT_ON_CANVAS_EXPERIMENT_ID = "chat-on-canvas";
+
 export const STARTER_TASKS_EXPERIMENT_ID = "onboarding-starter-tasks";
 
 export const BERDY_ONBOARDING_EXPERIMENT_ID = "berdy-onboarding";
@@ -95,6 +97,11 @@ export const EXPERIMENT_DEFINITIONS = [
     titleKey: "experiments.voiceConversation.title",
     descriptionKey: "experiments.voiceConversation.description",
     defaultEnabled: true,
+  },
+  {
+    id: CHAT_ON_CANVAS_EXPERIMENT_ID,
+    titleKey: "experiments.chatOnCanvas.title",
+    descriptionKey: "experiments.chatOnCanvas.description",
   },
   {
     id: AVATAR_COLLECTION_PAGE_EXPERIMENT_ID,

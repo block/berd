@@ -34,6 +34,7 @@ describe("chatStore", () => {
       draftAttachmentsBySession: {},
       activeSessionId: null,
       recentMessageSessionIds: [],
+      mountedTranscriptCountBySession: {},
       isViewingActiveSession: false,
       isConnected: false,
       loadingSessionIds: new Set(),
@@ -1255,6 +1256,7 @@ describe("chatStore draft localStorage persistence", () => {
       draftAttachmentsBySession: {},
       activeSessionId: null,
       recentMessageSessionIds: [],
+      mountedTranscriptCountBySession: {},
       isViewingActiveSession: false,
       isConnected: false,
     });
@@ -1327,6 +1329,7 @@ describe("chatStore session loading state", () => {
       draftAttachmentsBySession: {},
       activeSessionId: null,
       recentMessageSessionIds: [],
+      mountedTranscriptCountBySession: {},
       isViewingActiveSession: false,
       isConnected: false,
       loadingSessionIds: new Set<string>(),
@@ -1374,5 +1377,60 @@ describe("chatStore session loading state", () => {
     useChatStore.getState().setSessionLoading("s1", false);
 
     expect(useChatStore.getState().loadingSessionIds.size).toBe(0);
+  });
+});
+
+describe("mounted transcript cache retention", () => {
+  beforeEach(() => {
+    useChatStore.setState({
+      messagesBySession: {},
+      sessionStateById: {},
+      recentMessageSessionIds: [],
+      mountedTranscriptCountBySession: {},
+      loadingSessionIds: new Set(),
+    });
+  });
+
+  it("reference counts independent transcript mounts", () => {
+    const firstRelease = useChatStore
+      .getState()
+      .retainMountedTranscript("session-1");
+    const secondRelease = useChatStore
+      .getState()
+      .retainMountedTranscript("session-1");
+
+    expect(
+      useChatStore.getState().mountedTranscriptCountBySession["session-1"],
+    ).toBe(2);
+
+    firstRelease();
+    firstRelease();
+    expect(
+      useChatStore.getState().mountedTranscriptCountBySession["session-1"],
+    ).toBe(1);
+
+    secondRelease();
+    expect(useChatStore.getState().mountedTranscriptCountBySession).toEqual({});
+  });
+
+  it("protects a settled mounted transcript without increasing the cache limit", () => {
+    const release = useChatStore
+      .getState()
+      .retainMountedTranscript("mounted-session");
+    useChatStore.getState().setMessages("mounted-session", [makeMessage()]);
+
+    for (let index = 0; index < 11; index += 1) {
+      useChatStore
+        .getState()
+        .setMessages(`other-session-${index}`, [makeMessage()]);
+    }
+
+    expect(
+      useChatStore.getState().messagesBySession["mounted-session"],
+    ).toHaveLength(1);
+    expect(
+      Object.keys(useChatStore.getState().messagesBySession).length,
+    ).toBeLessThanOrEqual(10);
+    release();
   });
 });

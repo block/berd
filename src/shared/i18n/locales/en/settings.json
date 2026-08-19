@@ -256,6 +256,10 @@
     "voiceConversation": {
       "description": "Try continuous two-way voice conversations in Goose chats.",
       "title": "Voice conversations"
+    },
+    "chatOnCanvas": {
+      "title": "Chat on canvas",
+      "description": "Expand pinned chats into live, read-only conversation cards on Home."
     }
   },
   "extensions": {

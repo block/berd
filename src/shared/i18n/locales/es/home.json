@@ -147,7 +147,11 @@
       "emptyDescription": "Fija un chat para verlo aquí",
       "loadingDescription": "Cargando chat fijado...",
       "unavailableDescription": "Chat fijado no disponible",
-      "openAria": "Abrir chat: {{title}}"
+      "openAria": "Abrir chat: {{title}}",
+      "expandAria": "Expandir chat: {{title}}",
+      "collapseAria": "Contraer chat: {{title}}",
+      "openFullAria": "Abrir chat completo: {{title}}",
+      "previewHint": "Amplía para leer la conversación en vivo"
     },
     "projectArtifactPin": {
       "label": "Fijar un proyecto",

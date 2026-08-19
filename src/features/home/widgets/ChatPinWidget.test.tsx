@@ -6,6 +6,33 @@ import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { ChatPinWidget } from "./ChatPinWidget";
 import type { WidgetInstance } from "./types";
 
+const { mockUseExperiment } = vi.hoisted(() => ({
+  mockUseExperiment: vi.fn(() => ({ enabled: false })),
+}));
+
+vi.mock("@/features/experiments/experimentPreferences", () => ({
+  useExperiment: mockUseExperiment,
+}));
+
+vi.mock("./ChatCanvasCard", () => ({
+  ChatCanvasCard: ({
+    onCollapse,
+    onOpenFullChat,
+  }: {
+    onCollapse: () => void;
+    onOpenFullChat: () => void;
+  }) => (
+    <div>
+      <button type="button" onClick={onCollapse}>
+        Collapse
+      </button>
+      <button type="button" onClick={onOpenFullChat}>
+        Open full chat
+      </button>
+    </div>
+  ),
+}));
+
 vi.mock("@/shared/i18n", () => ({
   useLocaleFormatting: () => ({
     formatRelativeTimeToNow: () => "just now",
@@ -44,6 +71,7 @@ function instance(sessionId: string): WidgetInstance {
 describe("ChatPinWidget", () => {
   beforeEach(() => {
     resetStores();
+    mockUseExperiment.mockReturnValue({ enabled: false });
   });
 
   it("does not fall back to another session when the pinned id is missing", () => {
@@ -66,6 +94,63 @@ describe("ChatPinWidget", () => {
     expect(screen.queryByText("Other chat")).not.toBeInTheDocument();
     expect(screen.getByText("No recent chat")).toBeInTheDocument();
     expect(screen.getByText("Loading pinned chat...")).toBeInTheDocument();
+  });
+
+  it("expands in place instead of navigating when the experiment is enabled", async () => {
+    const user = userEvent.setup();
+    const onUpdateState = vi.fn();
+    const onSelectSession = vi.fn();
+    mockUseExperiment.mockReturnValue({ enabled: true });
+    useChatSessionStore.getState().addSession({
+      id: "session-pinned",
+      title: "Pinned chat",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      messageCount: 1,
+    });
+
+    render(
+      <ChatPinWidget
+        instance={instance("session-pinned")}
+        onUpdateState={onUpdateState}
+        onSelectSession={onSelectSession}
+      />,
+    );
+    await user.click(screen.getByRole("button"));
+
+    expect(onUpdateState).toHaveBeenCalledWith({ presentation: "expanded" });
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it("restores an expanded card and exposes collapse and full-chat actions", async () => {
+    const user = userEvent.setup();
+    const onUpdateState = vi.fn();
+    const onSelectSession = vi.fn();
+    mockUseExperiment.mockReturnValue({ enabled: true });
+    useChatSessionStore.getState().addSession({
+      id: "session-pinned",
+      title: "Pinned chat",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      messageCount: 1,
+    });
+    const expanded = {
+      ...instance("session-pinned"),
+      state: { sessionId: "session-pinned", presentation: "expanded" },
+    };
+
+    render(
+      <ChatPinWidget
+        instance={expanded}
+        onUpdateState={onUpdateState}
+        onSelectSession={onSelectSession}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Collapse" }));
+    await user.click(screen.getByRole("button", { name: "Open full chat" }));
+
+    expect(onUpdateState).toHaveBeenCalledWith({ presentation: "collapsed" });
+    expect(onSelectSession).toHaveBeenCalledWith("session-pinned");
   });
 
   it("selects an unavailable pinned session so it can retry loading", async () => {

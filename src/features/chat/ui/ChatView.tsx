@@ -7,18 +7,15 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence } from "motion/react";
 import { IconLayoutSidebarLeftCollapse } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { VirtualMessageTimelineGate } from "./VirtualMessageTimelineGate";
 import { ChatSearchBar } from "./ChatSearchBar";
+import { ChatTranscriptSurface } from "./ChatTranscriptSurface";
 import { WorkspaceSetupChoice } from "./WorkspaceSetupChoice";
 import { summarizeProjectWorkspaceStartup } from "@/features/projects/lib/projectChatWorkspaces";
 import { ChatInput } from "./ChatInput";
 import { LoadingBerd } from "./LoadingBerd";
-import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
-import { ConversationEmptyAvatar } from "./ConversationEmptyAvatar";
-import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import { ChatRightRail } from "./ChatRightRail";
 import {
   ARTIFACT_VIEWER_RAIL_ALLOWANCE_PX,
@@ -67,7 +64,6 @@ import {
   isContextPanelVisible,
 } from "@/features/chat/lib/chatCapabilityVisibility";
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
-import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
 import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
 import { useVoiceConversationController } from "@/features/voice-conversation/hooks/useVoiceConversationController";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
@@ -86,13 +82,6 @@ import {
 const CHAT_RESPONDING_PILL_CLASS =
   "rounded-full bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)] [--shimmer-ink:var(--color-surface-chat-responding-pill-fg)]";
 const CLOSED_RIGHT_RAIL_DOCK_TARGET_WIDTH_PX = 48;
-function shouldStageInitialTranscript(
-  messages: readonly unknown[],
-  isLoadingHistory: boolean,
-): boolean {
-  return messages.length > 0 && !isLoadingHistory;
-}
-
 interface ChatViewProps {
   sessionId: string;
   activeSession?: ChatSession | null;
@@ -574,11 +563,12 @@ export function ChatView({
   const onTimelineChangeFolder =
     !isReadOnly && changeFolderSessionId ? handleChangeFolder : undefined;
 
-  const showIndicator =
-    controller.chatState === "thinking" ||
-    controller.chatState === "streaming" ||
-    controller.chatState === "waiting" ||
-    controller.chatState === "compacting";
+  const shouldShowLoadingIndicator =
+    !controller.isLoadingHistory &&
+    (controller.chatState === "thinking" ||
+      controller.chatState === "streaming" ||
+      controller.chatState === "waiting" ||
+      controller.chatState === "compacting");
   const loadingChatState = controller.chatState as
     | "thinking"
     | "streaming"
@@ -606,24 +596,6 @@ export function ChatView({
 
     return undefined;
   }, [composerHandoffActive, controller.skillsEnabled, isReadOnly]);
-  const shouldStageTranscript = shouldStageInitialTranscript(
-    controller.messages,
-    controller.isLoadingHistory,
-  );
-  const [initialTranscriptGate, setInitialTranscriptGate] = useState(() => ({
-    sessionId,
-    pending: shouldStageTranscript,
-  }));
-  const isPreparingInitialTranscript =
-    initialTranscriptGate.sessionId === sessionId
-      ? initialTranscriptGate.pending
-      : shouldStageTranscript;
-  const showTimelineLoading =
-    controller.isLoadingHistory || isPreparingInitialTranscript;
-  const shouldShowLoadingIndicator = showIndicator && !showTimelineLoading;
-  const timelineMessages = isPreparingInitialTranscript
-    ? []
-    : controller.messages;
   const suppressEmptyConversationPlaceholder =
     composerHandoffInProgress || controller.queue.queuedMessage !== null;
   const handleForkFromMessage = useCallback(
@@ -644,34 +616,6 @@ export function ChatView({
     },
     [controller.messages, effectiveSession?.id, isReadOnly, onForkChat],
   );
-
-  // Only gate the first render for a session. Later live updates should stream
-  // into the mounted timeline without showing the skeleton again.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId is the reset signal for the initial transcript gate.
-  useEffect(() => {
-    const pending = shouldStageInitialTranscript(
-      controller.messages,
-      controller.isLoadingHistory,
-    );
-
-    setInitialTranscriptGate((current) =>
-      current.sessionId === sessionId && current.pending === pending
-        ? current
-        : { sessionId, pending },
-    );
-
-    if (!pending) {
-      return;
-    }
-
-    return scheduleAfterNextPaint(() => {
-      setInitialTranscriptGate((current) =>
-        current.sessionId === sessionId && current.pending
-          ? { sessionId, pending: false }
-          : current,
-      );
-    });
-  }, [sessionId]);
 
   let sendDisabledReason: string | undefined;
   if (readOnlyStatus) {
@@ -903,39 +847,15 @@ export function ChatView({
     </div>
   );
 
-  const conversationPlaceholder = showTimelineLoading ? (
-    <ChatLoadingSkeleton />
-  ) : suppressEmptyConversationPlaceholder ? (
-    <div className="flex w-full flex-1" aria-hidden="true" />
-  ) : (
-    <div className="flex w-full flex-1 flex-col items-center justify-center px-6">
-      <AnimatePresence initial={false}>
-        {controller.selectedPersona ? (
-          <motion.div
-            key="conversation-empty-avatar"
-            className="overflow-hidden"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.25, ease: "easeInOut" }}
-          >
-            <div className="pb-4">
-              <ConversationEmptyAvatar persona={controller.selectedPersona} />
-            </div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-      <p className="text-sm font-normal text-foreground">
-        {t("emptyState.startAConversation")}
-      </p>
-    </div>
-  );
   const timelineSessionId = effectiveSession?.id ?? sessionId;
   const messageTimeline = (
-    <VirtualMessageTimelineGate
+    <ChatTranscriptSurface
       sessionId={timelineSessionId}
-      messages={timelineMessages}
+      messages={controller.messages}
       streamingMessageId={controller.streamingMessageId}
+      isLoadingHistory={controller.isLoadingHistory}
+      selectedPersona={controller.selectedPersona}
+      sessionCwd={controller.sessionArtifactCwd}
       scrollTargetMessageId={controller.scrollTarget?.messageId ?? null}
       scrollTargetQuery={controller.scrollTarget?.query ?? null}
       onScrollTargetHandled={controller.handleScrollTargetHandled}
@@ -951,12 +871,12 @@ export function ChatView({
       onForkFromMessage={
         !isReadOnly && onForkChat ? handleForkFromMessage : undefined
       }
-      showPlaceholder={showTimelineLoading}
-      placeholder={conversationPlaceholder}
+      suppressEmptyPlaceholder={suppressEmptyConversationPlaceholder}
       footer={composerFooter}
       footerStatus={footerStatus}
     />
   );
+
   useFocusRegion({
     id: "terminal",
     label: "terminal",
@@ -983,11 +903,7 @@ export function ChatView({
   });
 
   return (
-    <ArtifactPolicyProvider
-      messages={timelineMessages}
-      sessionCwd={controller.sessionArtifactCwd}
-      sessionId={sessionId}
-    >
+    <>
       <ArtifactAutoOpenMount
         sessionId={sessionId}
         isHistoryLoading={controller.isLoadingHistory}
@@ -1169,6 +1085,6 @@ export function ChatView({
           onOpenTerminalAtPath={handleOpenTerminalAtPath}
         />
       </div>
-    </ArtifactPolicyProvider>
+    </>
   );
 }

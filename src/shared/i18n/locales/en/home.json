@@ -147,7 +147,11 @@
       "emptyDescription": "Pin a chat to see it here",
       "loadingDescription": "Loading pinned chat...",
       "unavailableDescription": "Pinned chat unavailable",
-      "openAria": "Open chat: {{title}}"
+      "openAria": "Open chat: {{title}}",
+      "expandAria": "Expand chat: {{title}}",
+      "collapseAria": "Collapse chat: {{title}}",
+      "openFullAria": "Open full chat: {{title}}",
+      "previewHint": "Enlarge to read the live transcript"
     },
     "projectArtifactPin": {
       "label": "Pin a project",
