@@ -1669,6 +1669,9 @@ fn synthesize_and_stream(
         if !callback_active.load(Ordering::SeqCst) {
             return false;
         }
+        if samples.is_empty() {
+            return true;
+        }
         let delta = match callback_speed_processor.borrow_mut().process(&samples) {
             Ok(processed) => processed,
             Err(error) => {

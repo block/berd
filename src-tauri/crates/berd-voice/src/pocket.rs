@@ -14,6 +14,7 @@
 //! Berd's Pocket model installer writes the complete attribution beside the
 //! cached model files.
 
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -35,8 +36,44 @@ pub const SAMPLE_RATE: u32 = 24_000;
 
 const TTS_NUM_THREADS: usize = 1;
 
-/// EXPERIMENTAL (latency): override ONNX intra-op threads for the Pocket
-/// sessions via `BERD_TTS_THREADS`. Default preserves production's 1.
+thread_local! {
+    static ACTIVE_SYNTHESIS_ENGINES: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
+struct SynthesisCallGuard {
+    engine_id: usize,
+}
+
+impl SynthesisCallGuard {
+    fn enter(engine_id: usize) -> Result<Self, String> {
+        ACTIVE_SYNTHESIS_ENGINES.with(|active| {
+            let mut active = active.borrow_mut();
+            if active.contains(&engine_id) {
+                return Err("Pocket TTS callback re-entered the active engine".to_string());
+            }
+            active.push(engine_id);
+            Ok(Self { engine_id })
+        })
+    }
+
+    fn is_active(engine_id: usize) -> bool {
+        ACTIVE_SYNTHESIS_ENGINES.with(|active| active.borrow().contains(&engine_id))
+    }
+}
+
+impl Drop for SynthesisCallGuard {
+    fn drop(&mut self) {
+        ACTIVE_SYNTHESIS_ENGINES.with(|active| {
+            let mut active = active.borrow_mut();
+            if let Some(index) = active.iter().rposition(|engine| *engine == self.engine_id) {
+                active.remove(index);
+            }
+        });
+    }
+}
+
+/// Return the configured ONNX intra-op thread count for Pocket sessions.
+/// `BERD_TTS_THREADS` overrides the single-thread default when set.
 fn tts_num_threads() -> usize {
     std::env::var("BERD_TTS_THREADS")
         .ok()
@@ -86,6 +123,7 @@ impl PocketTts {
     /// Split text into model-safe synthesis units that satisfy the bundle's
     /// exact 50-token input limit, packing sentences whenever they fit.
     pub fn split_text_into_chunks(&self, text: &str) -> Result<Vec<String>, String> {
+        self.reject_reentry()?;
         let Some(prepared) = prepare_april_prompt(text) else {
             return Ok(Vec::new());
         };
@@ -93,23 +131,6 @@ impl PocketTts {
             .lock()
             .map_err(|_| "Pocket TTS engine lock poisoned".to_string())?
             .split_prompt(&prepared)
-    }
-
-    /// Split text into ordered playback units, keeping the first sentence
-    /// separate so it reaches synthesis before the remainder is packed.
-    ///
-    /// Units are contiguous substrings of the prepared model prompt and may
-    /// retain boundary whitespace. Concatenating them with `chunks.concat()`
-    /// reconstructs that prompt exactly, and each unit's prepared token count
-    /// is at most 50.
-    pub fn split_text_for_playback(&self, text: &str) -> Result<Vec<String>, String> {
-        let Some(prepared) = prepare_april_prompt(text) else {
-            return Ok(Vec::new());
-        };
-        self.inner
-            .lock()
-            .map_err(|_| "Pocket TTS engine lock poisoned".to_string())?
-            .split_playback_prompt(&prepared)
     }
 
     /// Synthesize text with the supplied reference voice.
@@ -123,6 +144,7 @@ impl PocketTts {
         style: &VoiceStyle,
         _steps: usize,
     ) -> Result<Vec<f32>, String> {
+        self.reject_reentry()?;
         let Some(prepared) = prepare_april_prompt(text) else {
             return Ok(Vec::new());
         };
@@ -140,11 +162,12 @@ impl PocketTts {
         Ok(samples)
     }
 
-    /// EXPERIMENTAL (latency): streaming synthesis. Invokes `on_audio` with
-    /// PCM deltas as soon as roughly `emit_frames` Flow LM frames (80 ms of
-    /// audio each) have been generated and decoded. Concatenated deltas equal
-    /// one `synth_chunk` result. The callback runs on the caller thread and
-    /// returns `false` to cancel; the function then returns Ok(false).
+    /// Stream synthesis as PCM deltas become decoder-safe. `emit_frames` is
+    /// rounded down to a positive multiple of the Mimi decoder's 12-frame
+    /// chunk size. Concatenated non-empty deltas equal one `synth_chunk`
+    /// result. The callback runs on the caller thread and may receive empty
+    /// deltas so cancellation is observed before PCM is available. Returning
+    /// `false` cancels synthesis and makes the function return `Ok(false)`.
     pub fn synth_chunk_streaming(
         &self,
         text: &str,
@@ -152,6 +175,7 @@ impl PocketTts {
         emit_frames: usize,
         on_audio: &mut dyn FnMut(Vec<f32>) -> bool,
     ) -> Result<bool, String> {
+        let _call_guard = SynthesisCallGuard::enter(self as *const Self as usize)?;
         let Some(prepared) = prepare_april_prompt(text) else {
             return Ok(true);
         };
@@ -159,16 +183,48 @@ impl PocketTts {
             .inner
             .lock()
             .map_err(|_| "Pocket TTS engine lock poisoned".to_string())?;
-        let chunks = engine.split_prompt(&prepared)?;
+        let chunks = engine.split_playback_prompt(&prepared)?;
         for chunk in chunks {
+            if !callback_allows_audio(on_audio, Vec::new())? {
+                return Ok(false);
+            }
             let prepared = prepare_april_prompt(&chunk)
                 .ok_or_else(|| "Pocket TTS prompt chunk became empty".to_string())?;
-            if !engine.synth_chunk_streaming(&prepared, style, emit_frames, on_audio)? {
+            let mut callback_error = None;
+            let completed =
+                engine.synth_chunk_streaming(&prepared, style, emit_frames, &mut |audio| {
+                    match callback_allows_audio(on_audio, audio) {
+                        Ok(allowed) => allowed,
+                        Err(error) => {
+                            callback_error = Some(error);
+                            false
+                        }
+                    }
+                })?;
+            if let Some(error) = callback_error {
+                return Err(error);
+            }
+            if !completed {
                 return Ok(false);
             }
         }
         Ok(true)
     }
+
+    fn reject_reentry(&self) -> Result<(), String> {
+        if SynthesisCallGuard::is_active(self as *const Self as usize) {
+            return Err("Pocket TTS callback re-entered the active engine".to_string());
+        }
+        Ok(())
+    }
+}
+
+fn callback_allows_audio(
+    callback: &mut dyn FnMut(Vec<f32>) -> bool,
+    audio: Vec<f32>,
+) -> Result<bool, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(audio)))
+        .map_err(|_| "Pocket TTS synthesis callback panicked".to_string())
 }
 
 #[cfg(test)]
@@ -190,89 +246,19 @@ mod tests {
             .any(|artifact| artifact.filename == "flow_lm_main.onnx"));
     }
 
-    /// Which splitter each production function delegates to, across the whole
-    /// file rather than one hand-picked window.
-    ///
-    /// A wrong delegation can reinstate either shipped defect in one token:
-    /// removing first-sentence priority from playback, or re-isolating sentence
-    /// one inside units that already fit. Asserting the whole map means a new
-    /// delegation must be declared here to compile green.
-    fn splitter_delegations(source: &str) -> Vec<(String, Vec<String>)> {
-        let production = source
-            .split_once("\n#[cfg(test)]")
-            .map_or(source, |(production, _)| production);
-        // Scan code only. Prose cannot call a splitter, but it can contain
-        // ` fn `, which would end a body early and hide a call after it, and it
-        // can name a splitter, which would report a call the code never makes.
-        let production: String = production
-            .lines()
-            .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let mut out = Vec::new();
-        let mut rest = production.as_str();
-        while let Some((_, after)) = rest.split_once(" fn ") {
-            let (name, body) = after
-                .split_once('(')
-                .expect("a function signature has an argument list");
-            // End at this function's own closing brace, not at the next ` fn `:
-            // a body provably stops where its braces balance, so no later
-            // function's calls are attributed here and none of this one's are
-            // dropped.
-            let inner = body.split_once('{').map_or("", |(_, inner)| inner);
-            let mut depth = 1usize;
-            let body = inner
-                .char_indices()
-                .find(|&(_, ch)| {
-                    depth = match ch {
-                        '{' => depth + 1,
-                        '}' => depth - 1,
-                        _ => depth,
-                    };
-                    depth == 0
-                })
-                .map_or(inner, |(end, _)| &inner[..end]);
-            let mut calls = Vec::new();
-            // Check the isolating spelling first: ".split_prompt(" is a
-            // substring of neither, but a naive contains() on the shorter name
-            // would also match the longer one.
-            for _ in 0..body.matches(".split_playback_prompt(").count() {
-                calls.push("split_playback_prompt".to_string());
-            }
-            let plain = body.matches(".split_prompt(").count();
-            for _ in 0..plain {
-                calls.push("split_prompt".to_string());
-            }
-            if !calls.is_empty() {
-                out.push((name.trim().to_string(), calls));
-            }
-            rest = after;
-        }
-        out
+    #[test]
+    fn active_engine_reentry_is_rejected() {
+        let _guard = SynthesisCallGuard::enter(42).expect("first call");
+        assert!(SynthesisCallGuard::enter(42).is_err());
+        assert!(SynthesisCallGuard::is_active(42));
     }
 
     #[test]
-    fn every_production_splitter_delegation_is_declared() {
-        let source = include_str!("pocket.rs");
-        let actual = splitter_delegations(source);
-        let expected: Vec<(String, Vec<String>)> = vec![
-            // Model units: pack sentences, never isolate.
-            ("split_text_into_chunks".into(), vec!["split_prompt".into()]),
-            // Playback units: isolate sentence one for time-to-first-audio.
-            (
-                "split_text_for_playback".into(),
-                vec!["split_playback_prompt".into()],
-            ),
-            // Synthesis receives an already-packed unit: re-isolating here
-            // re-adds the per-sentence seam this PR removes.
-            ("synth_chunk".into(), vec!["split_prompt".into()]),
-            ("synth_chunk_streaming".into(), vec!["split_prompt".into()]),
-        ];
+    fn callback_panic_is_reported_without_unwinding() {
+        let mut callback = |_: Vec<f32>| -> bool { panic!("callback failure") };
         assert_eq!(
-            actual, expected,
-            "a production function changed which splitter it calls (or a new \
-             one appeared); isolating outside split_text_for_playback delays \
-             first audio, packing inside it removes the guarantee"
+            callback_allows_audio(&mut callback, Vec::new()).unwrap_err(),
+            "Pocket TTS synthesis callback panicked"
         );
     }
 

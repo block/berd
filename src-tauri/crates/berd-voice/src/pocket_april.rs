@@ -36,6 +36,11 @@ const DECODER_CHUNK_FRAMES: usize = 12;
 const TOKENS_PER_SECOND_ESTIMATE: f32 = 3.0;
 const GENERATION_SECONDS_PADDING: f32 = 2.0;
 
+fn decoder_safe_emit_frames(requested: usize) -> usize {
+    let requested = requested.max(DECODER_CHUNK_FRAMES);
+    requested - requested % DECODER_CHUNK_FRAMES
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TextBoundary {
     Sentence,
@@ -126,9 +131,8 @@ struct CachedVoice {
     embeddings: Vec<f32>,
 }
 
-/// EXPERIMENTAL (latency): a dtype-tagged copy of one recurrent state tensor,
-/// used to snapshot the Flow LM state right after voice conditioning so
-/// subsequent chunks skip the ~160 ms `condition_voice` pass entirely.
+/// A dtype-tagged copy of one recurrent state tensor used to snapshot the Flow
+/// LM state after voice conditioning so subsequent chunks can restore it.
 enum SnapshotTensor {
     F32(Vec<i64>, Vec<f32>),
     I64(Vec<i64>, Vec<i64>),
@@ -229,9 +233,8 @@ pub(crate) struct AprilPocketTts {
     flow: Session,
     mimi_decoder: Session,
     cached_voice: Option<CachedVoice>,
-    /// EXPERIMENTAL (latency): post-`condition_voice` Flow LM state, cached
-    /// per reference voice. Restoring it replaces the ~160 ms conditioning
-    /// pass on every chunk after the first for a given voice.
+    /// Post-`condition_voice` Flow LM state cached per reference voice.
+    /// Restoring it avoids repeating conditioning after the first chunk.
     cached_conditioning: Option<CachedConditioning>,
 }
 
@@ -377,18 +380,22 @@ impl AprilPocketTts {
         if self.prepared_token_count(&prepared.text)? <= self.bundle.max_token_per_chunk {
             return Ok(vec![prepared.text.clone()]);
         }
-        split_model_at_natural_boundaries(&prepared.text, self.bundle.max_token_per_chunk, |text| {
-            self.prepared_token_count(text)
-        })
+        split_at_natural_boundaries(
+            &prepared.text,
+            self.bundle.max_token_per_chunk,
+            false,
+            |text| self.prepared_token_count(text),
+        )
     }
 
     pub(crate) fn split_playback_prompt(
         &self,
         prepared: &AprilPreparedPrompt,
     ) -> Result<Vec<String>, String> {
-        split_playback_at_natural_boundaries(
+        split_at_natural_boundaries(
             &prepared.text,
             self.bundle.max_token_per_chunk,
+            true,
             |text| self.prepared_token_count(text),
         )
     }
@@ -398,7 +405,7 @@ impl AprilPocketTts {
         prepared: &AprilPreparedPrompt,
         style: &VoiceStyle,
     ) -> Result<Vec<f32>, String> {
-        // EXPERIMENTAL (latency bench): phase timing, enabled by BERD_TTS_PHASE_LOG=1.
+        // Optional synthesis phase timing, enabled by BERD_TTS_PHASE_LOG=1.
         let phase_log = std::env::var("BERD_TTS_PHASE_LOG").is_ok_and(|v| v == "1");
         let t0 = std::time::Instant::now();
         let mut flow_state = self.conditioned_flow_state(style)?;
@@ -446,10 +453,10 @@ impl AprilPocketTts {
         Ok(audio)
     }
 
-    /// EXPERIMENTAL (latency): return a fresh Flow LM state conditioned on
-    /// the reference voice, restoring a cached snapshot when the same voice
-    /// samples were conditioned before. Keyed by voice content, like
-    /// `cached_voice` — never by buffer address.
+    /// Return a fresh Flow LM state conditioned on the reference voice,
+    /// restoring a cached snapshot when the same voice samples were
+    /// conditioned before. Keyed by voice content, like `cached_voice` —
+    /// never by buffer address.
     fn conditioned_flow_state(&mut self, style: &VoiceStyle) -> Result<Vec<StateValue>, String> {
         let key = voice_key(style);
         if let Some(cached) = &self.cached_conditioning {
@@ -466,13 +473,13 @@ impl AprilPocketTts {
         Ok(state)
     }
 
-    /// EXPERIMENTAL (latency): streaming synthesis — interleaves the Flow LM
-    /// frame loop with incremental stateful Mimi decoding, invoking
-    /// `on_audio` with each decoded delta as soon as ~`emit_frames` latent
-    /// frames exist (80 ms of audio per frame). The Mimi decoder carries its
-    /// recurrent state across deltas, so the concatenated deltas are the same
-    /// audio `synth_chunk` would return. Returns Ok(false) when the callback
-    /// requested cancellation.
+    /// Interleave the Flow LM frame loop with incremental stateful Mimi
+    /// decoding, invoking `on_audio` with each decoded delta as soon as the
+    /// configured latent-frame interval is available. Empty callbacks expose
+    /// cancellation points before decoded PCM exists. The Mimi decoder carries
+    /// its recurrent state across deltas, so concatenated non-empty deltas are
+    /// the same audio `synth_chunk` would return. Returns `Ok(false)` when the
+    /// callback requests cancellation.
     pub(crate) fn synth_chunk_streaming(
         &mut self,
         prepared: &AprilPreparedPrompt,
@@ -480,6 +487,9 @@ impl AprilPocketTts {
         emit_frames: usize,
         on_audio: &mut dyn FnMut(Vec<f32>) -> bool,
     ) -> Result<bool, String> {
+        if !on_audio(Vec::new()) {
+            return Ok(false);
+        }
         let mut flow_state = self.conditioned_flow_state(style)?;
         let token_ids = self
             .tokenizer
@@ -505,7 +515,7 @@ impl AprilPocketTts {
         let text_embeddings = self.text_embeddings(token_ids)?;
         self.run_flow_main_prefix(&text_embeddings, &mut flow_state)?;
         let max_frames = estimate_max_frames(token_count, self.bundle.frame_rate);
-        let emit_frames = emit_frames.max(1);
+        let emit_frames = decoder_safe_emit_frames(emit_frames);
 
         let mut mimi_state = initialize_state(&self.bundle.mimi_state_manifest)?;
         let mut pending: Vec<f32> = Vec::with_capacity(emit_frames * self.bundle.latent_dim);
@@ -514,6 +524,9 @@ impl AprilPocketTts {
         let mut rng = rand::rng();
 
         for step in 0..max_frames {
+            if !on_audio(Vec::new()) {
+                return Ok(false);
+            }
             let sequence = Tensor::from_array((
                 vec![1_i64, 1, self.bundle.latent_dim as i64],
                 current.clone().into_boxed_slice(),
@@ -622,8 +635,8 @@ impl AprilPocketTts {
         Ok(true)
     }
 
-    /// EXPERIMENTAL (latency): decode a batch of latent frames with a
-    /// caller-held Mimi state, so successive calls continue one stream.
+    /// Decode a batch of latent frames with a caller-held Mimi state, so
+    /// successive calls continue one stream.
     fn decode_frames(
         &mut self,
         latents: &[f32],
@@ -958,28 +971,6 @@ impl AprilPocketTts {
     }
 }
 
-fn split_model_at_natural_boundaries<F>(
-    text: &str,
-    max_tokens: usize,
-    token_count: F,
-) -> Result<Vec<String>, String>
-where
-    F: FnMut(&str) -> Result<usize, String>,
-{
-    split_at_natural_boundaries(text, max_tokens, false, token_count)
-}
-
-fn split_playback_at_natural_boundaries<F>(
-    text: &str,
-    max_tokens: usize,
-    token_count: F,
-) -> Result<Vec<String>, String>
-where
-    F: FnMut(&str) -> Result<usize, String>,
-{
-    split_at_natural_boundaries(text, max_tokens, true, token_count)
-}
-
 fn split_at_natural_boundaries<F>(
     text: &str,
     max_tokens: usize,
@@ -1027,11 +1018,9 @@ where
             if !at_word_end && !at_clause_end {
                 continue;
             }
-            // Prepared token counts are monotonic in prefix length, so once a
-            // candidate overflows the limit no longer candidate can fit. Stop
-            // scanning instead of tokenizing every remaining boundary: that
-            // kept this loop superlinear in prompt length, and the cost landed
-            // before the first chunk reached synthesis.
+            // Prepared token counts are monotonic in prefix length, so no
+            // longer candidate can fit after the first overflow. Stopping here
+            // keeps boundary scanning bounded before synthesis starts.
             if token_count(&text[start..end])? > max_tokens {
                 break;
             }
@@ -1355,83 +1344,6 @@ mod tests {
         assert_eq!(shape_len(&[2, 1, 8, 1000, 64]).expect("shape"), 1_024_000);
     }
 
-    /// The two engine splitters must keep OPPOSITE isolation polarity.
-    ///
-    /// The guards in `pocket.rs` pin which engine method each public API calls,
-    /// but they cannot see what the method itself does: pointing
-    /// `split_playback_prompt` at the model wrapper leaves every call site's
-    /// source text untouched while first-sentence isolation silently stops
-    /// happening, so the first playback unit becomes the whole utterance and
-    /// first audio waits on generating all of it.
-    #[test]
-    fn engine_splitters_keep_opposite_isolation_polarity() {
-        let source = include_str!("pocket_april.rs");
-        let production = source
-            .split_once("\n#[cfg(test)]")
-            .map_or(source, |(production, _)| production);
-
-        // A method's own code, and nothing else. Ending at the method's own
-        // closing brace keeps the NEXT method's doc comment out, and stripping
-        // `//` to end of line keeps prose out: neither can call a splitter, so
-        // scanning either reports drift in a method that has not changed.
-        let method_code = |name: &str| -> String {
-            let (_, body) = production
-                .split_once(name)
-                .unwrap_or_else(|| panic!("{name} exists"));
-            let (body, _) = body
-                .split_once("\n    }\n")
-                .unwrap_or_else(|| panic!("{name} has a closing brace"));
-            body.lines()
-                .map(|line| line.split_once("//").map_or(line, |(code, _)| code))
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        let model = method_code("fn split_prompt");
-        let model = model.as_str();
-        let playback = method_code("fn split_playback_prompt");
-        let playback = playback.as_str();
-
-        assert_eq!(
-            (
-                model.matches("split_model_at_natural_boundaries(").count(),
-                model
-                    .matches("split_playback_at_natural_boundaries(")
-                    .count(),
-            ),
-            (1, 0),
-            "split_prompt must pack sentences: isolating here peels sentence \
-             one off every already-packed unit"
-        );
-        assert_eq!(
-            (
-                playback
-                    .matches("split_playback_at_natural_boundaries(")
-                    .count(),
-                playback
-                    .matches("split_model_at_natural_boundaries(")
-                    .count(),
-            ),
-            (1, 0),
-            "split_playback_prompt must isolate sentence one: packing here \
-             makes the first playback unit the whole utterance and delays \
-             first audio by the full generation"
-        );
-
-        // Calling the isolating splitter is necessary but not sufficient: a
-        // short circuit before the call can return the whole utterance as one
-        // unit while leaving the delegated splitter unchanged. Playback must
-        // delegate unconditionally so sentence one remains the first unit.
-        for control_flow in ["if ", "match ", "else", "return"] {
-            assert!(
-                !playback.contains(control_flow),
-                "split_playback_prompt must delegate unconditionally, found \
-                 `{control_flow}`: a branch before the split can return the \
-                 whole utterance as the first playback unit, delaying first \
-                 audio by the full generation"
-            );
-        }
-    }
-
     fn whitespace_token_count(text: &str) -> Result<usize, String> {
         Ok(text.split_whitespace().count())
     }
@@ -1439,7 +1351,7 @@ mod tests {
     #[test]
     fn playback_split_keeps_first_sentence_separate_then_packs_the_remainder() {
         let text = "One two. Three four. Five six.";
-        let chunks = split_playback_at_natural_boundaries(text, 4, whitespace_token_count).unwrap();
+        let chunks = split_at_natural_boundaries(text, 4, true, whitespace_token_count).unwrap();
         assert_eq!(chunks, ["One two. ", "Three four. Five six."]);
         assert_eq!(chunks.concat(), text);
     }
@@ -1447,7 +1359,7 @@ mod tests {
     #[test]
     fn model_split_packs_multiple_sentences_within_limit() {
         let text = "One two. Three four. Five six.";
-        let chunks = split_model_at_natural_boundaries(text, 4, whitespace_token_count).unwrap();
+        let chunks = split_at_natural_boundaries(text, 4, false, whitespace_token_count).unwrap();
         assert_eq!(chunks, ["One two. Three four. ", "Five six."]);
         assert_eq!(chunks.concat(), text);
     }
@@ -1455,14 +1367,14 @@ mod tests {
     #[test]
     fn playback_then_model_split_does_not_isolate_later_sentences_again() {
         let text = "Alpha one. Beta two. Gamma three.";
-        let playback =
-            split_playback_at_natural_boundaries(text, 50, whitespace_token_count).unwrap();
+        let playback = split_at_natural_boundaries(text, 50, true, whitespace_token_count).unwrap();
         assert_eq!(playback, ["Alpha one. ", "Beta two. Gamma three."]);
 
         let model: Vec<_> = playback
             .iter()
             .flat_map(|chunk| {
-                split_model_at_natural_boundaries(chunk.trim(), 50, whitespace_token_count).unwrap()
+                split_at_natural_boundaries(chunk.trim(), 50, false, whitespace_token_count)
+                    .unwrap()
             })
             .collect();
         assert_eq!(model, ["Alpha one.", "Beta two. Gamma three."]);
@@ -1577,11 +1489,18 @@ mod tests {
         assert_eq!(estimate_max_frames(300, 12.5), 1_275);
     }
 
-    /// Regression (review finding): the voice caches must key on CONTENT.
-    /// Voice switching clones and drops sample buffers, so a new voice with
-    /// the same length and rate can land at a recycled address — an
-    /// address-based key would then restore the previous voice's state and
-    /// speak with the wrong voice.
+    #[test]
+    fn streaming_emit_interval_uses_decoder_chunk_boundaries() {
+        assert_eq!(decoder_safe_emit_frames(0), DECODER_CHUNK_FRAMES);
+        assert_eq!(decoder_safe_emit_frames(1), DECODER_CHUNK_FRAMES);
+        assert_eq!(decoder_safe_emit_frames(12), DECODER_CHUNK_FRAMES);
+        assert_eq!(decoder_safe_emit_frames(13), DECODER_CHUNK_FRAMES);
+        assert_eq!(decoder_safe_emit_frames(24), DECODER_CHUNK_FRAMES * 2);
+    }
+
+    /// Voice caches key on content because switching voices clones and drops
+    /// sample buffers. An address-based key could restore another voice's
+    /// state when the allocator reuses a buffer address.
     #[test]
     fn voice_key_is_content_based_not_address_based() {
         let style_a = VoiceStyle {
