@@ -48,3 +48,9 @@ export type {
   TranscriptRowDescriptor,
   TranscriptRowKind,
 } from "./transcriptItemTypes";
+export {
+  composeTranscriptRowsForTimeline,
+  type ComposeTranscriptRowsForTimelineInput,
+  type TranscriptRowActiveRange,
+  type TranscriptRowComposition,
+} from "./composeTranscriptRowsForTimeline";

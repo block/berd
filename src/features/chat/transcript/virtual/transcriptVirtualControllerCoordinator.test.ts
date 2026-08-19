@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import type { Message, MessageRole } from "@/shared/types/messages";
+import { composeTranscriptRowsForTimeline } from "../projection/composeTranscriptRowsForTimeline";
 import type { TranscriptRowDescriptor } from "../projection/transcriptItemTypes";
 import {
   computeTranscriptVirtualRange,
@@ -320,6 +322,99 @@ describe("direct controller to viewport coordinator composition", () => {
       anchor: { type: "bottom" },
     });
   });
+
+  it("feeds one composed mixed batch through the coordinator and keeps attached completion at the bottom", () => {
+    const rows = makeRows(10, 100);
+    const composition = composeTranscriptRowsForTimeline({
+      rows,
+      messages: [message("row-8", "user"), message("row-9", "assistant")],
+      streamingMessageId: "row-9",
+    });
+    const settledComposition = composeTranscriptRowsForTimeline({
+      rows: settledRows(rows),
+      messages: [message("row-8", "user"), message("row-9", "assistant")],
+      streamingMessageId: null,
+    });
+    expect(composition.activeRange).toEqual({ start: 8, end: 10 });
+    expect(settledComposition.activeRange).toBeNull();
+
+    const { container } = browserHarness({
+      viewportHeight: 300,
+      scrollHeight: 1200,
+    });
+    const controller = createController({ viewportHeight: 300 });
+    const coordinator = new TranscriptViewportCoordinator({
+      container,
+      engine: controller,
+      getFooterHeight: () => 0,
+    });
+
+    coordinator.setRows(composition.rows);
+    coordinator.applyMeasuredHeights([
+      { token: tokenFor(controller, "row-1"), height: 120 },
+      { token: tokenFor(controller, "row-9"), height: 160 },
+    ]);
+    coordinator.setRows(settledComposition.rows);
+
+    expect(controller.getState()).toMatchObject({
+      pinnedToBottom: true,
+      anchor: { type: "bottom" },
+    });
+    expect(container.scrollTop).toBe(controller.getState().bottomScrollTop);
+  });
+
+  it("preserves a detached row anchor when the composed history and active rows settle", () => {
+    const rows = makeRows(10, 100);
+    const composition = composeTranscriptRowsForTimeline({
+      rows,
+      messages: [message("row-8", "user"), message("row-9", "assistant")],
+      streamingMessageId: "row-9",
+    });
+    const settledComposition = composeTranscriptRowsForTimeline({
+      rows: settledRows(rows),
+      messages: [message("row-8", "user"), message("row-9", "assistant")],
+      streamingMessageId: null,
+    });
+    const { container } = browserHarness({
+      viewportHeight: 300,
+      scrollHeight: 1200,
+    });
+    const controller = createController({ viewportHeight: 300 });
+    const coordinator = new TranscriptViewportCoordinator({
+      container,
+      engine: controller,
+      getFooterHeight: () => 0,
+    });
+
+    coordinator.setRows(composition.rows);
+    container.scrollTop = 400;
+    coordinator.syncViewport(
+      {
+        scrollTop: 400,
+        viewportHeight: 300,
+        widthScope: WIDTH_SCOPE,
+        browserScrollHeight: 1200,
+      },
+      { source: "browser", userScrollIntent: true },
+    );
+    expect(controller.getState().anchor).toMatchObject({
+      type: "row",
+      rowId: "row-4",
+      offsetWithinRow: 0,
+    });
+
+    coordinator.applyMeasuredHeights([
+      { token: tokenFor(controller, "row-2"), height: 160 },
+      { token: tokenFor(controller, "row-9"), height: 140 },
+    ]);
+    coordinator.setRows(settledComposition.rows);
+
+    expect(controller.getState()).toMatchObject({
+      anchor: { type: "row", rowId: "row-4", offsetWithinRow: 0 },
+      scrollTop: 460,
+    });
+    expect(container.scrollTop).toBe(460);
+  });
 });
 
 function createController(
@@ -393,6 +488,30 @@ function tokenFor(
   const token = controller.getMeasurementToken(rowId);
   expect(token).not.toBeNull();
   return token as TranscriptVirtualMeasurementToken;
+}
+
+function settledRows(
+  rows: readonly TranscriptRowDescriptor[],
+): TranscriptRowDescriptor[] {
+  return rows.map((row) =>
+    row.rowId === "row-9"
+      ? {
+          ...row,
+          anchorPriority: "stable",
+          renderRevision: "settled:row-9",
+          heightRevision: "settled-height:row-9",
+        }
+      : row,
+  );
+}
+
+function message(id: string, role: MessageRole): Message {
+  return {
+    id,
+    role,
+    created: 1,
+    content: [{ type: "text", text: id }],
+  };
 }
 
 function browserHarness({

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { composeTranscriptRowsForTimeline } from "../projection/composeTranscriptRowsForTimeline";
 import type { TranscriptRowDescriptor } from "../projection/transcriptItemTypes";
 import {
   DEFAULT_TRANSCRIPT_KEEP_ALIVE_POLICY,
@@ -805,6 +806,48 @@ describe("transcript row state registry", () => {
     expect(expiredDecision.protectedRowIds).toEqual([]);
     expect(stateAfter).toBe(stateBefore);
     expect(stateAfter?.toolChain?.expandedToolKeys).toEqual(["tool-a"]);
+  });
+
+  it("retains interactive, tool, and MCP rows from the composed list", () => {
+    const rows = [
+      row("row-0", { keepAlivePriority: "focused" }),
+      row("row-1", { keepAlivePriority: "active-mcp" }),
+      row("row-2", { keepAlivePriority: "active-stream" }),
+    ];
+    const composition = composeTranscriptRowsForTimeline({
+      rows,
+      messages: [
+        {
+          id: "row-0",
+          role: "user",
+          created: 1,
+          content: [{ type: "text", text: "row-0" }],
+        },
+        {
+          id: "row-2",
+          role: "assistant",
+          created: 2,
+          content: [{ type: "text", text: "row-2" }],
+        },
+      ],
+      streamingMessageId: "row-2",
+    });
+    const registry = createTranscriptRowStateRegistry({
+      activeStreamRowsPerSessionCap: 1,
+      mcpRowsPerSessionCap: 1,
+      recentRowsPerSessionCap: 0,
+    });
+
+    const decision = registry.evaluateKeepAlive({
+      sessionId: SESSION_ID,
+      rows: composition.rows,
+      nowMs: 10,
+    });
+
+    if (!composition.activeRange) throw new Error("expected active range");
+    expect(composition.rows.slice(composition.activeRange.start)).toEqual(rows);
+    expect(decision.protectedRowIds).toEqual(["row-0", "row-1", "row-2"]);
+    expect(decision.diagnostics.mcpProtectedRowCount).toBe(1);
   });
 });
 
