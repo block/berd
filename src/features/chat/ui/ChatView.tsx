@@ -107,6 +107,7 @@ interface ChatViewProps {
   composerHandoffInProgress?: boolean;
   onComposerHandoffTarget?: (rect: GlobalComposerHandoffRect) => void;
   onWorkspaceNameRequest?: (request: WorkspaceNameRequest) => void;
+  onAgentBuilderCompleted?: (agentId: string) => void;
 }
 
 export function ChatView({
@@ -124,6 +125,7 @@ export function ChatView({
   composerHandoffInProgress = false,
   onComposerHandoffTarget,
   onWorkspaceNameRequest,
+  onAgentBuilderCompleted,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   useRegisterSecurityConfirmationSurface(sessionId);
@@ -1150,6 +1152,7 @@ export function ChatView({
           agentBuilderChatCollapsed={isAgentBuilderChatCollapsed}
           builderRailSeparatorProps={builderRailSeparatorProps}
           onExpandAgentBuilderChat={toggleAgentBuilderChat}
+          onAgentBuilderCompleted={onAgentBuilderCompleted}
           builderColumnClassName={
             isAgentBuilderOpen ? "agent-builder-column-enter" : undefined
           }

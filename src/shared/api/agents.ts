@@ -621,7 +621,7 @@ function agentSourceFromMarkdownFile(
   };
 }
 
-function toPersona(source: AgentSourceEntry): Persona {
+export function agentSourceToPersona(source: AgentSourceEntry): Persona {
   const writable = source.writable === true;
   return {
     id: source.path,
@@ -818,7 +818,7 @@ export async function promotePersonaSource(
 export async function listPersonas(): Promise<Persona[]> {
   return (await listAgentSources())
     .filter((source) => source.properties?.draft !== true)
-    .map(toPersona);
+    .map(agentSourceToPersona);
 }
 
 export async function createPersona(
@@ -841,7 +841,7 @@ export async function createPersona(
   }
 
   const avatar = avatarToProperty(request.avatar);
-  return toPersona(
+  return agentSourceToPersona(
     avatar && normalizeAvatarUrl(response.source.properties?.avatar) !== avatar
       ? {
           ...response.source,
@@ -883,7 +883,7 @@ export async function updatePersona(
     throw new Error(`Unexpected source type returned: ${response.source.type}`);
   }
 
-  return toPersona(response.source);
+  return agentSourceToPersona(response.source);
 }
 
 export async function migratePersonaTargetIfUnchanged(
@@ -891,7 +891,7 @@ export async function migratePersonaTargetIfUnchanged(
   target: Pick<UpdatePersonaRequest, "provider" | "modelProviderId" | "model">,
 ): Promise<Persona | null> {
   const latestSource = await readExistingPersonaSource(persona.id);
-  const latestPersona = toPersona(latestSource);
+  const latestPersona = agentSourceToPersona(latestSource);
   if (
     latestPersona.provider !== persona.provider ||
     latestPersona.modelProviderId !== persona.modelProviderId ||
@@ -910,7 +910,7 @@ export async function migratePersonaTargetIfUnchanged(
     properties: mergedPersonaProperties(latestSource.properties, target),
   });
 
-  return toPersona(requireAgentSource(response.source));
+  return agentSourceToPersona(requireAgentSource(response.source));
 }
 
 export async function deletePersona(id: string): Promise<void> {
@@ -1037,7 +1037,7 @@ export async function importPersonas(
         `Unexpected source type returned: ${response.source.type}`,
       );
     }
-    return [toPersona(response.source)];
+    return [agentSourceToPersona(response.source)];
   }
 
   const parsed = readImportJson(fileContents);
@@ -1053,7 +1053,7 @@ export async function importPersonas(
         .filter(isAgentSource)
         .map((source) => preserveImportedAvatar(source, nativeImport.avatar)),
     );
-    return sources.map(toPersona);
+    return sources.map(agentSourceToPersona);
   }
 
   const response = await client.goose.GooseUnstableSourcesCreate(
@@ -1062,7 +1062,7 @@ export async function importPersonas(
   if (!isAgentSource(response.source)) {
     throw new Error(`Unexpected source type returned: ${response.source.type}`);
   }
-  return [toPersona(response.source)];
+  return [agentSourceToPersona(response.source)];
 }
 
 export interface ImportFileReadResult {

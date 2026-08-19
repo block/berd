@@ -4070,6 +4070,12 @@ export function AppShell({
     },
     [guardAppNavigation, navigateAgentsDirect],
   );
+  const handleAgentBuilderCompleted = useCallback(
+    (agentId: string) => {
+      navigateAgentsDirect(agentId);
+    },
+    [navigateAgentsDirect],
+  );
 
   const navigateAutomations = useCallback(
     (
@@ -5144,6 +5150,7 @@ export function AppShell({
                 handleAutomationBuilderLeaveActionChange
               }
               onCreatePersona={agentBuilder.create}
+              onAgentBuilderCompleted={handleAgentBuilderCompleted}
               onStartAgentBuilderSession={agentBuilder.start}
               onArchiveChat={handleArchiveChat}
               onCreateProject={(options) => {

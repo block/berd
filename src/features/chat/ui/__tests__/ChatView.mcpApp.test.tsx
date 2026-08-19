@@ -199,6 +199,7 @@ vi.mock("../ChatRightRail", () => ({
     onToggleTerminal?: () => void;
     terminalOpen?: boolean;
     contextVisible?: boolean;
+    onAgentBuilderCompleted?: (agentId: string) => void;
   }) => {
     mocks.chatRightRailSpy(props);
     if (!props.session) {
@@ -771,6 +772,36 @@ describe("ChatView MCP app messaging", () => {
     render(<ChatView sessionId="session-1" />);
 
     expect(screen.queryByTestId("conversation-empty-avatar")).toBeNull();
+  });
+
+  it("forwards agent builder completion to the app shell", () => {
+    const onAgentBuilderCompleted = vi.fn();
+    const activeSession = {
+      id: "session-1",
+      title: "Build agent",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: "build-agent",
+      agentBuilderOpen: true,
+      targetAgentPath: "/Users/test/.agents/agents/draft.md",
+      targetAgentSlug: "draft",
+    } satisfies ChatSession;
+
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={activeSession}
+        onAgentBuilderCompleted={onAgentBuilderCompleted}
+      />,
+    );
+
+    const railProps = mocks.chatRightRailSpy.mock.calls.at(-1)?.[0] as {
+      onAgentBuilderCompleted?: (agentId: string) => void;
+    };
+    railProps.onAgentBuilderCompleted?.("/saved-agent.md");
+
+    expect(onAgentBuilderCompleted).toHaveBeenCalledWith("/saved-agent.md");
   });
 
   it("keeps the canonical empty conversation presentation when Agent Builder is open", () => {

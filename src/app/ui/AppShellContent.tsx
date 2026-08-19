@@ -83,6 +83,7 @@ interface AppShellContentProps {
     action: AutomationBuilderLeaveAction | null,
   ) => void;
   onCreatePersona: () => void;
+  onAgentBuilderCompleted: (agentId: string) => void;
   onStartAgentBuilderSession: (args?: { path?: string; slug?: string }) => void;
   onArchiveChat: (sessionId: string) => Promise<CommandOutcome>;
   onCreateProject: (options?: {
@@ -153,6 +154,7 @@ export function AppShellContent({
   onBuilderbotBreadcrumbLabelChange,
   onAutomationBuilderLeaveActionChange,
   onCreatePersona,
+  onAgentBuilderCompleted,
   onStartAgentBuilderSession,
   onArchiveChat,
   onCreateProject,
@@ -252,6 +254,7 @@ export function AppShellContent({
     onChatComposerHandoffTarget,
     onWorkspaceNameRequest,
     onCreatePersona,
+    onAgentBuilderCompleted,
     onCreateProject,
     onExitSearch,
     onNavigateAgents,
@@ -335,6 +338,7 @@ interface RenderRouteContentOptions {
     action: AutomationBuilderLeaveAction | null,
   ) => void;
   onCreatePersona: () => void;
+  onAgentBuilderCompleted: (agentId: string) => void;
   onStartAgentBuilderSession: (args?: { path?: string; slug?: string }) => void;
   onArchiveChat: (sessionId: string) => Promise<CommandOutcome>;
   onCreateProject: (options?: {
@@ -391,6 +395,7 @@ function renderRouteContent({
   onWorkspaceNameRequest,
   onCloseDesignSystem,
   onCreatePersona,
+  onAgentBuilderCompleted,
   onCreateProject,
   onDesignSystemInspectorVisibleChange,
   onDesignSystemSectionChange,
@@ -523,6 +528,7 @@ function renderRouteContent({
           composerHandoffInProgress={chatComposerHandoffInProgress}
           onComposerHandoffTarget={onChatComposerHandoffTarget}
           onWorkspaceNameRequest={onWorkspaceNameRequest}
+          onAgentBuilderCompleted={onAgentBuilderCompleted}
         />
       ) : (
         (setupRequiredContent ?? (

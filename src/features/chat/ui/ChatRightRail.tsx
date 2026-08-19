@@ -58,6 +58,7 @@ interface ChatRightRailProps {
    * builder header while the chat is hidden.
    */
   onExpandAgentBuilderChat?: () => void;
+  onAgentBuilderCompleted?: (agentId: string) => void;
   terminalOpen?: boolean;
   terminalController?: TerminalController;
   terminalDockPreview?: TerminalDockedPlacement | null;
@@ -89,6 +90,7 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
       agentBuilderChatCollapsed = false,
       builderRailSeparatorProps,
       onExpandAgentBuilderChat,
+      onAgentBuilderCompleted,
       terminalOpen = false,
       terminalController,
       terminalDockPreview,
@@ -313,6 +315,7 @@ export const ChatRightRail = forwardRef<HTMLDivElement, ChatRightRailProps>(
               onExpandChat={
                 agentBuilderChatCollapsed ? onExpandAgentBuilderChat : undefined
               }
+              onAgentBuilderCompleted={onAgentBuilderCompleted}
             />
           </div>
         ) : null}

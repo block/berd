@@ -12,6 +12,9 @@ import { ChatRightRail } from "../ChatRightRail";
 const mocks = vi.hoisted(() => ({
   patchSession: vi.fn(),
   setPersonas: vi.fn(),
+  addPersona: vi.fn(),
+  updatePersona: vi.fn(),
+  personas: [] as Array<{ id: string }>,
   listPersonas: vi.fn(),
   recoverDraftAgent: vi.fn(),
   setAgentBuilderSessionLocalEdits: vi.fn(),
@@ -43,6 +46,7 @@ vi.mock("@/features/agents/ui/AgentBuilderRail", () => ({
     targetAgentSlug?: string | null;
     draftState?: "preparing" | "failed" | null;
     onDraftPromoted?: (source: unknown) => void;
+    onAgentBuilderCompleted?: (agentId: string) => void;
     onDraftTargetChanged?: (target: { path: string; slug: string }) => void;
     onRecoverMissingDraft?: () => void;
     onClose?: () => void;
@@ -60,7 +64,9 @@ vi.mock("@/features/agents/ui/AgentBuilderRail", () => ({
       </span>
       <button
         type="button"
-        onClick={() => props.onDraftPromoted?.({ path: "/path" })}
+        onClick={() => {
+          props.onDraftPromoted?.({ path: "/path" });
+        }}
       >
         promote
       </button>
@@ -112,11 +118,29 @@ vi.mock("@/features/agents/lib/agentBuilderSession", () => ({
 
 vi.mock("@/features/agents/stores/agentStore", () => ({
   useAgentStore: {
-    getState: () => ({ setPersonas: mocks.setPersonas }),
+    getState: () => ({
+      personas: mocks.personas,
+      setPersonas: mocks.setPersonas,
+      addPersona: mocks.addPersona,
+      updatePersona: mocks.updatePersona,
+    }),
   },
 }));
 
 vi.mock("@/shared/api/agents", () => ({
+  agentSourceToPersona: (source: {
+    path: string;
+    name?: string;
+    description?: string;
+    content?: string;
+  }) => ({
+    id: source.path,
+    displayName: source.name ?? "Saved agent",
+    sourceDescription: source.description,
+    systemPrompt: source.content ?? "",
+    isBuiltin: false,
+    writable: true,
+  }),
   listPersonas: () => mocks.listPersonas(),
 }));
 
@@ -164,7 +188,10 @@ describe("ChatRightRail", () => {
     mocks.compactViewport = false;
     mocks.reducedMotion = false;
     mocks.patchSession.mockReset();
+    mocks.personas = [];
     mocks.setPersonas.mockReset();
+    mocks.addPersona.mockReset();
+    mocks.updatePersona.mockReset();
     mocks.listPersonas.mockReset();
     mocks.listPersonas.mockResolvedValue([]);
     mocks.recoverDraftAgent.mockReset();
@@ -683,8 +710,9 @@ describe("ChatRightRail", () => {
     expect(screen.getByTestId("rail-terminal")).toBeVisible();
   });
 
-  it("refreshes agents and closes the capability when a draft is promoted", async () => {
+  it("refreshes agents, closes the capability, and opens the saved agent when a draft is promoted", async () => {
     const personas = [{ id: "/path", displayName: "Snark" }];
+    const onAgentBuilderCompleted = vi.fn();
     mocks.listPersonas.mockResolvedValue(personas);
 
     render(
@@ -698,15 +726,57 @@ describe("ChatRightRail", () => {
             targetAgentSlug: "draft-s1",
           } as never
         }
+        onAgentBuilderCompleted={onAgentBuilderCompleted}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "promote" }));
 
+    expect(mocks.clearBuilderSessionState).toHaveBeenCalledWith("s1");
+    expect(mocks.addPersona).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "/path" }),
+    );
+    expect(onAgentBuilderCompleted).toHaveBeenCalledWith("/path");
     await waitFor(() => {
-      expect(mocks.clearBuilderSessionState).toHaveBeenCalledWith("s1");
       expect(mocks.setPersonas).toHaveBeenCalledWith(personas);
     });
+  });
+
+  it("opens the promoted agent even when refreshing agents fails", async () => {
+    const onAgentBuilderCompleted = vi.fn();
+    mocks.listPersonas.mockRejectedValue(new Error("refresh unavailable"));
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    render(
+      <ChatRightRail
+        contextVisible={false}
+        session={
+          {
+            id: "s1",
+            intent: "build-agent",
+            targetAgentPath: "/draft-path",
+            targetAgentSlug: "draft-s1",
+          } as never
+        }
+        onAgentBuilderCompleted={onAgentBuilderCompleted}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "promote" }));
+
+    expect(mocks.addPersona).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "/path" }),
+    );
+    expect(onAgentBuilderCompleted).toHaveBeenCalledWith("/path");
+    await waitFor(() => {
+      expect(consoleError).toHaveBeenCalledWith(
+        "Failed to refresh agents after save:",
+        expect.any(Error),
+      );
+    });
+    consoleError.mockRestore();
   });
 
   it("patches only chat session target fields when the draft target moves", () => {
