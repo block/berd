@@ -151,7 +151,7 @@ describe("native assistant speech queue", () => {
       assistant([
         {
           type: "text",
-          text: "Dr. Smith is reviewing the U.S.",
+          text: "Dr. J. Smith is reviewing the U.S.",
         },
       ]),
     ]);
@@ -163,7 +163,7 @@ describe("native assistant speech queue", () => {
       .appendStreamingText("session-1", "assistant-1", " economy.");
     await vi.waitFor(() => {
       expect(mocks.speakPocketVoice).toHaveBeenCalledWith(
-        "Dr. Smith is reviewing the U.S. economy.",
+        "Dr. J. Smith is reviewing the U.S. economy.",
       );
     });
   });

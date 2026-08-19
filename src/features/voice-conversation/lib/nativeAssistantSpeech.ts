@@ -34,7 +34,7 @@ function isSpeakableBoundary(text: string, match: RegExpMatchArray): boolean {
   const token = prefix.match(/[\p{L}.]+$/u)?.[0].toLocaleLowerCase();
   if (!token) return true;
   return (
-    !NON_TERMINAL_ABBREVIATIONS.has(token) && !/^(?:\p{L}\.){2,}$/u.test(token)
+    !NON_TERMINAL_ABBREVIATIONS.has(token) && !/^(?:\p{L}\.)+$/u.test(token)
   );
 }
 
