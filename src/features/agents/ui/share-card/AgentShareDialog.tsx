@@ -260,12 +260,7 @@ export function AgentShareDialog({
     void generateAgentCardDescription(
       persona.systemPrompt,
       persona.displayName,
-      {
-        locale,
-        signal: controller.signal,
-        providerId: persona.provider,
-        modelId: persona.model,
-      },
+      { locale, signal: controller.signal },
     ).then((value) => {
       if (!controller.signal.aborted) {
         setGeneratedDescription({ identity: descriptionIdentity, value });
@@ -280,8 +275,6 @@ export function AgentShareDialog({
     locale,
     open,
     persona.displayName,
-    persona.model,
-    persona.provider,
     persona.systemPrompt,
   ]);
 

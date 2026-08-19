@@ -120,8 +120,6 @@ async function promptUnlessAborted(
 interface GenerateDescriptionOptions {
   locale?: string;
   signal?: AbortSignal;
-  providerId?: string;
-  modelId?: string;
 }
 
 /**
@@ -143,12 +141,6 @@ export async function generateAgentCardDescription(
       readiness.status !== "ready" ||
       !readiness.modelId ||
       options.signal?.aborted
-    ) {
-      return fallback;
-    }
-    if (
-      (options.providerId && options.providerId !== readiness.providerId) ||
-      (options.modelId && options.modelId !== readiness.modelId)
     ) {
       return fallback;
     }
