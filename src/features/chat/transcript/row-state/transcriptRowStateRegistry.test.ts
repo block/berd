@@ -809,45 +809,121 @@ describe("transcript row state registry", () => {
   });
 
   it("retains interactive, tool, and MCP rows from the composed list", () => {
-    const rows = [
-      row("row-0", { keepAlivePriority: "focused" }),
-      row("row-1", { keepAlivePriority: "active-mcp" }),
-      row("row-2", { keepAlivePriority: "active-stream" }),
+    // Protection here must come entirely from registry-owned state (focus,
+    // MCP activity, durable tool-chain patches, active-stream signals) rather
+    // than from a composition/descriptor-owned `keepAlivePriority`, and must
+    // survive both while the turn is active and after it settles.
+    const rows = [row("row-0"), row("row-1"), row("row-2")];
+    const messages = [
+      {
+        id: "row-0",
+        role: "user" as const,
+        created: 1,
+        content: [{ type: "text" as const, text: "row-0" }],
+      },
+      {
+        id: "row-2",
+        role: "assistant" as const,
+        created: 2,
+        content: [{ type: "text" as const, text: "row-2" }],
+      },
     ];
-    const composition = composeTranscriptRowsForTimeline({
-      rows,
-      messages: [
-        {
-          id: "row-0",
-          role: "user",
-          created: 1,
-          content: [{ type: "text", text: "row-0" }],
-        },
-        {
-          id: "row-2",
-          role: "assistant",
-          created: 2,
-          content: [{ type: "text", text: "row-2" }],
-        },
-      ],
-      streamingMessageId: "row-2",
-    });
     const registry = createTranscriptRowStateRegistry({
       activeStreamRowsPerSessionCap: 1,
       mcpRowsPerSessionCap: 1,
       recentRowsPerSessionCap: 0,
     });
 
-    const decision = registry.evaluateKeepAlive({
+    registry.setFocusedRow({
       sessionId: SESSION_ID,
-      rows: composition.rows,
+      rowId: "row-0",
+      focused: true,
+      focusTargetId: "copy-button",
+      nowMs: 1,
+    });
+    registry.setMcpActivity({
+      sessionId: SESSION_ID,
+      rowId: "row-1",
+      active: true,
+      kind: "host-request",
+      nowMs: 2,
+    });
+    const toolChainStateBefore = registry.patchRowState({
+      sessionId: SESSION_ID,
+      rowId: "row-1",
+      nowMs: 3,
+      patch: {
+        toolChain: {
+          chainExpanded: true,
+          expandedToolKeys: ["tool-a"],
+          userInteracted: true,
+        },
+      },
+    });
+    registry.setActiveStreamingRow({
+      sessionId: SESSION_ID,
+      rowId: "row-2",
+      active: true,
+      nowMs: 4,
+    });
+
+    const activeComposition = composeTranscriptRowsForTimeline({
+      rows,
+      messages,
+      streamingMessageId: "row-2",
+    });
+    if (!activeComposition.activeRange) {
+      throw new Error("expected active range");
+    }
+
+    const activeDecision = registry.evaluateKeepAlive({
+      sessionId: SESSION_ID,
+      rows: activeComposition.rows,
       nowMs: 10,
     });
 
-    if (!composition.activeRange) throw new Error("expected active range");
-    expect(composition.rows.slice(composition.activeRange.start)).toEqual(rows);
-    expect(decision.protectedRowIds).toEqual(["row-0", "row-1", "row-2"]);
-    expect(decision.diagnostics.mcpProtectedRowCount).toBe(1);
+    expect(activeDecision.protectedRowIds).toEqual(["row-0", "row-1", "row-2"]);
+    expect(activeDecision.evictedRowIds).toEqual([]);
+    expect(activeDecision.diagnostics.forcedProtectedRowCount).toBe(2);
+    expect(activeDecision.diagnostics.mcpProtectedRowCount).toBe(1);
+
+    const settledRows = [
+      row("row-0", { renderRevision: "render:2" }),
+      row("row-1", { renderRevision: "render:2" }),
+      row("row-2", { renderRevision: "render:2" }),
+    ];
+    const settledComposition = composeTranscriptRowsForTimeline({
+      rows: settledRows,
+      messages,
+      streamingMessageId: null,
+    });
+
+    expect(settledComposition.activeRange).toBeNull();
+
+    const settledDecision = registry.evaluateKeepAlive({
+      sessionId: SESSION_ID,
+      rows: settledComposition.rows,
+      nowMs: 20,
+    });
+
+    expect(settledDecision.protectedRowIds).toEqual([
+      "row-0",
+      "row-1",
+      "row-2",
+    ]);
+    expect(settledDecision.evictedRowIds).toEqual([]);
+    expect(settledDecision.diagnostics.forcedProtectedRowCount).toBe(2);
+    expect(settledDecision.diagnostics.mcpProtectedRowCount).toBe(1);
+
+    const toolChainStateAfter = registry.getRowState({
+      sessionId: SESSION_ID,
+      rowId: "row-1",
+    });
+    expect(toolChainStateAfter).toBe(toolChainStateBefore);
+    expect(toolChainStateAfter?.toolChain?.expandedToolKeys).toEqual([
+      "tool-a",
+    ]);
+    expect(toolChainStateAfter?.mcpApp?.lifecycle).toBe("active-host-request");
   });
 });
 
