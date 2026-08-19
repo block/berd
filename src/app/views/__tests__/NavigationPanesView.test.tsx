@@ -504,12 +504,70 @@ describe("NavigationPanesView", () => {
     });
     expect(within(mainNavigation).getByText("Projects")).toBeInTheDocument();
     expect(within(mainNavigation).getByText("Chats")).toBeInTheDocument();
+    expect(
+      within(mainNavigation).queryByRole("button", { name: "Chats" }),
+    ).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Create a project" }));
     await user.click(screen.getByRole("button", { name: "Start a chat" }));
 
     expect(onCreateProject).toHaveBeenCalledOnce();
     expect(onNewChat).toHaveBeenCalledOnce();
+  });
+
+  it("expands Projects only for an explicit local project creation", () => {
+    localStorage.setItem(
+      "goose:sidebar:section-visibility",
+      JSON.stringify({ pinned: true, projects: false, recents: true }),
+    );
+    const initialProps = sidebarProps({ projects: [mockProject()] });
+    const { rerender } = renderWithQueryClient(
+      <NavigationPanesView {...initialProps} />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Project One" })).toBeNull();
+
+    rerender(
+      <NavigationPanesView
+        {...initialProps}
+        projects={[
+          mockProject(),
+          mockProject({ id: "project-2", name: "Project Two", order: 1 }),
+        ]}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Project Two" })).toBeNull();
+
+    rerender(
+      <NavigationPanesView
+        {...initialProps}
+        projects={[
+          mockProject(),
+          mockProject({ id: "project-2", name: "Project Two", order: 1 }),
+        ]}
+        projectCreatedRevision={1}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Project Two" })).toBeVisible();
+  });
+
+  it("handles project creation when the session list mounts after the signal", async () => {
+    localStorage.setItem(
+      "goose:sidebar:section-visibility",
+      JSON.stringify({ pinned: true, projects: false, recents: true }),
+    );
+    const onProjectCreatedRevisionHandled = vi.fn();
+
+    renderSidebar({
+      projects: [mockProject()],
+      projectCreatedRevision: 1,
+      onProjectCreatedRevisionHandled,
+    });
+
+    expect(screen.getByRole("button", { name: "Project One" })).toBeVisible();
+    await waitFor(() =>
+      expect(onProjectCreatedRevisionHandled).toHaveBeenCalledWith(1),
+    );
   });
 
   it("shows the projects info moment next to the header for a fresh user", async () => {

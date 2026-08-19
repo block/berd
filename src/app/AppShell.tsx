@@ -1072,6 +1072,7 @@ export function AppShell({
   const retryFailedSessionsForProjectRef = useRef<
     (project: ProjectInfo) => void
   >(() => {});
+  const [projectCreatedRevision, setProjectCreatedRevision] = useState(0);
   const startChatForCreatedProjectRef = useRef<(project: ProjectInfo) => void>(
     () => {},
   );
@@ -1105,8 +1106,10 @@ export function AppShell({
     openEditProjectDialog,
   } = useProjectDialog({
     onProjectSaved: refreshProjectsAfterDialogSave,
-    onProjectCreated: (project) =>
-      startChatForCreatedProjectRef.current(project),
+    onProjectCreated: (project) => {
+      setProjectCreatedRevision((revision) => revision + 1);
+      startChatForCreatedProjectRef.current(project);
+    },
   });
   useEffect(() => {
     if (!createProjectOpen || selectedStarterTaskId !== "create-project")
@@ -5013,6 +5016,11 @@ export function AppShell({
           activeView,
           activeSettingsSection,
           activeSessionId,
+          onProjectCreatedRevisionHandled: (revision) =>
+            setProjectCreatedRevision((current) =>
+              current === revision ? 0 : current,
+            ),
+          projectCreatedRevision,
           projects,
           className: "h-full rounded-md",
         }}

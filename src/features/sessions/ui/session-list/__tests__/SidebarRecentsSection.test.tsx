@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,6 +27,7 @@ function renderRecents(
   showChatIcons: boolean,
   sessionOverrides: Partial<SidebarSessionItem> = {},
   collapsed = false,
+  props: Partial<ComponentProps<typeof SidebarRecentsSection>> = {},
 ) {
   return render(
     <SidebarChatDragProvider>
@@ -44,6 +46,7 @@ function renderRecents(
         isOpen
         onToggleOpen={vi.fn()}
         sectionHeaderTextClass=""
+        {...props}
       />
     </SidebarChatDragProvider>,
   );
@@ -67,6 +70,24 @@ describe("SidebarRecentsSection", () => {
         },
       ],
     });
+  });
+
+  it("renders an empty chat section as a non-collapsible label", () => {
+    const onToggleOpen = vi.fn();
+    renderRecents(false, {}, false, {
+      sessions: [],
+      showEmptyState: true,
+      isOpen: false,
+      onToggleOpen,
+      onNewChat: vi.fn(),
+    });
+
+    expect(screen.getByText("Chats")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Chats" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start a chat" })).toBeVisible();
+    expect(onToggleOpen).not.toHaveBeenCalled();
   });
 
   it("keeps collapsed recent chat icons accessibly named", () => {

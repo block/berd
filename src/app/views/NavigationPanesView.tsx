@@ -53,6 +53,8 @@ export interface NavigationPanesViewProps {
   onNavigate?: (view: AppView) => void;
   onOpenProject?: (projectId: string) => void;
   onSelectSession?: (sessionId: string) => void;
+  onProjectCreatedRevisionHandled?: (revision: number) => void;
+  projectCreatedRevision?: number;
   activeView?: AppView;
   activeSettingsSection?: SectionId;
   activeSessionId?: string | null;
@@ -217,6 +219,8 @@ export function NavigationPanesView({
   onNavigate,
   onOpenProject,
   onSelectSession,
+  onProjectCreatedRevisionHandled,
+  projectCreatedRevision,
   activeView,
   activeSettingsSection = DEFAULT_SETTINGS_SECTION,
   activeSessionId,
@@ -390,6 +394,10 @@ export function NavigationPanesView({
                   onReorderProject={onReorderProject}
                   onSelectSession={onSelectSession}
                   onSessionSelectForScroll={handleSessionSelectForScroll}
+                  onProjectCreatedRevisionHandled={
+                    onProjectCreatedRevisionHandled
+                  }
+                  projectCreatedRevision={projectCreatedRevision}
                   projects={projects}
                   surface={{
                     renderDragHandle: () => null,
