@@ -33,6 +33,23 @@ pub(crate) fn config_path() -> Result<PathBuf, String> {
     Ok(strategy.config_dir().join(CONFIG_FILE_NAME))
 }
 
+/// Resolve the upstream Goose state directory using the same path strategy as
+/// goosed. `GOOSE_PATH_ROOT` stores state beneath `<root>/state`.
+pub(crate) fn state_dir() -> Result<PathBuf, String> {
+    if let Some(root) = validated_path_root(env::var_os(GOOSE_PATH_ROOT_ENV)) {
+        return Ok(root.join("state"));
+    }
+
+    let strategy = choose_app_strategy(AppStrategyArgs {
+        top_level_domain: "Block".to_string(),
+        author: "Block".to_string(),
+        app_name: "goose".to_string(),
+    })
+    .map_err(|err| format!("Failed to resolve goose state directory: {err}"))?;
+
+    Ok(strategy.state_dir().unwrap_or_else(|| strategy.data_dir()))
+}
+
 fn validated_path_root(value: Option<OsString>) -> Option<PathBuf> {
     value.map(PathBuf::from).filter(|path| path.is_absolute())
 }

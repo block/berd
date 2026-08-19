@@ -203,7 +203,7 @@ pub async fn resolve_pr_tracker_projects(
 async fn resolve_pr_tracker_projects_inner(
     pull_requests: Vec<PullRequestIdentity>,
 ) -> Result<std::collections::HashMap<String, Option<String>>, String> {
-    let canonical_db_path = crate::services::log_export::goose_state_dir()?
+    let canonical_db_path = crate::services::goose_config::state_dir()?
         .join("sessions")
         .join("sessions.db");
     let legacy_db_path = dirs::home_dir()
