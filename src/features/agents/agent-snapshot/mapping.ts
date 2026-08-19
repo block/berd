@@ -1,4 +1,5 @@
 import type { CreatePersonaRequest, Persona } from "@/shared/types/agents";
+import { getRealPersonaDescription } from "@/features/agents/lib/personaPresentation";
 import { truncateCardGraphemes } from "@/features/agents/ui/share-card/agentShareCardText";
 import {
   isRemoteAvatarUrl,
@@ -69,6 +70,7 @@ export function snapshotToCreatePersonaRequest(
 /** Creates a deterministic, config-only snapshot without persistent or secret persona metadata. */
 export function personaToSnapshot(persona: Persona): SnapshotV1 {
   const displayName = persona.displayName.trim();
+  const authoredDescription = getRealPersonaDescription(persona);
   const snapshot: SnapshotV1 = {
     format: SNAPSHOT_FORMAT,
     version: SNAPSHOT_VERSION,
@@ -88,8 +90,8 @@ export function personaToSnapshot(persona: Persona): SnapshotV1 {
     },
     profile: {
       displayName,
-      about: persona.sourceDescription
-        ? truncateCardGraphemes(persona.sourceDescription.trim(), 110)
+      about: authoredDescription
+        ? truncateCardGraphemes(authoredDescription, 110)
         : null,
       goodFor: persona.goodFor ?? null,
       vibes: persona.vibes ?? null,

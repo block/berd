@@ -322,7 +322,6 @@ export function AgentShareDialog({
         const snapshot = personaToSnapshot({
           ...persona,
           avatar: embeddedAvatar ?? persona.avatar,
-          sourceDescription: description,
         });
         let animation = null;
         const stillMatchesAnimation = Boolean(

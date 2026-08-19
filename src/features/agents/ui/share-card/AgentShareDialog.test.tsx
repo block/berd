@@ -15,6 +15,7 @@ import {
   AgentSnapshotError,
   encodeAgentImage,
   MAX_SNAPSHOT_AVATAR_ANIMATION_BYTES,
+  personaToSnapshot,
 } from "@/features/agents/agent-snapshot";
 import { readCachedAvatarAnimation } from "@/shared/api/avatars";
 import {
@@ -477,6 +478,25 @@ describe("AgentShareDialog", () => {
         expect.any(String),
       ),
     );
+  });
+
+  it("does not persist localized fallback copy as an authored description", async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentShareDialog
+        open
+        persona={{ ...persona, sourceDescription: undefined }}
+        onOpenChange={vi.fn()}
+        onDownloadAgent={vi.fn()}
+      />,
+    );
+    await markCardReady();
+    await user.click(screen.getByRole("button", { name: "share.downloadPng" }));
+
+    await waitFor(() => expect(personaToSnapshot).toHaveBeenCalled());
+    expect(vi.mocked(personaToSnapshot).mock.calls[0]?.[0]).toMatchObject({
+      sourceDescription: undefined,
+    });
   });
 
   it("embeds cached asset-protocol avatar animation", async () => {

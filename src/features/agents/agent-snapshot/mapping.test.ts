@@ -134,6 +134,16 @@ describe("snapshot mappings", () => {
     );
   });
 
+  it.each([
+    "Agent",
+    "Draft",
+    "  agent  ",
+  ])("does not export placeholder description %j", (sourceDescription) => {
+    expect(
+      personaToSnapshot(persona({ sourceDescription })).profile?.about,
+    ).toBeNull();
+  });
+
   it("round-trips the reviewed public description", () => {
     const exported = personaToSnapshot(
       persona({ sourceDescription: "Builds useful things." }),
