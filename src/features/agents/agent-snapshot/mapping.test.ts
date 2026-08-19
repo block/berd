@@ -123,6 +123,8 @@ describe("snapshot mappings", () => {
       profile: {
         displayName: "Builder",
         about: null,
+        goodFor: null,
+        vibes: null,
         avatarDataUrl: null,
         avatarUrl: null,
       },
@@ -130,6 +132,26 @@ describe("snapshot mappings", () => {
     expect(JSON.stringify(exported)).not.toMatch(
       /private-id|apiKey|\/usr\/bin|createdAt|sourceProperties|memory/,
     );
+  });
+
+  it("round-trips grapheme-bounded Unicode share-card metadata", () => {
+    const goodFor = "👨‍👩‍👧‍👦".repeat(44);
+    const vibes = "😀".repeat(32);
+    const exported = personaToSnapshot(persona({ goodFor, vibes }));
+    expect(snapshotToCreatePersonaRequest(exported)).toMatchObject({
+      goodFor,
+      vibes,
+    });
+  });
+
+  it("round-trips short share-card metadata", () => {
+    const exported = personaToSnapshot(
+      persona({ goodFor: "building useful tools", vibes: "sharp, practical" }),
+    );
+    expect(snapshotToCreatePersonaRequest(exported)).toMatchObject({
+      goodFor: "building useful tools",
+      vibes: "sharp, practical",
+    });
   });
 
   it("exports safe URL and data URL avatars only", () => {

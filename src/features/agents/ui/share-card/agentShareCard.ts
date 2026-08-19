@@ -2,7 +2,7 @@ import cardFoil from "@/features/agents/assets/share-card/card-foil.png";
 import berdCardLogo from "@/features/agents/assets/share-card/berd-card-logo.svg";
 import type { ResolvedAvatarMedia } from "@/shared/avatars/catalog";
 import type { Persona } from "@/shared/types/agents";
-import { getRealPersonaDescription } from "@/features/agents/lib/personaPresentation";
+import { deriveAgentCardDescription } from "./agentShareCardDescription";
 import {
   fallbackAgentCardColor,
   sampleAgentAvatarColor,
@@ -25,7 +25,7 @@ export function getAgentShareCardBase(_personaId: string): string {
 }
 
 export function getAgentShareDescription(persona: Persona): string {
-  return getRealPersonaDescription(persona) ?? persona.systemPrompt.trim();
+  return deriveAgentCardDescription(persona.systemPrompt, persona.displayName);
 }
 
 export function getAgentShareFilename(name: string): string {
@@ -214,6 +214,7 @@ export async function renderAgentShareCard(
   cardBase: string,
   copy: AgentShareCardCopy,
   locale: string,
+  description = getAgentShareDescription(persona),
 ): Promise<Blob> {
   const [base, avatar, berdMark] = await Promise.all([
     loadShareCardImage(cardBase),
@@ -280,7 +281,6 @@ export async function renderAgentShareCard(
 
   context.fillStyle = "black";
   context.textAlign = "left";
-  const description = getAgentShareDescription(persona);
   const measureTitle = (value: string) => {
     context.font = "600 64px Inter, sans-serif";
     return context.measureText(value).width;

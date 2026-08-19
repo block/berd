@@ -41,6 +41,14 @@ export function snapshotToCreatePersonaRequest(
       snapshot.definition.modelProviderId?.trim() || undefined;
     request.model = model;
   }
+  const goodFor = snapshot.profile?.goodFor;
+  const vibes = snapshot.profile?.vibes;
+  if (typeof goodFor === "string" && goodFor.trim()) {
+    request.goodFor = goodFor.trim();
+  }
+  if (typeof vibes === "string" && vibes.trim()) {
+    request.vibes = vibes.trim();
+  }
   const avatarDataUrl = snapshot.profile?.avatarDataUrl;
   if (
     typeof avatarDataUrl === "string" &&
@@ -76,6 +84,8 @@ export function personaToSnapshot(persona: Persona): SnapshotV1 {
     profile: {
       displayName,
       about: null,
+      goodFor: persona.goodFor ?? null,
+      vibes: persona.vibes ?? null,
       avatarDataUrl:
         typeof persona.avatar === "string" &&
         isSafePngAvatarDataUrl(persona.avatar)

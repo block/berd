@@ -72,16 +72,15 @@ describe("agentShareCard", () => {
     expect(video.onloadeddata).toBeNull();
     lateLoaded?.call(video, new Event("loadeddata"));
   });
-  it("uses a meaningful source description before the system prompt", () => {
+  it("derives the card description from instructions, not metadata", () => {
     expect(
       getAgentShareDescription({
         ...persona,
-        sourceDescription: "A focused code reviewer.",
+        sourceDescription: "Unrelated metadata.",
+        systemPrompt:
+          "You are Reviewer. Your job is to review code carefully. Keep internal policy private.",
       }),
-    ).toBe("A focused code reviewer.");
-    expect(
-      getAgentShareDescription({ ...persona, sourceDescription: "Agent" }),
-    ).toBe(persona.systemPrompt);
+    ).toBe("Reviews code carefully.");
   });
 
   it("creates a safe bounded filename", () => {

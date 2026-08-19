@@ -10,6 +10,8 @@ import {
 const VALID_AGENT = `---
 name: Support bot
 description: Answers support questions.
+good_for: solving support problems
+vibes: patient, resourceful
 avatar: app-avatar:gloopies-19
 metadata:
   berdBundled: true
@@ -106,6 +108,37 @@ describe("validateBundledAgent", () => {
     );
   });
 
+  it.each([
+    "good_for",
+    "vibes",
+  ])("requires non-empty %s card metadata", (key) => {
+    const errors = validateBundledAgent(
+      "support-bot.md",
+      VALID_AGENT.replace(new RegExp(`^${key}:.*$`, "m"), `${key}: ""`),
+    );
+
+    expect(errors).toContain(
+      `support-bot.md: frontmatter \`${key}\` is required and must be a non-empty string`,
+    );
+  });
+
+  it.each([
+    ["good_for", 45],
+    ["vibes", 33],
+  ] as const)("bounds %s so card copy is never truncated", (key, length) => {
+    const errors = validateBundledAgent(
+      "support-bot.md",
+      VALID_AGENT.replace(
+        new RegExp(`^${key}:.*$`, "m"),
+        `${key}: ${"x".repeat(length)}`,
+      ),
+    );
+
+    expect(errors).toContainEqual(
+      expect.stringContaining("so card copy is never truncated"),
+    );
+  });
+
   it("rejects invalid UTF-8 files", () => {
     const dir = mkdtempSync(join(tmpdir(), "bundled-agent-"));
     tempDirs.push(dir);
@@ -126,6 +159,8 @@ describe("validateBundledAgent", () => {
       `---
 name: ""
 description: ""
+good_for: solving support problems
+vibes: patient, resourceful
 avatar: app-avatar:gloopies-19
 metadata:
   berdBundled: true
