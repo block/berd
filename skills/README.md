@@ -14,7 +14,7 @@ and can send an explicitly approved message back through the public Buzz CLI.
 ### Requirements
 
 - a [`buzz` CLI](https://github.com/block/buzz) build containing the handoff
-  contract introduced by [`block/buzz@9c1e4fad2`](https://github.com/block/buzz/commit/9c1e4fad2a2ca49835f2301c85b554bcde414bdc), on `PATH`
+  contract introduced by [`block/buzz@9e6ee814b`](https://github.com/block/buzz/commit/9e6ee814b), on `PATH`
 - `BUZZ_RELAY_URL` and `BUZZ_PRIVATE_KEY` configured outside the agent
   conversation
 - `BUZZ_AUTH_TAG` when required by the configured identity
