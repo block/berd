@@ -20,6 +20,7 @@ import {
 import { Button } from "@/shared/ui/button";
 import type {
   MessageContent,
+  TextContent,
   ThinkingContent,
   ReasoningContent,
   ToolRequestContent,
@@ -29,6 +30,7 @@ import type {
 import type { TranscriptAgentWorkPayload } from "@/features/chat/transcript/projection/transcriptItemTypes";
 import { useTranscriptRowStateAdapter } from "@/features/chat/transcript/row-state";
 import { ToolCallAdapter } from "./ToolCallAdapter";
+import { VoiceSpeechStatusIndicator } from "./VoiceSpeechStatusIndicator";
 
 interface ToolTimelineItem {
   kind: "tool";
@@ -51,7 +53,7 @@ interface RedactedThoughtTimelineItem {
 interface ProgressTimelineItem {
   kind: "progress";
   key: string;
-  text: string;
+  content: TextContent;
 }
 
 interface ActivePreviewState {
@@ -141,13 +143,19 @@ function buildAgentWorkTimeline(
 
     if (block.type === "text") {
       const previous = items[items.length - 1];
-      if (previous?.kind === "progress") {
-        previous.text += block.text;
+      if (
+        previous?.kind === "progress" &&
+        previous.content.speech?.status === block.speech?.status
+      ) {
+        previous.content = {
+          ...previous.content,
+          text: previous.content.text + block.text,
+        };
       } else if (block.text.trim()) {
         items.push({
           kind: "progress",
           key: `progress-${index}`,
-          text: block.text,
+          content: block,
         });
       }
       continue;
@@ -298,16 +306,34 @@ function AgentWorkItemRow({
   }
 
   if (item.kind === "progress") {
+    const speechStatus = item.content.speech?.status;
+    const speechLabel = speechStatus
+      ? {
+          speaking: t("message.voiceSpeechSpeakingLabel"),
+          spoken: t("message.voiceSpeechSpokenLabel"),
+          interrupted: t("message.voiceSpeechInterruptedLabel"),
+          notSpoken: t("message.voiceSpeechNotSpokenLabel"),
+          failed: t("message.voiceSpeechFailedLabel"),
+        }[speechStatus]
+      : null;
     return (
       <div className="flex gap-2.5">
         <WorkRail isLast={isLast} status="progress" primary={usePrimaryText} />
         <div
+          data-voice-speech-status={speechStatus}
           className={cn(
             "min-w-0 flex-1 pb-2 text-sm leading-relaxed",
             usePrimaryText ? "text-foreground" : "text-muted-foreground",
+            speechStatus === "interrupted" && "line-through opacity-70",
           )}
         >
-          <MessageResponse mode="static">{item.text}</MessageResponse>
+          {speechStatus && speechLabel ? (
+            <VoiceSpeechStatusIndicator
+              status={speechStatus}
+              label={speechLabel}
+            />
+          ) : null}
+          <MessageResponse mode="static">{item.content.text}</MessageResponse>
         </div>
       </div>
     );
