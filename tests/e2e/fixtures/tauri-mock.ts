@@ -674,6 +674,8 @@ export function buildInitScript(options?: {
             // ---- ACP transport ----
             case "get_goose_serve_url":
               return Promise.resolve(FAKE_ACP_URL);
+            case "get_installation_cohort":
+              return Promise.resolve("established-before-landing-v1");
             case "get_voice_conversation_status":
             case "get_native_voice_conversation_status":
               return Promise.resolve(clone(VOICE_CONVERSATION_STATUS));
