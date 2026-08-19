@@ -345,6 +345,12 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
               providerId,
               models: existing?.models ?? [],
               fetchedAt: existing?.fetchedAt ?? 0,
+              ...(existing?.provenModelIds
+                ? { provenModelIds: existing.provenModelIds }
+                : isCachedModelInventoryAuthoritative(existing)
+                  ? { provenModelIds: [] }
+                  : {}),
+              ...(existing?.runtimeManaged ? { runtimeManaged: true } : {}),
               ...(existing?.configuredModels
                 ? { configuredModels: existing.configuredModels }
                 : {}),

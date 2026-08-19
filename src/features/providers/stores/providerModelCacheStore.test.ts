@@ -273,6 +273,50 @@ describe("providerModelCacheStore", () => {
     ).toEqual(["goose-gpt-5-5", "goose-gpt-5-6-sol"]);
   });
 
+  it.each([
+    { provenModelIds: ["supported-model"], expected: ["supported-model"] },
+    { provenModelIds: [], expected: [] },
+  ])("preserves authoritative proof and runtime policy after refresh failure: $provenModelIds", async ({
+    provenModelIds,
+    expected,
+  }) => {
+    const model = seededModel({ id: "configured-model" });
+    useProviderModelCacheStore.setState({
+      providers: new Map([
+        [
+          "databricks_v2",
+          {
+            providerId: "databricks_v2",
+            models: [model],
+            configuredModels: [model],
+            provenModelIds,
+            fetchedAt: 123,
+            runtimeManaged: true,
+          },
+        ],
+      ]),
+      runtimeManagedProviderIds: new Set(["databricks_v2"]),
+    });
+    mocks.supportedModelsList.mockRejectedValueOnce(new Error("offline"));
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2", { force: true });
+
+    const entry = useProviderModelCacheStore
+      .getState()
+      .providers.get("databricks_v2");
+    expect(entry?.provenModelIds).toEqual(expected);
+    expect(entry?.runtimeManaged).toBe(true);
+    expect(entry?.configuredModels).toEqual([model]);
+    expect(entry?.fetchedAt).toBe(123);
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("databricks_v2"),
+    ).toBe(true);
+  });
+
   it("removes stale runtime-managed providers when runtime config changes", () => {
     const model = seededModel();
 

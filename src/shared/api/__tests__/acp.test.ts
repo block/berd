@@ -250,6 +250,57 @@ describe("acpSendMessage", () => {
     expect(mockPrompt).not.toHaveBeenCalled();
   });
 
+  it("keeps a disproved prepared model blocked after a failed forced refresh", async () => {
+    await setRuntimeConfig(managedRuntimeConfig);
+    const { useProviderModelCacheStore } = await import(
+      "@/features/providers/stores/providerModelCacheStore"
+    );
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+    sessionRegistry.registerPreparedSession(
+      "acp-session-model-disproved-before-refresh-failure",
+      "databricks_v2",
+      "/tmp/project",
+      "removed-model",
+    );
+    mockSupportedModelsList.mockResolvedValueOnce({
+      models: ["supported-model"],
+    });
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2", { force: true });
+
+    await expect(
+      acpSendMessage(
+        "acp-session-model-disproved-before-refresh-failure",
+        "before failure",
+      ),
+    ).rejects.toThrow("removed-model is no longer supported");
+
+    mockSupportedModelsList.mockRejectedValueOnce(new Error("offline"));
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2", { force: true });
+    const inventoryCallsBeforeSend = mockSupportedModelsList.mock.calls.length;
+
+    await expect(
+      acpSendMessage(
+        "acp-session-model-disproved-before-refresh-failure",
+        "after failure",
+      ),
+    ).rejects.toThrow("removed-model is no longer supported");
+
+    expect(mockSupportedModelsList).toHaveBeenCalledTimes(
+      inventoryCallsBeforeSend,
+    );
+    expect(mockPrompt).not.toHaveBeenCalled();
+    expect(
+      useProviderModelCacheStore.getState().providers.get("databricks_v2")
+        ?.provenModelIds,
+    ).toEqual(["supported-model"]);
+    useProviderModelCacheStore.getState().invalidateProvider("databricks_v2");
+  });
+
   it("admits a managed-provider prompt without reading live model inventory", async () => {
     await setRuntimeConfig(managedRuntimeConfig);
     const sessionRegistry = await import("../acpSessionRegistry");
