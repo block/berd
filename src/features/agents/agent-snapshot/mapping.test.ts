@@ -143,6 +143,17 @@ describe("snapshot mappings", () => {
     );
   });
 
+  it("bounds public descriptions by grapheme without failing export", () => {
+    const description = "😀".repeat(120);
+    const exported = personaToSnapshot(
+      persona({ sourceDescription: description }),
+    );
+    expect(exported.profile?.about).toBe("😀".repeat(110));
+    expect(snapshotToCreatePersonaRequest(exported).description).toBe(
+      "😀".repeat(110),
+    );
+  });
+
   it("round-trips grapheme-bounded Unicode share-card metadata", () => {
     const goodFor = "👨‍👩‍👧‍👦".repeat(44);
     const vibes = "😀".repeat(32);

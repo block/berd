@@ -1,4 +1,5 @@
 import type { CreatePersonaRequest, Persona } from "@/shared/types/agents";
+import { truncateCardGraphemes } from "@/features/agents/ui/share-card/agentShareCardText";
 import {
   isRemoteAvatarUrl,
   isSafePngAvatarDataUrl,
@@ -87,7 +88,9 @@ export function personaToSnapshot(persona: Persona): SnapshotV1 {
     },
     profile: {
       displayName,
-      about: persona.sourceDescription?.trim() || null,
+      about: persona.sourceDescription
+        ? truncateCardGraphemes(persona.sourceDescription.trim(), 110)
+        : null,
       goodFor: persona.goodFor ?? null,
       vibes: persona.vibes ?? null,
       avatarDataUrl:
