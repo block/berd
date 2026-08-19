@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -6,14 +6,16 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  CircleDashed,
   GitPullRequest,
   MonitorCog,
   RefreshCw,
   TestTube2,
-  XOctagon,
 } from "lucide-react";
 
+import {
+  PullRequestListItem,
+  type PullRequestListItemStatus,
+} from "@/features/pull-requests/ui/PullRequestListItem";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
@@ -501,58 +503,35 @@ function PullRequestProjectGroup({
   );
 }
 
-const PullRequestRow = memo(function PullRequestRow({
-  item,
-}: {
-  item: WorkStatusItem;
-}) {
+function PullRequestRow({ item }: { item: WorkStatusItem }) {
   const { t } = useTranslation("common");
   const { formatDate } = useLocaleFormatting();
-  const StatusIcon = iconForStatus(item.status);
+  const number = item.subtitle ?? item.destination.url.split("/").at(-1) ?? "";
+  const statuses: PullRequestListItemStatus[] = [
+    {
+      label: t(WORK_STATUS_LABEL_KEYS[item.status]),
+      tone: toneForStatus(item.status),
+    },
+  ];
 
   return (
-    <button
-      type="button"
-      className="flex w-full min-w-0 items-start overflow-hidden rounded-sm py-2 pr-3 pl-[38px] text-left text-foreground outline-none transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-      onClick={() => {
+    <PullRequestListItem
+      repo={item.groupName}
+      number={number}
+      title={item.title}
+      statuses={statuses}
+      timestamp={formatPullRequestTimestamp(item.updatedAt, formatDate)}
+      ariaLabel={`${item.title} · ${item.groupName} ${item.subtitle ?? ""}`.trim()}
+      className="pl-[38px]"
+      onOpen={() => {
         openWorkStatusUrl(item.destination.url).catch((error) => {
           console.error("Failed to open pull request:", error);
           toast.error(t("workStatus.openError"));
         });
       }}
-    >
-      <div className="min-w-0 flex-1 space-y-0.5 overflow-hidden">
-        <div className="flex min-w-0 items-start gap-2">
-          <p className="line-clamp-2 min-w-0 flex-1 text-sm leading-normal">
-            {item.title}
-          </p>
-          <span className="shrink-0 text-muted-foreground text-xs tabular-nums">
-            {formatPullRequestTimestamp(item.updatedAt, formatDate)}
-          </span>
-        </div>
-        <p className="truncate text-muted-foreground text-xs leading-normal">
-          {item.groupName}
-        </p>
-        <div className="flex min-w-0 items-center gap-1.5 text-xs leading-normal">
-          <StatusIcon
-            className={cn("size-3.5 shrink-0", statusClass(item.status))}
-          />
-          <span className="min-w-0 truncate text-muted-foreground">
-            {t(WORK_STATUS_LABEL_KEYS[item.status])}
-          </span>
-          {item.subtitle ? (
-            <>
-              <span className="shrink-0 text-muted-foreground">·</span>
-              <span className="min-w-0 truncate text-muted-foreground">
-                {item.subtitle}
-              </span>
-            </>
-          ) : null}
-        </div>
-      </div>
-    </button>
+    />
   );
-});
+}
 
 function groupItemsByProject(
   items: WorkStatusItem[],
@@ -595,39 +574,22 @@ function formatCount(count: number): string {
   return count > 999 ? "999+" : String(count);
 }
 
-function iconForStatus(status: WorkStatusState) {
+function toneForStatus(
+  status: WorkStatusState,
+): PullRequestListItemStatus["tone"] {
   switch (status) {
     case "readyToMerge":
-      return CheckCircle2;
-    case "draft":
+      return "success";
     case "awaitingApproval":
     case "checksPending":
-      return CircleDashed;
-    case "changesRequested":
-      return RefreshCw;
-    case "checksFailing":
-    case "mergeBlocked":
-    case "error":
-      return XOctagon;
-    default:
-      return CircleDashed;
-  }
-}
-
-function statusClass(status: WorkStatusState): string {
-  switch (status) {
-    case "readyToMerge":
-      return "text-success";
-    case "awaitingApproval":
-    case "checksPending":
-      return "text-warning";
+      return "warning";
     case "changesRequested":
     case "checksFailing":
     case "mergeBlocked":
     case "error":
-      return "text-destructive";
+      return "danger";
     default:
-      return "text-muted-foreground";
+      return "muted";
   }
 }
 
