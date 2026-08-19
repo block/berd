@@ -248,6 +248,10 @@
       "resetSuccess": "Onboarding starter tasks reset.",
       "title": "Onboarding starter tasks"
     },
+    "workStatus": {
+      "description": "Show in-app PR tracker",
+      "title": "PR tracker"
+    },
     "title": "Experiments",
     "transcriptVirtualRenderer": {
       "description": "Routes chats through the virtual transcript renderer bridge for implementation testing.",

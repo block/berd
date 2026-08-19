@@ -443,6 +443,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::pr_tracker::open_pr_tracker_url,
+            commands::pr_tracker::resolve_pr_tracker_projects,
+            commands::pr_tracker::list_pr_tracker_pull_requests,
             commands::agents::read_import_persona_file,
             commands::agents::read_import_agent_image,
             commands::agents::read_agent_source_file,

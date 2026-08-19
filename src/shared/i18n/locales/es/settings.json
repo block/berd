@@ -248,6 +248,10 @@
       "resetSuccess": "Se restablecieron las tareas iniciales.",
       "title": "Tareas iniciales de incorporación"
     },
+    "workStatus": {
+      "description": "Muestra el seguimiento de PR dentro de la aplicación",
+      "title": "Seguimiento de PR"
+    },
     "title": "Experimentos",
     "transcriptVirtualRenderer": {
       "description": "Envía los chats por el puente del renderizador virtual de transcripciones para probar la implementación.",

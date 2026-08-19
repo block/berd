@@ -27,7 +27,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use chrono::{DateTime, NaiveDateTime, Utc};
-use etcetera::{choose_app_strategy, AppStrategy, AppStrategyArgs};
 use tauri::Manager;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
@@ -74,32 +73,11 @@ pub(crate) fn resolve_log_dirs(app: &tauri::AppHandle) -> Result<LogDirs, String
         .path()
         .app_log_dir()
         .map_err(|error| format!("Failed to resolve app log directory: {error}"))?;
-    let goose_state_logs_dir = goose_state_dir()?.join("logs");
+    let goose_state_logs_dir = crate::services::goose_config::state_dir()?.join("logs");
     Ok(LogDirs {
         app_log_dir,
         goose_state_logs_dir,
     })
-}
-
-fn goose_state_dir() -> Result<PathBuf, String> {
-    if let Ok(root) = std::env::var("GOOSE_PATH_ROOT") {
-        let root = root.trim();
-        if !root.is_empty() {
-            return Ok(PathBuf::from(root).join("state"));
-        }
-    }
-
-    // NOTE: "Block" matches goosed's own `Paths` strategy (kept for backwards
-    // compatibility with existing install dirs). Reusing the same `etcetera`
-    // call guarantees we resolve the identical directory on every platform.
-    let strategy = choose_app_strategy(AppStrategyArgs {
-        top_level_domain: "Block".to_string(),
-        author: "Block".to_string(),
-        app_name: "goose".to_string(),
-    })
-    .map_err(|error| format!("Failed to resolve goose state directory: {error}"))?;
-
-    Ok(strategy.state_dir().unwrap_or_else(|| strategy.data_dir()))
 }
 
 struct ZipEntry {
