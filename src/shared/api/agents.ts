@@ -1026,11 +1026,9 @@ export interface PersonaImportPreview {
   identity: string;
 }
 
-function previewDescription(displayName: string, description: unknown): string {
+function previewDescription(description: unknown): string | undefined {
   const authored = trimmedPropertyString(description);
-  return hasRealAgentDescription(authored)
-    ? (authored as string)
-    : `${displayName} is ready to help.`;
+  return hasRealAgentDescription(authored) ? authored : undefined;
 }
 
 function previewSafeAvatar(
@@ -1056,7 +1054,7 @@ export function previewPersonaImport(
     const request = personaMarkdownToCreateRequest(fileContents);
     return {
       displayName: request.name,
-      description: previewDescription(request.name, request.description),
+      description: previewDescription(request.description),
       systemPrompt: request.content,
       goodFor: agentCardMetadataProperty(request.properties, "good_for"),
       vibes: agentCardMetadataProperty(request.properties, "vibes"),
@@ -1085,7 +1083,6 @@ export function previewPersonaImport(
     return {
       displayName,
       description: previewDescription(
-        displayName,
         parsed.description ?? metadata?.description,
       ),
       systemPrompt,
@@ -1103,7 +1100,7 @@ export function previewPersonaImport(
   const displayName = parsed.displayName as string;
   return {
     displayName,
-    description: previewDescription(displayName, parsed.description),
+    description: previewDescription(parsed.description),
     systemPrompt: parsed.systemPrompt as string,
     avatar: previewSafeAvatar(legacyPersonaProperties(parsed).avatar),
     identity: fileName,

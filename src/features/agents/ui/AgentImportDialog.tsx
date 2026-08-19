@@ -268,7 +268,9 @@ export function AgentImportDialog({
                     displayName={prepared.preview.displayName}
                     description={
                       prepared.preview.description ??
-                      `${prepared.preview.displayName} is ready to help.`
+                      t("importDialog.descriptionFallback", {
+                        name: prepared.preview.displayName,
+                      })
                     }
                     avatarSrc={prepared.preview.avatar}
                     alt={t("importDialog.previewAlt", {

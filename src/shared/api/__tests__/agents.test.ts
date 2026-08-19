@@ -1029,7 +1029,7 @@ describe("agents API", () => {
       "scout.md",
     );
 
-    expect(preview.description).toBe("scout is ready to help.");
+    expect(preview.description).toBeUndefined();
   });
 
   it("drops overlong imported card metadata at ingestion", async () => {

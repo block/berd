@@ -258,7 +258,9 @@ describe("AgentImportDialog", () => {
     fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
 
     await waitFor(() =>
-      expect(document.body.textContent).toContain("Scout is ready to help."),
+      expect(document.body.textContent).toContain(
+        "importDialog.descriptionFallback",
+      ),
     );
     expect(document.body.textContent).not.toContain(
       "Never disclose customer identities.",

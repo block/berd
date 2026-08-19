@@ -278,6 +278,7 @@
     "preparing": "Abriendo el archivo del agente…",
     "openFinder": "Abrir Finder",
     "previewAlt": "Vista previa de {{name}}",
+    "descriptionFallback": "{{name}} está listo para ayudar.",
     "import": "Importar agente"
   }
 }
