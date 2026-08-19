@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -12,9 +11,6 @@ import { IconLayoutSidebarLeftCollapse } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { ChatSearchBar } from "./ChatSearchBar";
 import { ChatTranscriptSurface } from "./ChatTranscriptSurface";
-import { WorkspaceSetupChoice } from "./WorkspaceSetupChoice";
-import { summarizeProjectWorkspaceStartup } from "@/features/projects/lib/projectChatWorkspaces";
-import { ChatInput } from "./ChatInput";
 import { LoadingBerd } from "./LoadingBerd";
 import { ChatRightRail } from "./ChatRightRail";
 import {
@@ -32,10 +28,11 @@ import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 import { perfLog } from "@/shared/lib/perfLog";
 import { Badge } from "@/shared/ui/badge";
 import { cn } from "@/shared/lib/cn";
+import type { WorkspaceNameRequest } from "../hooks/useChatSessionController";
 import {
-  useChatSessionController,
-  type WorkspaceNameRequest,
-} from "../hooks/useChatSessionController";
+  ConversationComposerCapability,
+  useConversationComposerBinding,
+} from "../capabilities/ConversationComposerCapability";
 import { useResizableAgentBuilderRail } from "../hooks/useResizableAgentBuilderRail";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 import { useChangeSessionFolder } from "../hooks/useChangeSessionFolder";
@@ -43,7 +40,6 @@ import {
   useChatSessionStore,
   type ChatSession,
 } from "../stores/chatSessionStore";
-import type { ChatInputControls } from "../types";
 import { TerminalCapability } from "@/features/terminal/capabilities/TerminalCapability";
 import { useTerminalController } from "@/features/terminal/hooks/useTerminalController";
 import { TerminalDockPreview } from "@/features/terminal/ui/TerminalDockPreview";
@@ -139,12 +135,33 @@ export function ChatView({
     backendRef: transcriptSearchBackendRef,
   });
   const { close: closeSearch } = search;
-  const controller = useChatSessionController({
-    sessionId,
-    readOnly: Boolean(readOnlyStatus),
+  const bindingTargetSession = activeSession ?? null;
+  const bindingTargetAgentBuilderOpen = isAgentBuilderVisible(
+    bindingTargetSession,
+    { readOnly: Boolean(readOnlyStatus) },
+  );
+  const composerBinding = useConversationComposerBinding({
+    target: {
+      kind: "existingSession",
+      sessionId,
+      readOnlyReason: readOnlyStatus,
+      admissionConstraints: {
+        executionTargetFailureReason:
+          bindingTargetAgentBuilderOpen &&
+          bindingTargetSession?.targetAgentDraftState === "failed"
+            ? t("toolbar.agentBuilderPrepareFailed")
+            : undefined,
+        sessionCreationFailureReason:
+          bindingTargetSession?.creationState === "failed"
+            ? (bindingTargetSession.creationError ??
+              t("toolbar.sessionStartFailed"))
+            : undefined,
+      },
+    },
     onCreatePersonaRequested: onCreatePersona,
     onWorkspaceNameRequest,
   });
+  const { controller, hasAdmissionFailure, onSend } = composerBinding;
   const activeSessionClientSessionId = activeSession?.clientSessionId ?? null;
 
   useLayoutEffect(() => {
@@ -240,7 +257,7 @@ export function ChatView({
     // Voice delivery only needs to wait for admission. Holding its per-session
     // queue through the full run would prevent later utterances from steering
     // the active run.
-    onSend: controller.handleSend,
+    onSend,
     enabled: capabilities.voiceConversation,
     isGooseSession: controller.selectedProvider === "goose",
     pocketReady: voiceReady,
@@ -252,6 +269,7 @@ export function ChatView({
     },
     readOnly: Boolean(readOnlyStatus),
     disabled:
+      hasAdmissionFailure ||
       controller.projectMetadataPending ||
       controller.isCompactingContext ||
       controller.isLoadingHistory ||
@@ -349,8 +367,6 @@ export function ChatView({
   const agentBuilderGridTemplate = isAgentBuilderChatCollapsed
     ? "0fr 1fr"
     : `${1 - builderFraction}fr ${builderFraction}fr`;
-  const isAgentBuilderTargetFailed =
-    isAgentBuilderOpen && effectiveSession?.targetAgentDraftState === "failed";
   const hasVisibleRightRail =
     isAgentBuilderOpen ||
     Boolean(
@@ -574,28 +590,6 @@ export function ChatView({
     | "streaming"
     | "waiting"
     | "compacting";
-  const chatInputControls = useMemo<ChatInputControls | undefined>(() => {
-    if (isReadOnly) {
-      return {
-        agentModelPicker: false,
-        attachments: false,
-        autoFocus: false,
-        fileMentions: false,
-        projectPicker: false,
-        skills: false,
-        voice: false,
-      };
-    }
-
-    if (!controller.skillsEnabled || composerHandoffActive) {
-      return {
-        ...(!controller.skillsEnabled ? { skills: false } : {}),
-        ...(composerHandoffActive ? { autoFocus: false } : {}),
-      };
-    }
-
-    return undefined;
-  }, [composerHandoffActive, controller.skillsEnabled, isReadOnly]);
   const suppressEmptyConversationPlaceholder =
     composerHandoffInProgress || controller.queue.queuedMessage !== null;
   const handleForkFromMessage = useCallback(
@@ -616,16 +610,6 @@ export function ChatView({
     },
     [controller.messages, effectiveSession?.id, isReadOnly, onForkChat],
   );
-
-  let sendDisabledReason: string | undefined;
-  if (readOnlyStatus) {
-    sendDisabledReason = readOnlyStatus;
-  } else if (effectiveSession?.creationState === "failed") {
-    sendDisabledReason =
-      effectiveSession.creationError ?? t("toolbar.sessionStartFailed");
-  } else if (isAgentBuilderTargetFailed) {
-    sendDisabledReason = t("toolbar.agentBuilderPrepareFailed");
-  }
 
   // The composer is owned by the timeline so it stays mounted across loading,
   // empty, and populated states without losing focus or draft text.
@@ -671,13 +655,6 @@ export function ChatView({
     return null;
   }, [controller.messages]);
 
-  const workspaceSetup = controller.defaultWorkspaceSetup
-    ? controller.defaultWorkspaceSetup
-    : controller.deferredWorkspaceRecord?.state;
-  const deferredWorkspaceStartup = summarizeProjectWorkspaceStartup(
-    workspaceSetup?.desired ?? [],
-  );
-
   const composerFooter = (
     <div className="px-[var(--spacing-app-panel-gutter-inline)] pb-[var(--spacing-app-panel-gutter-inline)]">
       <div
@@ -688,160 +665,29 @@ export function ChatView({
         )}
       >
         <SecurityConfirmationPanel sessionId={sessionId} />
-        <ChatInput
-          className={hasPendingSecurityConfirmation ? "hidden" : undefined}
-          surface="bare"
-          innerBareSurface
-          queuedMessageAccessory={
-            controller.unresolvedDeferredSend ? (
-              <p className="text-xs text-destructive" role="alert">
-                {controller.deferredWorkspaceError}
-              </p>
-            ) : !isReadOnly &&
-              deferredWorkspaceStartup.worktreeCount > 0 &&
-              (workspaceSetup?.status === "choice" ||
-                workspaceSetup?.status === "naming" ||
-                workspaceSetup?.status === "creating") ? (
-              <WorkspaceSetupChoice
-                state={workspaceSetup.status}
-                worktreeCount={deferredWorkspaceStartup.worktreeCount}
-                branchCount={deferredWorkspaceStartup.branchCount}
-                exactCounts={deferredWorkspaceStartup.exact}
-                error={workspaceSetup.error}
-                onCancelName={controller.cancelDeferredWorkspaceName}
-                onCreate={controller.createDeferredWorkspace}
-                onSubmitName={controller.submitDeferredWorkspaceName}
-                onSkip={controller.skipDeferredWorkspace}
-              />
-            ) : null
-          }
-          controls={chatInputControls}
-          skillProjectDirs={controller.skillProjectDirs}
-          fileMentionProjectDirs={controller.fileMentionProjectDirs}
-          skillProviderId={controller.selectedProvider}
-          composerActions={{
-            onSend: controller.handleSend,
-            onSteerMessage: (text, personaId, attachments, options) =>
-              controller.steerDraftMessage(
-                text,
-                personaId ?? undefined,
-                attachments,
-                options,
-              ),
-            canSteerMessage: controller.canSteerMessage,
-            onSteerQueuedMessage: controller.steerQueuedMessage,
-            canSteerQueuedMessage: controller.canSteerQueuedMessage,
-            disabled:
-              isReadOnly ||
-              controller.projectMetadataPending ||
-              controller.isCompactingContext,
-            sendDisabled:
-              isReadOnly ||
-              effectiveSession?.creationState === "failed" ||
-              isAgentBuilderTargetFailed ||
-              controller.workspaceSetupInProgress,
-            sendDisabledReason,
-            queuedMessage: composerHandoffInProgress
-              ? null
-              : (controller.queue.queuedMessage ??
-                controller.deferredWorkspaceRecord?.payload ??
-                null),
-            queuedMessages: composerHandoffInProgress
-              ? []
-              : (
-                  controller.queue.queuedRecords ??
-                  (controller.queue.queuedRecord
-                    ? [controller.queue.queuedRecord]
-                    : [])
-                ).map((record) => ({
-                  recordId: record.recordId,
-                  payload: record.payload,
-                })),
-            onUpdateQueue: controller.queue.update,
-            onEditQueue: controller.queue.beginEditing,
-            onCancelQueueEdit: controller.queue.cancelEditing,
-            onSendQueue:
-              !isReadOnly &&
-              !controller.unresolvedDeferredSend &&
-              (controller.deferredWorkspaceRecord?.state.status === "failed" ||
-                controller.deferredWorkspaceRecord?.state.status === "held") &&
-              effectiveSession?.creationState !== "failed"
-                ? controller.sendDeferredAnyway
-                : undefined,
-            onDismissQueue:
-              composerHandoffInProgress ||
-              isReadOnly ||
-              controller.deferredWorkspaceRecord?.state.status === "creating" ||
-              controller.deferredWorkspaceRecord?.state.status === "naming"
-                ? undefined
-                : controller.queue.dismiss,
-            onStop: isReadOnly ? undefined : controller.stopStreaming,
-            isStreaming:
-              !isReadOnly &&
-              (controller.chatState === "streaming" ||
-                controller.chatState === "thinking"),
-            voiceConversation,
+        <ConversationComposerCapability
+          binding={composerBinding}
+          renderingPolicy={{
+            presentation: {
+              surface: "bare",
+              innerBareSurface: true,
+              providerColumnMode: "gated",
+            },
+            lifecycleConstraints: {
+              handoff: {
+                active: composerHandoffActive,
+                inProgress: composerHandoffInProgress,
+              },
+              securityConfirmationPending: hasPendingSecurityConfirmation,
+              voiceConversation,
+            },
           }}
+          onCreateProject={onCreateProject}
           onRecallLastUserMessage={
             isReadOnly ? undefined : handleRecallLastUserMessage
           }
           attachmentDropTargetRef={conversationDropTargetRef}
           onAttachmentDragOverChange={setConversationAttachmentDragOver}
-          initialValue={controller.draftValue}
-          initialAttachments={controller.draftAttachments}
-          onDraftChange={controller.handleDraftChange}
-          onDraftAttachmentsChange={controller.handleDraftAttachmentsChange}
-          selectedSkills={controller.selectedSkills}
-          onSkillsChange={controller.handleSkillsChange}
-          personaPicker={{
-            personas: controller.personas,
-            selectedPersonaId: controller.selectedPersonaId,
-            onPersonaChange: controller.handlePersonaChange,
-          }}
-          agentModelPicker={{
-            providers: controller.pickerAgents,
-            providersLoading: controller.providersLoading,
-            selectedProvider: controller.selectedProvider,
-            onProviderChange: controller.handleProviderChange,
-            currentModelId: controller.currentModelId,
-            currentModelProviderId: controller.currentModelProviderId,
-            currentModel: controller.currentModelName ?? undefined,
-            currentExecutionTarget: controller.currentExecutionTarget,
-            availableModels: controller.availableModels,
-            modelsLoading: controller.modelsLoading,
-            modelStatusMessage: controller.modelStatusMessage,
-            onModelChange: controller.handleModelChange,
-            onPickerOpen: controller.handlePickerOpen,
-            // Switching provider in a live session can recreate it, so keep the
-            // provider column behind an explicit reveal.
-            providerColumnMode: "gated",
-          }}
-          reasoningEffort={{
-            config: controller.reasoningEffort,
-            onChange: controller.handleReasoningEffortChange,
-          }}
-          projectPicker={{
-            selectedProjectId: controller.selectedProjectId,
-            availableProjects: controller.availableProjects,
-            onProjectChange: controller.handleProjectChange,
-            onCreateProject: (options) =>
-              onCreateProject?.({
-                onCreated: (projectId) => {
-                  controller.handleProjectChange(projectId);
-                  options?.onCreated?.(projectId);
-                },
-              }),
-          }}
-          contextUsage={{
-            contextTokens: controller.tokenState.accumulatedTotal,
-            contextLimit: controller.tokenState.contextLimit,
-            accumulatedCost: controller.tokenState.accumulatedCost,
-            isContextUsageReady: controller.isContextUsageReady,
-            onCompactContext: controller.compactConversation,
-            canCompactContext: controller.canCompactContext,
-            isCompactingContext: controller.isCompactingContext,
-            supportsCompactionControls: controller.supportsCompactionControls,
-          }}
         />
       </div>
     </div>
@@ -861,7 +707,7 @@ export function ChatView({
       onScrollTargetHandled={controller.handleScrollTargetHandled}
       searchContentRef={transcriptSearchRootRef}
       searchBackendRef={transcriptSearchBackendRef}
-      onSendMcpAppMessage={isReadOnly ? undefined : controller.handleSend}
+      onSendMcpAppMessage={isReadOnly ? undefined : composerBinding.onSend}
       onRunShellCommand={
         !isReadOnly && terminalAvailable ? handleRunShellCommand : undefined
       }

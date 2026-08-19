@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   messageTimelineSpy: vi.fn(),
   chatInputSpy: vi.fn(),
   chatRightRailSpy: vi.fn(),
+  voiceControllerSpy: vi.fn(),
   setRightRailOpen: vi.fn(),
   patchSession: vi.fn(),
   handleSend: vi.fn(() => true),
@@ -93,14 +94,17 @@ vi.mock("react-i18next", () => ({
 vi.mock(
   "@/features/voice-conversation/hooks/useVoiceConversationController",
   () => ({
-    useVoiceConversationController: () => ({
-      lifecycle: "stopped",
-      uiState: "off",
-      microphoneMuted: false,
-      start: vi.fn(),
-      stop: vi.fn(),
-      toggleMicrophone: vi.fn(),
-    }),
+    useVoiceConversationController: (options: unknown) => {
+      mocks.voiceControllerSpy(options);
+      return {
+        lifecycle: "stopped",
+        uiState: "off",
+        microphoneMuted: false,
+        start: vi.fn(),
+        stop: vi.fn(),
+        toggleMicrophone: vi.fn(),
+      };
+    },
   }),
 );
 
@@ -393,6 +397,7 @@ describe("ChatView MCP app messaging", () => {
     mocks.messageTimelineSpy.mockClear();
     mocks.chatInputSpy.mockClear();
     mocks.chatRightRailSpy.mockClear();
+    mocks.voiceControllerSpy.mockClear();
     mocks.setRightRailOpen.mockClear();
     mocks.patchSession.mockClear();
     mocks.handleSend.mockClear();
@@ -1220,6 +1225,53 @@ describe("ChatView MCP app messaging", () => {
     expect(chatInputProps.composerActions?.sendDisabledReason).toBe(
       "toolbar.agentBuilderPrepareFailed",
     );
+  });
+
+  it("blocks ordinary, deferred, and voice delivery when the execution target fails", () => {
+    const sendDeferredAnyway = vi.fn();
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      deferredWorkspaceRecord: {
+        kind: "deferred",
+        recordId: "deferred-1",
+        payload: { text: "queued" },
+        state: { status: "held", desired: [] },
+      },
+      queue: { queuedMessage: { text: "queued" }, dismiss: vi.fn() },
+      sendDeferredAnyway,
+    });
+    const activeSession = {
+      id: "session-1",
+      title: "Build agent",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: "build-agent",
+      targetAgentDraftState: "failed",
+    } satisfies ChatSession;
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+      composerActions: {
+        onSend: (text: string) => boolean;
+        onSendQueue?: () => boolean;
+        disabled?: boolean;
+      };
+    };
+    expect(chatInputProps.composerActions.disabled).toBe(true);
+    expect(chatInputProps.composerActions.onSendQueue).toBeUndefined();
+    expect(chatInputProps.composerActions.onSend("blocked")).toBe(false);
+    expect(mocks.handleSend).not.toHaveBeenCalled();
+    expect(sendDeferredAnyway).not.toHaveBeenCalled();
+
+    const voiceOptions = mocks.voiceControllerSpy.mock.calls.at(-1)?.[0] as {
+      onSend: (text: string) => boolean;
+      disabled: boolean;
+    };
+    expect(voiceOptions.disabled).toBe(true);
+    expect(voiceOptions.onSend("blocked voice")).toBe(false);
+    expect(mocks.handleSend).not.toHaveBeenCalled();
   });
 
   it("keeps the canonical composer enabled when a pending builder is closed", () => {
