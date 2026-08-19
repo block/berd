@@ -12,6 +12,31 @@ type SpeakableSegment = {
 };
 
 const STREAMING_SPEECH_BOUNDARY = /(?:[.!?](?:["')\]}]+)?(?=\s|$)|\n+)/g;
+const NON_TERMINAL_ABBREVIATIONS = new Set([
+  "dr.",
+  "etc.",
+  "fig.",
+  "jr.",
+  "mr.",
+  "mrs.",
+  "ms.",
+  "no.",
+  "prof.",
+  "sr.",
+  "st.",
+  "vs.",
+]);
+
+function isSpeakableBoundary(text: string, match: RegExpMatchArray): boolean {
+  if (match[0].startsWith("\n") || !match[0].startsWith(".")) return true;
+  const periodIndex = match.index ?? 0;
+  const prefix = text.slice(0, periodIndex + 1);
+  const token = prefix.match(/[\p{L}.]+$/u)?.[0].toLocaleLowerCase();
+  if (!token) return true;
+  return (
+    !NON_TERMINAL_ABBREVIATIONS.has(token) && !/^(?:\p{L}\.){2,}$/u.test(token)
+  );
+}
 
 function splitSpeakableText(
   text: string,
@@ -20,6 +45,7 @@ function splitSpeakableText(
   const segments: string[] = [];
   let start = 0;
   for (const match of text.matchAll(STREAMING_SPEECH_BOUNDARY)) {
+    if (!isSpeakableBoundary(text, match)) continue;
     const end = (match.index ?? 0) + match[0].length;
     const segment = text.slice(start, end).trim();
     if (segment) segments.push(segment);
@@ -88,7 +114,7 @@ function setSegmentStatus(
       content: message.content.map((content, index) =>
         index === segment.contentIndex &&
         content.type === "text" &&
-        content.text.trim().startsWith(segment.sourceText)
+        content.text.trim() === segment.sourceText
           ? { ...content, speech: { status } }
           : content,
       ),

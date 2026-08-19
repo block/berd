@@ -119,29 +119,51 @@ describe("native assistant speech queue", () => {
       );
     });
 
-    useChatStore.getState().setMessages("session-1", [
-      assistant([
-        {
-          type: "text",
-          text: "The first sentence is ready. The second is still streaming",
-        },
-      ]),
-    ]);
+    useChatStore
+      .getState()
+      .appendStreamingText(
+        "session-1",
+        "assistant-1",
+        " The second is still streaming",
+      );
     await Promise.resolve();
     expect(mocks.speakPocketVoice).toHaveBeenCalledTimes(1);
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).not.toHaveProperty("speech");
+
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", "!");
+    await vi.waitFor(() => {
+      expect(mocks.speakPocketVoice).toHaveBeenNthCalledWith(
+        2,
+        "The second is still streaming!",
+      );
+    });
+  });
+
+  it("waits through abbreviations before speaking a streamed sentence", async () => {
+    mocks.speakPocketVoice.mockResolvedValue();
+    startNativeAssistantSpeech("session-1", vi.fn());
 
     useChatStore.getState().setMessages("session-1", [
       assistant([
         {
           type: "text",
-          text: "The first sentence is ready. The second is still streaming!",
+          text: "Dr. Smith is reviewing the U.S.",
         },
       ]),
     ]);
+    await Promise.resolve();
+    expect(mocks.speakPocketVoice).not.toHaveBeenCalled();
+
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", " economy.");
     await vi.waitFor(() => {
-      expect(mocks.speakPocketVoice).toHaveBeenNthCalledWith(
-        2,
-        "The second is still streaming!",
+      expect(mocks.speakPocketVoice).toHaveBeenCalledWith(
+        "Dr. Smith is reviewing the U.S. economy.",
       );
     });
   });

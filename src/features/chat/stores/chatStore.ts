@@ -271,10 +271,12 @@ function appendTextToMessage(message: Message, text: string): Message {
   const lastContent = message.content[message.content.length - 1];
   if (lastContent?.type === "text") {
     const nextContent = [...message.content];
-    nextContent[nextContent.length - 1] = {
+    const nextTextContent = {
       ...lastContent,
       text: lastContent.text + text,
     };
+    delete nextTextContent.speech;
+    nextContent[nextContent.length - 1] = nextTextContent;
     return { ...message, content: nextContent };
   }
 
