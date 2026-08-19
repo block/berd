@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpGetSessionInfo: (...args: unknown[]) => mocks.acpGetSessionInfo(...args),
   acpLoadSession: (...args: unknown[]) => mocks.acpLoadSession(...args),
   acpPrepareSession: (...args: unknown[]) => mocks.acpPrepareSession(...args),
