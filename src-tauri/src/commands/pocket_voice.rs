@@ -13,7 +13,7 @@ use std::time::{Duration, Instant, SystemTime};
 #[cfg(target_os = "macos")]
 use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
-use berd_voice::{load_text_to_speech, load_voice_style, SynthesisOutcome};
+use berd_voice::{load_text_to_speech, load_voice_style};
 use futures_util::StreamExt;
 #[cfg(target_os = "macos")]
 use rodio::buffer::SamplesBuffer;
@@ -36,6 +36,8 @@ const DOWNLOAD_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const DOWNLOAD_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const DOWNLOAD_TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
+#[cfg(target_os = "macos")]
+const STREAMING_EMIT_FRAMES: usize = 12;
 const PARAKEET_ARCHIVE: Artifact = Artifact {
     filename: "parakeet.tar.bz2",
     size: 104_337_827,
@@ -1597,31 +1599,6 @@ async fn download_artifact(
     Ok(())
 }
 
-#[cfg(any(target_os = "macos", test))]
-fn cumulative_delta<'a>(
-    previous_len: &mut usize,
-    samples: &'a [f32],
-) -> Result<Option<&'a [f32]>, String> {
-    // Pocket invokes the callback with an empty slice while generating the
-    // next internal model unit. It is progress-only, not a cumulative reset.
-    if samples.is_empty() {
-        return Ok(None);
-    }
-    if samples.len() < *previous_len {
-        return Err(format!(
-            "Pocket cumulative callback length decreased from {} to {}",
-            *previous_len,
-            samples.len()
-        ));
-    }
-    if samples.len() == *previous_len {
-        return Ok(None);
-    }
-    let delta = &samples[*previous_len..];
-    *previous_len = samples.len();
-    Ok(Some(delta))
-}
-
 #[cfg(target_os = "macos")]
 fn synthesize_and_stream(
     base: &Path,
@@ -1676,7 +1653,6 @@ fn synthesize_and_stream(
     let rate = NonZero::new(SAMPLE_RATE)
         .ok_or_else(|| "Pocket sample rate invariant failed".to_string())?;
     let player = Arc::new(Player::connect_new(sink.mixer()));
-    let previous_len = Arc::new(Mutex::new(0_usize));
     let speed_processor = Rc::new(RefCell::new(StreamingSpeedProcessor::new(
         speed,
         SAMPLE_RATE,
@@ -1686,53 +1662,40 @@ fn synthesize_and_stream(
 
     let callback_player = player.clone();
     let callback_active = active.clone();
-    let callback_previous_len = previous_len.clone();
     let callback_speed_processor = speed_processor.clone();
     let callback_error_slot = callback_error.clone();
     let callback_started = playback_started.clone();
-    let outcome =
-        engine.synth_chunk_streaming(text, &style, move |samples: &[f32], _progress: f32| {
-            if !callback_active.load(Ordering::SeqCst) {
+    let mut on_audio = move |samples: Vec<f32>| {
+        if !callback_active.load(Ordering::SeqCst) {
+            return false;
+        }
+        let delta = match callback_speed_processor.borrow_mut().process(&samples) {
+            Ok(processed) => processed,
+            Err(error) => {
+                if let Ok(mut callback_error) = callback_error_slot.lock() {
+                    *callback_error = Some(error);
+                }
                 return false;
             }
-            let Ok(mut previous_len) = callback_previous_len.lock() else {
-                return false;
-            };
-            let delta = match cumulative_delta(&mut previous_len, samples) {
-                Ok(Some(delta)) => match callback_speed_processor.borrow_mut().process(delta) {
-                    Ok(processed) => processed,
-                    Err(error) => {
-                        if let Ok(mut callback_error) = callback_error_slot.lock() {
-                            *callback_error = Some(error);
-                        }
-                        return false;
-                    }
-                },
-                Ok(None) => return true,
-                Err(error) => {
+        };
+        if !delta.is_empty() {
+            callback_player.append(SamplesBuffer::new(channels, rate, delta));
+            if !callback_started.swap(true, Ordering::SeqCst) {
+                println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
+                if let Err(error) = std::io::stdout().flush() {
                     if let Ok(mut callback_error) = callback_error_slot.lock() {
-                        *callback_error = Some(error);
+                        *callback_error = Some(format!("signal Pocket playback start: {error}"));
                     }
                     return false;
                 }
-            };
-            if !delta.is_empty() {
-                callback_player.append(SamplesBuffer::new(channels, rate, delta));
-                if !callback_started.swap(true, Ordering::SeqCst) {
-                    println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
-                    if let Err(error) = std::io::stdout().flush() {
-                        if let Ok(mut callback_error) = callback_error_slot.lock() {
-                            *callback_error =
-                                Some(format!("signal Pocket playback start: {error}"));
-                        }
-                        return false;
-                    }
-                }
             }
-            true
-        })?;
+        }
+        true
+    };
+    let completed =
+        engine.synth_chunk_streaming(text, &style, STREAMING_EMIT_FRAMES, &mut on_audio)?;
 
-    if matches!(outcome, SynthesisOutcome::Complete(_)) {
+    if completed {
         let tail = speed_processor.borrow_mut().finish()?;
         if !tail.is_empty() {
             player.append(SamplesBuffer::new(channels, rate, tail));
@@ -1753,7 +1716,7 @@ fn synthesize_and_stream(
         player.stop();
         return Err(error);
     }
-    if matches!(outcome, SynthesisOutcome::Interrupted) {
+    if !completed {
         player.stop();
         return Ok(());
     }
@@ -1954,32 +1917,6 @@ mod tests {
         let replacement = fingerprint_files([(path, 11)]).expect("fingerprint replacement fixture");
 
         assert_ne!(original, replacement);
-    }
-
-    #[test]
-    fn cumulative_callback_emits_only_growth_and_rejects_regression() {
-        let mut previous_len = 0;
-        assert_eq!(cumulative_delta(&mut previous_len, &[]), Ok(None));
-        assert_eq!(
-            cumulative_delta(&mut previous_len, &[1.0, 2.0, 3.0]),
-            Ok(Some(&[1.0, 2.0, 3.0][..]))
-        );
-        assert_eq!(previous_len, 3);
-        assert_eq!(cumulative_delta(&mut previous_len, &[]), Ok(None));
-        assert_eq!(previous_len, 3);
-        assert_eq!(
-            cumulative_delta(&mut previous_len, &[1.0, 2.0, 3.0]),
-            Ok(None)
-        );
-        assert_eq!(
-            cumulative_delta(&mut previous_len, &[1.0, 2.0, 3.0, 4.0]),
-            Ok(Some(&[4.0][..]))
-        );
-        assert_eq!(previous_len, 4);
-        assert_eq!(
-            cumulative_delta(&mut previous_len, &[1.0, 2.0]),
-            Err("Pocket cumulative callback length decreased from 4 to 2".to_string())
-        );
     }
 
     #[test]
