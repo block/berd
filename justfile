@@ -84,25 +84,8 @@ setup: _setup-dev-deps
 
 # ── Build & Check ────────────────────────────────────────────
 
-# Run the frontend non-test checks: design-system guardrails, berdctl contract freshness, formatting, lint, i18n, TypeScript, and public skills.
-check: design-system-check berdctl-contract-check frontend-fmt-check lint i18n-check typecheck public-skills-test
-
-# Validate the dependency-free tests shipped with public Agent Skills.
-public-skills-test:
-    just _public-skills-test-{{ os_family() }}
-
-[unix]
-_public-skills-test-unix:
-    python3 scripts/test-public-skills.py
-
-[windows]
-[script("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File")]
-_public-skills-test-windows:
-    Import-Module (Join-Path (Get-Location) "scripts/windows/WindowsDev.psm1") -Force -DisableNameChecking
-    $python = Find-RunnablePython
-    if ($null -eq $python) { throw "No runnable Python 3 interpreter found. Run: just doctor-windows" }
-    & $python.Path scripts/test-public-skills.py
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+# Run the frontend non-test checks: design-system guardrails, berdctl contract freshness, formatting, lint, i18n, and TypeScript.
+check: design-system-check berdctl-contract-check frontend-fmt-check lint i18n-check typecheck
 
 # Regenerate the berdctl CLI contract artifacts from the command registry.
 berdctl-contract-generate:

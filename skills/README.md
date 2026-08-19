@@ -13,8 +13,8 @@ and can send an explicitly approved message back through the public Buzz CLI.
 
 ### Requirements
 
-- the [`buzz` CLI](https://github.com/block/buzz) on `PATH`
-- Python 3.10 or newer
+- a [`buzz` CLI](https://github.com/block/buzz) build containing the handoff
+  contract introduced by [`block/buzz@9c1e4fad2`](https://github.com/block/buzz/commit/9c1e4fad2a2ca49835f2301c85b554bcde414bdc), on `PATH`
 - `BUZZ_RELAY_URL` and `BUZZ_PRIVATE_KEY` configured outside the agent
   conversation
 - `BUZZ_AUTH_TAG` when required by the configured identity
@@ -30,13 +30,15 @@ as its minimum):
 ```bash
 git clone https://github.com/block/buzz.git
 cd buzz
+git checkout investigate-buzz-cli-handoff # temporary until the contract lands on main
 cargo install --locked --path crates/buzz-cli
 buzz --help
 ```
 
-Update the CLI by pulling the Buzz checkout and repeating the `cargo install`
-command. This skill follows Buzz's current public CLI contract on `main`; it has
-no independent compatibility guarantee for older Buzz CLI builds.
+Until that prototype contract lands on Buzz `main`, check out
+`investigate-buzz-cli-handoff` before running `cargo install`. Update the CLI by
+pulling the Buzz checkout and repeating the install command. The skill has no
+compatibility guarantee for Buzz CLI builds that predate this contract.
 
 ### Install the skill
 
