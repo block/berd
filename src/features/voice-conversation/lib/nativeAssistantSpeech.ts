@@ -9,6 +9,7 @@ type SpeakableSegment = {
   contentIndex: number;
   text: string;
   sourceText: string;
+  completesSourceText: boolean;
 };
 
 const STREAMING_SPEECH_BOUNDARY = /(?:[.!?](?:["')\]}]+)?(?=\s|$)|\n+)/g;
@@ -225,6 +226,8 @@ export function startNativeAssistantSpeech(
           slot,
           sourceText.slice(0, consumedPrefix.length + split.consumedLength),
         );
+        const completesSourceText =
+          consumedPrefix.length + split.consumedLength === sourceText.length;
         split.segments.forEach((text, segmentIndex) => {
           segments.push({
             key: `${slot}\0${consumedPrefix.length}\0${sourceText.length}\0${segmentIndex}`,
@@ -232,6 +235,8 @@ export function startNativeAssistantSpeech(
             contentIndex,
             text,
             sourceText,
+            completesSourceText:
+              completesSourceText && segmentIndex === split.segments.length - 1,
           });
         });
       });
@@ -263,7 +268,11 @@ export function startNativeAssistantSpeech(
         current.setUiState("agent-speaking");
         try {
           await speakPocketVoice(segment.text);
-          if (activeGeneration === generation && segmentEpoch === speechEpoch) {
+          if (
+            activeGeneration === generation &&
+            segmentEpoch === speechEpoch &&
+            segment.completesSourceText
+          ) {
             setSegmentStatus(sessionId, segment, "spoken");
           }
         } catch (error) {

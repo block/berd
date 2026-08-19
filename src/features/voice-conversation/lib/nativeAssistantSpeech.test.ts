@@ -168,6 +168,51 @@ describe("native assistant speech queue", () => {
     });
   });
 
+  it("marks a multi-sentence text block spoken only after its final segment", async () => {
+    let finishFirst: (() => void) | undefined;
+    let finishSecond: (() => void) | undefined;
+    mocks.speakPocketVoice
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishFirst = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishSecond = resolve;
+          }),
+      );
+    startNativeAssistantSpeech("session-1", vi.fn());
+
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant(
+          [{ type: "text", text: "First sentence. Second sentence." }],
+          "completed",
+        ),
+      ]);
+    await vi.waitFor(() => {
+      expect(mocks.speakPocketVoice).toHaveBeenCalledTimes(1);
+    });
+    finishFirst?.();
+    await vi.waitFor(() => {
+      expect(mocks.speakPocketVoice).toHaveBeenCalledTimes(2);
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({ speech: { status: "speaking" } });
+    });
+
+    finishSecond?.();
+    await vi.waitFor(() => {
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({ speech: { status: "spoken" } });
+    });
+  });
+
   it("flushes an unfinished streamed sentence when the response completes", async () => {
     mocks.speakPocketVoice.mockResolvedValue();
     startNativeAssistantSpeech("session-1", vi.fn());
