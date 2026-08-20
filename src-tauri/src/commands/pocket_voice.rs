@@ -820,7 +820,7 @@ pub fn flush_pocket_voice_stream(
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (state, stream_id);
-        return Err("Pocket voice playback is currently supported on macOS only".to_string());
+        Err("Pocket voice playback is currently supported on macOS only".to_string())
     }
 
     #[cfg(target_os = "macos")]
