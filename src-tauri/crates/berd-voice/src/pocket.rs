@@ -15,21 +15,14 @@
 //! cached model files.
 
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 
 use sherpa_onnx::Wave;
 
 #[path = "pocket_april.rs"]
 mod pocket_april;
-#[path = "pocket_models.rs"]
-mod pocket_models;
-
 use pocket_april::{prepare_april_prompt, AprilPocketTts};
-pub use pocket_models::{
-    april_model_info, PocketModelArtifact, PocketModelInfo, APRIL_BUNDLE_ID, APRIL_MODEL_ID,
-    APRIL_MODEL_REVISION,
-};
 
 /// Pocket TTS emits 24 kHz mono PCM.
 pub const SAMPLE_RATE: u32 = 24_000;
@@ -128,19 +121,6 @@ pub fn load_text_to_speech(model_dir: &str) -> Result<PocketTts, String> {
 }
 
 impl PocketTts {
-    /// Split text into model-safe synthesis units that satisfy the bundle's
-    /// exact 50-token input limit, packing sentences whenever they fit.
-    pub fn split_text_into_chunks(&self, text: &str) -> Result<Vec<String>, String> {
-        self.reject_reentry()?;
-        let Some(prepared) = prepare_april_prompt(text) else {
-            return Ok(Vec::new());
-        };
-        self.inner
-            .lock()
-            .map_err(|_| "Pocket TTS engine lock poisoned".to_string())?
-            .split_prompt(&prepared)
-    }
-
     /// Drain model-safe units from text that may still be growing.
     ///
     /// The first complete sentence is made ready immediately. Later text stays
@@ -165,35 +145,6 @@ impl PocketTts {
             pending,
             first_chunk_pending,
         })
-    }
-
-    /// Synthesize text with the supplied reference voice.
-    ///
-    /// Pocket detects language from text and this model uses one synthesis
-    /// step, so `_lang` and `_steps` intentionally do not affect output.
-    pub fn synth_chunk(
-        &self,
-        text: &str,
-        _lang: &str,
-        style: &VoiceStyle,
-        _steps: usize,
-    ) -> Result<Vec<f32>, String> {
-        self.reject_reentry()?;
-        let Some(prepared) = prepare_april_prompt(text) else {
-            return Ok(Vec::new());
-        };
-        let mut engine = self
-            .inner
-            .lock()
-            .map_err(|_| "Pocket TTS engine lock poisoned".to_string())?;
-        let chunks = engine.split_prompt(&prepared)?;
-        let mut samples = Vec::new();
-        for chunk in chunks {
-            let prepared = prepare_april_prompt(&chunk)
-                .ok_or_else(|| "Pocket TTS prompt chunk became empty".to_string())?;
-            samples.extend(engine.synth_chunk(&prepared, style)?);
-        }
-        Ok(samples)
     }
 
     /// Stream synthesis as PCM deltas become decoder-safe. `emit_frames` is
@@ -266,21 +217,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn desktop_model_is_april_int8_only() {
-        let info = april_model_info();
-        assert_eq!(info.max_token_per_chunk, 50);
-        assert_eq!(info.sample_rate, SAMPLE_RATE);
-        assert!(info
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.filename == "flow_lm_main_int8.onnx"));
-        assert!(!info
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.filename == "flow_lm_main.onnx"));
-    }
-
-    #[test]
     fn active_engine_reentry_is_rejected() {
         let _guard = SynthesisCallGuard::enter(42).expect("first call");
         assert!(SynthesisCallGuard::enter(42).is_err());
@@ -296,20 +232,4 @@ mod tests {
         );
     }
 
-    #[test]
-    #[ignore = "requires BERD_POCKET_TEST_MODEL_DIR"]
-    fn production_api_emits_non_silent_april_int8_pcm() {
-        let dir = std::env::var("BERD_POCKET_TEST_MODEL_DIR")
-            .expect("set BERD_POCKET_TEST_MODEL_DIR to an April INT8 model directory");
-        let engine = load_text_to_speech(&dir).expect("load April INT8 engine");
-        let style = load_voice_style(&Path::new(&dir).join("reference_sample.wav"))
-            .expect("load reference voice");
-        let samples = engine
-            .synth_chunk("Bright birds begin beside the bay.", "en", &style, 1)
-            .expect("synthesize through the production API");
-
-        assert!(!samples.is_empty());
-        assert!(samples.iter().all(|sample| sample.is_finite()));
-        assert!(samples.iter().any(|sample| sample.abs() > 1.0e-6));
-    }
 }

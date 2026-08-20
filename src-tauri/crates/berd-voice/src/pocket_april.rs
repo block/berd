@@ -408,19 +408,6 @@ impl AprilPocketTts {
         )
     }
 
-    pub(crate) fn synth_chunk(
-        &mut self,
-        prepared: &AprilPreparedPrompt,
-        style: &VoiceStyle,
-    ) -> Result<Vec<f32>, String> {
-        let mut audio = Vec::new();
-        self.synth_chunk_streaming(prepared, style, DECODER_CHUNK_FRAMES, &mut |delta| {
-            audio.extend(delta);
-            true
-        })?;
-        Ok(audio)
-    }
-
     /// Return a fresh Flow LM state conditioned on the reference voice,
     /// restoring a cached snapshot when the same voice samples were
     /// conditioned before. Keyed by voice content, like `cached_voice` —
@@ -473,7 +460,7 @@ impl AprilPocketTts {
         }
         if token_ids.len() > self.bundle.max_token_per_chunk {
             return Err(format!(
-                "Pocket TTS prompt has {} tokens; split_text_into_chunks maximum is {}",
+                "Pocket TTS prompt has {} tokens; maximum is {}",
                 token_ids.len(),
                 self.bundle.max_token_per_chunk
             ));
