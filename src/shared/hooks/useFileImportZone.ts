@@ -83,6 +83,10 @@ export function useFileImportZone({
     [importFile],
   );
 
+  const invalidateImport = useCallback(() => {
+    importGenerationRef.current += 1;
+  }, []);
+
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -102,6 +106,7 @@ export function useFileImportZone({
     isDragOver,
     dropHandlers,
     importFile,
+    invalidateImport,
     handleFileChange,
     openFilePicker,
   };

@@ -98,6 +98,31 @@ describe("useFileImportZone", () => {
     expect(onImportFile).toHaveBeenCalledTimes(1);
   });
 
+  it("allows another ingress path to invalidate a pending file read", async () => {
+    const onImportFile = vi.fn();
+    let resolveRead: ((value: ArrayBuffer) => void) | undefined;
+    const file = pngFile("picker.png");
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn(
+        () =>
+          new Promise<ArrayBuffer>((resolve) => {
+            resolveRead = resolve;
+          }),
+      ),
+    });
+    const { result } = renderHook(() => useFileImportZone({ onImportFile }));
+
+    act(() => {
+      void result.current.importFile(file);
+      result.current.invalidateImport();
+    });
+    resolveRead?.(Uint8Array.from([1]).buffer);
+    await act(async () => {});
+
+    expect(onImportFile).not.toHaveBeenCalled();
+  });
+
   it("reports file read failures", async () => {
     const onImportFile = vi.fn();
     const onImportError = vi.fn();

@@ -232,6 +232,7 @@ export function AgentImportDialog({
     fileInputRef,
     isDragOver,
     importFile,
+    invalidateImport,
     handleFileChange,
     openFilePicker,
   } = useFileImportZone({
@@ -246,6 +247,7 @@ export function AgentImportDialog({
     (paths: string[]) => {
       const path = paths[0];
       if (!path) return;
+      invalidateImport();
       const generation = ++nativeDropGenerationRef.current;
       void readImportAgentFile(path)
         .then(({ fileBytes, fileName }) => {
@@ -273,7 +275,12 @@ export function AgentImportDialog({
             );
         });
     },
-    [onImportError, startPreparation, validateReplacementFile],
+    [
+      invalidateImport,
+      onImportError,
+      startPreparation,
+      validateReplacementFile,
+    ],
   );
   const {
     isAttachmentDragOver,
