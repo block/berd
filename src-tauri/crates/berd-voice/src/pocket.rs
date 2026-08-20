@@ -119,9 +119,7 @@ impl PocketTts {
     pub fn synth_chunk_streaming<F>(
         &self,
         text: &str,
-        _lang: &str,
         style: &VoiceStyle,
-        _steps: usize,
         mut callback: F,
     ) -> Result<SynthesisOutcome, String>
     where
@@ -282,7 +280,7 @@ mod tests {
         let started = std::time::Instant::now();
 
         let outcome = engine
-            .synth_chunk_streaming(text, "en", &style, 1, |cumulative, _| {
+            .synth_chunk_streaming(text, &style, |cumulative, _| {
                 callback_count += 1;
                 first_callback.get_or_insert_with(|| started.elapsed());
                 assert!(cumulative.len() >= previous_len);
