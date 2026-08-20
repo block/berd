@@ -104,9 +104,18 @@ describe("AgentImportDialog", () => {
       }),
     );
     expect(nativeDropMocks.readImportAgentFile).not.toHaveBeenCalled();
+    const inaccurateDropPosition = {
+      x: 4000,
+      y: 4000,
+      toLogical: () => ({ x: 2000, y: 2000 }),
+    };
     act(() =>
       nativeDropMocks.listener?.({
-        payload: { type: "drop", paths: ["first.zip"], position },
+        payload: {
+          type: "drop",
+          paths: ["first.zip"],
+          position: inaccurateDropPosition,
+        },
       }),
     );
     act(() =>

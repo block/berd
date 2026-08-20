@@ -209,6 +209,7 @@ export function AgentImportDialog({
 
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const nativeDropGenerationRef = useRef(0);
+  const nativeDropExpectedUntilRef = useRef(0);
   const validateReplacementFile = useCallback(
     (file: Pick<File, "name" | "type" | "size">) => {
       nativeDropGenerationRef.current += 1;
@@ -247,6 +248,7 @@ export function AgentImportDialog({
         getCurrentWebview().onDragDropEvent(({ payload }) => {
           if (disposed || !dropZoneRef.current) return;
           if (payload.type === "leave") {
+            nativeDropExpectedUntilRef.current = 0;
             dropHandlers.onDragLeave();
             return;
           }
@@ -258,6 +260,7 @@ export function AgentImportDialog({
             position.y >= rect.top &&
             position.y <= rect.bottom;
           if (payload.type === "enter" || payload.type === "over") {
+            nativeDropExpectedUntilRef.current = inside ? Date.now() + 1000 : 0;
             if (inside)
               dropHandlers.onDragOver({
                 preventDefault() {},
@@ -265,9 +268,12 @@ export function AgentImportDialog({
             else dropHandlers.onDragLeave();
             return;
           }
+          const nativeDropWasExpected =
+            nativeDropExpectedUntilRef.current > Date.now();
+          nativeDropExpectedUntilRef.current = 0;
           dropHandlers.onDragLeave();
           const path = payload.paths[0];
-          if (!inside || !path) return;
+          if ((!inside && !nativeDropWasExpected) || !path) return;
           const generation = ++nativeDropGenerationRef.current;
           void readImportAgentFile(path)
             .then(({ fileBytes, fileName }) => {
@@ -301,6 +307,7 @@ export function AgentImportDialog({
     return () => {
       disposed = true;
       nativeDropGenerationRef.current += 1;
+      nativeDropExpectedUntilRef.current = 0;
       unlisten?.();
     };
   }, [
