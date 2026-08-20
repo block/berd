@@ -643,6 +643,9 @@ describe("sessions.create", () => {
         id: "agent-7",
         displayName: "Reviewer",
         systemPrompt: "Review the work carefully.",
+        provider: "goose",
+        modelProviderId: "databricks_v2",
+        model: "model-9",
         isBuiltin: false,
         writable: true,
       },
@@ -702,6 +705,92 @@ describe("sessions.create", () => {
       payload: { text: "what is 1+1" },
     });
     expect(controller.openSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unconfigured agent before creating or sending", async () => {
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "empty-agent",
+        displayName: "Empty",
+        systemPrompt: "",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "create", prompt: "hi", agent_id: "empty-agent" },
+        ctx,
+      ),
+      "agent_configuration_invalid",
+    );
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().queuedMessageBySession).toEqual({});
+  });
+
+  it("creates a model-free non-agent session without refreshing inventory", async () => {
+    const refreshProviderModels = vi
+      .fn()
+      .mockRejectedValue(new Error("inventory unavailable"));
+    useProviderModelCacheStore.setState({ refreshProviderModels });
+    await dispatchCommand(
+      "sessions",
+      { action: "create", prompt: "hi", harness_id: "goose" },
+      ctx,
+    );
+    expect(refreshProviderModels).not.toHaveBeenCalled();
+    useProviderModelCacheStore.setState({
+      refreshProviderModels:
+        useProviderModelCacheStore.getInitialState().refreshProviderModels,
+    });
+    expect(mocks.acpCreateSession).toHaveBeenCalled();
+  });
+
+  it("keeps a model-only Goose override inside the saved provider", async () => {
+    useProviderModelCacheStore.setState((state) => ({
+      providers: new Map(state.providers)
+        .set("provider-a", {
+          providerId: "provider-a",
+          models: [{ id: "shared", name: "A" }],
+          fetchedAt: Date.now(),
+          provenModelIds: ["shared"],
+        })
+        .set("provider-b", {
+          providerId: "provider-b",
+          models: [{ id: "shared", name: "B" }],
+          fetchedAt: Date.now(),
+          provenModelIds: ["shared"],
+        }),
+    }));
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "agent-b",
+        displayName: "B",
+        systemPrompt: "",
+        provider: "goose",
+        modelProviderId: "provider-b",
+        model: "old",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+    await dispatchCommand(
+      "sessions",
+      {
+        action: "create",
+        prompt: "hi",
+        agent_id: "agent-b",
+        model_id: "shared",
+      },
+      ctx,
+    );
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "provider-b",
+      "/resolved/cwd",
+      expect.objectContaining({ modelId: "shared" }),
+    );
   });
 
   it("rejects an agent with an invalid saved target before creating", async () => {

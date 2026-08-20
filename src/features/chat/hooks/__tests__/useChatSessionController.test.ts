@@ -3104,6 +3104,7 @@ describe("useChatSessionController", () => {
           displayName: "Codex Planner",
           systemPrompt: "Plan clearly.",
           provider: "codex-acp",
+          model: "codex-model",
         }),
         personaFixture({
           id: "persona-2",
@@ -4767,6 +4768,44 @@ describe("useChatSessionController", () => {
       expect(result.current.currentModelId).toBe("claude-sonnet-4");
     });
     expect(result.current.currentModelName).toBe("Claude Sonnet 4");
+  });
+
+  it("rejects an invalid persona send before acceptance and preserves state", () => {
+    useAgentStore.setState({
+      personas: [
+        personaFixture({
+          provider: "missing-provider",
+          model: "missing-model",
+        }),
+      ],
+      activeAgentId: null,
+    });
+    useChatStore.setState((state) => ({
+      draftsBySession: { ...state.draftsBySession, "session-1": "keep me" },
+    }));
+    const beforeSession = useChatSessionStore
+      .getState()
+      .getSession("session-1");
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+    let accepted: boolean | Promise<boolean> = true;
+    act(() => {
+      accepted = result.current.handleSend("do not send", "persona-1");
+    });
+    expect(accepted).toBe(false);
+    expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+      "keep me",
+    );
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"],
+    ).toBeUndefined();
+    expect(useChatSessionStore.getState().getSession("session-1")).toEqual(
+      beforeSession,
+    );
+    expect(useAgentStore.getState().activeAgentId).toBeNull();
+    expect(mockUseChatSendMessage).not.toHaveBeenCalled();
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 
   it("rejects a persona's provider-only target", () => {

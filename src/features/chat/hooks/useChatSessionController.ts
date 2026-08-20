@@ -2525,6 +2525,19 @@ export function useChatSessionController({
       if (currentPreSendWorkspaceSetup?.status === "creating") {
         return false;
       }
+      const intendedPersona = personaId
+        ? selectedPersona?.id === personaId
+          ? selectedPersona
+          : useAgentStore.getState().getPersonaById(personaId)
+        : personaId === undefined
+          ? selectedPersona
+          : undefined;
+      if (
+        (personaId && !intendedPersona && personaId !== selectedPersonaId) ||
+        (intendedPersona &&
+          resolvePersonaTarget(intendedPersona).status === "invalid")
+      )
+        return false;
       const personaName = personaId
         ? selectedPersona?.id === personaId
           ? selectedPersona.displayName
@@ -2758,6 +2771,7 @@ export function useChatSessionController({
       queue,
       readOnly,
       recordDraftPreservingSubmission,
+      resolvePersonaTarget,
       session?.agentBuilderOpen,
       session?.creationState,
       session?.intent,

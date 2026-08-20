@@ -134,6 +134,12 @@ Result:
     const savedHarnessId = persona
       ? personaHarnessId(persona.provider, providers, catalogEntries)
       : undefined;
+    if (persona && !hasSavedTarget && !completeExplicitTarget) {
+      throw new CommandError(
+        "agent_configuration_invalid",
+        `Agent "${persona.id}" has no saved provider and model. Configure it or pass both --harness-id and --model-id.`,
+      );
+    }
     if (persona?.provider && !savedHarnessId && !completeExplicitTarget) {
       throw new CommandError(
         "agent_configuration_invalid",
@@ -143,12 +149,12 @@ Result:
     const harnessId = args.harness_id ?? savedHarnessId ?? GOOSE_PROVIDER_ID;
     await findReadyHarnessOrThrow(harnessId);
 
-    // Refresh and read inventory only after the final harness is known. The
-    // shared cache retains the freshness/proof distinction used by the UI.
-    if (harnessId === GOOSE_PROVIDER_ID) {
-      await gooseModelOptions();
-    } else {
-      await harnessModelOptions(harnessId);
+    const requiresModelValidation = Boolean(
+      args.model_id || (persona && hasSavedTarget && !completeExplicitTarget),
+    );
+    if (requiresModelValidation) {
+      if (harnessId === GOOSE_PROVIDER_ID) await gooseModelOptions();
+      else await harnessModelOptions(harnessId);
     }
     const modelCache = useProviderModelCacheStore.getState();
     const cachedModels = [...modelCache.providers].flatMap(([providerId]) =>
@@ -202,9 +208,21 @@ Result:
         ? personaResolution.target
         : undefined;
     const explicitModelId = args.model_id;
+    const explicitModelProviderBoundary =
+      harnessId === GOOSE_PROVIDER_ID &&
+      persona &&
+      !completeExplicitTarget &&
+      !args.harness_id
+        ? persona.modelProviderId
+        : undefined;
     const inventoryModels = modelsForHarness(harnessId);
     const explicitModel = explicitModelId
-      ? inventoryModels.find((model) => model.id === explicitModelId)
+      ? inventoryModels.find(
+          (model) =>
+            model.id === explicitModelId &&
+            (!explicitModelProviderBoundary ||
+              model.providerId === explicitModelProviderBoundary),
+        )
       : undefined;
     if (explicitModelId && !explicitModel) {
       throw new CommandError(
