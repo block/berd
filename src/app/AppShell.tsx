@@ -3695,6 +3695,22 @@ export function AppShell({
           };
         }
 
+        const voice = useVoiceConversationStore.getState();
+        if (
+          voice.status.sessionId === sessionId &&
+          voice.status.lifecycle !== "stopped" &&
+          voice.status.lifecycle !== "unavailable"
+        ) {
+          try {
+            await voice.stop();
+          } catch (error) {
+            console.error(
+              "Failed to stop voice for the archived session:",
+              error,
+            );
+          }
+        }
+
         let cleanupFailureReason:
           | "target_session_running"
           | "workspace_cleanup_failed"

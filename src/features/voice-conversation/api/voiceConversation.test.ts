@@ -230,6 +230,9 @@ describe("voice conversation API", () => {
       ["set_native_voice_microphone_muted", { muted: true }],
       ["set_native_voice_microphone_muted", { muted: false }],
     ]);
+    expect(mocks.setMicrophoneMuted.mock.invocationCallOrder[1]).toBeLessThan(
+      mocks.invoke.mock.invocationCallOrder[0],
+    );
   });
 
   it("routes UI mute through macOS while keeping browser capture in sync", async () => {
@@ -408,6 +411,7 @@ describe("voice conversation API", () => {
     await expect(
       setVoiceConversationMicrophoneMuted(true, status),
     ).rejects.toThrow("capture failed");
+    expect(mocks.invoke).not.toHaveBeenCalled();
     mocks.startMicrophone.mockResolvedValueOnce({
       setMuted: mocks.setMicrophoneMuted,
       stop: mocks.stopMicrophone,

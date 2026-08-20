@@ -29,7 +29,10 @@ import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
-import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
+import {
+  useVoiceConversationStore,
+  VOICE_CONVERSATION_OFF_STATUS,
+} from "@/features/voice-conversation/stores/voiceConversationStore";
 import { dispatchOnboarding } from "@/features/onboarding/model";
 import {
   resetHomeWidgetStoreForTests,
@@ -88,6 +91,7 @@ const gitMocks = vi.hoisted(() => ({
   removeWorktree: vi.fn(),
 }));
 const mockIsExternalAgentReady = vi.hoisted(() => vi.fn());
+const originalStopVoiceConversation = useVoiceConversationStore.getState().stop;
 const mockAgentStatus = vi.hoisted(() => ({
   readyAgentIds: new Set<string>(["goose"]),
 }));
@@ -894,6 +898,11 @@ describe("AppShell global navigation", () => {
     mockSessionWindowSupport.supported = false;
     mockFocusSessionWindow.mockReset();
     useSessionWindowStore.getState().setSnapshot([]);
+    useVoiceConversationStore.setState({
+      status: VOICE_CONVERSATION_OFF_STATUS,
+      microphoneMuted: false,
+      stop: originalStopVoiceConversation,
+    });
     mockListExtensions.mockReset();
     mockListExtensions.mockResolvedValue([]);
     mockAcpCreateSession.mockReset();
@@ -2536,6 +2545,7 @@ describe("AppShell global navigation", () => {
 
   it("archives the active session with Cmd+E", async () => {
     const user = userEvent.setup();
+    const stopVoiceConversation = vi.fn().mockResolvedValue(undefined);
     const session: ChatSession = {
       id: "session-1",
       title: "Active chat",
@@ -2548,6 +2558,18 @@ describe("AppShell global navigation", () => {
     useChatSessionStore.setState({
       sessions: [session],
       activeSessionId: null,
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      stop: stopVoiceConversation,
     });
 
     renderAppShell();
@@ -2563,6 +2585,7 @@ describe("AppShell global navigation", () => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("home");
     });
     expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    expect(stopVoiceConversation).toHaveBeenCalledOnce();
     expect(useChatSessionStore.getState().activeSessionId).toBeNull();
     expect(
       useChatSessionStore.getState().getSession("session-1")?.archivedAt,
