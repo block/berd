@@ -98,7 +98,13 @@ Result:
       { personaHarnessId, resolvePersonaExecutionTarget },
       { useAgentStore },
       { useProviderModelCacheStore },
-      { getProviderCatalog },
+      {
+        canonicalProviderCatalogIdFromEntries,
+        getModelProviders,
+        getProviderCatalog,
+      },
+      { filterModelProvidersForRuntimeConfig },
+      { useRuntimeConfigStore },
       { findPersonaOrThrow },
       { findProjectOrThrow },
       { findReadyHarnessOrThrow, gooseModelOptions, harnessModelOptions },
@@ -114,6 +120,8 @@ Result:
       import("@/features/agents/stores/agentStore"),
       import("@/features/providers/stores/providerModelCacheStore"),
       import("@/features/providers/providerCatalog"),
+      import("@/features/providers/runtimeProviderConstraints"),
+      import("@/shared/runtime-config/runtimeConfigStore"),
       import("../runtime/agents"),
       import("../runtime/projects"),
       import("../runtime/providers"),
@@ -157,13 +165,25 @@ Result:
       else await harnessModelOptions(harnessId);
     }
     const modelCache = useProviderModelCacheStore.getState();
-    const cachedModels = [...modelCache.providers].flatMap(([providerId]) =>
-      modelCache.isModelInventoryAuthoritative(providerId)
-        ? modelCache.getProvenModelsForProvider(providerId).map((model) => ({
-            ...model,
-            providerId: model.providerId ?? providerId,
-          }))
-        : [],
+    const eligibleGooseProviderIds = filterModelProvidersForRuntimeConfig(
+      getModelProviders(),
+      useRuntimeConfigStore.getState().config,
+    ).map((provider) => provider.id);
+    const provenModelsForProviders = (providerIds: Iterable<string>) =>
+      [...providerIds].flatMap((providerId) =>
+        modelCache.isModelInventoryAuthoritative(providerId)
+          ? modelCache.getProvenModelsForProvider(providerId).map((model) => ({
+              ...model,
+              providerId: model.providerId ?? providerId,
+            }))
+          : [],
+      );
+    // Saved targets may reference a provider outside the current runtime
+    // inference set. Keep all authoritative cache entries available for saved
+    // target validation, while bare-model inference remains runtime-scoped.
+    const cachedModels = provenModelsForProviders(modelCache.providers.keys());
+    const eligibleGooseModels = provenModelsForProviders(
+      eligibleGooseProviderIds,
     );
     const modelsForHarness = (candidateHarnessId: string) =>
       candidateHarnessId === GOOSE_PROVIDER_ID
@@ -212,10 +232,42 @@ Result:
       harnessId === GOOSE_PROVIDER_ID &&
       persona &&
       !completeExplicitTarget &&
-      !args.harness_id
-        ? persona.modelProviderId
+      !args.harness_id &&
+      persona.modelProviderId
+        ? canonicalProviderCatalogIdFromEntries(
+            catalogEntries,
+            persona.modelProviderId,
+          )
         : undefined;
-    const inventoryModels = modelsForHarness(harnessId);
+    const gooseInventoryIsAuthoritative = eligibleGooseProviderIds.every(
+      modelCache.isModelInventoryAuthoritative,
+    );
+    const inventoryIsAuthoritative =
+      harnessId === GOOSE_PROVIDER_ID
+        ? gooseInventoryIsAuthoritative
+        : modelCache.isModelInventoryAuthoritative(harnessId);
+    const inventoryModels =
+      harnessId === GOOSE_PROVIDER_ID
+        ? explicitModelProviderBoundary
+          ? modelCache.isModelInventoryAuthoritative(
+              explicitModelProviderBoundary,
+            )
+            ? modelCache
+                .getProvenModelsForProvider(explicitModelProviderBoundary)
+                .map((model) => ({
+                  ...model,
+                  providerId: model.providerId ?? explicitModelProviderBoundary,
+                }))
+            : modelCache
+                .getModelsForProvider(explicitModelProviderBoundary)
+                .map((model) => ({
+                  ...model,
+                  providerId: model.providerId ?? explicitModelProviderBoundary,
+                }))
+          : eligibleGooseModels
+        : inventoryIsAuthoritative
+          ? provenModelsForHarness(harnessId)
+          : modelsForHarness(harnessId);
     const matchingExplicitModels = explicitModelId
       ? inventoryModels.filter(
           (model) =>
@@ -224,9 +276,19 @@ Result:
               model.providerId === explicitModelProviderBoundary),
         )
       : [];
+    // Ambiguity is established by concrete proven matches even when the
+    // broader eligible inventory is incomplete. Incompleteness prevents a
+    // single implicit choice; it cannot make multiple known owners unique.
     const matchingExplicitProviders = new Set(
-      matchingExplicitModels.flatMap((model) =>
-        model.providerId ? [model.providerId] : [],
+      (explicitModelId &&
+      harnessId === GOOSE_PROVIDER_ID &&
+      !explicitModelProviderBoundary
+        ? cachedModels
+        : matchingExplicitModels
+      ).flatMap((model) =>
+        model.id === explicitModelId && model.providerId
+          ? [model.providerId]
+          : [],
       ),
     );
     if (
@@ -240,10 +302,6 @@ Result:
       );
     }
     const explicitModel = matchingExplicitModels[0];
-    const inventoryIsAuthoritative =
-      harnessId === GOOSE_PROVIDER_ID
-        ? matchingExplicitProviders.size > 0
-        : modelCache.isModelInventoryAuthoritative(harnessId);
     if (explicitModelId && !explicitModel && inventoryIsAuthoritative) {
       throw new CommandError(
         "model_not_found",
@@ -252,6 +310,17 @@ Result:
     }
     const explicitModelProviderId =
       harnessId === GOOSE_PROVIDER_ID ? explicitModel?.providerId : harnessId;
+    if (
+      explicitModelId &&
+      harnessId === GOOSE_PROVIDER_ID &&
+      !explicitModelProviderBoundary &&
+      !gooseInventoryIsAuthoritative
+    ) {
+      throw new CommandError(
+        "model_not_found",
+        `Could not resolve a provider for model "${explicitModelId}" without authoritative inventory for every eligible Goose provider; list models with \`berdctl info models\` and retry.`,
+      );
+    }
     if (explicitModelId && !explicitModelProviderId) {
       throw new CommandError(
         "model_not_found",

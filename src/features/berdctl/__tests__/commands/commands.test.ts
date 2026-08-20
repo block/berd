@@ -32,6 +32,7 @@ import { DEFAULT_PROJECT_COLOR } from "@/features/projects/lib/projectDefaults";
 import { DEFAULT_PROJECT_ICON } from "@/features/projects/lib/projectIcons";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { getModelProviders } from "@/features/providers/providerCatalog";
+import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import { resolveSkillPillTone } from "@/features/skills/lib/resolveSkillPillTone";
@@ -298,6 +299,14 @@ function seedModelCache(cacheKey: string, modelIds: string[]): void {
   });
 }
 
+function seedAuthoritativeGooseInventory(
+  modelsByProvider: Record<string, string[]> = {},
+): void {
+  for (const provider of getModelProviders()) {
+    seedModelCache(provider.id, modelsByProvider[provider.id] ?? []);
+  }
+}
+
 /** Fresh-but-empty cache entries for every catalog model provider, so goose
  *  aggregation never triggers a real refresh in tests. */
 function emptyModelProviderCache(): Map<
@@ -360,6 +369,9 @@ beforeEach(() => {
     hasFetchedProjects: false,
   });
   useAgentStore.setState({ personas: [], agents: [], activeAgentId: null });
+  useProviderCatalogStore.setState({
+    entries: useProviderCatalogStore.getInitialState().entries,
+  });
   useProviderModelCacheStore.setState({
     providers: emptyModelProviderCache(),
     refreshingProviderIds: new Set(),
@@ -915,7 +927,7 @@ describe("sessions.create", () => {
 
   it("resolves a goose model to its owning model provider", async () => {
     const modelProvider = getModelProviders()[0].id;
-    seedModelCache(modelProvider, ["model-a"]);
+    seedAuthoritativeGooseInventory({ [modelProvider]: ["model-a"] });
 
     await dispatchCommand(
       "sessions",
@@ -937,6 +949,97 @@ describe("sessions.create", () => {
         ctx,
       ),
       "model_not_found",
+    );
+  });
+
+  it("does not infer a bare Goose model while an eligible provider inventory is unavailable", async () => {
+    const [provenProvider] = getModelProviders();
+    useProviderCatalogStore.setState((state) => ({
+      entries: [
+        ...state.entries,
+        {
+          id: "unavailable-provider",
+          displayName: "Unavailable Provider",
+          category: "model",
+          description: "Eligible provider with unavailable inventory",
+          setupMethod: "single_api_key",
+          group: "additional",
+          setupCatalogProvider: true,
+        },
+      ],
+    }));
+    seedModelCache(provenProvider.id, ["model-a"]);
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "create", prompt: "hi", model_id: "model-a" },
+        ctx,
+      ),
+      "model_not_found",
+    );
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects an advisory ACP model excluded by authoritative proof", async () => {
+    useProviderModelCacheStore.setState((state) => ({
+      providers: new Map(state.providers).set("codex-acp", {
+        providerId: "codex-acp",
+        models: [
+          { id: "proven-model", name: "Proven" },
+          { id: "advisory-model", name: "Advisory" },
+        ],
+        fetchedAt: Date.now(),
+        provenModelIds: ["proven-model"],
+      }),
+    }));
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "create",
+          prompt: "hi",
+          harness_id: "codex-acp",
+          model_id: "advisory-model",
+        },
+        ctx,
+      ),
+      "model_not_found",
+    );
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("canonicalizes a saved provider alias for a model-only override", async () => {
+    seedModelCache("databricks_v2", ["alias-model"]);
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "legacy-alias-agent",
+        displayName: "Legacy Alias",
+        systemPrompt: "",
+        provider: "goose",
+        modelProviderId: "databricks",
+        model: "old-model",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+
+    await dispatchCommand(
+      "sessions",
+      {
+        action: "create",
+        prompt: "hi",
+        agent_id: "legacy-alias-agent",
+        model_id: "alias-model",
+      },
+      ctx,
+    );
+
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "databricks_v2",
+      "/resolved/cwd",
+      expect.objectContaining({ modelId: "alias-model" }),
     );
   });
 
