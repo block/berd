@@ -36,6 +36,13 @@ export function getVoiceSubmissionKey(
   ].join(":");
 }
 
+export function getTimelineMessageIdentity(message: Message): string {
+  const voiceSubmissionKey = getVoiceSubmissionKey(message);
+  return voiceSubmissionKey
+    ? `voice:${voiceSubmissionKey}`
+    : `message:${message.id}`;
+}
+
 export interface MessageBubbleCallbacks {
   onRetryMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;

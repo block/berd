@@ -40,6 +40,7 @@ import {
   MessageTimelineJumpToResponseStartGutterButton,
   REDUCED_MOTION_QUERY,
   RESPONSE_START_HINT_HIDE_DELAY_MS,
+  getTimelineMessageIdentity,
   getVoiceSubmissionKey,
   isResponseStartHintInRelevanceBand,
   useStickyFlag,
@@ -934,8 +935,10 @@ export function MessageTimeline({
 
   const latestVisibleMessage = visibleMessages.at(-1);
   const latestVisibleMessageId = latestVisibleMessage?.id;
-  const latestVisibleVoiceSubmissionKey =
-    getVoiceSubmissionKey(latestVisibleMessage);
+  const visibleMessageIdentities = useMemo(
+    () => visibleMessages.map(getTimelineMessageIdentity),
+    [visibleMessages],
+  );
   const visibleVoiceSubmissionKeys = useMemo(
     () =>
       visibleMessages
@@ -945,6 +948,9 @@ export function MessageTimeline({
   );
   const seenVoiceSubmissionKeysRef = useRef(
     new Set(visibleVoiceSubmissionKeys),
+  );
+  const previousVisibleTailIdentityRef = useRef(
+    visibleMessageIdentities.at(-1),
   );
 
   useEffect(() => {
@@ -969,13 +975,27 @@ export function MessageTimeline({
   ]);
 
   useEffect(() => {
-    const hasSeenLatest =
-      latestVisibleVoiceSubmissionKey === null ||
-      seenVoiceSubmissionKeysRef.current.has(latestVisibleVoiceSubmissionKey);
+    let latestUnseenVoiceSubmissionIndex = -1;
+    for (let index = 0; index < visibleMessages.length; index += 1) {
+      const key = getVoiceSubmissionKey(visibleMessages[index]);
+      if (key && !seenVoiceSubmissionKeysRef.current.has(key)) {
+        latestUnseenVoiceSubmissionIndex = index;
+      }
+    }
+    const previousTailIdentity = previousVisibleTailIdentityRef.current;
+    const previousTailIndex = previousTailIdentity
+      ? visibleMessageIdentities.indexOf(previousTailIdentity)
+      : -1;
     for (const key of visibleVoiceSubmissionKeys) {
       seenVoiceSubmissionKeysRef.current.add(key);
     }
-    if (hasSeenLatest) {
+    previousVisibleTailIdentityRef.current = visibleMessageIdentities.at(-1);
+    if (
+      latestUnseenVoiceSubmissionIndex < 0 ||
+      (previousTailIdentity &&
+        (previousTailIndex < 0 ||
+          latestUnseenVoiceSubmissionIndex <= previousTailIndex))
+    ) {
       return;
     }
     clearProgrammaticFollowResumeSuppression();
@@ -983,9 +1003,10 @@ export function MessageTimeline({
     schedulePinnedBottomBurst();
   }, [
     clearProgrammaticFollowResumeSuppression,
-    latestVisibleVoiceSubmissionKey,
     schedulePinnedBottomBurst,
     setDetachedFromLatest,
+    visibleMessageIdentities,
+    visibleMessages,
     visibleVoiceSubmissionKeys,
   ]);
 
