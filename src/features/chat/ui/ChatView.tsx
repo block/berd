@@ -71,7 +71,6 @@ import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import {
   SecurityConfirmationPanel,
-  useHasPendingSecurityConfirmation,
   useRegisterSecurityConfirmationSurface,
 } from "@/features/security/ui/SecurityConfirmationPanel";
 
@@ -117,8 +116,6 @@ export function ChatView({
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   useRegisterSecurityConfirmationSurface(sessionId);
-  const hasPendingSecurityConfirmation =
-    useHasPendingSecurityConfirmation(sessionId);
   const isArtifactViewerOpen = useOpenArtifact(sessionId) !== null;
   const mountStart = useRef(performance.now());
   const terminalRootRef = useRef<HTMLDivElement | null>(null);
@@ -135,33 +132,17 @@ export function ChatView({
     backendRef: transcriptSearchBackendRef,
   });
   const { close: closeSearch } = search;
-  const bindingTargetSession = activeSession ?? null;
-  const bindingTargetAgentBuilderOpen = isAgentBuilderVisible(
-    bindingTargetSession,
-    { readOnly: Boolean(readOnlyStatus) },
-  );
   const composerBinding = useConversationComposerBinding({
     target: {
       kind: "existingSession",
       sessionId,
+      sessionSnapshot: activeSession,
       readOnlyReason: readOnlyStatus,
-      admissionConstraints: {
-        executionTargetFailureReason:
-          bindingTargetAgentBuilderOpen &&
-          bindingTargetSession?.targetAgentDraftState === "failed"
-            ? t("toolbar.agentBuilderPrepareFailed")
-            : undefined,
-        sessionCreationFailureReason:
-          bindingTargetSession?.creationState === "failed"
-            ? (bindingTargetSession.creationError ??
-              t("toolbar.sessionStartFailed"))
-            : undefined,
-      },
     },
     onCreatePersonaRequested: onCreatePersona,
     onWorkspaceNameRequest,
   });
-  const { controller, hasAdmissionFailure, onSend } = composerBinding;
+  const { controller, admissionBlocked, onSend } = composerBinding;
   const activeSessionClientSessionId = activeSession?.clientSessionId ?? null;
 
   useLayoutEffect(() => {
@@ -269,7 +250,7 @@ export function ChatView({
     },
     readOnly: Boolean(readOnlyStatus),
     disabled:
-      hasAdmissionFailure ||
+      admissionBlocked ||
       controller.projectMetadataPending ||
       controller.isCompactingContext ||
       controller.isLoadingHistory ||
@@ -678,7 +659,6 @@ export function ChatView({
                 active: composerHandoffActive,
                 inProgress: composerHandoffInProgress,
               },
-              securityConfirmationPending: hasPendingSecurityConfirmation,
               voiceConversation,
             },
           }}
@@ -707,7 +687,9 @@ export function ChatView({
       onScrollTargetHandled={controller.handleScrollTargetHandled}
       searchContentRef={transcriptSearchRootRef}
       searchBackendRef={transcriptSearchBackendRef}
-      onSendMcpAppMessage={isReadOnly ? undefined : composerBinding.onSend}
+      onSendMcpAppMessage={
+        composerBinding.admissionBlocked ? undefined : composerBinding.onSend
+      }
       onRunShellCommand={
         !isReadOnly && terminalAvailable ? handleRunShellCommand : undefined
       }

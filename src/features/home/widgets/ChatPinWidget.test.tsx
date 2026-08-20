@@ -16,13 +16,20 @@ vi.mock("@/features/experiments/experimentPreferences", () => ({
 
 vi.mock("./ChatCanvasCard", () => ({
   ChatCanvasCard: ({
+    isFocused,
+    onFocus,
     onCollapse,
     onOpenFullChat,
   }: {
+    isFocused: boolean;
+    onFocus?: () => void;
     onCollapse: () => void;
     onOpenFullChat: () => void;
   }) => (
-    <div>
+    <div data-focused={String(isFocused)}>
+      <button type="button" onClick={onFocus}>
+        Focus
+      </button>
       <button type="button" onClick={onCollapse}>
         Collapse
       </button>
@@ -151,6 +158,63 @@ describe("ChatPinWidget", () => {
 
     expect(onUpdateState).toHaveBeenCalledWith({ presentation: "collapsed" });
     expect(onSelectSession).toHaveBeenCalledWith("session-pinned");
+  });
+
+  it("clears ephemeral focus when collapsing without persisting it", async () => {
+    const user = userEvent.setup();
+    const onUpdateState = vi.fn();
+    const onClearCanvasChatFocus = vi.fn();
+    mockUseExperiment.mockReturnValue({ enabled: true });
+    useChatSessionStore.getState().addSession({
+      id: "session-pinned",
+      title: "Pinned chat",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      messageCount: 1,
+    });
+
+    render(
+      <ChatPinWidget
+        instance={{
+          ...instance("session-pinned"),
+          state: { sessionId: "session-pinned", presentation: "expanded" },
+        }}
+        onUpdateState={onUpdateState}
+        isCanvasChatFocused
+        onClearCanvasChatFocus={onClearCanvasChatFocus}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Collapse" }));
+
+    expect(onClearCanvasChatFocus).toHaveBeenCalledTimes(1);
+    expect(onUpdateState).toHaveBeenCalledWith({ presentation: "collapsed" });
+  });
+
+  it("signals unavailable on temporary failure and again on remount", () => {
+    const onAvailabilityChange = vi.fn();
+    mockUseExperiment.mockReturnValue({ enabled: true });
+    useChatSessionStore.getState().addSession({
+      id: "session-pinned",
+      title: "Pinned chat",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      messageCount: 1,
+    });
+    const expanded = {
+      ...instance("session-pinned"),
+      state: { sessionId: "session-pinned", presentation: "expanded" },
+    };
+    const { unmount } = render(
+      <ChatPinWidget
+        instance={expanded}
+        onUpdateState={vi.fn()}
+        onCanvasChatAvailabilityChange={onAvailabilityChange}
+      />,
+    );
+
+    expect(onAvailabilityChange).toHaveBeenLastCalledWith("chat-pin-1", true);
+    unmount();
+    expect(onAvailabilityChange).toHaveBeenLastCalledWith("chat-pin-1", false);
   });
 
   it("selects an unavailable pinned session so it can retry loading", async () => {

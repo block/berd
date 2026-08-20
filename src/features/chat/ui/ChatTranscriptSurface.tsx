@@ -15,7 +15,10 @@ import { ArtifactPolicyProvider } from "@/features/chat/hooks/ArtifactPolicyCont
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
 import { ConversationEmptyAvatar } from "./ConversationEmptyAvatar";
-import { VirtualMessageTimelineGate } from "./VirtualMessageTimelineGate";
+import {
+  VirtualMessageTimelineGate,
+  type TranscriptRendererPolicy,
+} from "./VirtualMessageTimelineGate";
 
 type TimelineCallbacks = Pick<
   ComponentProps<typeof VirtualMessageTimelineGate>,
@@ -39,9 +42,12 @@ export interface ChatTranscriptSurfaceProps extends TimelineCallbacks {
   onScrollTargetHandled?: (messageId: string) => void;
   searchContentRef?: RefObject<HTMLDivElement | null>;
   searchBackendRef?: RefObject<TranscriptSearchBackend | null>;
+  startContent?: ReactNode;
   footer?: ReactNode;
   footerStatus?: ReactNode;
   suppressEmptyPlaceholder?: boolean;
+  /** The owning surface chooses presentation; full chat stays automatic. */
+  rendererPolicy?: TranscriptRendererPolicy;
 }
 
 function shouldStageInitialTranscript(
@@ -67,9 +73,11 @@ export function ChatTranscriptSurface({
   onScrollTargetHandled,
   searchContentRef,
   searchBackendRef,
+  startContent,
   footer,
   footerStatus,
   suppressEmptyPlaceholder = false,
+  rendererPolicy = "auto",
   ...callbacks
 }: ChatTranscriptSurfaceProps) {
   const { t } = useTranslation("chat");
@@ -156,8 +164,10 @@ export function ChatTranscriptSurface({
         searchBackendRef={searchBackendRef}
         showPlaceholder={showLoading}
         placeholder={placeholder}
+        startContent={startContent}
         footer={footer}
         footerStatus={footerStatus}
+        rendererPolicy={rendererPolicy}
         {...callbacks}
       />
     </ArtifactPolicyProvider>

@@ -1,6 +1,7 @@
 import type React from "react";
 import type { LayoutConstraints } from "@/features/layout/api/layout";
 import type { SkillInfo } from "@/features/skills/api/skills";
+import type { WorkspaceNameRequest } from "@/features/chat/hooks/useChatSessionController";
 
 export type WidgetCategory =
   | "clock"
@@ -72,6 +73,15 @@ export interface WidgetRenderProps {
   onOpenAutomation?: (automationId: string) => void;
   onCreatePersona?: () => void;
   onCreateProject?: () => void;
+  onWorkspaceNameRequest?: (request: WorkspaceNameRequest) => void;
+  /** Ephemeral interaction focus for expanded canvas chat cards. */
+  isCanvasChatFocused?: boolean;
+  onFocusCanvasChat?: () => void;
+  onClearCanvasChatFocus?: () => void;
+  onCanvasChatAvailabilityChange?: (
+    widgetId: string,
+    available: boolean,
+  ) => void;
   onOpenSkills?: () => void;
   onOpenAutomations?: () => void;
   onStartOnboardingTour?: (onComplete?: () => void) => void;

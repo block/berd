@@ -27,6 +27,7 @@ import {
   widgetSizeForInstance,
   widgetSizeProfile,
 } from "../widgets/catalog";
+import type { WorkspaceNameRequest } from "@/features/chat/hooks/useChatSessionController";
 import type {
   WidgetInstance,
   WidgetMutationHandlers,
@@ -49,6 +50,10 @@ import { useWidgetDragSuppression } from "./useWidgetDragSuppression";
  */
 export const HOME_WIDGET_NODE_ATTR = "data-home-widget-node";
 const HOME_WIDGET_NODE_SELECTOR = `[${HOME_WIDGET_NODE_ATTR}]`;
+const HOME_CANVAS_INTERACTIVE_SELECTOR =
+  "[data-home-canvas-interactive='true']";
+const HOME_WIDGET_DRAG_HANDLE_SELECTOR =
+  "[data-home-widget-drag-handle='true']";
 
 interface WidgetCanvasProps extends WidgetNavigationHandlers {
   instances: WidgetInstance[];
@@ -62,6 +67,7 @@ interface WidgetCanvasProps extends WidgetNavigationHandlers {
   viewportLeftOcclusionPx?: number;
   onCreatePersona?: () => void;
   onCreateProject?: () => void;
+  onWorkspaceNameRequest?: (request: WorkspaceNameRequest) => void;
   starterTasksAvailable?: boolean;
   onRestoreStarterTasks?: () => void;
 }
@@ -280,6 +286,7 @@ export function WidgetCanvas({
   onOpenAutomation,
   onCreatePersona,
   onCreateProject,
+  onWorkspaceNameRequest,
   onOpenSkills,
   onOpenAutomations,
   onStartOnboardingTour,
@@ -305,6 +312,12 @@ export function WidgetCanvas({
   const [visuallyLiftedZ, setVisuallyLiftedZ] = useState<
     Record<string, number>
   >({});
+  // Canvas chat focus is deliberately ephemeral. It is separate from route
+  // selection and widget persistence so restoring visible cards never creates
+  // a typing target or clears unread state.
+  const [focusedCanvasChatId, setFocusedCanvasChatId] = useState<string | null>(
+    null,
+  );
   const [picker, setPicker] = useState<PickerState>({
     open: false,
     x: 0,
@@ -488,22 +501,61 @@ export function WidgetCanvas({
 
   const handleCanvasPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (
-        event.button !== 0 ||
-        (event.target as HTMLElement).closest(HOME_WIDGET_NODE_SELECTOR)
-      ) {
+      if (event.button !== 0) {
+        return;
+      }
+      if ((event.target as HTMLElement).closest(HOME_WIDGET_NODE_SELECTOR)) {
         return;
       }
 
+      setFocusedCanvasChatId(null);
       beginPan(event);
     },
     [beginPan],
+  );
+
+  const handleCanvasChatAvailabilityChange = useCallback(
+    (widgetId: string, _available: boolean) => {
+      // Any mount/availability boundary invalidates the old gesture grant.
+      // A newly renderable card must be deliberately activated again.
+      setFocusedCanvasChatId((current) =>
+        current === widgetId ? null : current,
+      );
+    },
+    [],
   );
 
   const preventNativeDrag = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     event.stopPropagation();
   }, []);
+
+  const handleCanvasWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      if (
+        (event.target as HTMLElement).closest(HOME_CANVAS_INTERACTIVE_SELECTOR)
+      ) {
+        return;
+      }
+
+      handleWheel(event);
+    },
+    [handleWheel],
+  );
+
+  useEffect(() => {
+    if (
+      focusedCanvasChatId &&
+      !instances.some(
+        (instance) =>
+          instance.id === focusedCanvasChatId &&
+          instance.type === "chatPin" &&
+          instance.state?.presentation === "expanded",
+      )
+    ) {
+      setFocusedCanvasChatId(null);
+    }
+  }, [focusedCanvasChatId, instances]);
 
   const renderedInstances = useMemo(
     () =>
@@ -574,12 +626,21 @@ export function WidgetCanvas({
       ref={canvasRef}
       data-home-widget-canvas="true"
       onContextMenu={handleCanvasContextMenu}
+      onPointerDownCapture={(event) => {
+        if (event.button !== 0) return;
+        const owner = (event.target as HTMLElement).closest<HTMLElement>(
+          HOME_WIDGET_NODE_SELECTOR,
+        );
+        if (!owner || owner.dataset.homeWidgetId !== focusedCanvasChatId) {
+          setFocusedCanvasChatId(null);
+        }
+      }}
       onPointerDown={handleCanvasPointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={finishPointerGesture}
       onPointerCancel={finishPointerGesture}
       onDragStartCapture={preventNativeDrag}
-      onWheel={handleWheel}
+      onWheel={handleCanvasWheel}
       className="relative h-full w-full overflow-hidden bg-dot-grid select-none touch-none"
     >
       <div className="absolute left-0 top-0 size-0">
@@ -654,8 +715,25 @@ export function WidgetCanvas({
             <div
               key={instance.id}
               {...{ [HOME_WIDGET_NODE_ATTR]: "" }}
+              data-home-widget-id={instance.id}
               draggable={false}
-              onPointerDown={(event) => beginWidgetDrag(event, instance)}
+              onPointerDown={(event) => {
+                if (instance.id !== focusedCanvasChatId) {
+                  setFocusedCanvasChatId(null);
+                }
+                const expandedCanvasChat =
+                  instance.type === "chatPin" &&
+                  instance.state?.presentation === "expanded";
+                if (
+                  expandedCanvasChat &&
+                  !(event.target as HTMLElement).closest(
+                    HOME_WIDGET_DRAG_HANDLE_SELECTOR,
+                  )
+                ) {
+                  return;
+                }
+                beginWidgetDrag(event, instance);
+              }}
               onDragStart={preventNativeDrag}
               style={widgetStyle}
               className={cn(
@@ -695,6 +773,16 @@ export function WidgetCanvas({
                   canvasDragPosition={dragPositions[instance.id]}
                   widgetResizePreviewActive={isResizePreview}
                   renderPaused={!widgetInViewport}
+                  isCanvasChatFocused={focusedCanvasChatId === instance.id}
+                  onFocusCanvasChat={() => setFocusedCanvasChatId(instance.id)}
+                  onClearCanvasChatFocus={() =>
+                    setFocusedCanvasChatId((current) =>
+                      current === instance.id ? null : current,
+                    )
+                  }
+                  onCanvasChatAvailabilityChange={
+                    handleCanvasChatAvailabilityChange
+                  }
                   currentMaxZ={currentMaxZ}
                   mutations={mutations}
                   shouldIgnoreActivation={
@@ -713,6 +801,7 @@ export function WidgetCanvas({
                   onOpenAutomation={onOpenAutomation}
                   onCreatePersona={onCreatePersona}
                   onCreateProject={onCreateProject}
+                  onWorkspaceNameRequest={onWorkspaceNameRequest}
                   onOpenSkills={onOpenSkills}
                   onOpenAutomations={onOpenAutomations}
                   onStartOnboardingTour={onStartOnboardingTour}

@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { LayoutConstraints } from "@/features/layout/api/layout";
+import type { WorkspaceNameRequest } from "@/features/chat/hooks/useChatSessionController";
 import { cn } from "@/shared/lib/cn";
 import {
   consumeFreshWidgetPlacement,
@@ -33,6 +34,14 @@ interface WidgetFrameProps extends WidgetNavigationHandlers {
   canvasDragPosition?: { x: number; y: number };
   widgetResizePreviewActive?: boolean;
   renderPaused?: boolean;
+  isCanvasChatFocused?: boolean;
+  onFocusCanvasChat?: () => void;
+  onClearCanvasChatFocus?: () => void;
+  onCanvasChatAvailabilityChange?: (
+    widgetId: string,
+    available: boolean,
+  ) => void;
+  onWorkspaceNameRequest?: (request: WorkspaceNameRequest) => void;
   shouldIgnoreActivation?: () => boolean;
   gestureHandlers?: Partial<WidgetFrameGestureHandlers>;
   onVisualLiftReset?: (id: string) => void;
@@ -63,6 +72,10 @@ export function WidgetFrame({
   canvasDragPosition,
   widgetResizePreviewActive = false,
   renderPaused = false,
+  isCanvasChatFocused = false,
+  onFocusCanvasChat,
+  onClearCanvasChatFocus,
+  onCanvasChatAvailabilityChange,
   shouldIgnoreActivation = () => false,
   gestureHandlers = {},
   onVisualLiftReset = () => {},
@@ -77,6 +90,7 @@ export function WidgetFrame({
   onOpenAutomation,
   onCreatePersona,
   onCreateProject,
+  onWorkspaceNameRequest,
   onOpenSkills,
   onOpenAutomations,
   onStartOnboardingTour,
@@ -221,6 +235,11 @@ export function WidgetFrame({
           onOpenAutomation={onOpenAutomation}
           onCreatePersona={onCreatePersona}
           onCreateProject={onCreateProject}
+          onWorkspaceNameRequest={onWorkspaceNameRequest}
+          isCanvasChatFocused={isCanvasChatFocused}
+          onFocusCanvasChat={onFocusCanvasChat}
+          onClearCanvasChatFocus={onClearCanvasChatFocus}
+          onCanvasChatAvailabilityChange={onCanvasChatAvailabilityChange}
           onOpenSkills={onOpenSkills}
           onOpenAutomations={onOpenAutomations}
           onStartOnboardingTour={onStartOnboardingTour}

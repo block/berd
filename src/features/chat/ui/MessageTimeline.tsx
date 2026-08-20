@@ -77,6 +77,8 @@ interface MessageTimelineProps extends MessageTimelineBubbleCallbacks {
   searchContentRef?: Ref<HTMLDivElement>;
   className?: string;
   tailPaddingPx?: number;
+  /** Owning-surface content shown before the first transcript row. */
+  startContent?: ReactNode;
   /** Pinned to the bottom of the timeline while the conversation scrolls behind it. */
   footer?: ReactNode;
   /** Status or activity surface shown in the footer control row above the
@@ -130,6 +132,7 @@ export function MessageTimeline({
   onOpenContextPanel,
   className,
   tailPaddingPx,
+  startContent,
   footer,
   footerStatus,
   placeholder,
@@ -1449,6 +1452,7 @@ export function MessageTimeline({
       className="mx-auto w-full max-w-[var(--chat-transcript-container-max-width)] flex-1 px-[var(--chat-transcript-inline-padding)] pt-4"
       style={{ paddingBottom: messageListBottomPaddingPx }}
     >
+      {startContent}
       {snapshot.rows.map((row, index) => (
         <VirtualTranscriptRow
           key={row.reactKey}

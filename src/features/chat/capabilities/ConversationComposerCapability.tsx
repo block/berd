@@ -10,6 +10,10 @@ import {
 } from "@/features/chat/hooks/useChatSessionController";
 import { ChatInput } from "@/features/chat/ui/ChatInput";
 import { WorkspaceSetupChoice } from "@/features/chat/ui/WorkspaceSetupChoice";
+import {
+  useSessionAddressedComposerAdmission,
+  type SessionAddressedComposerAdmission,
+} from "@/features/chat/hooks/useSessionAddressedComposerAdmission";
 
 export type ConversationComposerTarget =
   | {
@@ -19,11 +23,7 @@ export type ConversationComposerTarget =
   | {
       kind: "existingSession";
       sessionId: string;
-      readOnlyReason?: string;
-      admissionConstraints?: {
-        executionTargetFailureReason?: string;
-        sessionCreationFailureReason?: string;
-      };
+      admission: SessionAddressedComposerAdmission;
     };
 
 export interface ConversationComposerRenderingPolicy {
@@ -38,7 +38,6 @@ export interface ConversationComposerRenderingPolicy {
   };
   lifecycleConstraints?: {
     handoff?: { active: boolean; inProgress: boolean };
-    securityConfirmationPending?: boolean;
     voiceConversation?: ChatInputVoiceConversation;
   };
 }
@@ -48,50 +47,84 @@ const conversationComposerBindingBrand: unique symbol = Symbol(
 );
 
 interface UseConversationComposerBindingOptions {
-  target: ConversationComposerTarget;
+  target:
+    | Extract<ConversationComposerTarget, { kind: "pendingConversation" }>
+    | {
+        kind: "existingSession";
+        sessionId: string;
+        sessionSnapshot?: Parameters<
+          typeof useSessionAddressedComposerAdmission
+        >[0]["sessionSnapshot"];
+        readOnlyReason?: string;
+        readOnlyWhenOpenInAnotherWindow?: boolean;
+      };
   onMessageAccepted?: (sessionId: string) => void;
   onCreatePersonaRequested?: () => void;
   onWorkspaceNameRequest?: (request: WorkspaceNameRequest) => void;
 }
 
 export function useConversationComposerBinding({
-  target,
+  target: requestedTarget,
   onMessageAccepted,
   onCreatePersonaRequested,
   onWorkspaceNameRequest,
 }: UseConversationComposerBindingOptions) {
+  const admission = useSessionAddressedComposerAdmission({
+    sessionId:
+      requestedTarget.kind === "existingSession"
+        ? requestedTarget.sessionId
+        : null,
+    sessionSnapshot:
+      requestedTarget.kind === "existingSession"
+        ? requestedTarget.sessionSnapshot
+        : undefined,
+    readOnlyReason:
+      requestedTarget.kind === "existingSession"
+        ? requestedTarget.readOnlyReason
+        : undefined,
+    readOnlyWhenOpenInAnotherWindow:
+      requestedTarget.kind === "existingSession"
+        ? requestedTarget.readOnlyWhenOpenInAnotherWindow
+        : false,
+  });
+  const target: ConversationComposerTarget =
+    requestedTarget.kind === "existingSession"
+      ? {
+          kind: "existingSession",
+          sessionId: requestedTarget.sessionId,
+          admission,
+        }
+      : requestedTarget;
   const controller = useChatSessionController({
     sessionId: target.sessionId,
     isHomeSession: target.kind === "pendingConversation",
     readOnly:
-      target.kind === "existingSession" && Boolean(target.readOnlyReason),
+      target.kind === "existingSession" &&
+      Boolean(target.admission.readOnlyReason),
     onMessageAccepted,
     onCreatePersonaRequested,
     onWorkspaceNameRequest,
   });
 
-  const admissionFailureReason =
+  const admissionBlockingReason =
     target.kind === "existingSession"
-      ? (target.readOnlyReason ??
-        target.admissionConstraints?.sessionCreationFailureReason ??
-        target.admissionConstraints?.executionTargetFailureReason)
+      ? target.admission.blockingReason
       : undefined;
-  const hasAdmissionFailure = Boolean(admissionFailureReason);
+  const admissionBlocked =
+    target.kind === "existingSession" && target.admission.blocked;
   const rejectSend = useCallback(
     (..._args: Parameters<typeof controller.handleSend>) => false,
     [],
   );
-  const onSend = hasAdmissionFailure ? rejectSend : controller.handleSend;
+  const onSend = admissionBlocked ? rejectSend : controller.handleSend;
 
   return {
     controller,
     target,
-    admissionFailureReason,
-    hasAdmissionFailure,
+    admissionBlockingReason,
+    admissionBlocked,
     onSend,
-    onSendQueue: hasAdmissionFailure
-      ? undefined
-      : controller.sendDeferredAnyway,
+    onSendQueue: admissionBlocked ? undefined : controller.sendDeferredAnyway,
     [conversationComposerBindingBrand]: true as const,
   };
 }
@@ -122,16 +155,21 @@ export function ConversationComposerCapability({
   const {
     controller,
     target,
-    admissionFailureReason,
-    hasAdmissionFailure,
+    admissionBlockingReason,
+    admissionBlocked,
     onSend,
     onSendQueue,
   } = binding;
   const isPendingConversation = target.kind === "pendingConversation";
   const readOnlyReason =
-    target.kind === "existingSession" ? target.readOnlyReason : undefined;
+    target.kind === "existingSession"
+      ? target.admission.readOnlyReason
+      : undefined;
   const isReadOnly = Boolean(readOnlyReason);
   const lifecycle = renderingPolicy.lifecycleConstraints;
+  const securityConfirmationPending =
+    target.kind === "existingSession" &&
+    target.admission.securityConfirmationPending;
   const handoffActive = lifecycle?.handoff?.active === true;
   const handoffInProgress = lifecycle?.handoff?.inProgress === true;
   const deferredWorkspaceInFlight =
@@ -172,7 +210,7 @@ export function ConversationComposerCapability({
       : undefined;
   return (
     <ChatInput
-      className={lifecycle?.securityConfirmationPending ? "hidden" : undefined}
+      className={securityConfirmationPending ? "hidden" : undefined}
       surface={renderingPolicy.presentation.surface}
       innerBareSurface={renderingPolicy.presentation.innerBareSurface}
       controls={controls}
@@ -211,29 +249,34 @@ export function ConversationComposerCapability({
       }
       composerActions={{
         onSend,
-        onSteerMessage: isPendingConversation
+        onSteerMessage:
+          isPendingConversation || admissionBlocked
+            ? undefined
+            : (text, personaId, attachments, options) =>
+                controller.steerDraftMessage(
+                  text,
+                  personaId ?? undefined,
+                  attachments,
+                  options,
+                ),
+        canSteerMessage:
+          isPendingConversation || admissionBlocked
+            ? false
+            : controller.canSteerMessage,
+        onSteerQueuedMessage: admissionBlocked
           ? undefined
-          : (text, personaId, attachments, options) =>
-              controller.steerDraftMessage(
-                text,
-                personaId ?? undefined,
-                attachments,
-                options,
-              ),
-        canSteerMessage: isPendingConversation
-          ? undefined
-          : controller.canSteerMessage,
-        onSteerQueuedMessage: controller.steerQueuedMessage,
-        canSteerQueuedMessage: controller.canSteerQueuedMessage,
+          : controller.steerQueuedMessage,
+        canSteerQueuedMessage:
+          !admissionBlocked && controller.canSteerQueuedMessage,
         disabled: isPendingConversation
           ? controller.projectMetadataPending
-          : hasAdmissionFailure ||
+          : admissionBlocked ||
             controller.projectMetadataPending ||
             controller.isCompactingContext,
         sendDisabled: isPendingConversation
           ? undefined
-          : hasAdmissionFailure || controller.workspaceSetupInProgress,
-        sendDisabledReason: admissionFailureReason,
+          : admissionBlocked || controller.workspaceSetupInProgress,
+        sendDisabledReason: admissionBlockingReason,
         queuedMessage: handoffInProgress
           ? null
           : (controller.queue.queuedMessage ??

@@ -15,6 +15,7 @@ import {
 } from "@/app/contexts/TopBarActionsContext";
 import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/terminalCwdPreference";
 import type { ChatSession } from "../../stores/chatSessionStore";
+import { useSecurityConfirmationStore } from "@/features/security/stores/securityConfirmationStore";
 import { ChatView } from "../ChatView";
 
 const mocks = vi.hoisted(() => ({
@@ -412,6 +413,10 @@ describe("ChatView MCP app messaging", () => {
     mocks.activeWorkspaceBySession = {};
     mocks.afterNextPaintCallbacks = [];
     mocks.autoFlushAfterNextPaint = true;
+    useSecurityConfirmationStore.setState({
+      pendingBySessionId: {},
+      mountedSurfaceCountBySessionId: {},
+    });
     window.localStorage.clear();
     mockMatchMedia(false);
     mocks.useChatSessionController.mockReturnValue({
@@ -506,6 +511,30 @@ describe("ChatView MCP app messaging", () => {
     });
   });
 
+  it("keeps full chat automatic and passes the complete transcript", () => {
+    const completeMessages = Array.from({ length: 12 }, (_, index) => ({
+      id: `user-${index + 1}`,
+      role: "user" as const,
+      created: index,
+      content: [{ type: "text" as const, text: `Question ${index + 1}` }],
+      metadata: { userVisible: true },
+    }));
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      messages: completeMessages,
+    });
+
+    render(<ChatView sessionId="session-1" />);
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      messages: typeof completeMessages;
+      rendererPolicy?: string;
+    };
+    expect(timelineProps.messages).toBe(completeMessages);
+    expect(timelineProps.messages).toHaveLength(12);
+    expect(timelineProps.rendererPolicy).toBe("auto");
+  });
+
   it("does not pass fork-from-message in read-only mode", () => {
     render(
       <ChatView
@@ -570,6 +599,67 @@ describe("ChatView MCP app messaging", () => {
       className?: string;
     };
     expect(chatInputProps.className).toBeUndefined();
+  });
+
+  it("blocks and hides composer, queue, MCP, and voice delivery while security confirmation is pending", () => {
+    const sendDeferredAnyway = vi.fn();
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      deferredWorkspaceRecord: {
+        kind: "deferred",
+        recordId: "deferred-1",
+        payload: { text: "queued" },
+        state: { status: "held", desired: [] },
+      },
+      queue: { queuedMessage: { text: "queued" }, dismiss: vi.fn() },
+      sendDeferredAnyway,
+    });
+    useSecurityConfirmationStore.setState({
+      pendingBySessionId: {
+        "session-1": [
+          {
+            request: { sessionId: "session-1" } as never,
+            title: "Security",
+            command: null,
+            alertText: "Alert",
+            resolve: () => undefined,
+            inferredExplanation: { status: "idle" },
+          },
+        ],
+      },
+    });
+
+    render(<ChatView sessionId="session-1" />);
+
+    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+      className?: string;
+      composerActions: {
+        onSend: (text: string) => boolean;
+        onSendQueue?: () => boolean;
+        onSteerMessage?: unknown;
+        onSteerQueuedMessage?: unknown;
+      };
+    };
+    expect(chatInputProps.className).toBe("hidden");
+    expect(chatInputProps.composerActions.onSend("blocked")).toBe(false);
+    expect(chatInputProps.composerActions.onSendQueue).toBeUndefined();
+    expect(chatInputProps.composerActions.onSteerMessage).toBeUndefined();
+    expect(chatInputProps.composerActions.onSteerQueuedMessage).toBeUndefined();
+    expect(mocks.handleSend).not.toHaveBeenCalled();
+    expect(sendDeferredAnyway).not.toHaveBeenCalled();
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      onSendMcpAppMessage?: unknown;
+    };
+    expect(timelineProps.onSendMcpAppMessage).toBeUndefined();
+
+    const voiceOptions = mocks.voiceControllerSpy.mock.calls.at(-1)?.[0] as {
+      onSend: (text: string) => boolean;
+      disabled: boolean;
+    };
+    expect(voiceOptions.disabled).toBe(true);
+    expect(voiceOptions.onSend("blocked voice")).toBe(false);
+    expect(mocks.handleSend).not.toHaveBeenCalled();
   });
 
   it("shows the empty-state placeholder while keeping the composer mounted for a fresh chat", () => {

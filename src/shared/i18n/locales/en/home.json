@@ -151,7 +151,9 @@
       "expandAria": "Expand chat: {{title}}",
       "collapseAria": "Collapse chat: {{title}}",
       "openFullAria": "Open full chat: {{title}}",
-      "previewHint": "Enlarge to read the live transcript"
+      "previewHint": "Enlarge to read the live transcript",
+      "earlierMessages": "Earlier messages are available in full chat",
+      "openFull": "Open full chat"
     },
     "projectArtifactPin": {
       "label": "Pin a project",

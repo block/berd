@@ -151,7 +151,9 @@
       "expandAria": "Expandir chat: {{title}}",
       "collapseAria": "Contraer chat: {{title}}",
       "openFullAria": "Abrir chat completo: {{title}}",
-      "previewHint": "Amplía para leer la conversación en vivo"
+      "previewHint": "Amplía para leer la conversación en vivo",
+      "earlierMessages": "Los mensajes anteriores están disponibles en el chat completo",
+      "openFull": "Abrir chat completo"
     },
     "projectArtifactPin": {
       "label": "Fijar un proyecto",

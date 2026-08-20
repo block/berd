@@ -143,6 +143,17 @@ describe("ExperimentsSettings", () => {
     ]);
   });
 
+  it("keeps chat on canvas manual-only and off by default", () => {
+    expect(
+      EXPERIMENT_DEFINITIONS.find(
+        ({ id }) => id === CHAT_ON_CANVAS_EXPERIMENT_ID,
+      ),
+    ).toMatchObject({
+      defaultEnabled: false,
+      manualEnableOnly: true,
+    });
+  });
+
   it("groups onboarding experiments and resets all onboarding experiences", async () => {
     vi.stubEnv("DEV", true);
     const user = userEvent.setup();

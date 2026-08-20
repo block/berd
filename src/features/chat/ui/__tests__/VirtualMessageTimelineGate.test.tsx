@@ -143,6 +143,26 @@ describe("VirtualMessageTimelineGate", () => {
     expect(mocks.legacyTimelineSpy).not.toHaveBeenCalled();
   });
 
+  it("honors an owning surface's explicit classic renderer policy", () => {
+    expect(
+      setExperimentEnabled(TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID, true),
+    ).toBe(true);
+
+    render(
+      <VirtualMessageTimelineGate
+        sessionId="canvas-session"
+        messages={[message("user-1")]}
+        rendererPolicy="classic"
+      />,
+    );
+
+    expect(screen.getByTestId("legacy-message-timeline")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("virtual-message-timeline"),
+    ).not.toBeInTheDocument();
+    expect(mocks.virtualTimelineSpy).not.toHaveBeenCalled();
+  });
+
   it("replaces loaded transcript state when the virtual renderer is toggled", () => {
     expect(
       setExperimentEnabled(TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID, true),

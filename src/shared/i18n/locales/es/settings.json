@@ -259,7 +259,7 @@
     },
     "chatOnCanvas": {
       "title": "Chat en el lienzo",
-      "description": "Expande los chats fijados en tarjetas de conversación en vivo y de solo lectura en Inicio."
+      "description": "Expande los chats fijados en tarjetas de conversación en vivo en Inicio, donde puedes leer y responder."
     }
   },
   "extensions": {

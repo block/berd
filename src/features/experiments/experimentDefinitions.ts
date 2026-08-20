@@ -102,6 +102,8 @@ export const EXPERIMENT_DEFINITIONS = [
     id: CHAT_ON_CANVAS_EXPERIMENT_ID,
     titleKey: "experiments.chatOnCanvas.title",
     descriptionKey: "experiments.chatOnCanvas.description",
+    defaultEnabled: false,
+    manualEnableOnly: true,
   },
   {
     id: AVATAR_COLLECTION_PAGE_EXPERIMENT_ID,

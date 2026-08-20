@@ -107,24 +107,44 @@ function latestProps() {
 
 function createBinding(
   controller: ReturnType<typeof createController>,
-  target: ConversationComposerTarget,
+  target:
+    | Extract<ConversationComposerTarget, { kind: "pendingConversation" }>
+    | {
+        kind: "existingSession";
+        sessionId: string;
+        admission?: Partial<
+          Extract<
+            ConversationComposerTarget,
+            { kind: "existingSession" }
+          >["admission"]
+        >;
+      },
 ) {
-  const admissionFailureReason =
+  const completeTarget: ConversationComposerTarget =
     target.kind === "existingSession"
-      ? (target.readOnlyReason ??
-        target.admissionConstraints?.sessionCreationFailureReason ??
-        target.admissionConstraints?.executionTargetFailureReason)
+      ? {
+          ...target,
+          admission: {
+            blocked: false,
+            securityConfirmationPending: false,
+            ...target.admission,
+          },
+        }
+      : target;
+  const admissionBlockingReason =
+    completeTarget.kind === "existingSession"
+      ? completeTarget.admission.blockingReason
       : undefined;
-  const hasAdmissionFailure = Boolean(admissionFailureReason);
+  const admissionBlocked =
+    completeTarget.kind === "existingSession" &&
+    completeTarget.admission.blocked;
   return {
     controller,
-    target,
-    admissionFailureReason,
-    hasAdmissionFailure,
-    onSend: hasAdmissionFailure ? vi.fn(() => false) : controller.handleSend,
-    onSendQueue: hasAdmissionFailure
-      ? undefined
-      : controller.sendDeferredAnyway,
+    target: completeTarget,
+    admissionBlockingReason,
+    admissionBlocked,
+    onSend: admissionBlocked ? vi.fn(() => false) : controller.handleSend,
+    onSendQueue: admissionBlocked ? undefined : controller.sendDeferredAnyway,
   } as never;
 }
 
@@ -172,8 +192,10 @@ describe("ConversationComposerCapability surface parity", () => {
         binding={createBinding(controller, {
           kind: "existingSession",
           sessionId: "session-1",
-          admissionConstraints: {
-            executionTargetFailureReason: "Agent preparation failed",
+          admission: {
+            blocked: true,
+            blockingReason: "Agent preparation failed",
+            securityConfirmationPending: true,
           },
         })}
         renderingPolicy={{
@@ -184,7 +206,6 @@ describe("ConversationComposerCapability surface parity", () => {
           },
           lifecycleConstraints: {
             handoff: { active: true, inProgress: true },
-            securityConfirmationPending: true,
             voiceConversation: voiceConversation as never,
           },
         }}
@@ -196,7 +217,9 @@ describe("ConversationComposerCapability surface parity", () => {
     expect(props.innerBareSurface).toBe(true);
     expect(props.className).toBe("hidden");
     expect(props.controls?.autoFocus).toBe(false);
-    expect(props.composerActions.onSteerMessage).toBeTypeOf("function");
+    expect(props.composerActions.onSteerMessage).toBeUndefined();
+    expect(props.composerActions.canSteerMessage).toBe(false);
+    expect(props.composerActions.onSteerQueuedMessage).toBeUndefined();
     expect(props.composerActions.queuedMessage).toBeNull();
     expect(props.composerActions.queuedMessages).toEqual([]);
     expect(props.composerActions.onDismissQueue).toBeUndefined();
@@ -225,7 +248,11 @@ describe("ConversationComposerCapability authority boundary", () => {
         binding={createBinding(controller, {
           kind: "existingSession",
           sessionId: "session-1",
-          readOnlyReason: "Read only",
+          admission: {
+            blocked: true,
+            readOnlyReason: "Read only",
+            blockingReason: "Read only",
+          },
         })}
         renderingPolicy={{
           presentation: { surface: "pill", providerColumnMode: "visible" },
@@ -254,8 +281,9 @@ describe("ConversationComposerCapability authority boundary", () => {
     const binding = createBinding(controller, {
       kind: "existingSession",
       sessionId: "session-1",
-      admissionConstraints: {
-        sessionCreationFailureReason: "Session creation failed",
+      admission: {
+        blocked: true,
+        blockingReason: "Session creation failed",
       },
     });
     const { rerender } = render(
@@ -298,7 +326,11 @@ describe("ConversationComposerCapability authority boundary", () => {
     };
     const independentlyAssertedBinding: ConversationComposerBinding = {
       controller: createController() as never,
-      target: { kind: "existingSession", sessionId: "session-1" },
+      target: {
+        kind: "existingSession",
+        sessionId: "session-1",
+        admission: { blocked: false, securityConfirmationPending: false },
+      },
       // @ts-expect-error The hook's private brand cannot be independently asserted.
       fakeBrand: true,
     };

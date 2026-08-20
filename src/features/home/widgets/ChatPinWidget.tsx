@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { CHAT_ON_CANVAS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
@@ -33,6 +33,13 @@ export function ChatPinWidget({
   onUpdateState,
   shouldIgnoreActivation,
   onSelectSession,
+  onCreatePersona,
+  onCreateProject,
+  onWorkspaceNameRequest,
+  isCanvasChatFocused = false,
+  onFocusCanvasChat,
+  onClearCanvasChatFocus,
+  onCanvasChatAvailabilityChange,
 }: WidgetRenderProps) {
   const { t } = useTranslation("home");
   const { formatRelativeTimeToNow } = useLocaleFormatting();
@@ -70,6 +77,15 @@ export function ChatPinWidget({
   }
   const isExpanded =
     chatOnCanvasEnabled && instance.state?.presentation === "expanded";
+  // Viewport pausing is a visual-work hint, not a lifecycle boundary. A drag
+  // can transiently move this mounted card outside the viewport; availability
+  // remains owned by the expanded card/session lifecycle so focus and local
+  // transcript/composer state survive that movement.
+  const canvasChatAvailable = Boolean(isExpanded && session && !isUnavailable);
+  useLayoutEffect(() => {
+    onCanvasChatAvailabilityChange?.(instance.id, canvasChatAvailable);
+    return () => onCanvasChatAvailabilityChange?.(instance.id, false);
+  }, [canvasChatAvailable, instance.id, onCanvasChatAvailabilityChange]);
   useEffect(() => {
     if (!chatOnCanvasEnabled && instance.state?.presentation === "expanded") {
       onUpdateState({ presentation: "collapsed" });
@@ -87,8 +103,18 @@ export function ChatPinWidget({
   if (isExpanded && session && !isUnavailable) {
     return (
       <ChatCanvasCard
+        key={session.id}
         session={session}
-        onCollapse={() => onUpdateState({ presentation: "collapsed" })}
+        isFocused={isCanvasChatFocused}
+        onFocus={onFocusCanvasChat}
+        shouldIgnoreActivation={shouldIgnoreActivation}
+        onCreatePersona={onCreatePersona}
+        onCreateProject={onCreateProject}
+        onWorkspaceNameRequest={onWorkspaceNameRequest}
+        onCollapse={() => {
+          onClearCanvasChatFocus?.();
+          onUpdateState({ presentation: "collapsed" });
+        }}
         onOpenFullChat={() => onSelectSession?.(session.id)}
       />
     );

@@ -259,7 +259,7 @@
     },
     "chatOnCanvas": {
       "title": "Chat on canvas",
-      "description": "Expand pinned chats into live, read-only conversation cards on Home."
+      "description": "Expand pinned chats into live conversation cards on Home where you can read and respond."
     }
   },
   "extensions": {

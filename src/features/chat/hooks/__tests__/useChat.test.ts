@@ -157,6 +157,27 @@ describe("useChat", () => {
     mockAcpPrepareSession.mockResolvedValue(undefined);
   });
 
+  it("dispatches to its addressed session without changing route-active selection", async () => {
+    seedChatSession();
+    useChatStore.setState({ activeSessionId: "route-session" });
+    useChatSessionStore.setState({ activeSessionId: "route-session" });
+    const { result } = renderHook(() => useChat("session-1"));
+
+    await act(async () => {
+      await result.current.sendMessage("Canvas prompt");
+    });
+
+    expect(mockAcpSendMessage).toHaveBeenCalledWith(
+      "session-1",
+      "Canvas prompt",
+      expect.any(Object),
+    );
+    expect(useChatStore.getState().activeSessionId).toBe("route-session");
+    expect(useChatSessionStore.getState().activeSessionId).toBe(
+      "route-session",
+    );
+  });
+
   it("marks the streaming message stopped only after cancellation succeeds", async () => {
     const cancelDeferred = createDeferredPromise<boolean>();
     mockAcpCancelSession.mockReturnValue(cancelDeferred.promise);

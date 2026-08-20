@@ -1318,6 +1318,9 @@ describe("MessageTimeline", () => {
       name: "Jump to latest",
     });
     expect(jumpButton).toHaveClass("h-8", "w-8");
+    expect(jumpButton.closest('[data-testid="message-timeline-footer"]')).toBe(
+      screen.getByTestId("message-timeline-footer"),
+    );
     expect(screen.queryByText("Jump to latest")).not.toBeInTheDocument();
   });
 
