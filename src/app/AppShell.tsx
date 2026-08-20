@@ -3589,6 +3589,19 @@ export function AppShell({
         if (!session || session.id !== sessionId) {
           return { ok: false as const, reason: "session_not_found" as const };
         }
+        await useVoiceConversationStore.getState().init();
+        const voiceBeforeArchive = useVoiceConversationStore.getState().status;
+        if (
+          cleanupPolicy === "reject" &&
+          voiceBeforeArchive.sessionId === sessionId &&
+          voiceBeforeArchive.lifecycle !== "stopped" &&
+          voiceBeforeArchive.lifecycle !== "unavailable"
+        ) {
+          return {
+            ok: false as const,
+            reason: "target_session_running" as const,
+          };
+        }
 
         let plans: InspectedSessionWorkspaceCleanupPlan[] = [];
         if (hasSessionWorkspaceCleanupTargets(session)) {
@@ -3695,6 +3708,7 @@ export function AppShell({
           };
         }
 
+        await useVoiceConversationStore.getState().init();
         const voice = useVoiceConversationStore.getState();
         if (
           voice.status.sessionId === sessionId &&

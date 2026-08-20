@@ -2513,6 +2513,38 @@ describe("AppShell global navigation", () => {
     expect(gitMocks.removeWorktree).not.toHaveBeenCalled();
   });
 
+  it("does not auto-archive a background voice session", async () => {
+    const stopVoiceConversation = vi.fn().mockResolvedValue(undefined);
+    useChatSessionStore.setState({
+      sessions: [makeManagedWorktreeSession("background-voice")],
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      stop: stopVoiceConversation,
+    });
+    renderAppShell();
+
+    const outcome = await getAppNavigationController().archiveSession(
+      "session-1",
+      "reject",
+    );
+
+    expect(outcome).toEqual({
+      ok: false,
+      reason: "target_session_running",
+    });
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    expect(stopVoiceConversation).not.toHaveBeenCalled();
+  });
+
   it("rechecks running state before noninteractive archival", async () => {
     const inspection = deferred<GitState>();
     mockPathExists.mockResolvedValue(true);
