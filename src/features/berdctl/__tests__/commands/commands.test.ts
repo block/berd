@@ -940,6 +940,45 @@ describe("sessions.create", () => {
     );
   });
 
+  it("rejects a complete explicit Goose target when its model id is provider-ambiguous", async () => {
+    seedModelCache("openai", ["shared-model"]);
+    seedModelCache("anthropic", ["shared-model"]);
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "create",
+          prompt: "hi",
+          harness_id: "goose",
+          model_id: "shared-model",
+        },
+        ctx,
+      ),
+      "model_ambiguous",
+    );
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("accepts an explicit model for a ready ACP harness without authoritative inventory", async () => {
+    await dispatchCommand(
+      "sessions",
+      {
+        action: "create",
+        prompt: "hi",
+        harness_id: "codex-acp",
+        model_id: "unlisted-model",
+      },
+      ctx,
+    );
+
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "codex-acp",
+      "/resolved/cwd",
+      expect.objectContaining({ modelId: "unlisted-model" }),
+    );
+  });
+
   it("reports model_not_found when an explicit Goose model has no concrete provider", async () => {
     await expectCommandError(
       dispatchCommand(

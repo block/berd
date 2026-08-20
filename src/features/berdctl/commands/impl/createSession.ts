@@ -216,15 +216,35 @@ Result:
         ? persona.modelProviderId
         : undefined;
     const inventoryModels = modelsForHarness(harnessId);
-    const explicitModel = explicitModelId
-      ? inventoryModels.find(
+    const matchingExplicitModels = explicitModelId
+      ? inventoryModels.filter(
           (model) =>
             model.id === explicitModelId &&
             (!explicitModelProviderBoundary ||
               model.providerId === explicitModelProviderBoundary),
         )
-      : undefined;
-    if (explicitModelId && !explicitModel) {
+      : [];
+    const matchingExplicitProviders = new Set(
+      matchingExplicitModels.flatMap((model) =>
+        model.providerId ? [model.providerId] : [],
+      ),
+    );
+    if (
+      explicitModelId &&
+      harnessId === GOOSE_PROVIDER_ID &&
+      matchingExplicitProviders.size > 1
+    ) {
+      throw new CommandError(
+        "model_ambiguous",
+        `Model "${explicitModelId}" is available from multiple Goose providers; select an agent with a provider-qualified model.`,
+      );
+    }
+    const explicitModel = matchingExplicitModels[0];
+    const inventoryIsAuthoritative =
+      harnessId === GOOSE_PROVIDER_ID
+        ? matchingExplicitProviders.size > 0
+        : modelCache.isModelInventoryAuthoritative(harnessId);
+    if (explicitModelId && !explicitModel && inventoryIsAuthoritative) {
       throw new CommandError(
         "model_not_found",
         `Model "${explicitModelId}" is not available on "${harnessId}"; list models with \`berdctl info models\`.`,

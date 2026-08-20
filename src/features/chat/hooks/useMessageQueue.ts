@@ -167,7 +167,10 @@ export function useMessageQueue(
       if (dispatchReleaseUnsubscribeRef.current) {
         return false;
       }
-      const acquisition = acquireSessionDispatchTarget(sessionId);
+      const acquisition = acquireSessionDispatchTarget(
+        sessionId,
+        queuedMsg.payload.sendOptions?.sessionSelection,
+      );
       if (acquisition.status === "contended") {
         dispatchReleasePayloadRef.current = payload;
         dispatchReleaseUnsubscribeRef.current = acquisition.waiter.wait(() => {

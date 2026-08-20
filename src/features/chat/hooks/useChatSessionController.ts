@@ -2446,8 +2446,14 @@ export function useChatSessionController({
             availableSkillsCatalogPrompt,
           )
         : undefined;
+      const personaTarget = queuedPersona
+        ? resolvePersonaTarget(queuedPersona)
+        : undefined;
       const sendOptions = {
         ...payload.sendOptions,
+        ...(personaTarget?.status === "valid"
+          ? { sessionSelection: personaTarget.target }
+          : {}),
         ...(capturedPersonaSystemPrompt !== undefined
           ? { capturedPersonaSystemPrompt }
           : {}),
@@ -2477,6 +2483,7 @@ export function useChatSessionController({
       availableSkillsCatalogPrompt,
       chatSourceSurface,
       includedWorkspacesPrompt,
+      resolvePersonaTarget,
       selectedPersona,
       workspaceContextReady,
       workspaceInstructionsPrompt,

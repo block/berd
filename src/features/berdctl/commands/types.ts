@@ -78,6 +78,7 @@ export const COMMAND_ERROR_CODES = [
   "harness_not_found",
   "harness_not_ready",
   "model_not_found",
+  "model_ambiguous",
   "blocked_unsaved_changes",
   "backend_read_failed",
   "backend_archive_failed",

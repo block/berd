@@ -3201,6 +3201,12 @@ describe("useChatSessionController", () => {
         personaId: "persona-1",
         personaName: "Codex Planner",
         sendOptions: {
+          sessionSelection: {
+            harnessId: "codex-acp",
+            modelProviderId: "codex-acp",
+            modelId: "codex-model",
+            modelName: "codex-model",
+          },
           capturedPersonaSystemPrompt: expect.stringContaining("Plan clearly."),
           telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT,
         },
@@ -3210,6 +3216,12 @@ describe("useChatSessionController", () => {
         personaId: "persona-2",
         personaName: "Goose Reviewer",
         sendOptions: {
+          sessionSelection: {
+            harnessId: "goose",
+            modelProviderId: "databricks_v2",
+            modelId: "goose-claude-opus-4-8",
+            modelName: "Claude Opus 4.8",
+          },
           capturedPersonaSystemPrompt:
             expect.stringContaining("Review carefully."),
           telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT,
