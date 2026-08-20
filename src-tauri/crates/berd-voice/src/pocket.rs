@@ -48,7 +48,6 @@ impl SynthesisCallGuard {
             Ok(Self { engine_id })
         })
     }
-
 }
 
 impl Drop for SynthesisCallGuard {
