@@ -31,6 +31,7 @@ pub mod local_mcp_inventory;
 pub mod message_queues;
 pub mod migration;
 pub mod model_setup;
+mod native_input_mute;
 pub mod native_voice;
 pub mod notifications;
 #[cfg(feature = "block-voice-dictation")]

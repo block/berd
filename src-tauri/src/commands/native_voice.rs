@@ -16,7 +16,9 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tokio::sync::mpsc as tokio_mpsc;
 
-use super::{pocket_voice::parakeet_model_dir, voice_capture::VoiceCaptureState};
+use super::{
+    native_input_mute, pocket_voice::parakeet_model_dir, voice_capture::VoiceCaptureState,
+};
 
 const EVENT_NAME: &str = "voice-conversation:event";
 const MAX_AUDIO_BATCH_BYTES: usize = 100 * 1024;
@@ -124,6 +126,7 @@ pub struct NativeVoiceState {
     runtime: Arc<Mutex<Runtime>>,
     pending: Arc<Mutex<VecDeque<PendingTranscript>>>,
     capture_suppressions: Arc<AtomicUsize>,
+    input_muted: Arc<AtomicBool>,
 }
 
 #[must_use = "capture suppression ends when the guard is dropped"]
@@ -172,24 +175,38 @@ struct SttPipeline {
     audio_tx: SyncSender<Vec<u8>>,
     audio_seen: AtomicBool,
     shutdown: Arc<AtomicBool>,
+    input_muted: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
 }
 
 impl SttPipeline {
-    fn new(model_dir: PathBuf) -> Result<(Self, tokio_mpsc::Receiver<SttMessage>), String> {
+    fn new(
+        model_dir: PathBuf,
+        input_muted: Arc<AtomicBool>,
+    ) -> Result<(Self, tokio_mpsc::Receiver<SttMessage>), String> {
         let (audio_tx, audio_rx) = mpsc::sync_channel(AUDIO_QUEUE_DEPTH);
         let (event_tx, event_rx) = tokio_mpsc::channel(64);
         let shutdown = Arc::new(AtomicBool::new(false));
         let worker_shutdown = Arc::clone(&shutdown);
+        let worker_input_muted = Arc::clone(&input_muted);
         let thread = thread::Builder::new()
             .name("berd-native-stt".into())
-            .spawn(move || stt_worker(model_dir, audio_rx, event_tx, worker_shutdown))
+            .spawn(move || {
+                stt_worker(
+                    model_dir,
+                    audio_rx,
+                    event_tx,
+                    worker_shutdown,
+                    worker_input_muted,
+                )
+            })
             .map_err(|error| format!("start native transcription: {error}"))?;
         Ok((
             Self {
                 audio_tx,
                 audio_seen: AtomicBool::new(false),
                 shutdown,
+                input_muted,
                 thread: Some(thread),
             },
             event_rx,
@@ -205,6 +222,9 @@ impl SttPipeline {
         }
         if !bytes.len().is_multiple_of(4) {
             return Err("audio batch must contain complete f32 samples".to_string());
+        }
+        if self.input_muted.load(Ordering::Acquire) {
+            return Ok(());
         }
         if !self.audio_seen.swap(true, Ordering::AcqRel) {
             log::info!(
@@ -389,7 +409,7 @@ pub async fn start_native_voice_conversation(
             return Err(error);
         }
     };
-    let (pipeline, mut events) = match SttPipeline::new(model_dir) {
+    let (pipeline, mut events) = match SttPipeline::new(model_dir, Arc::clone(&state.input_muted)) {
         Ok(result) => result,
         Err(error) => {
             if microphone_claimed {
@@ -421,6 +441,7 @@ pub async fn start_native_voice_conversation(
             runtime.lifecycle_id.clone().unwrap_or_default(),
         )
     };
+    native_input_mute::start(&state.input_muted);
     let _ = webview_window.emit(
         EVENT_NAME,
         NativeVoiceEvent::Startup {
@@ -516,6 +537,7 @@ pub async fn start_native_voice_conversation(
                     if let Some(pipeline) = pipeline {
                         shutdown_pipeline(pipeline).await;
                     }
+                    native_input_mute::stop(&event_app.state::<NativeVoiceState>().input_muted);
                     event_app
                         .state::<VoiceCaptureState>()
                         .release_owner(&window_label, &owner_id);
@@ -583,6 +605,9 @@ pub async fn stop_native_voice_conversation(
     if let Some((owner, owner_id)) = owner.as_ref() {
         capture.release_owner(&owner.window_label, owner_id);
     }
+    if session_id.is_some() {
+        native_input_mute::stop(&state.input_muted);
+    }
     if let Some(session_id) = session_id {
         let target = owner
             .as_ref()
@@ -637,6 +662,7 @@ impl NativeVoiceState {
             }
             runtime.revision
         };
+        let had_session = session_id.is_some();
         if let (Some(owner), Some(session_id)) = (owner, session_id) {
             capture.release_owner(&owner.window_label, &native_owner_id(&session_id));
             if let Some(window) = app.get_webview_window(&owner.window_label) {
@@ -648,6 +674,9 @@ impl NativeVoiceState {
                     },
                 );
             }
+        }
+        if had_session {
+            native_input_mute::stop(&self.input_muted);
         }
         Ok(())
     }
@@ -679,8 +708,10 @@ impl NativeVoiceState {
                     runtime.revision = runtime.revision.wrapping_add(1);
                 }
             }
+            native_input_mute::stop(&self.input_muted);
             return true;
         }
+        native_input_mute::stop(&self.input_muted);
         let runtime = Arc::clone(&self.runtime);
         tauri::async_runtime::spawn(async move {
             shutdown_pipeline(pipeline.expect("pipeline checked above")).await;
@@ -708,6 +739,9 @@ impl NativeVoiceState {
             )
         };
         drop(pipeline);
+        if session_id.is_some() {
+            native_input_mute::stop(&self.input_muted);
+        }
         if let Ok(mut runtime) = self.runtime.lock() {
             if runtime.revision == revision && runtime.session_id == session_id {
                 runtime.session_id = None;
@@ -772,6 +806,7 @@ fn stt_worker(
     audio_rx: Receiver<Vec<u8>>,
     event_tx: tokio_mpsc::Sender<SttMessage>,
     shutdown: Arc<AtomicBool>,
+    input_muted: Arc<AtomicBool>,
 ) {
     use rubato::{Fft, FixedSync, Resampler};
     use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig};
@@ -812,9 +847,24 @@ fn stt_worker(
     let mut in_speech = false;
     while !shutdown.load(Ordering::Acquire) {
         let bytes = match audio_rx.recv_timeout(Duration::from_millis(50)) {
-            Ok(bytes) => bytes,
-            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Ok(bytes) => Some(bytes),
+            Err(mpsc::RecvTimeoutError::Timeout) => None,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+        if input_muted.load(Ordering::Acquire) {
+            if clear_buffered_audio(
+                &mut input_48k,
+                &mut leftover_16k,
+                &mut speech,
+                &mut silence_frames,
+                &mut in_speech,
+            ) {
+                let _ = event_tx.blocking_send(SttMessage::Speaking(false));
+            }
+            continue;
+        }
+        let Some(bytes) = bytes else {
+            continue;
         };
         input_48k.extend(
             bytes
@@ -863,6 +913,20 @@ fn stt_worker(
         flush_speech(&speech, &recognizer, &event_tx, Some(delivered_tx));
         let _ = delivered_rx.recv_timeout(Duration::from_secs(5));
     }
+}
+
+fn clear_buffered_audio(
+    input_48k: &mut Vec<f32>,
+    leftover_16k: &mut Vec<f32>,
+    speech: &mut Vec<f32>,
+    silence_frames: &mut usize,
+    in_speech: &mut bool,
+) -> bool {
+    input_48k.clear();
+    leftover_16k.clear();
+    speech.clear();
+    *silence_frames = 0;
+    std::mem::take(in_speech)
 }
 
 fn resample(resampler: &mut rubato::Fft<f32>, samples: &[f32]) -> Vec<f32> {
@@ -972,6 +1036,7 @@ mod tests {
         let pipeline = SttPipeline {
             audio_tx: sender,
             shutdown: Arc::new(AtomicBool::new(false)),
+            input_muted: Arc::new(AtomicBool::new(false)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
@@ -985,6 +1050,7 @@ mod tests {
         let pipeline = SttPipeline {
             audio_tx: sender,
             shutdown: Arc::new(AtomicBool::new(false)),
+            input_muted: Arc::new(AtomicBool::new(false)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
@@ -994,6 +1060,50 @@ mod tests {
             .push(vec![0; 4])
             .expect_err("full queue must report overrun")
             .contains("overrun"));
+    }
+
+    #[test]
+    fn input_mute_discards_audio_and_unmute_resumes_queueing() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let input_muted = Arc::new(AtomicBool::new(true));
+        let pipeline = SttPipeline {
+            audio_tx: sender,
+            shutdown: Arc::new(AtomicBool::new(false)),
+            input_muted: Arc::clone(&input_muted),
+            audio_seen: AtomicBool::new(false),
+            thread: None,
+        };
+
+        pipeline
+            .push(vec![0; 4])
+            .expect("muted microphone input is accepted and discarded");
+        assert!(receiver.try_recv().is_err());
+
+        input_muted.store(false, Ordering::Release);
+        pipeline.push(vec![0; 4]).expect("unmuted audio is queued");
+        assert_eq!(receiver.try_recv().expect("unmuted audio"), vec![0; 4]);
+    }
+
+    #[test]
+    fn input_mute_clears_partial_utterance_even_without_a_new_batch() {
+        let mut input_48k = vec![0.1];
+        let mut leftover_16k = vec![0.2];
+        let mut speech = vec![0.3];
+        let mut silence_frames = 4;
+        let mut in_speech = true;
+
+        assert!(clear_buffered_audio(
+            &mut input_48k,
+            &mut leftover_16k,
+            &mut speech,
+            &mut silence_frames,
+            &mut in_speech,
+        ));
+        assert!(input_48k.is_empty());
+        assert!(leftover_16k.is_empty());
+        assert!(speech.is_empty());
+        assert_eq!(silence_frames, 0);
+        assert!(!in_speech);
     }
 
     #[test]
@@ -1008,6 +1118,7 @@ mod tests {
             runtime.pipeline = Some(SttPipeline {
                 audio_tx: sender,
                 shutdown: Arc::new(AtomicBool::new(false)),
+                input_muted: Arc::new(AtomicBool::new(false)),
                 audio_seen: AtomicBool::new(false),
                 thread: None,
             });
@@ -1033,6 +1144,7 @@ mod tests {
             runtime.pipeline = Some(SttPipeline {
                 audio_tx: sender,
                 shutdown: Arc::new(AtomicBool::new(false)),
+                input_muted: Arc::new(AtomicBool::new(false)),
                 audio_seen: AtomicBool::new(false),
                 thread: Some(worker),
             });
