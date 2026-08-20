@@ -388,15 +388,23 @@ impl AprilPocketTts {
         )
     }
 
-    pub(crate) fn split_playback_prompt(
-        &self,
-        prepared: &AprilPreparedPrompt,
-    ) -> Result<Vec<String>, String> {
-        split_at_natural_boundaries(
-            &prepared.text,
+    pub(crate) fn take_streaming_text_chunks(
+        &mut self,
+        text: &str,
+        first_chunk_pending: bool,
+        flush: bool,
+    ) -> Result<(Vec<String>, String, bool), String> {
+        take_streaming_chunks_at_natural_boundaries(
+            text,
             self.bundle.max_token_per_chunk,
-            true,
-            |text| self.prepared_token_count(text),
+            first_chunk_pending,
+            flush,
+            |candidate| {
+                let Some(prepared) = prepare_april_prompt(candidate) else {
+                    return Ok(0);
+                };
+                self.prepared_token_count(&prepared.text)
+            },
         )
     }
 
@@ -903,6 +911,97 @@ where
     Ok(chunks)
 }
 
+fn take_streaming_chunks_at_natural_boundaries<F>(
+    text: &str,
+    max_tokens: usize,
+    mut first_chunk_pending: bool,
+    flush: bool,
+    mut token_count: F,
+) -> Result<(Vec<String>, String, bool), String>
+where
+    F: FnMut(&str) -> Result<usize, String>,
+{
+    let mut pending = text.trim_start().to_string();
+    let mut ready = Vec::new();
+
+    if pending.is_empty() {
+        return Ok((ready, pending, first_chunk_pending));
+    }
+
+    if first_chunk_pending {
+        let first_sentence_end = pending.char_indices().find_map(|(offset, ch)| {
+            let end = offset + ch.len_utf8();
+            let at_boundary = end == pending.len()
+                || pending[end..]
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_whitespace);
+            (at_boundary && natural_boundary(&pending[..end], false) == TextBoundary::Sentence)
+                .then_some(end)
+        });
+
+        if let Some(mut end) = first_sentence_end {
+            while pending[end..]
+                .chars()
+                .next()
+                .is_some_and(char::is_whitespace)
+            {
+                end += pending[end..]
+                    .chars()
+                    .next()
+                    .expect("checked above")
+                    .len_utf8();
+            }
+            let sentence = pending[..end].to_string();
+            if token_count(&sentence)? <= max_tokens {
+                ready.push(sentence);
+            } else {
+                ready.extend(split_at_natural_boundaries(
+                    &sentence,
+                    max_tokens,
+                    false,
+                    &mut token_count,
+                )?);
+            }
+            pending = pending[end..].to_string();
+            first_chunk_pending = false;
+        }
+    }
+
+    if pending.is_empty() {
+        return Ok((ready, pending, first_chunk_pending));
+    }
+
+    if flush {
+        ready.extend(split_at_natural_boundaries(
+            &pending,
+            max_tokens,
+            first_chunk_pending,
+            &mut token_count,
+        )?);
+        pending.clear();
+        first_chunk_pending = false;
+        return Ok((ready, pending, first_chunk_pending));
+    }
+
+    if token_count(&pending)? > max_tokens {
+        let chunks = split_at_natural_boundaries(
+            &pending,
+            max_tokens,
+            first_chunk_pending,
+            &mut token_count,
+        )?;
+        if chunks.len() > 1 {
+            let stable_count = chunks.len() - 1;
+            ready.extend(chunks[..stable_count].iter().cloned());
+            pending = chunks[stable_count].clone();
+            first_chunk_pending = false;
+        }
+    }
+
+    Ok((ready, pending, first_chunk_pending))
+}
+
 fn natural_boundary(candidate: &str, is_end_of_text: bool) -> TextBoundary {
     if is_end_of_text {
         return TextBoundary::Sentence;
@@ -934,11 +1033,16 @@ fn looks_like_abbreviation(candidate: &str) -> bool {
     let last_word = candidate
         .rsplit_once(char::is_whitespace)
         .map_or(candidate, |(_, word)| word);
+    let dotted = last_word.strip_suffix('.');
     ABBREVIATIONS.contains(&last_word)
-        || (last_word.ends_with('.')
-            && last_word[..last_word.len() - 1]
-                .chars()
-                .all(|ch| ch.is_ascii_digit()))
+        || dotted.is_some_and(|stem| {
+            stem.chars().all(|ch| ch.is_ascii_digit())
+                || (stem.chars().count() == 1 && stem.chars().all(|ch| ch.is_alphabetic()))
+                || (stem.contains('.')
+                    && stem.split('.').all(|part| {
+                        part.chars().count() == 1 && part.chars().all(char::is_alphabetic)
+                    }))
+        })
 }
 
 fn load_session(path: PathBuf, num_threads: usize) -> Result<Session, String> {
@@ -1198,6 +1302,86 @@ mod tests {
             })
             .collect();
         assert_eq!(model, ["Alpha one.", "Beta two. Gamma three."]);
+    }
+
+    #[test]
+    fn streaming_text_releases_the_first_sentence_immediately() {
+        let (ready, pending, first_pending) = take_streaming_chunks_at_natural_boundaries(
+            "One two. Three four",
+            50,
+            true,
+            false,
+            whitespace_token_count,
+        )
+        .unwrap();
+
+        assert_eq!(ready, ["One two. "]);
+        assert_eq!(pending, "Three four");
+        assert!(!first_pending);
+    }
+
+    #[test]
+    fn streaming_text_keeps_later_sentences_pending_under_the_token_limit() {
+        let (ready, pending, first_pending) = take_streaming_chunks_at_natural_boundaries(
+            "Three four. Five six.",
+            5,
+            false,
+            false,
+            whitespace_token_count,
+        )
+        .unwrap();
+
+        assert!(ready.is_empty());
+        assert_eq!(pending, "Three four. Five six.");
+        assert!(!first_pending);
+    }
+
+    #[test]
+    fn streaming_text_drains_stable_natural_chunks_after_overflow() {
+        let (ready, pending, first_pending) = take_streaming_chunks_at_natural_boundaries(
+            "Three four. Five six. Seven eight.",
+            4,
+            false,
+            false,
+            whitespace_token_count,
+        )
+        .unwrap();
+
+        assert_eq!(ready, ["Three four. Five six. "]);
+        assert_eq!(pending, "Seven eight.");
+        assert!(!first_pending);
+    }
+
+    #[test]
+    fn streaming_text_flushes_the_growing_tail() {
+        let (ready, pending, first_pending) = take_streaming_chunks_at_natural_boundaries(
+            "Three four. Five six.",
+            5,
+            false,
+            true,
+            whitespace_token_count,
+        )
+        .unwrap();
+
+        assert_eq!(ready, ["Three four. Five six."]);
+        assert!(pending.is_empty());
+        assert!(!first_pending);
+    }
+
+    #[test]
+    fn streaming_text_waits_for_a_real_first_sentence_boundary() {
+        let (ready, pending, first_pending) = take_streaming_chunks_at_natural_boundaries(
+            "Dr. J. Smith is still speaking",
+            50,
+            true,
+            false,
+            whitespace_token_count,
+        )
+        .unwrap();
+
+        assert!(ready.is_empty());
+        assert_eq!(pending, "Dr. J. Smith is still speaking");
+        assert!(first_pending);
     }
 
     #[test]

@@ -111,6 +111,14 @@ pub struct PocketTts {
     inner: Mutex<AprilPocketTts>,
 }
 
+/// Stable synthesis units drained from a growing assistant response.
+#[derive(Debug, PartialEq, Eq)]
+pub struct StreamingTextChunks {
+    pub ready: Vec<String>,
+    pub pending: String,
+    pub first_chunk_pending: bool,
+}
+
 /// Load Berd's pinned April INT8 model.
 pub fn load_text_to_speech(model_dir: &str) -> Result<PocketTts, String> {
     let dir = Path::new(model_dir);
@@ -131,6 +139,32 @@ impl PocketTts {
             .lock()
             .map_err(|_| "Pocket TTS engine lock poisoned".to_string())?
             .split_prompt(&prepared)
+    }
+
+    /// Drain model-safe units from text that may still be growing.
+    ///
+    /// The first complete sentence is made ready immediately. Later text stays
+    /// pending until it overflows the model's exact token limit, at which point
+    /// every stable natural chunk except the growing tail is returned. `flush`
+    /// makes the tail ready at a response or tool boundary.
+    pub fn take_streaming_text_chunks(
+        &self,
+        text: &str,
+        first_chunk_pending: bool,
+        flush: bool,
+    ) -> Result<StreamingTextChunks, String> {
+        self.reject_reentry()?;
+        let mut engine = self
+            .inner
+            .lock()
+            .map_err(|_| "Pocket TTS engine lock poisoned".to_string())?;
+        let (ready, pending, first_chunk_pending) =
+            engine.take_streaming_text_chunks(text, first_chunk_pending, flush)?;
+        Ok(StreamingTextChunks {
+            ready,
+            pending,
+            first_chunk_pending,
+        })
     }
 
     /// Synthesize text with the supplied reference voice.
@@ -183,7 +217,7 @@ impl PocketTts {
             .inner
             .lock()
             .map_err(|_| "Pocket TTS engine lock poisoned".to_string())?;
-        let chunks = engine.split_playback_prompt(&prepared)?;
+        let chunks = engine.split_prompt(&prepared)?;
         for chunk in chunks {
             if !callback_allows_audio(on_audio, Vec::new())? {
                 return Ok(false);

@@ -7,13 +7,15 @@ use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 #[cfg(target_os = "macos")]
 use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
-use berd_voice::{load_text_to_speech, load_voice_style};
+use berd_voice::{load_text_to_speech, load_voice_style, PocketTts, VoiceStyle};
 use futures_util::StreamExt;
 #[cfg(target_os = "macos")]
 use rodio::buffer::SamplesBuffer;
@@ -31,6 +33,8 @@ use tokio::io::AsyncWriteExt;
 const CACHE_VERSION: &str = "native-voice-v2";
 const VERIFIED_MARKER: &str = ".verified";
 const POCKET_EVENT: &str = "pocket-voice:event";
+#[cfg(target_os = "macos")]
+const POCKET_STREAM_EVENT: &str = "pocket-voice:stream-event";
 const DEFAULT_VOICE: &str = "mary";
 const DOWNLOAD_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -89,6 +93,7 @@ const MODEL_ARTIFACTS: &[Artifact] = &[
     Artifact { filename: "LICENSE", size: 18_655, sha256: "fe7b4ce83b8381cc5b216bbb4af73c570688d1b819c73bbaed8ca401f4677cd6", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/LICENSE" },
 ];
 
+#[cfg(target_os = "macos")]
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PocketVoice {
@@ -129,6 +134,41 @@ pub struct PocketVoiceState {
 #[derive(Debug, Default)]
 struct PlaybackRuntime {
     active: Option<Arc<AtomicBool>>,
+    #[cfg(target_os = "macos")]
+    stream: Option<ActivePocketStream>,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct ActivePocketStream {
+    id: String,
+    sender: mpsc::Sender<PocketStreamCommand>,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+enum PocketStreamCommand {
+    Append(String),
+    Finish,
+    Stop,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+enum PocketStreamEventState {
+    Started,
+    Completed,
+    Interrupted,
+    Failed,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PocketStreamEvent {
+    stream_id: String,
+    state: PocketStreamEventState,
+    error: Option<String>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -652,6 +692,147 @@ pub async fn speak_pocket_voice(
 }
 
 #[tauri::command]
+pub fn start_pocket_voice_stream(
+    app: AppHandle,
+    state: State<'_, PocketVoiceState>,
+    native_voice: State<'_, NativeVoiceState>,
+    stream_id: String,
+) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, state, native_voice, stream_id);
+        return Err("Pocket voice playback is currently supported on macOS only".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if stream_id.trim().is_empty() {
+            return Err("Pocket voice stream id cannot be empty".to_string());
+        }
+        let base = cache_base(&app)?;
+        if !pocket_installation_valid(&base) {
+            return Err("Pocket TTS installation is incomplete or corrupt".to_string());
+        }
+        let voice_id = selected_voice(&base);
+        let voice = VOICES
+            .iter()
+            .find(|voice| voice.id == voice_id)
+            .copied()
+            .ok_or_else(|| format!("Unknown selected Pocket voice: {voice_id}"))?;
+        let active = begin_playback(&state, "Pocket voice playback is already active")?;
+        let speed = playback_speed(&base);
+        let output_device = selected_output_device();
+        let effective_output_device = effective_output_device_name(output_device.as_deref());
+        let capture_suppression = output_device_uses_speakers(effective_output_device.as_deref())
+            .then(|| {
+                log::info!("[voice-echo-guard] speaker output detected");
+                native_voice.suppress_capture()
+            });
+        let (sender, receiver) = mpsc::channel();
+        {
+            let mut playback = state
+                .playback
+                .lock()
+                .map_err(|_| "Pocket TTS playback state lock was poisoned".to_string())?;
+            playback.stream = Some(ActivePocketStream {
+                id: stream_id.clone(),
+                sender,
+            });
+        }
+
+        let playback = state.playback.clone();
+        let playback_active = active.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let _capture_suppression = capture_suppression;
+            let result = run_pocket_voice_stream(
+                &app,
+                &stream_id,
+                &base,
+                voice,
+                output_device.as_deref(),
+                active.clone(),
+                speed,
+                receiver,
+            );
+            let (event_state, error) = match result {
+                Ok(PocketStreamEventState::Completed) => (PocketStreamEventState::Completed, None),
+                Ok(PocketStreamEventState::Interrupted) => {
+                    (PocketStreamEventState::Interrupted, None)
+                }
+                Ok(other) => (other, None),
+                Err(error) if !active.load(Ordering::SeqCst) => {
+                    log::debug!("Pocket voice stream stopped after error: {error}");
+                    (PocketStreamEventState::Interrupted, None)
+                }
+                Err(error) => (PocketStreamEventState::Failed, Some(error)),
+            };
+            emit_pocket_stream_event(&app, &stream_id, event_state, error);
+            finish_playback(&playback, &playback_active);
+        });
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub fn append_pocket_voice_stream(
+    state: State<'_, PocketVoiceState>,
+    stream_id: String,
+    text: String,
+) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (state, stream_id, text);
+        return Err("Pocket voice playback is currently supported on macOS only".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        if text.is_empty() {
+            return Ok(());
+        }
+        send_pocket_stream_command(&state, &stream_id, PocketStreamCommand::Append(text))
+    }
+}
+
+#[tauri::command]
+pub fn finish_pocket_voice_stream(
+    state: State<'_, PocketVoiceState>,
+    stream_id: String,
+) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (state, stream_id);
+        return Err("Pocket voice playback is currently supported on macOS only".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        send_pocket_stream_command(&state, &stream_id, PocketStreamCommand::Finish)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn send_pocket_stream_command(
+    state: &PocketVoiceState,
+    stream_id: &str,
+    command: PocketStreamCommand,
+) -> Result<(), String> {
+    let playback = state
+        .playback
+        .lock()
+        .map_err(|_| "Pocket TTS playback state lock was poisoned".to_string())?;
+    let stream = playback
+        .stream
+        .as_ref()
+        .filter(|stream| stream.id == stream_id)
+        .ok_or_else(|| format!("Pocket voice stream is not active: {stream_id}"))?;
+    stream
+        .sender
+        .send(command)
+        .map_err(|_| format!("Pocket voice stream worker stopped: {stream_id}"))
+}
+
+#[tauri::command]
 pub fn stop_pocket_voice(state: State<'_, PocketVoiceState>) -> Result<bool, String> {
     stop_pocket_playback(&state)
 }
@@ -665,6 +846,10 @@ fn stop_pocket_playback(state: &PocketVoiceState) -> Result<bool, String> {
         return Ok(false);
     };
     active.store(false, Ordering::SeqCst);
+    #[cfg(target_os = "macos")]
+    if let Some(stream) = playback.stream.as_ref() {
+        let _ = stream.sender.send(PocketStreamCommand::Stop);
+    }
     Ok(true)
 }
 
@@ -926,6 +1111,10 @@ fn finish_playback(playback: &std::sync::Mutex<PlaybackRuntime>, completed: &Arc
             .is_some_and(|active| Arc::ptr_eq(active, completed))
         {
             playback.active = None;
+            #[cfg(target_os = "macos")]
+            {
+                playback.stream = None;
+            }
         }
     }
 }
@@ -1597,6 +1786,227 @@ async fn download_artifact(
         ));
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn emit_pocket_stream_event(
+    app: &AppHandle,
+    stream_id: &str,
+    state: PocketStreamEventState,
+    error: Option<String>,
+) {
+    let _ = app.emit(
+        POCKET_STREAM_EVENT,
+        PocketStreamEvent {
+            stream_id: stream_id.to_string(),
+            state,
+            error,
+        },
+    );
+}
+
+#[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
+fn run_pocket_voice_stream(
+    app: &AppHandle,
+    stream_id: &str,
+    base: &Path,
+    voice: PocketVoice,
+    output_device: Option<&str>,
+    active: Arc<AtomicBool>,
+    speed: f32,
+    receiver: mpsc::Receiver<PocketStreamCommand>,
+) -> Result<PocketStreamEventState, String> {
+    use std::num::NonZero;
+
+    use rodio::cpal::traits::HostTrait;
+
+    let version = base.join(CACHE_VERSION);
+    let engine = load_text_to_speech(
+        version
+            .to_str()
+            .ok_or_else(|| "Pocket model path is not valid UTF-8".to_string())?,
+    )?;
+    let style = load_voice_style(&version.join("voices").join(voice.filename))?;
+    let sink = if let Some(name) = output_device {
+        let host = rodio::cpal::default_host();
+        let mut matching = None;
+        for device in host
+            .output_devices()
+            .map_err(|error| format!("enumerate audio outputs: {error}"))?
+        {
+            if device
+                .description()
+                .ok()
+                .is_some_and(|description| description.name() == name)
+            {
+                matching = Some(device);
+                break;
+            }
+        }
+        let device = matching.ok_or_else(|| format!("audio output not found: {name}"))?;
+        rodio::DeviceSinkBuilder::from_device(device)
+            .map_err(|error| format!("configure audio output {name}: {error}"))?
+            .open_stream()
+            .map_err(|error| format!("open audio output {name}: {error}"))?
+    } else {
+        rodio::DeviceSinkBuilder::open_default_sink()
+            .map_err(|error| format!("open default audio output: {error}"))?
+    };
+    let channels =
+        NonZero::new(1_u16).ok_or_else(|| "Pocket channel count invariant failed".to_string())?;
+    let rate = NonZero::new(SAMPLE_RATE)
+        .ok_or_else(|| "Pocket sample rate invariant failed".to_string())?;
+    let player = Player::connect_new(sink.mixer());
+    let mut speed_processor = StreamingSpeedProcessor::new(speed, SAMPLE_RATE)?;
+    let mut pending = String::new();
+    let mut first_chunk_pending = true;
+    let mut playback_started = false;
+
+    loop {
+        if !active.load(Ordering::SeqCst) {
+            player.stop();
+            return Ok(PocketStreamEventState::Interrupted);
+        }
+        match receiver.recv() {
+            Ok(PocketStreamCommand::Append(text)) => {
+                pending.push_str(&text);
+                if !synthesize_pocket_stream_ready(
+                    app,
+                    stream_id,
+                    &engine,
+                    &style,
+                    &active,
+                    &player,
+                    channels,
+                    rate,
+                    &mut speed_processor,
+                    &mut pending,
+                    &mut first_chunk_pending,
+                    &mut playback_started,
+                    false,
+                )? {
+                    return Ok(PocketStreamEventState::Interrupted);
+                }
+            }
+            Ok(PocketStreamCommand::Finish) => {
+                if !synthesize_pocket_stream_ready(
+                    app,
+                    stream_id,
+                    &engine,
+                    &style,
+                    &active,
+                    &player,
+                    channels,
+                    rate,
+                    &mut speed_processor,
+                    &mut pending,
+                    &mut first_chunk_pending,
+                    &mut playback_started,
+                    true,
+                )? {
+                    return Ok(PocketStreamEventState::Interrupted);
+                }
+                let tail = speed_processor.finish()?;
+                if !tail.is_empty() {
+                    player.append(SamplesBuffer::new(channels, rate, tail));
+                    if !playback_started {
+                        emit_pocket_stream_event(
+                            app,
+                            stream_id,
+                            PocketStreamEventState::Started,
+                            None,
+                        );
+                    }
+                }
+                while !player.empty() {
+                    if !active.load(Ordering::SeqCst) {
+                        player.stop();
+                        return Ok(PocketStreamEventState::Interrupted);
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                return Ok(PocketStreamEventState::Completed);
+            }
+            Ok(PocketStreamCommand::Stop) | Err(_) => {
+                active.store(false, Ordering::SeqCst);
+                player.stop();
+                return Ok(PocketStreamEventState::Interrupted);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
+fn synthesize_pocket_stream_ready(
+    app: &AppHandle,
+    stream_id: &str,
+    engine: &PocketTts,
+    style: &VoiceStyle,
+    active: &Arc<AtomicBool>,
+    player: &Player,
+    channels: std::num::NonZero<u16>,
+    rate: std::num::NonZero<u32>,
+    speed_processor: &mut StreamingSpeedProcessor,
+    pending: &mut String,
+    first_chunk_pending: &mut bool,
+    playback_started: &mut bool,
+    flush: bool,
+) -> Result<bool, String> {
+    let split = engine.take_streaming_text_chunks(pending, *first_chunk_pending, flush)?;
+    *pending = split.pending;
+    *first_chunk_pending = split.first_chunk_pending;
+    for text in split.ready {
+        if !active.load(Ordering::SeqCst) {
+            player.stop();
+            return Ok(false);
+        }
+        let mut callback_error = None;
+        let completed = engine.synth_chunk_streaming(
+            text.trim(),
+            style,
+            STREAMING_EMIT_FRAMES,
+            &mut |samples| {
+                if !active.load(Ordering::SeqCst) {
+                    return false;
+                }
+                if samples.is_empty() {
+                    return true;
+                }
+                let delta = match speed_processor.process(&samples) {
+                    Ok(processed) => processed,
+                    Err(error) => {
+                        callback_error = Some(error);
+                        return false;
+                    }
+                };
+                if delta.is_empty() {
+                    return true;
+                }
+                player.append(SamplesBuffer::new(channels, rate, delta));
+                if !*playback_started {
+                    *playback_started = true;
+                    emit_pocket_stream_event(app, stream_id, PocketStreamEventState::Started, None);
+                    println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
+                    if let Err(error) = std::io::stdout().flush() {
+                        callback_error = Some(format!("signal Pocket playback start: {error}"));
+                        return false;
+                    }
+                }
+                true
+            },
+        )?;
+        if let Some(error) = callback_error {
+            player.stop();
+            return Err(error);
+        }
+        if !completed {
+            player.stop();
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 #[cfg(target_os = "macos")]
