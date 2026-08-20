@@ -1,6 +1,7 @@
 import type { CreatePersonaRequest, Persona } from "@/shared/types/agents";
 import { getRealPersonaDescription } from "@/features/agents/lib/personaPresentation";
 import { truncateCardGraphemes } from "@/features/agents/ui/share-card/agentShareCardText";
+import { graphemeCount } from "@/shared/lib/graphemeCount";
 import {
   isRemoteAvatarUrl,
   isSafePngAvatarDataUrl,
@@ -11,6 +12,21 @@ import {
   type SnapshotV1,
   validateSnapshotV1,
 } from "./schema";
+
+const MAX_CARD_COPY_RAW_LENGTH = 4_096;
+
+function validOptionalCardCopy(
+  value: unknown,
+  maxGraphemes: number,
+): string | undefined {
+  if (typeof value !== "string" || value.length > MAX_CARD_COPY_RAW_LENGTH) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed && graphemeCount(trimmed) <= maxGraphemes
+    ? trimmed
+    : undefined;
+}
 
 export interface SnapshotMappingSupport {
   /** Return true only when this exact provider/model can be selected locally. */
@@ -47,14 +63,10 @@ export function snapshotToCreatePersonaRequest(
   if (typeof about === "string" && about.trim()) {
     request.description = truncateCardGraphemes(about.trim(), 110);
   }
-  const goodFor = snapshot.profile?.goodFor;
-  const vibes = snapshot.profile?.vibes;
-  if (typeof goodFor === "string" && goodFor.trim()) {
-    request.goodFor = goodFor.trim();
-  }
-  if (typeof vibes === "string" && vibes.trim()) {
-    request.vibes = vibes.trim();
-  }
+  const goodFor = validOptionalCardCopy(snapshot.profile?.goodFor, 44);
+  const vibes = validOptionalCardCopy(snapshot.profile?.vibes, 32);
+  if (goodFor) request.goodFor = goodFor;
+  if (vibes) request.vibes = vibes;
   const avatarDataUrl = snapshot.profile?.avatarDataUrl;
   if (
     typeof avatarDataUrl === "string" &&

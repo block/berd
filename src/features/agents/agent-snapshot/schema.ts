@@ -1,5 +1,3 @@
-import { graphemeCount } from "@/shared/lib/graphemeCount";
-
 export const SNAPSHOT_FORMAT = "buzz-agent-snapshot" as const;
 export const SNAPSHOT_VERSION = 1 as const;
 export const SNAPSHOT_PNG_KEYWORD = "buzz_agent_snapshot" as const;
@@ -158,20 +156,6 @@ export function validateSnapshotV1(value: unknown): SnapshotV1 {
   if (profile) {
     optionalString(profile, "displayName", MAX_SNAPSHOT_NAME_LENGTH);
     optionalString(profile, "about", MAX_SNAPSHOT_CARD_COPY_RAW_LENGTH);
-    optionalString(profile, "goodFor", MAX_SNAPSHOT_CARD_COPY_RAW_LENGTH);
-    optionalString(profile, "vibes", MAX_SNAPSHOT_CARD_COPY_RAW_LENGTH);
-    if (
-      typeof profile.goodFor === "string" &&
-      graphemeCount(profile.goodFor.trim()) > 44
-    ) {
-      throw new AgentSnapshotError("goodFor is too long", "invalid-snapshot");
-    }
-    if (
-      typeof profile.vibes === "string" &&
-      graphemeCount(profile.vibes.trim()) > 32
-    ) {
-      throw new AgentSnapshotError("vibes is too long", "invalid-snapshot");
-    }
     optionalString(
       profile,
       "avatarDataUrl",

@@ -186,6 +186,25 @@ describe("snapshot mappings", () => {
     });
   });
 
+  it.each([
+    [{ legacy: true }, ["calm"]],
+    ["x".repeat(4_097), "y".repeat(4_097)],
+    ["😀".repeat(45), "😀".repeat(33)],
+  ])("ignores incompatible v1 card metadata without rejecting the snapshot", (goodFor, vibes) => {
+    const value = snapshot({
+      profile: {
+        displayName: "Display name",
+        goodFor: goodFor as string,
+        vibes: vibes as string,
+      },
+    });
+
+    expect(snapshotToCreatePersonaRequest(value)).not.toMatchObject({
+      goodFor: expect.anything(),
+      vibes: expect.anything(),
+    });
+  });
+
   it("round-trips short share-card metadata", () => {
     const exported = personaToSnapshot(
       persona({ goodFor: "building useful tools", vibes: "sharp, practical" }),
