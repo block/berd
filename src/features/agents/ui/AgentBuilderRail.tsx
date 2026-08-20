@@ -42,7 +42,6 @@ import {
   fileStem,
   isPlaceholderAgentName,
   PLACEHOLDER_AGENT_BODY,
-  PLACEHOLDER_AGENT_DESCRIPTION,
   promoteDraft,
 } from "@/features/agents/lib/agentBuilderSession";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
@@ -51,6 +50,7 @@ import { AvatarCollectionOverlay } from "@/features/agents/ui/AvatarCollectionOv
 import { AvatarLibraryPicker } from "@/features/agents/ui/AvatarLibraryPicker";
 import { ProviderModelFields } from "@/features/agents/ui/PersonaFields/ProviderModelFields";
 import { FORM_FIELD_CLASS } from "@/shared/ui/form-field-tokens";
+import { hasRealAgentDescription } from "@/shared/api/agents";
 
 const FIELD_CLASS = cn(FORM_FIELD_CLASS, "bg-muted/40");
 const FIELD_LABEL_CLASS = "mb-2 block text-xs text-muted-foreground";
@@ -312,9 +312,7 @@ export function AgentBuilderRail({
   const nameFieldValue =
     data && !isPlaceholderAgentName(data.name) ? data.name : "";
   const descriptionFieldValue =
-    data && data.description !== PLACEHOLDER_AGENT_DESCRIPTION
-      ? data.description
-      : "";
+    data && hasRealAgentDescription(data.description) ? data.description : "";
   const contentFieldValue = data?.content ?? "";
   const isPlaceholderContent = contentFieldValue === PLACEHOLDER_AGENT_BODY;
   const instructionsFieldValue = isPlaceholderContent ? "" : contentFieldValue;
@@ -340,14 +338,11 @@ export function AgentBuilderRail({
       return;
     }
 
-    onSaveDraftHandlerChange?.(() => {
-      if (!descriptionRequired) return false;
-      return saveNow();
-    });
+    onSaveDraftHandlerChange?.(saveNow);
     return () => {
       onSaveDraftHandlerChange?.(null);
     };
-  }, [data, descriptionRequired, onSaveDraftHandlerChange, saveNow]);
+  }, [data, onSaveDraftHandlerChange, saveNow]);
 
   const blockingError =
     error !== null && !(error === "load" && saveStatus === "error");

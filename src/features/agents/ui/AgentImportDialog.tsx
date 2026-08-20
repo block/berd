@@ -210,10 +210,18 @@ export function AgentImportDialog({
 
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const nativeDropGenerationRef = useRef(0);
-  const nativeDropActiveRef = useRef(open);
-  nativeDropActiveRef.current = open;
+  const nativeDropActiveRef = useRef(false);
+  useEffect(() => {
+    nativeDropActiveRef.current = open;
+    if (!open) nativeDropGenerationRef.current += 1;
+    return () => {
+      nativeDropActiveRef.current = false;
+      nativeDropGenerationRef.current += 1;
+    };
+  }, [open]);
   const validateReplacementFile = useCallback(
     (file: Pick<File, "name" | "type" | "size">) => {
+      nativeDropGenerationRef.current += 1;
       preparationRef.current?.abort();
       setPrepared(null);
       return validateImportFile(file);
@@ -223,7 +231,6 @@ export function AgentImportDialog({
   const {
     fileInputRef,
     isDragOver,
-    dropHandlers,
     importFile,
     handleFileChange,
     openFilePicker,
@@ -340,7 +347,6 @@ export function AgentImportDialog({
           ) : (
             <div
               ref={dropZoneRef}
-              {...dropHandlers}
               role="status"
               aria-busy={preparing}
               className={cn(

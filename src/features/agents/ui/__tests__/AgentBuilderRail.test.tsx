@@ -223,6 +223,28 @@ describe("AgentBuilderRail", () => {
     expect(update).toHaveBeenCalledWith({ content: "Be snarky." });
   });
 
+  it("allows an incomplete draft to be saved when leaving", async () => {
+    const saveNow = vi.fn().mockResolvedValue(true);
+    mockHook({ saveNow });
+    let saveDraft: (() => boolean | Promise<boolean>) | null = null;
+    renderWithProviders(
+      <AgentBuilderRail
+        sessionId="s1"
+        targetAgentPath={baseSource.path}
+        targetAgentSlug="draft-1"
+        onSaveDraftHandlerChange={(handler) => {
+          saveDraft = handler;
+        }}
+      />,
+    );
+
+    expect(screen.getByLabelText(/description/i)).toHaveValue("");
+    await waitFor(() => expect(saveDraft).not.toBeNull());
+    const registeredSave = saveDraft as unknown as () => Promise<boolean>;
+    await expect(registeredSave()).resolves.toBe(true);
+    expect(saveNow).toHaveBeenCalledOnce();
+  });
+
   it("calls update() when the description field changes", () => {
     const { update } = mockHook();
     renderWithProviders(

@@ -140,6 +140,36 @@ describe("AgentImportDialog", () => {
     expect(prepareImport).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores a native read that resolves after unmount", async () => {
+    window.__TAURI_INTERNALS__ = {} as typeof window.__TAURI_INTERNALS__;
+    const read = deferred<{ fileBytes: number[]; fileName: string }>();
+    nativeDropMocks.readImportAgentFile.mockReturnValue(read.promise);
+    const prepareImport = vi.fn(() => ({
+      displayName: "Reviewer",
+      systemPrompt: "Review carefully.",
+      identity: "agent.agent.png",
+    }));
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn().mockReturnValue(null),
+    });
+    const { unmount } = render(
+      <AgentImportDialog {...importDialogProps({ prepareImport })} />,
+    );
+    await waitFor(() => expect(nativeDropMocks.listener).not.toBeNull());
+    const position = { x: 0, y: 0 };
+    act(() =>
+      nativeDropMocks.listener?.({
+        payload: { type: "drop", paths: ["agent.png"], position },
+      }),
+    );
+    unmount();
+    read.resolve({ fileBytes: [1], fileName: "agent.png" });
+    await act(async () => {});
+
+    expect(prepareImport).not.toHaveBeenCalled();
+  });
+
   it("clears a prepared import when a replacement file is rejected", async () => {
     const firstBytes = Uint8Array.from([1, 2, 3]);
     const firstFile = new File([firstBytes], "agent.agent.png", {
