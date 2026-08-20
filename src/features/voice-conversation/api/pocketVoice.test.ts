@@ -9,14 +9,19 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 
 import {
+  appendPocketVoiceStream,
+  finishPocketVoiceStream,
+  flushPocketVoiceStream,
   getPocketVoiceStatus,
   installVoiceModel,
+  listenToPocketVoiceStream,
   listenToPocketVoiceStatus,
   previewPocketVoice,
   removeVoiceModel,
   selectPocketVoice,
   setPocketPlaybackSpeed,
   speakPocketVoice,
+  startPocketVoiceStream,
   stopPocketVoice,
 } from "./pocketVoice";
 
@@ -78,5 +83,51 @@ describe("Pocket voice API", () => {
 
     await listenToPocketVoiceStatus(callback);
     expect(callback).toHaveBeenCalledWith(status);
+  });
+
+  it("uses the streaming utterance commands", async () => {
+    mocks.invoke.mockResolvedValue(undefined);
+
+    await startPocketVoiceStream("stream-1");
+    await appendPocketVoiceStream("stream-1", "Hello");
+    await flushPocketVoiceStream("stream-1");
+    await finishPocketVoiceStream("stream-1");
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(
+      1,
+      "start_pocket_voice_stream",
+      { streamId: "stream-1" },
+    );
+    expect(mocks.invoke).toHaveBeenNthCalledWith(
+      2,
+      "append_pocket_voice_stream",
+      { streamId: "stream-1", text: "Hello" },
+    );
+    expect(mocks.invoke).toHaveBeenNthCalledWith(
+      3,
+      "flush_pocket_voice_stream",
+      { streamId: "stream-1" },
+    );
+    expect(mocks.invoke).toHaveBeenNthCalledWith(
+      4,
+      "finish_pocket_voice_stream",
+      { streamId: "stream-1" },
+    );
+  });
+
+  it("unwraps playback stream events", async () => {
+    const callback = vi.fn();
+    const streamEvent = {
+      streamId: "stream-1",
+      state: "started",
+      error: null,
+    };
+    mocks.listen.mockImplementation(async (_event, handler) => {
+      handler({ payload: streamEvent });
+      return vi.fn();
+    });
+
+    await listenToPocketVoiceStream(callback);
+    expect(callback).toHaveBeenCalledWith(streamEvent);
   });
 });

@@ -148,6 +148,7 @@ struct ActivePocketStream {
 #[derive(Debug)]
 enum PocketStreamCommand {
     Append(String),
+    Flush,
     Finish,
     Stop,
 }
@@ -808,6 +809,23 @@ pub fn finish_pocket_voice_stream(
     #[cfg(target_os = "macos")]
     {
         send_pocket_stream_command(&state, &stream_id, PocketStreamCommand::Finish)
+    }
+}
+
+#[tauri::command]
+pub fn flush_pocket_voice_stream(
+    state: State<'_, PocketVoiceState>,
+    stream_id: String,
+) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (state, stream_id);
+        return Err("Pocket voice playback is currently supported on macOS only".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        send_pocket_stream_command(&state, &stream_id, PocketStreamCommand::Flush)
     }
 }
 
@@ -1885,6 +1903,25 @@ fn run_pocket_voice_stream(
                     &mut first_chunk_pending,
                     &mut playback_started,
                     false,
+                )? {
+                    return Ok(PocketStreamEventState::Interrupted);
+                }
+            }
+            Ok(PocketStreamCommand::Flush) => {
+                if !synthesize_pocket_stream_ready(
+                    app,
+                    stream_id,
+                    &engine,
+                    &style,
+                    &active,
+                    &player,
+                    channels,
+                    rate,
+                    &mut speed_processor,
+                    &mut pending,
+                    &mut first_chunk_pending,
+                    &mut playback_started,
+                    true,
                 )? {
                     return Ok(PocketStreamEventState::Interrupted);
                 }

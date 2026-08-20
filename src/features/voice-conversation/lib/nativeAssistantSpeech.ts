@@ -1,87 +1,54 @@
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import { speakPocketVoice, stopPocketVoice } from "../api/pocketVoice";
+import {
+  appendPocketVoiceStream,
+  finishPocketVoiceStream,
+  flushPocketVoiceStream,
+  listenToPocketVoiceStream,
+  startPocketVoiceStream,
+  stopPocketVoice,
+  type PocketVoiceStreamEvent,
+} from "../api/pocketVoice";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
 type SpeechFailureHandler = (text: string, error: unknown) => void;
-type SpeakableSegment = {
-  key: string;
-  messageId: string;
-  contentIndex: number;
+type SpeechTarget = { messageId: string; textOrdinal: number };
+type ActiveUtterance = {
+  id: string;
+  sessionId: string;
+  target: SpeechTarget;
   text: string;
-  sourceText: string;
-  completesSourceText: boolean;
+  finishing: boolean;
+  onFailure: SpeechFailureHandler;
 };
-
-const STREAMING_SPEECH_BOUNDARY = /(?:[.!?](?:["')\]}]+)?(?=\s|$)|\n+)/g;
-const NON_TERMINAL_ABBREVIATIONS = new Set([
-  "dr.",
-  "etc.",
-  "fig.",
-  "jr.",
-  "mr.",
-  "mrs.",
-  "ms.",
-  "no.",
-  "prof.",
-  "sr.",
-  "st.",
-  "vs.",
-]);
-
-function isSpeakableBoundary(text: string, match: RegExpMatchArray): boolean {
-  if (match[0].startsWith("\n") || !match[0].startsWith(".")) return true;
-  const periodIndex = match.index ?? 0;
-  const prefix = text.slice(0, periodIndex + 1);
-  const token = prefix.match(/[\p{L}.]+$/u)?.[0].toLocaleLowerCase();
-  if (!token) return true;
-  return (
-    !NON_TERMINAL_ABBREVIATIONS.has(token) && !/^(?:\p{L}\.)+$/u.test(token)
-  );
-}
-
-function splitSpeakableText(
-  text: string,
-  flushRemainder: boolean,
-): { segments: string[]; consumedLength: number } {
-  const segments: string[] = [];
-  let start = 0;
-  for (const match of text.matchAll(STREAMING_SPEECH_BOUNDARY)) {
-    if (!isSpeakableBoundary(text, match)) continue;
-    const end = (match.index ?? 0) + match[0].length;
-    const segment = text.slice(start, end).trim();
-    if (segment) segments.push(segment);
-    start = end;
-  }
-  if (flushRemainder) {
-    const remainder = text.slice(start).trim();
-    if (remainder) segments.push(remainder);
-    return { segments, consumedLength: text.length };
-  }
-  return { segments, consumedLength: start };
-}
+type SpeechStatus =
+  | "speaking"
+  | "spoken"
+  | "interrupted"
+  | "notSpoken"
+  | "failed";
 
 let stopSubscription: (() => void) | null = null;
 let stopVoiceSubscription: (() => void) | null = null;
-let playbackQueue = Promise.resolve();
+let stopStreamSubscription: (() => void) | null = null;
+let streamListenerReady: Promise<void> = Promise.resolve();
+let commandQueue = Promise.resolve();
 let generation = 0;
-let speechEpoch = 0;
+let commandEpoch = 0;
 let activeSpeechSessionId: string | null = null;
-const scheduledSegments = new Map<string, SpeakableSegment>();
+let activeUtterance: ActiveUtterance | null = null;
 const pendingNotices = new Map<string, string[]>();
 const recordedNoticeKeys = new Set<string>();
 
 function recordPlaybackNotice(
   sessionId: string,
-  segment: SpeakableSegment,
+  key: string,
+  text: string,
   status: "interrupted" | "notSpoken" | "failed",
 ) {
-  const key = `${sessionId}\0${segment.key}\0${status}`;
-  if (recordedNoticeKeys.has(key)) return;
-  recordedNoticeKeys.add(key);
-  const text =
-    segment.text.length > 500
-      ? `${segment.text.slice(0, 497).trimEnd()}…`
-      : segment.text;
+  const noticeKey = `${sessionId}\0${key}\0${status}`;
+  if (recordedNoticeKeys.has(noticeKey)) return;
+  recordedNoticeKeys.add(noticeKey);
+  const excerpt = text.length > 500 ? `${text.slice(0, 497).trimEnd()}…` : text;
   const outcome =
     status === "interrupted"
       ? "TTS delivery was interrupted because the user started speaking; the assistant reply was not fully spoken."
@@ -89,7 +56,7 @@ function recordPlaybackNotice(
         ? "TTS delivery was blocked because the user was speaking; the assistant reply was not spoken."
         : "Native TTS could not deliver the assistant reply.";
   const notice =
-    `[voice: tts-delivery-failed]\n${outcome}\nOriginal text: ${text}\n` +
+    `[voice: tts-delivery-failed]\n${outcome}\nOriginal text: ${excerpt}\n` +
     "This is TTS delivery state, not live user voice input. Do not respond to this control message or repeat the reply unless re-delivery is still appropriate.";
   pendingNotices.set(sessionId, [
     ...(pendingNotices.get(sessionId) ?? []),
@@ -103,44 +70,139 @@ export function takeVoicePlaybackNotices(sessionId: string): string | null {
   return notices?.join("\n") ?? null;
 }
 
-function setSegmentStatus(
+function targetKey(target: SpeechTarget): string {
+  return `${target.messageId}\0text:${target.textOrdinal}`;
+}
+
+function setTargetStatus(
   sessionId: string,
-  segment: SpeakableSegment,
-  status: "speaking" | "spoken" | "interrupted" | "notSpoken" | "failed",
+  target: SpeechTarget,
+  status: SpeechStatus,
 ) {
   useChatStore
     .getState()
-    .updateMessage(sessionId, segment.messageId, (message) => ({
-      ...message,
-      content: message.content.map((content, index) =>
-        index === segment.contentIndex &&
-        content.type === "text" &&
-        content.text.trim() === segment.sourceText
-          ? { ...content, speech: { status } }
-          : content,
-      ),
-    }));
+    .updateMessage(sessionId, target.messageId, (message) => {
+      let textOrdinal = 0;
+      return {
+        ...message,
+        content: message.content.map((content) => {
+          if (content.type !== "text") return content;
+          const matches = textOrdinal === target.textOrdinal;
+          textOrdinal += 1;
+          return matches ? { ...content, speech: { status } } : content;
+        }),
+      };
+    });
+}
+
+function failActiveUtterance(
+  utteranceId: string,
+  error: unknown,
+  onFailure: SpeechFailureHandler,
+) {
+  const utterance = activeUtterance;
+  if (!utterance || utterance.id !== utteranceId) return;
+  setTargetStatus(utterance.sessionId, utterance.target, "failed");
+  recordPlaybackNotice(
+    utterance.sessionId,
+    utterance.id,
+    utterance.text,
+    "failed",
+  );
+  useVoiceConversationStore.getState().setUiState("listening");
+  activeUtterance = null;
+  onFailure(utterance.text, error);
+}
+
+function queueStreamCommand(
+  utterance: ActiveUtterance,
+  operation: () => Promise<void>,
+  onFailure: SpeechFailureHandler,
+) {
+  const queuedEpoch = commandEpoch;
+  commandQueue = commandQueue.then(async () => {
+    if (queuedEpoch !== commandEpoch) return;
+    try {
+      await operation();
+    } catch (error) {
+      failActiveUtterance(utterance.id, error, onFailure);
+    }
+  });
+}
+
+function handleStreamEvent(event: PocketVoiceStreamEvent) {
+  const utterance = activeUtterance;
+  if (!utterance || utterance.id !== event.streamId) return;
+  const voice = useVoiceConversationStore.getState();
+
+  switch (event.state) {
+    case "started":
+      setTargetStatus(utterance.sessionId, utterance.target, "speaking");
+      voice.setUiState("agent-speaking");
+      break;
+    case "completed":
+      setTargetStatus(utterance.sessionId, utterance.target, "spoken");
+      voice.setUiState("listening");
+      activeUtterance = null;
+      break;
+    case "interrupted":
+      setTargetStatus(utterance.sessionId, utterance.target, "interrupted");
+      recordPlaybackNotice(
+        utterance.sessionId,
+        utterance.id,
+        utterance.text,
+        "interrupted",
+      );
+      voice.setUiState("listening");
+      activeUtterance = null;
+      break;
+    case "failed":
+      setTargetStatus(utterance.sessionId, utterance.target, "failed");
+      recordPlaybackNotice(
+        utterance.sessionId,
+        utterance.id,
+        utterance.text,
+        "failed",
+      );
+      voice.setUiState("listening");
+      activeUtterance = null;
+      utterance.onFailure(
+        utterance.text,
+        event.error ?? new Error("Pocket voice stream failed"),
+      );
+      break;
+  }
+}
+
+function interruptActiveUtterance() {
+  const utterance = activeUtterance;
+  commandEpoch += 1;
+  activeUtterance = null;
+  if (utterance) {
+    setTargetStatus(utterance.sessionId, utterance.target, "interrupted");
+    recordPlaybackNotice(
+      utterance.sessionId,
+      utterance.id,
+      utterance.text,
+      "interrupted",
+    );
+  }
+  void stopPocketVoice().catch(() => undefined);
+  commandQueue = commandQueue.then(async () => {
+    await stopPocketVoice().catch(() => undefined);
+  });
 }
 
 export function stopNativeAssistantSpeech(): void {
-  if (activeSpeechSessionId) {
-    for (const segment of scheduledSegments.values()) {
-      setSegmentStatus(activeSpeechSessionId, segment, "interrupted");
-      recordPlaybackNotice(activeSpeechSessionId, segment, "interrupted");
-    }
-  }
   generation += 1;
-  speechEpoch += 1;
+  interruptActiveUtterance();
   stopSubscription?.();
   stopSubscription = null;
   stopVoiceSubscription?.();
   stopVoiceSubscription = null;
-  scheduledSegments.clear();
+  stopStreamSubscription?.();
+  stopStreamSubscription = null;
   activeSpeechSessionId = null;
-  void stopPocketVoice().catch(() => {
-    // Stopping an inactive or unavailable native player is best-effort during
-    // lifecycle teardown.
-  });
 }
 
 export function startNativeAssistantSpeech(
@@ -151,6 +213,16 @@ export function startNativeAssistantSpeech(
   stopNativeAssistantSpeech();
   activeSpeechSessionId = sessionId;
   const activeGeneration = generation;
+  streamListenerReady = listenToPocketVoiceStream(handleStreamEvent).then(
+    (unlisten) => {
+      if (activeGeneration !== generation) {
+        unlisten();
+        return;
+      }
+      stopStreamSubscription = unlisten;
+    },
+  );
+
   const initialMessages =
     useChatStore.getState().messagesBySession[sessionId] ?? [];
   const toolCountByMessage = new Map<string, number>();
@@ -166,16 +238,37 @@ export function startNativeAssistantSpeech(
       completedMessages.add(message.id);
     }
     let textOrdinal = 0;
-    message.content.forEach((content) => {
-      if (content.type === "text") {
-        consumedTextBySlot.set(
-          `${message.id}\0text:${textOrdinal}`,
-          content.text.trim(),
-        );
-        textOrdinal += 1;
-      }
-    });
+    for (const content of message.content) {
+      if (content.type !== "text") continue;
+      consumedTextBySlot.set(
+        `${message.id}\0text:${textOrdinal}`,
+        content.text,
+      );
+      textOrdinal += 1;
+    }
   }
+
+  const ensureUtterance = (target: SpeechTarget): ActiveUtterance => {
+    if (activeUtterance) return activeUtterance;
+    const utterance: ActiveUtterance = {
+      id: crypto.randomUUID(),
+      sessionId,
+      target,
+      text: "",
+      finishing: false,
+      onFailure,
+    };
+    activeUtterance = utterance;
+    queueStreamCommand(
+      utterance,
+      async () => {
+        await streamListenerReady;
+        await startPocketVoiceStream(utterance.id);
+      },
+      onFailure,
+    );
+    return utterance;
+  };
 
   const inspectNow = () => {
     if (activeGeneration !== generation) return;
@@ -186,7 +279,7 @@ export function startNativeAssistantSpeech(
     ) {
       return;
     }
-    const segments: SpeakableSegment[] = [];
+
     const messages = useChatStore.getState().messagesBySession[sessionId] ?? [];
     for (const message of messages) {
       if (
@@ -199,95 +292,59 @@ export function startNativeAssistantSpeech(
         (content) => content.type === "toolRequest",
       ).length;
       const priorToolCount = toolCountByMessage.get(message.id) ?? 0;
+      const crossedToolBoundary = toolCount > priorToolCount;
       const completed =
         message.metadata?.completionStatus === "completed" &&
         !completedMessages.has(message.id);
-      const crossedToolBoundary = toolCount > priorToolCount;
       toolCountByMessage.set(message.id, toolCount);
       if (completed) completedMessages.add(message.id);
+
       let textOrdinal = 0;
-      message.content.forEach((content, contentIndex) => {
-        if (content.type !== "text") return;
-        const sourceText = content.text.trim();
-        const slot = `${message.id}\0text:${textOrdinal}`;
+      for (const content of message.content) {
+        if (content.type !== "text") continue;
+        const target = { messageId: message.id, textOrdinal };
+        const slot = targetKey(target);
         textOrdinal += 1;
-        if (!sourceText) return;
-        const consumedText = consumedTextBySlot.get(slot) ?? "";
-        const consumedPrefix = sourceText.startsWith(consumedText)
-          ? consumedText
-          : "";
-        const pendingText = sourceText.slice(consumedPrefix.length);
-        const split = splitSpeakableText(
-          pendingText,
-          crossedToolBoundary || completed,
+        const previous = consumedTextBySlot.get(slot) ?? "";
+        if (content.text === previous) continue;
+        const delta = content.text.startsWith(previous)
+          ? content.text.slice(previous.length)
+          : content.text;
+        consumedTextBySlot.set(slot, content.text);
+        if (!delta) continue;
+
+        if (voice.userSpeaking) {
+          setTargetStatus(sessionId, target, "notSpoken");
+          recordPlaybackNotice(sessionId, slot, content.text, "notSpoken");
+          continue;
+        }
+
+        const utterance = ensureUtterance(target);
+        if (utterance.finishing) continue;
+        utterance.text += delta;
+        queueStreamCommand(
+          utterance,
+          () => appendPocketVoiceStream(utterance.id, delta),
+          onFailure,
         );
-        if (split.consumedLength === 0) return;
-        consumedTextBySlot.set(
-          slot,
-          sourceText.slice(0, consumedPrefix.length + split.consumedLength),
-        );
-        const completesSourceText =
-          consumedPrefix.length + split.consumedLength === sourceText.length;
-        split.segments.forEach((text, segmentIndex) => {
-          segments.push({
-            key: `${slot}\0${consumedPrefix.length}\0${sourceText.length}\0${segmentIndex}`,
-            messageId: message.id,
-            contentIndex,
-            text,
-            sourceText,
-            completesSourceText:
-              completesSourceText && segmentIndex === split.segments.length - 1,
-          });
-        });
-      });
-    }
-    for (const segment of segments) {
-      if (voice.userSpeaking) {
-        setSegmentStatus(sessionId, segment, "notSpoken");
-        recordPlaybackNotice(sessionId, segment, "notSpoken");
-        continue;
       }
-      const segmentEpoch = speechEpoch;
-      scheduledSegments.set(segment.key, segment);
-      playbackQueue = playbackQueue.then(async () => {
-        if (
-          activeGeneration !== generation ||
-          segmentEpoch !== speechEpoch ||
-          !scheduledSegments.has(segment.key)
-        ) {
-          return;
-        }
-        const current = useVoiceConversationStore.getState();
-        if (current.userSpeaking) {
-          setSegmentStatus(sessionId, segment, "notSpoken");
-          recordPlaybackNotice(sessionId, segment, "notSpoken");
-          scheduledSegments.delete(segment.key);
-          return;
-        }
-        setSegmentStatus(sessionId, segment, "speaking");
-        current.setUiState("agent-speaking");
-        try {
-          await speakPocketVoice(segment.text);
-          if (
-            activeGeneration === generation &&
-            segmentEpoch === speechEpoch &&
-            segment.completesSourceText
-          ) {
-            setSegmentStatus(sessionId, segment, "spoken");
-          }
-        } catch (error) {
-          if (activeGeneration === generation && segmentEpoch === speechEpoch) {
-            setSegmentStatus(sessionId, segment, "failed");
-            recordPlaybackNotice(sessionId, segment, "failed");
-            onFailure(segment.text, error);
-          }
-        } finally {
-          scheduledSegments.delete(segment.key);
-          if (activeGeneration === generation) {
-            useVoiceConversationStore.getState().setUiState("listening");
-          }
-        }
-      });
+
+      const utterance = activeUtterance;
+      if (crossedToolBoundary && utterance && !utterance.finishing) {
+        queueStreamCommand(
+          utterance,
+          () => flushPocketVoiceStream(utterance.id),
+          onFailure,
+        );
+      }
+      if (completed && utterance && !utterance.finishing) {
+        utterance.finishing = true;
+        queueStreamCommand(
+          utterance,
+          () => finishPocketVoiceStream(utterance.id),
+          onFailure,
+        );
+      }
     }
   };
 
@@ -315,19 +372,7 @@ export function startNativeAssistantSpeech(
     const becameUserSpeaking = voice.userSpeaking && !wasUserSpeaking;
     wasUserSpeaking = voice.userSpeaking;
     if (!becameUserSpeaking || activeGeneration !== generation) return;
-
-    speechEpoch += 1;
-    for (const segment of scheduledSegments.values()) {
-      setSegmentStatus(sessionId, segment, "interrupted");
-      recordPlaybackNotice(sessionId, segment, "interrupted");
-    }
-    scheduledSegments.clear();
-    void stopPocketVoice().catch((error) => {
-      console.error("Native Pocket barge-in stop failed", {
-        sessionId,
-        error,
-      });
-    });
+    interruptActiveUtterance();
   });
   queueMicrotask(inspect);
 }
