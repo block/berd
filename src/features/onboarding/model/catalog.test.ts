@@ -7,9 +7,9 @@ import {
 } from "./catalog";
 
 describe("onboarding catalog", () => {
-  it("provides seven placeholder agents backed by app avatar references", () => {
-    expect(RECOMMENDED_AGENTS).toHaveLength(7);
-    expect(new Set(RECOMMENDED_AGENTS.map((agent) => agent.id)).size).toBe(7);
+  it("provides four placeholder agents backed by app avatar references", () => {
+    expect(RECOMMENDED_AGENTS).toHaveLength(4);
+    expect(new Set(RECOMMENDED_AGENTS.map((agent) => agent.id)).size).toBe(4);
     expect(
       RECOMMENDED_AGENTS.every((agent) =>
         agent.avatar.startsWith("app-avatar:"),
@@ -23,10 +23,6 @@ describe("onboarding catalog", () => {
       "design",
     ]);
     expect(recommendations).toHaveLength(3);
-    expect(recommendations.slice(0, 2).map((agent) => agent.id)).toEqual([
-      "reviewer",
-      "generalist",
-    ]);
     expect(recommendationsForWorkTypes([])).toHaveLength(3);
   });
 

@@ -57,14 +57,6 @@
     "genericError": "No se pudieron añadir algunos agentes. Inténtalo de nuevo.",
     "adoptionError": "No se pudo añadir a {{names}}. Los demás agentes se conservaron; inténtalo de nuevo para añadir el resto.",
     "agents": {
-      "builder": {
-        "name": "Builder",
-        "description": "Un aliado práctico para implementar productos."
-      },
-      "debugger": {
-        "name": "Debugger",
-        "description": "Un investigador metódico para fallos desconcertantes."
-      },
       "planner": {
         "name": "Planner",
         "description": "Un pensador estructurado para investigaciones y planes técnicos."
@@ -80,10 +72,6 @@
       "explorer": {
         "name": "Explorer",
         "description": "Un compañero de investigación para sistemas y decisiones desconocidos."
-      },
-      "generalist": {
-        "name": "Generalist",
-        "description": "Un colaborador flexible para un poco de todo."
       }
     },
     "partialAdoptionWarning": "Se conservaron algunos agentes, pero no se pudo añadir a {{names}}. Puedes continuar e intentarlo de nuevo más tarde."

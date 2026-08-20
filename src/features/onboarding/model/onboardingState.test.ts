@@ -36,7 +36,7 @@ describe("onboardingReducer", () => {
     );
     state = onboardingReducer(state, {
       type: "select-agent",
-      agentId: "builder",
+      agentId: "test-agent",
     });
     state = onboardingReducer(state, {
       type: "select-harness",
@@ -49,7 +49,7 @@ describe("onboardingReducer", () => {
       lifecycle: "in-progress",
       step: "recommendations",
       selectedWorkTypeIds: ["write-code"],
-      selectedAgentId: "builder",
+      selectedAgentId: "test-agent",
       selectedHarnessId: "goose",
       completedHarnessSetupIds: [],
     });
@@ -86,7 +86,7 @@ describe("onboardingReducer", () => {
       {
         ...INITIAL_ONBOARDING_STATE,
         selectedWorkTypeIds: ["engineering"],
-        selectedAgentId: "builder",
+        selectedAgentId: "test-agent",
         selectedHarnessId: "goose",
         completedHarnessSetupIds: ["goose"],
         shareUsageData: false,
