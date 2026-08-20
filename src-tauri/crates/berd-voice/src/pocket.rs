@@ -15,30 +15,17 @@
 //! cached model files.
 
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 
 use sherpa_onnx::Wave;
 
 #[path = "pocket_april.rs"]
 mod pocket_april;
-#[path = "pocket_models.rs"]
-mod pocket_models;
-
 use pocket_april::{prepare_april_prompt, AprilPocketTts, AprilSynthesisOutcome};
-pub use pocket_models::{
-    april_model_info, PocketModelArtifact, PocketModelInfo, APRIL_BUNDLE_ID, APRIL_MODEL_ID,
-    APRIL_MODEL_REVISION,
-};
 
 /// Pocket TTS emits 24 kHz mono PCM.
 pub const SAMPLE_RATE: u32 = 24_000;
-
-/// Bundled reference voice name without its extension.
-pub const DEFAULT_VOICE: &str = "reference_sample";
-
-/// Pocket voice files are reference WAVs.
-pub const VOICE_FILE_EXT: &str = "wav";
 
 const TTS_NUM_THREADS: usize = 1;
 
@@ -62,9 +49,6 @@ impl SynthesisCallGuard {
         })
     }
 
-    fn is_active(engine_id: usize) -> bool {
-        ACTIVE_SYNTHESIS_ENGINES.with(|active| active.borrow().contains(&engine_id))
-    }
 }
 
 impl Drop for SynthesisCallGuard {
@@ -119,95 +103,13 @@ pub enum SynthesisOutcome {
 
 /// Load Berd's pinned April INT8 model.
 pub fn load_text_to_speech(model_dir: &str) -> Result<PocketTts, String> {
-    let dir = PathBuf::from(model_dir);
-    for artifact in april_model_info().artifacts {
-        let path = dir.join(artifact.filename);
-        if !path.is_file() {
-            return Err(format!(
-                "incomplete Pocket TTS {} INT8 bundle: missing {}",
-                APRIL_BUNDLE_ID,
-                path.display()
-            ));
-        }
-    }
+    let dir = Path::new(model_dir);
     Ok(PocketTts {
-        inner: Mutex::new(AprilPocketTts::load(&dir, TTS_NUM_THREADS)?),
+        inner: Mutex::new(AprilPocketTts::load(dir, TTS_NUM_THREADS)?),
     })
 }
 
 impl PocketTts {
-    /// Split text into synthesis units that satisfy the bundle's exact
-    /// 50-token input limit.
-    ///
-    /// The first sentence remains its own unit when it fits. Oversized
-    /// sentences fall back to clause, word, and UTF-8 scalar boundaries, while
-    /// later sentences pack into the largest natural unit that fits.
-    ///
-    /// Chunks are contiguous substrings of the prepared model prompt and may
-    /// retain boundary whitespace. Concatenating them with `chunks.concat()`
-    /// reconstructs that prompt exactly, and each chunk's prepared token count
-    /// is at most 50.
-    pub fn split_text_into_chunks(&self, text: &str) -> Result<Vec<String>, String> {
-        if SynthesisCallGuard::is_active(self as *const Self as usize) {
-            return Err("Pocket TTS callback re-entered the active engine".to_string());
-        }
-        let Some(prepared) = prepare_april_prompt(text) else {
-            return Ok(Vec::new());
-        };
-        self.inner
-            .lock()
-            .map_err(|_| "Pocket TTS engine lock poisoned".to_string())?
-            .split_playback_prompt(&prepared)
-    }
-
-    /// Synthesize text with the supplied reference voice.
-    ///
-    /// Pocket detects language from text and this model uses one synthesis
-    /// step, so `_lang` and `_steps` intentionally do not affect output.
-    pub fn synth_chunk(
-        &self,
-        text: &str,
-        lang: &str,
-        style: &VoiceStyle,
-        steps: usize,
-    ) -> Result<Vec<f32>, String> {
-        match self.synth_chunk_streaming(text, lang, style, steps, |_, _| true)? {
-            SynthesisOutcome::Complete(samples) => Ok(samples),
-            SynthesisOutcome::Interrupted => Ok(Vec::new()),
-        }
-    }
-
-    /// Synthesize text with the mobile-compatible optional callback API.
-    ///
-    /// This compatibility surface returns all PCM produced before cancellation.
-    /// New callers that need to distinguish completion from interruption should
-    /// use [`PocketTts::synth_chunk_streaming`].
-    pub fn synth_chunk_with_callback<F>(
-        &self,
-        text: &str,
-        lang: &str,
-        style: &VoiceStyle,
-        steps: usize,
-        mut callback: Option<F>,
-    ) -> Result<Vec<f32>, String>
-    where
-        F: FnMut(&[f32], f32) -> bool + 'static,
-    {
-        let mut latest_samples = Vec::new();
-        let outcome =
-            self.synth_chunk_streaming(text, lang, style, steps, |samples, progress| {
-                latest_samples.clear();
-                latest_samples.extend_from_slice(samples);
-                callback
-                    .as_mut()
-                    .is_none_or(|callback| callback(samples, progress))
-            })?;
-        match outcome {
-            SynthesisOutcome::Complete(samples) => Ok(samples),
-            SynthesisOutcome::Interrupted => Ok(latest_samples),
-        }
-    }
-
     /// Synthesize text while reporting cumulative PCM as decoder blocks finish.
     ///
     /// Callback sample buffers contain all PCM produced for this call so far.
@@ -305,21 +207,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn desktop_model_is_april_int8_only() {
-        let info = april_model_info();
-        assert_eq!(info.max_token_per_chunk, 50);
-        assert_eq!(info.sample_rate, SAMPLE_RATE);
-        assert!(info
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.filename == "flow_lm_main_int8.onnx"));
-        assert!(!info
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.filename == "flow_lm_main.onnx"));
-    }
-
-    #[test]
     fn cumulative_callback_allows_growth_equal_repeats_and_cancellation() {
         let mut observed = Vec::new();
         let mut callback = |samples: &[f32], progress: f32| {
@@ -377,24 +264,6 @@ mod tests {
     fn active_engine_reentry_is_rejected() {
         let _guard = SynthesisCallGuard::enter(42).expect("first call");
         assert!(SynthesisCallGuard::enter(42).is_err());
-        assert!(SynthesisCallGuard::is_active(42));
-    }
-
-    #[test]
-    #[ignore = "requires BERD_POCKET_TEST_MODEL_DIR"]
-    fn production_api_emits_non_silent_april_int8_pcm() {
-        let dir = std::env::var("BERD_POCKET_TEST_MODEL_DIR")
-            .expect("set BERD_POCKET_TEST_MODEL_DIR to an April INT8 model directory");
-        let engine = load_text_to_speech(&dir).expect("load April INT8 engine");
-        let style = load_voice_style(&Path::new(&dir).join("reference_sample.wav"))
-            .expect("load reference voice");
-        let samples = engine
-            .synth_chunk("Bright birds begin beside the bay.", "en", &style, 1)
-            .expect("synthesize through the production API");
-
-        assert!(!samples.is_empty());
-        assert!(samples.iter().all(|sample| sample.is_finite()));
-        assert!(samples.iter().any(|sample| sample.abs() > 1.0e-6));
     }
 
     #[test]
@@ -405,9 +274,6 @@ mod tests {
         let engine = load_text_to_speech(&dir).expect("load April INT8 engine");
         let style = load_voice_style(&Path::new(&dir).join("reference_sample.wav"))
             .expect("load reference voice");
-        engine
-            .synth_chunk("Warm up.", "en", &style, 1)
-            .expect("warm production engine");
         let text = "And sometimes, when I am certain the reader is rested, I will engage him with a sentence of considerable length, a sentence that burns with energy and builds with all the impetus of a crescendo, the roll of the drums, the crash of the cymbals–sounds that say listen to this, it is important.";
         let mut reconstructed = Vec::new();
         let mut previous_len = 0;
@@ -444,80 +310,7 @@ mod tests {
 
         assert!(saw_equal_repeat);
         assert_eq!(reconstructed, samples);
-    }
-
-    #[test]
-    #[ignore = "requires BERD_POCKET_TEST_MODEL_DIR"]
-    fn production_streaming_callback_interrupts_before_pcm_is_available() {
-        let dir = std::env::var("BERD_POCKET_TEST_MODEL_DIR")
-            .expect("set BERD_POCKET_TEST_MODEL_DIR to an April INT8 model directory");
-        let engine = load_text_to_speech(&dir).expect("load April INT8 engine");
-        let style = load_voice_style(&Path::new(&dir).join("reference_sample.wav"))
-            .expect("load reference voice");
-        engine
-            .synth_chunk("Warm up.", "en", &style, 1)
-            .expect("warm production engine");
-        let mut callback_at = None;
-        let started = std::time::Instant::now();
-
-        let outcome = engine
-            .synth_chunk_streaming(
-                "This sentence is long enough to require more than one decoder block.",
-                "en",
-                &style,
-                1,
-                |samples, progress| {
-                    assert!(samples.is_empty());
-                    assert!(progress <= 0.5);
-                    callback_at = Some(started.elapsed());
-                    false
-                },
-            )
-            .expect("interrupt production streaming");
-        let callback_at = callback_at.expect("decoder must produce a callback");
-        let cancellation_latency = started.elapsed().saturating_sub(callback_at);
-        eprintln!(
-            "callback_to_cancel_return_ms={:.1}",
-            cancellation_latency.as_secs_f64() * 1000.0
-        );
-
-        assert!(matches!(outcome, SynthesisOutcome::Interrupted));
-    }
-
-    #[test]
-    #[ignore = "requires BERD_POCKET_TEST_MODEL_DIR"]
-    fn production_streaming_callback_interrupts_after_first_decoder_block() {
-        let dir = std::env::var("BERD_POCKET_TEST_MODEL_DIR")
-            .expect("set BERD_POCKET_TEST_MODEL_DIR to an April INT8 model directory");
-        let engine = load_text_to_speech(&dir).expect("load April INT8 engine");
-        let style = load_voice_style(&Path::new(&dir).join("reference_sample.wav"))
-            .expect("load reference voice");
-        let mut callback_at = None;
-        let started = std::time::Instant::now();
-
-        let outcome = engine
-            .synth_chunk_streaming(
-                "This sentence is long enough to require more than one decoder block.",
-                "en",
-                &style,
-                1,
-                |samples, progress| {
-                    if samples.is_empty() {
-                        return true;
-                    }
-                    assert!(progress > 0.5);
-                    callback_at = Some(started.elapsed());
-                    false
-                },
-            )
-            .expect("interrupt production streaming after decoded PCM");
-        let callback_at = callback_at.expect("decoder must produce a callback");
-        let cancellation_latency = started.elapsed().saturating_sub(callback_at);
-        eprintln!(
-            "decoded_callback_to_cancel_return_ms={:.1}",
-            cancellation_latency.as_secs_f64() * 1000.0
-        );
-
-        assert!(matches!(outcome, SynthesisOutcome::Interrupted));
+        assert!(samples.iter().all(|sample| sample.is_finite()));
+        assert!(samples.iter().any(|sample| sample.abs() > 1.0e-6));
     }
 }

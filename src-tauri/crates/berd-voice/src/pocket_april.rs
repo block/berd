@@ -269,18 +269,6 @@ impl AprilPocketTts {
         )
     }
 
-    pub(crate) fn split_playback_prompt(
-        &self,
-        prepared: &AprilPreparedPrompt,
-    ) -> Result<Vec<String>, String> {
-        split_at_natural_boundaries(
-            &prepared.text,
-            self.bundle.max_token_per_chunk,
-            true,
-            |text| self.prepared_token_count(text),
-        )
-    }
-
     pub(crate) fn synth_chunk_streaming<F>(
         &mut self,
         prepared: &AprilPreparedPrompt,

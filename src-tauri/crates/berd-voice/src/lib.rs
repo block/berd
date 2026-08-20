@@ -3,7 +3,5 @@
 mod pocket;
 
 pub use pocket::{
-    april_model_info, load_text_to_speech, load_voice_style, PocketModelArtifact, PocketModelInfo,
-    PocketTts, SynthesisOutcome, VoiceStyle, APRIL_BUNDLE_ID, APRIL_MODEL_ID, APRIL_MODEL_REVISION,
-    DEFAULT_VOICE, SAMPLE_RATE, VOICE_FILE_EXT,
+    load_text_to_speech, load_voice_style, PocketTts, SynthesisOutcome, VoiceStyle, SAMPLE_RATE,
 };
