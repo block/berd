@@ -87,6 +87,13 @@ const EXECUTION_TARGET = {
   modelName: "GPT-6 Berd",
 } as const;
 
+const NEWER_EXECUTION_TARGET = {
+  harnessId: "goose",
+  modelProviderId: "anthropic",
+  modelId: "claude-newer",
+  modelName: "Claude Newer",
+} as const;
+
 const PROJECT: ProjectInfo = {
   id: "project-1",
   path: "/tmp/project-source",
@@ -195,6 +202,51 @@ describe("sendQueuedPromptToExistingSessionInBackground telemetry", () => {
     mocks.resolveSessionCwd.mockResolvedValue("/tmp/project");
     mocks.loadWorkspaceInstructionFiles.mockResolvedValue([]);
     mocks.listSkills.mockResolvedValue([]);
+  });
+
+  it("dispatches a queued target snapshot after the live session changes", async () => {
+    const queued = releasedRecord({
+      persona: { kind: "none" },
+      sendOptions: { sessionSelection: EXECUTION_TARGET },
+    });
+    useChatSessionStore
+      .getState()
+      .replaceSessionExecutionTarget(SESSION_ID, NEWER_EXECUTION_TARGET);
+    let targetAtPromptDispatch: unknown;
+    let providerAtPromptDispatch: unknown;
+    mocks.acpSendMessage.mockImplementationOnce((...args: unknown[]) => {
+      targetAtPromptDispatch = useChatSessionStore
+        .getState()
+        .getSession(SESSION_ID)?.executionTarget;
+      providerAtPromptDispatch = useChatStore
+        .getState()
+        .getSessionRuntime(SESSION_ID).pendingAssistantProviderId;
+      const options = args[2] as
+        | { onPromptDispatching?: () => void; onPromptDispatched?: () => void }
+        | undefined;
+      options?.onPromptDispatching?.();
+      options?.onPromptDispatched?.();
+      return Promise.resolve(undefined);
+    });
+
+    await sendQueuedPromptToExistingSessionInBackground(SESSION_ID, queued);
+
+    expect(mocks.acpPrepareSession).toHaveBeenCalledWith(
+      SESSION_ID,
+      EXECUTION_TARGET.modelProviderId,
+      "/tmp/project",
+      expect.objectContaining({
+        modelId: EXECUTION_TARGET.modelId,
+        selectionAlreadyResolved: true,
+      }),
+      expect.anything(),
+    );
+    expect(targetAtPromptDispatch).toEqual(EXECUTION_TARGET);
+    expect(providerAtPromptDispatch).toBe(EXECUTION_TARGET.modelProviderId);
+    expect(mocks.acpSendMessage).toHaveBeenCalledTimes(1);
+    expect(
+      useChatSessionStore.getState().getSession(SESSION_ID)?.executionTarget,
+    ).toEqual(NEWER_EXECUTION_TARGET);
   });
 
   it("emits Session Started and Message Sent exactly once, at the user-message commit", async () => {

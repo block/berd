@@ -305,6 +305,34 @@ describe("applySessionModel", () => {
     expect(prompt).toHaveBeenCalledWith("anthropic");
   });
 
+  it("lets a successful load supersede existing negative proof but not newer proof", async () => {
+    const { publishProvenModelInventory } = await import(
+      "@/features/providers/stores/providerModelCacheStore"
+    );
+    publishProvenModelInventory("openai", ["gpt-other"]);
+    const registry = await importRegistry();
+    mockLoadSession.mockResolvedValueOnce(
+      executionConfigResponse("openai", "gpt-5.5"),
+    );
+    const prompt = vi.fn().mockResolvedValue("complete");
+
+    await registry.loadSession("session-1", "/project");
+
+    await expect(
+      registry.runPreparedSessionPrompt("session-1", prompt),
+    ).resolves.toBe("complete");
+    expect(prompt).toHaveBeenCalledWith("openai");
+
+    publishProvenModelInventory("openai", ["gpt-newer"]);
+
+    await expect(
+      registry.runPreparedSessionPrompt("session-1", prompt),
+    ).rejects.toThrow(
+      "Session model gpt-5.5 is no longer supported by provider openai",
+    );
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
   it("holds prompt transport behind pending configuration intent until it clears", async () => {
     const registry = await importPreparedRegistry("openai", "gpt-4.1");
     const supersession = registry.supersedeSessionMutation("session-1");

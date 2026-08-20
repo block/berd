@@ -561,15 +561,23 @@ export async function loadSession(
           })()
         : undefined;
       const executionSnapshot = readSessionExecutionConfigSnapshot(response);
+      const executionSelection = executionSnapshot
+        ? {
+            ...executionSnapshot,
+            acknowledgedProofRevision: getModelInventoryProofRevision(
+              executionSnapshot.providerId,
+            ),
+          }
+        : undefined;
       prepared.set(sessionId, {
         workingDir,
-        executionSelection: executionSnapshot ?? undefined,
+        executionSelection,
       });
       return {
         response,
         isCurrent: isCurrentResult,
         ...(deferredCurrent ? { deferredCurrent } : {}),
-        executionSelection: executionSnapshot ?? undefined,
+        executionSelection,
       };
     },
     false,
