@@ -230,6 +230,66 @@ describe("native assistant speech stream", () => {
     expect(mocks.finish).not.toHaveBeenCalled();
   });
 
+  it("updates every text block around a tool with the utterance status", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Before the tool." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalledTimes(1));
+    emit("started");
+
+    useChatStore.getState().setMessages("session-1", [
+      assistant([
+        { type: "text", text: "Before the tool." },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "Read",
+          arguments: {},
+          status: "completed",
+        },
+        { type: "text", text: "After the tool." },
+      ]),
+    ]);
+
+    await vi.waitFor(() => {
+      expect(mocks.flush).toHaveBeenCalledTimes(1);
+      expect(mocks.append).toHaveBeenLastCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "After the tool.",
+      );
+    });
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[2],
+    ).toMatchObject({ speech: { status: "speaking" } });
+
+    useChatStore.getState().setMessages("session-1", [
+      assistant(
+        [
+          { type: "text", text: "Before the tool." },
+          {
+            type: "toolRequest",
+            id: "tool-1",
+            name: "Read",
+            arguments: {},
+            status: "completed",
+          },
+          { type: "text", text: "After the tool." },
+        ],
+        "completed",
+      ),
+    ]);
+    await vi.waitFor(() => expect(mocks.finish).toHaveBeenCalledTimes(1));
+    emit("completed");
+
+    const content =
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content;
+    expect(content?.[0]).toMatchObject({ speech: { status: "spoken" } });
+    expect(content?.[2]).toMatchObject({ speech: { status: "spoken" } });
+  });
+
   it("interrupts one utterance status even when many deltas are queued", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore

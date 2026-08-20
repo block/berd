@@ -15,9 +15,10 @@ type SpeechTarget = { messageId: string; textOrdinal: number };
 type ActiveUtterance = {
   id: string;
   sessionId: string;
-  target: SpeechTarget;
+  targets: SpeechTarget[];
   text: string;
   finishing: boolean;
+  status: SpeechStatus | null;
   onFailure: SpeechFailureHandler;
 };
 type SpeechStatus =
@@ -95,6 +96,13 @@ function setTargetStatus(
     });
 }
 
+function setUtteranceStatus(utterance: ActiveUtterance, status: SpeechStatus) {
+  utterance.status = status;
+  for (const target of utterance.targets) {
+    setTargetStatus(utterance.sessionId, target, status);
+  }
+}
+
 function failActiveUtterance(
   utteranceId: string,
   error: unknown,
@@ -102,7 +110,7 @@ function failActiveUtterance(
 ) {
   const utterance = activeUtterance;
   if (!utterance || utterance.id !== utteranceId) return;
-  setTargetStatus(utterance.sessionId, utterance.target, "failed");
+  setUtteranceStatus(utterance, "failed");
   recordPlaybackNotice(
     utterance.sessionId,
     utterance.id,
@@ -137,16 +145,16 @@ function handleStreamEvent(event: PocketVoiceStreamEvent) {
 
   switch (event.state) {
     case "started":
-      setTargetStatus(utterance.sessionId, utterance.target, "speaking");
+      setUtteranceStatus(utterance, "speaking");
       voice.setUiState("agent-speaking");
       break;
     case "completed":
-      setTargetStatus(utterance.sessionId, utterance.target, "spoken");
+      setUtteranceStatus(utterance, "spoken");
       voice.setUiState("listening");
       activeUtterance = null;
       break;
     case "interrupted":
-      setTargetStatus(utterance.sessionId, utterance.target, "interrupted");
+      setUtteranceStatus(utterance, "interrupted");
       recordPlaybackNotice(
         utterance.sessionId,
         utterance.id,
@@ -157,7 +165,7 @@ function handleStreamEvent(event: PocketVoiceStreamEvent) {
       activeUtterance = null;
       break;
     case "failed":
-      setTargetStatus(utterance.sessionId, utterance.target, "failed");
+      setUtteranceStatus(utterance, "failed");
       recordPlaybackNotice(
         utterance.sessionId,
         utterance.id,
@@ -179,7 +187,7 @@ function interruptActiveUtterance() {
   commandEpoch += 1;
   activeUtterance = null;
   if (utterance) {
-    setTargetStatus(utterance.sessionId, utterance.target, "interrupted");
+    setUtteranceStatus(utterance, "interrupted");
     recordPlaybackNotice(
       utterance.sessionId,
       utterance.id,
@@ -249,13 +257,26 @@ export function startNativeAssistantSpeech(
   }
 
   const ensureUtterance = (target: SpeechTarget): ActiveUtterance => {
-    if (activeUtterance) return activeUtterance;
+    if (activeUtterance) {
+      if (
+        !activeUtterance.targets.some(
+          (candidate) => targetKey(candidate) === targetKey(target),
+        )
+      ) {
+        activeUtterance.targets.push(target);
+        if (activeUtterance.status) {
+          setTargetStatus(sessionId, target, activeUtterance.status);
+        }
+      }
+      return activeUtterance;
+    }
     const utterance: ActiveUtterance = {
       id: crypto.randomUUID(),
       sessionId,
-      target,
+      targets: [target],
       text: "",
       finishing: false,
+      status: null,
       onFailure,
     };
     activeUtterance = utterance;
