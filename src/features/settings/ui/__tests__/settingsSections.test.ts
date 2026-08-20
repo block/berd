@@ -29,6 +29,10 @@ const enabledCapabilities: ProfileCapabilityState = {
 // (no securityMl-gated omission at the nav level -- SecuritySettings.tsx
 // gates its ML rows internally instead). Doctor is a hidden, routable
 // sub-page reached from a row inside System, not a nav destination.
+//
+// Rev 5 (Aug 19): "about" is gone as a section too -- both "about" and
+// "updates" now redirect to "system", which absorbed About's content under
+// its own subhead.
 describe("settingsSections", () => {
   it("includes experiments in settings navigation", () => {
     const sectionIds = SETTINGS_SECTIONS.map((section) => section.id);
@@ -65,11 +69,18 @@ describe("settingsSections", () => {
     );
   });
 
-  it("redirects the legacy general and updates routes to their new homes", () => {
+  it("redirects the legacy general, about, and updates routes to their new homes", () => {
     expect(resolveSettingsSection("general")).toBe("appearance");
-    // Updates lives embedded on the About page now -- app identity and
-    // "is it current" are one concept, not split across two sections.
-    expect(resolveSettingsSection("updates")).toBe("about");
+    // About merged into System (rev 5): app identity, Account, and the
+    // update check all live there now, under an "About" subhead.
+    expect(resolveSettingsSection("about")).toBe("system");
+    expect(resolveSettingsSection("updates")).toBe("system");
+  });
+
+  it("no longer lists about as a settings section", () => {
+    expect(SETTINGS_SECTIONS.map((section) => section.id)).not.toContain(
+      "about",
+    );
   });
 
   it("hosts connections and redirects the legacy extensions route", () => {

@@ -12,6 +12,9 @@ export interface SettingsSearchItem {
 // the sidebar's own display-options menu (SidebarDisplayOptionsMenu.tsx),
 // not in Settings, so there's no page for a search hit to land on.
 // "language" moved from "behavior" to "system" alongside the row itself.
+//
+// Rev 5 (Aug 19): "about" and "updates" now point at "system" -- About
+// merged into System (see settingsSections.ts).
 /** Searchable controls and destinations that are visible within Settings. */
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   {
@@ -153,12 +156,12 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: "about",
-    sectionId: "about",
-    labelKey: "nav.about",
+    sectionId: "system",
+    labelKey: "about.title",
   },
   {
     id: "updates",
-    sectionId: "about",
+    sectionId: "system",
     labelKey: "updates.title",
   },
   {

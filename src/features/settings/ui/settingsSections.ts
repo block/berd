@@ -4,7 +4,6 @@ import {
   Bell,
   FlaskConical,
   Headphones,
-  Info,
   Keyboard,
   Palette,
   Settings2,
@@ -53,8 +52,15 @@ type SettingsSectionDefinition = {
 //     media, bb CLI, dev runtime config) + a row that opens Doctor as its
 //     own page. Language lives here, not "behavior": it's an install-level,
 //     "which language does Berd speak" setting, not a per-chat behavior.
-//   - "about": app identity + "is it current" (Updates card) + Account,
-//     which are one concept, not split across two pages.
+//
+// Rev 5 (Aug 19): "about" is no longer its own section -- app identity +
+// "is it current" (Updates card) + Account are still one concept, but they
+// now live at the bottom of "system" under an "About" subhead instead of a
+// separate nav destination. "Check for updates" moved to the top of System
+// since it's the row people actually look for; the rest of About's
+// identity rows (build mode, Tauri version, identifier, license) and
+// Account stayed together underneath. `about` and the legacy `updates`
+// route both redirect to `system` now.
 //
 // "Agents" was considered for "providers" but collides with the primary
 // nav's real "Agents" destination (PrimaryNavigationSurface.tsx) -- kept as
@@ -100,7 +106,6 @@ export const SETTINGS_SECTIONS = [
   { id: "archive", labelKey: "nav.archive", icon: Archive },
   { id: "security", labelKey: "nav.security", icon: Shield },
   { id: "system", labelKey: "nav.system", icon: Settings2 },
-  { id: "about", labelKey: "nav.about", icon: Info },
   { id: "experiments", labelKey: "nav.experiments", icon: FlaskConical },
 ] as const satisfies readonly SettingsSectionDefinition[];
 
@@ -113,9 +118,12 @@ const LEGACY_SECTION_REDIRECTS: Record<string, SectionId> = {
   projects: "archive",
   chats: "archive",
   extensions: "connections",
-  // rev 3: "updates" was a real top-level section on main; app identity +
-  // "is it current" are one concept now, both living on "about".
-  updates: "about",
+  // rev 5: "about" is no longer a section -- app identity, the update
+  // check, and Account now live at the bottom of "system" under an "About"
+  // subhead. Both the legacy `about` route and the older `updates` route
+  // (which redirected to `about` in rev 3) land on `system`.
+  about: "system",
+  updates: "system",
   // rev 4: "doctor" was a hidden sub-page reached from System; it's now a
   // dialog opened from a row on that same page, not a section at all. Old
   // deep links land on System, where the row lives.
