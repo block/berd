@@ -1,6 +1,5 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AboutSettings } from "./AboutSettings";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { ArchiveSettings } from "./ArchiveSettings";
 import { BehaviorSettings } from "./BehaviorSettings";
@@ -35,6 +34,10 @@ interface SettingsViewProps {
 // settingsSections.ts for the full rationale). Security is now permanent --
 // no more securityMl gate at this level; SecuritySettings.tsx gates its own
 // ML rows internally.
+//
+// Rev 5 (Aug 19): "about" is no longer a routable section -- its content
+// (app identity, Account, and the embedded Updates card) moved into
+// SystemSettings.tsx, under an "About" subhead at the bottom of the page.
 //
 // Rev 4: Doctor is no longer a routable settings section at all -- it opens
 // as a dialog from a row inside SystemSettings.tsx instead (see
@@ -90,9 +93,8 @@ export function SettingsView({
       )}
       {activeSection === "archive" && <ArchiveSettings />}
       {activeSection === "security" && <SecuritySettings />}
-      {activeSection === "system" && <SystemSettings />}
-      {activeSection === "about" && (
-        <AboutSettings authStatus={authStatus} onLoggedOut={onLoggedOut} />
+      {activeSection === "system" && (
+        <SystemSettings authStatus={authStatus} onLoggedOut={onLoggedOut} />
       )}
       {activeSection === "experiments" && <ExperimentsSettings />}
     </SettingsPane>
