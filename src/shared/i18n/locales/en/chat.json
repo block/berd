@@ -45,8 +45,6 @@
     "confirmStopDescription": "This terminates the shell and closes the terminal panel.",
     "confirmStopTabTitle": "Stop terminal {{path}}?",
     "confirmStopTitle": "Stop terminal?",
-    "invalidAgentConfiguration": "This agent’s saved provider or model is no longer available.",
-    "repairAgentConfiguration": "Use default configuration",
     "expand": "Expand terminal",
     "exitedWithSignal": "Exited by {{signal}}",
     "newTab": "New terminal tab",
@@ -439,7 +437,8 @@
   "globalPill": {
     "ariaLabel": "Quick compose",
     "invalidAgentConfiguration": "This agent’s saved provider or model is no longer available.",
-    "repairAgentConfiguration": "Use default configuration",
+    "editInvalidAgent": "Edit agent",
+    "continueWithoutAgent": "Continue without this agent",
     "expand": "Expand to full chat",
     "placeholder": "Start a conversation",
     "setupVoiceConversation": "Set up Voice Conversation",

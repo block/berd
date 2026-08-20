@@ -813,8 +813,11 @@ describe("GlobalComposerPill", () => {
       ),
     ).toBeInTheDocument();
 
+    expect(
+      screen.queryByRole("button", { name: "Edit agent" }),
+    ).not.toBeInTheDocument();
     await user.click(
-      screen.getByRole("button", { name: "Use default configuration" }),
+      screen.getByRole("button", { name: "Continue without this agent" }),
     );
 
     expect(
@@ -823,6 +826,40 @@ describe("GlobalComposerPill", () => {
       ),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled();
+  });
+
+  it("offers to edit an invalid agent without clearing its saved selection", async () => {
+    const user = userEvent.setup();
+    const onEditAgent = vi.fn();
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Legacy agent",
+          systemPrompt: "Help.",
+          model: "unresolved-model",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    renderGlobalComposer(vi.fn(), {
+      suggestedPersonaId: "persona-1",
+      onEditAgent,
+    });
+
+    await user.click(screen.getByRole("button", { name: "Edit agent" }));
+
+    expect(onEditAgent).toHaveBeenCalledWith("persona-1");
+    expect(screen.getByText("Legacy agent")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This agent’s saved provider or model is no longer available.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /send message/i }),
+    ).toBeDisabled();
   });
 
   it("applies a legacy persona target when inventory arrives", async () => {

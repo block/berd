@@ -101,6 +101,7 @@ interface GlobalComposerPillProps {
     payload: GlobalComposerExpandPayload,
   ) => boolean | undefined | Promise<boolean | undefined>;
   onDismiss?: () => void;
+  onEditAgent?: (personaId: string) => void;
   onHandoffStart?: (rect: GlobalComposerHandoffRect) => void;
   suggestedPersonaId?: string | null;
   reasoningEffort?: ChatInputReasoningEffort;
@@ -212,6 +213,7 @@ export function GlobalComposerPill({
   onSend,
   onExpand,
   onDismiss,
+  onEditAgent,
   onHandoffStart,
   suggestedPersonaId = null,
   reasoningEffort,
@@ -1527,14 +1529,26 @@ export function GlobalComposerPill({
           className="mx-6 mb-14 flex items-center justify-between gap-3 text-xs text-destructive"
         >
           <span>{t("globalPill.invalidAgentConfiguration")}</span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => handlePersonaChange(null)}
-          >
-            {t("globalPill.repairAgentConfiguration")}
-          </Button>
+          <div className="flex items-center gap-2">
+            {selectedPersonaId && onEditAgent ? (
+              <Button
+                type="button"
+                variant="alert"
+                size="sm"
+                onClick={() => onEditAgent(selectedPersonaId)}
+              >
+                {t("globalPill.editInvalidAgent")}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="alert"
+              size="sm"
+              onClick={() => handlePersonaChange(null)}
+            >
+              {t("globalPill.continueWithoutAgent")}
+            </Button>
+          </div>
         </div>
       ) : null}
 

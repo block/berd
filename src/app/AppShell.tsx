@@ -5297,6 +5297,7 @@ export function AppShell({
                 onSend={handleGlobalCompose}
                 onExpand={handleGlobalComposerExpand}
                 onDismiss={dismissCenteredGlobalComposer}
+                onEditAgent={navigateAgents}
                 onHandoffStart={handleGlobalComposerHandoffStart}
                 placement={globalComposerPlacement}
                 mainLeftOffsetPx={sidebarDockedOuterWidth}
