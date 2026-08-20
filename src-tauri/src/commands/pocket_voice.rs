@@ -93,7 +93,6 @@ const MODEL_ARTIFACTS: &[Artifact] = &[
     Artifact { filename: "LICENSE", size: 18_655, sha256: "fe7b4ce83b8381cc5b216bbb4af73c570688d1b819c73bbaed8ca401f4677cd6", url: "https://huggingface.co/KevinAHM/pocket-tts-onnx/resolve/58a6d00cf13d239b6748cb0769f35c580a8f606c/onnx/LICENSE" },
 ];
 
-#[cfg(target_os = "macos")]
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PocketVoice {
