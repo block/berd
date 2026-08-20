@@ -749,7 +749,7 @@ export function GlobalComposerPill({
     fileMentionsLoading,
     fileMentionsError,
     detectMention,
-    closeMention,
+    dismissMention,
     navigateMention,
     setAtMentionCategory,
     handleMentionCategoryKey,
@@ -1325,7 +1325,14 @@ export function GlobalComposerPill({
             !expanded && "flex h-full items-center",
           )}
         >
-          <Popover open={mentionOpen}>
+          <Popover
+            open={mentionOpen}
+            onOpenChange={(open) => {
+              if (!open && mentionOpen) {
+                dismissMention();
+              }
+            }}
+          >
             <div
               id={mentionStatusId}
               role="status"
@@ -1368,7 +1375,7 @@ export function GlobalComposerPill({
                     if (event.key === "Escape") {
                       event.preventDefault();
                       event.stopPropagation();
-                      closeMention();
+                      dismissMention();
                       return;
                     }
                     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
@@ -1445,7 +1452,6 @@ export function GlobalComposerPill({
               atCategory={atMentionCategory}
               onAtCategoryChange={setAtMentionCategory}
               selectedIndex={mentionSelectedIndex}
-              onClose={closeMention}
               onSelectPersona={(persona) =>
                 handleMentionConfirm({ type: "persona", persona })
               }

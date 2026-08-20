@@ -704,7 +704,7 @@ export function ChatInput({
     fileMentionsError,
     resolveSkillSlashCommand,
     detectMention,
-    closeMention,
+    dismissMention,
     navigateMention,
     setAtMentionCategory,
     handleMentionCategoryKey,
@@ -1180,7 +1180,7 @@ export function ChatInput({
       ) {
         event.preventDefault();
         event.stopPropagation();
-        closeMention();
+        dismissMention();
         return;
       }
       if (eventMatchesShortcutCommand(event.nativeEvent, "chat.mention.next")) {
@@ -1685,7 +1685,14 @@ export function ChatInput({
               : "mx-auto max-w-[var(--chat-composer-max-width)]",
           )}
         >
-          <Popover open={mentionOpen}>
+          <Popover
+            open={mentionOpen}
+            onOpenChange={(open) => {
+              if (!open && mentionOpen) {
+                dismissMention();
+              }
+            }}
+          >
             {queuedMessageAccessory ? (
               <div
                 data-slot="queued-message-accessory"
@@ -1746,7 +1753,6 @@ export function ChatInput({
                 onSelectPersona={handlePersonaMentionSelect}
                 onSelectSkill={handleSkillMentionSelect}
                 onSelectFile={handleFileMentionSelect}
-                onClose={closeMention}
                 selectedIndex={mentionSelectedIndex}
                 listboxId={mentionListboxId}
                 atCategory={atMentionCategory}

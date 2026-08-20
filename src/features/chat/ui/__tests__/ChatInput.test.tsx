@@ -1776,6 +1776,56 @@ describe("ChatInput", () => {
     }
   });
 
+  it("dismisses mentions when the composer is clicked", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@missing");
+    expect(screen.getByRole("tab", { name: "Agents" })).not.toBeNull();
+
+    await user.click(input);
+
+    expect(screen.queryByRole("tab", { name: "Agents" })).toBeNull();
+    expect((input as HTMLTextAreaElement).value).toBe("@missing");
+  });
+
+  it("keeps mentions dismissed while the current token is still being typed", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@log");
+    expect(screen.getByRole("tab", { name: "Agents" })).not.toBeNull();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("tab", { name: "Agents" })).toBeNull();
+
+    await user.type(input, "fold");
+
+    expect((input as HTMLTextAreaElement).value).toBe("@logfold");
+    expect(screen.queryByRole("tab", { name: "Agents" })).toBeNull();
+  });
+
+  it("opens mentions in a new draft after the previous token was dismissed", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const user = userEvent.setup();
+    renderProjectChatInput(onSend);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@missing");
+    expect(screen.getByRole("tab", { name: "Agents" })).not.toBeNull();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("tab", { name: "Agents" })).toBeNull();
+
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(""));
+
+    await user.type(input, "@");
+    expect(screen.getByRole("tab", { name: "Agents" })).not.toBeNull();
+  });
+
   it("attaches folder and static root references as chips", async () => {
     const user = userEvent.setup();
     mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);

@@ -33,7 +33,6 @@ interface MentionAutocompleteProps {
   onSelectPersona: (persona: Persona) => void;
   onSelectSkill?: (skill: SkillMentionItem) => void;
   onSelectFile?: (file: FileMentionItem) => void;
-  onClose?: (() => void) | undefined;
   selectedIndex?: number;
   listboxId?: string;
   atCategory?: AtMentionCategory;
@@ -50,7 +49,6 @@ export function MentionAutocomplete({
   onSelectPersona,
   onSelectSkill,
   onSelectFile,
-  onClose,
   selectedIndex: controlledIndex,
   listboxId = "mention-autocomplete-listbox",
   atCategory = "agents",
@@ -62,37 +60,6 @@ export function MentionAutocomplete({
   const [internalIndex, setInternalIndex] = useState(0);
   const selectedIndex = controlledIndex ?? internalIndex;
   const itemRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
-  const contentRef = useRef<HTMLDivElement>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
-
-  useEffect(() => {
-    if (!isOpen) {
-      return;
-    }
-
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) {
-        return;
-      }
-      if (contentRef.current?.contains(target)) {
-        return;
-      }
-      if (
-        target instanceof HTMLElement &&
-        target.closest("textarea, input, [contenteditable='true']")
-      ) {
-        return;
-      }
-      onCloseRef.current?.();
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown, true);
-    };
-  }, [isOpen]);
 
   // Scroll the active item into view when selectedIndex changes
   useEffect(() => {
@@ -181,18 +148,12 @@ export function MentionAutocomplete({
 
   return (
     <PopoverContent
-      ref={contentRef}
       side="top"
       align="start"
       sideOffset={4}
       className="w-72 p-2"
       onOpenAutoFocus={(e) => e.preventDefault()}
       onCloseAutoFocus={(e) => e.preventDefault()}
-      onEscapeKeyDown={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onClose?.();
-      }}
     >
       <Tabs
         value={atCategory}
