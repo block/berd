@@ -94,6 +94,10 @@ describe("AgentImportDialog", () => {
       systemPrompt: "Review carefully.",
       identity: "agent.agent.png",
     }));
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn().mockReturnValue(null),
+    });
     render(<AgentImportDialog {...importDialogProps({ prepareImport })} />);
     await waitFor(() => expect(nativeDropMocks.listener).not.toBeNull());
     const position = { x: 0, y: 0, toLogical: () => ({ x: 0, y: 0 }) };

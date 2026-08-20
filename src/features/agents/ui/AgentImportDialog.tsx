@@ -15,6 +15,7 @@ import {
 
 import { cn } from "@/shared/lib/cn";
 import { useFileImportZone } from "@/shared/hooks/useFileImportZone";
+import { useAttachmentDropTarget } from "@/features/chat/hooks/useAttachmentDropTarget";
 import { Button } from "@/shared/ui/button";
 import { AgentImportPrimaryButton } from "@/shared/ui/agent-import-primary-button";
 import { AgentImportSecondaryButton } from "@/shared/ui/agent-import-secondary-button";
@@ -209,10 +210,10 @@ export function AgentImportDialog({
 
   const dropZoneRef = useRef<HTMLDivElement>(null);
   const nativeDropGenerationRef = useRef(0);
-  const nativeDropExpectedUntilRef = useRef(0);
+  const nativeDropActiveRef = useRef(open);
+  nativeDropActiveRef.current = open;
   const validateReplacementFile = useCallback(
     (file: Pick<File, "name" | "type" | "size">) => {
-      nativeDropGenerationRef.current += 1;
       preparationRef.current?.abort();
       setPrepared(null);
       return validateImportFile(file);
@@ -223,6 +224,7 @@ export function AgentImportDialog({
     fileInputRef,
     isDragOver,
     dropHandlers,
+    importFile,
     handleFileChange,
     openFilePicker,
   } = useFileImportZone({
@@ -233,90 +235,49 @@ export function AgentImportDialog({
     fileTooLargeMessage: importTooLargeMessage,
   });
 
-  useEffect(() => {
-    if (!open || !window.__TAURI_INTERNALS__) return;
-
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-    void Promise.all([
-      import("@tauri-apps/api/webview"),
-      import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
-        getCurrentWindow().scaleFactor(),
-      ),
-    ])
-      .then(([{ getCurrentWebview }, scaleFactor]) =>
-        getCurrentWebview().onDragDropEvent(({ payload }) => {
-          if (disposed || !dropZoneRef.current) return;
-          if (payload.type === "leave") {
-            nativeDropExpectedUntilRef.current = 0;
-            dropHandlers.onDragLeave();
+  const handleDroppedPaths = useCallback(
+    (paths: string[]) => {
+      const path = paths[0];
+      if (!path) return;
+      const generation = ++nativeDropGenerationRef.current;
+      void readImportAgentFile(path)
+        .then(({ fileBytes, fileName }) => {
+          if (
+            !nativeDropActiveRef.current ||
+            generation !== nativeDropGenerationRef.current
+          )
+            return;
+          const bytes = Uint8Array.from(fileBytes);
+          const file = new File([bytes], fileName);
+          const error = validateReplacementFile(file);
+          if (error) {
+            onImportError(error);
             return;
           }
-          const rect = dropZoneRef.current.getBoundingClientRect();
-          const position = payload.position.toLogical(scaleFactor);
-          const inside =
-            position.x >= rect.left &&
-            position.x <= rect.right &&
-            position.y >= rect.top &&
-            position.y <= rect.bottom;
-          if (payload.type === "enter" || payload.type === "over") {
-            nativeDropExpectedUntilRef.current = inside ? Date.now() + 1000 : 0;
-            if (inside)
-              dropHandlers.onDragOver({
-                preventDefault() {},
-              } as React.DragEvent);
-            else dropHandlers.onDragLeave();
-            return;
-          }
-          const nativeDropWasExpected =
-            nativeDropExpectedUntilRef.current > Date.now();
-          nativeDropExpectedUntilRef.current = 0;
-          dropHandlers.onDragLeave();
-          const path = payload.paths[0];
-          if ((!inside && !nativeDropWasExpected) || !path) return;
-          const generation = ++nativeDropGenerationRef.current;
-          void readImportAgentFile(path)
-            .then(({ fileBytes, fileName }) => {
-              if (disposed || generation !== nativeDropGenerationRef.current)
-                return;
-              const bytes = Uint8Array.from(fileBytes);
-              const file = new File([bytes], fileName);
-              const error = validateReplacementFile(file);
-              if (error) {
-                onImportError(error);
-                return;
-              }
-              startPreparation(bytes, fileName);
-            })
-            .catch((error) => {
-              if (!disposed && generation === nativeDropGenerationRef.current)
-                onImportError(
-                  error instanceof Error ? error.message : String(error),
-                );
-            });
-        }),
-      )
-      .then((cleanup) => {
-        if (disposed) cleanup();
-        else unlisten = cleanup;
-      })
-      .catch((error) => {
-        if (!disposed)
-          console.warn("Failed to register agent import drop target", error);
-      });
-    return () => {
-      disposed = true;
-      nativeDropGenerationRef.current += 1;
-      nativeDropExpectedUntilRef.current = 0;
-      unlisten?.();
-    };
-  }, [
-    dropHandlers,
-    onImportError,
-    open,
-    startPreparation,
-    validateReplacementFile,
-  ]);
+          startPreparation(bytes, fileName);
+        })
+        .catch((error) => {
+          if (
+            nativeDropActiveRef.current &&
+            generation === nativeDropGenerationRef.current
+          )
+            onImportError(
+              error instanceof Error ? error.message : String(error),
+            );
+        });
+    },
+    [onImportError, startPreparation, validateReplacementFile],
+  );
+  const { isAttachmentDragOver } = useAttachmentDropTarget({
+    disabled: !open || preparing,
+    targetRef: dropZoneRef,
+    bindTargetEvents: true,
+    onDropFiles: (files) => {
+      const file = files[0];
+      if (file) void importFile(file);
+    },
+    onDropPaths: handleDroppedPaths,
+  });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -384,7 +345,8 @@ export function AgentImportDialog({
               aria-busy={preparing}
               className={cn(
                 "flex min-h-56 flex-col items-center justify-center gap-4 rounded-md border border-dashed border-border bg-muted/40 px-6 text-center",
-                isDragOver && "border-ring bg-muted/70",
+                (isDragOver || isAttachmentDragOver) &&
+                  "border-ring bg-muted/70",
               )}
             >
               <p className="text-sm">
