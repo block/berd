@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::services::distro_bundle::DistroBundle;
 
@@ -14,6 +15,9 @@ const AGENTS_DIR_NAME: &str = "agents";
 const MARKER_FILE_NAME: &str = ".berd-bundled-agents.json";
 const LEGACY_MARKER_FILE_NAME: &str = ".goose-internal-bundled-agents.json";
 static INSTALL_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+const LEGACY_AGT_BUILDER_FILE_NAME: &str = "agt-builder.md";
+const LEGACY_AGT_BUILDER_FILE_SHA256: &str =
+    "15ac706dd4b14dced6368572f4f2f0b3e42d0263cafb5ec199e71cd034b14a9d";
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct SeedBundledAgentsResult {
@@ -245,6 +249,25 @@ fn seed_bundled_agents_from_dir(
     })
 }
 
+fn has_known_legacy_agt_builder_contents(path: &Path) -> Result<bool, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|err| format!("Failed to inspect legacy agent '{}': {err}", path.display()))?;
+    if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    let contents = fs::read(path)
+        .map_err(|err| format!("Failed to read legacy agent '{}': {err}", path.display()))?;
+    let digest = format!("{:x}", Sha256::digest(contents));
+    Ok(digest == LEGACY_AGT_BUILDER_FILE_SHA256)
+}
+
+fn is_known_legacy_agt_builder(path: &Path) -> Result<bool, String> {
+    if path.file_name().and_then(|name| name.to_str()) != Some(LEGACY_AGT_BUILDER_FILE_NAME) {
+        return Ok(false);
+    }
+    has_known_legacy_agt_builder_contents(path)
+}
+
 fn should_install_agent(
     source: &Path,
     target: &Path,
@@ -252,6 +275,9 @@ fn should_install_agent(
 ) -> Result<bool, String> {
     if !target.exists() {
         return Ok(!was_previously_seeded);
+    }
+    if is_known_legacy_agt_builder(target)? {
+        return Ok(true);
     }
     if !was_previously_seeded {
         return Ok(false);
@@ -333,7 +359,8 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
     if !matches!(
         installed_agent_path_state(target)?,
         InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled
-    ) {
+    ) && !is_known_legacy_agt_builder(target)?
+    {
         return Err(format!(
             "Cannot install bundled agent over user-owned file '{}'",
             target.display()
@@ -372,6 +399,7 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
         })?;
         match installed_agent_path_state(target)? {
             InstalledAgentPathState::Missing | InstalledAgentPathState::Bundled => {}
+            InstalledAgentPathState::UserOwned if is_known_legacy_agt_builder(target)? => {}
             InstalledAgentPathState::UserOwned => {
                 return Err(format!(
                     "Cannot install bundled agent over user-owned file '{}'",
@@ -385,7 +413,8 @@ fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
                 source.display(),
                 target.display()
             )
-        })
+        })?;
+        Ok(())
     })();
     if install_result.is_err() {
         let _ = fs::remove_file(&temp_path);
@@ -586,6 +615,74 @@ mod tests {
         assert!(!target.path().join("builderbot.md").exists());
         assert!(target.path().join(MARKER_FILE_NAME).exists());
         assert!(!target.path().join(LEGACY_MARKER_FILE_NAME).exists());
+    }
+
+    #[test]
+    fn production_signature_recognizes_the_historical_agt_builder() {
+        let target = tempdir().unwrap();
+        let path = target.path().join(LEGACY_AGT_BUILDER_FILE_NAME);
+        fs::write(
+            &path,
+            include_str!("../../test-fixtures/legacy-agt-builder.md"),
+        )
+        .unwrap();
+
+        assert!(is_known_legacy_agt_builder(&path).unwrap());
+    }
+
+    #[test]
+    fn replaces_exact_legacy_agt_builder_directly() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        let bundled = "---\nname: Agt. Builder\ndescription: Current\nmetadata:\n  berdBundled: true\n---\nCurrent instructions.";
+        fs::write(source.path().join(LEGACY_AGT_BUILDER_FILE_NAME), bundled).unwrap();
+        fs::write(
+            target.path().join(LEGACY_AGT_BUILDER_FILE_NAME),
+            include_str!("../../test-fixtures/legacy-agt-builder.md"),
+        )
+        .unwrap();
+
+        let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(result.seeded_count, 1);
+        assert_eq!(
+            fs::read_to_string(target.path().join(LEGACY_AGT_BUILDER_FILE_NAME)).unwrap(),
+            bundled
+        );
+    }
+
+    #[test]
+    fn preserves_a_legacy_agt_builder_with_a_custom_avatar() {
+        let target = tempdir().unwrap();
+        let path = target.path().join(LEGACY_AGT_BUILDER_FILE_NAME);
+        let fixture = include_str!("../../test-fixtures/legacy-agt-builder.md");
+        fs::write(
+            &path,
+            fixture.replacen("data:image/png;base64,", "data:image/png;base64,CUSTOM", 1),
+        )
+        .unwrap();
+
+        assert!(!is_known_legacy_agt_builder(&path).unwrap());
+    }
+
+    #[test]
+    fn preserves_a_legacy_agt_builder_with_different_line_endings() {
+        let target = tempdir().unwrap();
+        let path = target.path().join(LEGACY_AGT_BUILDER_FILE_NAME);
+        let fixture = include_str!("../../test-fixtures/legacy-agt-builder.md");
+        fs::write(&path, fixture.replace('\n', "\r\n")).unwrap();
+
+        assert!(!is_known_legacy_agt_builder(&path).unwrap());
+    }
+
+    #[test]
+    fn preserves_a_modified_legacy_agt_builder() {
+        let target = tempdir().unwrap();
+        let path = target.path().join(LEGACY_AGT_BUILDER_FILE_NAME);
+        let fixture = include_str!("../../test-fixtures/legacy-agt-builder.md");
+        fs::write(&path, fixture.replacen("name:", "# user note\nname:", 1)).unwrap();
+
+        assert!(!is_known_legacy_agt_builder(&path).unwrap());
     }
 
     #[test]

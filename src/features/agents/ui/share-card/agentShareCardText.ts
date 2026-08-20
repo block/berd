@@ -1,3 +1,5 @@
+import { segmentGraphemes } from "@/shared/lib/graphemeCount";
+
 function segmentWithIntl(
   value: string,
   locale: string,
@@ -12,10 +14,7 @@ function segmentWithIntl(
 }
 
 export function segmentCardGraphemes(value: string, locale = "en"): string[] {
-  return (
-    segmentWithIntl(value, locale, "grapheme")?.map(({ segment }) => segment) ??
-    Array.from(value)
-  );
+  return segmentGraphemes(value, locale);
 }
 
 /** Returns locale-aware word runs while allowing no-space scripts to wrap. */

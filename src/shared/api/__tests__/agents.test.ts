@@ -194,7 +194,7 @@ describe("agents API", () => {
     mockedInvoke.mockResolvedValue({
       fileName: "blueprint-boi.md",
       fileContents:
-        "---\nname: blueprint-boi\ndisplay_name: Blueprint Bandit\ndescription: Plans carefully.\nmodel: goose:goose-claude-fable-5\navatar: app-avatar:gloopies-14\n---\n\nPlan before building.\n",
+        "---\nname: blueprint-boi\ndisplay_name: Blueprint Bandit\ndescription: Plans carefully.\nmodel: goose:goose-claude-fable-5\navatar: app-avatar:gloopies-14\ngood_for: practical plans\nvibes: thoughtful, precise\n---\n\nPlan before building.\n",
     });
 
     const { listPersonas } = await import("../agents");
@@ -207,6 +207,8 @@ describe("agents API", () => {
       id: sourcePath,
       displayName: "Blueprint Bandit",
       sourceDescription: "Plans carefully.",
+      goodFor: "practical plans",
+      vibes: "thoughtful, precise",
       systemPrompt: "Plan before building.",
       provider: "goose",
       model: "goose-claude-fable-5",
@@ -894,6 +896,56 @@ describe("agents API", () => {
     expect(result.contents).not.toContain("avatar:");
   });
 
+  it("exports direct share-card metadata for round trips", async () => {
+    mockGooseSourcesList.mockResolvedValue({
+      sources: [
+        {
+          ...agentSource,
+          properties: {
+            ...agentSource.properties,
+            good_for: "finding answers",
+            vibes: "curious, thorough",
+          },
+        },
+      ],
+    });
+
+    const { exportPersona } = await import("../agents");
+    const result = await exportPersona(agentSource.path);
+
+    expect(result.contents).toContain("good_for: finding answers\n");
+    expect(result.contents).toContain("vibes: curious, thorough\n");
+  });
+
+  it("keeps direct card metadata precedence over stale Sprout values", async () => {
+    mockGooseSourcesList.mockResolvedValue({
+      sources: [
+        {
+          ...agentSource,
+          properties: {
+            ...agentSource.properties,
+            good_for: "direct work",
+            vibes: "direct vibes",
+            sprout: {
+              frontmatter: {
+                good_for: "stale work",
+                vibes: "stale vibes",
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    const { exportPersona } = await import("../agents");
+    const result = await exportPersona(agentSource.path);
+
+    expect(result.contents).toContain("good_for: direct work\n");
+    expect(result.contents).toContain("vibes: direct vibes\n");
+    expect(result.contents).not.toContain("stale work");
+    expect(result.contents).not.toContain("stale vibes");
+  });
+
   it("exports preserved Sprout frontmatter from imported persona markdown", async () => {
     mockGooseSourcesList.mockResolvedValue({
       sources: [
@@ -930,6 +982,67 @@ describe("agents API", () => {
     });
   });
 
+  it("previews real share-card metadata from persona markdown", async () => {
+    const { previewPersonaImport } = await import("../agents");
+
+    expect(
+      previewPersonaImport(
+        `---\nname: builder\ndisplay_name: Builder\ndescription: Builds useful things.\ngood_for: making what you need\nvibes: hands-on, resourceful\n---\n\nBuild carefully.`,
+        "builder.md",
+      ),
+    ).toMatchObject({
+      displayName: "Builder",
+      description: "Builds useful things.",
+      goodFor: "making what you need",
+      vibes: "hands-on, resourceful",
+      systemPrompt: "Build carefully.",
+    });
+  });
+
+  it("previews native agent JSON card metadata without exposing instructions", async () => {
+    const { previewPersonaImport } = await import("../agents");
+    const preview = previewPersonaImport(
+      JSON.stringify({
+        type: "agent",
+        name: "Scout",
+        description: "Finds the answer you need.",
+        content: "Private detailed instructions.",
+        properties: {
+          good_for: "finding answers",
+          vibes: "curious, thorough",
+        },
+      }),
+      "scout.agent.json",
+    );
+
+    expect(preview).toMatchObject({
+      description: "Finds the answer you need.",
+      goodFor: "finding answers",
+      vibes: "curious, thorough",
+    });
+  });
+
+  it("uses a short import-preview fallback instead of exposing instructions", async () => {
+    const { previewPersonaImport } = await import("../agents");
+    const preview = previewPersonaImport(
+      "---\nname: scout\ndescription: Agent\n---\n\nPrivate detailed instructions.",
+      "scout.md",
+    );
+
+    expect(preview.description).toBeUndefined();
+  });
+
+  it("drops overlong imported card metadata at ingestion", async () => {
+    const { previewPersonaImport } = await import("../agents");
+    const preview = previewPersonaImport(
+      `---\nname: builder\ndescription: Agent\ngood_for: ${"😀".repeat(45)}\nvibes: ${"😀".repeat(33)}\n---\n\nBuild carefully.`,
+      "builder.md",
+    );
+
+    expect(preview.goodFor).toBeUndefined();
+    expect(preview.vibes).toBeUndefined();
+  });
+
   it("does not expose remote avatar URLs in pre-consent previews", async () => {
     const { previewPersonaImport } = await import("../agents");
     const remoteAvatar = "https://attacker.example/track.png";
@@ -960,6 +1073,7 @@ describe("agents API", () => {
       version: 1,
       displayName: "Scout",
       systemPrompt: "Research carefully.",
+      description: "Finds relevant evidence.",
       provider: "openai",
       model: "gpt-4.1",
       avatar: { type: "url", value: "https://example.test/scout.png" },
@@ -970,7 +1084,7 @@ describe("agents API", () => {
     expect(mockGooseSourcesCreate).toHaveBeenCalledWith({
       type: "agent",
       name: "Scout",
-      description: "Agent",
+      description: "Finds relevant evidence.",
       content: "Research carefully.",
       target: { scope: "global" },
       properties: {
@@ -1262,6 +1376,66 @@ Research carefully.
       target: { scope: "global" },
     });
     expect(mockGooseSourcesCreate).not.toHaveBeenCalled();
+  });
+
+  it("drops overlong native agent card metadata before import", async () => {
+    mockGooseSourcesImport.mockResolvedValue({ sources: [agentSource] });
+    const { importPersonas } = await import("../agents");
+    await importPersonas(
+      JSON.stringify({
+        version: 1,
+        type: "agent",
+        name: "Scout",
+        description: "Agent",
+        content: "Research carefully.",
+        properties: {
+          good_for: "😀".repeat(45),
+          vibes: "😀".repeat(33),
+          color: "blue",
+        },
+      }),
+      "scout.agent.json",
+    );
+
+    const importRequest = mockGooseSourcesImport.mock.calls[0]?.[0] as {
+      data: string;
+    };
+    expect(JSON.parse(importRequest.data).properties).toEqual({
+      color: "blue",
+    });
+  });
+
+  it("promotes valid native metadata frontmatter card copy", async () => {
+    mockGooseSourcesImport.mockResolvedValue({ sources: [agentSource] });
+    const { importPersonas } = await import("../agents");
+    await importPersonas(
+      JSON.stringify({
+        version: 1,
+        type: "agent",
+        name: "Scout",
+        description: "Agent",
+        content: "Research carefully.",
+        metadata: {
+          frontmatter: {
+            good_for: "finding answers",
+            vibes: "curious, thorough",
+            tags: ["research"],
+          },
+        },
+      }),
+      "scout.agent.json",
+    );
+
+    const importRequest = mockGooseSourcesImport.mock.calls[0]?.[0] as {
+      data: string;
+    };
+    expect(JSON.parse(importRequest.data)).toMatchObject({
+      properties: {
+        good_for: "finding answers",
+        vibes: "curious, thorough",
+      },
+      metadata: { frontmatter: { tags: ["research"] } },
+    });
   });
 
   it("preserves native agent JSON app avatar refs when ACP import omits them", async () => {

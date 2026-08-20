@@ -211,9 +211,15 @@ export function AgentShareDialog({
   // decoded. Cached animation/poster resolution may continue independently.
   const cardReady = Boolean(avatarSrc && avatarReadySrc === avatarSrc);
   const cardBase = getAgentShareCardBase(persona.id);
-  const description = getAgentShareDescription(persona);
   const locale = i18n?.resolvedLanguage ?? i18n?.language ?? "en";
-  const cardCopy = resolveAgentShareCardCopy(description, t);
+  const description = getAgentShareDescription(
+    persona,
+    t("share.descriptionFallback", { name: persona.displayName }),
+  );
+  const cardCopy = resolveAgentShareCardCopy(persona.systemPrompt, t, {
+    goodFor: persona.goodFor,
+    vibes: persona.vibes,
+  });
   const cardContentIdentity = [
     locale,
     persona.id,
@@ -221,6 +227,9 @@ export function AgentShareDialog({
     persona.displayName,
     persona.systemPrompt,
     persona.sourceDescription,
+    description,
+    persona.goodFor,
+    persona.vibes,
   ].join("\0");
 
   useEffect(() => {
@@ -305,6 +314,7 @@ export function AgentShareDialog({
           cardBase,
           cardCopy,
           locale,
+          description,
         );
         if (operationGeneration !== cardOperationGenerationRef.current) return;
         const embeddedAvatar = await avatarSourceToDataUrl(cardAvatarSrc);
@@ -419,6 +429,7 @@ export function AgentShareDialog({
       cardCopy,
       cardBase,
       currentGeneratedAvatarPoster,
+      description,
       locale,
       persona,
       t,

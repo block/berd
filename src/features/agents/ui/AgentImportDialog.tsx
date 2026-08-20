@@ -266,7 +266,12 @@ export function AgentImportDialog({
                   <AgentShareCardPreview
                     identity={prepared.preview.identity}
                     displayName={prepared.preview.displayName}
-                    description={prepared.preview.systemPrompt}
+                    description={
+                      prepared.preview.description ??
+                      t("importDialog.descriptionFallback", {
+                        name: prepared.preview.displayName,
+                      })
+                    }
                     avatarSrc={prepared.preview.avatar}
                     alt={t("importDialog.previewAlt", {
                       name: prepared.preview.displayName,
@@ -274,6 +279,10 @@ export function AgentImportDialog({
                     copy={resolveAgentShareCardCopy(
                       prepared.preview.systemPrompt,
                       t,
+                      {
+                        goodFor: prepared.preview.goodFor,
+                        vibes: prepared.preview.vibes,
+                      },
                     )}
                     locale={locale}
                   />

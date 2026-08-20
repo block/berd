@@ -163,6 +163,7 @@
     "cardDownloaded": "Se descargó {{filename}}",
     "cardDownloadFailed": "No se pudo crear la tarjeta. Inténtalo de nuevo.",
     "loadingCard": "Cargando tarjeta",
+    "descriptionFallback": "{{name}} ayuda con tareas específicas.",
     "avatarUnavailable": "Avatar no disponible",
     "cardLabels": {
       "goodFor": "Ideal para:",
@@ -276,6 +277,7 @@
     "preparing": "Abriendo el archivo del agente…",
     "openFinder": "Abrir Finder",
     "previewAlt": "Vista previa de {{name}}",
+    "descriptionFallback": "{{name}} está listo para ayudar.",
     "import": "Importar agente"
   }
 }

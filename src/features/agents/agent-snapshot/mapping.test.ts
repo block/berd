@@ -123,6 +123,8 @@ describe("snapshot mappings", () => {
       profile: {
         displayName: "Builder",
         about: null,
+        goodFor: null,
+        vibes: null,
         avatarDataUrl: null,
         avatarUrl: null,
       },
@@ -130,6 +132,87 @@ describe("snapshot mappings", () => {
     expect(JSON.stringify(exported)).not.toMatch(
       /private-id|apiKey|\/usr\/bin|createdAt|sourceProperties|memory/,
     );
+  });
+
+  it.each([
+    "Agent",
+    "Draft",
+    "  agent  ",
+  ])("does not export placeholder description %j", (sourceDescription) => {
+    expect(
+      personaToSnapshot(persona({ sourceDescription })).profile?.about,
+    ).toBeNull();
+  });
+
+  it("round-trips the reviewed public description", () => {
+    const exported = personaToSnapshot(
+      persona({ sourceDescription: "Builds useful things." }),
+    );
+    expect(snapshotToCreatePersonaRequest(exported).description).toBe(
+      "Builds useful things.",
+    );
+  });
+
+  it("bounds public descriptions by grapheme without failing export", () => {
+    const description = "😀".repeat(120);
+    const exported = personaToSnapshot(
+      persona({ sourceDescription: description }),
+    );
+    expect(exported.profile?.about).toBe("😀".repeat(110));
+    expect(snapshotToCreatePersonaRequest(exported).description).toBe(
+      "😀".repeat(110),
+    );
+  });
+
+  it("accepts long v1 descriptions and bounds the imported presentation copy", () => {
+    const value = snapshot({
+      profile: {
+        displayName: "Display name",
+        about: "a".repeat(200),
+      },
+    });
+    expect(snapshotToCreatePersonaRequest(value).description).toBe(
+      "a".repeat(110),
+    );
+  });
+
+  it("round-trips grapheme-bounded Unicode share-card metadata", () => {
+    const goodFor = "👨‍👩‍👧‍👦".repeat(44);
+    const vibes = "😀".repeat(32);
+    const exported = personaToSnapshot(persona({ goodFor, vibes }));
+    expect(snapshotToCreatePersonaRequest(exported)).toMatchObject({
+      goodFor,
+      vibes,
+    });
+  });
+
+  it.each([
+    [{ legacy: true }, ["calm"]],
+    ["x".repeat(4_097), "y".repeat(4_097)],
+    ["😀".repeat(45), "😀".repeat(33)],
+  ])("ignores incompatible v1 card metadata without rejecting the snapshot", (goodFor, vibes) => {
+    const value = snapshot({
+      profile: {
+        displayName: "Display name",
+        goodFor: goodFor as string,
+        vibes: vibes as string,
+      },
+    });
+
+    expect(snapshotToCreatePersonaRequest(value)).not.toMatchObject({
+      goodFor: expect.anything(),
+      vibes: expect.anything(),
+    });
+  });
+
+  it("round-trips short share-card metadata", () => {
+    const exported = personaToSnapshot(
+      persona({ goodFor: "building useful tools", vibes: "sharp, practical" }),
+    );
+    expect(snapshotToCreatePersonaRequest(exported)).toMatchObject({
+      goodFor: "building useful tools",
+      vibes: "sharp, practical",
+    });
   });
 
   it("exports safe URL and data URL avatars only", () => {

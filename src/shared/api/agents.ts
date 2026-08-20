@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { SourceEntry, SourceScope } from "@aaif/goose-sdk";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { getClient } from "@/shared/api/acpConnection";
+import { graphemeCount } from "@/shared/lib/graphemeCount";
 import type {
   Persona,
   CreatePersonaRequest,
@@ -35,6 +36,8 @@ const PORTABLE_SPROUT_FRONTMATTER_KEYS = new Set([
   "description",
   "model",
   "avatar",
+  "good_for",
+  "vibes",
 ]);
 
 // The API layer requires a non-empty description on every source, so a
@@ -119,6 +122,10 @@ function propertyToString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function trimmedPropertyString(value: unknown): string | undefined {
+  return propertyToString(value)?.trim() || undefined;
+}
+
 function propertyToRecord(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
@@ -136,6 +143,8 @@ function personaProperties(
     properties.modelProviderId = request.modelProviderId;
   }
   if (request.model) properties.model = request.model;
+  if (request.goodFor) properties.good_for = request.goodFor;
+  if (request.vibes) properties.vibes = request.vibes;
 
   const avatar = avatarToProperty(request.avatar);
   if (avatar) properties.avatar = avatar;
@@ -269,6 +278,31 @@ function sproutFrontmatterFromProperties(
   return propertyToRecord(sprout?.frontmatter) ?? {};
 }
 
+const AGENT_CARD_METADATA_LIMITS = { good_for: 44, vibes: 32 } as const;
+
+function normalizedAgentCardMetadata(
+  value: unknown,
+  key: keyof typeof AGENT_CARD_METADATA_LIMITS,
+): string | undefined {
+  const trimmed = trimmedPropertyString(value);
+  return trimmed && graphemeCount(trimmed) <= AGENT_CARD_METADATA_LIMITS[key]
+    ? trimmed
+    : undefined;
+}
+
+function agentCardMetadataProperty(
+  properties: AgentSourceProperties | undefined,
+  key: keyof typeof AGENT_CARD_METADATA_LIMITS,
+): string | undefined {
+  return (
+    normalizedAgentCardMetadata(properties?.[key], key) ??
+    normalizedAgentCardMetadata(
+      sproutFrontmatterFromProperties(properties)[key],
+      key,
+    )
+  );
+}
+
 function serializePersonaMarkdown(source: AgentSourceEntry): ExportResult {
   const properties = source.properties;
   const name = personaExportName(source);
@@ -289,6 +323,11 @@ function serializePersonaMarkdown(source: AgentSourceEntry): ExportResult {
   const avatar = normalizeAvatarUrl(properties?.avatar);
   if (avatar) {
     frontmatter.avatar = avatar;
+  }
+
+  for (const key of ["good_for", "vibes"] as const) {
+    const value = agentCardMetadataProperty(properties, key);
+    if (value) frontmatter[key] = value;
   }
 
   Object.assign(
@@ -462,7 +501,11 @@ function legacyPersonaToCreateRequest(parsed: Record<string, unknown>) {
   return {
     type: AGENT_SOURCE_TYPE,
     name: parsed.displayName as string,
-    description: AGENT_DESCRIPTION,
+    description: hasRealAgentDescription(
+      trimmedPropertyString(parsed.description),
+    )
+      ? (trimmedPropertyString(parsed.description) as string)
+      : AGENT_DESCRIPTION,
     content: parsed.systemPrompt as string,
     target: { scope: "global" } as const,
     properties: legacyPersonaProperties(parsed),
@@ -480,6 +523,24 @@ function sanitizedNativeAgentImport(parsed: Record<string, unknown>): {
     ? { ...properties }
     : {};
   const sanitizedMetadata = metadata ? { ...metadata } : undefined;
+  const metadataFrontmatter = propertyToRecord(metadata?.frontmatter);
+  for (const key of ["good_for", "vibes"] as const) {
+    const value =
+      normalizedAgentCardMetadata(sanitizedProperties[key], key) ??
+      normalizedAgentCardMetadata(metadataFrontmatter?.[key], key);
+    if (value) sanitizedProperties[key] = value;
+    else delete sanitizedProperties[key];
+    if (metadataFrontmatter && key in metadataFrontmatter) {
+      delete metadataFrontmatter[key];
+    }
+  }
+  if (sanitizedMetadata && metadataFrontmatter) {
+    if (hasEntries(metadataFrontmatter)) {
+      sanitizedMetadata.frontmatter = metadataFrontmatter;
+    } else {
+      delete sanitizedMetadata.frontmatter;
+    }
+  }
   const avatar =
     legacyAvatarToProperty(properties?.avatar) ??
     legacyAvatarToProperty(metadata?.avatar) ??
@@ -498,8 +559,10 @@ function sanitizedNativeAgentImport(parsed: Record<string, unknown>): {
     sanitizedProperties.avatar = avatar;
   }
 
-  if (properties || avatar) {
+  if (hasEntries(sanitizedProperties)) {
     sanitized.properties = sanitizedProperties;
+  } else {
+    delete sanitized.properties;
   }
   if (sanitizedMetadata) {
     sanitized.metadata = sanitizedMetadata;
@@ -519,6 +582,10 @@ function personaMarkdownProperties(
   if (model) {
     applyPersonaModelProperty(properties, model);
   }
+  const goodFor = normalizedAgentCardMetadata(parsed.good_for, "good_for");
+  const vibes = normalizedAgentCardMetadata(parsed.vibes, "vibes");
+  if (goodFor) properties.good_for = goodFor;
+  if (vibes) properties.vibes = vibes;
   applyOptionalProperty(
     properties,
     "avatar",
@@ -634,6 +701,12 @@ export function agentSourceToPersona(source: AgentSourceEntry): Persona {
     isBuiltin: !writable,
     writable,
     sourceDescription: source.description,
+    ...(agentCardMetadataProperty(source.properties, "good_for")
+      ? { goodFor: agentCardMetadataProperty(source.properties, "good_for") }
+      : {}),
+    ...(agentCardMetadataProperty(source.properties, "vibes")
+      ? { vibes: agentCardMetadataProperty(source.properties, "vibes") }
+      : {}),
     sourceProperties: source.properties ? { ...source.properties } : undefined,
   };
 }
@@ -948,10 +1021,18 @@ export async function exportPersona(id: string): Promise<ExportResult> {
 
 export interface PersonaImportPreview {
   displayName: string;
+  description?: string;
   systemPrompt: string;
+  goodFor?: string;
+  vibes?: string;
   /** Only local/data-backed media is safe to render before import consent. */
   avatar?: string;
   identity: string;
+}
+
+function previewDescription(description: unknown): string | undefined {
+  const authored = trimmedPropertyString(description);
+  return hasRealAgentDescription(authored) ? authored : undefined;
 }
 
 function previewSafeAvatar(
@@ -977,7 +1058,10 @@ export function previewPersonaImport(
     const request = personaMarkdownToCreateRequest(fileContents);
     return {
       displayName: request.name,
+      description: previewDescription(request.description),
       systemPrompt: request.content,
+      goodFor: agentCardMetadataProperty(request.properties, "good_for"),
+      vibes: agentCardMetadataProperty(request.properties, "vibes"),
       avatar: previewSafeAvatar(request.properties.avatar),
       identity: fileName,
     };
@@ -996,9 +1080,18 @@ export function previewPersonaImport(
     if (!displayName || !systemPrompt) {
       throw new Error("Agent JSON must include a name and instructions");
     }
+    const cardProperties: AgentSourceProperties = {
+      ...(properties ?? {}),
+      ...(propertyToRecord(metadata?.frontmatter) ? { sprout: metadata } : {}),
+    };
     return {
       displayName,
+      description: previewDescription(
+        parsed.description ?? metadata?.description,
+      ),
       systemPrompt,
+      goodFor: agentCardMetadataProperty(cardProperties, "good_for"),
+      vibes: agentCardMetadataProperty(cardProperties, "vibes"),
       avatar: previewSafeAvatar(
         legacyAvatarToProperty(properties?.avatar) ??
           legacyAvatarToProperty(metadata?.avatar),
@@ -1008,8 +1101,10 @@ export function previewPersonaImport(
   }
 
   validateLegacyPersonaImport(parsed);
+  const displayName = parsed.displayName as string;
   return {
-    displayName: parsed.displayName as string,
+    displayName,
+    description: previewDescription(parsed.description),
     systemPrompt: parsed.systemPrompt as string,
     avatar: previewSafeAvatar(legacyPersonaProperties(parsed).avatar),
     identity: fileName,

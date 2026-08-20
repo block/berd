@@ -22,6 +22,44 @@ function translator(locale: "en" | "es"): TFunction<"agents"> {
 }
 
 describe("resolveAgentShareCardCopy", () => {
+  it("uses real agent card metadata when provided", () => {
+    expect(
+      resolveAgentShareCardCopy("Build software", translator("en"), {
+        goodFor: "growing your cast of doers",
+        vibes: "sharp, seasoned",
+      }),
+    ).toEqual({
+      goodForLabel: "Good for:",
+      vibesLabel: "Vibes:",
+      goodFor: "growing your cast of doers",
+      vibes: "sharp, seasoned",
+    });
+  });
+
+  it("rejects overlong metadata instead of truncating it", () => {
+    expect(
+      resolveAgentShareCardCopy("Research evidence", translator("en"), {
+        goodFor: "x".repeat(45),
+        vibes: "y".repeat(33),
+      }),
+    ).toMatchObject({
+      goodFor: "finding answers",
+      vibes: "curious",
+    });
+  });
+
+  it("never renders untranslated localization keys", () => {
+    const missingTranslator = ((key: string) => key) as TFunction<"agents">;
+    expect(
+      resolveAgentShareCardCopy("unknown purpose", missingTranslator),
+    ).toEqual({
+      goodForLabel: "Good for:",
+      vibesLabel: "Vibes:",
+      goodFor: "focused work",
+      vibes: "capable, thoughtful",
+    });
+  });
+
   it("resolves one semantic trait into localized card copy", () => {
     expect(
       resolveAgentShareCardCopy("Research evidence", translator("en")),

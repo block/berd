@@ -163,6 +163,7 @@
     "cardDownloaded": "Downloaded {{filename}}",
     "cardDownloadFailed": "Couldn't create the card. Try again.",
     "loadingCard": "Loading card",
+    "descriptionFallback": "{{name}} helps with focused work.",
     "avatarUnavailable": "Avatar unavailable",
     "cardLabels": {
       "goodFor": "Good for:",
@@ -276,6 +277,7 @@
     "preparing": "Opening agent file…",
     "openFinder": "Open Finder",
     "previewAlt": "Preview of {{name}}",
+    "descriptionFallback": "{{name}} is ready to help.",
     "import": "Import agent"
   }
 }

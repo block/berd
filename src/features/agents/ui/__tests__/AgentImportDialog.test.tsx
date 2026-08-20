@@ -202,6 +202,71 @@ describe("AgentImportDialog", () => {
     expect(screen.queryByText("Stale")).not.toBeInTheDocument();
   });
 
+  it("shows authored public copy instead of private instructions", async () => {
+    const bytes = Uint8Array.from([1]);
+    const file = new File([bytes], "agent.md", { type: "text/markdown" });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(bytes.buffer),
+    });
+    render(
+      <AgentImportDialog
+        {...importDialogProps({
+          prepareImport: () => ({
+            displayName: "Scout",
+            description: "Finds relevant evidence.",
+            systemPrompt: "Never disclose customer identities.",
+            identity: "agent.md",
+          }),
+        })}
+      />,
+    );
+
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
+
+    await waitFor(() =>
+      expect(document.body.textContent).toContain("Finds relevant evidence."),
+    );
+    expect(document.body.textContent).not.toContain(
+      "Never disclose customer identities.",
+    );
+  });
+
+  it("uses a generic fallback when public import copy is absent", async () => {
+    const bytes = Uint8Array.from([1]);
+    const file = new File([bytes], "agent.md", { type: "text/markdown" });
+    Object.defineProperty(file, "arrayBuffer", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(bytes.buffer),
+    });
+    render(
+      <AgentImportDialog
+        {...importDialogProps({
+          prepareImport: () => ({
+            displayName: "Scout",
+            systemPrompt: "Never disclose customer identities.",
+            identity: "agent.md",
+          }),
+        })}
+      />,
+    );
+
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
+
+    await waitFor(() =>
+      expect(document.body.textContent).toContain(
+        "importDialog.descriptionFallback",
+      ),
+    );
+    expect(document.body.textContent).not.toContain(
+      "Never disclose customer identities.",
+    );
+  });
+
   it("tilts the rendered import card toward the pointer and resets", async () => {
     vi.spyOn(window, "matchMedia").mockReturnValue({
       matches: false,
