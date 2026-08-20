@@ -179,7 +179,10 @@ import {
 } from "@/features/providers/providerCatalog";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { getBuildFeatureState } from "@/shared/profile/buildProfile";
-import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
+import {
+  executionTargetFromGooseServeBoundary,
+  gooseServeSelectionFromExecutionTarget,
+} from "@/features/chat/lib/gooseServeExecutionTarget";
 import {
   isModelExecutionTarget,
   materializeSessionExecutionModel,
@@ -1820,11 +1823,12 @@ export function AppShell({
               // the backend session as soon as it exists.
               deferProviderSetup: false,
             },
-          ).then(({ sessionId, configOptionsSnapshot }) => {
+          ).then(({ sessionId, configOptionsSnapshot, resolvedSelection }) => {
             createdBackendSessionId = sessionId;
             return {
               sessionId,
               configOptionsSnapshot,
+              resolvedSelection,
               sessionExecutionTarget: requestedTarget,
               workingDir: resolvedWorkingDir,
             };
@@ -1834,6 +1838,7 @@ export function AppShell({
           async ({
             sessionId,
             configOptionsSnapshot,
+            resolvedSelection,
             sessionExecutionTarget,
             workingDir,
           }) => {
@@ -1847,7 +1852,24 @@ export function AppShell({
               );
               return;
             }
-            let appliedTarget = sessionExecutionTarget;
+            const creationTarget = executionTargetFromGooseServeBoundary(
+              resolvedSelection ??
+                gooseServeSelectionFromExecutionTarget(sessionExecutionTarget),
+              sessionExecutionTarget,
+            );
+            let appliedTarget = creationTarget;
+            if (
+              sameSessionExecutionTarget(
+                latestSession.executionTarget,
+                sessionExecutionTarget,
+              ) &&
+              !sameSessionExecutionTarget(
+                creationTarget,
+                sessionExecutionTarget,
+              )
+            ) {
+              replaceSessionTargetAfterDispatch(session.id, creationTarget);
+            }
             let resolvedConfigOptionsSnapshot = configOptionsSnapshot;
             const reconcileLatestDraftSelection = async () => {
               while (true) {

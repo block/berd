@@ -1296,6 +1296,7 @@ describe("acpCreateSession", () => {
         model: null,
         reasoningEffort: null,
       },
+      resolvedSelection: { providerId: "openai", modelId: "gpt-4.1" },
     });
 
     expect(mockNewSession).toHaveBeenCalledWith("/tmp/project", {
@@ -1348,6 +1349,7 @@ describe("acpCreateSession", () => {
         model: null,
         reasoningEffort: null,
       },
+      resolvedSelection: { providerId: "goose" },
     });
 
     expect(mockNewSession).toHaveBeenCalledWith("/tmp/project", {
@@ -1479,6 +1481,11 @@ describe("acpCreateSession", () => {
         },
         reasoningEffort: reasoningEffortSnapshot,
       },
+      resolvedSelection: {
+        providerId: "openai",
+        modelId: "gpt-4.1",
+        modelName: "GPT-4.1",
+      },
     });
   });
 
@@ -1505,6 +1512,11 @@ describe("acpCreateSession", () => {
         model: { modelId: "claude-fable", modelName: "Claude Fable" },
         reasoningEffort: null,
       },
+      resolvedSelection: {
+        providerId: "anthropic",
+        modelId: "claude-fable",
+        modelName: "Claude Fable",
+      },
     });
   });
 
@@ -1516,7 +1528,15 @@ describe("acpCreateSession", () => {
     mockNewSession.mockResolvedValue({ sessionId: "migrated-session" });
     const { acpCreateSession } = await import("../acp");
 
-    await acpCreateSession("goose", "/tmp/project");
+    await expect(
+      acpCreateSession("goose", "/tmp/project"),
+    ).resolves.toMatchObject({
+      sessionId: "migrated-session",
+      resolvedSelection: {
+        providerId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      },
+    });
 
     expect(mockSetProvider).toHaveBeenCalledWith(
       "migrated-session",

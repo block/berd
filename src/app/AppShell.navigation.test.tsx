@@ -3421,6 +3421,39 @@ describe("AppShell global navigation", () => {
     });
   });
 
+  it("promotes a managed provider and model resolved during draft creation", async () => {
+    mockAcpCreateSession.mockResolvedValueOnce({
+      sessionId: "created-session",
+      configOptionsSnapshot: {
+        model: { modelId: "goose-gpt-5-5", modelName: "GPT-5.5" },
+        reasoningEffort: null,
+      },
+      resolvedSelection: {
+        providerId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+        modelName: "GPT-5.5",
+      },
+    });
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("created-session"),
+      ).toMatchObject({
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+          modelId: "goose-gpt-5-5",
+          modelName: "GPT-5.5",
+        },
+      });
+    });
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
+  });
+
   it("applies the latest pending draft selection before promotion", async () => {
     const pendingSession = deferred<{ sessionId: string }>();
     const pendingPrepare = deferred<Record<string, never>>();

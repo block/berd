@@ -101,6 +101,11 @@ export function reserveAcpSessionConfiguration(
 export interface AcpCreateSessionResult {
   sessionId: string;
   configOptionsSnapshot: AcpSessionConfigSnapshots;
+  resolvedSelection: {
+    providerId: string;
+    modelId?: string;
+    modelName?: string;
+  };
 }
 
 export type AcpDuplicateSessionOptions = AcpForkSessionOptions;
@@ -540,7 +545,17 @@ export async function acpCreateSession(
         (await sessionRegistry.applySessionModel(sessionId, options.modelId)) ??
         configOptionsSnapshot;
     }
-    return { sessionId, configOptionsSnapshot };
+    const resolvedModel = configOptionsSnapshot.model;
+    return {
+      sessionId,
+      configOptionsSnapshot,
+      resolvedSelection: {
+        ...selection,
+        ...(selection.modelId && resolvedModel?.modelId === selection.modelId
+          ? { modelName: resolvedModel.modelName }
+          : {}),
+      },
+    };
   } catch (error) {
     rollbackSessionRegistration?.();
     try {

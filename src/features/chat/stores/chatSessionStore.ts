@@ -34,12 +34,14 @@ import {
   removePersistedChatWorkspaceMetadata,
 } from "./workspaceAttachmentPersistence";
 import {
-  materializeSessionExecutionModel,
   normalizeSessionExecutionTarget,
   sameSessionExecutionTarget,
   type SessionExecutionTarget,
 } from "@/features/chat/lib/sessionExecutionTarget";
-import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
+import {
+  executionTargetFromGooseServeBoundary,
+  gooseServeSelectionFromExecutionTarget,
+} from "@/features/chat/lib/gooseServeExecutionTarget";
 
 const RIGHT_RAIL_OPEN_STORAGE_KEY = "goose:right-rail-open";
 const LEGACY_CONTEXT_PANEL_OPEN_STORAGE_KEY = "goose:context-panel-open";
@@ -513,29 +515,23 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     );
     const providerId = gooseServeSelection.providerId ?? "goose";
     const requestedModelId = requestedExecutionTarget.modelId;
-    const { sessionId, configOptionsSnapshot } = await acpCreateSession(
-      providerId,
-      opts.workingDir,
-      {
+    const { sessionId, configOptionsSnapshot, resolvedSelection } =
+      await acpCreateSession(providerId, opts.workingDir, {
         personaId: opts.personaId,
         modelId: requestedModelId,
         projectId: opts.projectId,
         deferProviderSetup: opts.deferProviderSetup ?? requestedModelId == null,
-      },
-    );
+      });
     logReasoningEffortInfo("createSession acp resolved", {
       sessionId: shortLogId(sessionId),
       providerId,
       modelId: requestedModelId ?? null,
       hasReasoningEffort: Boolean(configOptionsSnapshot?.reasoningEffort),
     });
-    const executionTarget =
-      !requestedModelId && configOptionsSnapshot?.model
-        ? (materializeSessionExecutionModel(
-            requestedExecutionTarget,
-            configOptionsSnapshot.model,
-          ) ?? requestedExecutionTarget)
-        : requestedExecutionTarget;
+    const executionTarget = executionTargetFromGooseServeBoundary(
+      resolvedSelection ?? gooseServeSelection,
+      requestedExecutionTarget,
+    );
     const chatSession: ChatSession = withWorkspaceBackfill({
       id: sessionId,
       title: opts.title ?? DEFAULT_CHAT_TITLE,
