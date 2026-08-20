@@ -933,9 +933,19 @@ export function MessageTimeline({
 
   const latestVisibleMessage = visibleMessages.at(-1);
   const latestVisibleMessageId = latestVisibleMessage?.id;
+  const latestVisibleVoiceUserMessageId = visibleMessages.findLast(
+    (message) =>
+      message.role === "user" &&
+      message.metadata?.origin === "voice_conversation",
+  )?.id;
+  const lastVoiceUserAutoScrollIdRef = useRef(latestVisibleVoiceUserMessageId);
 
   useEffect(() => {
-    if (!latestVisibleMessageId || latestVisibleMessage?.role !== "user") {
+    if (
+      !latestVisibleMessageId ||
+      latestVisibleMessage?.role !== "user" ||
+      latestVisibleMessage.metadata?.origin === "voice_conversation"
+    ) {
       return;
     }
 
@@ -945,10 +955,22 @@ export function MessageTimeline({
   }, [
     clearProgrammaticFollowResumeSuppression,
     latestVisibleMessageId,
+    latestVisibleMessage?.metadata?.origin,
     latestVisibleMessage?.role,
     scrollToBottom,
     setDetachedFromLatest,
   ]);
+
+  useEffect(() => {
+    if (
+      !latestVisibleVoiceUserMessageId ||
+      lastVoiceUserAutoScrollIdRef.current === latestVisibleVoiceUserMessageId
+    ) {
+      return;
+    }
+    lastVoiceUserAutoScrollIdRef.current = latestVisibleVoiceUserMessageId;
+    scrollToBottomIfNearBottom("auto");
+  }, [latestVisibleVoiceUserMessageId, scrollToBottomIfNearBottom]);
 
   const scheduleResponseStartHint = useCallback(
     (messageId: string) => {

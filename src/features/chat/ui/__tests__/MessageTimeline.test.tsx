@@ -1481,6 +1481,90 @@ describe("MessageTimeline", () => {
     });
   });
 
+  it("follows a new voice user turn when an assistant turn remains latest", async () => {
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "Answer"),
+    ];
+    const { rerender } = renderWithProviders(
+      <MessageTimeline messages={messages} />,
+    );
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, { scrollTop: 500 });
+    const scrollTo = attachScrollTo(scroller);
+    scrollTo.mockClear();
+
+    setScrollMetrics(scroller, {
+      scrollTop: 500,
+      scrollHeight: 1200,
+      clientHeight: 500,
+    });
+    rerender(
+      <MessageTimeline
+        messages={[
+          ...messages,
+          {
+            ...message("voice-1", "user", "Spoken follow-up"),
+            metadata: {
+              userVisible: true,
+              origin: "voice_conversation",
+            },
+          },
+          message("assistant-2", "assistant", "Working"),
+        ]}
+        streamingMessageId="assistant-2"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({
+        top: 700,
+        behavior: "auto",
+      }),
+    );
+  });
+
+  it("does not follow a new voice user turn while the reader is detached", async () => {
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "Answer"),
+    ];
+    const { rerender } = renderWithProviders(
+      <MessageTimeline messages={messages} />,
+    );
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, { scrollTop: 500 });
+    const scrollTo = attachScrollTo(scroller);
+
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    scroller.scrollTop = 100;
+    fireEvent.scroll(scroller);
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+    scrollTo.mockClear();
+
+    rerender(
+      <MessageTimeline
+        messages={[
+          ...messages,
+          {
+            ...message("voice-1", "user", "Spoken follow-up"),
+            metadata: {
+              userVisible: true,
+              origin: "voice_conversation",
+            },
+          },
+          message("assistant-2", "assistant", "Working"),
+        ]}
+        streamingMessageId="assistant-2"
+      />,
+    );
+
+    await waitFor(() => expect(scroller.scrollTop).toBe(100));
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
   it("keeps manual position stable and shows Jump when resize leaves latest behind", () => {
     const animationFrame = mockRequestAnimationFrame();
     const messages = [

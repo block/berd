@@ -2435,6 +2435,24 @@ function VirtualMessageTimelineSession({
   }, [stableMessageByRowId, stableRows]);
   const latestMessage = latestMessageEntry?.message;
   const latestMessageId = latestMessageEntry?.messageId;
+  const latestVoiceUserMessageId = useMemo(() => {
+    for (let index = stableRows.length - 1; index >= 0; index -= 1) {
+      const row = stableRows[index];
+      if (!row?.messageId || !isMessageTurnRow(row)) {
+        continue;
+      }
+
+      const message = stableMessageByRowId.get(row.rowId);
+      if (
+        message?.role === "user" &&
+        message.metadata?.origin === "voice_conversation"
+      ) {
+        return row.messageId;
+      }
+    }
+    return null;
+  }, [stableMessageByRowId, stableRows]);
+  const lastVoiceUserAutoScrollIdRef = useRef(latestVoiceUserMessageId);
   const latestAssistantMessageEntry = useMemo(() => {
     for (let index = stableRows.length - 1; index >= 0; index -= 1) {
       const row = stableRows[index];
@@ -2909,7 +2927,11 @@ function VirtualMessageTimelineSession({
   }, [pulsingMessageId]);
 
   useEffect(() => {
-    if (!latestMessageId || latestMessage?.role !== "user") {
+    if (
+      !latestMessageId ||
+      latestMessage?.role !== "user" ||
+      latestMessage.metadata?.origin === "voice_conversation"
+    ) {
       return;
     }
 
@@ -2925,11 +2947,23 @@ function VirtualMessageTimelineSession({
   }, [
     clearProgrammaticFollowResumeSuppression,
     latestMessageId,
+    latestMessage?.metadata?.origin,
     latestMessage?.role,
     sessionId,
     scrollToBottom,
     setDetachedFromLatest,
   ]);
+
+  useEffect(() => {
+    if (
+      !latestVoiceUserMessageId ||
+      lastVoiceUserAutoScrollIdRef.current === latestVoiceUserMessageId
+    ) {
+      return;
+    }
+    lastVoiceUserAutoScrollIdRef.current = latestVoiceUserMessageId;
+    scrollToBottomIfNearBottom("auto");
+  }, [latestVoiceUserMessageId, scrollToBottomIfNearBottom]);
 
   const requestMcpAppAutoScroll = useCallback(
     (element: HTMLElement | null) => {

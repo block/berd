@@ -1789,6 +1789,103 @@ describe("VirtualMessageTimeline", () => {
     await waitFor(() => expect(scroller.scrollTop).toBe(detachedScrollTop));
   });
 
+  it("follows a new voice user turn when an assistant turn remains latest", async () => {
+    mockTranscriptElementMeasurements();
+    const messages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage(
+        "assistant-1",
+        "assistant",
+        `${longText("history", 80)}\n[height:900]`,
+      ),
+    ];
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    const scrollTo = attachScrollTo(scroller);
+    setScrollMetrics(scroller, {
+      scrollTop: 700,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+    scrollTo.mockClear();
+
+    setScrollMetrics(scroller, {
+      scrollTop: 700,
+      scrollHeight: 1200,
+      clientHeight: 300,
+    });
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          ...messages,
+          textMessage("voice-1", "user", "Spoken follow-up", {
+            userVisible: true,
+            origin: "voice_conversation",
+          }),
+          textMessage("assistant-2", "assistant", "Working"),
+        ]}
+        streamingMessageId="assistant-2"
+      />,
+    );
+
+    await waitFor(() => expect(scroller.scrollTop).toBeGreaterThan(700));
+  });
+
+  it("does not follow a new voice user turn while the reader is detached", async () => {
+    mockTranscriptElementMeasurements();
+    const messages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage(
+        "assistant-1",
+        "assistant",
+        `${longText("history", 80)}\n[height:900]`,
+      ),
+    ];
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    const scrollTo = attachScrollTo(scroller);
+    setScrollMetrics(scroller, {
+      scrollTop: 700,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+
+    fireEvent.wheel(scroller, { deltaY: -300 });
+    setScrollMetrics(scroller, {
+      scrollTop: 200,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+    scrollTo.mockClear();
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          ...messages,
+          textMessage("voice-1", "user", "Spoken follow-up", {
+            userVisible: true,
+            origin: "voice_conversation",
+          }),
+        ]}
+      />,
+    );
+
+    await waitFor(() => expect(scroller.scrollTop).toBe(200));
+    expect(scrollTo).not.toHaveBeenCalled();
+  });
+
   it("keeps following latest after an intent-less upward scroll correction", async () => {
     const messages = [
       textMessage("user-1", "user", "Question"),
