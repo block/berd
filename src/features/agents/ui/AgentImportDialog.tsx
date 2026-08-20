@@ -275,10 +275,15 @@ export function AgentImportDialog({
     },
     [onImportError, startPreparation, validateReplacementFile],
   );
-  const { isAttachmentDragOver } = useAttachmentDropTarget({
-    disabled: !open || preparing,
+  const {
+    isAttachmentDragOver,
+    handleDragEnter,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+  } = useAttachmentDropTarget({
+    disabled: !open,
     targetRef: dropZoneRef,
-    bindTargetEvents: true,
     onDropFiles: (files) => {
       const file = files[0];
       if (file) void importFile(file);
@@ -347,6 +352,10 @@ export function AgentImportDialog({
           ) : (
             <div
               ref={dropZoneRef}
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
               role="status"
               aria-busy={preparing}
               className={cn(
