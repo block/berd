@@ -3592,7 +3592,7 @@ export function AppShell({
         await useVoiceConversationStore.getState().init();
         const voiceBeforeArchive = useVoiceConversationStore.getState().status;
         if (
-          cleanupPolicy === "reject" &&
+          cleanupPolicy !== "confirm" &&
           voiceBeforeArchive.sessionId === sessionId &&
           voiceBeforeArchive.lifecycle !== "stopped" &&
           voiceBeforeArchive.lifecycle !== "unavailable"
@@ -3674,6 +3674,19 @@ export function AppShell({
           return {
             ok: false as const,
             reason: "blocked_unsaved_changes" as const,
+          };
+        }
+        await useVoiceConversationStore.getState().init();
+        const voiceBeforeMutation = useVoiceConversationStore.getState().status;
+        if (
+          cleanupPolicy !== "confirm" &&
+          voiceBeforeMutation.sessionId === sessionId &&
+          voiceBeforeMutation.lifecycle !== "stopped" &&
+          voiceBeforeMutation.lifecycle !== "unavailable"
+        ) {
+          return {
+            ok: false as const,
+            reason: "target_session_running" as const,
           };
         }
 

@@ -2513,7 +2513,10 @@ describe("AppShell global navigation", () => {
     expect(gitMocks.removeWorktree).not.toHaveBeenCalled();
   });
 
-  it("does not auto-archive a background voice session", async () => {
+  it.each([
+    "reject",
+    "discard",
+  ] as const)("does not use the %s archive policy on a background voice session", async (cleanupPolicy) => {
     const stopVoiceConversation = vi.fn().mockResolvedValue(undefined);
     useChatSessionStore.setState({
       sessions: [makeManagedWorktreeSession("background-voice")],
@@ -2534,7 +2537,7 @@ describe("AppShell global navigation", () => {
 
     const outcome = await getAppNavigationController().archiveSession(
       "session-1",
-      "reject",
+      cleanupPolicy,
     );
 
     expect(outcome).toEqual({
@@ -2543,6 +2546,45 @@ describe("AppShell global navigation", () => {
     });
     expect(mockAcpArchiveSession).not.toHaveBeenCalled();
     expect(stopVoiceConversation).not.toHaveBeenCalled();
+  });
+
+  it("rechecks background voice immediately before auto-archive", async () => {
+    const inspection = deferred<GitState>();
+    mockPathExists.mockResolvedValue(true);
+    gitMocks.getGitState.mockReturnValue(inspection.promise);
+    useChatSessionStore.setState({
+      sessions: [makeManagedWorktreeSession("voice-starts-during-inspection")],
+    });
+    renderAppShell();
+
+    const outcome = getAppNavigationController().archiveSession(
+      "session-1",
+      "reject",
+    );
+    await waitFor(() => {
+      expect(gitMocks.getGitState).toHaveBeenCalled();
+    });
+
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+    });
+    inspection.resolve(
+      managedWorktreeGitState("voice-starts-during-inspection"),
+    );
+
+    await expect(outcome).resolves.toEqual({
+      ok: false,
+      reason: "target_session_running",
+    });
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
   });
 
   it("rechecks running state before noninteractive archival", async () => {
