@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import type {
   ChatInputSendHandler,
@@ -510,6 +510,7 @@ export function useVoiceConversationController({
   const clearRequestedStart = useVoiceConversationStore(
     (state) => state.clearRequestedStart,
   );
+  const previousPocketReady = useRef(pocketReady);
 
   useEffect(
     () =>
@@ -537,6 +538,18 @@ export function useVoiceConversationController({
       addErrorNotification(sessionId, errorText(initError));
     });
   }, [enabled, init, isGooseSession, sessionId]);
+
+  useEffect(() => {
+    const becameReady = pocketReady && !previousPocketReady.current;
+    previousPocketReady.current = pocketReady;
+    if (!becameReady || !enabled || !isGooseSession) return;
+
+    // Installing the models changes native availability without a voice
+    // lifecycle event. Refresh it before consuming a pending start request.
+    void init().catch((initError) => {
+      addErrorNotification(sessionId, errorText(initError));
+    });
+  }, [enabled, init, isGooseSession, pocketReady, sessionId]);
 
   useEffect(() => {
     if (enabled && isGooseSession) ensureVoiceEventDeliveryInitialized();

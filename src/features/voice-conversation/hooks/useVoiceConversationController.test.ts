@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
@@ -14,6 +15,7 @@ import {
   shouldStartRequestedVoiceConversation,
   shouldStopVoiceWhenRouteUnmounts,
   startPendingTranscriptRecovery,
+  useVoiceConversationController,
   waitForVoiceDeliveryOpportunity,
 } from "./useVoiceConversationController";
 
@@ -265,6 +267,65 @@ describe("voice transcript delivery coordination", () => {
         routeReady: false,
       }),
     ).toBe(false);
+  });
+
+  it("starts a first-run request after Pocket installation refreshes availability", async () => {
+    const init = vi.fn().mockResolvedValue(undefined);
+    const start = vi.fn().mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      lifecycle: "starting" as const,
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      revision: 1,
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: false,
+        unavailableReason: "Download Pocket TTS.",
+        lifecycle: "unavailable",
+        sessionId: null,
+        ownerWindowLabel: null,
+        revision: 0,
+      },
+      hydrated: true,
+      init,
+      start,
+      requestedStartSessionId: "session-1",
+    });
+
+    const options = {
+      sessionId: "session-1",
+      onSend: vi.fn().mockResolvedValue(true),
+      enabled: true,
+      isGooseSession: true,
+      onPocketSetupRequired: vi.fn(),
+    };
+    const { rerender } = renderHook(
+      ({ pocketReady }) =>
+        useVoiceConversationController({ ...options, pocketReady }),
+      { initialProps: { pocketReady: false } },
+    );
+
+    await waitFor(() => expect(init).toHaveBeenCalledTimes(1));
+    rerender({ pocketReady: true });
+    await waitFor(() => expect(init).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      useVoiceConversationStore.setState((state) => ({
+        status: {
+          ...state.status,
+          available: true,
+          unavailableReason: null,
+          lifecycle: "stopped",
+        },
+      }));
+    });
+
+    await waitFor(() => expect(start).toHaveBeenCalledWith("session-1"));
+    expect(
+      useVoiceConversationStore.getState().requestedStartSessionId,
+    ).toBeNull();
   });
 
   it("does not let navigation steal an active voice session route", () => {
