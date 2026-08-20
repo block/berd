@@ -13,7 +13,9 @@ import {
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
+import { Alert, AlertDescription } from "@/shared/ui/alert";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
+import { BerdLoaderInline } from "@/shared/ui/berd-loader-inline";
 import { Button } from "@/shared/ui/button";
 import { CanvasNavButton } from "@/shared/ui/canvas-nav-button";
 import { Spinner } from "@/shared/ui/spinner";
@@ -139,7 +141,7 @@ interface AvatarCollectionOverlayProps {
   /** Collection to open with; null starts at the collections level. */
   initialCollectionId?: string | null;
   /** Receives the full persisted ref (`app-avatar:<id>` or `user-avatar:<id>`). */
-  onSelectAvatar: (avatarRef: string) => void;
+  onSelectAvatar: (avatarRef: string) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -179,6 +181,8 @@ export function AvatarCollectionOverlay({
   );
   const [pendingAvatarRef, setPendingAvatarRef] = useState<string | null>(null);
   const [hoveredAvatarRef, setHoveredAvatarRef] = useState<string | null>(null);
+  const [selectionPending, setSelectionPending] = useState(false);
+  const [selectionFailed, setSelectionFailed] = useState(false);
   const [closing, setClosing] = useState(false);
   // Where the funnel exit collapses to (viewport px); null = plain fade.
   const [exitTarget, setExitTarget] = useState<{
@@ -398,7 +402,7 @@ export function AvatarCollectionOverlay({
   );
 
   const onConfirmSelect = useCallback(() => {
-    if (!pendingAvatarRef || closing) {
+    if (!pendingAvatarRef || closing || selectionPending) {
       return;
     }
     const pendingRef = collection?.entries.find(
@@ -407,14 +411,28 @@ export function AvatarCollectionOverlay({
     if (!pendingRef) {
       return;
     }
-    // The chosen avatar lands on the rail's preview; funnel toward it.
-    closeWithAnimation(() => onSelectAvatar(pendingRef), "funnel");
+    setSelectionPending(true);
+    setSelectionFailed(false);
+    void Promise.resolve(onSelectAvatar(pendingRef))
+      .then(() => {
+        // The chosen avatar lands on the rail's preview; funnel toward it only
+        // after persistence succeeds so a failed save keeps retry context.
+        closeWithAnimation(onClose, "funnel");
+      })
+      .catch(() => {
+        setSelectionFailed(true);
+      })
+      .finally(() => {
+        setSelectionPending(false);
+      });
   }, [
     closing,
     closeWithAnimation,
     collection,
+    onClose,
     onSelectAvatar,
     pendingAvatarRef,
+    selectionPending,
   ]);
 
   const hoverHandlers = useCallback(
@@ -503,6 +521,8 @@ export function AvatarCollectionOverlay({
               <Button
                 type="button"
                 variant="primary"
+                feedbackState={selectionPending ? "loading" : "idle"}
+                loadingLabel={t("editor.avatarLoading")}
                 disabled={closing}
                 onClick={onConfirmSelect}
               >
@@ -522,6 +542,7 @@ export function AvatarCollectionOverlay({
       pendingAvatarRef,
       readyIds,
       registerTileNode,
+      selectionPending,
       t,
     ],
   );
@@ -701,6 +722,37 @@ export function AvatarCollectionOverlay({
               ) : null}
             </div>
           </div>
+
+          {library.loading && !library.catalog ? (
+            <div
+              className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm text-muted-foreground"
+              role="status"
+              aria-live="polite"
+            >
+              <BerdLoaderInline
+                size={56}
+                decorative
+                className="text-foreground"
+              />
+              <span>{t("editor.avatarLoading")}</span>
+            </div>
+          ) : null}
+
+          {selectionFailed ? (
+            <Alert className="absolute bottom-6 left-1/2 z-10 w-auto max-w-[calc(100%_-_3rem)] -translate-x-1/2">
+              <AlertDescription className="grid-cols-[1fr_auto] items-center gap-3">
+                <span>{t("builderRail.saveError")}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onConfirmSelect}
+                >
+                  {t("builderRail.retrySave")}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : null}
 
           {/* Navigation chrome, per design feedback (Berd-Updates 704-3688):
             one black icon-only circle in the top-right corner. An arrow when

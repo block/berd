@@ -206,7 +206,6 @@ export function AgentBuilderRail({
   const onSelectAvatar = useCallback(
     (selectedAvatarRef: string) => {
       writeProperty("avatar", selectedAvatarRef);
-      setAvatarPanel("closed");
     },
     [writeProperty],
   );
