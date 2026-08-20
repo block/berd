@@ -60,7 +60,6 @@ function visibleTextAfterTtsDeliveryNotices(text: string): string | null {
 function sanitizeTtsDeliveryReplayArtifact(message: Message): Message | null {
   if (
     message.role !== "user" ||
-    message.metadata?.origin !== "voice_conversation" ||
     message.content.some((content) => content.type !== "text")
   ) {
     return message;
