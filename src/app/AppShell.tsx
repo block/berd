@@ -224,6 +224,7 @@ import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { OnboardingFlow } from "@/features/onboarding/ui/OnboardingFlow";
 import { useOnboardingState } from "@/features/onboarding/model";
 import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
+import { listenToVoiceConversationOpenSession } from "@/features/voice-conversation/api/voiceConversation";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
 import { PocketVoiceSetupDialog } from "@/features/voice-conversation/ui/PocketVoiceSetupDialog";
@@ -362,25 +363,6 @@ function getSessionArchiveInterruptionReason(
 
 type GlobalComposerPlacement = "docked" | "centered" | "handoff";
 
-export function shouldStopVoiceConversationOnSessionChange({
-  previousSessionId,
-  nextSessionId,
-  boundSessionId,
-  lifecycle,
-}: {
-  previousSessionId: string | null;
-  nextSessionId: string | null;
-  boundSessionId: string | null;
-  lifecycle: string;
-}): boolean {
-  return (
-    previousSessionId !== null &&
-    previousSessionId !== nextSessionId &&
-    boundSessionId === previousSessionId &&
-    lifecycle !== "stopped" &&
-    lifecycle !== "unavailable"
-  );
-}
 const current = (id: string, label: string): TopBarBreadcrumb => ({
   id,
   label,
@@ -764,18 +746,7 @@ export function AppShell({
     ) {
       voice.clearRequestedStart(previousSessionId);
     }
-    if (
-      !shouldStopVoiceConversationOnSessionChange({
-        previousSessionId,
-        nextSessionId: activeSessionId,
-        boundSessionId: voice.status.sessionId,
-        lifecycle: voice.status.lifecycle,
-      })
-    ) {
-      return;
-    }
-    void stopVoiceConversation().catch(() => undefined);
-  }, [activeSessionId, stopVoiceConversation]);
+  }, [activeSessionId]);
   const sidebarIsResizing = isResizing;
   const sidebarDockedPanelOuterWidth = sidebarPanelOuterWidth;
   const sidebarDockedOuterWidth = sidebarCollapsed ? 0 : sidebarPanelOuterWidth;
@@ -3894,6 +3865,31 @@ export function AppShell({
     },
     [activeView, guardAppNavigation, isMultiWindowEnabled, selectSessionDirect],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void listenToVoiceConversationOpenSession((sessionId) => {
+      const voice = useVoiceConversationStore.getState().status;
+      if (voice.lifecycle === "running" && voice.sessionId === sessionId) {
+        handleSelectSession(sessionId);
+      }
+    })
+      .then((cleanup) => {
+        if (cancelled) cleanup();
+        else unlisten = cleanup;
+      })
+      .catch((error) => {
+        console.error(
+          "Failed to listen for voice session open requests:",
+          error,
+        );
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [handleSelectSession]);
 
   const handleSelectSearchResult = useCallback(
     (sessionId: string, messageId?: string, query?: string) => {

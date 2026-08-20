@@ -48,6 +48,7 @@ function status(
     lifecycle,
     sessionId,
     ownerWindowLabel: lifecycle === "running" ? "main" : null,
+    microphoneMuted: false,
     revision,
   };
 }

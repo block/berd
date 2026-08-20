@@ -29,6 +29,7 @@ import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import { dispatchOnboarding } from "@/features/onboarding/model";
 import {
   resetHomeWidgetStoreForTests,
@@ -60,7 +61,6 @@ import {
 import {
   AppShell,
   shouldStopVoiceConversationOnExperimentChange,
-  shouldStopVoiceConversationOnSessionChange,
 } from "./AppShell";
 import type { NavigationPanesViewProps } from "@/app/views/NavigationPanesView";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
@@ -872,46 +872,6 @@ describe("AppShell global navigation", () => {
     ).toBe(false);
   });
 
-  it("stops voice only when navigation leaves its bound chat", () => {
-    const base = {
-      previousSessionId: "session-1",
-      boundSessionId: "session-1",
-      lifecycle: "running",
-    };
-
-    expect(
-      shouldStopVoiceConversationOnSessionChange({
-        ...base,
-        nextSessionId: "session-2",
-      }),
-    ).toBe(true);
-    expect(
-      shouldStopVoiceConversationOnSessionChange({
-        ...base,
-        nextSessionId: null,
-      }),
-    ).toBe(true);
-    expect(
-      shouldStopVoiceConversationOnSessionChange({
-        ...base,
-        nextSessionId: "session-1",
-      }),
-    ).toBe(false);
-    expect(
-      shouldStopVoiceConversationOnSessionChange({
-        ...base,
-        nextSessionId: "session-2",
-        boundSessionId: "session-elsewhere",
-      }),
-    ).toBe(false);
-    expect(
-      shouldStopVoiceConversationOnSessionChange({
-        ...base,
-        nextSessionId: "session-2",
-        lifecycle: "stopped",
-      }),
-    ).toBe(false);
-  });
   afterEach(cleanup);
 
   beforeEach(() => {
@@ -5546,6 +5506,7 @@ describe("AppShell global navigation", () => {
 
   it("cycles sessions with Ctrl+Tab and Ctrl+Shift+Tab", async () => {
     const user = userEvent.setup();
+    const stopVoiceConversation = vi.fn();
     const sessionBase = {
       executionTarget: { harnessId: "goose" },
       workingDir: "~/goose artifacts",
@@ -5568,6 +5529,18 @@ describe("AppShell global navigation", () => {
         },
       ] as ChatSession[],
       activeSessionId: null,
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      stop: stopVoiceConversation,
     });
 
     renderAppShell();
@@ -5601,5 +5574,6 @@ describe("AppShell global navigation", () => {
     expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
       "session-1",
     );
+    expect(stopVoiceConversation).not.toHaveBeenCalled();
   });
 });

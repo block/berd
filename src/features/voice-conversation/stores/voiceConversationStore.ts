@@ -35,6 +35,7 @@ export const VOICE_CONVERSATION_OFF_STATUS: VoiceConversationStatus = {
   lifecycle: "stopped",
   sessionId: null,
   ownerWindowLabel: null,
+  microphoneMuted: false,
   revision: 0,
 };
 
@@ -255,7 +256,8 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                     : uiStateForStatus(status),
                 microphoneMuted: applyHydratedMute
                   ? status.lifecycle === "running"
-                    ? (status.nativeMicrophoneMuted ?? false)
+                    ? status.microphoneMuted ||
+                      (status.nativeMicrophoneMuted ?? false)
                     : false
                   : state.microphoneMuted,
                 hydrated: true,
@@ -267,10 +269,12 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   ...state.status,
                   available: status.available,
                   unavailableReason: status.unavailableReason,
+                  microphoneMuted: status.microphoneMuted,
                 },
                 microphoneMuted: applyHydratedMute
                   ? status.lifecycle === "running"
-                    ? (status.nativeMicrophoneMuted ?? false)
+                    ? status.microphoneMuted ||
+                      (status.nativeMicrophoneMuted ?? false)
                     : false
                   : state.microphoneMuted,
                 hydrated: true,
@@ -321,6 +325,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                     lifecycle: "running" as const,
                     sessionId: event.sessionId,
                     ownerWindowLabel: event.ownerWindowLabel,
+                    microphoneMuted: false,
                     revision: event.revision,
                     nativeMicrophoneMuteControl:
                       event.nativeMicrophoneMuteControl,
@@ -328,6 +333,24 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   uiState: "listening",
                   error: null,
                 };
+              case "microphoneMute": {
+                const nextState = {
+                  ...state,
+                  microphoneMuted: event.muted,
+                  userSpeaking: event.muted ? false : state.userSpeaking,
+                  status: {
+                    ...state.status,
+                    lifecycle: "running" as const,
+                    sessionId: event.sessionId,
+                    microphoneMuted: event.muted,
+                    revision: event.revision,
+                  },
+                };
+                return {
+                  ...nextState,
+                  uiState: activityUiState(nextState),
+                };
+              }
               case "user":
                 return {
                   ...state,
@@ -397,6 +420,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                     lifecycle: "stopped",
                     sessionId: null,
                     ownerWindowLabel: null,
+                    microphoneMuted: false,
                     revision: event.revision,
                     nativeMicrophoneMuteControl: false,
                   },
@@ -416,6 +440,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                         lifecycle: "stopped",
                         sessionId: null,
                         ownerWindowLabel: null,
+                        microphoneMuted: false,
                         revision: event.revision,
                         nativeMicrophoneMuteControl: false,
                       }
@@ -543,6 +568,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             ? {
                 status,
                 uiState: uiStateForStatus(status),
+                microphoneMuted: status.microphoneMuted,
                 error: null,
               }
             : state,

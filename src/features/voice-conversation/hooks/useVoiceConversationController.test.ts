@@ -18,14 +18,12 @@ vi.mock("../lib/nativeAssistantSpeech", () => ({
 import {
   canBindVoiceSendRoute,
   canClaimVoiceSendRoute,
-  createVoiceRouteMountRegistry,
   createVoiceTranscriptDeliveryQueue,
   hasDeliveredVoiceTranscript,
   resetVoiceUiWhenRunSettles,
   resolveVoiceRouteMount,
   resolveVoiceToggleAction,
   shouldStartRequestedVoiceConversation,
-  shouldStopVoiceWhenRouteUnmounts,
   startPendingTranscriptRecovery,
   useVoiceConversationController,
   waitForVoiceDeliveryOpportunity,
@@ -68,6 +66,7 @@ describe("voice transcript delivery coordination", () => {
         lifecycle: "running",
         sessionId: "session-1",
         ownerWindowLabel: "main",
+        microphoneMuted: false,
         revision: 3,
       },
       uiState: "agent-working",
@@ -143,6 +142,7 @@ describe("voice transcript delivery coordination", () => {
         lifecycle: "stopped",
         sessionId: null,
         ownerWindowLabel: null,
+        microphoneMuted: false,
         revision: 4,
       },
     });
@@ -292,6 +292,7 @@ describe("voice transcript delivery coordination", () => {
       lifecycle: "starting" as const,
       sessionId: "session-1",
       ownerWindowLabel: "main",
+      microphoneMuted: false,
       revision: 1,
     });
     useVoiceConversationStore.setState({
@@ -301,6 +302,7 @@ describe("voice transcript delivery coordination", () => {
         lifecycle: "unavailable",
         sessionId: null,
         ownerWindowLabel: null,
+        microphoneMuted: false,
         revision: 0,
       },
       hydrated: true,
@@ -352,77 +354,6 @@ describe("voice transcript delivery coordination", () => {
     );
     expect(canClaimVoiceSendRoute(null, "session-1", "session-2")).toBe(false);
     expect(canClaimVoiceSendRoute(null, null, "session-2")).toBe(true);
-  });
-
-  it("stops only after the final view for the bound chat unmounts", () => {
-    const scheduled: Array<() => void> = [];
-    const registry = createVoiceRouteMountRegistry((callback) =>
-      scheduled.push(callback),
-    );
-    const onLastUnmount = vi.fn();
-    const unregisterFirst = registry.register("session-1", onLastUnmount);
-    const unregisterSecond = registry.register("session-1", onLastUnmount);
-
-    unregisterFirst();
-    scheduled.splice(0).forEach((callback) => {
-      callback();
-    });
-    expect(onLastUnmount).not.toHaveBeenCalled();
-
-    unregisterSecond();
-    const remounted = registry.register("session-1", onLastUnmount);
-    scheduled.splice(0).forEach((callback) => {
-      callback();
-    });
-    expect(onLastUnmount).not.toHaveBeenCalled();
-
-    remounted();
-    scheduled.splice(0).forEach((callback) => {
-      callback();
-    });
-    expect(onLastUnmount).toHaveBeenCalledOnce();
-  });
-
-  it("stops a starting or running voice lifecycle when its chat disappears", () => {
-    expect(
-      shouldStopVoiceWhenRouteUnmounts(
-        {
-          available: true,
-          unavailableReason: null,
-          lifecycle: "running",
-          sessionId: "session-1",
-          ownerWindowLabel: "main",
-          revision: 3,
-        },
-        "session-1",
-      ),
-    ).toBe(true);
-    expect(
-      shouldStopVoiceWhenRouteUnmounts(
-        {
-          available: true,
-          unavailableReason: null,
-          lifecycle: "starting",
-          sessionId: "session-1",
-          ownerWindowLabel: "main",
-          revision: 3,
-        },
-        "session-1",
-      ),
-    ).toBe(true);
-    expect(
-      shouldStopVoiceWhenRouteUnmounts(
-        {
-          available: true,
-          unavailableReason: null,
-          lifecycle: "running",
-          sessionId: "session-1",
-          ownerWindowLabel: "main",
-          revision: 3,
-        },
-        "session-2",
-      ),
-    ).toBe(false);
   });
 
   it("drains retained transcripts without stealing a stopped session route", () => {

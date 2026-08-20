@@ -52,6 +52,8 @@ pub mod telemetry;
 pub mod terminal;
 pub mod updates;
 pub mod voice_capture;
+#[cfg(target_os = "macos")]
+pub mod voice_menu_bar;
 pub mod whoami;
 pub mod window_session;
 pub mod workspace_context;

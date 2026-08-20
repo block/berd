@@ -684,6 +684,8 @@ pub fn open_session_window(
                 .state::<crate::commands::native_voice::NativeVoiceState>()
                 .stop_for_window_destroyed(&label_for_close);
             if stopped_native_voice {
+                #[cfg(target_os = "macos")]
+                crate::commands::voice_menu_bar::remove(&app_for_close);
                 app_for_close
                     .state::<crate::commands::pocket_voice::PocketVoiceState>()
                     .stop_for_window_destroyed();

@@ -16,7 +16,6 @@ import {
   stopNativeAssistantSpeech,
   takeVoicePlaybackNotices,
 } from "../lib/nativeAssistantSpeech";
-import type { VoiceConversationStatus } from "../api/voiceConversation";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -29,45 +28,6 @@ interface VoiceSendRoute {
 let activeSendRoute: VoiceSendRoute | null = null;
 let deliveryInitialized = false;
 let operationInFlight = false;
-
-export function createVoiceRouteMountRegistry(
-  schedule: (callback: () => void) => void = queueMicrotask,
-) {
-  const mountsBySession = new Map<string, Set<symbol>>();
-  return {
-    register(sessionId: string, onLastUnmount: () => void): () => void {
-      const token = Symbol(sessionId);
-      const mounts = mountsBySession.get(sessionId) ?? new Set<symbol>();
-      mounts.add(token);
-      mountsBySession.set(sessionId, mounts);
-
-      return () => {
-        const currentMounts = mountsBySession.get(sessionId);
-        currentMounts?.delete(token);
-        if (currentMounts?.size === 0) mountsBySession.delete(sessionId);
-
-        // React development mode may immediately remount the same view. Defer
-        // the ownership check so that remount can reclaim the session first.
-        schedule(() => {
-          if (!mountsBySession.has(sessionId)) onLastUnmount();
-        });
-      };
-    },
-  };
-}
-
-const voiceRouteMountRegistry = createVoiceRouteMountRegistry();
-
-export function shouldStopVoiceWhenRouteUnmounts(
-  status: VoiceConversationStatus,
-  unmountedSessionId: string,
-): boolean {
-  return (
-    status.sessionId === unmountedSessionId &&
-    status.lifecycle !== "stopped" &&
-    status.lifecycle !== "unavailable"
-  );
-}
 
 export function createVoiceTranscriptDeliveryQueue() {
   const queues = new Map<string, Promise<void>>();
@@ -511,26 +471,6 @@ export function useVoiceConversationController({
     (state) => state.clearRequestedStart,
   );
   const previousPocketReady = useRef(pocketReady);
-
-  useEffect(
-    () =>
-      voiceRouteMountRegistry.register(sessionId, () => {
-        const voice = useVoiceConversationStore.getState();
-        if (!shouldStopVoiceWhenRouteUnmounts(voice.status, sessionId)) return;
-
-        void voice
-          .stop()
-          .catch((stopError) => {
-            addErrorNotification(sessionId, errorText(stopError));
-          })
-          .finally(() => {
-            if (activeSendRoute?.sessionId === sessionId) {
-              activeSendRoute = null;
-            }
-          });
-      }),
-    [sessionId],
-  );
 
   useEffect(() => {
     if (!enabled || !isGooseSession) return;

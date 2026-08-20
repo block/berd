@@ -384,6 +384,7 @@ pub fn run() {
                 set_dev_dock_icon();
                 refresh_traffic_light_position_on_window_changes(app);
                 attach_main_window_lifecycle(app);
+                app.on_menu_event(commands::voice_menu_bar::handle_menu_event);
 
                 let app_menu = SubmenuBuilder::new(app, "Berd")
                     .about_with_text(
@@ -640,6 +641,7 @@ pub fn run() {
             commands::siri_voice::finish_siri_voice_stream,
             commands::siri_voice::stop_siri_voice,
             commands::native_voice::get_native_voice_conversation_status,
+            commands::native_voice::set_native_voice_microphone_muted,
             commands::native_voice::drain_native_voice_conversation_transcripts,
             commands::native_voice::acknowledge_native_voice_conversation_transcript,
             commands::native_voice::reject_native_voice_conversation_transcript,

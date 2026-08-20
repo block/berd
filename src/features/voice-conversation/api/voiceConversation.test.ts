@@ -67,6 +67,7 @@ describe("voice conversation API", () => {
       lifecycle: "running",
       sessionId: "session-1",
       ownerWindowLabel: "main",
+      microphoneMuted: false,
       revision: 3,
     } as const;
     mocks.invoke
@@ -132,6 +133,7 @@ describe("voice conversation API", () => {
       lifecycle: "running",
       sessionId: "session-1",
       ownerWindowLabel: "main",
+      microphoneMuted: false,
       revision: 3,
     } as const;
     mocks.invoke.mockResolvedValue(status);
@@ -150,6 +152,7 @@ describe("voice conversation API", () => {
       lifecycle: "running",
       sessionId: "session-1",
       ownerWindowLabel: "main",
+      microphoneMuted: false,
       revision: 3,
     } as const;
 
@@ -187,6 +190,7 @@ describe("voice conversation API", () => {
       lifecycle: "running",
       sessionId: "session-1",
       ownerWindowLabel: "session-window",
+      microphoneMuted: false,
       revision: 3,
     } as const;
 
@@ -202,19 +206,30 @@ describe("voice conversation API", () => {
       lifecycle: "running",
       sessionId: "session-1",
       ownerWindowLabel: "main",
+      microphoneMuted: false,
       revision: 3,
     } as const;
 
     await reconcileVoiceConversationMicrophone(status);
     await setVoiceConversationMicrophoneMuted(true, status);
-    await reconcileVoiceConversationMicrophone(status);
+    await reconcileVoiceConversationMicrophone({
+      ...status,
+      microphoneMuted: true,
+    });
     await setVoiceConversationMicrophoneMuted(false, status);
 
     expect(mocks.startMicrophone).toHaveBeenCalledOnce();
     expect(mocks.stopMicrophone).not.toHaveBeenCalled();
-    expect(mocks.setMicrophoneMuted).toHaveBeenCalledWith(true);
-    expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(false);
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(mocks.setMicrophoneMuted.mock.calls).toEqual([
+      [false],
+      [true],
+      [true],
+      [false],
+    ]);
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["set_native_voice_microphone_muted", { muted: true }],
+      ["set_native_voice_microphone_muted", { muted: false }],
+    ]);
   });
 
   it("routes UI mute through macOS while keeping browser capture in sync", async () => {
@@ -384,6 +399,7 @@ describe("voice conversation API", () => {
       lifecycle: "running",
       sessionId: "session-1",
       ownerWindowLabel: "main",
+      microphoneMuted: false,
       revision: 3,
     } as const;
 

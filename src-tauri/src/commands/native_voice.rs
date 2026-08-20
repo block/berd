@@ -48,6 +48,7 @@ pub struct NativeVoiceStatus {
     lifecycle: Lifecycle,
     session_id: Option<String>,
     owner_window_label: Option<String>,
+    microphone_muted: bool,
     revision: u64,
     native_microphone_mute_control: bool,
     native_microphone_muted: bool,
@@ -103,6 +104,11 @@ enum NativeVoiceEvent {
         muted: bool,
         revision: u64,
     },
+    MicrophoneMute {
+        session_id: String,
+        muted: bool,
+        revision: u64,
+    },
     CleanShutdown {
         session_id: String,
         revision: u64,
@@ -137,6 +143,7 @@ pub struct NativeVoiceState {
     capture_suppressions: Arc<AtomicUsize>,
     input_muted: Arc<AtomicBool>,
     input_mute_epoch: Arc<AtomicU64>,
+    microphone_muted: Arc<AtomicBool>,
 }
 
 #[must_use = "capture suppression ends when the guard is dropped"]
@@ -169,6 +176,54 @@ impl NativeVoiceState {
 
     fn capture_is_suppressed(&self) -> bool {
         self.capture_suppressions.load(Ordering::SeqCst) > 0
+    }
+
+    pub fn microphone_is_muted(&self) -> bool {
+        self.microphone_muted.load(Ordering::SeqCst)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn active_session_target(&self) -> Option<(String, String)> {
+        let runtime = self.runtime.lock().ok()?;
+        Some((
+            runtime.session_id.clone()?,
+            runtime.owner.as_ref()?.window_label.clone(),
+        ))
+    }
+
+    pub fn set_microphone_muted(&self, app: &AppHandle, muted: bool) -> Result<(), String> {
+        let (session_id, owner_window_label, revision) = {
+            let runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| "native voice state lock was poisoned".to_string())?;
+            let session_id = runtime
+                .session_id
+                .clone()
+                .ok_or_else(|| "No native voice conversation is active.".to_string())?;
+            let owner_window_label = runtime
+                .owner
+                .as_ref()
+                .map(|owner| owner.window_label.clone())
+                .ok_or_else(|| "The native voice conversation has no owning window.".to_string())?;
+            (session_id, owner_window_label, runtime.revision)
+        };
+        self.microphone_muted.store(muted, Ordering::SeqCst);
+        #[cfg(target_os = "macos")]
+        if let Err(error) = super::voice_menu_bar::set_muted(app, muted) {
+            log::warn!("Failed to update the voice menu bar mute state: {error}");
+        }
+        if let Some(window) = app.get_webview_window(&owner_window_label) {
+            let _ = window.emit(
+                EVENT_NAME,
+                NativeVoiceEvent::MicrophoneMute {
+                    session_id,
+                    muted,
+                    revision,
+                },
+            );
+        }
+        Ok(())
     }
 }
 
@@ -333,6 +388,7 @@ fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
             .owner
             .as_ref()
             .map(|owner| owner.window_label.clone()),
+        microphone_muted: state.microphone_is_muted(),
         revision: runtime.revision,
         native_microphone_mute_control: runtime.native_microphone_mute_control,
         native_microphone_muted: runtime.session_id.is_some()
@@ -499,12 +555,18 @@ pub async fn start_native_voice_conversation(
                     },
                 );
             });
+        state.microphone_muted.store(false, Ordering::SeqCst);
         (
             runtime.revision,
             runtime.lifecycle_id.clone().unwrap_or_default(),
             runtime.native_microphone_mute_control,
         )
     };
+    #[cfg(target_os = "macos")]
+    if let Err(error) = super::voice_menu_bar::install(&app, false) {
+        state.stop_active(&app, &capture).await?;
+        return Err(format!("Could not install the voice menu bar: {error}"));
+    }
     let _ = webview_window.emit(
         EVENT_NAME,
         NativeVoiceEvent::Startup {
@@ -521,6 +583,7 @@ pub async fn start_native_voice_conversation(
     let runtime = Arc::clone(&state.runtime);
     let pending = Arc::clone(&state.pending);
     let input_muted = Arc::clone(&state.input_muted);
+    let event_state = state.inner().clone();
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
             let active = runtime.lock().ok().is_some_and(|current| {
@@ -604,6 +667,9 @@ pub async fn start_native_voice_conversation(
                     if let Some(pipeline) = pipeline {
                         shutdown_pipeline(pipeline).await;
                     }
+                    event_state.microphone_muted.store(false, Ordering::SeqCst);
+                    #[cfg(target_os = "macos")]
+                    super::voice_menu_bar::remove(&event_app);
                     event_app
                         .state::<VoiceCaptureState>()
                         .release_owner(&window_label, &owner_id);
@@ -625,6 +691,16 @@ pub async fn start_native_voice_conversation(
 }
 
 #[tauri::command]
+pub fn set_native_voice_microphone_muted(
+    app: AppHandle,
+    state: State<'_, NativeVoiceState>,
+    muted: bool,
+) -> Result<NativeVoiceStatus, String> {
+    state.set_microphone_muted(&app, muted)?;
+    Ok(status(&app, &state))
+}
+
+#[tauri::command]
 pub async fn stop_native_voice_conversation(
     app: AppHandle,
     state: State<'_, NativeVoiceState>,
@@ -634,58 +710,7 @@ pub async fn stop_native_voice_conversation(
     renderer_epoch: u64,
 ) -> Result<NativeVoiceStatus, String> {
     capture.activate_renderer(webview_window.label(), &renderer_id, renderer_epoch)?;
-    let (session_id, revision, pipeline, owner) = {
-        let mut runtime = state
-            .runtime
-            .lock()
-            .map_err(|_| "native voice state lock was poisoned".to_string())?;
-        let owner = runtime.owner.clone();
-        let session_id = runtime.session_id.clone();
-        let owner_id = session_id.as_deref().map(native_owner_id);
-        let revision = runtime.revision;
-        (
-            session_id,
-            revision,
-            runtime.pipeline.take(),
-            owner.zip(owner_id),
-        )
-    };
-    // Keep the lifecycle current while the worker flushes its final buffered
-    // utterance into the durable pending queue.
-    if let Some(pipeline) = pipeline {
-        shutdown_pipeline(pipeline).await;
-    }
-    let revision = {
-        let mut runtime = state
-            .runtime
-            .lock()
-            .map_err(|_| "native voice state lock was poisoned".to_string())?;
-        if runtime.revision == revision && runtime.session_id == session_id {
-            native_input_mute::stop(&state.input_muted);
-            runtime.native_microphone_mute_control = false;
-            runtime.session_id = None;
-            runtime.lifecycle_id = None;
-            runtime.owner = None;
-            runtime.revision = runtime.revision.wrapping_add(1);
-        }
-        runtime.revision
-    };
-    if let Some((owner, owner_id)) = owner.as_ref() {
-        capture.release_owner(&owner.window_label, owner_id);
-    }
-    if let Some(session_id) = session_id {
-        let target = owner
-            .as_ref()
-            .and_then(|(owner, _)| app.get_webview_window(&owner.window_label))
-            .unwrap_or(webview_window);
-        let _ = target.emit(
-            EVENT_NAME,
-            NativeVoiceEvent::CleanShutdown {
-                session_id,
-                revision,
-            },
-        );
-    }
+    state.stop_active(&app, &capture).await?;
     Ok(status(&app, &state))
 }
 
@@ -694,6 +719,65 @@ fn native_owner_id(session_id: &str) -> String {
 }
 
 impl NativeVoiceState {
+    pub async fn stop_active(
+        &self,
+        app: &AppHandle,
+        capture: &VoiceCaptureState,
+    ) -> Result<(), String> {
+        let (session_id, revision, pipeline, owner) = {
+            let mut runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| "native voice state lock was poisoned".to_string())?;
+            let owner = runtime.owner.clone();
+            let session_id = runtime.session_id.clone();
+            let owner_id = session_id.as_deref().map(native_owner_id);
+            let revision = runtime.revision;
+            (
+                session_id,
+                revision,
+                runtime.pipeline.take(),
+                owner.zip(owner_id),
+            )
+        };
+        // Keep the lifecycle current while the worker flushes its final buffered
+        // utterance into the durable pending queue.
+        if let Some(pipeline) = pipeline {
+            shutdown_pipeline(pipeline).await;
+        }
+        let next_revision = {
+            let mut runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| "native voice state lock was poisoned".to_string())?;
+            if runtime.revision == revision && runtime.session_id == session_id {
+                runtime.session_id = None;
+                runtime.lifecycle_id = None;
+                runtime.owner = None;
+                runtime.revision = runtime.revision.wrapping_add(1);
+            }
+            runtime.revision
+        };
+        self.microphone_muted.store(false, Ordering::SeqCst);
+        #[cfg(target_os = "macos")]
+        super::voice_menu_bar::remove(app);
+        if let Some((owner, owner_id)) = owner.as_ref() {
+            capture.release_owner(&owner.window_label, owner_id);
+        }
+        if let (Some(session_id), Some((owner, _))) = (session_id, owner) {
+            if let Some(target) = app.get_webview_window(&owner.window_label) {
+                let _ = target.emit(
+                    EVENT_NAME,
+                    NativeVoiceEvent::CleanShutdown {
+                        session_id,
+                        revision: next_revision,
+                    },
+                );
+            }
+        }
+        Ok(())
+    }
+
     pub async fn stop_for_model_removal(
         &self,
         app: &AppHandle,
@@ -729,6 +813,9 @@ impl NativeVoiceState {
             }
             runtime.revision
         };
+        self.microphone_muted.store(false, Ordering::SeqCst);
+        #[cfg(target_os = "macos")]
+        super::voice_menu_bar::remove(app);
         if let (Some(owner), Some(session_id)) = (owner, session_id) {
             capture.release_owner(&owner.window_label, &native_owner_id(&session_id));
             if let Some(window) = app.get_webview_window(&owner.window_label) {
@@ -807,6 +894,7 @@ impl NativeVoiceState {
             )
         };
         drop(pipeline);
+        self.microphone_muted.store(false, Ordering::SeqCst);
         if let Ok(mut runtime) = self.runtime.lock() {
             if runtime.revision == revision && runtime.session_id == session_id {
                 runtime.session_id = None;
@@ -879,7 +967,7 @@ fn push_audio_for_window(
     {
         return Err("Only the owning window may send native voice audio.".to_string());
     }
-    if state.capture_is_suppressed() {
+    if state.capture_is_suppressed() || state.microphone_is_muted() {
         return Ok(());
     }
     if let Some(pipeline) = runtime.pipeline.as_ref() {
@@ -1361,6 +1449,11 @@ mod tests {
 
         assert!(push_audio_for_window(&state, "other-window", vec![0; 4]).is_err());
         assert!(receiver.try_recv().is_err());
+        state.microphone_muted.store(true, Ordering::SeqCst);
+        push_audio_for_window(&state, "owner-window", vec![0; 4])
+            .expect("muted owner audio is ignored");
+        assert!(receiver.try_recv().is_err());
+        state.microphone_muted.store(false, Ordering::SeqCst);
         push_audio_for_window(&state, "owner-window", vec![0; 4]).expect("owner can send audio");
         assert_eq!(
             receiver.try_recv().expect("owner audio queued").bytes,

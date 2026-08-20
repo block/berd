@@ -110,6 +110,7 @@ describe("native assistant speech stream", () => {
         lifecycle: "running",
         sessionId: "session-1",
         ownerWindowLabel: "main",
+        microphoneMuted: false,
         revision: 1,
       },
       uiState: "listening",

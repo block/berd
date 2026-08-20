@@ -58,6 +58,7 @@ async function ensureActiveMicrophone(): Promise<void> {
 export async function reconcileVoiceConversationMicrophone(
   status: VoiceConversationStatus,
 ): Promise<void> {
+  microphoneMuted = status.microphoneMuted;
   if (
     status.lifecycle === "running" &&
     status.ownerWindowLabel === getCurrentWindow().label
@@ -91,6 +92,7 @@ export async function setVoiceConversationMicrophoneMuted(
     await reconcileVoiceConversationMicrophone(status);
     if (intent !== microphoneMuteIntent) return;
     activeMicrophone?.setMuted(microphoneMuted);
+    await invoke("set_native_voice_microphone_muted", { muted });
     if (status.nativeMicrophoneMuteControl) {
       await invoke("set_native_voice_input_muted", {
         sessionId: status.sessionId,
@@ -163,6 +165,8 @@ export interface VoiceConversationStatus {
   sessionId: string | null;
   /** Trusted Tauri window allowed to attach capture and send raw PCM. */
   ownerWindowLabel: string | null;
+  /** Whether microphone samples are currently withheld from recognition. */
+  microphoneMuted: boolean;
   /** Monotonic native lifecycle revision used to reject stale responses/events. */
   revision: number;
   /** macOS owns an input session capable of receiving headset mute controls. */
@@ -206,6 +210,12 @@ export type VoiceConversationEvent =
       revision: number;
     }
   | {
+      type: "microphoneMute";
+      sessionId: string;
+      muted: boolean;
+      revision: number;
+    }
+  | {
       type: "cleanShutdown";
       sessionId: string;
       revision: number;
@@ -219,6 +229,8 @@ export type VoiceConversationEvent =
     };
 
 export const VOICE_CONVERSATION_EVENT = "voice-conversation:event";
+export const VOICE_CONVERSATION_OPEN_SESSION_EVENT =
+  "voice-conversation:open-session";
 
 export function getVoiceConversationStatus(): Promise<VoiceConversationStatus> {
   return invoke<VoiceConversationStatus>(
@@ -311,6 +323,34 @@ export function listenToVoiceConversation(
   onEvent: (event: VoiceConversationEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<VoiceConversationEvent>(VOICE_CONVERSATION_EVENT, (event) => {
+    if (
+      event.payload.type === "inputMute" ||
+      event.payload.type === "microphoneMute"
+    ) {
+      applyVoiceConversationMicrophoneMuteEvent(event.payload.muted);
+    }
+    if (
+      event.payload.type === "cleanShutdown" ||
+      (event.payload.type === "error" && event.payload.terminal)
+    ) {
+      microphoneMuted = false;
+      stopActiveMicrophone();
+    }
     onEvent(event.payload);
   });
+}
+
+export function listenToVoiceConversationOpenSession(
+  onOpen: (sessionId: string) => void,
+): Promise<UnlistenFn> {
+  const internals = window.__TAURI_INTERNALS__ as
+    | { transformCallback?: unknown }
+    | undefined;
+  if (typeof internals?.transformCallback !== "function") {
+    return Promise.resolve(() => undefined);
+  }
+  return listen<{ sessionId: string }>(
+    VOICE_CONVERSATION_OPEN_SESSION_EVENT,
+    (event) => onOpen(event.payload.sessionId),
+  );
 }
