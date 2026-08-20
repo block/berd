@@ -176,6 +176,33 @@ describe("saveDefaultProviderSelection", () => {
     expect(defaultsSave).not.toHaveBeenCalled();
   });
 
+  it("does not save a stale default after forced refresh fails", async () => {
+    const staleModel = { id: "gpt-4o", name: "gpt-4o", recommended: true };
+    const refreshProviderModels = vi.fn().mockImplementation((providerId) => {
+      useProviderModelCacheStore.setState({
+        providers: new Map([
+          [
+            providerId,
+            {
+              providerId,
+              fetchedAt: Date.now(),
+              provenModelIds: ["gpt-4o"],
+              models: [staleModel],
+              error: "offline",
+            },
+          ],
+        ]),
+      });
+    });
+    useProviderModelCacheStore.setState({ refreshProviderModels });
+
+    await expect(saveDefaultProviderSelection("openai")).rejects.toThrow(
+      "Could not prove models for provider",
+    );
+    expect(defaultsSave).not.toHaveBeenCalled();
+    expect(mockSetStoredModelPreference).not.toHaveBeenCalled();
+  });
+
   it("saves backend defaults, local goose preference, and readiness", async () => {
     const refreshProviderModels = vi.fn().mockImplementation((providerId) => {
       useProviderModelCacheStore.setState({

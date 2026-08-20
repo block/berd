@@ -750,7 +750,13 @@ export function useResolvedAgentModelPicker({
       return null;
     }
 
-    const modelsMatchingSessionId = availableModels.filter(
+    const inventoryAuthoritative =
+      executionTarget.modelProviderId != null &&
+      isModelInventoryAuthoritative(executionTarget.modelProviderId);
+    const sessionCandidates = inventoryAuthoritative
+      ? getProvenModelsForAgent(executionTarget.harnessId)
+      : availableModels;
+    const modelsMatchingSessionId = sessionCandidates.filter(
       (model) => model.id === executionTarget.modelId,
     );
     const exactProviderMatch =
@@ -775,11 +781,7 @@ export function useResolvedAgentModelPicker({
       };
     }
 
-    if (
-      isModelAlias(executionTarget.modelId) ||
-      (executionTarget.modelProviderId &&
-        isModelInventoryAuthoritative(executionTarget.modelProviderId))
-    ) {
+    if (isModelAlias(executionTarget.modelId) || inventoryAuthoritative) {
       return null;
     }
 
@@ -789,7 +791,12 @@ export function useResolvedAgentModelPicker({
       modelProviderId: executionTarget.modelProviderId,
       source: "explicit",
     };
-  }, [availableModels, isModelInventoryAuthoritative, session]);
+  }, [
+    availableModels,
+    getProvenModelsForAgent,
+    isModelInventoryAuthoritative,
+    session,
+  ]);
 
   const availableDefaultModelSelection =
     useMemo<PreferredModelSelection | null>(() => {

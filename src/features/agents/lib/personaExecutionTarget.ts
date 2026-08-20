@@ -125,7 +125,7 @@ function persistedModelProviderId(
  * Convert canonical saved agent metadata into PR #1085's runtime target.
  * An incomplete legacy target is no override; callers must leave chat state alone.
  */
-export function personaExecutionTarget(
+function resolvePersonaExecutionTargetValue(
   persona:
     | Pick<Persona, "provider" | "modelProviderId" | "model">
     | null
@@ -201,6 +201,38 @@ export function personaExecutionTarget(
     modelId,
     modelName: matchingModel?.displayName ?? matchingModel?.name ?? modelId,
   });
+}
+
+export type PersonaExecutionResolution =
+  | { status: "absent"; target?: undefined }
+  | { status: "invalid"; target?: undefined }
+  | { status: "valid"; target: SessionExecutionTarget };
+
+/** Distinguish legacy absence from saved metadata that cannot be invoked safely. */
+export function resolvePersonaExecutionTarget(
+  persona:
+    | Pick<Persona, "provider" | "modelProviderId" | "model">
+    | null
+    | undefined,
+  context: PersonaTargetContext,
+): PersonaExecutionResolution {
+  const hasSavedTarget = Boolean(
+    persona?.provider || persona?.modelProviderId || persona?.model,
+  );
+  if (!hasSavedTarget) return { status: "absent" };
+  const target = resolvePersonaExecutionTargetValue(persona, context);
+  return target ? { status: "valid", target } : { status: "invalid" };
+}
+
+export function personaExecutionTarget(
+  persona:
+    | Pick<Persona, "provider" | "modelProviderId" | "model">
+    | null
+    | undefined,
+  context: PersonaTargetContext,
+): SessionExecutionTarget | undefined {
+  const resolution = resolvePersonaExecutionTarget(persona, context);
+  return resolution.status === "valid" ? resolution.target : undefined;
 }
 
 /**

@@ -506,6 +506,35 @@ describe("useResolvedAgentModelPicker", () => {
     });
   });
 
+  it("does not accept an advisory retired model for an existing session", () => {
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        { id: "retired", name: "Retired", providerId: "openai" },
+        { id: "current", name: "Current", providerId: "openai" },
+      ],
+      getProvenModelsForAgent: () => [
+        { id: "current", name: "Current", providerId: "openai" },
+      ],
+      isModelInventoryAuthoritative: (providerId: string) =>
+        providerId === "openai",
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const session = makeSession({
+      harnessId: "goose",
+      modelProviderId: "openai",
+      modelId: "retired",
+      modelName: "Retired",
+    });
+    const { result } = renderModelPicker({ session });
+
+    expect(result.current.effectiveModelSelection?.id).not.toBe("retired");
+  });
+
   it("does not synthesize a model for an existing provider-only session", () => {
     window.localStorage.setItem(
       "goose:preferredModelsByAgent",

@@ -6,7 +6,7 @@ import { getClient } from "@/shared/api/acpConnection";
 import { notifyProviderModelInventoryInvalidated } from "../lib/providerModelInventoryEvents";
 
 const MODEL_CACHE_STORAGE_KEY = "goose:providerModelCache:v1";
-const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
+export const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const inFlightRefreshes = new Map<string, Promise<void>>();
 const queuedForceRefreshes = new Map<string, Promise<void>>();
 const providerRefreshVersions = new Map<string, number>();
@@ -17,6 +17,8 @@ export interface CachedProviderModels {
   models: ModelOption[];
   /** IDs returned by a successful live inventory response; the only proof. */
   provenModelIds?: string[];
+  /** Monotonic provenance for comparing proof with a later ACP acknowledgement. */
+  proofRevision?: number;
   fetchedAt: number;
   /** Runtime configuration policy; it does not establish model proof. */
   runtimeManaged?: boolean;
@@ -150,7 +152,9 @@ function mergeDisplayModels(
 function getProvenModels(
   entry: CachedProviderModels | undefined,
 ): ModelOption[] {
-  if (!entry?.provenModelIds) return [];
+  if (!isCachedModelInventoryAuthoritative(entry) || !entry?.provenModelIds) {
+    return [];
+  }
   const provenIds = new Set(entry.provenModelIds);
   return entry.models.filter((model) => provenIds.has(model.id));
 }
@@ -158,23 +162,31 @@ function getProvenModels(
 export function isCachedModelInventoryAuthoritative(
   entry: CachedProviderModels | undefined,
 ): boolean {
-  return entry != null && Array.isArray(entry.provenModelIds);
+  return (
+    entry != null &&
+    Array.isArray(entry.provenModelIds) &&
+    entry.error === undefined &&
+    Date.now() - entry.fetchedAt <= MODEL_CACHE_TTL_MS
+  );
 }
 
 /**
  * Return whether cached inventory still permits a concrete provider/model pair.
- * Missing or provisional inventory cannot disprove a prepared selection; a
- * successful authoritative response can.
+ * Retained successful proof can disprove a selection even after it becomes
+ * stale or a refresh fails. A later ACP acknowledgement supersedes that older
+ * negative proof for the concrete prepared session only.
  */
 export function isModelSelectionAllowedByCachedInventory(
   providerId: string,
   modelId: string,
+  acknowledgedProofRevision = 0,
 ): boolean {
   const entry = useProviderModelCacheStore.getState().providers.get(providerId);
-  if (!isCachedModelInventoryAuthoritative(entry)) {
-    return true;
-  }
-  return entry?.provenModelIds?.includes(modelId) === true;
+  if (!entry?.provenModelIds) return true;
+  if (entry.provenModelIds.includes(modelId)) return true;
+  // A proof can disprove only selections acknowledged before that proof. A
+  // newer ACP acknowledgement is stronger evidence for that exact session.
+  return proofRevision(entry) <= acknowledgedProofRevision;
 }
 
 function isStale(entry: CachedProviderModels | undefined): boolean {
@@ -184,6 +196,21 @@ function isStale(entry: CachedProviderModels | undefined): boolean {
   return Date.now() - entry.fetchedAt > MODEL_CACHE_TTL_MS;
 }
 
+function proofRevision(entry: CachedProviderModels | undefined): number {
+  return entry?.proofRevision ?? entry?.fetchedAt ?? 0;
+}
+
+function nextProofRevision(entry: CachedProviderModels | undefined): number {
+  return Math.max(Date.now(), proofRevision(entry) + 1);
+}
+
+/** Provenance of the latest successful inventory observed for a provider. */
+export function getModelInventoryProofRevision(providerId: string): number {
+  return proofRevision(
+    useProviderModelCacheStore.getState().providers.get(providerId),
+  );
+}
+
 function refreshVersion(providerId: string): number {
   return providerRefreshVersions.get(providerId) ?? 0;
 }
@@ -191,6 +218,35 @@ function refreshVersion(providerId: string): number {
 function bumpRefreshVersion(providerId: string): void {
   providerRefreshVersions.set(providerId, refreshVersion(providerId) + 1);
   notifyProviderModelInventoryInvalidated(providerId);
+}
+
+/** Publish successful live proof into the one shared inventory authority. */
+export function publishProvenModelInventory(
+  providerId: string,
+  modelIds: readonly string[],
+): void {
+  const state = useProviderModelCacheStore.getState();
+  const existing = state.providers.get(providerId);
+  const discoveredModels = providerModelOptionsFromIds(providerId, [
+    ...modelIds,
+  ]);
+  const configuredModels = existing?.configuredModels ?? [];
+  // A successful preflight is newer proof than any refresh already in flight.
+  // Supersede only the store's refresh writer; publishing proof is not an
+  // invalidation and must not evict the preflight cache that produced it.
+  providerRefreshVersions.set(providerId, refreshVersion(providerId) + 1);
+  const providers = new Map(state.providers);
+  providers.set(providerId, {
+    providerId,
+    models: mergeDisplayModels(discoveredModels, configuredModels),
+    provenModelIds: [...modelIds],
+    proofRevision: nextProofRevision(existing),
+    fetchedAt: Date.now(),
+    ...(existing?.runtimeManaged ? { runtimeManaged: true } : {}),
+    ...(configuredModels.length > 0 ? { configuredModels } : {}),
+  });
+  useProviderModelCacheStore.setState({ providers });
+  persistModels(providers);
 }
 
 export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
@@ -229,6 +285,9 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
             fetchedAt: existing?.fetchedAt ?? 0,
             configuredModels,
             ...(hasLiveProof ? { provenModelIds } : {}),
+            ...(existing?.proofRevision !== undefined
+              ? { proofRevision: existing.proofRevision }
+              : {}),
             ...(runtimeManaged ? { runtimeManaged } : {}),
           });
           if (runtimeManaged) {
@@ -322,6 +381,7 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
             models,
             fetchedAt: Date.now(),
             provenModelIds: ids,
+            proofRevision: nextProofRevision(existing),
             ...(existing?.runtimeManaged ? { runtimeManaged: true } : {}),
             ...(configuredModels.length > 0 ? { configuredModels } : {}),
           };
@@ -350,6 +410,9 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
                 : isCachedModelInventoryAuthoritative(existing)
                   ? { provenModelIds: [] }
                   : {}),
+              ...(existing?.proofRevision !== undefined
+                ? { proofRevision: existing.proofRevision }
+                : {}),
               ...(existing?.runtimeManaged ? { runtimeManaged: true } : {}),
               ...(existing?.configuredModels
                 ? { configuredModels: existing.configuredModels }

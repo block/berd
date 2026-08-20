@@ -64,6 +64,7 @@ interface PendingOperation {
   selectionAtRequest?: SessionTargetSelection;
   targetAtRequest?: SessionExecutionTarget;
   settled: boolean;
+  intent: ReturnType<typeof reserveAcpSessionConfiguration>;
   resolve: (outcome: SessionTargetOutcome) => void;
 }
 
@@ -271,8 +272,7 @@ async function execute(
   actor: SessionActor,
   operation: PendingOperation,
 ): Promise<void> {
-  const { request, operationId } = operation;
-  const intent = reserveAcpSessionConfiguration(request.sessionId);
+  const { request, operationId, intent } = operation;
   try {
     const effective = await resolveEffectiveTarget(request.target);
     const liveTarget = useChatSessionStore
@@ -505,8 +505,14 @@ function requestSessionTargetTransition(
   });
   const outcome = new Promise<SessionTargetOutcome>((resolve) => {
     const previous = actor.latest;
-    if (previous && previous !== actor.current)
+    // Reserve the replacement before releasing the superseded operation. The
+    // registry atomically transfers pending ownership to this intent, so a
+    // prompt waiter can never observe an unowned A-to-B handoff.
+    const intent = reserveAcpSessionConfiguration(request.sessionId);
+    if (previous && previous !== actor.current) {
+      previous.intent.clear();
       settleOperation(previous, { status: "superseded", applied: false });
+    }
     actor.latest = {
       sequence,
       request,
@@ -514,6 +520,7 @@ function requestSessionTargetTransition(
       selectionAtRequest,
       targetAtRequest,
       settled: false,
+      intent,
       resolve,
     };
   });
@@ -1231,6 +1238,7 @@ export function transferSessionTargetOwnership(
       ),
     );
     for (const operation of pending) {
+      operation.intent.clear();
       settleOperation(operation, { status: "superseded", applied: false });
     }
     source.current = undefined;
@@ -1259,6 +1267,7 @@ export function cancelSessionTarget(sessionId: string): void {
     ),
   );
   for (const operation of pending) {
+    operation.intent.clear();
     settleOperation(operation, { status: "session-missing", applied: false });
   }
   actor.latest = undefined;

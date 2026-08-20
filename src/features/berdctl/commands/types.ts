@@ -73,6 +73,7 @@ export const COMMAND_ERROR_CODES = [
   "session_not_found",
   "project_not_found",
   "agent_not_found",
+  "agent_configuration_invalid",
   "skill_not_found",
   "harness_not_found",
   "harness_not_ready",

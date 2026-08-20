@@ -88,7 +88,7 @@ import {
 } from "@/features/chat/stores/chatSessionSelectors";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
-import { personaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
+import { resolvePersonaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { findExistingDraft } from "@/features/chat/lib/newChat";
@@ -2714,7 +2714,7 @@ export function AppShell({
             providerId: model.providerId ?? providerId,
           })),
         );
-        const executionTarget = personaExecutionTarget(persona, {
+        const personaResolution = resolvePersonaExecutionTarget(persona, {
           providers: agentState.providers,
           models: cachedModels,
           getProvenModelsForHarness: () => provenModels,
@@ -2724,6 +2724,15 @@ export function AppShell({
               .isModelInventoryAuthoritative(providerId),
           catalogEntries: getProviderCatalog(),
         });
+        if (personaResolution.status === "invalid") {
+          setActiveView("agents");
+          setAgentsPersonaId(agentId);
+          return;
+        }
+        const executionTarget =
+          personaResolution.status === "valid"
+            ? personaResolution.target
+            : undefined;
 
         void createNewTab(DEFAULT_CHAT_TITLE, undefined, {
           executionTarget,

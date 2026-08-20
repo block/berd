@@ -704,6 +704,31 @@ describe("sessions.create", () => {
     expect(controller.openSession).not.toHaveBeenCalled();
   });
 
+  it("rejects an agent with an invalid saved target before creating", async () => {
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "invalid-agent",
+        displayName: "Invalid Agent",
+        systemPrompt: "Do not invoke.",
+        provider: "missing-provider",
+        model: "retired-model",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "create", prompt: "hi", agent_id: "invalid-agent" },
+        ctx,
+      ),
+      "agent_configuration_invalid",
+    );
+
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+  });
+
   it("rejects an unknown agent before creating the session", async () => {
     await expectCommandError(
       dispatchCommand(
@@ -736,6 +761,37 @@ describe("sessions.create", () => {
         projectId: undefined,
         deferProviderSetup: false,
       },
+    );
+  });
+
+  it("uses a valid agent's saved execution target when no explicit target is passed", async () => {
+    seedModelCache("databricks_v2", ["agent-model"]);
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "configured-agent",
+        displayName: "Configured Agent",
+        systemPrompt: "Use the saved target.",
+        provider: "goose",
+        modelProviderId: "databricks_v2",
+        model: "agent-model",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+
+    await dispatchCommand(
+      "sessions",
+      { action: "create", prompt: "hi", agent_id: "configured-agent" },
+      ctx,
+    );
+
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "databricks_v2",
+      "/resolved/cwd",
+      expect.objectContaining({
+        modelId: "agent-model",
+        personaId: "configured-agent",
+      }),
     );
   });
 

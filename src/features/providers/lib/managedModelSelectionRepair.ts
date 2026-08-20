@@ -5,6 +5,7 @@ import {
   providerModelInventoryGeneration,
   subscribeToProviderModelInventoryInvalidation,
 } from "@/shared/runtime-config/providerModelInventoryInvalidation";
+import { publishProvenModelInventory } from "@/features/providers/stores/providerModelCacheStore";
 import {
   readBoundedProvenModelInventory,
   resolveManagedGooseProviderSelection,
@@ -58,6 +59,7 @@ async function validatedModelIds(
         modelIds,
         fetchedAt: Date.now(),
       });
+      publishProvenModelInventory(providerId, [...modelIds]);
       return modelIds;
     } catch (error) {
       if (generationAtStart !== providerModelInventoryGeneration(providerId)) {

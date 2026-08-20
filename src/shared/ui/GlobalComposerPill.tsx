@@ -18,7 +18,7 @@ import { useTranslation } from "react-i18next";
 import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { selectPersonas } from "@/features/agents/stores/agentSelectors";
-import { personaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
+import { resolvePersonaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
 import { useAttachmentDropTarget } from "@/features/chat/hooks/useAttachmentDropTarget";
 import { useChatInputAttachments } from "@/features/chat/hooks/useChatInputAttachments";
 import { useChatInputFilePicker } from "@/features/chat/hooks/useChatInputFilePicker";
@@ -498,9 +498,9 @@ export function GlobalComposerPill({
     },
   });
 
-  const personaTarget = useMemo(
+  const personaResolution = useMemo(
     () =>
-      personaExecutionTarget(selectedPersona, {
+      resolvePersonaExecutionTarget(selectedPersona, {
         providers,
         models: getModelsForAgent("goose"),
         getModelsForHarness: getModelsForAgent,
@@ -517,6 +517,9 @@ export function GlobalComposerPill({
       selectedPersona,
     ],
   );
+  const personaTarget =
+    personaResolution.status === "valid" ? personaResolution.target : undefined;
+  const personaConfigurationInvalid = personaResolution.status === "invalid";
 
   useEffect(() => {
     if (!selectedPersonaId) {
@@ -1518,6 +1521,23 @@ export function GlobalComposerPill({
         </div>
       </div>
 
+      {personaConfigurationInvalid && !personaSelectionOverridden ? (
+        <div
+          role="status"
+          className="mx-6 mb-14 flex items-center justify-between gap-3 text-xs text-destructive"
+        >
+          <span>{t("globalPill.invalidAgentConfiguration")}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => handlePersonaChange(null)}
+          >
+            {t("globalPill.repairAgentConfiguration")}
+          </Button>
+        </div>
+      ) : null}
+
       <div
         data-role="composer-action-strip"
         className={cn(
@@ -1561,7 +1581,8 @@ export function GlobalComposerPill({
             modelsLoading={modelsLoading}
             modelStatusMessage={modelStatusMessage}
             showDefaultModelInTrigger={
-              personaSelectionOverridden || !personaTarget
+              !personaConfigurationInvalid &&
+              (personaSelectionOverridden || !personaTarget)
             }
             onModelChange={handleModelChange}
             onOpen={handlePickerOpen}

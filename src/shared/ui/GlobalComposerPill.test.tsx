@@ -807,6 +807,22 @@ describe("GlobalComposerPill", () => {
       screen.getByRole("button", { name: /send message/i }),
     ).toBeDisabled();
     expect(onSend).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "This agent’s saved provider or model is no longer available.",
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Use default configuration" }),
+    );
+
+    expect(
+      screen.queryByText(
+        "This agent’s saved provider or model is no longer available.",
+      ),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled();
   });
 
   it("applies a legacy persona target when inventory arrives", async () => {

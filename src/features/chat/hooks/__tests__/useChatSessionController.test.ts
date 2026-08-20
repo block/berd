@@ -4801,12 +4801,15 @@ describe("useChatSessionController", () => {
       expect(
         useChatSessionStore.getState().getSession("session-1"),
       ).toMatchObject({
-        personaId: "persona-1",
         executionTarget: {
           harnessId: "goose",
           modelProviderId: "openai",
         },
       });
+      expect(
+        useChatSessionStore.getState().getSession("home-unresolved-persona")
+          ?.personaId,
+      ).toBeUndefined();
     });
     expect(mockAcpPrepareSession).toHaveBeenCalledWith(
       "session-1",
@@ -5189,7 +5192,7 @@ describe("useChatSessionController", () => {
     });
   });
 
-  it("leaves the current target alone when a legacy persona model cannot resolve", async () => {
+  it("rejects a legacy persona whose saved model cannot resolve", async () => {
     useAgentStore.setState({
       personas: [
         personaFixture({
@@ -5220,13 +5223,13 @@ describe("useChatSessionController", () => {
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
-      personaId: "persona-1",
       executionTarget: {
         harnessId: "goose",
         modelProviderId: "openai",
         modelId: "gpt-4o",
       },
     });
+    expect(useAgentStore.getState().activeAgentId).toBeNull();
     expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 
@@ -5328,7 +5331,7 @@ describe("useChatSessionController", () => {
     expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 
-  it("leaves the current target alone when a persona target cannot resolve", () => {
+  it("rejects a persona whose saved target cannot resolve", () => {
     useAgentStore.setState({
       personas: [
         personaFixture({
@@ -5350,17 +5353,17 @@ describe("useChatSessionController", () => {
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
-      personaId: "persona-1",
       executionTarget: {
         harnessId: "goose",
         modelProviderId: "openai",
         modelId: "gpt-4o",
       },
     });
+    expect(useAgentStore.getState().activeAgentId).toBeNull();
     expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 
-  it("keeps the Home target when an unresolved persona is selected", async () => {
+  it("does not carry an unresolved persona into a later Home session", async () => {
     useAgentStore.setState({
       personas: [
         personaFixture({
@@ -5397,12 +5400,15 @@ describe("useChatSessionController", () => {
       expect(
         useChatSessionStore.getState().getSession("home-unresolved-persona"),
       ).toMatchObject({
-        personaId: "persona-1",
         executionTarget: {
           harnessId: "goose",
           modelProviderId: "openai",
         },
       });
+      expect(
+        useChatSessionStore.getState().getSession("home-unresolved-persona")
+          ?.personaId,
+      ).toBeUndefined();
     });
     expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });

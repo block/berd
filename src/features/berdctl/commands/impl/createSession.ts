@@ -95,6 +95,10 @@ Result:
       { berdctlCrossSessionSendOptions },
       { GOOSE_PROVIDER_ID },
       { normalizeSessionExecutionTarget, targetFromAgentModelSelection },
+      { resolvePersonaExecutionTarget },
+      { useAgentStore },
+      { useProviderModelCacheStore },
+      { getProviderCatalog },
       { findPersonaOrThrow },
       { findProjectOrThrow },
       { findReadyHarnessOrThrow, gooseModelOptions, harnessModelOptions },
@@ -106,23 +110,62 @@ Result:
       import("../runtime/sessionSend"),
       import("@/shared/api/acpPersonaHandoff"),
       import("@/features/chat/lib/sessionExecutionTarget"),
+      import("@/features/agents/lib/personaExecutionTarget"),
+      import("@/features/agents/stores/agentStore"),
+      import("@/features/providers/stores/providerModelCacheStore"),
+      import("@/features/providers/providerCatalog"),
       import("../runtime/agents"),
       import("../runtime/projects"),
       import("../runtime/providers"),
     ]);
-    const harnessId = args.harness_id ?? GOOSE_PROVIDER_ID;
+    const requestedHarnessId = args.harness_id ?? GOOSE_PROVIDER_ID;
     // The validation legs are independent I/O; overlap them.
     const [project, , models, persona] = await Promise.all([
       args.project_id ? findProjectOrThrow(args.project_id) : null,
       args.harness_id ? findReadyHarnessOrThrow(args.harness_id) : null,
       args.model_id
-        ? (harnessId === GOOSE_PROVIDER_ID
+        ? (requestedHarnessId === GOOSE_PROVIDER_ID
             ? gooseModelOptions()
-            : harnessModelOptions(harnessId)
+            : harnessModelOptions(requestedHarnessId)
           ).catch(() => [])
         : null,
       args.agent_id ? findPersonaOrThrow(args.agent_id) : null,
     ]);
+    const modelCache = useProviderModelCacheStore.getState();
+    const cachedModels = [...modelCache.providers].flatMap(([providerId]) =>
+      modelCache.isModelInventoryAuthoritative(providerId)
+        ? modelCache.getProvenModelsForProvider(providerId).map((model) => ({
+            ...model,
+            providerId: model.providerId ?? providerId,
+          }))
+        : [],
+    );
+    const personaResolution = persona
+      ? resolvePersonaExecutionTarget(persona, {
+          providers: useAgentStore.getState().providers,
+          models: cachedModels,
+          getModelsForHarness: (harnessId) =>
+            harnessId === GOOSE_PROVIDER_ID ? cachedModels : [],
+          getProvenModelsForHarness: (harnessId) =>
+            harnessId === GOOSE_PROVIDER_ID ? cachedModels : [],
+          isModelInventoryAuthoritative:
+            modelCache.isModelInventoryAuthoritative,
+          catalogEntries: getProviderCatalog(),
+        })
+      : { status: "absent" as const };
+    if (personaResolution.status === "invalid") {
+      throw new CommandError(
+        "agent_configuration_invalid",
+        `Agent "${persona?.id}" has a saved provider or model that is no longer available. Update the agent configuration before invoking it.`,
+      );
+    }
+    const personaTarget =
+      personaResolution.status === "valid"
+        ? personaResolution.target
+        : undefined;
+    const harnessId =
+      args.harness_id ?? personaTarget?.harnessId ?? GOOSE_PROVIDER_ID;
+
     // Soft model validation: only reject when the harness's model list is
     // known and the id is not in it. On goose a model belongs to a model
     // provider (anthropic, openai, ...), so a match also resolves the
@@ -152,7 +195,9 @@ Result:
           modelId: args.model_id,
           modelName: args.model_id,
         })
-      : normalizeSessionExecutionTarget({ harnessId });
+      : args.harness_id
+        ? normalizeSessionExecutionTarget({ harnessId })
+        : (personaTarget ?? normalizeSessionExecutionTarget({ harnessId }));
     const requiresStartupName = Boolean(
       project && projectRequiresStartupWorkspaceName(project),
     );

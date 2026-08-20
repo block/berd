@@ -11,12 +11,17 @@ import {
   shortLogId,
 } from "@/shared/lib/reasoningEffortDiagnostics";
 import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
-import { isModelSelectionAllowedByCachedInventory } from "@/features/providers/stores/providerModelCacheStore";
+import {
+  getModelInventoryProofRevision,
+  isModelSelectionAllowedByCachedInventory,
+} from "@/features/providers/stores/providerModelCacheStore";
 
 export interface AcpSessionExecutionSelection {
   providerId: string;
   /** Last model this window observed ACP acknowledge successfully. */
   modelId?: string;
+  /** Shared inventory proof already known when ACP acknowledged this selection. */
+  acknowledgedProofRevision?: number;
 }
 
 interface PreparedSession {
@@ -90,6 +95,7 @@ function replaceExecutionSelection(
   entry.executionSelection = {
     providerId,
     ...(modelId ? { modelId } : {}),
+    acknowledgedProofRevision: getModelInventoryProofRevision(providerId),
   };
 }
 
@@ -330,6 +336,7 @@ async function prepareSessionNow(
     executionSelection: {
       providerId,
       ...(acknowledgedModelId ? { modelId: acknowledgedModelId } : {}),
+      acknowledgedProofRevision: getModelInventoryProofRevision(providerId),
     },
   };
   prepared.set(sessionId, entry);
@@ -487,13 +494,15 @@ export function requireSessionInvocationSelection(
     !isModelSelectionAllowedByCachedInventory(
       selection.providerId,
       selection.modelId,
+      selection.acknowledgedProofRevision,
     )
   ) {
     throw new Error(
       `Session model ${selection.modelId} is no longer supported by provider ${selection.providerId}. Re-prepare the session before prompting.`,
     );
   }
-  return { ...selection, modelId: selection.modelId };
+  const { acknowledgedProofRevision: _, ...invocationSelection } = selection;
+  return { ...invocationSelection, modelId: selection.modelId };
 }
 
 /** Run prompt setup and transport without allowing session config to interleave. */
@@ -568,6 +577,7 @@ export function registerPreparedSession(
     executionSelection: {
       providerId,
       ...(acknowledgedModelId ? { modelId: acknowledgedModelId } : {}),
+      acknowledgedProofRevision: getModelInventoryProofRevision(providerId),
     },
   };
 

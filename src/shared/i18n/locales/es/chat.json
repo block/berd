@@ -44,6 +44,8 @@
     "confirmStopDescription": "Esto finaliza el shell y cierra el panel del terminal.",
     "confirmStopTabTitle": "¿Detener terminal {{path}}?",
     "confirmStopTitle": "¿Detener terminal?",
+    "invalidAgentConfiguration": "El proveedor o modelo guardado de este agente ya no está disponible.",
+    "repairAgentConfiguration": "Usar la configuración predeterminada",
     "expand": "Expandir terminal",
     "exitedWithSignal": "Finalizado por {{signal}}",
     "newTab": "Nueva pestaña de terminal",
@@ -435,6 +437,8 @@
   },
   "globalPill": {
     "ariaLabel": "Redacción rápida",
+    "invalidAgentConfiguration": "El proveedor o modelo guardado de este agente ya no está disponible.",
+    "repairAgentConfiguration": "Usar la configuración predeterminada",
     "expand": "Expandir a chat completo",
     "placeholder": "Inicia una conversación",
     "setupVoiceConversation": "Configurar conversación por voz",

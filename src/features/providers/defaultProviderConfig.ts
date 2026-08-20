@@ -138,7 +138,10 @@ export async function saveDefaultProviderSelection(
   await modelCacheStore.refreshProviderModels(providerId, { force: true });
 
   const cache = useProviderModelCacheStore.getState();
-  if (!cache.isModelInventoryAuthoritative(providerId)) {
+  if (
+    cache.getError(providerId) ||
+    !cache.isModelInventoryAuthoritative(providerId)
+  ) {
     throw new Error(
       "Could not prove models for provider. Check provider setup and try again.",
     );

@@ -1,7 +1,12 @@
 import { waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelOption } from "@/features/chat/types";
-import { useProviderModelCacheStore } from "./providerModelCacheStore";
+import {
+  isModelSelectionAllowedByCachedInventory,
+  MODEL_CACHE_TTL_MS,
+  publishProvenModelInventory,
+  useProviderModelCacheStore,
+} from "./providerModelCacheStore";
 
 const mocks = vi.hoisted(() => ({
   getClient: vi.fn(),
@@ -81,6 +86,79 @@ describe("providerModelCacheStore", () => {
     expect(mocks.supportedModelsList).toHaveBeenCalledWith({
       providerId: "databricks_v2",
     });
+  });
+
+  it("lets a newer ACP acknowledgement supersede retained negative proof", () => {
+    const model = seededModel({ id: "old-model" });
+    const proofRevision = 10;
+    useProviderModelCacheStore.setState({
+      providers: new Map([
+        [
+          "databricks_v2",
+          {
+            providerId: "databricks_v2",
+            models: [model],
+            provenModelIds: ["old-model"],
+            proofRevision,
+            fetchedAt: Date.now() - MODEL_CACHE_TTL_MS - 1,
+          },
+        ],
+      ]),
+    });
+
+    expect(
+      isModelSelectionAllowedByCachedInventory(
+        "databricks_v2",
+        "newly-prepared-model",
+      ),
+    ).toBe(false);
+    expect(
+      isModelSelectionAllowedByCachedInventory(
+        "databricks_v2",
+        "newly-prepared-model",
+        proofRevision + 1,
+      ),
+    ).toBe(true);
+
+    useProviderModelCacheStore.setState((state) => {
+      const providers = new Map(state.providers);
+      const entry = providers.get("databricks_v2");
+      if (!entry) throw new Error("expected seeded provider");
+      providers.set("databricks_v2", {
+        ...entry,
+        error: "offline",
+      });
+      return { providers };
+    });
+    expect(
+      isModelSelectionAllowedByCachedInventory(
+        "databricks_v2",
+        "newly-prepared-model",
+      ),
+    ).toBe(false);
+    expect(
+      isModelSelectionAllowedByCachedInventory(
+        "databricks_v2",
+        "newly-prepared-model",
+        proofRevision + 1,
+      ),
+    ).toBe(true);
+  });
+
+  it("publishes successful live preflight as the shared fresh authority", () => {
+    publishProvenModelInventory("databricks_v2", ["new-model"]);
+
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("databricks_v2"),
+    ).toBe(true);
+    expect(
+      isModelSelectionAllowedByCachedInventory("databricks_v2", "new-model"),
+    ).toBe(true);
+    expect(
+      isModelSelectionAllowedByCachedInventory("databricks_v2", "old-model"),
+    ).toBe(false);
   });
 
   it("invalidates runtime-managed proof without discarding its display seed", async () => {
@@ -276,7 +354,7 @@ describe("providerModelCacheStore", () => {
   it.each([
     { provenModelIds: ["supported-model"], expected: ["supported-model"] },
     { provenModelIds: [], expected: [] },
-  ])("preserves authoritative proof and runtime policy after refresh failure: $provenModelIds", async ({
+  ])("preserves prior proof data and runtime policy but revokes authority after refresh failure: $provenModelIds", async ({
     provenModelIds,
     expected,
   }) => {
@@ -314,7 +392,7 @@ describe("providerModelCacheStore", () => {
       useProviderModelCacheStore
         .getState()
         .isModelInventoryAuthoritative("databricks_v2"),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("removes stale runtime-managed providers when runtime config changes", () => {

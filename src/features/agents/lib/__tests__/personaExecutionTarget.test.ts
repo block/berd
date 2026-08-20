@@ -3,6 +3,7 @@ import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
 import {
   personaExecutionTarget,
+  resolvePersonaExecutionTarget,
   personaTargetMigration,
 } from "../personaExecutionTarget";
 
@@ -42,6 +43,24 @@ const context = (
 describe("personaExecutionTarget", () => {
   it("returns no override when the agent has no configured target", () => {
     expect(personaExecutionTarget({}, context())).toBeUndefined();
+  });
+
+  it("distinguishes absent, valid, and invalid saved configurations", () => {
+    expect(resolvePersonaExecutionTarget({}, context())).toEqual({
+      status: "absent",
+    });
+    expect(
+      resolvePersonaExecutionTarget(
+        { provider: "goose", modelProviderId: "openai", model: "gpt-5" },
+        context(),
+      ),
+    ).toMatchObject({ status: "valid", target: { modelId: "gpt-5" } });
+    expect(
+      resolvePersonaExecutionTarget(
+        { provider: "missing-provider", model: "retired" },
+        context(),
+      ),
+    ).toEqual({ status: "invalid" });
   });
 
   it("returns the complete saved Goose target without requiring inventory", () => {

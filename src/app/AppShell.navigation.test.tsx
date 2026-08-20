@@ -326,6 +326,7 @@ function seedProviderModels(
       providers.set(providerId, {
         ...existing,
         provenModelIds: models.map((model) => model.id),
+        fetchedAt: Date.now(),
       });
     }
     return { providers };
@@ -5093,7 +5094,7 @@ describe("AppShell global navigation", () => {
     });
   });
 
-  it("uses the normal new-chat target when a persona has no plausible target", async () => {
+  it("rejects starting an agent whose saved target is invalid", async () => {
     useDefaultProviderReadinessStore.setState({
       readiness: {
         status: "ready",
@@ -5124,15 +5125,10 @@ describe("AppShell global navigation", () => {
     );
 
     await waitFor(() => {
-      expect(mockAcpCreateSession).toHaveBeenCalledWith(
-        "databricks_v2",
-        "~/goose artifacts",
-        expect.objectContaining({ modelId: "goose-default" }),
-      );
+      expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
     });
-    expect(
-      useChatSessionStore.getState().getSession("created-session"),
-    ).toMatchObject({ personaId: "persona-unresolved" });
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+    expect(useChatSessionStore.getState().sessions).toHaveLength(0);
   });
 
   it("tags a Home agent starter in the composer instead of opening a blank chat", async () => {

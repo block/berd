@@ -83,7 +83,7 @@ import {
   markAgentBuilderSessionPreparationFailed,
   preSeedDraftAgent,
 } from "@/features/agents/lib/agentBuilderSession";
-import { personaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
+import { resolvePersonaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
 import { deletePersonaSource } from "@/shared/api/agents";
 import type { Persona } from "@/shared/types/agents";
 import {
@@ -1206,7 +1206,7 @@ export function useChatSessionController({
 
   const resolvePersonaTarget = useCallback(
     (persona: Persona) =>
-      personaExecutionTarget(persona, {
+      resolvePersonaExecutionTarget(persona, {
         providers,
         models: getModelsForAgent("goose"),
         getModelsForHarness: getModelsForAgent,
@@ -1446,7 +1446,16 @@ export function useChatSessionController({
       }
 
       const persona = personas.find((candidate) => candidate.id === personaId);
-      const personaTarget = persona ? resolvePersonaTarget(persona) : undefined;
+      const personaResolution = persona
+        ? resolvePersonaTarget(persona)
+        : { status: "absent" as const };
+      if (personaResolution.status === "invalid") {
+        return;
+      }
+      const personaTarget =
+        personaResolution.status === "valid"
+          ? personaResolution.target
+          : undefined;
 
       if (personaTarget) {
         const harnessId = personaTarget.harnessId;
@@ -1848,9 +1857,12 @@ export function useChatSessionController({
       const targetPersona = personas.find(
         (persona) => persona.id === overridePersona.id,
       );
+      const resolution = targetPersona
+        ? resolvePersonaTarget(targetPersona)
+        : undefined;
       return (
-        (targetPersona
-          ? resolvePersonaTarget(targetPersona)?.harnessId
+        (resolution?.status === "valid"
+          ? resolution.target.harnessId
           : undefined) ?? selectedAgentId
       );
     },
