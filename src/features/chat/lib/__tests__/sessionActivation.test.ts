@@ -325,6 +325,11 @@ describe("loadSessionMessages", () => {
           "Okay, that's perfect. Thank you",
       ),
       id: "persisted-voice-reply",
+      metadata: {
+        userVisible: true,
+        agentVisible: true,
+        origin: "voice_conversation",
+      },
     });
 
     await expect(loadSessionMessages(session.id)).resolves.toBe(true);
