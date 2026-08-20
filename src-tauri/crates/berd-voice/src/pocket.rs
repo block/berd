@@ -231,5 +231,4 @@ mod tests {
             "Pocket TTS synthesis callback panicked"
         );
     }
-
 }
