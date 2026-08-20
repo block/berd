@@ -946,9 +946,13 @@ function compactWorkContent(
 
       const previous = compacted[compacted.length - 1];
 
-      if (previous?.type === "text" && sanitizedBlock.type === "text") {
+      if (
+        previous?.type === "text" &&
+        sanitizedBlock.type === "text" &&
+        previous.speech?.status === sanitizedBlock.speech?.status
+      ) {
         compacted[compacted.length - 1] = {
-          type: "text",
+          ...previous,
           text: `${previous.text}${sanitizedBlock.text}`,
         };
         continue;
@@ -1020,12 +1024,24 @@ function getCompanionIdentity(block: MessageContent): string {
 function compactTextContent(
   content: readonly TextLikeContent[],
 ): MessageContent[] {
-  const text = content
-    .map((block) => block.text.trim())
-    .filter(Boolean)
-    .join("\n\n");
+  const compacted: TextLikeContent[] = [];
+  for (const block of content) {
+    const text = block.text.trim();
+    if (!text) continue;
 
-  return text ? [{ type: "text", text }] : [];
+    const previous = compacted[compacted.length - 1];
+    if (previous && previous.speech?.status === block.speech?.status) {
+      compacted[compacted.length - 1] = {
+        ...previous,
+        text: `${previous.text}\n\n${text}`,
+      };
+      continue;
+    }
+
+    compacted.push({ ...block, text });
+  }
+
+  return compacted;
 }
 
 function estimateAgentWorkHeight(content: readonly MessageContent[]): number {

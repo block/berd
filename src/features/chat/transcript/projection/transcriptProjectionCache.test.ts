@@ -1166,6 +1166,102 @@ describe("transcript projection cache", () => {
     }
   });
 
+  it("preserves speech state across agent-work and final-answer projection", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-voice-work",
+      "assistant",
+      [
+        {
+          type: "text",
+          text: "First spoken block.",
+          speech: { status: "spoken" },
+        },
+        toolRequest("tool-1"),
+        {
+          type: "thinking",
+          text: "Considering the result.",
+        },
+        {
+          type: "text",
+          text: "Final speaking block.",
+          speech: { status: "speaking" },
+        },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+    const work = snapshot.items.find(
+      (item) => item.itemId === "message:assistant-voice-work:agent-work",
+    );
+    const answer = snapshot.items.find(
+      (item) => item.itemId === "message:assistant-voice-work:answer",
+    );
+
+    expect(work?.kind).toBe("agent-work");
+    if (work?.kind === "agent-work") {
+      expect(work.content).toContainEqual({
+        type: "text",
+        text: "First spoken block.",
+        speech: { status: "spoken" },
+      });
+    }
+    expect(answer?.kind).toBe("message");
+    if (answer?.kind === "message") {
+      expect(answer.visibleContent).toEqual([
+        {
+          type: "text",
+          text: "Final speaking block.",
+          speech: { status: "speaking" },
+        },
+      ]);
+    }
+  });
+
+  it("keeps adjacent final text with different speech states separate", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = messageWithContent(
+      "assistant-voice-segments",
+      "assistant",
+      [
+        { type: "thinking", text: "Preparing two segments." },
+        {
+          type: "text",
+          text: "Already spoken.",
+          speech: { status: "spoken" },
+        },
+        {
+          type: "text",
+          text: "Speaking now.",
+          speech: { status: "speaking" },
+        },
+      ],
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+    const answer = snapshot.items.find(
+      (item) => item.itemId === "message:assistant-voice-segments:answer",
+    );
+
+    expect(answer?.kind).toBe("message");
+    if (answer?.kind === "message") {
+      expect(answer.visibleContent).toEqual([
+        {
+          type: "text",
+          text: "Already spoken.",
+          speech: { status: "spoken" },
+        },
+        {
+          type: "text",
+          text: "Speaking now.",
+          speech: { status: "speaking" },
+        },
+      ]);
+    }
+  });
+
   it("keeps an MCP companion row identity stable when another app is inserted", () => {
     const cache = createTranscriptProjectionCache();
     const mcpApp = (id: string): McpAppContent => ({

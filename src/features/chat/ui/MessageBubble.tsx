@@ -1,12 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Check,
-  FileText,
-  FolderClosed,
-  ImageIcon,
-  Volume2,
-} from "lucide-react";
+import { Check, FileText, FolderClosed, ImageIcon } from "lucide-react";
 import { IconRobot } from "@tabler/icons-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
@@ -69,6 +63,7 @@ import {
   UserMessageClamp,
 } from "./UserMessageClamp";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
+import { VoiceSpeechStatusIndicator } from "./VoiceSpeechStatusIndicator";
 
 interface MessageAttachmentPreviewItem {
   key: string;
@@ -554,17 +549,11 @@ function renderContentBlock(
             speechStatus === "interrupted" && "line-through opacity-70",
           )}
         >
-          {speechLabel ? (
-            <div
-              className={cn(
-                "mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground",
-                speechStatus === "failed" && "text-destructive",
-                speechStatus === "interrupted" && "text-warning",
-              )}
-            >
-              <Volume2 aria-hidden="true" className="size-3.5" />
-              <span>{speechLabel}</span>
-            </div>
+          {speechStatus && speechLabel ? (
+            <VoiceSpeechStatusIndicator
+              status={speechStatus}
+              label={speechLabel}
+            />
           ) : null}
           <MessageResponse
             isAnimating={isStreamingMsg}
