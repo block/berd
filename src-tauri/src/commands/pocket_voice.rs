@@ -1925,6 +1925,23 @@ fn run_pocket_voice_stream(
                 )? {
                     return Ok(PocketStreamEventState::Interrupted);
                 }
+                let tail = speed_processor.drain_and_reset()?;
+                if !tail.is_empty() {
+                    player.append(SamplesBuffer::new(channels, rate, tail));
+                    if !playback_started {
+                        playback_started = true;
+                        emit_pocket_stream_event(
+                            app,
+                            stream_id,
+                            PocketStreamEventState::Started,
+                            None,
+                        );
+                        println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
+                        std::io::stdout()
+                            .flush()
+                            .map_err(|error| format!("signal Pocket playback start: {error}"))?;
+                    }
+                }
             }
             Ok(PocketStreamCommand::Finish) => {
                 if !synthesize_pocket_stream_ready(
