@@ -360,15 +360,28 @@ export function startNativeAssistantSpeech(
   };
 
   stopSubscription = useChatStore.subscribe(inspect);
-  let wasUserSpeaking = useVoiceConversationStore.getState().userSpeaking;
+  const initialVoice = useVoiceConversationStore.getState();
+  let reachedRunning =
+    initialVoice.status.lifecycle === "running" &&
+    initialVoice.status.sessionId === sessionId;
+  let wasUserSpeaking = initialVoice.userSpeaking;
   stopVoiceSubscription = useVoiceConversationStore.subscribe((voice) => {
-    if (
-      voice.status.lifecycle !== "running" ||
-      voice.status.sessionId !== sessionId
-    ) {
-      stopNativeAssistantSpeech();
+    const runningForSession =
+      voice.status.lifecycle === "running" &&
+      voice.status.sessionId === sessionId;
+    if (!runningForSession) {
+      if (
+        reachedRunning ||
+        voice.status.lifecycle === "unavailable" ||
+        (voice.status.sessionId !== null &&
+          voice.status.sessionId !== sessionId)
+      ) {
+        stopNativeAssistantSpeech();
+      }
       return;
     }
+    reachedRunning = true;
+    inspect();
     const becameUserSpeaking = voice.userSpeaking && !wasUserSpeaking;
     wasUserSpeaking = voice.userSpeaking;
     if (!becameUserSpeaking || activeGeneration !== generation) return;

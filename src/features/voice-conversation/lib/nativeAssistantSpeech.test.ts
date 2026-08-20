@@ -39,9 +39,10 @@ function assistant(
   completionStatus: NonNullable<
     Message["metadata"]
   >["completionStatus"] = "inProgress",
+  id = "assistant-1",
 ): Message {
   return {
-    id: "assistant-1",
+    id,
     role: "assistant",
     created: 1,
     content,
@@ -117,6 +118,54 @@ describe("native assistant speech stream", () => {
         " text.",
       );
     });
+  });
+
+  it("preserves the first live reply while speech is arming", async () => {
+    const history = assistant(
+      [{ type: "text", text: "Historical response." }],
+      "completed",
+      "assistant-history",
+    );
+    useChatStore.getState().setMessages("session-1", [history]);
+    useVoiceConversationStore.setState((voice) => ({
+      status: {
+        ...voice.status,
+        lifecycle: "stopped",
+        sessionId: null,
+        ownerWindowLabel: null,
+        revision: 0,
+      },
+      uiState: "off",
+    }));
+
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        history,
+        assistant([{ type: "text", text: "First live reply." }]),
+      ]);
+    useVoiceConversationStore.setState((voice) => ({
+      status: {
+        ...voice.status,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        revision: 1,
+      },
+      uiState: "listening",
+    }));
+
+    await vi.waitFor(() =>
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "First live reply.",
+      ),
+    );
+    expect(mocks.append).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "Historical response.",
+    );
   });
 
   it("derives speaking and completion state from backend playback events", async () => {
