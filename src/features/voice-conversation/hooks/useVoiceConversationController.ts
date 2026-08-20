@@ -355,11 +355,9 @@ function ensureVoiceEventDeliveryInitialized() {
         },
       };
       const playbackNotice = takeVoicePlaybackNotices(event.sessionId);
-      const prompt = playbackNotice
-        ? `${playbackNotice}\n\n${event.text}`
-        : event.text;
       const displayOptions = {
         ...sendOptions,
+        ...(playbackNotice ? { assistantPrompt: playbackNotice } : {}),
         displayText: event.text,
       };
       try {
@@ -379,13 +377,13 @@ function ensureVoiceEventDeliveryInitialized() {
           opportunity === "steer"
             ? await steerPromptInSession(
                 event.sessionId,
-                prompt,
+                event.text,
                 undefined,
                 displayOptions,
                 { throwOnError: true },
               )
             : await currentRoute.send(
-                prompt,
+                event.text,
                 undefined,
                 undefined,
                 displayOptions,
@@ -403,7 +401,7 @@ function ensureVoiceEventDeliveryInitialized() {
           }
           await steerPromptInSession(
             event.sessionId,
-            prompt,
+            event.text,
             undefined,
             displayOptions,
             { throwOnError: true },
