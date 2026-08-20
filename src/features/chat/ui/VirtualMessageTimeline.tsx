@@ -73,6 +73,7 @@ import {
   MessageTimelineJumpToResponseStartGutterButton,
   REDUCED_MOTION_QUERY,
   RESPONSE_START_HINT_HIDE_DELAY_MS,
+  getVoiceSubmissionKey,
   isResponseStartHintInRelevanceBand,
   useStickyFlag,
   type MessageBubbleCallbacks,
@@ -2435,24 +2436,15 @@ function VirtualMessageTimelineSession({
   }, [stableMessageByRowId, stableRows]);
   const latestMessage = latestMessageEntry?.message;
   const latestMessageId = latestMessageEntry?.messageId;
-  const latestVoiceUserMessageId = useMemo(() => {
-    for (let index = stableRows.length - 1; index >= 0; index -= 1) {
-      const row = stableRows[index];
-      if (!row?.messageId || !isMessageTurnRow(row)) {
-        continue;
-      }
-
-      const message = stableMessageByRowId.get(row.rowId);
-      if (
-        message?.role === "user" &&
-        message.metadata?.origin === "voice_conversation"
-      ) {
-        return row.messageId;
-      }
-    }
-    return null;
-  }, [stableMessageByRowId, stableRows]);
-  const lastVoiceUserAutoScrollIdRef = useRef(latestVoiceUserMessageId);
+  const latestVoiceSubmissionKey = getVoiceSubmissionKey(latestMessage);
+  const voiceSubmissionKeys = useMemo(
+    () =>
+      messages
+        .map(getVoiceSubmissionKey)
+        .filter((key): key is string => key !== null),
+    [messages],
+  );
+  const seenVoiceSubmissionKeysRef = useRef(new Set(voiceSubmissionKeys));
   const latestAssistantMessageEntry = useMemo(() => {
     for (let index = stableRows.length - 1; index >= 0; index -= 1) {
       const row = stableRows[index];
@@ -2955,23 +2947,26 @@ function VirtualMessageTimelineSession({
   ]);
 
   useEffect(() => {
-    if (
-      !latestVoiceUserMessageId ||
-      lastVoiceUserAutoScrollIdRef.current === latestVoiceUserMessageId
-    ) {
+    const hasSeenLatest =
+      latestVoiceSubmissionKey === null ||
+      seenVoiceSubmissionKeysRef.current.has(latestVoiceSubmissionKey);
+    for (const key of voiceSubmissionKeys) {
+      seenVoiceSubmissionKeysRef.current.add(key);
+    }
+    if (hasSeenLatest) {
       return;
     }
-    lastVoiceUserAutoScrollIdRef.current = latestVoiceUserMessageId;
     clearProgrammaticFollowResumeSuppression();
     setDetachedFromLatest(false);
     scrollToBottom("auto");
     requestBottomScroll();
   }, [
     clearProgrammaticFollowResumeSuppression,
-    latestVoiceUserMessageId,
+    latestVoiceSubmissionKey,
     requestBottomScroll,
     scrollToBottom,
     setDetachedFromLatest,
+    voiceSubmissionKeys,
   ]);
 
   const requestMcpAppAutoScroll = useCallback(

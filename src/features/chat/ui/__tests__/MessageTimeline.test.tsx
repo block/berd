@@ -1499,21 +1499,18 @@ describe("MessageTimeline", () => {
       await screen.findByRole("button", { name: "Jump to latest" }),
     ).toBeInTheDocument();
     scrollTo.mockClear();
+    const voiceMessage = {
+      ...message("voice-local", "user", "Spoken follow-up"),
+      metadata: {
+        userVisible: true,
+        origin: "voice_conversation" as const,
+        voiceConversationLifecycleId: "lifecycle-1",
+        voiceUtteranceId: "utterance-1",
+        voiceConversationRevision: 0,
+      },
+    };
 
-    rerender(
-      <MessageTimeline
-        messages={[
-          ...messages,
-          {
-            ...message("voice-1", "user", "Spoken follow-up"),
-            metadata: {
-              userVisible: true,
-              origin: "voice_conversation",
-            },
-          },
-        ]}
-      />,
-    );
+    rerender(<MessageTimeline messages={[...messages, voiceMessage]} />);
 
     await waitFor(() =>
       expect(
@@ -1524,6 +1521,26 @@ describe("MessageTimeline", () => {
       top: 500,
       behavior: "auto",
     });
+
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    scroller.scrollTop = 100;
+    fireEvent.scroll(scroller);
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+    scrollTo.mockClear();
+
+    rerender(
+      <MessageTimeline
+        messages={[...messages, { ...voiceMessage, id: "voice-backend" }]}
+      />,
+    );
+
+    await waitFor(() => expect(scroller.scrollTop).toBe(100));
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps manual position stable and shows Jump when resize leaves latest behind", () => {

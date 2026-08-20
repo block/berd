@@ -40,6 +40,7 @@ import {
   MessageTimelineJumpToResponseStartGutterButton,
   REDUCED_MOTION_QUERY,
   RESPONSE_START_HINT_HIDE_DELAY_MS,
+  getVoiceSubmissionKey,
   isResponseStartHintInRelevanceBand,
   useStickyFlag,
   type MessageBubbleCallbacks,
@@ -933,12 +934,18 @@ export function MessageTimeline({
 
   const latestVisibleMessage = visibleMessages.at(-1);
   const latestVisibleMessageId = latestVisibleMessage?.id;
-  const latestVisibleVoiceUserMessageId = visibleMessages.findLast(
-    (message) =>
-      message.role === "user" &&
-      message.metadata?.origin === "voice_conversation",
-  )?.id;
-  const lastVoiceUserAutoScrollIdRef = useRef(latestVisibleVoiceUserMessageId);
+  const latestVisibleVoiceSubmissionKey =
+    getVoiceSubmissionKey(latestVisibleMessage);
+  const visibleVoiceSubmissionKeys = useMemo(
+    () =>
+      visibleMessages
+        .map(getVoiceSubmissionKey)
+        .filter((key): key is string => key !== null),
+    [visibleMessages],
+  );
+  const seenVoiceSubmissionKeysRef = useRef(
+    new Set(visibleVoiceSubmissionKeys),
+  );
 
   useEffect(() => {
     if (
@@ -962,21 +969,24 @@ export function MessageTimeline({
   ]);
 
   useEffect(() => {
-    if (
-      !latestVisibleVoiceUserMessageId ||
-      lastVoiceUserAutoScrollIdRef.current === latestVisibleVoiceUserMessageId
-    ) {
+    const hasSeenLatest =
+      latestVisibleVoiceSubmissionKey === null ||
+      seenVoiceSubmissionKeysRef.current.has(latestVisibleVoiceSubmissionKey);
+    for (const key of visibleVoiceSubmissionKeys) {
+      seenVoiceSubmissionKeysRef.current.add(key);
+    }
+    if (hasSeenLatest) {
       return;
     }
-    lastVoiceUserAutoScrollIdRef.current = latestVisibleVoiceUserMessageId;
     clearProgrammaticFollowResumeSuppression();
     setDetachedFromLatest(false);
     schedulePinnedBottomBurst();
   }, [
     clearProgrammaticFollowResumeSuppression,
-    latestVisibleVoiceUserMessageId,
+    latestVisibleVoiceSubmissionKey,
     schedulePinnedBottomBurst,
     setDetachedFromLatest,
+    visibleVoiceSubmissionKeys,
   ]);
 
   const scheduleResponseStartHint = useCallback(
