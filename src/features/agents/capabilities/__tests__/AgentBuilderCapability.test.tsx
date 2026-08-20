@@ -55,8 +55,6 @@ import {
   useChatSessionStore,
   type ChatSession,
 } from "@/features/chat/stores/chatSessionStore";
-import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
-import { AVATAR_COLLECTION_PAGE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 
 const existingAgentSource: AgentSourceEntry = {
@@ -119,7 +117,6 @@ describe("AgentBuilderCapability keep-save telemetry", () => {
     );
     apiMocks.listPersonas.mockResolvedValue([]);
     resetAgentBuilderSourceLifecycleForTests();
-    setExperimentEnabled(AVATAR_COLLECTION_PAGE_EXPERIMENT_ID, false);
     useAgentStore.setState({
       personas: [],
       personasLoading: false,
