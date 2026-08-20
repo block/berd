@@ -175,8 +175,9 @@ export function AgentDetailPage({
         await onAvatarUpdate(persona, nextAvatar);
         setAvatarValue(nextAvatar ?? "");
         setAvatarPreviewFailed(false);
-      } catch {
+      } catch (error) {
         setAvatarValue(personaAvatarValue);
+        throw error;
       } finally {
         setAvatarSavePending(false);
       }
@@ -190,22 +191,14 @@ export function AgentDetailPage({
     ],
   );
 
-  const handleSelectAvatar = useCallback(
-    (avatarId: string) => {
+  const handleSelectOverlayAvatar = useCallback(
+    async (avatarId: string) => {
       const nextAvatar = avatarRef(avatarId);
       setAvatarValue(nextAvatar);
       setAvatarPreviewFailed(false);
-      void commitAvatar(nextAvatar);
+      await commitAvatar(nextAvatar);
     },
     [commitAvatar],
-  );
-
-  const handleSelectOverlayAvatar = useCallback(
-    (avatarId: string) => {
-      setShowAvatarOverlay(false);
-      handleSelectAvatar(avatarId);
-    },
-    [handleSelectAvatar],
   );
 
   const handleCloseAvatarOverlay = useCallback(() => {

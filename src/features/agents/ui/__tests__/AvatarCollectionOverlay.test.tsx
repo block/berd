@@ -124,7 +124,7 @@ describe("AvatarCollectionOverlay", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("highlights an avatar on click and commits it via the Select button", () => {
+  it("highlights an avatar, persists it, then closes", async () => {
     const onSelectAvatar = vi.fn();
     renderWithProviders(
       <AvatarCollectionOverlay
@@ -148,9 +148,57 @@ describe("AvatarCollectionOverlay", () => {
     ).toBe(true);
 
     fireEvent.click(overlay().getByRole("button", { name: /^select$/i }));
-    expect(onSelectAvatar).not.toHaveBeenCalled();
-    finishExitAnimation();
     expect(onSelectAvatar).toHaveBeenCalledWith("g-1");
+    await act(async () => {});
+    finishExitAnimation();
+  });
+
+  it("shows a neutral loading state while the catalog loads", () => {
+    const onClose = vi.fn();
+    renderWithProviders(
+      <AvatarCollectionOverlay
+        library={libraryWith(null, { loading: true, cacheChecking: true })}
+        onSelectAvatar={vi.fn()}
+        onClose={onClose}
+      />,
+    );
+
+    expect(overlay().getByRole("status")).toHaveTextContent("Loading");
+    fireEvent.click(overlay().getByRole("button", { name: /^close$/i }));
+    finishExitAnimation();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a failed selection highlighted and lets the user retry", async () => {
+    const onSelectAvatar = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("save failed"))
+      .mockResolvedValueOnce(undefined);
+    renderWithProviders(
+      <AvatarCollectionOverlay
+        library={libraryWith(catalogWith({ gloopies: ["g-1", "g-2"] }))}
+        onSelectAvatar={onSelectAvatar}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(overlay().getAllByRole("button", { name: "g-1" })[0]);
+    fireEvent.click(overlay().getByRole("button", { name: /^select$/i }));
+    await act(async () => {});
+
+    expect(overlay().getByRole("alert")).toHaveTextContent(
+      "Save failed. Your edits are still here.",
+    );
+    expect(
+      overlay()
+        .getAllByRole("button", { name: "g-1" })
+        .some((tile) => tile.getAttribute("aria-pressed") === "true"),
+    ).toBe(true);
+
+    fireEvent.click(overlay().getByRole("button", { name: /retry save/i }));
+    await act(async () => {});
+    expect(onSelectAvatar).toHaveBeenCalledTimes(2);
+    finishExitAnimation();
   });
 
   it("toggles the highlight off when the same avatar is clicked again", () => {
