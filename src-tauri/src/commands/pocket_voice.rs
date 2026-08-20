@@ -11,9 +11,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 #[cfg(target_os = "macos")]
-use buzz_voice::SAMPLE_RATE;
+use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
-use buzz_voice::{load_text_to_speech, load_voice_style, SynthesisOutcome};
+use berd_voice::{load_text_to_speech, load_voice_style, SynthesisOutcome};
 use futures_util::StreamExt;
 #[cfg(target_os = "macos")]
 use rodio::buffer::SamplesBuffer;
@@ -36,8 +36,6 @@ const DOWNLOAD_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const DOWNLOAD_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const DOWNLOAD_TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
-#[cfg(target_os = "macos")]
-const SYNTH_STEPS: usize = 1;
 const PARAKEET_ARCHIVE: Artifact = Artifact {
     filename: "parakeet.tar.bz2",
     size: 104_337_827,
@@ -1692,12 +1690,8 @@ fn synthesize_and_stream(
     let callback_speed_processor = speed_processor.clone();
     let callback_error_slot = callback_error.clone();
     let callback_started = playback_started.clone();
-    let outcome = engine.synth_chunk_streaming(
-        text,
-        "en",
-        &style,
-        SYNTH_STEPS,
-        move |samples: &[f32], _progress: f32| {
+    let outcome =
+        engine.synth_chunk_streaming(text, &style, move |samples: &[f32], _progress: f32| {
             if !callback_active.load(Ordering::SeqCst) {
                 return false;
             }
@@ -1736,8 +1730,7 @@ fn synthesize_and_stream(
                 }
             }
             true
-        },
-    )?;
+        })?;
 
     if matches!(outcome, SynthesisOutcome::Complete(_)) {
         let tail = speed_processor.borrow_mut().finish()?;
