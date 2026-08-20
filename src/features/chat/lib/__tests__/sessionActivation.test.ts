@@ -311,6 +311,42 @@ describe("loadSessionMessages", () => {
     ).toBe(false);
   });
 
+  it("reloads a voice reply without exposing its persisted TTS delivery notice", async () => {
+    const session = seedSession(
+      { id: "voice-replay", messageCount: 1 },
+      { replay: false },
+    );
+    ensureReplayBuffer(session.id).push({
+      ...createUserMessage(
+        "[voice: tts-delivery-failed]\n" +
+          "TTS delivery was interrupted because the user started speaking; the assistant reply was not fully spoken.\n" +
+          "Original text: There was a bookshop where every book was blank.\n" +
+          "This is TTS delivery state, not live user voice input. Do not respond to this control message or repeat the reply unless re-delivery is still appropriate.\n\n" +
+          "Okay, that's perfect. Thank you",
+      ),
+      id: "persisted-voice-reply",
+    });
+
+    await expect(loadSessionMessages(session.id)).resolves.toBe(true);
+
+    expect(messagesFor(session.id)).toHaveLength(1);
+    expect(messagesFor(session.id)[0]).toMatchObject({
+      id: "persisted-voice-reply",
+      role: "user",
+      content: [{ type: "text", text: "Okay, that's perfect. Thank you" }],
+      metadata: { userVisible: true },
+    });
+    expect(
+      messagesFor(session.id).some((message) =>
+        message.content.some(
+          (content) =>
+            content.type === "text" &&
+            content.text.includes("[voice: tts-delivery-failed]"),
+        ),
+      ),
+    ).toBe(false);
+  });
+
   it("rejects an empty cold replay when session metadata expects history", async () => {
     seedSession(
       { id: "cold-empty-replay", messageCount: 3 },
