@@ -2962,8 +2962,17 @@ function VirtualMessageTimelineSession({
       return;
     }
     lastVoiceUserAutoScrollIdRef.current = latestVoiceUserMessageId;
-    scrollToBottomIfNearBottom("auto");
-  }, [latestVoiceUserMessageId, scrollToBottomIfNearBottom]);
+    clearProgrammaticFollowResumeSuppression();
+    setDetachedFromLatest(false);
+    scrollToBottom("auto");
+    requestBottomScroll();
+  }, [
+    clearProgrammaticFollowResumeSuppression,
+    latestVoiceUserMessageId,
+    requestBottomScroll,
+    scrollToBottom,
+    setDetachedFromLatest,
+  ]);
 
   const requestMcpAppAutoScroll = useCallback(
     (element: HTMLElement | null) => {

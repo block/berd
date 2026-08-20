@@ -969,8 +969,15 @@ export function MessageTimeline({
       return;
     }
     lastVoiceUserAutoScrollIdRef.current = latestVisibleVoiceUserMessageId;
-    scrollToBottomIfNearBottom("auto");
-  }, [latestVisibleVoiceUserMessageId, scrollToBottomIfNearBottom]);
+    clearProgrammaticFollowResumeSuppression();
+    setDetachedFromLatest(false);
+    schedulePinnedBottomBurst();
+  }, [
+    clearProgrammaticFollowResumeSuppression,
+    latestVisibleVoiceUserMessageId,
+    schedulePinnedBottomBurst,
+    setDetachedFromLatest,
+  ]);
 
   const scheduleResponseStartHint = useCallback(
     (messageId: string) => {
