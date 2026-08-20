@@ -38,6 +38,11 @@ let storageOverrideForTests: Storage | null | undefined;
 
 const workTypeIds = new Set<string>(WORK_TYPE_IDS);
 const agentIds = new Set(RECOMMENDED_AGENTS.map((agent) => agent.id));
+const retiredRecommendedAgentIds = new Set([
+  "builder",
+  "debugger",
+  "generalist",
+]);
 const harnessIds = new Set<string>(CURATED_HARNESS_IDS);
 
 function storage(): Storage | null {
@@ -81,7 +86,9 @@ export function initializeOnboardingGraduation(
             record.version > ONBOARDING_STORAGE_VERSION) ||
           (record.version === ONBOARDING_STORAGE_VERSION &&
             isValidPersistedState(
-              record.state as Partial<OnboardingState> | undefined,
+              normalizeRetiredRecommendedAgent(
+                (record.state as Partial<OnboardingState> | undefined) ?? {},
+              ),
             ))
         );
       } catch {
@@ -152,6 +159,14 @@ function isValidPersistedState(
   );
 }
 
+function normalizeRetiredRecommendedAgent(
+  state: Partial<OnboardingState>,
+): Partial<OnboardingState> {
+  return retiredRecommendedAgentIds.has(state.selectedAgentId ?? "")
+    ? { ...state, selectedAgentId: null }
+    : state;
+}
+
 function parsePersisted(raw: string | null): OnboardingState {
   hasUnsupportedNewerRecord = false;
   if (raw === null) return { ...INITIAL_ONBOARDING_STATE };
@@ -168,7 +183,9 @@ function parsePersisted(raw: string | null): OnboardingState {
         record.version > ONBOARDING_STORAGE_VERSION;
       return { ...INITIAL_ONBOARDING_STATE };
     }
-    const state = record.state as Partial<OnboardingState> | undefined;
+    const state = normalizeRetiredRecommendedAgent(
+      (record.state as Partial<OnboardingState> | undefined) ?? {},
+    );
     if (!isValidPersistedState(state)) {
       return { ...INITIAL_ONBOARDING_STATE };
     }

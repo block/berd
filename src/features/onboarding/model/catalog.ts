@@ -37,22 +37,6 @@ export interface RecommendedAgent {
 
 export const RECOMMENDED_AGENTS: readonly RecommendedAgent[] = [
   {
-    id: "builder",
-    canonicalName: "Builder",
-    canonicalPromptDescription:
-      "A practical partner for implementing product work.",
-    avatar: "app-avatar:gloopies-1",
-    workTypeIds: ["engineering", "product"],
-  },
-  {
-    id: "debugger",
-    canonicalName: "Debugger",
-    canonicalPromptDescription:
-      "A methodical investigator for curious failures.",
-    avatar: "app-avatar:gloopies-2",
-    workTypeIds: ["engineering", "legal"],
-  },
-  {
     id: "planner",
     canonicalName: "Planner",
     canonicalPromptDescription:
@@ -83,14 +67,6 @@ export const RECOMMENDED_AGENTS: readonly RecommendedAgent[] = [
       "A research companion for unfamiliar systems and choices.",
     avatar: "app-avatar:gloopies-15",
     workTypeIds: ["legal", "design"],
-  },
-  {
-    id: "generalist",
-    canonicalName: "Generalist",
-    canonicalPromptDescription:
-      "A flexible collaborator for a little of everything.",
-    avatar: "app-avatar:gloopies-19",
-    workTypeIds: [...WORK_TYPE_IDS],
   },
 ];
 

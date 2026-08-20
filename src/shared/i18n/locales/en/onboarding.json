@@ -57,14 +57,6 @@
     "genericError": "Some agents could not be adopted. Try again.",
     "adoptionError": "Couldn’t adopt {{names}}. The other agents were kept; try again for the rest.",
     "agents": {
-      "builder": {
-        "name": "Builder",
-        "description": "A practical partner for implementing product work."
-      },
-      "debugger": {
-        "name": "Debugger",
-        "description": "A methodical investigator for curious failures."
-      },
       "planner": {
         "name": "Planner",
         "description": "A structured thinker for research and technical plans."
@@ -80,10 +72,6 @@
       "explorer": {
         "name": "Explorer",
         "description": "A research companion for unfamiliar systems and choices."
-      },
-      "generalist": {
-        "name": "Generalist",
-        "description": "A flexible collaborator for a little of everything."
       }
     },
     "partialAdoptionWarning": "Some agents were kept, but {{names}} could not be added. You can continue and try again later."

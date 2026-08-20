@@ -29,10 +29,10 @@ vi.mock("@/shared/ui/avatar-media", () => ({
 }));
 
 const agent: RecommendedAgent = {
-  id: "builder",
-  canonicalName: "Builder",
+  id: "test-agent",
+  canonicalName: "Test Agent",
   canonicalPromptDescription: "Builds things.",
-  avatar: "app-avatar:gloopies-01",
+  avatar: "app-avatar:test-fixture",
   workTypeIds: ["engineering"],
 };
 

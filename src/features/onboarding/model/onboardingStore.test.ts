@@ -77,6 +77,36 @@ describe("onboarding persistence", () => {
     );
   });
 
+  it.each([
+    ["in-progress", "recommendations"],
+    ["completed", "complete"],
+  ] as const)("preserves established %s records with retired recommendation selections", (lifecycle, step) => {
+    for (const selectedAgentId of ["builder", "debugger", "generalist"]) {
+      const state = {
+        ...INITIAL_ONBOARDING_STATE,
+        lifecycle,
+        step,
+        selectedWorkTypeIds: ["engineering"],
+        selectedAgentId,
+        selectedHarnessId: "goose",
+        completedHarnessSetupIds: ["goose"],
+        shareUsageData: false,
+      };
+      window.localStorage.setItem(
+        ONBOARDING_STORAGE_KEY,
+        JSON.stringify({ version: ONBOARDING_STORAGE_VERSION, state }),
+      );
+
+      initializeOnboardingGraduation("established-before-landing-v1");
+      resetOnboardingStoreForTests();
+
+      expect(getOnboardingSnapshot()).toEqual({
+        ...state,
+        selectedAgentId: null,
+      });
+    }
+  });
+
   it("does not graduate when the cohort is unknown", () => {
     initializeOnboardingGraduation("unknown");
     resetOnboardingStoreForTests();
@@ -97,20 +127,18 @@ describe("onboarding persistence", () => {
 
   it("persists versioned state and hydrates it on a new lifecycle", () => {
     dispatchOnboarding({ type: "start" });
-    dispatchOnboarding({ type: "select-agent", agentId: "builder" });
-
     const persisted = JSON.parse(
       window.localStorage.getItem(ONBOARDING_STORAGE_KEY) ?? "null",
     );
     expect(persisted).toMatchObject({
       version: ONBOARDING_STORAGE_VERSION,
-      state: { lifecycle: "in-progress", selectedAgentId: "builder" },
+      state: { lifecycle: "in-progress", selectedAgentId: null },
     });
 
     resetOnboardingStoreForTests();
     expect(getOnboardingSnapshot()).toMatchObject({
       lifecycle: "in-progress",
-      selectedAgentId: "builder",
+      selectedAgentId: null,
     });
   });
 
@@ -183,7 +211,7 @@ describe("onboarding persistence", () => {
         state: {
           ...INITIAL_ONBOARDING_STATE,
           selectedWorkTypeIds: ["engineering", "engineering"],
-          selectedAgentId: "builder",
+          selectedAgentId: null,
           selectedHarnessId: "goose",
           completedHarnessSetupIds: ["goose", "goose", "claude-acp"],
         },
@@ -192,9 +220,43 @@ describe("onboarding persistence", () => {
 
     expect(getOnboardingSnapshot()).toMatchObject({
       selectedWorkTypeIds: ["engineering"],
-      selectedAgentId: "builder",
+      selectedAgentId: null,
       selectedHarnessId: "goose",
       completedHarnessSetupIds: ["goose", "claude-acp"],
+    });
+  });
+
+  it.each([
+    "builder",
+    "debugger",
+    "generalist",
+  ])("hydrates a completed record with retired %s selection", (selectedAgentId) => {
+    window.localStorage.setItem(
+      ONBOARDING_STORAGE_KEY,
+      JSON.stringify({
+        version: ONBOARDING_STORAGE_VERSION,
+        state: {
+          ...INITIAL_ONBOARDING_STATE,
+          lifecycle: "completed",
+          step: "complete",
+          selectedWorkTypeIds: ["engineering"],
+          selectedAgentId,
+          selectedHarnessId: "goose",
+          completedHarnessSetupIds: ["goose"],
+          shareUsageData: false,
+        },
+      }),
+    );
+
+    expect(getOnboardingSnapshot()).toEqual({
+      ...INITIAL_ONBOARDING_STATE,
+      lifecycle: "completed",
+      step: "complete",
+      selectedWorkTypeIds: ["engineering"],
+      selectedAgentId: null,
+      selectedHarnessId: "goose",
+      completedHarnessSetupIds: ["goose"],
+      shareUsageData: false,
     });
   });
 
