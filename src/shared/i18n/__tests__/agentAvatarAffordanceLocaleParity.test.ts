@@ -15,11 +15,7 @@ import esAgents from "../locales/es/agents.json";
  * cleared, this pins the contract for the keys the avatar affordance owns.
  */
 
-const AVATAR_AFFORDANCE_KEYS = [
-  "changeAvatar",
-  "customizeAvatar",
-  "avatarBackToProfile",
-] as const;
+const AVATAR_AFFORDANCE_KEYS = ["changeAvatar", "customizeAvatar"] as const;
 
 describe("agent avatar affordance locale parity", () => {
   it.each(

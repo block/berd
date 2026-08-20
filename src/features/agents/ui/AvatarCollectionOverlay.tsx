@@ -28,7 +28,7 @@ import {
   type ScatterItemLayout,
 } from "@/features/agents/lib/avatarScatter";
 import { useAvatarScatterPan } from "@/features/agents/hooks/useAvatarScatterPan";
-import { getCachedAvatarMedia } from "@/features/agents/ui/AvatarLibraryPicker";
+import { getCachedAvatarMedia } from "@/features/agents/lib/getCachedAvatarMedia";
 
 /** Exit animation length; keep in sync with .avatar-overlay-exit. */
 const OVERLAY_EXIT_MS = 260;

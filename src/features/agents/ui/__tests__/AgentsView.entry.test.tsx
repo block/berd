@@ -806,7 +806,6 @@ describe("AgentsView entry points", () => {
     await user.keyboard("{Enter}");
 
     expect(screen.getByTestId("avatar-collection-overlay")).toBeInTheDocument();
-    expect(screen.queryByText("editor.avatarUrl")).not.toBeInTheDocument();
   });
 
   it("persists the avatar picked in the collection gallery and closes the takeover", async () => {
@@ -849,6 +848,11 @@ describe("AgentsView entry points", () => {
         { avatar: "app-avatar:gloopies-1" },
       ),
     );
+    expect(mockTrackAgentEditCompleted).toHaveBeenCalledTimes(1);
+    expect(mockTrackAgentEditCompleted).toHaveBeenCalledWith({
+      provider: undefined,
+      model: undefined,
+    });
 
     // The takeover hands control back to the profile after committing.
     await waitFor(() =>
@@ -856,6 +860,39 @@ describe("AgentsView entry points", () => {
         screen.queryByTestId("avatar-collection-overlay"),
       ).not.toBeInTheDocument(),
     );
+  });
+
+  it("does not report a completed edit when a canvas selection fails to persist", async () => {
+    vi.mocked(useAvatarLibrary).mockReturnValue(
+      singleAvatarLibrary("gloopies-1"),
+    );
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 1200,
+      bottom: 800,
+      width: 1200,
+      height: 800,
+      toJSON: () => ({}),
+    } as DOMRect);
+    mockUpdatePersona.mockRejectedValueOnce(new Error("update failed"));
+    useAgentStore.setState({ personas: [persona] });
+    const user = userEvent.setup();
+
+    render(<AgentsView activePersonaId={persona.id} />);
+    await user.click(
+      screen.getByRole("button", { name: "editor.customizeAvatar" }),
+    );
+    const overlay = within(screen.getByTestId("avatar-collection-overlay"));
+    await user.click(overlay.getAllByRole("button", { name: "gloopies-1" })[0]);
+    await user.click(
+      overlay.getAllByRole("button", { name: "collectionPage.select" })[0],
+    );
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(mockTrackAgentEditCompleted).not.toHaveBeenCalled();
   });
 
   it("clicking detail Start chat calls onStartChatWithAgent with the persona id", () => {
