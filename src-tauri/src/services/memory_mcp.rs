@@ -62,7 +62,7 @@ fn render_fragment(binary: &Path, off_flag: &Path) -> String {
             "    enabled: true\n",
             "    type: stdio\n",
             "    name: Berd memory\n",
-            "    description: The user's memory — durable preferences and topic files they own. Proposals are reviewed by the user; nothing saves without their okay.\n",
+            "    description: The user's memory — durable preferences and topic files they own. Anything saved is shown to them right away and they can delete it.\n",
             "    cmd: {cmd}\n",
             "    args: []\n",
             "    envs:\n",

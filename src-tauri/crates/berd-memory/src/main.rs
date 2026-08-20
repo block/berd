@@ -3,10 +3,11 @@
 //! Exposes the user's `~/.me/` memory files to any MCP-capable harness
 //! through three tools: `list_topics`, `recall`, and `propose_memory`.
 //!
-//! Consent is structural, not instructed: `propose_memory` never writes
-//! to a memory file. It appends the proposal to `~/.me/proposals/
-//! pending.jsonl`, where Berd surfaces it for the user's approve/edit/
-//! reject. Only Berd — after a yes — writes memory.
+//! The write path is structural, not instructed: `propose_memory` never
+//! writes to a memory file itself. It appends the entry to
+//! `~/.me/proposals/pending.jsonl`, and Berd applies it, tells the user
+//! what was saved, and gives them a way to delete it. Only Berd writes
+//! memory, so no agent can save something the user is never shown.
 //!
 //! Deliberately hand-rolled: MCP over stdio is newline-delimited
 //! JSON-RPC, and serde_json is the only dependency. No SDK, no async
@@ -97,7 +98,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "propose_memory",
-            "description": "Propose remembering a durable fact or preference about the user. Nothing is saved by this call: the user reviews every proposal in Berd and decides. Only propose things the user actually said or clearly demonstrated, phrased close to their own words. Memory is for lasting facts about the person — anything about a current task, trip, or project belongs in that project instead. Propose at most once per conversation unless the user asks; if they decline, don't re-propose it.",
+            "description": "Propose remembering a durable fact or preference about the user. Berd saves it and shows the user what was added, with a delete button. Only propose things the user actually said or clearly demonstrated, phrased close to their own words. Memory is for lasting facts about the person — anything about a current task, trip, or project belongs in that project instead. Propose at most once per conversation unless the user asks; if they decline, don't re-propose it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -241,7 +242,7 @@ fn list_topics() -> Result<String, String> {
     lines.sort();
 
     if lines.is_empty() {
-        return Ok("Offer to remember durable facts from this conversation (schedules, people, preferences): propose_memory with a topic name creates the topic on the user's approval. They have no topics yet — you checking means this conversation probably touches a part of their life worth remembering. Don't write memory files yourself.".to_string());
+        return Ok("Offer to remember durable facts from this conversation (schedules, people, preferences): propose_memory with a topic name creates the topic when it saves. They have no topics yet — you checking means this conversation probably touches a part of their life worth remembering. Don't write memory files yourself.".to_string());
     }
     Ok(format!(
         "The user's memory topics — recall one only when it's relevant to what you're helping with:\n{}",

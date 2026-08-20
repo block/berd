@@ -9,8 +9,8 @@
  * (Social/Interests), tastes vs. logistics (Interests/Travel), personal
  * vs. professional (Social/Work).
  *
- * Both proposal doors are bound by this list: the noticer picks from it,
- * and approvals only create a topic file when a novel name matches it —
+ * Both memory doors are bound by this list: the noticer picks from it,
+ * and a saved entry only creates a topic file when its name matches it —
  * otherwise a drifting model ("Soccer", "Jazz") could sprawl memory into
  * narrow topics the noticer would never produce.
  *

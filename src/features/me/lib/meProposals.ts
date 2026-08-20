@@ -15,10 +15,10 @@ import { createTopic, listTopics } from "./meTopics";
  *
  * The memory MCP server can't write memory — `propose_memory` appends to
  * `~/.me/proposals/pending.jsonl` and this module is the other half:
- * Berd reads the queue, the user approves or dismisses each proposal in
- * Settings → Memory, and only an approval writes the entry into a memory
- * file (with agent attribution in the file history). Consent stays
- * structural: the queue is the only door agent proposals come through.
+ * Berd reads the queue and applies each entry, then shows the user what
+ * was saved with a way to delete it (with agent attribution in the file
+ * history). The queue is the only door agent-written memory comes
+ * through, so nothing is saved without Berd disclosing it.
  */
 
 export interface MemoryProposal {
