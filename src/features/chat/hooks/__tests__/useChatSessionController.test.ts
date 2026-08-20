@@ -4769,17 +4769,7 @@ describe("useChatSessionController", () => {
     expect(result.current.currentModelName).toBe("Claude Sonnet 4");
   });
 
-  it("applies a persona's provider-only target exactly", async () => {
-    useProviderCatalogStore.getState().mergeEntries([
-      {
-        id: "openai",
-        displayName: "OpenAI",
-        category: "model",
-        description: "OpenAI",
-        setupMethod: "single_api_key",
-        group: "default",
-      },
-    ]);
+  it("rejects a persona's provider-only target", () => {
     useAgentStore.setState({
       personas: [
         personaFixture({
@@ -4789,81 +4779,16 @@ describe("useChatSessionController", () => {
         }),
       ],
     });
+    const before = useChatSessionStore.getState().getSession("session-1");
     const { result } = renderHook(() =>
       useChatSessionController({ sessionId: "session-1" }),
     );
-
     act(() => {
       result.current.handlePersonaChange("persona-1");
     });
-
-    await waitFor(() => {
-      expect(
-        useChatSessionStore.getState().getSession("session-1"),
-      ).toMatchObject({
-        executionTarget: {
-          harnessId: "goose",
-          modelProviderId: "openai",
-        },
-      });
-      expect(
-        useChatSessionStore.getState().getSession("home-unresolved-persona")
-          ?.personaId,
-      ).toBeUndefined();
-    });
-    expect(mockAcpPrepareSession).toHaveBeenCalledWith(
-      "session-1",
-      "openai",
-      "/tmp/project",
-      expect.objectContaining({ requestId: expect.any(String) }),
-      expect.objectContaining({ clear: expect.any(Function) }),
+    expect(useChatSessionStore.getState().getSession("session-1")).toEqual(
+      before,
     );
-  });
-
-  it("keeps a provider-only persona target local while session creation is pending", () => {
-    useProviderCatalogStore.getState().mergeEntries([
-      {
-        id: "openai",
-        displayName: "OpenAI",
-        category: "model",
-        description: "OpenAI",
-        setupMethod: "single_api_key",
-        group: "default",
-      },
-    ]);
-    useAgentStore.setState({
-      personas: [
-        personaFixture({
-          provider: "goose",
-          modelProviderId: "openai",
-          model: undefined,
-        }),
-      ],
-    });
-    useChatSessionStore.setState((state) => ({
-      sessions: state.sessions.map((candidate) =>
-        candidate.id === "session-1"
-          ? { ...candidate, creationState: "pending" }
-          : candidate,
-      ),
-    }));
-    const { result } = renderHook(() =>
-      useChatSessionController({ sessionId: "session-1" }),
-    );
-
-    act(() => {
-      result.current.handlePersonaChange("persona-1");
-    });
-
-    expect(
-      useChatSessionStore.getState().getSession("session-1"),
-    ).toMatchObject({
-      personaId: "persona-1",
-      executionTarget: {
-        harnessId: "goose",
-        modelProviderId: "openai",
-      },
-    });
     expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 

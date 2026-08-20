@@ -180,6 +180,46 @@ describe("acpSteerMessage", () => {
 
     expect(mockSteerSession).not.toHaveBeenCalled();
   });
+
+  it("waits for pending configuration before steering the active run", async () => {
+    const registry = await import("../acpSessionRegistry");
+    const { acpSteerMessage, reserveAcpSessionConfiguration } = await import(
+      "../acp"
+    );
+    const sessionId = "acp-session-steer-transition";
+    registry.registerPreparedSession(
+      sessionId,
+      "openai",
+      "/tmp/project",
+      "gpt-4.1",
+    );
+    mockSteerSession.mockResolvedValueOnce({
+      runId: "run-1",
+      messageId: "steer-message",
+    });
+    const intent = reserveAcpSessionConfiguration(sessionId);
+    const steering = acpSteerMessage(sessionId, "run-1", "more");
+    await Promise.resolve();
+    expect(mockSteerSession).not.toHaveBeenCalled();
+    await registry.configureSession(
+      sessionId,
+      "anthropic",
+      "/tmp/project",
+      "claude-fable",
+      {},
+      intent,
+    );
+    await expect(steering).resolves.toEqual({
+      runId: "run-1",
+      messageId: "steer-message",
+    });
+    expect(mockSteerSession).toHaveBeenCalledWith(
+      sessionId,
+      [{ type: "text", text: "more" }],
+      "run-1",
+      undefined,
+    );
+  });
 });
 
 describe("acpSendMessage", () => {

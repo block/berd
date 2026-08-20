@@ -1526,10 +1526,10 @@ export function GlobalComposerPill({
       {personaConfigurationInvalid && !personaSelectionOverridden ? (
         <div
           role="status"
-          className="mx-6 mb-14 flex items-center justify-between gap-3 text-xs text-destructive"
+          className="mx-6 mb-14 flex flex-wrap items-center justify-between gap-3 text-xs text-destructive"
         >
           <span>{t("globalPill.invalidAgentConfiguration")}</span>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {selectedPersonaId && onEditAgent ? (
               <Button
                 type="button"

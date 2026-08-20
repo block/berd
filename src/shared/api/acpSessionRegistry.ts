@@ -505,10 +505,12 @@ export function requireSessionInvocationSelection(
   return { ...invocationSelection, modelId: selection.modelId };
 }
 
-/** Run prompt setup and transport without allowing session config to interleave. */
-export async function runPreparedSessionPrompt<T>(
+/** Run invocation transport without allowing session config to interleave. */
+export async function runPreparedSessionInvocation<T>(
   sessionId: string,
-  prompt: (providerId: string) => Promise<T>,
+  invoke: (
+    selection: AcpSessionExecutionSelection & { modelId: string },
+  ) => Promise<T>,
 ): Promise<T> {
   let pending = mutationQueues.get(sessionId)?.pendingSupersession;
   while (pending) {
@@ -517,8 +519,18 @@ export async function runPreparedSessionPrompt<T>(
   }
   return serializeSessionMutation(
     sessionId,
-    () => prompt(requireSessionInvocationSelection(sessionId).providerId),
+    () => invoke(requireSessionInvocationSelection(sessionId)),
     false,
+  );
+}
+
+/** Run prompt setup and transport without allowing session config to interleave. */
+export function runPreparedSessionPrompt<T>(
+  sessionId: string,
+  prompt: (providerId: string) => Promise<T>,
+): Promise<T> {
+  return runPreparedSessionInvocation(sessionId, ({ providerId }) =>
+    prompt(providerId),
   );
 }
 

@@ -111,11 +111,12 @@ describe("personaExecutionTarget", () => {
   it("never materializes an agent provider as a Goose target without a model", () => {
     const persona = { provider: "goose", modelProviderId: "claude-acp" };
 
-    expect(personaExecutionTarget(persona, context())).toEqual({
-      harnessId: "goose",
+    expect(personaExecutionTarget(persona, context())).toBeUndefined();
+    expect(resolvePersonaExecutionTarget(persona, context())).toEqual({
+      status: "invalid",
     });
     expect(personaTargetMigration(persona, context())).toEqual({
-      provider: "goose",
+      provider: null,
       modelProviderId: null,
       model: null,
     });

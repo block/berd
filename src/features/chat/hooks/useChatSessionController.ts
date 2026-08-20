@@ -83,7 +83,10 @@ import {
   markAgentBuilderSessionPreparationFailed,
   preSeedDraftAgent,
 } from "@/features/agents/lib/agentBuilderSession";
-import { resolvePersonaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
+import {
+  personaHarnessId,
+  resolvePersonaExecutionTarget,
+} from "@/features/agents/lib/personaExecutionTarget";
 import { deletePersonaSource } from "@/shared/api/agents";
 import type { Persona } from "@/shared/types/agents";
 import {
@@ -1863,11 +1866,19 @@ export function useChatSessionController({
       return (
         (resolution?.status === "valid"
           ? resolution.target.harnessId
-          : undefined) ?? selectedAgentId
+          : targetPersona
+            ? personaHarnessId(
+                targetPersona.provider,
+                providers,
+                catalogEntries,
+              )
+            : undefined) ?? selectedAgentId
       );
     },
     [
+      catalogEntries,
       personas,
+      providers,
       resolvePersonaTarget,
       selectedAgentId,
       session?.executionTarget?.harnessId,

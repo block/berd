@@ -51,7 +51,7 @@ function canonicalModelProviderId(
   return canonicalProviderCatalogIdFromEntries(catalogEntries, providerId);
 }
 
-function harnessIdForPersona(
+export function personaHarnessId(
   providerId: string | undefined,
   providers: readonly AvailableHarness[],
   catalogEntries: ProviderCatalogEntry[],
@@ -139,7 +139,7 @@ function resolvePersonaExecutionTargetValue(
     catalogEntries,
   }: PersonaTargetContext,
 ): SessionExecutionTarget | undefined {
-  const harnessId = harnessIdForPersona(
+  const harnessId = personaHarnessId(
     persona?.provider,
     providers,
     catalogEntries,
@@ -150,6 +150,7 @@ function resolvePersonaExecutionTargetValue(
   const provenModels =
     getProvenModelsForHarness?.(harnessId) ?? availableModels;
   const modelId = normalizeConcreteModelId(persona?.model);
+  if (!modelId) return undefined;
   let modelProviderId = persistedModelProviderId(
     persona ?? {},
     harnessId,
@@ -260,13 +261,13 @@ export function personaTargetMigration(
     );
     const unknownHarness =
       Boolean(persona.provider) &&
-      !harnessIdForPersona(
+      !personaHarnessId(
         persona.provider,
         context.providers,
         context.catalogEntries,
       );
     const persistedAgentProviderForGoose =
-      harnessIdForPersona(
+      personaHarnessId(
         persona.provider,
         context.providers,
         context.catalogEntries,

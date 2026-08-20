@@ -1476,9 +1476,12 @@ describe("AppShell global navigation", () => {
     expect(mockAcpCreateSession).toHaveBeenCalled();
   });
 
-  it("allows a configured concrete provider when the BYO default is missing", async () => {
+  it("allows a configured concrete target when the BYO default is missing", async () => {
     requireByoDefaultProviderSetup();
-    setResolvingPersona();
+    setResolvingPersona("goose-gpt-5-5", "databricks_v2", "databricks_v2");
+    seedProviderModels("databricks_v2", [
+      { id: "goose-gpt-5-5", name: "GPT-5.5" },
+    ]);
     mockCheckAllProviderStatus.mockResolvedValue([
       { providerId: "databricks_v2", isConfigured: true },
     ]);
@@ -1497,7 +1500,7 @@ describe("AppShell global navigation", () => {
       "~/goose artifacts",
       {
         deferProviderSetup: false,
-        modelId: undefined,
+        modelId: "goose-gpt-5-5",
         projectId: undefined,
       },
     );

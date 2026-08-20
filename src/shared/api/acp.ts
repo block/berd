@@ -330,7 +330,6 @@ export async function acpSteerMessage(
     "assistantPrompt" | "goose" | "images"
   > = {},
 ): Promise<AcpSteerResponse> {
-  sessionRegistry.requireSessionInvocationSelection(sessionId);
   const { assistantPrompt, goose, images } = options;
   const content: ContentBlock[] = [];
   const assistantText = assistantPrompt?.trim();
@@ -348,11 +347,13 @@ export async function acpSteerMessage(
     }
   }
 
-  return directAcp.steerSession(
-    sessionId,
-    content,
-    expectedRunId,
-    goose && Object.keys(goose).length > 0 ? { goose } : undefined,
+  return sessionRegistry.runPreparedSessionInvocation(sessionId, () =>
+    directAcp.steerSession(
+      sessionId,
+      content,
+      expectedRunId,
+      goose && Object.keys(goose).length > 0 ? { goose } : undefined,
+    ),
   );
 }
 
