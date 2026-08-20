@@ -6,7 +6,32 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const nativeDropMocks = vi.hoisted(() => ({
+  listener: null as ((event: { payload: unknown }) => void) | null,
+  readImportAgentFile: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/webview", () => ({
+  getCurrentWebview: () => ({
+    onDragDropEvent: (listener: (event: { payload: unknown }) => void) => {
+      nativeDropMocks.listener = listener;
+      return Promise.resolve(() => {
+        nativeDropMocks.listener = null;
+      });
+    },
+  }),
+}));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({ scaleFactor: () => Promise.resolve(2) }),
+}));
+
+vi.mock("@/shared/api/agents", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/shared/api/agents")>()),
+  readImportAgentFile: nativeDropMocks.readImportAgentFile,
+}));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -51,6 +76,57 @@ function importDialogProps(overrides: Record<string, unknown> = {}) {
 }
 
 describe("AgentImportDialog", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
+    nativeDropMocks.listener = null;
+    nativeDropMocks.readImportAgentFile.mockReset();
+  });
+
+  it("waits for a native drop and ignores stale reads", async () => {
+    window.__TAURI_INTERNALS__ = {} as typeof window.__TAURI_INTERNALS__;
+    const first = deferred<{ fileBytes: number[]; fileName: string }>();
+    const second = deferred<{ fileBytes: number[]; fileName: string }>();
+    nativeDropMocks.readImportAgentFile
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    const prepareImport = vi.fn(() => ({
+      displayName: "Reviewer",
+      systemPrompt: "Review carefully.",
+      identity: "agent.agent.png",
+    }));
+    render(<AgentImportDialog {...importDialogProps({ prepareImport })} />);
+    await waitFor(() => expect(nativeDropMocks.listener).not.toBeNull());
+    const position = { x: 0, y: 0, toLogical: () => ({ x: 0, y: 0 }) };
+
+    act(() =>
+      nativeDropMocks.listener?.({
+        payload: { type: "enter", paths: ["first.zip"], position },
+      }),
+    );
+    expect(nativeDropMocks.readImportAgentFile).not.toHaveBeenCalled();
+    act(() =>
+      nativeDropMocks.listener?.({
+        payload: { type: "drop", paths: ["first.zip"], position },
+      }),
+    );
+    act(() =>
+      nativeDropMocks.listener?.({
+        payload: { type: "drop", paths: ["second.zip"], position },
+      }),
+    );
+    second.resolve({ fileBytes: [2], fileName: "second.zip" });
+    await waitFor(() =>
+      expect(prepareImport).toHaveBeenCalledWith(
+        expect.any(Uint8Array),
+        "second.zip",
+        expect.any(AbortSignal),
+      ),
+    );
+    first.resolve({ fileBytes: [1], fileName: "first.zip" });
+    await act(async () => {});
+    expect(prepareImport).toHaveBeenCalledTimes(1);
+  });
+
   it("clears a prepared import when a replacement file is rejected", async () => {
     const firstBytes = Uint8Array.from([1, 2, 3]);
     const firstFile = new File([firstBytes], "agent.agent.png", {

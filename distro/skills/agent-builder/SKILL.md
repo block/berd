@@ -27,7 +27,7 @@ Each agent is one `.md` file:
 ```md
 ---
 name: Agent Name
-description: Agent
+description: A concise summary of what this agent does
 provider: optional-provider
 model: optional-model
 avatar: optional-avatar
@@ -35,7 +35,7 @@ avatar: optional-avatar
 
 Agent instructions here.
 ```
-Required frontmatter keys are name and description. Preserve all other frontmatter keys when editing existing agents unless the user explicitly changes them. The Markdown body is the agent’s system prompt/persona instructions.
+Required frontmatter keys are `name` and `description`. The description must be a trimmed, non-empty summary of what the agent does; never create or save an agent with a missing, blank, or placeholder description. If the user has not supplied enough context to write an accurate description, ask for one before saving. Preserve all other frontmatter keys when editing existing agents unless the user explicitly changes them. The Markdown body is the agent’s system prompt/persona instructions.
 
 When writing or generating a description or body, do not assign the agent a gender or gendered pronouns unless the user asked for one. Use it/its or they/them for the agent, matching how it is framed (tool vs. character), or avoid pronouns; people the instructions describe get they/them. Preserve pronouns the user chose, in either direction.
 
@@ -52,4 +52,4 @@ When editing, read the existing file first. Resolve targets by exact path, front
 
 Prefer direct file edits over helper scripts. Do not require Python, Node, or another runtime unless the current repo already requires it.
 
-After writing, verify that the file exists, frontmatter is valid, required keys are present, and preserved metadata was not removed. Report the final path.
+After writing, verify that the file exists, frontmatter is valid, `name` and `description` are both trimmed and non-empty, and preserved metadata was not removed. Report the final path.

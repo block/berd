@@ -7,12 +7,8 @@ import {
   fallbackAgentCardColor,
   sampleAgentAvatarColor,
 } from "./agentCardColor";
-import {
-  deriveAgentCardTraitLines,
-  deriveAgentShareCardTextLayout,
-} from "./agentShareCardLayout";
+import { deriveAgentShareCardTextLayout } from "./agentShareCardLayout";
 import { loadAgentCardFonts } from "./agentShareCardFonts";
-import type { AgentShareCardCopy } from "./agentShareCardCopy";
 import {
   AGENT_CARD_GEOMETRY,
   agentCardFramePath,
@@ -36,7 +32,6 @@ interface AgentShareCardPreviewProps {
   description: string;
   avatarSrc?: string;
   alt: string;
-  copy: AgentShareCardCopy;
   locale: string;
 }
 
@@ -46,7 +41,6 @@ export function AgentShareCardPreview({
   description,
   avatarSrc,
   alt,
-  copy,
   locale,
 }: AgentShareCardPreviewProps) {
   const resolvedAvatarSrc = avatarSrc ?? resolveAgentIcon(identity);
@@ -93,21 +87,6 @@ export function AgentShareCardPreview({
   }, [identity, resolvedAvatarSrc]);
 
   const geometry = AGENT_CARD_GEOMETRY;
-  const traitMeasure = createAgentCardTextMeasure();
-  const goodForLines = deriveAgentCardTraitLines(
-    copy.goodForLabel,
-    copy.goodFor,
-    geometry.goodFor.width,
-    (value) => traitMeasure(value, "600 42px Inter, sans-serif"),
-    locale,
-  );
-  const vibesLines = deriveAgentCardTraitLines(
-    copy.vibesLabel,
-    copy.vibes,
-    geometry.vibes.width,
-    (value) => traitMeasure(value, "600 42px Inter, sans-serif"),
-    locale,
-  );
   const { title, descriptionLines, contentShift } = textLayout;
   const descriptionLineKeys = descriptionLines.map(
     (line, index) =>
@@ -226,7 +205,7 @@ export function AgentShareCardPreview({
 
         <foreignObject
           x={geometry.title.x}
-          y={1306 - contentShift}
+          y={geometry.title.y - 64 - contentShift}
           width={geometry.title.width}
           height="78"
         >
@@ -247,59 +226,6 @@ export function AgentShareCardPreview({
               key={descriptionLineKeys[index]}
               x={geometry.description.x}
               dy={index === 0 ? 0 : geometry.description.lineHeight}
-            >
-              {line}
-            </tspan>
-          ))}
-        </text>
-
-        <line
-          x1={geometry.goodFor.ruleX}
-          x2={geometry.goodFor.ruleX}
-          y1={geometry.traitRule.y1}
-          y2={geometry.traitRule.y2}
-          stroke="black"
-          strokeWidth={geometry.traitRule.width}
-        />
-        <line
-          x1={geometry.vibes.ruleX}
-          x2={geometry.vibes.ruleX}
-          y1={geometry.traitRule.y1}
-          y2={geometry.traitRule.y2}
-          stroke="black"
-          strokeWidth={geometry.traitRule.width}
-        />
-        <text
-          x={geometry.goodFor.copyX}
-          y={geometry.traitCopyY}
-          fill="black"
-          fontFamily="Inter, sans-serif"
-          fontSize="42"
-          fontWeight="600"
-        >
-          {goodForLines.map((line, index) => (
-            <tspan
-              key={`good-for:${line}`}
-              x={geometry.goodFor.copyX}
-              dy={index === 0 ? 0 : 50}
-            >
-              {line}
-            </tspan>
-          ))}
-        </text>
-        <text
-          x={geometry.vibes.copyX}
-          y={geometry.traitCopyY}
-          fill="black"
-          fontFamily="Inter, sans-serif"
-          fontSize="42"
-          fontWeight="600"
-        >
-          {vibesLines.map((line, index) => (
-            <tspan
-              key={`vibes:${line}`}
-              x={geometry.vibes.copyX}
-              dy={index === 0 ? 0 : 50}
             >
               {line}
             </tspan>

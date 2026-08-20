@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 interface FileImportZoneOptions {
   onImportFile: (fileBytes: Uint8Array, fileName: string) => void;
@@ -64,21 +64,24 @@ export function useFileImportZone({
     [fileTooLargeMessage, maxBytes, onImportFile, onImportError, validateFile],
   );
 
-  const dropHandlers = {
-    onDragLeave: () => setIsDragOver(false),
-    onDragOver: (e: React.DragEvent) => {
-      e.preventDefault();
-      setIsDragOver(true);
-    },
-    onDrop: (e: React.DragEvent) => {
-      e.preventDefault();
-      setIsDragOver(false);
-      const file = e.dataTransfer.files[0];
-      if (file) {
-        void importFile(file);
-      }
-    },
-  };
+  const dropHandlers = useMemo(
+    () => ({
+      onDragLeave: () => setIsDragOver(false),
+      onDragOver: (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragOver(true);
+      },
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault();
+        setIsDragOver(false);
+        const file = e.dataTransfer.files[0];
+        if (file) {
+          void importFile(file);
+        }
+      },
+    }),
+    [importFile],
+  );
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -98,6 +101,7 @@ export function useFileImportZone({
     fileInputRef,
     isDragOver,
     dropHandlers,
+    importFile,
     handleFileChange,
     openFilePicker,
   };

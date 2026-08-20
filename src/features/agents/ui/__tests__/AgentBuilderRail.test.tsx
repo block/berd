@@ -297,6 +297,12 @@ describe("AgentBuilderRail", () => {
       screen.getByRole("button", { name: /save changes/i }),
     ).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByText(/required:/i)).toHaveTextContent(/avatar/i);
+    expect(screen.getByText(/required:/i)).toHaveTextContent(/description/i);
+    expect(screen.getByLabelText(/description/i)).toBeRequired();
+    expect(screen.getByLabelText(/description/i)).toHaveAttribute(
+      "aria-invalid",
+      "true",
+    );
   });
 
   it("does not persist a default avatar when the draft opens", async () => {
@@ -394,6 +400,7 @@ describe("AgentBuilderRail", () => {
       data: {
         ...baseSource,
         name: "Snark",
+        description: "A sharp, witty agent.",
         content: "Be snarky.",
         properties: {
           draft: true,
@@ -405,6 +412,7 @@ describe("AgentBuilderRail", () => {
     vi.mocked(promoteDraft).mockResolvedValue({
       ...baseSource,
       name: "Snark",
+      description: "A sharp, witty agent.",
       content: "Be snarky.",
       properties: {
         avatar: "app-avatar:gloopy-1",
@@ -434,6 +442,7 @@ describe("AgentBuilderRail", () => {
       data: {
         ...baseSource,
         name: "Snark",
+        description: "A sharp, witty agent.",
         content: "Be snarky.",
         properties: {
           draft: true,
@@ -448,6 +457,7 @@ describe("AgentBuilderRail", () => {
       ...baseSource,
       path: "/Users/x/.agents/agents/snark.md",
       name: "Snark",
+      description: "A sharp, witty agent.",
       content: "Be snarky.",
       properties: {
         avatar: "app-avatar:gloopy-1",
@@ -489,6 +499,7 @@ describe("AgentBuilderRail", () => {
       data: {
         ...baseSource,
         name: "Snark",
+        description: "A sharp, witty agent.",
         content: "Be snarky.",
         properties: {
           draft: true,
@@ -526,6 +537,7 @@ describe("AgentBuilderRail", () => {
       data: {
         ...baseSource,
         name: "Code Reviewer",
+        description: "Reviews code for correctness.",
         content: "",
         properties: {},
       },
@@ -560,6 +572,7 @@ describe("AgentBuilderRail", () => {
       ...baseSource,
       path: "/Users/x/.agents/agents/code-reviewer.md",
       name: "Code Reviewer",
+      description: "Reviews code for correctness.",
       content: "Review code carefully.",
       properties: { provider: "openai", model: "gpt-5" },
     };

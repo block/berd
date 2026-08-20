@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { PersonaImportPreview } from "@/shared/api/agents";
+import {
+  readImportAgentFile,
+  type PersonaImportPreview,
+} from "@/shared/api/agents";
 import type { SnapshotV1 } from "@/features/agents/agent-snapshot";
 import { AgentShareCardPreview } from "@/features/agents/ui/share-card/AgentShareCardPreview";
 import { HolographicAgentCard } from "@/features/agents/ui/share-card/HolographicAgentCard";
 import { AgentCardReveal } from "@/features/agents/ui/share-card/AgentCardReveal";
-import { resolveAgentShareCardCopy } from "@/features/agents/ui/share-card/agentShareCardCopy";
 import {
   fallbackAgentCardColor,
   sampleAgentAvatarColor,
@@ -205,6 +207,17 @@ export function AgentImportDialog({
     };
   }, [open, initialFile, startPreparation]);
 
+  const dropZoneRef = useRef<HTMLDivElement>(null);
+  const nativeDropGenerationRef = useRef(0);
+  const validateReplacementFile = useCallback(
+    (file: Pick<File, "name" | "type" | "size">) => {
+      nativeDropGenerationRef.current += 1;
+      preparationRef.current?.abort();
+      setPrepared(null);
+      return validateImportFile(file);
+    },
+    [validateImportFile],
+  );
   const {
     fileInputRef,
     isDragOver,
@@ -213,15 +226,90 @@ export function AgentImportDialog({
     openFilePicker,
   } = useFileImportZone({
     onImportFile: startPreparation,
-    validateFile: (file) => {
-      preparationRef.current?.abort();
-      setPrepared(null);
-      return validateImportFile(file);
-    },
+    validateFile: validateReplacementFile,
     onImportError,
     maxBytes: maxImportBytes,
     fileTooLargeMessage: importTooLargeMessage,
   });
+
+  useEffect(() => {
+    if (!open || !window.__TAURI_INTERNALS__) return;
+
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void Promise.all([
+      import("@tauri-apps/api/webview"),
+      import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
+        getCurrentWindow().scaleFactor(),
+      ),
+    ])
+      .then(([{ getCurrentWebview }, scaleFactor]) =>
+        getCurrentWebview().onDragDropEvent(({ payload }) => {
+          if (disposed || !dropZoneRef.current) return;
+          if (payload.type === "leave") {
+            dropHandlers.onDragLeave();
+            return;
+          }
+          const rect = dropZoneRef.current.getBoundingClientRect();
+          const position = payload.position.toLogical(scaleFactor);
+          const inside =
+            position.x >= rect.left &&
+            position.x <= rect.right &&
+            position.y >= rect.top &&
+            position.y <= rect.bottom;
+          if (payload.type === "enter" || payload.type === "over") {
+            if (inside)
+              dropHandlers.onDragOver({
+                preventDefault() {},
+              } as React.DragEvent);
+            else dropHandlers.onDragLeave();
+            return;
+          }
+          dropHandlers.onDragLeave();
+          const path = payload.paths[0];
+          if (!inside || !path) return;
+          const generation = ++nativeDropGenerationRef.current;
+          void readImportAgentFile(path)
+            .then(({ fileBytes, fileName }) => {
+              if (disposed || generation !== nativeDropGenerationRef.current)
+                return;
+              const bytes = Uint8Array.from(fileBytes);
+              const file = new File([bytes], fileName);
+              const error = validateReplacementFile(file);
+              if (error) {
+                onImportError(error);
+                return;
+              }
+              startPreparation(bytes, fileName);
+            })
+            .catch((error) => {
+              if (!disposed && generation === nativeDropGenerationRef.current)
+                onImportError(
+                  error instanceof Error ? error.message : String(error),
+                );
+            });
+        }),
+      )
+      .then((cleanup) => {
+        if (disposed) cleanup();
+        else unlisten = cleanup;
+      })
+      .catch((error) => {
+        if (!disposed)
+          console.warn("Failed to register agent import drop target", error);
+      });
+    return () => {
+      disposed = true;
+      nativeDropGenerationRef.current += 1;
+      unlisten?.();
+    };
+  }, [
+    dropHandlers,
+    onImportError,
+    open,
+    startPreparation,
+    validateReplacementFile,
+  ]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -276,14 +364,6 @@ export function AgentImportDialog({
                     alt={t("importDialog.previewAlt", {
                       name: prepared.preview.displayName,
                     })}
-                    copy={resolveAgentShareCardCopy(
-                      prepared.preview.systemPrompt,
-                      t,
-                      {
-                        goodFor: prepared.preview.goodFor,
-                        vibes: prepared.preview.vibes,
-                      },
-                    )}
                     locale={locale}
                   />
                 )}
@@ -291,6 +371,7 @@ export function AgentImportDialog({
             </div>
           ) : (
             <div
+              ref={dropZoneRef}
               {...dropHandlers}
               role="status"
               aria-busy={preparing}

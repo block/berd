@@ -49,6 +49,7 @@
     "completeRequiredFields": "Obligatorio: {{fields}}.",
     "requiredAvatar": "avatar",
     "requiredName": "nombre",
+    "requiredDescription": "descripción",
     "requiredInstructions": "instrucciones",
     "startFreshDraft": "Iniciar borrador nuevo",
     "leaveDraftTitle": "¿Guardar este borrador de agente?",

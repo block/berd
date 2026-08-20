@@ -301,18 +301,6 @@ export function AgentBuilderRail({
     };
   }, [hasLocalEdits, onLocalEditStateChange]);
 
-  useEffect(() => {
-    if (!data) {
-      onSaveDraftHandlerChange?.(null);
-      return;
-    }
-
-    onSaveDraftHandlerChange?.(saveNow);
-    return () => {
-      onSaveDraftHandlerChange?.(null);
-    };
-  }, [data, onSaveDraftHandlerChange, saveNow]);
-
   const requiresNewDraftFields = isDraft;
   const headerName = data
     ? isPlaceholderAgentName(data.name)
@@ -332,6 +320,7 @@ export function AgentBuilderRail({
   const instructionsFieldValue = isPlaceholderContent ? "" : contentFieldValue;
   const avatarRequired = Boolean(effectiveAvatar);
   const nameRequired = nameFieldValue.trim().length > 0;
+  const descriptionRequired = descriptionFieldValue.trim().length > 0;
   const instructionsRequired =
     contentFieldValue.trim().length > 0 &&
     contentFieldValue !== PLACEHOLDER_AGENT_BODY;
@@ -340,10 +329,26 @@ export function AgentBuilderRail({
       ? t("builderRail.requiredAvatar")
       : null,
     !nameRequired ? t("builderRail.requiredName") : null,
+    !descriptionRequired ? t("builderRail.requiredDescription") : null,
     requiresNewDraftFields && !instructionsRequired
       ? t("builderRail.requiredInstructions")
       : null,
   ].filter((field): field is string => field !== null);
+  useEffect(() => {
+    if (!data) {
+      onSaveDraftHandlerChange?.(null);
+      return;
+    }
+
+    onSaveDraftHandlerChange?.(() => {
+      if (!descriptionRequired) return false;
+      return saveNow();
+    });
+    return () => {
+      onSaveDraftHandlerChange?.(null);
+    };
+  }, [data, descriptionRequired, onSaveDraftHandlerChange, saveNow]);
+
   const blockingError =
     error !== null && !(error === "load" && saveStatus === "error");
   // An agent must never be saved with a half-finished avatar. The rule lives in
@@ -755,6 +760,8 @@ export function AgentBuilderRail({
         <Input
           id="builder-rail-description"
           value={descriptionFieldValue}
+          required
+          aria-invalid={!descriptionRequired}
           placeholder={t("builderRail.descriptionPlaceholder")}
           onChange={(event) => update({ description: event.target.value })}
           className={FIELD_CLASS}

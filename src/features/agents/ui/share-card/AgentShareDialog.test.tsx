@@ -470,10 +470,6 @@ describe("AgentShareDialog", () => {
         generatedPersona,
         "asset://generated-avatar.png",
         expect.any(String),
-        expect.objectContaining({
-          goodForLabel: "Good for:",
-          vibesLabel: "Vibes:",
-        }),
         "en",
         expect.any(String),
       ),

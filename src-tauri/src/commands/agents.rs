@@ -47,6 +47,26 @@ fn validate_import_agent_image_path(source_path: &str) -> Result<PathBuf, String
     canonicalize_path(&path, "agent image import")
 }
 
+fn validate_agent_import_path(source_path: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(source_path);
+    let metadata = validate_existing_regular_file(&path, "agent import")?;
+    let lower_name = lower_file_name(&path)?;
+    if !lower_name.ends_with(".zip")
+        && !lower_name.ends_with(".png")
+        && !lower_name.ends_with(".md")
+        && !lower_name.ends_with(".json")
+    {
+        return Err(
+            "Unsupported file type. Expected an agent ZIP, PNG, Markdown, or JSON file."
+                .to_string(),
+        );
+    }
+    if metadata.len() > MAX_AGENT_IMAGE_IMPORT_BYTES {
+        return Err("Agent import file must be 10 MB or smaller.".to_string());
+    }
+    canonicalize_path(&path, "agent import")
+}
+
 fn validate_agent_source_path(
     source_path: &str,
     agents_root: Option<&Path>,
@@ -178,6 +198,29 @@ pub fn repair_bundled_agent(
 pub fn read_import_persona_file(source_path: String) -> Result<ImportFileReadResult, String> {
     let path = validate_import_persona_path(&source_path)?;
     read_persona_file(path, "import")
+}
+
+#[tauri::command]
+pub fn read_import_agent_file(source_path: String) -> Result<ImportBinaryFileReadResult, String> {
+    let path = validate_agent_import_path(&source_path)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Selected file is missing a valid filename".to_string())?
+        .to_string();
+    let file = std::fs::File::open(&path)
+        .map_err(|err| format!("Failed to open agent import '{}': {err}", path.display()))?;
+    let mut file_bytes = Vec::new();
+    file.take(MAX_AGENT_IMAGE_IMPORT_BYTES + 1)
+        .read_to_end(&mut file_bytes)
+        .map_err(|err| format!("Failed to read agent import '{}': {err}", path.display()))?;
+    if file_bytes.len() as u64 > MAX_AGENT_IMAGE_IMPORT_BYTES {
+        return Err("Agent import file must be 10 MB or smaller.".to_string());
+    }
+    Ok(ImportBinaryFileReadResult {
+        file_bytes,
+        file_name,
+    })
 }
 
 #[tauri::command]

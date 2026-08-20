@@ -17,8 +17,9 @@ interface AgentShareCardMetadata {
   vibes?: string;
 }
 
-export const AGENT_CARD_GOOD_FOR_MAX_GRAPHEMES = 44;
-export const AGENT_CARD_VIBES_MAX_GRAPHEMES = 32;
+export const AGENT_CARD_TRAIT_MAX_GRAPHEMES = 32;
+export const AGENT_CARD_GOOD_FOR_MAX_GRAPHEMES = AGENT_CARD_TRAIT_MAX_GRAPHEMES;
+export const AGENT_CARD_VIBES_MAX_GRAPHEMES = AGENT_CARD_TRAIT_MAX_GRAPHEMES;
 
 function shortCardValue(value: string | undefined, maxGraphemes: number) {
   const trimmed = value?.trim();

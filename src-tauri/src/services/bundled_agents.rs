@@ -18,6 +18,18 @@ static INSTALL_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 const LEGACY_AGT_BUILDER_FILE_NAME: &str = "agt-builder.md";
 const LEGACY_AGT_BUILDER_FILE_SHA256: &str =
     "15ac706dd4b14dced6368572f4f2f0b3e42d0263cafb5ec199e71cd034b14a9d";
+const KNOWN_AGENT_DESCRIPTION_MIGRATIONS: [(&str, &str, &str); 2] = [
+    (
+        "reviewer.md",
+        "82cd0d7433c62c1c0ec67250e40167d2fd049e65989910a843a651cb5c57d9a4",
+        "A careful second set of eyes for maintainable changes.",
+    ),
+    (
+        "spar.md",
+        "e09d82e3114cf454a1f9bdb82c8fac61d6e842d7ff1ad7d7318da60e0d71da75",
+        "Reviews architecture and system design for structural soundness.",
+    ),
+];
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct SeedBundledAgentsResult {
@@ -59,7 +71,10 @@ pub fn seed_bundled_agents(
         }
     };
 
-    seed_bundled_agents_from_dir(&bundle.root_dir.join(DISTRO_AGENTS_DIR_NAME), &target_root)
+    let result =
+        seed_bundled_agents_from_dir(&bundle.root_dir.join(DISTRO_AGENTS_DIR_NAME), &target_root)?;
+    migrate_known_placeholder_descriptions(&target_root)?;
+    Ok(result)
 }
 
 /// Explicitly restores one bundled agent after a user invokes a feature that
@@ -249,6 +264,55 @@ fn seed_bundled_agents_from_dir(
     })
 }
 
+fn migrate_known_placeholder_descriptions(target_root: &Path) -> Result<usize, String> {
+    migrate_placeholder_descriptions(target_root, &KNOWN_AGENT_DESCRIPTION_MIGRATIONS)
+}
+
+fn migrate_placeholder_descriptions(
+    target_root: &Path,
+    migrations: &[(&str, &str, &str)],
+) -> Result<usize, String> {
+    let mut migrated = 0;
+    for &(file_name, expected_sha256, description) in migrations {
+        let path = target_root.join(file_name);
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to inspect agent description migration target '{}': {error}",
+                    path.display()
+                ));
+            }
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            continue;
+        }
+        let contents = match fs::read_to_string(&path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => continue,
+            Err(error) => {
+                return Err(format!(
+                    "Failed to read agent description migration target '{}': {error}",
+                    path.display()
+                ));
+            }
+        };
+        let digest = format!("{:x}", Sha256::digest(contents.as_bytes()));
+        if digest != expected_sha256 {
+            continue;
+        }
+        let updated = contents.replacen(
+            "description: Agent",
+            &format!("description: {description}"),
+            1,
+        );
+        install_agent_contents(&path, updated.as_bytes())?;
+        migrated += 1;
+    }
+    Ok(migrated)
+}
+
 fn has_known_legacy_agt_builder_contents(path: &Path) -> Result<bool, String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|err| format!("Failed to inspect legacy agent '{}': {err}", path.display()))?;
@@ -343,6 +407,53 @@ fn agent_frontmatter(contents: &str) -> Option<&str> {
     let contents = contents.strip_prefix("---\n")?;
     let end = contents.find("\n---")?;
     Some(&contents[..end])
+}
+
+fn install_agent_contents(target: &Path, contents: &[u8]) -> Result<(), String> {
+    let parent = target
+        .parent()
+        .ok_or_else(|| "Agent target has no parent".to_string())?;
+    let sequence = INSTALL_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temp_path = parent.join(format!(
+        ".berd-agent-install-{}-{sequence}.tmp",
+        std::process::id()
+    ));
+    let install_result = (|| -> Result<(), String> {
+        let mut temp = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .map_err(|err| {
+                format!(
+                    "Failed to create temporary agent '{}': {err}",
+                    temp_path.display()
+                )
+            })?;
+        temp.write_all(contents).map_err(|err| {
+            format!(
+                "Failed to write temporary agent '{}': {err}",
+                temp_path.display()
+            )
+        })?;
+        temp.sync_all().map_err(|err| {
+            format!(
+                "Failed to sync temporary agent '{}': {err}",
+                temp_path.display()
+            )
+        })?;
+        #[cfg(windows)]
+        if target.exists() {
+            fs::remove_file(target).map_err(|err| {
+                format!("Failed to replace agent at '{}': {err}", target.display())
+            })?;
+        }
+        fs::rename(&temp_path, target)
+            .map_err(|err| format!("Failed to install agent at '{}': {err}", target.display()))
+    })();
+    if install_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    install_result
 }
 
 fn install_agent_file(source: &Path, target: &Path) -> Result<(), String> {
@@ -492,6 +603,79 @@ mod tests {
     fn write_agent(root: &Path, name: &str, contents: &str) {
         fs::create_dir_all(root).unwrap();
         fs::write(root.join(name), contents).unwrap();
+    }
+
+    #[test]
+    fn migrates_only_known_agents_with_placeholder_descriptions() {
+        let target = tempdir().unwrap();
+        write_agent(
+            target.path(),
+            "reviewer.md",
+            "---\nname: Reviewer\ndescription: Agent\navatar: custom\n---\nUser instructions.",
+        );
+        write_agent(
+            target.path(),
+            "spar.md",
+            "---\nname: Spar\ndescription: Agent\n---\nArchitecture instructions.",
+        );
+        write_agent(
+            target.path(),
+            "custom.md",
+            "---\nname: Custom\ndescription: Agent\n---\nCustom instructions.",
+        );
+        write_agent(
+            target.path(),
+            "reviewer-copy.md",
+            "---\nname: Reviewer\ndescription: Agent\n---\nAnother agent.",
+        );
+
+        let migrations = [
+            (
+                "reviewer.md",
+                "c8a703c47be78da3e30ede9ab81f4fcc8265e04153ae20d1bd0510aa293cf083",
+                "A careful second set of eyes for maintainable changes.",
+            ),
+            (
+                "spar.md",
+                "34134750f4bc3bfdc38d38322fff71df421401bff7eaebf6ecc1fe51005ee389",
+                "Reviews architecture and system design for structural soundness.",
+            ),
+        ];
+        assert_eq!(
+            migrate_placeholder_descriptions(target.path(), &migrations).unwrap(),
+            2
+        );
+        assert!(fs::read_to_string(target.path().join("reviewer.md"))
+            .unwrap()
+            .contains("description: A careful second set of eyes for maintainable changes."));
+        assert!(fs::read_to_string(target.path().join("spar.md"))
+            .unwrap()
+            .contains(
+                "description: Reviews architecture and system design for structural soundness."
+            ));
+        assert!(fs::read_to_string(target.path().join("custom.md"))
+            .unwrap()
+            .contains("description: Agent"));
+        assert!(fs::read_to_string(target.path().join("reviewer-copy.md"))
+            .unwrap()
+            .contains("description: Agent"));
+    }
+
+    #[test]
+    fn preserves_known_agents_with_authored_descriptions() {
+        let target = tempdir().unwrap();
+        let contents =
+            "---\nname: Reviewer\ndescription: My custom reviewer\n---\nUser instructions.";
+        write_agent(target.path(), "reviewer.md", contents);
+
+        assert_eq!(
+            migrate_known_placeholder_descriptions(target.path()).unwrap(),
+            0
+        );
+        assert_eq!(
+            fs::read_to_string(target.path().join("reviewer.md")).unwrap(),
+            contents
+        );
     }
 
     #[test]
