@@ -19,11 +19,6 @@ import { importPersonas } from "@/shared/api/agents";
 import { useAvatarLibrary } from "@/features/agents/hooks/useAvatarLibrary";
 import type { AvatarLibraryState } from "@/features/agents/hooks/useAvatarLibrary";
 import type { CreatePersonaRequest } from "@/shared/types/agents";
-import {
-  EXPERIMENT_PREFERENCES_STORAGE_KEY,
-  EXPERIMENT_PREFERENCES_STORAGE_VERSION,
-} from "@/features/experiments/experimentPreferences";
-import { AVATAR_COLLECTION_PAGE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { AgentsView } from "../AgentsView";
 
 const mockCreatePersona = vi.hoisted(() => vi.fn());
@@ -258,25 +253,12 @@ describe("AgentsView entry points", () => {
     });
     delete document.documentElement.dataset.agentTransition;
     Reflect.deleteProperty(window, "__TAURI_INTERNALS__");
-    localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
     vi.restoreAllMocks();
   });
 
   beforeEach(async () => {
     vi.clearAllMocks();
     vi.mocked(useAvatarLibrary).mockReturnValue(EMPTY_AVATAR_LIBRARY);
-    // These tests exercise the inline customize section, so the collection
-    // gallery experiment (auto-enabled in dev/test) is pinned off.
-    // Gallery-specific tests re-enable it explicitly.
-    localStorage.setItem(
-      EXPERIMENT_PREFERENCES_STORAGE_KEY,
-      JSON.stringify({
-        version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
-        experiments: {
-          [AVATAR_COLLECTION_PAGE_EXPERIMENT_ID]: { enabled: false },
-        },
-      }),
-    );
     // Restore the default passthrough after tests that defer extraction.
     const actualZipImport = await vi.importActual<
       typeof import("@/features/agents/lib/agentZipImport")
@@ -823,7 +805,7 @@ describe("AgentsView entry points", () => {
     expect(screen.queryByText("Description")).not.toBeInTheDocument();
   });
 
-  it("shows and activates the avatar customization affordance", async () => {
+  it("opens the avatar collection gallery from the customization affordance", async () => {
     useAgentStore.setState({ personas: [persona] });
     const user = userEvent.setup();
 
@@ -837,30 +819,6 @@ describe("AgentsView entry points", () => {
     expect(customizeAvatar).toHaveFocus();
     await user.keyboard("{Enter}");
 
-    expect(screen.getByText("editor.avatarUrl")).toBeInTheDocument();
-  });
-
-  it("opens the avatar collection gallery instead of the inline section when the experiment is on", async () => {
-    localStorage.setItem(
-      EXPERIMENT_PREFERENCES_STORAGE_KEY,
-      JSON.stringify({
-        version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
-        experiments: {
-          [AVATAR_COLLECTION_PAGE_EXPERIMENT_ID]: { enabled: true },
-        },
-      }),
-    );
-    useAgentStore.setState({ personas: [persona] });
-    const user = userEvent.setup();
-
-    render(<AgentsView activePersonaId={persona.id} />);
-
-    await user.click(
-      screen.getByRole("button", { name: "editor.customizeAvatar" }),
-    );
-
-    // The full-surface gallery takeover renders; the inline customize
-    // section (with its duplicate custom-URL form) never appears.
     expect(screen.getByTestId("avatar-collection-overlay")).toBeInTheDocument();
     expect(screen.queryByText("editor.avatarUrl")).not.toBeInTheDocument();
   });
@@ -882,15 +840,6 @@ describe("AgentsView entry points", () => {
       height: 800,
       toJSON: () => ({}),
     } as DOMRect);
-    localStorage.setItem(
-      EXPERIMENT_PREFERENCES_STORAGE_KEY,
-      JSON.stringify({
-        version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
-        experiments: {
-          [AVATAR_COLLECTION_PAGE_EXPERIMENT_ID]: { enabled: true },
-        },
-      }),
-    );
     useAgentStore.setState({ personas: [persona] });
     const user = userEvent.setup();
 
@@ -1218,54 +1167,6 @@ describe("AgentsView entry points", () => {
 
       await waitFor(() => expect(toast.error).toHaveBeenCalled());
       expect(mockTrackAgentCreateCompleted).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("berd_agent Edit Completed", () => {
-    async function saveCustomAvatarUrl(url: string): Promise<void> {
-      const user = userEvent.setup();
-      await user.click(
-        screen.getByRole("button", { name: "editor.customizeAvatar" }),
-      );
-      await user.type(screen.getByLabelText("editor.avatarUrl"), url);
-      await user.click(
-        screen.getByRole("button", { name: "common:actions.save" }),
-      );
-    }
-
-    it("fires once with the persisted identity after a detail-page avatar change", async () => {
-      const qualifiedPersona = {
-        ...persona,
-        provider: "goose",
-        model: "gpt-5.6",
-      };
-      useAgentStore.setState({ personas: [qualifiedPersona] });
-      render(<AgentsView activePersonaId={qualifiedPersona.id} />);
-
-      await saveCustomAvatarUrl("https://example.com/avatar.png");
-
-      await waitFor(() =>
-        expect(mockTrackAgentEditCompleted).toHaveBeenCalledTimes(1),
-      );
-      expect(mockUpdatePersona).toHaveBeenCalledWith(
-        expect.objectContaining({ id: qualifiedPersona.id }),
-        { avatar: "https://example.com/avatar.png" },
-      );
-      expect(mockTrackAgentEditCompleted).toHaveBeenCalledWith({
-        provider: "goose",
-        model: "gpt-5.6",
-      });
-    });
-
-    it("does not fire when the avatar update fails", async () => {
-      mockUpdatePersona.mockRejectedValueOnce(new Error("update failed"));
-      useAgentStore.setState({ personas: [persona] });
-      render(<AgentsView activePersonaId={persona.id} />);
-
-      await saveCustomAvatarUrl("https://example.com/avatar.png");
-
-      await waitFor(() => expect(toast.error).toHaveBeenCalled());
-      expect(mockTrackAgentEditCompleted).not.toHaveBeenCalled();
     });
   });
 

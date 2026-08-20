@@ -55,8 +55,6 @@ export const VOICE_CONVERSATION_EXPERIMENT_ID = "voice-conversation";
 export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
   "transcript-virtual-renderer";
 
-export const AVATAR_COLLECTION_PAGE_EXPERIMENT_ID = "avatar-collection-page";
-
 export const CHAT_ON_CANVAS_EXPERIMENT_ID = "chat-on-canvas";
 
 export const STARTER_TASKS_EXPERIMENT_ID = "onboarding-starter-tasks";
@@ -104,16 +102,6 @@ export const EXPERIMENT_DEFINITIONS = [
     descriptionKey: "experiments.chatOnCanvas.description",
     defaultEnabled: false,
     manualEnableOnly: true,
-  },
-  {
-    id: AVATAR_COLLECTION_PAGE_EXPERIMENT_ID,
-    titleKey: "experiments.avatarCollectionPage.title",
-    descriptionKey: "experiments.avatarCollectionPage.description",
-    // Replaces the inline avatar picker in the agent builder with a
-    // full-surface, pannable collection canvas rendered as a frosted-glass
-    // takeover. Purely a UI swap over the same avatar library state; no
-    // backend authority. No explicit default, so it follows the global
-    // auto-enable preference: on in dev builds, off in production.
   },
   {
     id: BERDY_ONBOARDING_EXPERIMENT_ID,
