@@ -6,6 +6,11 @@ const ALTERNATE_COMPACT_TRIGGERS = new Set(["/summarize"]);
 const TTS_DELIVERY_FAILURE_PREFIX = "[voice: tts-delivery-failed]\n";
 const TTS_DELIVERY_FAILURE_SUFFIX =
   "This is TTS delivery state, not live user voice input. Do not respond to this control message or repeat the reply unless re-delivery is still appropriate.";
+const TTS_DELIVERY_FAILURE_OUTCOMES = new Set([
+  "TTS delivery was interrupted because the user started speaking; the assistant reply was not fully spoken.",
+  "TTS delivery was blocked because the user was speaking; the assistant reply was not spoken.",
+  "Native TTS could not deliver the assistant reply.",
+]);
 
 function visibleTextAfterTtsDeliveryNotices(text: string): string | null {
   if (!text.startsWith(TTS_DELIVERY_FAILURE_PREFIX)) {
@@ -14,12 +19,24 @@ function visibleTextAfterTtsDeliveryNotices(text: string): string | null {
 
   let noticeStart = 0;
   while (text.startsWith(TTS_DELIVERY_FAILURE_PREFIX, noticeStart)) {
+    const outcomeStart = noticeStart + TTS_DELIVERY_FAILURE_PREFIX.length;
+    const outcomeEnd = text.indexOf("\n", outcomeStart);
+    if (
+      outcomeEnd === -1 ||
+      !TTS_DELIVERY_FAILURE_OUTCOMES.has(
+        text.slice(outcomeStart, outcomeEnd),
+      ) ||
+      !text.startsWith("\nOriginal text: ", outcomeEnd)
+    ) {
+      return null;
+    }
+
     let suffixStart = text.indexOf(
-      TTS_DELIVERY_FAILURE_SUFFIX,
-      noticeStart + TTS_DELIVERY_FAILURE_PREFIX.length,
+      `\n${TTS_DELIVERY_FAILURE_SUFFIX}`,
+      outcomeEnd + "\nOriginal text: ".length,
     );
     while (suffixStart !== -1) {
-      const suffixEnd = suffixStart + TTS_DELIVERY_FAILURE_SUFFIX.length;
+      const suffixEnd = suffixStart + 1 + TTS_DELIVERY_FAILURE_SUFFIX.length;
       if (text.startsWith(`\n${TTS_DELIVERY_FAILURE_PREFIX}`, suffixEnd)) {
         noticeStart = suffixEnd + 1;
         break;
@@ -30,7 +47,7 @@ function visibleTextAfterTtsDeliveryNotices(text: string): string | null {
       if (suffixEnd === text.length) {
         return "";
       }
-      suffixStart = text.indexOf(TTS_DELIVERY_FAILURE_SUFFIX, suffixEnd);
+      suffixStart = text.indexOf(`\n${TTS_DELIVERY_FAILURE_SUFFIX}`, suffixEnd);
     }
     if (suffixStart === -1) {
       return null;
@@ -43,6 +60,7 @@ function visibleTextAfterTtsDeliveryNotices(text: string): string | null {
 function sanitizeTtsDeliveryReplayArtifact(message: Message): Message | null {
   if (
     message.role !== "user" ||
+    message.metadata?.origin !== "voice_conversation" ||
     message.content.some((content) => content.type !== "text")
   ) {
     return message;
@@ -88,10 +106,9 @@ export function isManualCompactReplayArtifact(message: Message): boolean {
 
 export function sanitizeReplayMessages(messages: Message[]): Message[] {
   return messages.flatMap((message) => {
-    if (isManualCompactReplayArtifact(message)) {
-      return [];
-    }
     const sanitized = sanitizeTtsDeliveryReplayArtifact(message);
-    return sanitized ? [sanitized] : [];
+    return sanitized && !isManualCompactReplayArtifact(sanitized)
+      ? [sanitized]
+      : [];
   });
 }
