@@ -16,6 +16,12 @@ const apiMocks = vi.hoisted(() => ({
   readAgentSourceFile: vi.fn(),
   updatePersonaSource: vi.fn(),
   listPersonas: vi.fn(),
+  hasRealAgentDescription: (description: string | null | undefined) => {
+    const normalized = description?.trim().toLowerCase();
+    return Boolean(
+      normalized && normalized !== "agent" && normalized !== "draft",
+    );
+  },
 }));
 
 vi.mock("@/shared/api/agents", () => apiMocks);
