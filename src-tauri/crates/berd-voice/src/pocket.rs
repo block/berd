@@ -116,7 +116,7 @@ pub struct StreamingTextChunks {
 pub fn load_text_to_speech(model_dir: &str) -> Result<PocketTts, String> {
     let dir = Path::new(model_dir);
     Ok(PocketTts {
-        inner: Mutex::new(AprilPocketTts::load(&dir, tts_num_threads())?),
+        inner: Mutex::new(AprilPocketTts::load(dir, tts_num_threads())?),
     })
 }
 
