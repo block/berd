@@ -5,13 +5,9 @@ export const AGENT_CARD_GEOMETRY = {
   panel: { x: 30, y: 31, width: 1167, height: 1777, radius: 70 },
   logo: { x: 120, y: 122, width: 40, height: 40 },
   brand: { x: 1110, y: 153 },
-  avatar: { x: 155, y: 240, width: 917, height: 920 },
-  title: { x: 115, y: 1370, width: 997 },
-  description: { x: 115, y: 1445, width: 997, lineHeight: 52 },
-  goodFor: { ruleX: 120, copyX: 139, width: 500 },
-  vibes: { ruleX: 700, copyX: 729, width: 373 },
-  traitRule: { y1: 1585, y2: 1683, width: 4 },
-  traitCopyY: 1614,
+  avatar: { x: 125, y: 318, width: 977, height: 990 },
+  title: { x: 115, y: 1530, width: 997 },
+  description: { x: 115, y: 1605, width: 997, lineHeight: 52 },
 } as const;
 
 export const AGENT_CARD_ASPECT_RATIO = `${AGENT_CARD_GEOMETRY.width}/${AGENT_CARD_GEOMETRY.height}`;

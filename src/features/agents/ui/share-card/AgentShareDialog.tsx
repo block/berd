@@ -37,7 +37,6 @@ import {
 } from "@/shared/ui/dialog";
 import { AgentShareCardPreview } from "./AgentShareCardPreview";
 import { AgentCardReveal } from "./AgentCardReveal";
-import { resolveAgentShareCardCopy } from "./agentShareCardCopy";
 import {
   blobToBytes,
   createAvatarPoster,
@@ -216,10 +215,6 @@ export function AgentShareDialog({
     persona,
     t("share.descriptionFallback", { name: persona.displayName }),
   );
-  const cardCopy = resolveAgentShareCardCopy(persona.systemPrompt, t, {
-    goodFor: persona.goodFor,
-    vibes: persona.vibes,
-  });
   const cardContentIdentity = [
     locale,
     persona.id,
@@ -312,7 +307,6 @@ export function AgentShareDialog({
           persona,
           cardAvatarSrc,
           cardBase,
-          cardCopy,
           locale,
           description,
         );
@@ -426,7 +420,6 @@ export function AgentShareDialog({
     [
       avatarReadySrc,
       cachedAvatar,
-      cardCopy,
       cardBase,
       currentGeneratedAvatarPoster,
       description,
@@ -531,7 +524,6 @@ export function AgentShareDialog({
                   description={description}
                   avatarSrc={avatarSrc}
                   alt={t("share.cardAlt", { name: persona.displayName })}
-                  copy={cardCopy}
                   locale={locale}
                 />
               </AgentCardReveal>

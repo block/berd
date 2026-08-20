@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { PersonaImportPreview } from "@/shared/api/agents";
+import {
+  readImportAgentFile,
+  type PersonaImportPreview,
+} from "@/shared/api/agents";
 import type { SnapshotV1 } from "@/features/agents/agent-snapshot";
 import { AgentShareCardPreview } from "@/features/agents/ui/share-card/AgentShareCardPreview";
 import { HolographicAgentCard } from "@/features/agents/ui/share-card/HolographicAgentCard";
 import { AgentCardReveal } from "@/features/agents/ui/share-card/AgentCardReveal";
-import { resolveAgentShareCardCopy } from "@/features/agents/ui/share-card/agentShareCardCopy";
 import {
   fallbackAgentCardColor,
   sampleAgentAvatarColor,
@@ -13,6 +15,7 @@ import {
 
 import { cn } from "@/shared/lib/cn";
 import { useFileImportZone } from "@/shared/hooks/useFileImportZone";
+import { useAttachmentDropTarget } from "@/features/chat/hooks/useAttachmentDropTarget";
 import { Button } from "@/shared/ui/button";
 import { AgentImportPrimaryButton } from "@/shared/ui/agent-import-primary-button";
 import { AgentImportSecondaryButton } from "@/shared/ui/agent-import-secondary-button";
@@ -205,22 +208,94 @@ export function AgentImportDialog({
     };
   }, [open, initialFile, startPreparation]);
 
-  const {
-    fileInputRef,
-    isDragOver,
-    dropHandlers,
-    handleFileChange,
-    openFilePicker,
-  } = useFileImportZone({
-    onImportFile: startPreparation,
-    validateFile: (file) => {
+  const dropZoneRef = useRef<HTMLDivElement>(null);
+  const nativeDropGenerationRef = useRef(0);
+  const nativeDropActiveRef = useRef(false);
+  useEffect(() => {
+    nativeDropActiveRef.current = open;
+    if (!open) nativeDropGenerationRef.current += 1;
+    return () => {
+      nativeDropActiveRef.current = false;
+      nativeDropGenerationRef.current += 1;
+    };
+  }, [open]);
+  const validateReplacementFile = useCallback(
+    (file: Pick<File, "name" | "type" | "size">) => {
+      nativeDropGenerationRef.current += 1;
       preparationRef.current?.abort();
       setPrepared(null);
       return validateImportFile(file);
     },
+    [validateImportFile],
+  );
+  const {
+    fileInputRef,
+    isDragOver,
+    importFile,
+    invalidateImport,
+    handleFileChange,
+    openFilePicker,
+  } = useFileImportZone({
+    onImportFile: startPreparation,
+    validateFile: validateReplacementFile,
     onImportError,
     maxBytes: maxImportBytes,
     fileTooLargeMessage: importTooLargeMessage,
+  });
+
+  const handleDroppedPaths = useCallback(
+    (paths: string[]) => {
+      const path = paths[0];
+      if (!path) return;
+      invalidateImport();
+      const generation = ++nativeDropGenerationRef.current;
+      void readImportAgentFile(path)
+        .then(({ fileBytes, fileName }) => {
+          if (
+            !nativeDropActiveRef.current ||
+            generation !== nativeDropGenerationRef.current
+          )
+            return;
+          const bytes = Uint8Array.from(fileBytes);
+          const file = new File([bytes], fileName);
+          const error = validateReplacementFile(file);
+          if (error) {
+            onImportError(error);
+            return;
+          }
+          startPreparation(bytes, fileName);
+        })
+        .catch((error) => {
+          if (
+            nativeDropActiveRef.current &&
+            generation === nativeDropGenerationRef.current
+          )
+            onImportError(
+              error instanceof Error ? error.message : String(error),
+            );
+        });
+    },
+    [
+      invalidateImport,
+      onImportError,
+      startPreparation,
+      validateReplacementFile,
+    ],
+  );
+  const {
+    isAttachmentDragOver,
+    handleDragEnter,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+  } = useAttachmentDropTarget({
+    disabled: !open,
+    targetRef: dropZoneRef,
+    onDropFiles: (files) => {
+      const file = files[0];
+      if (file) void importFile(file);
+    },
+    onDropPaths: handleDroppedPaths,
   });
 
   return (
@@ -276,14 +351,6 @@ export function AgentImportDialog({
                     alt={t("importDialog.previewAlt", {
                       name: prepared.preview.displayName,
                     })}
-                    copy={resolveAgentShareCardCopy(
-                      prepared.preview.systemPrompt,
-                      t,
-                      {
-                        goodFor: prepared.preview.goodFor,
-                        vibes: prepared.preview.vibes,
-                      },
-                    )}
                     locale={locale}
                   />
                 )}
@@ -291,12 +358,17 @@ export function AgentImportDialog({
             </div>
           ) : (
             <div
-              {...dropHandlers}
+              ref={dropZoneRef}
+              onDragEnter={handleDragEnter}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
               role="status"
               aria-busy={preparing}
               className={cn(
                 "flex min-h-56 flex-col items-center justify-center gap-4 rounded-md border border-dashed border-border bg-muted/40 px-6 text-center",
-                isDragOver && "border-ring bg-muted/70",
+                (isDragOver || isAttachmentDragOver) &&
+                  "border-ring bg-muted/70",
               )}
             >
               <p className="text-sm">

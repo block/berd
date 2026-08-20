@@ -523,13 +523,25 @@ describe("AgentsView entry points", () => {
     const { container } = render(<AgentsView />);
     const dropZone = container.querySelector(".\\@container") as HTMLElement;
 
-    fireEvent.drop(dropZone, { dataTransfer: { files: [makeZipFile("a")] } });
+    fireEvent.drop(dropZone, {
+      dataTransfer: {
+        files: [makeZipFile("a")],
+        items: [{ kind: "file" }],
+        types: ["Files"],
+      },
+    });
     await waitFor(() => expect(resolvers).toHaveLength(1));
 
     // Dropping B onto the dialog's drop zone replaces A and aborts its work.
     const dialogDropZone = screen.getByRole("status");
     const fileB = makeZipFile("b");
-    fireEvent.drop(dialogDropZone, { dataTransfer: { files: [fileB] } });
+    fireEvent.drop(dialogDropZone, {
+      dataTransfer: {
+        files: [fileB],
+        items: [{ kind: "file" }],
+        types: ["Files"],
+      },
+    });
     await waitFor(() => expect(resolvers).toHaveLength(2));
     expect(resolvers[0].signal?.aborted).toBe(true);
 

@@ -1170,6 +1170,14 @@ export interface ImportBinaryFileReadResult {
   fileName: string;
 }
 
+export async function readImportAgentFile(
+  sourcePath: string,
+): Promise<ImportBinaryFileReadResult> {
+  return invoke<ImportBinaryFileReadResult>("read_import_agent_file", {
+    sourcePath,
+  });
+}
+
 export async function readImportAgentImage(
   sourcePath: string,
 ): Promise<ImportBinaryFileReadResult> {

@@ -39,7 +39,7 @@ describe("resolveAgentShareCardCopy", () => {
   it("rejects overlong metadata instead of truncating it", () => {
     expect(
       resolveAgentShareCardCopy("Research evidence", translator("en"), {
-        goodFor: "x".repeat(45),
+        goodFor: "x".repeat(33),
         vibes: "y".repeat(33),
       }),
     ).toMatchObject({

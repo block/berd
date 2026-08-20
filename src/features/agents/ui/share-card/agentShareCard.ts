@@ -10,12 +10,10 @@ import {
 } from "./agentCardColor";
 import { AGENT_CARD_HEIGHT, AGENT_CARD_WIDTH } from "./agentShareCardSpec";
 import {
-  deriveAgentCardTraitLines,
   deriveAgentShareCardTextLayout,
   wrapAgentCardText,
 } from "./agentShareCardLayout";
 import { loadAgentCardFonts } from "./agentShareCardFonts";
-import type { AgentShareCardCopy } from "./agentShareCardCopy";
 import { AGENT_CARD_GEOMETRY } from "./agentShareCardGeometry";
 
 export const AVATAR_VIDEO_LOAD_TIMEOUT_MS = 10_000;
@@ -223,7 +221,6 @@ export async function renderAgentShareCard(
   persona: Persona,
   avatarSrc: string,
   cardBase: string,
-  copy: AgentShareCardCopy,
   locale: string,
   description = getAgentShareDescription(persona),
 ): Promise<Blob> {
@@ -323,61 +320,12 @@ export async function renderAgentShareCard(
     );
   });
 
-  const { goodFor, vibes, traitRule, traitCopyY } = AGENT_CARD_GEOMETRY;
-  context.lineWidth = traitRule.width;
-  context.strokeStyle = "black";
-  context.beginPath();
-  context.moveTo(goodFor.ruleX, traitRule.y1);
-  context.lineTo(goodFor.ruleX, traitRule.y2);
-  context.moveTo(vibes.ruleX, traitRule.y1);
-  context.lineTo(vibes.ruleX, traitRule.y2);
-  context.stroke();
-
-  context.font = "600 42px Inter, sans-serif";
-  const measureTrait = (value: string) => context.measureText(value).width;
-  drawAgentCardTraitLines(
-    context,
-    deriveAgentCardTraitLines(
-      copy.goodForLabel,
-      copy.goodFor,
-      goodFor.width,
-      measureTrait,
-      locale,
-    ),
-    goodFor.copyX,
-    traitCopyY,
-  );
-  drawAgentCardTraitLines(
-    context,
-    deriveAgentCardTraitLines(
-      copy.vibesLabel,
-      copy.vibes,
-      vibes.width,
-      measureTrait,
-      locale,
-    ),
-    vibes.copyX,
-    traitCopyY,
-  );
-
   return new Promise((resolve, reject) => {
     canvas.toBlob(
       (blob) =>
         blob ? resolve(blob) : reject(new Error("Failed to create card image")),
       "image/png",
     );
-  });
-}
-
-function drawAgentCardTraitLines(
-  context: CanvasRenderingContext2D,
-  lines: readonly string[],
-  x: number,
-  y: number,
-): void {
-  context.font = "600 42px Inter, sans-serif";
-  lines.forEach((line, index) => {
-    context.fillText(line, x, y + index * 50);
   });
 }
 
