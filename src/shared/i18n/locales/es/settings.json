@@ -65,23 +65,23 @@
     }
   },
   "archive": {
-    "title": "Archivo",
     "autoArchive": {
-      "sectionTitle": "Archivado automático",
-      "label": "Archivar chats inactivos",
-      "description": "Archiva automáticamente los chats después de este tiempo sin mensajes. Los chats fijados en Inicio nunca se archivan automáticamente.",
-      "confirmTitle": "¿Activar el archivado automático?",
-      "confirmDescription": "Berd archivará los chats no fijados {{duration}} sin volver a preguntar. Puedes restaurarlos desde Archivo o desactivar esta opción cuando quieras.",
       "confirmAction": "Activar",
+      "confirmDescription": "Berd archivará los chats no fijados {{duration}} sin volver a preguntar. Puedes restaurarlos desde Archivo o desactivar esta opción cuando quieras.",
+      "confirmTitle": "¿Activar el archivado automático?",
+      "description": "Archiva automáticamente los chats después de este tiempo sin mensajes. Los chats fijados en Inicio nunca se archivan automáticamente.",
+      "label": "Archivar chats inactivos",
       "options": {
-        "never": "Nunca",
         "1-day": "Después de 1 día",
-        "7-days": "Después de 7 días",
         "14-days": "Después de 14 días",
         "30-days": "Después de 30 días",
-        "90-days": "Después de 90 días"
-      }
-    }
+        "7-days": "Después de 7 días",
+        "90-days": "Después de 90 días",
+        "never": "Nunca"
+      },
+      "sectionTitle": "Archivado automático"
+    },
+    "title": "Archivo"
   },
   "chats": {
     "empty": "No hay chats archivados.",
@@ -105,6 +105,9 @@
     "title": "Compactación"
   },
   "connections": {
+    "askAgent": "Agregar conexión",
+    "askAgentPrompt": "Ayúdame a agregar una conexión. Primero pregunta si quiero un servicio administrado por la empresa o un MCP local; después explica la configuración y los requisitos de acceso. Pregunta antes de cambiar cualquier configuración y nunca muestres ni copies credenciales.",
+    "askAgentTitle": "Agregar una conexión",
     "configure": "Configurar",
     "connect": "Conectar",
     "connectError": "No se pudo abrir el flujo de conexión. Inténtalo de nuevo.",
@@ -119,12 +122,20 @@
     "expiresToday": "Caduca hoy",
     "expiresTomorrow": "Caduca mañana",
     "extendAccess": "Ampliar acceso",
+    "localError": {
+      "description": "Inténtalo de nuevo en unos instantes.",
+      "partialDescription": "Berd no pudo leer todas las fuentes de configuración local.",
+      "partialTitle": "Es posible que falten algunos MCP locales",
+      "retry": "Intentar de nuevo",
+      "retrying": "Intentando…",
+      "title": "No se pudieron cargar tus MCP locales"
+    },
     "noResults": "Ninguna conexión coincide con tu búsqueda.",
     "reconnect": "Reconectar",
     "search": "Buscar conexiones",
     "sections": {
-      "managed": "Administradas por la empresa",
-      "local": "Locales"
+      "local": "Locales",
+      "managed": "Administradas por la empresa"
     },
     "status": {
       "active": "Activa",
@@ -132,18 +143,7 @@
       "expired": "Caducada"
     },
     "title": "Conexiones",
-    "worksWith": "Funciona con: {{harnesses}}",
-    "localError": {
-      "title": "No se pudieron cargar tus MCP locales",
-      "description": "Inténtalo de nuevo en unos instantes.",
-      "partialTitle": "Es posible que falten algunos MCP locales",
-      "partialDescription": "Berd no pudo leer todas las fuentes de configuración local.",
-      "retry": "Intentar de nuevo",
-      "retrying": "Intentando…"
-    },
-    "askAgent": "Agregar conexión",
-    "askAgentTitle": "Agregar una conexión",
-    "askAgentPrompt": "Ayúdame a agregar una conexión. Primero pregunta si quiero un servicio administrado por la empresa o un MCP local; después explica la configuración y los requisitos de acceso. Pregunta antes de cambiar cualquier configuración y nunca muestres ni copies credenciales."
+    "worksWith": "Funciona con: {{harnesses}}"
   },
   "deleteProject": {
     "description": "Este proyecto y todos sus datos se eliminarán de forma permanente.",
@@ -408,6 +408,59 @@
     },
     "title": "General"
   },
+  "me": {
+    "addTopic": "Añadir tema",
+    "addTopicAction": "Añadir",
+    "added": {
+      "delete": "Quitar",
+      "description": "Berd encontró estos temas en chats recientes. Confirma o quita cualquier recuerdo.",
+      "inGeneral": "Preferencia general",
+      "inTopic": "En {{topic}}",
+      "ok": "OK",
+      "title": "Agregado a la memoria"
+    },
+    "cancel": "Cancelar",
+    "closeTopic": "Cerrar",
+    "create": "Crear mi archivo",
+    "description": "El archivo que cada agente lee en cada chat. Incluye detalles esenciales sobre ti, reglas y preferencias fijas, y otra información que preferirías no repetir.",
+    "editTab": "Editar",
+    "editorLabel": "Editar tu me.md",
+    "history": {
+      "clear": "Borrar historial",
+      "clearConfirm": {
+        "description": "Tus archivos de memoria se mantienen, y lo que hayas quitado no se propondrá de nuevo.",
+        "title": "¿Borrar el historial de cambios?"
+      },
+      "description": "Este registro rastrea cada cambio en tus archivos de memoria, incluido qué lo hizo y cuándo. Se guarda como historial de git dentro de la carpeta ~/.me.",
+      "empty": "Aún no hay cambios registrados.",
+      "loading": "Leyendo historial...",
+      "title": "Historial"
+    },
+    "livesIn": "Se encuentra en archivos de texto sin formato en tu equipo, en",
+    "loadError": "No se pudo leer tu archivo. Es posible que se haya movido o eliminado.",
+    "newTopicDescription": "Un tema es su propio documento. Los agentes lo leen solo cuando esa parte de tu vida es lo que está pasando.",
+    "newTopicError": "No se pudo crear ese tema. Puede que ya exista un tema con un nombre similar.",
+    "newTopicLabel": "Nombra tu tema",
+    "newTopicPlaceholder": "Estilo, Familia, Viajes…",
+    "noTopics": "Aún no hay temas. Los temas guardan conocimiento más profundo, como estilo, familia o trabajo, que solo se carga cuando es relevante.",
+    "offBanner": {
+      "description": "Berd no está leyendo ni escribiendo tus archivos de memoria. Los agentes y otras herramientas no accederán a ellos a través de Berd, y tus archivos permanecen intactos. Los chats y el historial de sesiones siguen funcionando con normalidad."
+    },
+    "openTopic": "Ver",
+    "previewTab": "Vista previa",
+    "refresh": "Actualizar",
+    "save": "Guardar",
+    "saveError": "No se pudieron guardar tus cambios. Tus ediciones siguen aquí, inténtalo de nuevo.",
+    "spineTitle": "Sobre ti",
+    "title": "Memoria",
+    "toggle": {
+      "description": "La memoria es lo que Berd sabe sobre ti y cómo quieres que funcione. Se completa con el tiempo y puedes leer, editar o eliminar cualquier cosa cuando quieras.",
+      "label": "Usar memoria"
+    },
+    "topicsHint": "Los temas aportan conocimiento más específico que solo se carga cuando es relevante. Los agentes pueden agregar o actualizar temas al conocerte.",
+    "topicsTitle": "Temas",
+    "unsavedChanges": "Cambios sin guardar"
+  },
   "nav": {
     "appearance": "Apariencia",
     "archive": "Archivo",
@@ -418,6 +471,8 @@
     "experiments": "Experimentos",
     "extensions": "Extensiones",
     "general": "General",
+    "me": "Memoria",
+    "memoryProposalsPending": "{{count}} memorias por revisar",
     "notifications": "Notificaciones",
     "providers": "Proveedores de IA",
     "providersUpdateAvailable": "Actualización disponible",

@@ -140,6 +140,18 @@ vi.mock("@/features/berdctl/appPreamble", () => ({
   getBerdctlPreamble: () => mockGetBerdctlPreamble(),
 }));
 
+const mockGetMePreamble = vi.fn<() => string | null>(() => null);
+
+vi.mock("@/features/me/lib/mePreamble", () => ({
+  getMePreamble: () => mockGetMePreamble(),
+}));
+
+const mockGetAgentsFilePreamble = vi.fn<() => string | null>(() => null);
+
+vi.mock("@/features/me/lib/agentsFilePreamble", () => ({
+  getAgentsFilePreamble: () => mockGetAgentsFilePreamble(),
+}));
+
 vi.mock("../acpActiveMessageTracking", () => ({
   setActiveMessageId: vi.fn(),
   clearActiveMessageId: vi.fn(),
@@ -177,8 +189,10 @@ describe("acpSendMessage", () => {
     vi.clearAllMocks();
     vi.resetModules();
     // clearAllMocks clears call history but not return values; reset the
-    // preamble to unavailable so tests opt in explicitly.
+    // preambles to unavailable so tests opt in explicitly.
     mockGetBerdctlPreamble.mockReturnValue(null);
+    mockGetMePreamble.mockReturnValue(null);
+    mockGetAgentsFilePreamble.mockReturnValue(null);
     localStorage.removeItem(STYLE_GUIDELINES_STORAGE_KEY);
   });
 
@@ -298,10 +312,22 @@ describe("acpSendMessage", () => {
     expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
       5,
       sessionId,
+      "berd_me_file",
+      "",
+    );
+    expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
+      6,
+      sessionId,
+      "berd_user_agents_file",
+      "",
+    );
+    expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
+      7,
+      sessionId,
       "client_system_prompt",
       "You are Starfriend.",
     );
-    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledTimes(5);
+    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledTimes(7);
   });
 
   it("adds the default style guidelines when unset", async () => {
@@ -401,6 +427,60 @@ describe("acpSendMessage", () => {
     expect(blocks[0].annotations).toEqual({ audience: ["assistant"] });
     expect(blocks[0].text).toContain(INTERACTION_NORMS_PREAMBLE);
     expect(blocks[0].text.indexOf(INTERACTION_NORMS_PREAMBLE)).toBeLessThan(
+      blocks[0].text.indexOf("You are Starfriend."),
+    );
+  });
+
+  it("sends the me.md preamble under berd_me_file when the file exists", async () => {
+    mockGetMePreamble.mockReturnValue(
+      "[The user's file]\n- Keep answers brief.",
+    );
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+
+    sessionRegistry.registerPreparedSession(
+      "acp-session-me-file",
+      "goose",
+      "/tmp/project",
+      "test-model",
+    );
+
+    await acpSendMessage("acp-session-me-file", "hello", {});
+
+    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledWith(
+      "acp-session-me-file",
+      "berd_me_file",
+      "[The user's file]\n- Keep answers brief.",
+    );
+  });
+
+  it("hands the me.md preamble off in-band for external agents, before the persona", async () => {
+    mockGetMePreamble.mockReturnValue(
+      "[The user's file]\n- Keep answers brief.",
+    );
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { __resetAllPersonaHandoffs } = await import("../acpPersonaHandoff");
+    const { acpSendMessage } = await import("../acp");
+    __resetAllPersonaHandoffs();
+
+    sessionRegistry.registerPreparedSession(
+      "acp-session-me-file-ext",
+      "claude-acp",
+      "/tmp/project",
+      "test-model",
+    );
+
+    await acpSendMessage("acp-session-me-file-ext", "hello", {
+      systemPrompt: "You are Starfriend.",
+    });
+
+    const [, blocks] = mockPrompt.mock.calls[0];
+    expect(blocks[0].annotations).toEqual({ audience: ["assistant"] });
+    expect(blocks[0].text).toContain("- Keep answers brief.");
+    expect(blocks[0].text).toContain("You are Starfriend.");
+    expect(blocks[0].text.indexOf("- Keep answers brief.")).toBeLessThan(
       blocks[0].text.indexOf("You are Starfriend."),
     );
   });

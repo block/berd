@@ -21,6 +21,7 @@ import type {
   ToolResponseContent,
 } from "@/shared/types/messages";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { noteAgentMemoryEdits } from "@/features/me/lib/meAgentEdits";
 import {
   clearActiveMessageId,
   clearActiveMessageTracking,
@@ -775,6 +776,17 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
             update,
             false,
           );
+          // Direct agent edits to memory files get agent attribution in
+          // the file history (instead of being swept in later as "Edited
+          // outside Berd"). Best-effort, fire-and-forget.
+          const editLocations = (
+            toolRequest?.locations ??
+            locationsFromUpdate(update) ??
+            []
+          ).map((location) => location.path);
+          if (editLocations.length > 0) {
+            void noteAgentMemoryEdits(editLocations);
+          }
         }
       }
       break;

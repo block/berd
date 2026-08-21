@@ -169,3 +169,72 @@ export interface TextFilePayload {
 export async function readTextFile(path: string): Promise<TextFilePayload> {
   return invoke("read_text_file", { path });
 }
+
+/**
+ * Create a text file (and any missing parent directories) only if it does
+ * not already exist. Fails rather than overwriting existing content.
+ */
+export async function createTextFile(
+  path: string,
+  contents: string,
+): Promise<void> {
+  return invoke("create_text_file", { path, contents });
+}
+
+/**
+ * Overwrite a UTF-8 text file, creating parent directories as needed. For
+ * user-initiated edits of user-owned files (e.g. the Settings → Me editor)
+ * — agent writes must not route through this.
+ */
+export async function writeTextFile(
+  path: string,
+  contents: string,
+): Promise<void> {
+  return invoke("write_text_file", { path, contents });
+}
+
+/** One recorded change in a me.md timeline. */
+export interface MeHistoryEntry {
+  timestampMs: number;
+  author: string;
+  message: string;
+}
+
+/**
+ * Record the current state of the user's me.md in its invisible local
+ * history, attributed to a source ("created" | "user" | "delete" | "external" |
+ * "agent:<name>" | "agent-edit:<name>"). Pass `summary` — the affected entry —
+ * when the caller knows it, so the record says what changed and not only who
+ * changed it. Best-effort by design: callers must treat failures as
+ * non-fatal — history must never break a write.
+ */
+export async function recordMeHistory(
+  filePath: string,
+  source: string,
+  summary?: string,
+): Promise<boolean> {
+  return invoke("record_me_history", { filePath, source, summary });
+}
+
+/** The recorded timeline for the user's me.md, newest first. */
+export async function listMeHistory(
+  filePath: string,
+): Promise<MeHistoryEntry[]> {
+  return invoke("list_me_history", { filePath });
+}
+
+/**
+ * Clear the store's change history. The memory files and the record of what
+ * the user has removed both survive; only the timeline goes away.
+ */
+export async function clearMeHistory(filePath: string): Promise<void> {
+  await invoke("clear_me_history", { filePath });
+}
+
+/**
+ * (De)register the memory MCP server for future goose sessions. Off means
+ * the memory tools don't exist in sessions at all — the cleanest off state.
+ */
+export async function setMemoryMcpEnabled(enabled: boolean): Promise<void> {
+  return invoke("set_memory_mcp_enabled", { enabled });
+}
