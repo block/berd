@@ -19,6 +19,7 @@ exclude = ["plugins/app-test-driver"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+cc = "1"
 
 [dependencies]
 anyhow = "1"

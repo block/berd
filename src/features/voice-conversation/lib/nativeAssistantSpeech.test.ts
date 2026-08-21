@@ -5,12 +5,19 @@ import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 import type { PocketVoiceStreamEvent } from "../api/pocketVoice";
 
 const mocks = vi.hoisted(() => ({
+  backend: "pocket" as "pocket" | "siri",
   start: vi.fn<(streamId: string) => Promise<void>>(),
   append: vi.fn<(streamId: string, text: string) => Promise<void>>(),
   flush: vi.fn<(streamId: string) => Promise<void>>(),
   finish: vi.fn<(streamId: string) => Promise<void>>(),
   stop: vi.fn<() => Promise<boolean>>(),
   streamHandler: null as ((event: PocketVoiceStreamEvent) => void) | null,
+  siriStart: vi.fn<(streamId: string) => Promise<void>>(),
+  siriAppend: vi.fn<(streamId: string, text: string) => Promise<void>>(),
+  siriFlush: vi.fn<(streamId: string) => Promise<void>>(),
+  siriFinish: vi.fn<(streamId: string) => Promise<void>>(),
+  siriStop: vi.fn<() => Promise<boolean>>(),
+  siriStreamHandler: null as ((event: PocketVoiceStreamEvent) => void) | null,
 }));
 
 vi.mock("../api/pocketVoice", () => ({
@@ -26,6 +33,25 @@ vi.mock("../api/pocketVoice", () => ({
     mocks.streamHandler = handler;
     return vi.fn();
   },
+}));
+
+vi.mock("../api/siriVoice", () => ({
+  startSiriVoiceStream: (streamId: string) => mocks.siriStart(streamId),
+  appendSiriVoiceStream: (streamId: string, text: string) =>
+    mocks.siriAppend(streamId, text),
+  flushSiriVoiceStream: (streamId: string) => mocks.siriFlush(streamId),
+  finishSiriVoiceStream: (streamId: string) => mocks.siriFinish(streamId),
+  stopSiriVoice: () => mocks.siriStop(),
+  listenToSiriVoiceStream: async (
+    handler: (event: PocketVoiceStreamEvent) => void,
+  ) => {
+    mocks.siriStreamHandler = handler;
+    return vi.fn();
+  },
+}));
+
+vi.mock("./voiceOutputPreference", () => ({
+  getVoiceOutputBackend: () => mocks.backend,
 }));
 
 import {
@@ -60,12 +86,19 @@ function emit(
 
 describe("native assistant speech stream", () => {
   beforeEach(() => {
+    mocks.backend = "pocket";
     mocks.start.mockReset().mockResolvedValue();
     mocks.append.mockReset().mockResolvedValue();
     mocks.flush.mockReset().mockResolvedValue();
     mocks.finish.mockReset().mockResolvedValue();
     mocks.stop.mockReset().mockResolvedValue(true);
     mocks.streamHandler = null;
+    mocks.siriStart.mockReset().mockResolvedValue();
+    mocks.siriAppend.mockReset().mockResolvedValue();
+    mocks.siriFlush.mockReset().mockResolvedValue();
+    mocks.siriFinish.mockReset().mockResolvedValue();
+    mocks.siriStop.mockReset().mockResolvedValue(true);
+    mocks.siriStreamHandler = null;
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -118,6 +151,27 @@ describe("native assistant speech stream", () => {
         " text.",
       );
     });
+  });
+
+  it("routes the complete utterance stream through Siri when selected", async () => {
+    mocks.backend = "siri";
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Hello from Siri." }], "completed"),
+      ]);
+
+    await vi.waitFor(() => {
+      expect(mocks.siriStart).toHaveBeenCalledTimes(1);
+      expect(mocks.siriAppend).toHaveBeenCalledWith(
+        mocks.siriStart.mock.calls[0]?.[0],
+        "Hello from Siri.",
+      );
+      expect(mocks.siriFinish).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.append).not.toHaveBeenCalled();
   });
 
   it("preserves the first live reply while speech is arming", async () => {

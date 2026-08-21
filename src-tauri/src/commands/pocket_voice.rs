@@ -342,7 +342,7 @@ fn selected_output_device() -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-fn effective_output_device_name(configured: Option<&str>) -> Option<String> {
+pub(crate) fn effective_output_device_name(configured: Option<&str>) -> Option<String> {
     use rodio::cpal::traits::HostTrait;
 
     if let Some(name) = configured {
@@ -360,7 +360,7 @@ fn effective_output_device_name(configured: Option<&str>) -> Option<String> {
     configured.map(ToOwned::to_owned)
 }
 
-fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
+pub(crate) fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
     output_device.is_some_and(|name| name.to_lowercase().contains("speaker"))
 }
 

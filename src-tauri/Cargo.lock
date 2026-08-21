@@ -14,6 +14,7 @@ dependencies = [
  "berd-voice",
  "bytes",
  "bzip2 0.6.1",
+ "cc",
  "chrono",
  "dirs",
  "doctor",

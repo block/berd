@@ -29,6 +29,31 @@ pub const SAMPLE_RATE: u32 = 24_000;
 
 const TTS_NUM_THREADS: usize = 1;
 
+/// Drain stable, sentence-aware chunks from text that may still be growing.
+///
+/// This backend-neutral form uses a word-count budget. It lets system speech
+/// engines share Berd's first-sentence latency behavior without loading a
+/// Pocket model solely to segment text.
+pub fn take_streaming_text_chunks(
+    text: &str,
+    first_chunk_pending: bool,
+    flush: bool,
+) -> Result<StreamingTextChunks, String> {
+    let (ready, pending, first_chunk_pending) =
+        pocket_april::take_streaming_chunks_at_natural_boundaries(
+            text,
+            50,
+            first_chunk_pending,
+            flush,
+            |candidate| Ok(candidate.split_whitespace().count()),
+        )?;
+    Ok(StreamingTextChunks {
+        ready,
+        pending,
+        first_chunk_pending,
+    })
+}
+
 thread_local! {
     static ACTIVE_SYNTHESIS_ENGINES: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
 }

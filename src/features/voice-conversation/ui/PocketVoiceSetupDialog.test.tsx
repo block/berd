@@ -57,7 +57,7 @@ describe("PocketVoiceSetupDialog", () => {
     ...overrides,
   });
 
-  it("names Voice Conversation and explains that both models are required", () => {
+  it("puts speech input before speech output", () => {
     renderWithProviders(
       <PocketVoiceSetupDialog
         open
@@ -71,9 +71,14 @@ describe("PocketVoiceSetupDialog", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Install both Pocket TTS and Parakeet STT to use Voice Conversation.",
+        "Install speech recognition and choose how Berd speaks during Voice Conversation.",
       ),
     ).toBeInTheDocument();
+    const input = screen.getByRole("heading", { name: "Speech input" });
+    const output = screen.getByRole("heading", { name: "Speech output" });
+    expect(
+      input.compareDocumentPosition(output) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("hands an installed setup back to the initiating voice action exactly once", async () => {
@@ -102,6 +107,50 @@ describe("PocketVoiceSetupDialog", () => {
     expect(onOpenChange).not.toHaveBeenCalled();
   });
 
+  it("accepts an installed Siri voice without requiring Pocket TTS", async () => {
+    const onUseSelected = vi.fn();
+    renderWithProviders(
+      <PocketVoiceSetupDialog
+        open
+        onOpenChange={vi.fn()}
+        onUseSelected={onUseSelected}
+        backend="siri"
+        onBackendChange={vi.fn()}
+        setup={setup({
+          ...baseStatus,
+          parakeetInstalled: true,
+          parakeetSizeBytes: 131_662_414,
+        })}
+        siriSetup={{
+          status: {
+            supported: true,
+            availableLanguages: ["en-US"],
+            selectedVoice: { name: "Aaron", language: "en-US" },
+            selectedVoiceInstalled: true,
+            playbackSpeed: 1,
+            voices: [],
+          },
+          language: "en-US",
+          languages: ["en-US"],
+          loading: false,
+          error: null,
+          downloadingVoiceKey: null,
+          previewingVoiceKey: null,
+          setLanguage: vi.fn(),
+          setPlaybackSpeed: vi.fn(),
+          downloadVoice: vi.fn(),
+          previewVoice: vi.fn(),
+          selectVoice: vi.fn(),
+        }}
+      />,
+    );
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Use selected voice" }),
+    );
+    expect(onUseSelected).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps both missing model actions independently clickable", async () => {
     const installModel = vi.fn().mockResolvedValue(undefined);
     renderWithProviders(
@@ -117,9 +166,8 @@ describe("PocketVoiceSetupDialog", () => {
     expect(
       screen.getAllByRole("button", { name: "Download model" }),
     ).toHaveLength(2);
-    const buttons = screen.getAllByRole("button", { name: "Download model" });
-    await userEvent.click(buttons[0]);
-    await userEvent.click(buttons[1]);
+    await userEvent.click(screen.getByTestId("voice-model-pocket-download"));
+    await userEvent.click(screen.getByTestId("voice-model-parakeet-download"));
     expect(installModel).toHaveBeenNthCalledWith(1, "pocket");
     expect(installModel).toHaveBeenNthCalledWith(2, "parakeet");
   });
@@ -340,9 +388,7 @@ describe("PocketVoiceSetupDialog", () => {
       />,
     );
 
-    await userEvent.click(
-      screen.getAllByRole("button", { name: "Remove model" })[1],
-    );
+    await userEvent.click(screen.getByTestId("voice-model-parakeet-remove"));
     expect(
       screen.getByRole("heading", { name: "Remove Parakeet STT?" }),
     ).toBeInTheDocument();

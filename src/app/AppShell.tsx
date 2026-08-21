@@ -225,7 +225,10 @@ import { OnboardingFlow } from "@/features/onboarding/ui/OnboardingFlow";
 import { useOnboardingState } from "@/features/onboarding/model";
 import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
+import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
 import { PocketVoiceSetupDialog } from "@/features/voice-conversation/ui/PocketVoiceSetupDialog";
+import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
+import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
 import {
   cancelPendingVoiceStart,
   continuePendingVoiceStart,
@@ -713,6 +716,15 @@ export function AppShell({
   );
   const globalPocketVoiceSetup = usePocketVoiceSetup(
     capabilities.voiceConversation,
+  );
+  const globalVoiceOutput = useVoiceOutputPreference();
+  const globalSiriVoiceSetup = useSiriVoiceSetup(
+    capabilities.voiceConversation && globalVoiceOutput.backend === "siri",
+  );
+  const globalVoiceReady = isVoiceSetupReady(
+    globalPocketVoiceSetup.status,
+    globalSiriVoiceSetup.status,
+    globalVoiceOutput.backend,
   );
   const [globalPocketVoiceSetupOpen, setGlobalPocketVoiceSetupOpen] =
     useState(false);
@@ -3206,7 +3218,7 @@ export function AppShell({
       setupComplete = false,
     ): Promise<boolean> => {
       if (!capabilities.voiceConversation) return Promise.resolve(false);
-      if (!setupComplete && globalPocketVoiceSetup.status?.installed !== true) {
+      if (!setupComplete && !globalVoiceReady) {
         const pending = deferPendingVoiceStart(
           pendingGlobalVoiceStartRef,
           payload,
@@ -3296,7 +3308,7 @@ export function AppShell({
     [
       capabilities.voiceConversation,
       createNewTab,
-      globalPocketVoiceSetup.status?.installed,
+      globalVoiceReady,
       guardAppNavigation,
       handleNavigateToSession,
       patchSession,
@@ -5298,8 +5310,7 @@ export function AppShell({
                   capabilities.voiceConversation
                     ? {
                         enabled: true,
-                        ready:
-                          globalPocketVoiceSetup.status?.installed === true,
+                        ready: globalVoiceReady,
                         onStart: handleGlobalVoiceConversationStart,
                       }
                     : undefined
@@ -5319,6 +5330,9 @@ export function AppShell({
         onOpenChange={handleGlobalPocketVoiceSetupOpenChange}
         onUseSelected={handleGlobalPocketVoiceUseSelected}
         setup={globalPocketVoiceSetup}
+        siriSetup={globalSiriVoiceSetup}
+        backend={globalVoiceOutput.backend}
+        onBackendChange={globalVoiceOutput.setBackend}
       />
       <SessionWorkspaceCleanupDialog
         open={Boolean(pendingWorkspaceCleanupConfirmation)}

@@ -688,6 +688,9 @@ pub fn open_session_window(
                     .state::<crate::commands::pocket_voice::PocketVoiceState>()
                     .stop_for_window_destroyed();
             }
+            app_for_close
+                .state::<crate::commands::siri_voice::SiriVoiceState>()
+                .stop_for_window_destroyed(&label_for_close);
             reg_for_close.release_label(&label_for_close);
             let _ = emit_snapshot(&app_for_close, &reg_for_close);
         }
