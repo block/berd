@@ -57,9 +57,7 @@ describe("SiriVoiceSettings", () => {
     expect(
       screen.getByRole("option", { name: "Australian English" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("option", { name: "Indian English" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /India/ })).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "English" })).toBeNull();
   });
 
