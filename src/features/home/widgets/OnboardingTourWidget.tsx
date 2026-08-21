@@ -249,7 +249,7 @@ const BerdyContent = memo(function BerdyContent({
               media={gloopyMedia}
               poster={gloopyPoster.data}
               alt={t("onboarding.callout.avatarAlt")}
-              loadingStrategy="lazy-once"
+              loadingStrategy="eager"
               playbackMode="occasional"
               className="size-full object-contain"
             />
