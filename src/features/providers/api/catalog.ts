@@ -1,4 +1,5 @@
 import type { ProviderSetupCatalogEntryDto } from "@aaif/goose-sdk";
+import { CURATED_PROVIDER_CATALOG_BY_ID } from "@/features/providers/curatedProviders";
 import { getClient } from "@/shared/api/acpConnection";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import { perfLog } from "@/shared/lib/perfLog";
@@ -6,21 +7,29 @@ import { perfLog } from "@/shared/lib/perfLog";
 export function mapProviderSetupCatalogEntryDto(
   dto: ProviderSetupCatalogEntryDto,
 ): ProviderCatalogEntry {
+  // Goose owns current setup data, while Berd's curated catalog carries stable
+  // client identity and native-connect capabilities. A fetched same-id entry
+  // must add to that metadata rather than make credentials and actions vanish.
+  const curatedEntry = CURATED_PROVIDER_CATALOG_BY_ID.get(dto.providerId);
+  const aliases = [
+    ...new Set([...(curatedEntry?.aliases ?? []), ...(dto.aliases ?? [])]),
+  ];
+  const nativeConnectQuery =
+    dto.nativeConnectQuery ?? curatedEntry?.nativeConnectQuery;
+
   return {
     id: dto.providerId,
     displayName: dto.name,
     category: dto.category,
     description: dto.description,
     setupMethod: dto.setupMethod,
-    ...(dto.nativeConnectQuery
-      ? { nativeConnectQuery: dto.nativeConnectQuery }
-      : {}),
+    ...(nativeConnectQuery ? { nativeConnectQuery } : {}),
     ...(dto.fields?.length ? { fields: dto.fields } : {}),
     ...(dto.binaryName ? { binaryName: dto.binaryName } : {}),
     ...(dto.docUrl ? { docsUrl: dto.docUrl } : {}),
     group: dto.group,
     showOnlyWhenInstalled: dto.showOnlyWhenInstalled,
-    ...(dto.aliases?.length ? { aliases: dto.aliases } : {}),
+    ...(aliases.length ? { aliases } : {}),
     supportsInstall: dto.supportsInstall,
     supportsAuth: dto.supportsAuth,
     supportsAuthStatus: dto.supportsAuthStatus,

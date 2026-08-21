@@ -4,6 +4,8 @@ import {
   type RuntimeConfig,
 } from "@/shared/runtime-config/schema";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
+import { mapProviderSetupCatalogEntryDto } from "./api/catalog";
+import { isCredentialedProvider } from "./lib/providerConnectionPolicy";
 import { getModelCacheRefreshProviderIds } from "./modelCacheRefresh";
 import {
   applyRuntimeProviderConfig,
@@ -212,6 +214,66 @@ describe("mergeRuntimeProviderCatalog", () => {
     expect(openai.fields?.map((field) => field.key)).toEqual([
       "OPENAI_API_KEY",
     ]);
+  });
+
+  it("preserves curated Databricks identity through setup and runtime catalog composition", () => {
+    const fetchedSetupEntry = mapProviderSetupCatalogEntryDto({
+      providerId: "databricks_v2",
+      name: "Databricks AI Gateway",
+      category: "model",
+      description: "Databricks AI Gateway models",
+      setupMethod: "host_with_oauth_fallback",
+      fields: [
+        {
+          key: "DATABRICKS_HOST",
+          label: "Host",
+          secret: false,
+          required: true,
+        },
+        {
+          key: "DATABRICKS_TOKEN",
+          label: "Token",
+          secret: true,
+          required: false,
+        },
+      ],
+      group: "default",
+      showOnlyWhenInstalled: false,
+      aliases: ["databricks_ai_gateway"],
+      supportsInstall: false,
+      supportsAuth: true,
+      supportsAuthStatus: false,
+    });
+
+    const merged = mergeRuntimeProviderCatalog(
+      [fetchedSetupEntry],
+      MANAGED_RUNTIME_CONFIG,
+    );
+    const databricks = merged.find((entry) => entry.id === "databricks_v2");
+    if (!databricks) {
+      throw new Error("Expected Databricks in the composed provider catalog");
+    }
+    expect(databricks.nativeConnectQuery).toBe("databricks");
+    expect(databricks.aliases).toEqual(
+      expect.arrayContaining([
+        "databricks_v2",
+        "databricks",
+        "databricks_ai_gateway",
+      ]),
+    );
+
+    const credentialed = isCredentialedProvider(
+      databricks,
+      new Set(["databricks"]),
+    );
+    expect(credentialed).toBe(true);
+    expect(
+      getModelCacheRefreshProviderIds(MANAGED_RUNTIME_CONFIG, {
+        byoKeyProvidersEnabled: true,
+        catalogEntries: merged,
+        configuredProviderIds: credentialed ? ["databricks_v2"] : [],
+      }),
+    ).toContain("databricks_v2");
   });
 
   it("keeps managed Databricks setup fields hidden", () => {

@@ -55,7 +55,7 @@ describe("provider setup catalog API", () => {
       docsUrl: "https://docs.anthropic.com/en/docs/claude-code",
       group: "default",
       showOnlyWhenInstalled: false,
-      aliases: ["claude-acp", "claude_code", "claude"],
+      aliases: ["claude-acp", "claude_code", "claude-code", "claude"],
       supportsInstall: true,
       supportsAuth: true,
       supportsAuthStatus: true,
