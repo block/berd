@@ -16,6 +16,7 @@ import {
   stopNativeAssistantSpeech,
   takeVoicePlaybackNotices,
 } from "../lib/nativeAssistantSpeech";
+import { openVoiceConversationSession } from "../api/voiceConversation";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -59,6 +60,13 @@ export function canBindVoiceSendRoute(options: {
     !options.readOnly &&
     !options.disabled
   );
+}
+
+export function resolveActiveVoiceButtonAction(
+  activeSessionId: string | null,
+  candidateSessionId: string,
+): "stop" | "open-owner" {
+  return activeSessionId === candidateSessionId ? "stop" : "open-owner";
 }
 
 export function shouldStartRequestedVoiceConversation({
@@ -607,6 +615,17 @@ export function useVoiceConversationController({
       });
       if (action === "stop") {
         const boundSessionId = currentStatus.sessionId;
+        if (
+          resolveActiveVoiceButtonAction(boundSessionId, sessionId) ===
+          "open-owner"
+        ) {
+          try {
+            await openVoiceConversationSession();
+          } catch (openError) {
+            addErrorNotification(boundSessionId, errorText(openError));
+          }
+          return;
+        }
         try {
           await stop();
         } catch (stopError) {

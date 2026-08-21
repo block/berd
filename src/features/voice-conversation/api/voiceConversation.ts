@@ -238,6 +238,20 @@ export function getVoiceConversationStatus(): Promise<VoiceConversationStatus> {
   );
 }
 
+export function openVoiceConversationSession(): Promise<void> {
+  return invoke("open_voice_conversation_session");
+}
+
+export function stopVoiceConversationFromBuddy(): Promise<void> {
+  microphoneMuted = false;
+  stopActiveMicrophone();
+  return invoke("stop_voice_conversation_from_buddy");
+}
+
+export function sendVoiceConversationToMenuBar(): Promise<void> {
+  return invoke("send_voice_conversation_to_menu_bar");
+}
+
 export interface PendingVoiceTranscript {
   sessionId: string;
   lifecycleId: string;

@@ -30,10 +30,13 @@ import {
   getVoiceConversationStatus,
   hydrateVoiceConversationMicrophone,
   listenToVoiceConversation,
+  openVoiceConversationSession,
   reconcileVoiceConversationMicrophone,
   setVoiceConversationMicrophoneMuted,
+  sendVoiceConversationToMenuBar,
   startVoiceConversation,
   stopActiveMicrophoneForTest,
+  stopVoiceConversationFromBuddy,
   stopVoiceConversation,
 } from "./voiceConversation";
 
@@ -124,6 +127,20 @@ describe("voice conversation API", () => {
         rendererEpoch: 7,
       },
     );
+  });
+
+  it("exposes the buddy control commands", async () => {
+    mocks.invoke.mockResolvedValue(undefined);
+
+    await openVoiceConversationSession();
+    await stopVoiceConversationFromBuddy();
+    await sendVoiceConversationToMenuBar();
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["open_voice_conversation_session"],
+      ["stop_voice_conversation_from_buddy"],
+      ["send_voice_conversation_to_menu_bar"],
+    ]);
   });
 
   it("can stop only the browser microphone for deterministic development tests", async () => {

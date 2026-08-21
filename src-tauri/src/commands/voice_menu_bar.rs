@@ -1,11 +1,10 @@
 //! macOS menu bar controls for the process-wide native voice conversation.
 
-use serde::Serialize;
 use std::sync::mpsc;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager, WebviewWindow,
+    AppHandle, Manager,
 };
 
 use super::{native_voice::NativeVoiceState, voice_capture::VoiceCaptureState};
@@ -14,13 +13,7 @@ const TRAY_ID: &str = "voice-conversation";
 const MUTE_ID: &str = "voice-conversation-mute";
 const OPEN_ID: &str = "voice-conversation-open";
 const STOP_ID: &str = "voice-conversation-stop";
-pub const OPEN_SESSION_EVENT: &str = "voice-conversation:open-session";
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct OpenSessionPayload {
-    session_id: String,
-}
+const SHOW_BUDDY_ID: &str = "voice-conversation-show-buddy";
 
 // AppKit traps if an NSStatusItem is created, mutated, or dropped off its main
 // queue. Tauri's tray wrapper drops the native item when it leaves the manager.
@@ -48,9 +41,13 @@ fn menu(app: &AppHandle, muted: bool) -> tauri::Result<Menu<tauri::Wry>> {
     let status = MenuItem::new(app, "Voice conversation active", false, None::<&str>)?;
     let mute = CheckMenuItem::with_id(app, MUTE_ID, "Mute Microphone", true, muted, None::<&str>)?;
     let open = MenuItem::with_id(app, OPEN_ID, "Open Voice Session", true, None::<&str>)?;
+    let show_buddy = MenuItem::with_id(app, SHOW_BUDDY_ID, "Show Gloopie", true, None::<&str>)?;
     let stop = MenuItem::with_id(app, STOP_ID, "Stop Voice Conversation", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    Menu::with_items(app, &[&status, &separator, &mute, &open, &stop])
+    Menu::with_items(
+        app,
+        &[&status, &separator, &mute, &open, &show_buddy, &stop],
+    )
 }
 
 pub fn install(app: &AppHandle, muted: bool) -> Result<(), String> {
@@ -88,29 +85,6 @@ pub fn remove(app: &AppHandle) {
     }
 }
 
-fn focus_window(window: &WebviewWindow) {
-    let _ = window.show();
-    let _ = window.unminimize();
-    let _ = window.set_focus();
-}
-
-fn open_voice_session(app: &AppHandle) -> Result<(), String> {
-    let state = app.state::<NativeVoiceState>();
-    let Some((session_id, owner_window_label)) = state.active_session_target() else {
-        return Ok(());
-    };
-    let window = app
-        .get_webview_window(&owner_window_label)
-        .ok_or_else(|| "The voice session window is no longer available.".to_string())?;
-    focus_window(&window);
-    if owner_window_label == "main" {
-        window
-            .emit(OPEN_SESSION_EVENT, OpenSessionPayload { session_id })
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
 pub fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     match event.id().as_ref() {
         MUTE_ID => {
@@ -121,10 +95,14 @@ pub fn handle_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
             }
         }
         OPEN_ID => {
-            if let Err(error) = open_voice_session(app) {
+            if let Err(error) = super::voice_buddy::open_active_session(app) {
                 log::warn!("Failed to open the voice session: {error}");
             }
         }
+        SHOW_BUDDY_ID => match super::voice_buddy::install(app) {
+            Ok(()) => remove(app),
+            Err(error) => log::warn!("Failed to restore the Gloopie voice buddy: {error}"),
+        },
         STOP_ID => {
             let app = app.clone();
             tauri::async_runtime::spawn(async move {

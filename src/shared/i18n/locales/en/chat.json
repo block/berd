@@ -548,6 +548,17 @@
       "start": "Start voice conversation",
       "muteMicrophone": "Mute microphone",
       "unmuteMicrophone": "Unmute microphone",
+      "buddy": {
+        "title": "Voice conversation",
+        "gloopieAlt": "Gloopie voice buddy",
+        "openSession": "Open voice session",
+        "hangUp": "Hang up",
+        "sendToMenuBar": "Send to menu bar",
+        "listening": "Listening…",
+        "user-speaking": "Listening to you…",
+        "agent-speaking": "Speaking…",
+        "muted": "Microphone muted"
+      },
       "states": {
         "off": "Start voice conversation",
         "starting": "Starting voice conversation…",

@@ -20,7 +20,7 @@ use super::{
     native_input_mute, pocket_voice::parakeet_model_dir, voice_capture::VoiceCaptureState,
 };
 
-const EVENT_NAME: &str = "voice-conversation:event";
+pub(crate) const EVENT_NAME: &str = "voice-conversation:event";
 const MAX_AUDIO_BATCH_BYTES: usize = 100 * 1024;
 const AUDIO_QUEUE_DEPTH: usize = 50;
 const MAX_PENDING_TRANSCRIPTS: usize = 64;
@@ -182,7 +182,6 @@ impl NativeVoiceState {
         self.microphone_muted.load(Ordering::SeqCst)
     }
 
-    #[cfg(target_os = "macos")]
     pub fn active_session_target(&self) -> Option<(String, String)> {
         let runtime = self.runtime.lock().ok()?;
         Some((
@@ -213,16 +212,15 @@ impl NativeVoiceState {
         if let Err(error) = super::voice_menu_bar::set_muted(app, muted) {
             log::warn!("Failed to update the voice menu bar mute state: {error}");
         }
+        let event = NativeVoiceEvent::MicrophoneMute {
+            session_id,
+            muted,
+            revision,
+        };
         if let Some(window) = app.get_webview_window(&owner_window_label) {
-            let _ = window.emit(
-                EVENT_NAME,
-                NativeVoiceEvent::MicrophoneMute {
-                    session_id,
-                    muted,
-                    revision,
-                },
-            );
+            let _ = window.emit(EVENT_NAME, event.clone());
         }
+        super::voice_buddy::emit(app, event);
         Ok(())
     }
 }
@@ -562,10 +560,9 @@ pub async fn start_native_voice_conversation(
             runtime.native_microphone_mute_control,
         )
     };
-    #[cfg(target_os = "macos")]
-    if let Err(error) = super::voice_menu_bar::install(&app, false) {
+    if let Err(error) = super::voice_buddy::install(&app) {
         state.stop_active(&app, &capture).await?;
-        return Err(format!("Could not install the voice menu bar: {error}"));
+        return Err(format!("Could not show the Gloopie voice buddy: {error}"));
     }
     let _ = webview_window.emit(
         EVENT_NAME,
@@ -575,6 +572,15 @@ pub async fn start_native_voice_conversation(
             line: "Native Parakeet voice conversation is on".to_string(),
             revision,
             native_microphone_mute_control: runtime_mute_control,
+        },
+    );
+    super::voice_buddy::emit(
+        &app,
+        NativeVoiceEvent::Startup {
+            session_id: session_id.clone(),
+            owner_window_label: window_label.clone(),
+            line: "Native Parakeet voice conversation is on".to_string(),
+            revision,
         },
     );
 
@@ -595,18 +601,17 @@ pub async fn start_native_voice_conversation(
             }
             match event {
                 SttMessage::Speaking(speaking) => {
-                    let _ = event_window.emit(
-                        EVENT_NAME,
-                        NativeVoiceEvent::Activity {
-                            session_id: session_id.clone(),
-                            activity: if speaking {
-                                "user-speaking"
-                            } else {
-                                "user-idle"
-                            },
-                            revision,
+                    let event = NativeVoiceEvent::Activity {
+                        session_id: session_id.clone(),
+                        activity: if speaking {
+                            "user-speaking"
+                        } else {
+                            "user-idle"
                         },
-                    );
+                        revision,
+                    };
+                    let _ = event_window.emit(EVENT_NAME, event.clone());
+                    super::voice_buddy::emit(&event_app, event);
                 }
                 SttMessage::Final { text, delivered } => {
                     let transcript = PendingTranscript {
@@ -670,6 +675,7 @@ pub async fn start_native_voice_conversation(
                     event_state.microphone_muted.store(false, Ordering::SeqCst);
                     #[cfg(target_os = "macos")]
                     super::voice_menu_bar::remove(&event_app);
+                    super::voice_buddy::remove(&event_app);
                     event_app
                         .state::<VoiceCaptureState>()
                         .release_owner(&window_label, &owner_id);
@@ -761,6 +767,7 @@ impl NativeVoiceState {
         self.microphone_muted.store(false, Ordering::SeqCst);
         #[cfg(target_os = "macos")]
         super::voice_menu_bar::remove(app);
+        super::voice_buddy::remove(app);
         if let Some((owner, owner_id)) = owner.as_ref() {
             capture.release_owner(&owner.window_label, owner_id);
         }
@@ -816,6 +823,7 @@ impl NativeVoiceState {
         self.microphone_muted.store(false, Ordering::SeqCst);
         #[cfg(target_os = "macos")]
         super::voice_menu_bar::remove(app);
+        super::voice_buddy::remove(app);
         if let (Some(owner), Some(session_id)) = (owner, session_id) {
             capture.release_owner(&owner.window_label, &native_owner_id(&session_id));
             if let Some(window) = app.get_webview_window(&owner.window_label) {

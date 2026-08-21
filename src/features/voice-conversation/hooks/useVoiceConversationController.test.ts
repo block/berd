@@ -21,6 +21,7 @@ import {
   createVoiceTranscriptDeliveryQueue,
   hasDeliveredVoiceTranscript,
   resetVoiceUiWhenRunSettles,
+  resolveActiveVoiceButtonAction,
   resolveVoiceRouteMount,
   resolveVoiceToggleAction,
   shouldStartRequestedVoiceConversation,
@@ -354,6 +355,15 @@ describe("voice transcript delivery coordination", () => {
     );
     expect(canClaimVoiceSendRoute(null, "session-1", "session-2")).toBe(false);
     expect(canClaimVoiceSendRoute(null, null, "session-2")).toBe(true);
+  });
+
+  it("opens the owner instead of stopping voice from another session", () => {
+    expect(resolveActiveVoiceButtonAction("session-1", "session-2")).toBe(
+      "open-owner",
+    );
+    expect(resolveActiveVoiceButtonAction("session-1", "session-1")).toBe(
+      "stop",
+    );
   });
 
   it("drains retained transcripts without stealing a stopped session route", () => {

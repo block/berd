@@ -545,6 +545,17 @@
       "start": "Iniciar conversación de voz",
       "muteMicrophone": "Silenciar micrófono",
       "unmuteMicrophone": "Activar micrófono",
+      "buddy": {
+        "title": "Conversación por voz",
+        "gloopieAlt": "Asistente Gloopie de voz",
+        "openSession": "Abrir sesión de voz",
+        "hangUp": "Colgar",
+        "sendToMenuBar": "Enviar a la barra de menús",
+        "listening": "Escuchando…",
+        "user-speaking": "Escuchándote…",
+        "agent-speaking": "Hablando…",
+        "muted": "Micrófono silenciado"
+      },
       "states": {
         "off": "Iniciar conversación de voz",
         "starting": "Iniciando conversación de voz…",
