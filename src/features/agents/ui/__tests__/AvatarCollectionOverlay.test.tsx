@@ -245,6 +245,31 @@ describe("AvatarCollectionOverlay", () => {
     finishExitAnimation();
   });
 
+  it("clears a failed selection when the highlighted avatar is toggled off", async () => {
+    const onSelectAvatar = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("save failed"));
+    renderWithProviders(
+      <AvatarCollectionOverlay
+        library={libraryWith(catalogWith({ gloopies: ["g-1", "g-2"] }))}
+        onSelectAvatar={onSelectAvatar}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(overlay().getAllByRole("button", { name: "g-1" })[0]);
+    fireEvent.click(overlay().getByRole("button", { name: /^select$/i }));
+    await act(async () => {});
+
+    expect(overlay().getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(overlay().getAllByRole("button", { name: "g-1" })[0]);
+
+    expect(overlay().queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      overlay().queryByRole("button", { name: /^select$/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("toggles the highlight off when the same avatar is clicked again", () => {
     renderWithProviders(
       <AvatarCollectionOverlay
@@ -373,6 +398,38 @@ describe("AvatarCollectionOverlay", () => {
     expect(
       overlay().queryByRole("button", { name: /^select$/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("clears a failed selection when going up to the collections level", async () => {
+    const onSelectAvatar = vi.fn().mockRejectedValue(new Error("save failed"));
+    renderWithProviders(
+      <AvatarCollectionOverlay
+        library={libraryWith(
+          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
+        )}
+        onSelectAvatar={onSelectAvatar}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(
+      overlay().getAllByRole("button", {
+        name: /open the gloopies collection/i,
+      })[0],
+    );
+    fireEvent.click(overlay().getAllByRole("button", { name: "g-1" })[0]);
+    fireEvent.click(overlay().getByRole("button", { name: /^select$/i }));
+    await act(async () => {});
+
+    expect(overlay().getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(
+      overlay().getByRole("button", { name: /back to avatar collections/i }),
+    );
+
+    expect(overlay().queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      overlay().getByRole("heading", { name: /avatar collections/i }),
+    ).toBeInTheDocument();
   });
 
   it("returns to the collections level on Escape before closing", () => {

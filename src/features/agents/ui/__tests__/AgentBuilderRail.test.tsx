@@ -421,6 +421,8 @@ describe("AgentBuilderRail", () => {
             media: { src: "/cached/gloopy-1.webm", mediaType: "video" },
           },
         },
+        userAvatarIds: [],
+        userAvatarMediaById: {},
         loading: false,
         cacheChecking: false,
         error: false,

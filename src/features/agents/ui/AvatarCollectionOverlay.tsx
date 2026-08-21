@@ -271,17 +271,30 @@ export function AvatarCollectionOverlay({
     [],
   );
 
+  const clearPendingSelection = useCallback(() => {
+    setPendingAvatarRef(null);
+    setSelectionFailed(false);
+  }, []);
+
+  const togglePendingSelection = useCallback((avatarRef: string) => {
+    setPendingAvatarRef((current) =>
+      current === avatarRef ? null : avatarRef,
+    );
+    setSelectionFailed(false);
+  }, []);
+
   const goBack = useCallback(() => {
     if (closing || selectionPending) {
       return;
     }
     if (collection && hasCollectionsLevel) {
-      setPendingAvatarRef(null);
+      clearPendingSelection();
       setCollectionId(null);
       return;
     }
     closeWithAnimation(onClose);
   }, [
+    clearPendingSelection,
     closing,
     closeWithAnimation,
     collection,
@@ -401,14 +414,21 @@ export function AvatarCollectionOverlay({
         // highlight — everything fades back up. Deliberately not a dismiss:
         // mis-clicking near an avatar must not throw the user out of the
         // picker.
-        setPendingAvatarRef(null);
+        clearPendingSelection();
         return;
       }
       // On the collections level, empty-canvas clicks light-dismiss the
       // overlay like a dialog scrim.
       closeWithAnimation(onClose);
     },
-    [closing, closeWithAnimation, collection, onClose, selectionPending],
+    [
+      clearPendingSelection,
+      closing,
+      closeWithAnimation,
+      collection,
+      onClose,
+      selectionPending,
+    ],
   );
 
   const onConfirmSelect = useCallback(() => {
@@ -493,11 +513,7 @@ export function AvatarCollectionOverlay({
             aria-pressed={pending}
             disabled={!cachedMedia || closing || selectionPending}
             {...hoverHandlers(entry.ref)}
-            onClick={() =>
-              setPendingAvatarRef((current) =>
-                current === entry.ref ? null : entry.ref,
-              )
-            }
+            onClick={() => togglePendingSelection(entry.ref)}
           >
             {cachedMedia ? (
               <AvatarMedia
@@ -554,6 +570,7 @@ export function AvatarCollectionOverlay({
       registerTileNode,
       selectionPending,
       t,
+      togglePendingSelection,
     ],
   );
 
@@ -604,14 +621,7 @@ export function AvatarCollectionOverlay({
         </button>
       );
     },
-    [
-      closing,
-      collectionDisplayLabel,
-      markReady,
-      readyIds,
-      selectionPending,
-      t,
-    ],
+    [closing, collectionDisplayLabel, markReady, readyIds, selectionPending, t],
   );
 
   const heading = collection
