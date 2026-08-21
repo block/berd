@@ -701,16 +701,16 @@ impl NativeVoiceState {
             {
                 return false;
             }
-            (
-                runtime.session_id.clone(),
-                runtime.revision,
-                runtime.pipeline.take(),
-            )
+            let pipeline = runtime.pipeline.take();
+            if let Some(pipeline) = pipeline.as_ref() {
+                pipeline.latch_muted_shutdown();
+            }
+            native_input_mute::stop(&self.input_muted);
+            (runtime.session_id.clone(), runtime.revision, pipeline)
         };
         if pipeline.is_none() {
             if let Ok(mut runtime) = self.runtime.lock() {
                 if runtime.revision == revision && runtime.session_id == session_id {
-                    native_input_mute::stop(&self.input_muted);
                     runtime.session_id = None;
                     runtime.lifecycle_id = None;
                     runtime.owner = None;
@@ -720,12 +720,10 @@ impl NativeVoiceState {
             return true;
         }
         let runtime = Arc::clone(&self.runtime);
-        let input_muted = Arc::clone(&self.input_muted);
         tauri::async_runtime::spawn(async move {
             shutdown_pipeline(pipeline.expect("pipeline checked above")).await;
             if let Ok(mut runtime) = runtime.lock() {
                 if runtime.revision == revision && runtime.session_id == session_id {
-                    native_input_mute::stop(&input_muted);
                     runtime.session_id = None;
                     runtime.lifecycle_id = None;
                     runtime.owner = None;
@@ -919,10 +917,7 @@ fn stt_worker(
             }
         }
     }
-    if !speech.is_empty()
-        && !input_muted.load(Ordering::Acquire)
-        && !discard_on_shutdown.load(Ordering::Acquire)
-    {
+    if !speech.is_empty() && !discard_on_shutdown.load(Ordering::Acquire) {
         let (delivered_tx, delivered_rx) = mpsc::sync_channel(0);
         flush_speech(&speech, &recognizer, &event_tx, Some(delivered_tx));
         let _ = delivered_rx.recv_timeout(Duration::from_secs(5));
@@ -1141,6 +1136,26 @@ mod tests {
         input_muted.store(false, Ordering::Release);
 
         assert!(discard_on_shutdown.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn unmuted_shutdown_keeps_final_utterance_after_later_mute_event() {
+        let (sender, _receiver) = mpsc::sync_channel(1);
+        let input_muted = Arc::new(AtomicBool::new(false));
+        let discard_on_shutdown = Arc::new(AtomicBool::new(false));
+        let mut pipeline = SttPipeline {
+            audio_tx: sender,
+            shutdown: Arc::new(AtomicBool::new(false)),
+            discard_on_shutdown: Arc::clone(&discard_on_shutdown),
+            input_muted: Arc::clone(&input_muted),
+            audio_seen: AtomicBool::new(false),
+            thread: None,
+        };
+
+        pipeline.begin_shutdown();
+        input_muted.store(true, Ordering::Release);
+
+        assert!(!discard_on_shutdown.load(Ordering::Acquire));
     }
 
     #[test]
