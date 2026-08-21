@@ -1489,6 +1489,33 @@ describe("acpCreateSession", () => {
     });
   });
 
+  it("returns the concrete model acknowledged for provider-only creation", async () => {
+    mockNewSession.mockResolvedValue({ sessionId: "acp-session-default" });
+    mockSetProvider.mockResolvedValueOnce({
+      model: { modelId: "gpt-5.5", modelName: "GPT-5.5" },
+      reasoningEffort: reasoningEffortSnapshot,
+    });
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpCreateSession } = await import("../acp");
+
+    await expect(acpCreateSession("openai", "/tmp/project")).resolves.toEqual({
+      sessionId: "acp-session-default",
+      configOptionsSnapshot: {
+        model: { modelId: "gpt-5.5", modelName: "GPT-5.5" },
+        reasoningEffort: reasoningEffortSnapshot,
+      },
+      resolvedSelection: {
+        providerId: "openai",
+        modelId: "gpt-5.5",
+        modelName: "GPT-5.5",
+      },
+    });
+    expect(
+      sessionRegistry.requireSessionInvocationSelection("acp-session-default"),
+    ).toMatchObject({ providerId: "openai", modelId: "gpt-5.5" });
+  });
+
   it("does not resurrect provider defaults absent from the final model snapshot", async () => {
     mockNewSession.mockResolvedValue({ sessionId: "acp-session-1" });
     mockSetProvider.mockResolvedValueOnce({

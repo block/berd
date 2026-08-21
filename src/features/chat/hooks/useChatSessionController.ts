@@ -2449,8 +2449,13 @@ export function useChatSessionController({
       const personaTarget = queuedPersona
         ? resolvePersonaTarget(queuedPersona)
         : undefined;
+      const {
+        sessionSelection: _previousPersonaSelection,
+        sessionSelectionToken: _previousPersonaSelectionToken,
+        ...retainedSendOptions
+      } = payload.sendOptions ?? {};
       const sendOptions = {
-        ...payload.sendOptions,
+        ...retainedSendOptions,
         ...(personaTarget?.status === "valid"
           ? { sessionSelection: personaTarget.target }
           : {}),

@@ -3516,6 +3516,83 @@ describe("AppShell global navigation", () => {
     expect(getModelSelectionIntent("created-session")).toBeUndefined();
   });
 
+  it("does not restore stale draft creation ownership after A to B to A", async () => {
+    const pendingSession = deferred<{
+      sessionId: string;
+      resolvedSelection: {
+        providerId: string;
+        modelId: string;
+        modelName: string;
+      };
+    }>();
+    mockAcpCreateSession.mockReturnValueOnce(pendingSession.promise);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    await waitFor(() => expect(mockAcpCreateSession).toHaveBeenCalled());
+    const draftSessionId = useChatSessionStore.getState().activeSessionId ?? "";
+    const originalTarget = useChatSessionStore
+      .getState()
+      .getSession(draftSessionId)?.executionTarget;
+    expect(originalTarget).toBeDefined();
+    if (!originalTarget) {
+      throw new Error(
+        "Expected the draft to retain its original execution target",
+      );
+    }
+
+    act(() => {
+      beginModelSelectionIntent(draftSessionId, {
+        requestId: "newer-b",
+        target: {
+          harnessId: "codex-acp",
+          modelProviderId: "codex-acp",
+          modelId: "gpt-5.4-mini",
+          modelName: "GPT-5.4 mini",
+        },
+      });
+      beginModelSelectionIntent(draftSessionId, {
+        requestId: "newer-a",
+        target: originalTarget,
+        preferenceAgentId: originalTarget.harnessId,
+      });
+      pendingSession.resolve({
+        sessionId: "created-session",
+        resolvedSelection: {
+          providerId: "anthropic",
+          modelId: "claude-fable",
+          modelName: "Claude Fable",
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+        "created-session",
+        "goose",
+        "~/goose artifacts",
+        expect.objectContaining({ selectionAlreadyResolved: true }),
+        expect.objectContaining({ clear: expect.any(Function) }),
+      );
+    });
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("created-session")
+          ?.executionTarget,
+      ).toMatchObject(originalTarget);
+    });
+    expect(
+      useChatSessionStore.getState().getSession("created-session")
+        ?.executionTarget,
+    ).not.toMatchObject({ modelId: "claude-fable" });
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().activeSessionId).toBe(
+        "created-session",
+      );
+    });
+  });
+
   it("adopts a repaired pending draft selection before promotion", async () => {
     const pendingSession = deferred<{ sessionId: string }>();
     mockAcpCreateSession.mockReturnValueOnce(pendingSession.promise);

@@ -549,12 +549,13 @@ export async function acpCreateSession(
     return {
       sessionId,
       configOptionsSnapshot,
-      resolvedSelection: {
-        ...selection,
-        ...(selection.modelId && resolvedModel?.modelId === selection.modelId
-          ? { modelName: resolvedModel.modelName }
-          : {}),
-      },
+      resolvedSelection: resolvedModel
+        ? {
+            providerId: selection.providerId,
+            modelId: resolvedModel.modelId,
+            modelName: resolvedModel.modelName,
+          }
+        : selection,
     };
   } catch (error) {
     rollbackSessionRegistration?.();

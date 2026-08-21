@@ -1810,6 +1810,9 @@ export function AppShell({
             liveDraft,
             sessionExecutionTarget,
           );
+          const requestedTargetIntentId = getModelSelectionIntent(
+            session.id,
+          )?.requestId;
           const creationSelection =
             gooseServeSelectionFromExecutionTarget(requestedTarget);
           return acpCreateSession(
@@ -1830,6 +1833,7 @@ export function AppShell({
               configOptionsSnapshot,
               resolvedSelection,
               sessionExecutionTarget: requestedTarget,
+              requestedTargetIntentId,
               workingDir: resolvedWorkingDir,
             };
           });
@@ -1840,6 +1844,7 @@ export function AppShell({
             configOptionsSnapshot,
             resolvedSelection,
             sessionExecutionTarget,
+            requestedTargetIntentId,
             workingDir,
           }) => {
             const sessionStore = useChatSessionStore.getState();
@@ -1859,6 +1864,8 @@ export function AppShell({
             );
             let appliedTarget = creationTarget;
             if (
+              getModelSelectionIntent(session.id)?.requestId ===
+                requestedTargetIntentId &&
               sameSessionExecutionTarget(
                 latestSession.executionTarget,
                 sessionExecutionTarget,
@@ -1883,6 +1890,9 @@ export function AppShell({
                 if (sameSessionExecutionTarget(latestTarget, appliedTarget)) {
                   return latestTarget;
                 }
+                const latestTargetIntentId = getModelSelectionIntent(
+                  session.id,
+                )?.requestId;
                 const result = await transitionSessionTarget({
                   sessionId,
                   target: latestTarget,
@@ -1917,6 +1927,12 @@ export function AppShell({
                       result.resolvedTarget,
                     );
                   }
+                }
+                if (
+                  getModelSelectionIntent(session.id)?.requestId ===
+                  latestTargetIntentId
+                ) {
+                  return effectiveTarget;
                 }
                 appliedTarget = effectiveTarget;
               }
@@ -1991,6 +2007,8 @@ export function AppShell({
                   providerId: pendingSelectionIntent.target.modelProviderId,
                 },
               );
+            }
+            if (pendingSelectionIntent) {
               clearCurrentModelSelectionIntent(
                 session.id,
                 pendingSelectionIntent.requestId,

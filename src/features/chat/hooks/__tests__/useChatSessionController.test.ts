@@ -16,7 +16,10 @@ import {
   type ChatAttachmentDraft,
   createUserMessage,
 } from "@/shared/types/messages";
-import { useChatStore } from "../../stores/chatStore";
+import {
+  type QueuedMessagePayload,
+  useChatStore,
+} from "../../stores/chatStore";
 import {
   type ChatSession,
   useChatSessionStore,
@@ -5261,6 +5264,63 @@ describe("useChatSessionController", () => {
         modelId: "goose-claude-opus-4-8",
       },
     });
+  });
+
+  it("replaces captured persona authority when a queued edit removes the persona", () => {
+    const update = vi.fn(
+      (_recordId: string, _payload: QueuedMessagePayload) => true,
+    );
+    const staleToken = Symbol("persona-a");
+    mockUseMessageQueue.mockReturnValue({
+      queuedMessage: null,
+      enqueue: vi.fn(),
+      update,
+      dismiss: vi.fn(),
+    });
+    useAgentStore.setState({
+      personas: [
+        personaFixture({
+          provider: "goose",
+          model: "goose-claude-fable-5",
+        }),
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.queue.update("queued-a", {
+        text: "send without persona",
+        persona: { kind: "none" },
+        sendOptions: {
+          sessionSelection: {
+            harnessId: "goose",
+            modelProviderId: "databricks_v2",
+            modelId: "goose-claude-fable-5",
+            modelName: "goose-claude-fable-5",
+          },
+          sessionSelectionToken: staleToken,
+          displayText: "preserved",
+        },
+      });
+    });
+
+    expect(update).toHaveBeenCalledWith(
+      "queued-a",
+      expect.objectContaining({
+        persona: { kind: "none" },
+        sendOptions: expect.objectContaining({ displayText: "preserved" }),
+      }),
+    );
+    const updateCall = update.mock.calls[0];
+    if (!updateCall) {
+      throw new Error("Expected the queued message to be recaptured");
+    }
+    const recaptured = updateCall[1].sendOptions;
+    expect(recaptured).not.toHaveProperty("sessionSelection");
+    expect(recaptured).not.toHaveProperty("sessionSelectionToken");
   });
 
   it("removes the active persona without changing the selected model", async () => {
