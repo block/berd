@@ -864,7 +864,7 @@ fn stt_worker(
             Err(mpsc::RecvTimeoutError::Timeout) => None,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        if shutdown.load(Ordering::Acquire) {
+        if shutdown.load(Ordering::Acquire) && discard_on_shutdown.load(Ordering::Acquire) {
             break;
         }
         if input_muted.load(Ordering::Acquire) {
