@@ -678,7 +678,7 @@ pub fn run() {
                 app.state::<commands::native_voice::NativeVoiceState>()
                     .stop_for_app_exit();
                 app.state::<commands::siri_voice::SiriVoiceState>()
-                    .stop_for_window_destroyed();
+                    .stop_for_app_exit();
                 services::acp::goose_serve::GooseServeProcess::kill_singleton();
             }
             #[cfg(target_os = "macos")]

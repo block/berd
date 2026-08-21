@@ -30,6 +30,7 @@ pub struct SiriVoiceState {
 #[derive(Debug, Default)]
 struct SiriVoiceRuntime {
     active: Option<Arc<AtomicBool>>,
+    owner_window: Option<String>,
     #[cfg(target_os = "macos")]
     stream: Option<ActiveSiriStream>,
 }
@@ -214,8 +215,7 @@ unsafe extern "C" fn should_stop_siri_playback(context: *mut std::ffi::c_void) -
     !active.load(Ordering::SeqCst)
 }
 
-#[cfg(target_os = "macos")]
-fn begin_playback(state: &SiriVoiceState) -> Result<Arc<AtomicBool>, String> {
+fn begin_playback(state: &SiriVoiceState, owner_window: &str) -> Result<Arc<AtomicBool>, String> {
     let mut runtime = state
         .runtime
         .lock()
@@ -225,10 +225,10 @@ fn begin_playback(state: &SiriVoiceState) -> Result<Arc<AtomicBool>, String> {
     }
     let token = Arc::new(AtomicBool::new(true));
     runtime.active = Some(token.clone());
+    runtime.owner_window = Some(owner_window.to_string());
     Ok(token)
 }
 
-#[cfg(target_os = "macos")]
 fn finish_playback(state: &SiriVoiceState, completed: &Arc<AtomicBool>) {
     if let Ok(mut runtime) = state.runtime.lock() {
         if runtime
@@ -237,6 +237,7 @@ fn finish_playback(state: &SiriVoiceState, completed: &Arc<AtomicBool>) {
             .is_some_and(|current| Arc::ptr_eq(current, completed))
         {
             runtime.active = None;
+            runtime.owner_window = None;
             #[cfg(target_os = "macos")]
             {
                 runtime.stream = None;
@@ -651,13 +652,14 @@ fn run_siri_stream(
 #[tauri::command]
 pub fn start_siri_voice_stream(
     app: AppHandle,
+    webview_window: tauri::WebviewWindow,
     state: tauri::State<'_, SiriVoiceState>,
     native_voice: tauri::State<'_, NativeVoiceState>,
     stream_id: String,
 ) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, state, native_voice, stream_id);
+        let _ = (app, webview_window, state, native_voice, stream_id);
         Err("Siri TTS is only available on macOS".to_string())
     }
 
@@ -670,7 +672,7 @@ pub fn start_siri_voice_stream(
         let selection = settings.selected_voice.ok_or_else(|| {
             "Select an installed Siri voice in Voice settings before using Siri TTS".to_string()
         })?;
-        let active = begin_playback(&state)?;
+        let active = begin_playback(&state, webview_window.label())?;
         let capture_suppression =
             output_device_uses_speakers(effective_output_device_name(None).as_deref()).then(|| {
                 log::info!("[voice-echo-guard] speaker output detected");
@@ -776,13 +778,14 @@ fn send_stream_command(
 #[tauri::command]
 pub async fn preview_siri_voice(
     app: AppHandle,
+    webview_window: tauri::WebviewWindow,
     state: tauri::State<'_, SiriVoiceState>,
     native_voice: tauri::State<'_, NativeVoiceState>,
     voice: SiriVoiceSelection,
 ) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, state, native_voice, voice);
+        let _ = (app, webview_window, state, native_voice, voice);
         Err("Siri TTS is only available on macOS".to_string())
     }
 
@@ -796,7 +799,7 @@ pub async fn preview_siri_voice(
             .map_err(|_| "Siri voice language cannot contain NUL bytes".to_string())?;
         let name = CString::new(voice.name.clone())
             .map_err(|_| "Siri voice name cannot contain NUL bytes".to_string())?;
-        let active = begin_playback(&state)?;
+        let active = begin_playback(&state, webview_window.label())?;
         let capture_suppression =
             output_device_uses_speakers(effective_output_device_name(None).as_deref()).then(|| {
                 log::info!("[voice-echo-guard] speaker output detected");
@@ -864,10 +867,20 @@ pub fn stop_siri_voice(state: tauri::State<'_, SiriVoiceState>) -> Result<bool, 
 }
 
 fn stop_siri_playback(state: &SiriVoiceState) -> Result<bool, String> {
+    stop_siri_playback_for_owner(state, None)
+}
+
+fn stop_siri_playback_for_owner(
+    state: &SiriVoiceState,
+    owner_window: Option<&str>,
+) -> Result<bool, String> {
     let runtime = state
         .runtime
         .lock()
         .map_err(|_| "Siri playback state lock was poisoned".to_string())?;
+    if owner_window.is_some_and(|owner| runtime.owner_window.as_deref() != Some(owner)) {
+        return Ok(false);
+    }
     let Some(active) = runtime.active.as_ref() else {
         return Ok(false);
     };
@@ -880,11 +893,17 @@ fn stop_siri_playback(state: &SiriVoiceState) -> Result<bool, String> {
 }
 
 impl SiriVoiceState {
-    pub(crate) fn stop_for_window_destroyed(&self) -> bool {
-        stop_siri_playback(self).unwrap_or_else(|error| {
+    pub(crate) fn stop_for_window_destroyed(&self, window_label: &str) -> bool {
+        stop_siri_playback_for_owner(self, Some(window_label)).unwrap_or_else(|error| {
             log::warn!("Failed to stop Siri playback for a destroyed window: {error}");
             false
         })
+    }
+
+    pub(crate) fn stop_for_app_exit(&self) {
+        if let Err(error) = stop_siri_playback(self) {
+            log::warn!("Failed to stop Siri playback during app exit: {error}");
+        }
     }
 }
 
@@ -965,6 +984,21 @@ mod tests {
                 language: "en-AU".to_string(),
             }))
         );
+    }
+
+    #[test]
+    fn window_destroy_stops_only_its_owned_siri_playback() {
+        let state = SiriVoiceState::default();
+        let active = begin_playback(&state, "session-window").expect("start playback");
+
+        assert!(!state.stop_for_window_destroyed("other-window"));
+        assert!(active.load(Ordering::SeqCst));
+
+        assert!(state.stop_for_window_destroyed("session-window"));
+        assert!(!active.load(Ordering::SeqCst));
+
+        finish_playback(&state, &active);
+        assert!(begin_playback(&state, "next-window").is_ok());
     }
 
     #[cfg(target_os = "macos")]
