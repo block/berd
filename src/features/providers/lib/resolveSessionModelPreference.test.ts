@@ -13,8 +13,9 @@ const mockCheckAllProviderStatus = vi.mocked(checkAllProviderStatus);
 function setCachedModels(
   providerId: string,
   models: string[],
-  fetchedAt = Date.now(),
+  options: { fetchedAt?: number; proven?: boolean } = {},
 ) {
+  const { fetchedAt = Date.now(), proven = true } = options;
   useProviderModelCacheStore.setState({
     providers: new Map([
       [
@@ -22,6 +23,7 @@ function setCachedModels(
         {
           providerId,
           models: models.map((id) => ({ id, name: id, providerId })),
+          ...(proven ? { provenModelIds: models } : {}),
           fetchedAt,
         },
       ],
@@ -63,6 +65,7 @@ describe("resolveSupportedSessionModelPreference", () => {
         modelId: "gpt-5.4",
       },
     });
+    setCachedModels("openai", ["gpt-5.4"]);
 
     await expect(
       resolveSupportedSessionModelPreference("goose"),
@@ -204,50 +207,72 @@ describe("resolveSupportedSessionModelPreference", () => {
     });
   });
 
-  it("preserves the selected model when the model cache has no model list", async () => {
-    setCachedModels("openai", []);
+  it.each([
+    {
+      name: "proof is absent",
+      models: ["gpt-5.3"],
+      options: { proven: false },
+      expected: {
+        providerId: "openai",
+        modelId: "gpt-5.4",
+        modelName: "gpt-5.4",
+      },
+    },
+    {
+      name: "live proof is empty",
+      models: [],
+      options: {},
+      expected: { providerId: "openai" },
+    },
+    {
+      name: "live proof contains the preferred model",
+      models: ["gpt-5.4"],
+      options: {},
+      expected: {
+        providerId: "openai",
+        modelId: "gpt-5.4",
+        modelName: "gpt-5.4",
+      },
+    },
+    {
+      name: "live proof omits the preferred model",
+      models: ["gpt-5.3"],
+      options: {},
+      expected: { providerId: "openai" },
+    },
+  ])("uses only live proof when $name", async ({
+    models,
+    options,
+    expected,
+  }) => {
+    setCachedModels("openai", models, options);
 
     await expect(
       resolveSupportedSessionModelPreference("openai", "gpt-5.4"),
-    ).resolves.toEqual({
-      providerId: "openai",
-      modelId: "gpt-5.4",
-      modelName: "gpt-5.4",
-    });
+    ).resolves.toEqual(expected);
   });
 
-  it("drops an unsupported model when populated model cache is available", async () => {
-    setCachedModels("openai", ["gpt-5.3"]);
+  it("rejects an advisory display candidate absent from live proof", async () => {
+    useProviderModelCacheStore.setState({
+      providers: new Map([
+        [
+          "openai",
+          {
+            providerId: "openai",
+            models: [
+              { id: "gpt-5.3", name: "gpt-5.3", providerId: "openai" },
+              { id: "gpt-5.4", name: "gpt-5.4", providerId: "openai" },
+            ],
+            provenModelIds: ["gpt-5.3"],
+            fetchedAt: Date.now(),
+          },
+        ],
+      ]),
+    });
 
     await expect(
       resolveSupportedSessionModelPreference("openai", "gpt-5.4"),
-    ).resolves.toEqual({
-      providerId: "openai",
-    });
-  });
-
-  it("preserves a selected model while a populated cache is provisional", async () => {
-    setCachedModels("openai", ["gpt-5.3"], 0);
-
-    await expect(
-      resolveSupportedSessionModelPreference("openai", "gpt-5.4"),
-    ).resolves.toEqual({
-      providerId: "openai",
-      modelId: "gpt-5.4",
-      modelName: "gpt-5.4",
-    });
-  });
-
-  it("keeps a supported model when populated model cache is available", async () => {
-    setCachedModels("openai", ["gpt-5.4"]);
-
-    await expect(
-      resolveSupportedSessionModelPreference("openai", "gpt-5.4"),
-    ).resolves.toEqual({
-      providerId: "openai",
-      modelId: "gpt-5.4",
-      modelName: "gpt-5.4",
-    });
+    ).resolves.toEqual({ providerId: "openai" });
   });
 
   it("drops a stored model whose provider is disconnected", async () => {
@@ -272,6 +297,7 @@ describe("resolveSupportedSessionModelPreference", () => {
         modelId: "goose-gpt-5-5",
       },
     });
+    setCachedModels("databricks_v2", ["goose-gpt-5-5"]);
     mockCheckAllProviderStatus.mockResolvedValue([
       { providerId: "openai", isConfigured: false },
     ]);

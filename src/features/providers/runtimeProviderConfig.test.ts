@@ -436,10 +436,21 @@ describe("getModelCacheRefreshProviderIds", () => {
       ]);
   });
 
-  it("excludes runtime-managed model providers from startup refresh", () => {
-    expect(getModelCacheRefreshProviderIds(DEFAULT_RUNTIME_CONFIG)).toEqual([
-      "codex-acp",
-    ]);
+  it("includes runtime-managed model providers so live discovery can establish proof", () => {
+    expect(
+      getModelCacheRefreshProviderIds({
+        ...MANAGED_RUNTIME_CONFIG,
+        goose: {
+          ...MANAGED_RUNTIME_CONFIG.goose,
+          modelProviders: [
+            {
+              ...MANAGED_RUNTIME_CONFIG.goose.modelProviders[0],
+              modelInventoryMode: "authoritative",
+            },
+          ],
+        },
+      }),
+    ).toEqual(["databricks_v2", "codex-acp"]);
   });
 
   it("includes model providers for bundled appDefault refresh", () => {

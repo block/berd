@@ -63,6 +63,36 @@ describe("reconcileManagedDefaultProviderSelection", () => {
     mockGetStoredModelPreference.mockReturnValue(null);
   });
 
+  it("does not wait for model inventory for provider-only defaults", async () => {
+    useRuntimeConfigStore.setState({
+      loaded: true,
+      config: managedRuntimeConfig,
+      result: {
+        status: "ready",
+        source: "bundledFile",
+        config: managedRuntimeConfig,
+      },
+    });
+    const supportedModelsList = vi.fn().mockReturnValue(new Promise(() => {}));
+    mockGetClient.mockResolvedValue({
+      goose: {
+        GooseUnstableDefaultsRead: vi.fn().mockResolvedValue({
+          providerId: "databricks_v2",
+          modelId: undefined,
+        }),
+        GooseUnstableDefaultsSave: defaultsSave,
+        GooseUnstableProvidersSupportedModelsList: supportedModelsList,
+      },
+    } as never);
+
+    await expect(reconcileManagedDefaultProviderSelection()).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: undefined,
+    });
+    expect(supportedModelsList).not.toHaveBeenCalled();
+    expect(defaultsSave).not.toHaveBeenCalled();
+  });
+
   it("repairs a persisted Goose harness sentinel to the managed default", async () => {
     useRuntimeConfigStore.setState({
       loaded: true,
@@ -80,6 +110,9 @@ describe("reconcileManagedDefaultProviderSelection", () => {
           modelId: "goose",
         }),
         GooseUnstableDefaultsSave: defaultsSave,
+        GooseUnstableProvidersSupportedModelsList: vi.fn().mockResolvedValue({
+          models: ["goose-gpt-5-5"],
+        }),
       },
     } as never);
 
@@ -119,6 +152,57 @@ describe("saveDefaultProviderSelection", () => {
     });
   });
 
+  it("does not persist an advisory recommendation excluded from live proof", async () => {
+    const refreshProviderModels = vi.fn().mockImplementation((providerId) => {
+      useProviderModelCacheStore.setState({
+        providers: new Map([
+          [
+            providerId,
+            {
+              providerId,
+              fetchedAt: Date.now(),
+              provenModelIds: [],
+              models: [{ id: "advisory", name: "Advisory", recommended: true }],
+            },
+          ],
+        ]),
+      });
+    });
+    useProviderModelCacheStore.setState({ refreshProviderModels });
+
+    await expect(saveDefaultProviderSelection("openai")).rejects.toThrow(
+      "Could not load models for provider",
+    );
+    expect(defaultsSave).not.toHaveBeenCalled();
+  });
+
+  it("does not save a stale default after forced refresh fails", async () => {
+    const staleModel = { id: "gpt-4o", name: "gpt-4o", recommended: true };
+    const refreshProviderModels = vi.fn().mockImplementation((providerId) => {
+      useProviderModelCacheStore.setState({
+        providers: new Map([
+          [
+            providerId,
+            {
+              providerId,
+              fetchedAt: Date.now(),
+              provenModelIds: ["gpt-4o"],
+              models: [staleModel],
+              error: "offline",
+            },
+          ],
+        ]),
+      });
+    });
+    useProviderModelCacheStore.setState({ refreshProviderModels });
+
+    await expect(saveDefaultProviderSelection("openai")).rejects.toThrow(
+      "Could not prove models for provider",
+    );
+    expect(defaultsSave).not.toHaveBeenCalled();
+    expect(mockSetStoredModelPreference).not.toHaveBeenCalled();
+  });
+
   it("saves backend defaults, local goose preference, and readiness", async () => {
     const refreshProviderModels = vi.fn().mockImplementation((providerId) => {
       useProviderModelCacheStore.setState({
@@ -128,6 +212,7 @@ describe("saveDefaultProviderSelection", () => {
             {
               providerId,
               fetchedAt: Date.now(),
+              provenModelIds: ["gpt-4o"],
               models: [{ id: "gpt-4o", name: "gpt-4o", recommended: true }],
             },
           ],
@@ -271,6 +356,7 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
             {
               providerId,
               fetchedAt: Date.now(),
+              provenModelIds: models.map((model) => model.id),
               models,
             },
           ],

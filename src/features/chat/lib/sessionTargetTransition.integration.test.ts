@@ -5,6 +5,42 @@ const mockLoadSession = vi.fn();
 const mockSetProvider = vi.fn();
 const mockSetModel = vi.fn();
 const mockGetClient = vi.fn();
+const noRequestProviderContext = {
+  requestId: undefined,
+  canPublish: expect.any(Function),
+};
+
+const noRequestModelContext = (providerId: string) => ({
+  providerId,
+  requestId: undefined,
+  canPublish: expect.any(Function),
+});
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function executionConfigResponse(providerId: string, modelId: string) {
+  return {
+    configOptions: [
+      {
+        id: "provider",
+        kind: { type: "select", currentValue: providerId, options: [] },
+      },
+      {
+        id: "model",
+        category: "model",
+        kind: { type: "select", currentValue: modelId, options: [] },
+      },
+    ],
+  };
+}
 
 vi.mock("@/shared/api/acpApi", () => ({
   loadSession: (...args: unknown[]) => mockLoadSession(...args),
@@ -117,12 +153,12 @@ describe("transitionSessionTarget with managed Goose models", () => {
     expect(mockSetProvider).toHaveBeenCalledWith(
       "legacy-session",
       "databricks_v2",
-      { requestId: undefined },
+      noRequestProviderContext,
     );
     expect(mockSetModel).toHaveBeenCalledWith(
       "legacy-session",
       "goose-gpt-5-5",
-      { providerId: "databricks_v2", requestId: undefined },
+      noRequestModelContext("databricks_v2"),
     );
     expect(mockSetModel).not.toHaveBeenCalledWith("legacy-session", "goose");
   });
@@ -245,6 +281,11 @@ describe("transitionSessionTarget with managed Goose models", () => {
       "./sessionTargetCoordinator"
     );
 
+    mockSetProvider.mockResolvedValueOnce({
+      model: { modelId: "backend-fallback", modelName: "Backend fallback" },
+      reasoningEffort: null,
+    });
+
     await expect(
       transitionSessionTarget({
         sessionId: "no-default-session",
@@ -261,17 +302,148 @@ describe("transitionSessionTarget with managed Goose models", () => {
       resolvedTarget: {
         harnessId: "goose",
         modelProviderId: "databricks_v2",
+        modelId: "backend-fallback",
       },
     });
 
+    expect(mockSetProvider).toHaveBeenCalledWith(
+      "no-default-session",
+      "databricks_v2",
+      noRequestProviderContext,
+    );
     expect(mockSetModel).not.toHaveBeenCalled();
+    expect(mockGetClient).toHaveBeenCalledTimes(1);
     expect(
       useChatSessionStore.getState().getSession("no-default-session"),
     ).toMatchObject({
       executionTarget: {
         harnessId: "goose",
         modelProviderId: "databricks_v2",
+        modelId: "backend-fallback",
       },
+    });
+    const { requireSessionInvocationSelection } = await import(
+      "@/shared/api/acpSessionRegistry"
+    );
+    expect(requireSessionInvocationSelection("no-default-session")).toEqual({
+      providerId: "databricks_v2",
+      modelId: "backend-fallback",
+    });
+  });
+
+  it("suppresses a concurrent load while migration proof is pending", async () => {
+    const supportedModels = deferred<{ models: string[] }>();
+    const supportedModelsList = vi
+      .fn()
+      .mockReturnValue(supportedModels.promise);
+    mockGetClient.mockResolvedValue({
+      goose: { GooseUnstableProvidersSupportedModelsList: supportedModelsList },
+    });
+    mockLoadSession.mockResolvedValueOnce(
+      executionConfigResponse("legacy-provider", "legacy-model"),
+    );
+    const applyModelConfigSnapshot = vi.fn();
+    const { setSessionConfigSnapshotHandlers } = await import(
+      "@/shared/api/acpSessionConfigSnapshots"
+    );
+    setSessionConfigSnapshotHandlers({ applyModelConfigSnapshot });
+    const { resetManagedModelSelectionRepairCacheForTests } = await import(
+      "@/features/providers/lib/managedModelSelectionRepair"
+    );
+    resetManagedModelSelectionRepairCacheForTests();
+    const { acpLoadSession } = await import("@/shared/api/acp");
+    const { transitionSessionTarget } = await import(
+      "./sessionTargetCoordinator"
+    );
+
+    const transition = transitionSessionTarget({
+      sessionId: "migration-proof-session",
+      target: {
+        harnessId: "goose",
+        modelProviderId: "legacy-provider",
+        modelId: "legacy-model",
+        modelName: "Legacy model",
+      },
+      workingDir: "/tmp/project",
+    });
+    await vi.waitFor(() =>
+      expect(supportedModelsList).toHaveBeenCalledTimes(1),
+    );
+
+    await acpLoadSession("migration-proof-session", "/tmp/project");
+    expect(applyModelConfigSnapshot).not.toHaveBeenCalled();
+
+    supportedModels.resolve({ models: ["goose-gpt-5-5"] });
+    await expect(transition).resolves.toMatchObject({
+      applied: true,
+      resolvedTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      },
+    });
+    expect(applyModelConfigSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("materializes the prepared model for a matching provider-only transition", async () => {
+    const sessionId = "provider-only-prepared-session";
+    const { useChatSessionStore } = await import(
+      "@/features/chat/stores/chatSessionStore"
+    );
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: sessionId,
+          title: "Prepared session",
+          executionTarget: {
+            harnessId: "goose",
+            modelProviderId: "databricks_v2",
+          },
+          createdAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    const registry = await import("@/shared/api/acpSessionRegistry");
+    registry.registerPreparedSession(
+      sessionId,
+      "databricks_v2",
+      "/tmp/project",
+      "goose-gpt-5-5",
+    );
+    const { transitionSessionTarget } = await import(
+      "./sessionTargetCoordinator"
+    );
+
+    await expect(
+      transitionSessionTarget({
+        sessionId,
+        target: {
+          harnessId: "goose",
+          modelProviderId: "databricks_v2",
+        },
+        workingDir: "/tmp/project",
+      }),
+    ).resolves.toMatchObject({
+      status: "committed",
+      target: {
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      },
+    });
+
+    expect(mockSetProvider).not.toHaveBeenCalled();
+    expect(mockSetModel).not.toHaveBeenCalled();
+    expect(
+      useChatSessionStore.getState().getSession(sessionId)?.executionTarget,
+    ).toMatchObject({
+      modelProviderId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+    });
+    expect(registry.requireSessionInvocationSelection(sessionId)).toEqual({
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
     });
   });
 
@@ -296,13 +468,13 @@ describe("transitionSessionTarget with managed Goose models", () => {
     expect(mockSetProvider).toHaveBeenCalledWith(
       "managed-opus-session",
       "databricks_v2",
-      { requestId: undefined },
+      noRequestProviderContext,
     );
     expect(mockSetModel).toHaveBeenCalledOnce();
     expect(mockSetModel).toHaveBeenCalledWith(
       "managed-opus-session",
       "goose-claude-opus-4-8",
-      { providerId: "databricks_v2", requestId: undefined },
+      noRequestModelContext("databricks_v2"),
     );
   });
 });

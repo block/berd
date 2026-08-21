@@ -5,6 +5,7 @@ import { MAX_PROMPT_ATTACHMENT_BYTES } from "../attachmentPayloadBudget";
 const mockAcpSteerMessage = vi.fn();
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpSteerMessage: (...args: unknown[]) => mockAcpSteerMessage(...args),
 }));
 

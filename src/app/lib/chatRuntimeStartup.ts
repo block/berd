@@ -259,15 +259,19 @@ async function startChatRuntime(
     const cachedModels = [...modelState.providers].flatMap(
       ([providerId, entry]) =>
         authoritativeProviderIds.has(providerId)
-          ? entry.models.map((model) => ({
-              ...model,
-              providerId: model.providerId ?? providerId,
-            }))
+          ? entry.models
+              .filter((model) => entry.provenModelIds?.includes(model.id))
+              .map((model) => ({
+                ...model,
+                providerId: model.providerId ?? providerId,
+              }))
           : [],
     );
     const targetContext = {
       providers: useAgentStore.getState().providers,
       models: cachedModels,
+      isModelInventoryAuthoritative: (providerId: string) =>
+        authoritativeProviderIds.has(providerId),
       catalogEntries: getProviderCatalog(),
     };
     const personas = useAgentStore.getState().personas;
@@ -311,13 +315,14 @@ async function startChatRuntime(
     );
     await modelCacheStore.refreshAllModelProviders(refreshProviderIds);
     const modelState = useProviderModelCacheStore.getState();
-    return new Set([
-      ...modelState.runtimeManagedProviderIds,
-      ...refreshProviderIds.filter((providerId) => {
+    return new Set(
+      refreshProviderIds.filter((providerId) => {
         const entry = modelState.providers.get(providerId);
-        return entry != null && !entry.error;
+        return (
+          entry != null && !entry.error && entry.provenModelIds !== undefined
+        );
       }),
-    ]);
+    );
   };
 
   const loadSessionState = async () => {

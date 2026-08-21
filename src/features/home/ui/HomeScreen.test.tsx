@@ -127,6 +127,7 @@ vi.mock("@/features/chat/hooks/useMentionHandlers", () => ({
 }));
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   discoverAcpProviders: vi.fn().mockResolvedValue([
     { id: "goose", label: "Goose" },
     { id: "claude-acp", label: "Claude Code" },

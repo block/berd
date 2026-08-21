@@ -1,9 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeConfig } from "./schema";
+import { notifyProviderModelInventoryInvalidated } from "./providerModelInventoryInvalidation";
 import {
   managedGooseSelectionChanged,
   resolveManagedGooseProviderSelection,
+  resolveValidatedManagedGooseProviderSelection,
 } from "./modelProviderPolicy";
+
+const mockGetClient = vi.hoisted(() => vi.fn());
+const mockInvalidateClientConnection = vi.hoisted(() => vi.fn());
+const mockSupportedModelsList = vi.hoisted(() => vi.fn());
+vi.mock("@/shared/api/acpConnection", () => ({
+  getClient: () => mockGetClient(),
+  invalidateClientConnection: () => mockInvalidateClientConnection(),
+}));
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 const managedConfig: RuntimeConfig = {
   schemaVersion: 1,
@@ -29,6 +47,18 @@ const managedConfig: RuntimeConfig = {
 };
 
 describe("resolveManagedGooseProviderSelection", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+    mockGetClient.mockReset();
+    mockInvalidateClientConnection.mockReset();
+    mockInvalidateClientConnection.mockResolvedValue(undefined);
+    mockGetClient.mockResolvedValue({
+      goose: {
+        GooseUnstableProvidersSupportedModelsList: mockSupportedModelsList,
+      },
+    });
+    mockSupportedModelsList.mockReset();
+  });
   it("returns unrestricted for an empty provider list", () => {
     expect(
       resolveManagedGooseProviderSelection(
@@ -58,7 +88,7 @@ describe("resolveManagedGooseProviderSelection", () => {
     ).toEqual({ providerId: "databricks_v2", modelId: "shared-model" });
   });
 
-  it("repairs the legacy Goose model sentinel without live inventory", () => {
+  it("keeps a legacy model sentinel model-free without live proof", () => {
     expect(
       resolveManagedGooseProviderSelection(managedConfig, {
         providerId: "databricks",
@@ -66,7 +96,7 @@ describe("resolveManagedGooseProviderSelection", () => {
       }),
     ).toEqual({
       providerId: "databricks_v2",
-      modelId: "goose-gpt-5-5",
+      modelId: undefined,
     });
   });
 
@@ -151,14 +181,183 @@ describe("resolveManagedGooseProviderSelection", () => {
     });
   });
 
-  it("uses the configured default only when no model is selected", () => {
+  it("keeps a migrated provider model-free without live proof", () => {
     expect(
       resolveManagedGooseProviderSelection(managedConfig, {
         providerId: "databricks",
       }),
     ).toEqual({
       providerId: "databricks_v2",
+      modelId: undefined,
+    });
+  });
+
+  it("validates a model retained across a provider migration", async () => {
+    mockSupportedModelsList.mockResolvedValue({ models: ["shared-model"] });
+
+    await expect(
+      resolveValidatedManagedGooseProviderSelection(managedConfig, {
+        providerId: "disallowed",
+        modelId: "shared-model",
+      }),
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "shared-model",
+    });
+  });
+
+  it("replaces an unsupported migrated model only with a proven default", async () => {
+    mockSupportedModelsList.mockResolvedValue({ models: ["goose-gpt-5-5"] });
+
+    await expect(
+      resolveValidatedManagedGooseProviderSelection(managedConfig, {
+        providerId: "disallowed",
+        modelId: "other-model",
+      }),
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
       modelId: "goose-gpt-5-5",
     });
+  });
+
+  it("uses a deterministic proven inventory model when a migration has no default model", async () => {
+    mockSupportedModelsList.mockResolvedValue({
+      models: ["z-model", "a-model"],
+    });
+    const configWithoutDefault: RuntimeConfig = {
+      ...managedConfig,
+      goose: { ...managedConfig.goose, defaultModelId: undefined },
+    };
+
+    await expect(
+      resolveValidatedManagedGooseProviderSelection(configWithoutDefault, {
+        providerId: "disallowed",
+      }),
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "a-model",
+    });
+  });
+
+  it("rejects a migration with no selected default when target inventory is empty", async () => {
+    mockSupportedModelsList.mockResolvedValue({ models: [] });
+    const configWithoutDefault: RuntimeConfig = {
+      ...managedConfig,
+      goose: { ...managedConfig.goose, defaultModelId: undefined },
+    };
+
+    await expect(
+      resolveValidatedManagedGooseProviderSelection(configWithoutDefault, {
+        providerId: "disallowed",
+      }),
+    ).rejects.toThrow(
+      "No supported model is available for migrated provider databricks_v2",
+    );
+  });
+
+  it("times out a never-settling inventory proof without accepting its late result", async () => {
+    vi.useFakeTimers();
+    let resolveInventory!: (value: { models: string[] }) => void;
+    mockSupportedModelsList.mockReturnValue(
+      new Promise<{ models: string[] }>((resolve) => {
+        resolveInventory = resolve;
+      }),
+    );
+
+    const migration = resolveValidatedManagedGooseProviderSelection(
+      managedConfig,
+      {
+        providerId: "disallowed",
+      },
+    );
+    const rejectedMigration = expect(migration).rejects.toThrow(
+      "Cannot verify models for migrated provider databricks_v2",
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejectedMigration;
+    expect(mockInvalidateClientConnection).not.toHaveBeenCalled();
+    resolveInventory({ models: ["goose-gpt-5-5"] });
+    await Promise.resolve();
+  });
+
+  it("does not abort a concurrent prompt when inventory proof times out", async () => {
+    vi.useFakeTimers();
+    const prompt = deferred<string>();
+    mockSupportedModelsList.mockReturnValue(new Promise(() => {}));
+    mockGetClient.mockResolvedValue({
+      goose: {
+        GooseUnstableProvidersSupportedModelsList: mockSupportedModelsList,
+        prompt: () => prompt.promise,
+      },
+    });
+
+    const client = await mockGetClient();
+    const activePrompt = client.goose.prompt();
+    const migration = resolveValidatedManagedGooseProviderSelection(
+      managedConfig,
+      { providerId: "disallowed" },
+    );
+    const rejectedMigration = expect(migration).rejects.toThrow(
+      "Cannot verify models for migrated provider databricks_v2",
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejectedMigration;
+
+    expect(mockInvalidateClientConnection).not.toHaveBeenCalled();
+    prompt.resolve("complete");
+    await expect(activePrompt).resolves.toBe("complete");
+  });
+
+  it("times out stalled ACP client acquisition", async () => {
+    vi.useFakeTimers();
+    mockGetClient.mockReturnValue(new Promise(() => {}));
+
+    const migration = resolveValidatedManagedGooseProviderSelection(
+      managedConfig,
+      { providerId: "disallowed" },
+    );
+    const rejectedMigration = expect(migration).rejects.toThrow(
+      "Cannot verify models for migrated provider databricks_v2",
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+    await rejectedMigration;
+    expect(mockInvalidateClientConnection).not.toHaveBeenCalled();
+    expect(mockSupportedModelsList).not.toHaveBeenCalled();
+  });
+
+  it("rejects an inventory proof invalidated while it is in flight", async () => {
+    let resolveInventory!: (value: { models: string[] }) => void;
+    mockSupportedModelsList.mockReturnValue(
+      new Promise<{ models: string[] }>((resolve) => {
+        resolveInventory = resolve;
+      }),
+    );
+
+    const migration = resolveValidatedManagedGooseProviderSelection(
+      managedConfig,
+      {
+        providerId: "disallowed",
+      },
+    );
+    await vi.waitFor(() => expect(mockSupportedModelsList).toHaveBeenCalled());
+    notifyProviderModelInventoryInvalidated("databricks_v2");
+    resolveInventory({ models: ["goose-gpt-5-5"] });
+
+    await expect(migration).rejects.toThrow(
+      "Cannot verify models for migrated provider databricks_v2",
+    );
+  });
+
+  it("rejects a provider migration when support cannot be proved", async () => {
+    mockSupportedModelsList.mockRejectedValue(new Error("offline"));
+
+    await expect(
+      resolveValidatedManagedGooseProviderSelection(managedConfig, {
+        providerId: "disallowed",
+        modelId: "other-model",
+      }),
+    ).rejects.toThrow(
+      "Cannot verify models for migrated provider databricks_v2",
+    );
   });
 });

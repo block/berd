@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpCreateSession: (...args: unknown[]) => mocks.acpCreateSession(...args),
   acpListSessionsPage: (...args: unknown[]) =>
     mocks.acpListSessionsPage(...args),
@@ -700,12 +701,17 @@ describe("chatSessionStore", () => {
       });
     });
 
-    it("does not attach an ACP default model to an unqualified Goose harness", async () => {
+    it("stores the managed provider and model resolved during direct creation", async () => {
       mocks.acpCreateSession.mockResolvedValue({
         sessionId: "acp-1",
         configOptionsSnapshot: {
-          model: { modelId: "gpt-5.5", modelName: "GPT-5.5" },
+          model: { modelId: "goose-gpt-5-5", modelName: "GPT-5.5" },
           reasoningEffort: null,
+        },
+        resolvedSelection: {
+          providerId: "databricks_v2",
+          modelId: "goose-gpt-5-5",
+          modelName: "GPT-5.5",
         },
       });
 
@@ -714,7 +720,15 @@ describe("chatSessionStore", () => {
         workingDir: "/tmp/project",
       });
 
-      expect(session.executionTarget).toEqual({ harnessId: "goose" });
+      expect(session.executionTarget).toEqual({
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+        modelName: "GPT-5.5",
+      });
+      expect(
+        useChatSessionStore.getState().getSession("acp-1")?.executionTarget,
+      ).toEqual(session.executionTarget);
     });
 
     it("seeds reasoning effort from ACP session creation config", async () => {

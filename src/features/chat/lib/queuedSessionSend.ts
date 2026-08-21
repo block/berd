@@ -117,6 +117,7 @@ async function hydrateSessionForBackgroundSend(
 
 export async function acquireExistingSessionForBackgroundSend(
   sessionId: string,
+  targetOverride?: SessionExecutionTarget,
 ) {
   const sessionBeforeHydration = useChatSessionStore
     .getState()
@@ -140,7 +141,7 @@ export async function acquireExistingSessionForBackgroundSend(
   // other senders see contention and wait for the release instead of
   // dispatching into it. Hydration under a held lease is expected — the target
   // coordinator either absorbs a matching observation or defers it to release.
-  const acquisition = acquireSessionDispatchTarget(sessionId);
+  const acquisition = acquireSessionDispatchTarget(sessionId, targetOverride);
   if (acquisition.status === "unresolved") {
     // The store holds no execution target yet, so there is nothing to lease:
     // the `session/load` replay is what hydrates the target for a session
@@ -151,7 +152,7 @@ export async function acquireExistingSessionForBackgroundSend(
     if (!(await hydrateSessionForBackgroundSend(sessionId))) {
       return { status: "session-missing" } as const;
     }
-    return acquireSessionDispatchTarget(sessionId);
+    return acquireSessionDispatchTarget(sessionId, targetOverride);
   }
   if (acquisition.status !== "acquired") {
     return acquisition;
@@ -278,7 +279,11 @@ export async function sendQueuedPromptToExistingSessionInBackground(
     return targetPath;
   };
   assertAgentBuilderPreparationReady();
-  const acquisition = await acquireExistingSessionForBackgroundSend(sessionId);
+  const { payload } = queuedMessage;
+  const acquisition = await acquireExistingSessionForBackgroundSend(
+    sessionId,
+    payload.sendOptions?.sessionSelection,
+  );
   if (acquisition.status === "contended") {
     throw new SessionDispatchContentionError(acquisition.waiter);
   }
@@ -293,7 +298,6 @@ export async function sendQueuedPromptToExistingSessionInBackground(
   }
   const targetLease = acquisition;
   try {
-    const { payload } = queuedMessage;
     const payloadPersonaIntent = payload.persona;
     const payloadPersona =
       payloadPersonaIntent.kind === "persona"

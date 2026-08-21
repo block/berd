@@ -1,7 +1,12 @@
 import { waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelOption } from "@/features/chat/types";
-import { useProviderModelCacheStore } from "./providerModelCacheStore";
+import {
+  isModelSelectionAllowedByCachedInventory,
+  MODEL_CACHE_TTL_MS,
+  publishProvenModelInventory,
+  useProviderModelCacheStore,
+} from "./providerModelCacheStore";
 
 const mocks = vi.hoisted(() => ({
   getClient: vi.fn(),
@@ -41,48 +46,145 @@ describe("providerModelCacheStore", () => {
     });
   });
 
-  it("seeds runtime models as authoritative runtime-managed entries", async () => {
+  it("keeps runtime-managed configuration seeds advisory until live discovery succeeds", async () => {
     const model = seededModel({
       contextLimit: 128000,
       recommended: true,
       featured: true,
       sortOrder: 0,
     });
-
     useProviderModelCacheStore
       .getState()
       .seedRuntimeModels(new Map([["databricks_v2", [model]]]));
+
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("databricks_v2"),
+    ).toBe(false);
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .getProvenModelsForProvider("databricks_v2"),
+    ).toEqual([]);
+
+    mocks.supportedModelsList.mockResolvedValueOnce({ models: [] });
     await useProviderModelCacheStore
       .getState()
-      .refreshAllModelProviders(["databricks_v2"]);
-    await useProviderModelCacheStore
-      .getState()
-      .refreshProviderModels("databricks_v2", { force: true });
+      .refreshProviderModels("databricks_v2");
 
     const entry = useProviderModelCacheStore
       .getState()
       .providers.get("databricks_v2");
     expect(entry?.runtimeManaged).toBe(true);
+    expect(entry?.provenModelIds).toEqual([]);
     expect(
       useProviderModelCacheStore
         .getState()
         .getModelsForProvider("databricks_v2"),
     ).toEqual([model]);
-    expect(mocks.supportedModelsList).not.toHaveBeenCalled();
+    expect(mocks.supportedModelsList).toHaveBeenCalledWith({
+      providerId: "databricks_v2",
+    });
   });
 
-  it("preserves runtime-managed models after invalidation and forced refresh", async () => {
-    const model = seededModel({
-      contextLimit: 128000,
-      recommended: true,
-      featured: true,
-      sortOrder: 0,
+  it("lets a newer ACP acknowledgement supersede retained negative proof", () => {
+    const model = seededModel({ id: "old-model" });
+    const proofRevision = 10;
+    useProviderModelCacheStore.setState({
+      providers: new Map([
+        [
+          "databricks_v2",
+          {
+            providerId: "databricks_v2",
+            models: [model],
+            provenModelIds: ["old-model"],
+            proofRevision,
+            fetchedAt: Date.now() - MODEL_CACHE_TTL_MS - 1,
+          },
+        ],
+      ]),
     });
 
+    expect(
+      isModelSelectionAllowedByCachedInventory(
+        "databricks_v2",
+        "newly-prepared-model",
+      ),
+    ).toBe(false);
+    expect(
+      isModelSelectionAllowedByCachedInventory(
+        "databricks_v2",
+        "newly-prepared-model",
+        proofRevision + 1,
+      ),
+    ).toBe(true);
+
+    useProviderModelCacheStore.setState((state) => {
+      const providers = new Map(state.providers);
+      const entry = providers.get("databricks_v2");
+      if (!entry) throw new Error("expected seeded provider");
+      providers.set("databricks_v2", {
+        ...entry,
+        error: "offline",
+      });
+      return { providers };
+    });
+    expect(
+      isModelSelectionAllowedByCachedInventory(
+        "databricks_v2",
+        "newly-prepared-model",
+      ),
+    ).toBe(false);
+    expect(
+      isModelSelectionAllowedByCachedInventory(
+        "databricks_v2",
+        "newly-prepared-model",
+        proofRevision + 1,
+      ),
+    ).toBe(true);
+  });
+
+  it("publishes successful live preflight as the shared fresh authority", () => {
+    publishProvenModelInventory("databricks_v2", ["new-model"]);
+
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("databricks_v2"),
+    ).toBe(true);
+    expect(
+      isModelSelectionAllowedByCachedInventory("databricks_v2", "new-model"),
+    ).toBe(true);
+    expect(
+      isModelSelectionAllowedByCachedInventory("databricks_v2", "old-model"),
+    ).toBe(false);
+  });
+
+  it("invalidates runtime-managed proof without discarding its display seed", async () => {
+    const model = seededModel({ recommended: true, featured: true });
     useProviderModelCacheStore
       .getState()
       .seedRuntimeModels(new Map([["databricks_v2", [model]]]));
+    mocks.supportedModelsList
+      .mockResolvedValueOnce({ models: ["goose-gpt-5-5"] })
+      .mockResolvedValueOnce({ models: ["goose-gpt-5-5"] });
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2");
     useProviderModelCacheStore.getState().invalidateProvider("databricks_v2");
+
+    const invalidatedEntry = useProviderModelCacheStore
+      .getState()
+      .providers.get("databricks_v2");
+    expect(invalidatedEntry?.provenModelIds).toBeUndefined();
+    expect(invalidatedEntry?.models).toEqual([model]);
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("databricks_v2"),
+    ).toBe(false);
 
     await useProviderModelCacheStore
       .getState()
@@ -92,12 +194,16 @@ describe("providerModelCacheStore", () => {
       .getState()
       .providers.get("databricks_v2");
     expect(entry?.runtimeManaged).toBe(true);
+    expect(entry?.provenModelIds).toEqual(["goose-gpt-5-5"]);
     expect(
       useProviderModelCacheStore
         .getState()
-        .getModelsForProvider("databricks_v2"),
-    ).toEqual([model]);
-    expect(mocks.supportedModelsList).not.toHaveBeenCalled();
+        .getModelsForProvider("databricks_v2")
+        .map((candidate) => candidate.id),
+    ).toEqual(["goose-gpt-5-5", "seeded-model"]);
+    expect(mocks.supportedModelsList).toHaveBeenLastCalledWith({
+      providerId: "databricks_v2",
+    });
   });
 
   it("keeps refreshable runtime models provisional until discovery succeeds", async () => {
@@ -206,6 +312,12 @@ describe("providerModelCacheStore", () => {
     expect(models.find((model) => model.id === "goose-gpt-5-6-sol")).toEqual(
       expect.objectContaining(configuredModel),
     );
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .getProvenModelsForProvider("databricks_v2")
+        .map((model) => model.id),
+    ).toEqual(["goose-gpt-5-5"]);
   });
 
   it("keeps configured models after a failed refresh and retry", async () => {
@@ -239,6 +351,50 @@ describe("providerModelCacheStore", () => {
     ).toEqual(["goose-gpt-5-5", "goose-gpt-5-6-sol"]);
   });
 
+  it.each([
+    { provenModelIds: ["supported-model"], expected: ["supported-model"] },
+    { provenModelIds: [], expected: [] },
+  ])("preserves prior proof data and runtime policy but revokes authority after refresh failure: $provenModelIds", async ({
+    provenModelIds,
+    expected,
+  }) => {
+    const model = seededModel({ id: "configured-model" });
+    useProviderModelCacheStore.setState({
+      providers: new Map([
+        [
+          "databricks_v2",
+          {
+            providerId: "databricks_v2",
+            models: [model],
+            configuredModels: [model],
+            provenModelIds,
+            fetchedAt: 123,
+            runtimeManaged: true,
+          },
+        ],
+      ]),
+      runtimeManagedProviderIds: new Set(["databricks_v2"]),
+    });
+    mocks.supportedModelsList.mockRejectedValueOnce(new Error("offline"));
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2", { force: true });
+
+    const entry = useProviderModelCacheStore
+      .getState()
+      .providers.get("databricks_v2");
+    expect(entry?.provenModelIds).toEqual(expected);
+    expect(entry?.runtimeManaged).toBe(true);
+    expect(entry?.configuredModels).toEqual([model]);
+    expect(entry?.fetchedAt).toBe(123);
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("databricks_v2"),
+    ).toBe(false);
+  });
+
   it("removes stale runtime-managed providers when runtime config changes", () => {
     const model = seededModel();
 
@@ -268,6 +424,56 @@ describe("providerModelCacheStore", () => {
     ).toBe(false);
     expect(
       useProviderModelCacheStore.getState().providers.has("databricks_v2"),
+    ).toBe(true);
+  });
+
+  it("keeps configuration-only runtime seeds provisional across restart", () => {
+    const model = seededModel({ recommended: true, featured: true });
+    useProviderModelCacheStore
+      .getState()
+      .seedRuntimeModels(new Map([["databricks_v2", [model]]]));
+
+    useProviderModelCacheStore.setState({
+      providers: new Map(),
+      runtimeManagedProviderIds: new Set(),
+    });
+    useProviderModelCacheStore.getState().loadPersisted();
+
+    const entry = useProviderModelCacheStore
+      .getState()
+      .providers.get("databricks_v2");
+    expect(entry?.provenModelIds).toBeUndefined();
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("databricks_v2"),
+    ).toBe(false);
+  });
+
+  it("persists authority only after a successful live response", async () => {
+    const model = seededModel({ recommended: true, featured: true });
+    useProviderModelCacheStore
+      .getState()
+      .seedRuntimeModels(new Map([["databricks_v2", [model]]]));
+    mocks.supportedModelsList.mockResolvedValueOnce({ models: [] });
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2");
+    useProviderModelCacheStore.setState({
+      providers: new Map(),
+      runtimeManagedProviderIds: new Set(),
+    });
+    useProviderModelCacheStore.getState().loadPersisted();
+
+    const entry = useProviderModelCacheStore
+      .getState()
+      .providers.get("databricks_v2");
+    expect(entry?.provenModelIds).toEqual([]);
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("databricks_v2"),
     ).toBe(true);
   });
 

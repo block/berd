@@ -18,7 +18,7 @@ import { useTranslation } from "react-i18next";
 import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { selectPersonas } from "@/features/agents/stores/agentSelectors";
-import { personaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
+import { resolvePersonaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
 import { useAttachmentDropTarget } from "@/features/chat/hooks/useAttachmentDropTarget";
 import { useChatInputAttachments } from "@/features/chat/hooks/useChatInputAttachments";
 import { useChatInputFilePicker } from "@/features/chat/hooks/useChatInputFilePicker";
@@ -101,6 +101,7 @@ interface GlobalComposerPillProps {
     payload: GlobalComposerExpandPayload,
   ) => boolean | undefined | Promise<boolean | undefined>;
   onDismiss?: () => void;
+  onEditAgent?: (personaId: string) => void;
   onHandoffStart?: (rect: GlobalComposerHandoffRect) => void;
   suggestedPersonaId?: string | null;
   reasoningEffort?: ChatInputReasoningEffort;
@@ -212,6 +213,7 @@ export function GlobalComposerPill({
   onSend,
   onExpand,
   onDismiss,
+  onEditAgent,
   onHandoffStart,
   suggestedPersonaId = null,
   reasoningEffort,
@@ -454,6 +456,7 @@ export function GlobalComposerPill({
     pickerAgents,
     availableModels,
     getModelsForAgent,
+    getProvenModelsForAgent,
     isModelInventoryAuthoritative,
     modelsLoading,
     modelStatusMessage,
@@ -497,16 +500,28 @@ export function GlobalComposerPill({
     },
   });
 
-  const personaTarget = useMemo(
+  const personaResolution = useMemo(
     () =>
-      personaExecutionTarget(selectedPersona, {
+      resolvePersonaExecutionTarget(selectedPersona, {
         providers,
         models: getModelsForAgent("goose"),
         getModelsForHarness: getModelsForAgent,
+        getProvenModelsForHarness: getProvenModelsForAgent,
+        isModelInventoryAuthoritative,
         catalogEntries,
       }),
-    [catalogEntries, getModelsForAgent, providers, selectedPersona],
+    [
+      catalogEntries,
+      getModelsForAgent,
+      getProvenModelsForAgent,
+      isModelInventoryAuthoritative,
+      providers,
+      selectedPersona,
+    ],
   );
+  const personaTarget =
+    personaResolution.status === "valid" ? personaResolution.target : undefined;
+  const personaConfigurationInvalid = personaResolution.status === "invalid";
 
   useEffect(() => {
     if (!selectedPersonaId) {
@@ -570,10 +585,21 @@ export function GlobalComposerPill({
       ? selectedProviderForPicker
       : null;
   const defaultModelSelection = useMemo(() => {
+    const provenModels = getProvenModelsForAgent(selectedAgentId);
+    const selectableModels = availableModels.filter((model) => {
+      const providerId = model.providerId ?? concreteSelectedProviderId;
+      return provenModels.some(
+        (proven) =>
+          proven.id === model.id &&
+          (!providerId ||
+            !proven.providerId ||
+            proven.providerId === providerId),
+      );
+    });
     const storedPreference = getStoredModelPreference(selectedAgentId);
     if (storedPreference) {
       const matchingModel = findMatchingModel(
-        availableModels,
+        selectableModels,
         storedPreference.modelId,
         storedPreference.providerId,
       );
@@ -609,7 +635,7 @@ export function GlobalComposerPill({
         gooseDefaultSelection.modelProviderId === concreteSelectedProviderId)
     ) {
       const matchingDefault = findMatchingModel(
-        availableModels,
+        selectableModels,
         gooseDefaultSelection.modelId,
         gooseDefaultSelection.modelProviderId,
       );
@@ -619,25 +645,21 @@ export function GlobalComposerPill({
           selectedProviderForPicker,
         );
       }
-      if (
-        !isModelInventoryAuthoritative(gooseDefaultSelection.modelProviderId)
-      ) {
-        return gooseDefaultSelection;
-      }
     }
 
     const compatibleModels = concreteSelectedProviderId
-      ? availableModels.filter(
+      ? selectableModels.filter(
           (model) =>
             !model.providerId ||
             model.providerId === concreteSelectedProviderId,
         )
-      : availableModels;
+      : selectableModels;
 
     return getPreferredModel(compatibleModels, selectedProviderForPicker);
   }, [
     availableModels,
     concreteSelectedProviderId,
+    getProvenModelsForAgent,
     gooseDefaultSelection,
     isModelInventoryAuthoritative,
     selectedAgentId,
@@ -651,20 +673,51 @@ export function GlobalComposerPill({
     if (!currentExecutionTarget?.modelId) {
       return null;
     }
+    const modelProviderId = currentExecutionTarget.modelProviderId;
+    if (
+      modelProviderId &&
+      isModelInventoryAuthoritative(modelProviderId) &&
+      !getProvenModelsForAgent(currentExecutionTarget.harnessId).some(
+        (model) =>
+          model.id === currentExecutionTarget.modelId &&
+          (!model.providerId || model.providerId === modelProviderId),
+      )
+    ) {
+      return null;
+    }
 
     return {
       modelProviderId: currentExecutionTarget.modelProviderId,
       modelId: currentExecutionTarget.modelId,
       modelName: currentExecutionTarget.modelName,
     };
-  }, [currentExecutionTarget]);
+  }, [
+    currentExecutionTarget,
+    getProvenModelsForAgent,
+    isModelInventoryAuthoritative,
+  ]);
   const hasLocalExecutionOverride =
     providerOverride !== null || modelOverride !== null;
+  const personaSelectionOverridden =
+    personaOverrideUserOverrideForRef.current === selectedPersonaId;
+  // A persona target is the configuration sent to the runtime. Materialize the
+  // picker from that exact target: a provider-only target deliberately has no
+  // model selection and must not borrow a default model for display.
+  const personaModelSelection =
+    !personaSelectionOverridden && personaTarget?.modelId
+      ? {
+          modelProviderId: personaTarget.modelProviderId,
+          modelId: personaTarget.modelId,
+          modelName: personaTarget.modelName,
+        }
+      : null;
   const effectiveModelSelection =
-    modelOverride ??
-    (!hasLocalExecutionOverride && currentExecutionTarget !== undefined
-      ? controlledModelSelection
-      : defaultModelSelection);
+    !personaSelectionOverridden && personaTarget
+      ? personaModelSelection
+      : (modelOverride ??
+        (!hasLocalExecutionOverride && currentExecutionTarget !== undefined
+          ? controlledModelSelection
+          : defaultModelSelection));
   const localExecutionTarget = useMemo(
     () =>
       hasLocalExecutionOverride || currentExecutionTarget === undefined
@@ -682,12 +735,19 @@ export function GlobalComposerPill({
       selectedProviderForPicker,
     ],
   );
-  const personaSelectionOverridden =
-    personaOverrideUserOverrideForRef.current === selectedPersonaId;
+  const personaHasSavedExecutionTarget = Boolean(
+    selectedPersona?.provider ||
+      selectedPersona?.modelProviderId ||
+      selectedPersona?.model,
+  );
+  const controlledTargetInvalidated =
+    currentExecutionTarget?.modelId != null && controlledModelSelection == null;
   const effectiveExecutionTarget =
-    !personaSelectionOverridden && personaTarget
+    !personaSelectionOverridden && personaHasSavedExecutionTarget
       ? personaTarget
-      : (localExecutionTarget ?? currentExecutionTarget ?? undefined);
+      : (localExecutionTarget ??
+        (controlledTargetInvalidated ? undefined : currentExecutionTarget) ??
+        undefined);
   const canSend =
     hasSendableContent &&
     Boolean(effectiveExecutionTarget) &&
@@ -1463,6 +1523,35 @@ export function GlobalComposerPill({
         </div>
       </div>
 
+      {personaConfigurationInvalid && !personaSelectionOverridden ? (
+        <div
+          role="status"
+          className="mx-6 mb-14 flex flex-wrap items-center justify-between gap-3 text-xs text-destructive"
+        >
+          <span>{t("globalPill.invalidAgentConfiguration")}</span>
+          <div className="flex flex-wrap items-center gap-2">
+            {selectedPersonaId && onEditAgent ? (
+              <Button
+                type="button"
+                variant="alert"
+                size="sm"
+                onClick={() => onEditAgent(selectedPersonaId)}
+              >
+                {t("globalPill.editInvalidAgent")}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="alert"
+              size="sm"
+              onClick={() => handlePersonaChange(null)}
+            >
+              {t("globalPill.continueWithoutAgent")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <div
         data-role="composer-action-strip"
         className={cn(
@@ -1505,6 +1594,10 @@ export function GlobalComposerPill({
             availableModels={availableModels}
             modelsLoading={modelsLoading}
             modelStatusMessage={modelStatusMessage}
+            showDefaultModelInTrigger={
+              !personaConfigurationInvalid &&
+              (personaSelectionOverridden || !personaTarget)
+            }
             onModelChange={handleModelChange}
             onOpen={handlePickerOpen}
             onOpenChange={setModelPickerOpen}

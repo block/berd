@@ -28,7 +28,10 @@ import {
   type PersonaHandoffClaim,
 } from "./acpPersonaHandoff";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
-import { resolveManagedGooseProviderSelection } from "@/shared/runtime-config/modelProviderPolicy";
+import {
+  resolveManagedGooseProviderSelection,
+  resolveValidatedManagedGooseProviderSelection,
+} from "@/shared/runtime-config/modelProviderPolicy";
 import { getStyleGuidelinesPrompt } from "@/shared/preferences/styleGuidelinesPreference";
 import { getBerdctlPreamble } from "@/features/berdctl/appPreamble";
 import { INTERACTION_NORMS_PREAMBLE } from "@/shared/api/interactionNorms";
@@ -78,11 +81,31 @@ export interface AcpSessionConfigApplyOptions {
   modelId?: string | null;
   /** UI selection intent that owns any response snapshots. */
   requestId?: string;
+  /** The coordinator already resolved this complete selection from inventory. */
+  selectionAlreadyResolved?: boolean;
+}
+
+export type AcpSessionConfigurationIntent =
+  sessionRegistry.SessionMutationSupersession;
+
+/**
+ * Reserve a session's configuration ordering before asynchronous resolution.
+ * The owner must pass it to acpPrepareSession and clear it when finished.
+ */
+export function reserveAcpSessionConfiguration(
+  sessionId: string,
+): AcpSessionConfigurationIntent {
+  return sessionRegistry.supersedeSessionMutation(sessionId);
 }
 
 export interface AcpCreateSessionResult {
   sessionId: string;
   configOptionsSnapshot: AcpSessionConfigSnapshots;
+  resolvedSelection: {
+    providerId: string;
+    modelId?: string;
+    modelName?: string;
+  };
 }
 
 export type AcpDuplicateSessionOptions = AcpForkSessionOptions;
@@ -169,11 +192,25 @@ async function acpSendMessageNow(
   const sid = sessionId.slice(0, 8);
   const tStart = performance.now();
 
-  const resolvedProvider = resolveGooseSessionSelection(providerId).providerId;
-  if (resolvedProvider !== providerId) {
-    throw new Error(
-      `Session provider ${providerId} is outside the managed Goose provider policy. Re-prepare the session before prompting.`,
-    );
+  if (
+    providerId === "goose" ||
+    CURATED_PROVIDER_CATALOG_BY_ID.get(providerId)?.category !== "agent"
+  ) {
+    const runtimeConfigState = useRuntimeConfigStore.getState();
+    if (runtimeConfigState.result.status === "unavailable") {
+      throw new Error(
+        `Goose provider policy is unavailable: ${runtimeConfigState.result.message}`,
+      );
+    }
+    const resolvedProvider = resolveManagedGooseProviderSelection(
+      runtimeConfigState.config,
+      { providerId },
+    )?.providerId;
+    if (resolvedProvider && resolvedProvider !== providerId) {
+      throw new Error(
+        `Session provider ${providerId} is outside the managed Goose provider policy. Re-prepare the session before prompting.`,
+      );
+    }
   }
 
   // Goose owns prompt assembly and accepts a real system prompt via its ACP
@@ -298,7 +335,6 @@ export async function acpSteerMessage(
     "assistantPrompt" | "goose" | "images"
   > = {},
 ): Promise<AcpSteerResponse> {
-  sessionRegistry.requireSessionInvocationSelection(sessionId);
   const { assistantPrompt, goose, images } = options;
   const content: ContentBlock[] = [];
   const assistantText = assistantPrompt?.trim();
@@ -316,18 +352,20 @@ export async function acpSteerMessage(
     }
   }
 
-  return directAcp.steerSession(
-    sessionId,
-    content,
-    expectedRunId,
-    goose && Object.keys(goose).length > 0 ? { goose } : undefined,
+  return sessionRegistry.runPreparedSessionInvocation(sessionId, () =>
+    directAcp.steerSession(
+      sessionId,
+      content,
+      expectedRunId,
+      goose && Object.keys(goose).length > 0 ? { goose } : undefined,
+    ),
   );
 }
 
-function resolveGooseSessionSelection(
+async function resolveGooseSessionSelection(
   providerId: string,
   modelId?: string | null,
-): { providerId: string; modelId?: string } {
+): Promise<{ providerId: string; modelId?: string }> {
   if (modelId === "goose") {
     throw new Error(`Invalid model id: ${modelId}`);
   }
@@ -356,7 +394,7 @@ function resolveGooseSessionSelection(
     providerId,
     ...(concreteModelId ? { modelId: concreteModelId } : {}),
   };
-  const managedSelection = resolveManagedGooseProviderSelection(
+  const managedSelection = await resolveValidatedManagedGooseProviderSelection(
     runtimeConfigState.config,
     requestedSelection,
   );
@@ -368,9 +406,36 @@ function resolveGooseSessionSelection(
     );
   }
 
-  // A concrete provider is renderer-owned. Policy may validate it, but must
-  // not replace its provider or inject a different provider's default model.
-  return requestedSelection;
+  // A concrete provider stays renderer-owned; validation may remove or replace
+  // only its model with a proven result.
+  return managedSelection;
+}
+
+/** Apply a caller-resolved session selection without performing another inventory read. */
+async function applyResolvedSessionSelection(
+  sessionId: string,
+  selection: { providerId: string; modelId?: string },
+  workingDir: string,
+  options: AcpSessionConfigApplyOptions,
+  supersession: AcpSessionConfigurationIntent,
+): Promise<AcpSessionConfigSnapshots | undefined> {
+  const applyResolvedModel = Boolean(selection.modelId);
+  return applyResolvedModel && selection.modelId
+    ? sessionRegistry.configureSession(
+        sessionId,
+        selection.providerId,
+        workingDir,
+        selection.modelId,
+        options,
+        supersession,
+      )
+    : sessionRegistry.prepareSession(
+        sessionId,
+        selection.providerId,
+        workingDir,
+        options,
+        supersession,
+      );
 }
 
 /** Prepare or warm an ACP session ahead of the first prompt. */
@@ -379,34 +444,37 @@ export async function acpPrepareSession(
   providerId: string,
   workingDir: string,
   options: AcpSessionConfigApplyOptions = {},
+  intent?: AcpSessionConfigurationIntent,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
   const sid = sessionId.slice(0, 8);
   const t0 = performance.now();
   perfLog(
     `[perf:prepare] ${sid} acpPrepareSession start (provider=${providerId})`,
   );
-  const selection = resolveGooseSessionSelection(providerId, options.modelId);
-  const applyResolvedModel =
-    Boolean(options.modelId) || selection.providerId !== providerId;
-  const snapshots =
-    applyResolvedModel && selection.modelId
-      ? await sessionRegistry.configureSession(
-          sessionId,
-          selection.providerId,
-          workingDir,
-          selection.modelId,
-          options,
-        )
-      : await sessionRegistry.prepareSession(
-          sessionId,
-          selection.providerId,
-          workingDir,
-          options,
-        );
-  perfLog(
-    `[perf:prepare] ${sid} acpPrepareSession done in ${(performance.now() - t0).toFixed(1)}ms`,
-  );
-  return snapshots;
+  const supersession = intent ?? reserveAcpSessionConfiguration(sessionId);
+  const ownsSupersession = intent === undefined;
+  try {
+    const resolvedModelId = normalizeConcreteModelId(options.modelId);
+    const selection = options.selectionAlreadyResolved
+      ? {
+          providerId,
+          ...(resolvedModelId ? { modelId: resolvedModelId } : {}),
+        }
+      : await resolveGooseSessionSelection(providerId, options.modelId);
+    const snapshots = await applyResolvedSessionSelection(
+      sessionId,
+      selection,
+      workingDir,
+      options,
+      supersession,
+    );
+    perfLog(
+      `[perf:prepare] ${sid} acpPrepareSession done in ${(performance.now() - t0).toFixed(1)}ms`,
+    );
+    return snapshots;
+  } finally {
+    if (ownsSupersession) supersession.clear();
+  }
 }
 
 export async function acpCreateSession(
@@ -414,7 +482,10 @@ export async function acpCreateSession(
   workingDir: string,
   options: AcpCreateSessionOptions = {},
 ): Promise<AcpCreateSessionResult> {
-  const selection = resolveGooseSessionSelection(providerId, options.modelId);
+  const selection = await resolveGooseSessionSelection(
+    providerId,
+    options.modelId,
+  );
   providerId = selection.providerId;
   options = { ...options, modelId: selection.modelId };
   // Only the "goose" sentinel should rely on backend defaults. Concrete
@@ -474,7 +545,18 @@ export async function acpCreateSession(
         (await sessionRegistry.applySessionModel(sessionId, options.modelId)) ??
         configOptionsSnapshot;
     }
-    return { sessionId, configOptionsSnapshot };
+    const resolvedModel = configOptionsSnapshot.model;
+    return {
+      sessionId,
+      configOptionsSnapshot,
+      resolvedSelection: resolvedModel
+        ? {
+            providerId: selection.providerId,
+            modelId: resolvedModel.modelId,
+            modelName: resolvedModel.modelName,
+          }
+        : selection,
+    };
   } catch (error) {
     rollbackSessionRegistration?.();
     try {
@@ -563,29 +645,37 @@ export async function acpLoadSession(
     sessionId: shortLogId(sessionId),
   });
   perfLog(`[perf:load] ${sid} acpLoadSession → client.loadSession`);
-  const { response, isCurrent, executionSelection } =
+  const { response, isCurrent, deferredCurrent, executionSelection } =
     await sessionRegistry.loadSession(sessionId, effectiveWorkingDir);
-  if (!isCurrent) {
+  const publish = () => {
+    const snapshots = readSessionConfigOptionsSnapshots(response);
+    logReasoningEffortInfo("acpLoadSession response", {
+      sessionId: shortLogId(sessionId),
+      hasReasoningEffortSnapshot: Boolean(snapshots.reasoningEffort),
+      ...reasoningEffortConfigLogFields(
+        "reasoningEffort",
+        snapshots.reasoningEffort,
+      ),
+    });
+    applySessionConfigOptionsSnapshot(sessionId, response, {
+      origin: "response",
+    });
     perfLog(
-      `[perf:load] ${sid} dropped superseded load snapshot in ${(performance.now() - t0).toFixed(1)}ms`,
+      `[perf:load] ${sid} client.loadSession resolved in ${(performance.now() - t0).toFixed(1)}ms`,
+    );
+  };
+  if (!isCurrent) {
+    if (deferredCurrent) {
+      void deferredCurrent.then((becameCurrent) => {
+        if (becameCurrent) publish();
+      });
+    }
+    perfLog(
+      `[perf:load] ${sid} deferred or dropped superseded load snapshot in ${(performance.now() - t0).toFixed(1)}ms`,
     );
     return undefined;
   }
-  const snapshots = readSessionConfigOptionsSnapshots(response);
-  logReasoningEffortInfo("acpLoadSession response", {
-    sessionId: shortLogId(sessionId),
-    hasReasoningEffortSnapshot: Boolean(snapshots.reasoningEffort),
-    ...reasoningEffortConfigLogFields(
-      "reasoningEffort",
-      snapshots.reasoningEffort,
-    ),
-  });
-  applySessionConfigOptionsSnapshot(sessionId, response, {
-    origin: "response",
-  });
-  perfLog(
-    `[perf:load] ${sid} client.loadSession resolved in ${(performance.now() - t0).toFixed(1)}ms`,
-  );
+  publish();
   return executionSelection;
 }
 

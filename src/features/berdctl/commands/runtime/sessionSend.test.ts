@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpGetSessionInfo: (...args: unknown[]) => mocks.acpGetSessionInfo(...args),
   acpLoadSession: (...args: unknown[]) => mocks.acpLoadSession(...args),
   acpPrepareSession: (...args: unknown[]) => {
@@ -580,7 +581,8 @@ describe("sendPromptToExistingSessionInBackground", () => {
       SESSION_ID,
       "claude-acp",
       expect.any(String),
-      { modelId: "claude-sonnet-4" },
+      { modelId: "claude-sonnet-4", selectionAlreadyResolved: true },
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
     expect(mocks.acpSendMessage).toHaveBeenCalledWith(
       SESSION_ID,
@@ -655,7 +657,8 @@ describe("sendPromptToExistingSessionInBackground", () => {
       SESSION_ID,
       UPDATED_TARGET.modelProviderId,
       "/tmp/project",
-      { modelId: UPDATED_TARGET.modelId },
+      { modelId: UPDATED_TARGET.modelId, selectionAlreadyResolved: true },
+      expect.objectContaining({ clear: expect.any(Function) }),
     ]);
     expect(mocks.acpSendMessage).toHaveBeenCalledTimes(1);
     expect(
@@ -720,7 +723,8 @@ describe("sendPromptToExistingSessionInBackground", () => {
       SESSION_ID,
       INITIAL_TARGET.modelProviderId,
       "/tmp/project",
-      { modelId: INITIAL_TARGET.modelId },
+      { modelId: INITIAL_TARGET.modelId, selectionAlreadyResolved: true },
+      expect.objectContaining({ clear: expect.any(Function) }),
     ]);
     expect(mocks.transportProviders).toEqual([INITIAL_TARGET.modelProviderId]);
     expect(
@@ -865,7 +869,8 @@ describe("sendPromptToExistingSessionInBackground", () => {
       SESSION_ID,
       INITIAL_TARGET.modelProviderId,
       "/tmp/project",
-      { modelId: INITIAL_TARGET.modelId },
+      { modelId: INITIAL_TARGET.modelId, selectionAlreadyResolved: true },
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
     expect(mocks.acpPrepareSession.mock.calls.at(-1)).toEqual([
       SESSION_ID,
@@ -873,8 +878,10 @@ describe("sendPromptToExistingSessionInBackground", () => {
       "/tmp/project",
       expect.objectContaining({
         modelId: UPDATED_TARGET.modelId,
+        selectionAlreadyResolved: true,
         requestId: "select-updated-during-prepare",
       }),
+      expect.objectContaining({ clear: expect.any(Function) }),
     ]);
     expect(mocks.acpSendMessage).toHaveBeenCalledTimes(1);
     expect(mocks.transportProviders).toEqual([INITIAL_TARGET.modelProviderId]);
@@ -915,7 +922,8 @@ describe("sendPromptToExistingSessionInBackground", () => {
       SESSION_ID,
       INITIAL_TARGET.modelProviderId,
       "/tmp/project",
-      { modelId: INITIAL_TARGET.modelId },
+      { modelId: INITIAL_TARGET.modelId, selectionAlreadyResolved: true },
+      expect.objectContaining({ clear: expect.any(Function) }),
     ]);
     expect(mocks.acpPrepareSession.mock.calls.at(-1)).toEqual([
       SESSION_ID,
@@ -923,8 +931,10 @@ describe("sendPromptToExistingSessionInBackground", () => {
       "/tmp/project",
       expect.objectContaining({
         modelId: UPDATED_TARGET.modelId,
+        selectionAlreadyResolved: true,
         requestId: "select-updated-during-cwd",
       }),
+      expect.objectContaining({ clear: expect.any(Function) }),
     ]);
     expect(mocks.acpSendMessage).toHaveBeenCalledTimes(1);
     expect(mocks.transportProviders).toEqual([INITIAL_TARGET.modelProviderId]);

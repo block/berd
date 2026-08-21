@@ -451,6 +451,9 @@
   },
   "globalPill": {
     "ariaLabel": "Redacción rápida",
+    "invalidAgentConfiguration": "El proveedor o modelo guardado de este agente ya no está disponible.",
+    "editInvalidAgent": "Editar agente",
+    "continueWithoutAgent": "Continuar sin este agente",
     "expand": "Expandir a chat completo",
     "placeholder": "Inicia una conversación",
     "setupVoiceConversation": "Configurar conversación por voz",

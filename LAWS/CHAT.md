@@ -37,3 +37,9 @@
 
 - A session's subagent activity MUST appear in the chat transcript with the subagent identity when known.
 - A session's subagent activity MUST appear in the chat transcript with the delegated task when known.
+
+## Session configuration
+
+- A session’s provider MUST support its model, and its harness MUST support that provider.
+- A session MUST have exactly one effective configuration.
+- Berd MUST show the configuration that the session uses.

@@ -315,6 +315,7 @@ vi.mock("@/features/chat/stores/chatStore", () => ({
 }));
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpSearchSessions: (...args: unknown[]) => mockAcpSearchSessions(...args),
 }));
 

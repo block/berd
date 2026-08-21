@@ -95,6 +95,16 @@ Result:
       { berdctlCrossSessionSendOptions },
       { GOOSE_PROVIDER_ID },
       { normalizeSessionExecutionTarget, targetFromAgentModelSelection },
+      { personaHarnessId, resolvePersonaExecutionTarget },
+      { useAgentStore },
+      { useProviderModelCacheStore },
+      {
+        canonicalProviderCatalogIdFromEntries,
+        getModelProviders,
+        getProviderCatalog,
+      },
+      { filterModelProvidersForRuntimeConfig },
+      { useRuntimeConfigStore },
       { findPersonaOrThrow },
       { findProjectOrThrow },
       { findReadyHarnessOrThrow, gooseModelOptions, harnessModelOptions },
@@ -106,53 +116,228 @@ Result:
       import("../runtime/sessionSend"),
       import("@/shared/api/acpPersonaHandoff"),
       import("@/features/chat/lib/sessionExecutionTarget"),
+      import("@/features/agents/lib/personaExecutionTarget"),
+      import("@/features/agents/stores/agentStore"),
+      import("@/features/providers/stores/providerModelCacheStore"),
+      import("@/features/providers/providerCatalog"),
+      import("@/features/providers/runtimeProviderConstraints"),
+      import("@/shared/runtime-config/runtimeConfigStore"),
       import("../runtime/agents"),
       import("../runtime/projects"),
       import("../runtime/providers"),
     ]);
-    const harnessId = args.harness_id ?? GOOSE_PROVIDER_ID;
-    // The validation legs are independent I/O; overlap them.
-    const [project, , models, persona] = await Promise.all([
+    // Resolve precedence before validating any target field: a complete
+    // explicit target replaces saved execution metadata, while partial
+    // overrides still consume and therefore validate the remaining saved fields.
+    const [project, persona] = await Promise.all([
       args.project_id ? findProjectOrThrow(args.project_id) : null,
-      args.harness_id ? findReadyHarnessOrThrow(args.harness_id) : null,
-      args.model_id
-        ? (harnessId === GOOSE_PROVIDER_ID
-            ? gooseModelOptions()
-            : harnessModelOptions(harnessId)
-          ).catch(() => [])
-        : null,
       args.agent_id ? findPersonaOrThrow(args.agent_id) : null,
     ]);
-    // Soft model validation: only reject when the harness's model list is
-    // known and the id is not in it. On goose a model belongs to a model
-    // provider (anthropic, openai, ...), so a match also resolves the
-    // provider the session should run against — mirroring the in-app picker.
-    let modelProviderId =
-      harnessId === GOOSE_PROVIDER_ID ? undefined : harnessId;
-    if (args.model_id && models) {
-      const match = models.find((model) => model.model_id === args.model_id);
-      if (match) {
-        modelProviderId = match.provider ?? modelProviderId;
-      } else if (models.length > 0) {
-        throw new CommandError(
-          "model_not_found",
-          `Model "${args.model_id}" is not available on "${harnessId}"; list models with \`berdctl info models\`.`,
-        );
-      }
-    }
-    if (args.model_id && !modelProviderId && harnessId === GOOSE_PROVIDER_ID) {
+    const providers = useAgentStore.getState().providers;
+    const catalogEntries = getProviderCatalog();
+    const completeExplicitTarget = Boolean(args.harness_id && args.model_id);
+    const hasSavedTarget = Boolean(
+      persona?.provider || persona?.modelProviderId || persona?.model,
+    );
+    const savedHarnessId = persona
+      ? personaHarnessId(persona.provider, providers, catalogEntries)
+      : undefined;
+    if (persona && !hasSavedTarget && !completeExplicitTarget) {
       throw new CommandError(
-        "model_not_found",
-        `Could not resolve a provider for model "${args.model_id}"; list models with \`berdctl info models\` and retry.`,
+        "agent_configuration_invalid",
+        `Agent "${persona.id}" has no saved provider and model. Configure it or pass both --harness-id and --model-id.`,
       );
     }
-    const executionTarget = args.model_id
+    if (persona?.provider && !savedHarnessId && !completeExplicitTarget) {
+      throw new CommandError(
+        "agent_configuration_invalid",
+        `Agent "${persona.id}" has a saved provider or model that is no longer available. Update the agent configuration before invoking it.`,
+      );
+    }
+    const harnessId = args.harness_id ?? savedHarnessId ?? GOOSE_PROVIDER_ID;
+    await findReadyHarnessOrThrow(harnessId);
+
+    const requiresModelValidation = Boolean(
+      args.model_id || (persona && hasSavedTarget && !completeExplicitTarget),
+    );
+    if (requiresModelValidation) {
+      if (harnessId === GOOSE_PROVIDER_ID) await gooseModelOptions();
+      else await harnessModelOptions(harnessId);
+    }
+    const modelCache = useProviderModelCacheStore.getState();
+    const eligibleGooseProviderIds = filterModelProvidersForRuntimeConfig(
+      getModelProviders(),
+      useRuntimeConfigStore.getState().config,
+    ).map((provider) => provider.id);
+    const provenModelsForProviders = (providerIds: Iterable<string>) =>
+      [...providerIds].flatMap((providerId) =>
+        modelCache.isModelInventoryAuthoritative(providerId)
+          ? modelCache.getProvenModelsForProvider(providerId).map((model) => ({
+              ...model,
+              providerId: model.providerId ?? providerId,
+            }))
+          : [],
+      );
+    // Saved targets may reference a provider outside the current runtime
+    // inference set. Keep all authoritative cache entries available for saved
+    // target validation, while bare-model inference remains runtime-scoped.
+    const cachedModels = provenModelsForProviders(modelCache.providers.keys());
+    const eligibleGooseModels = provenModelsForProviders(
+      eligibleGooseProviderIds,
+    );
+    const modelsForHarness = (candidateHarnessId: string) =>
+      candidateHarnessId === GOOSE_PROVIDER_ID
+        ? cachedModels
+        : modelCache.getModelsForProvider(candidateHarnessId);
+    const provenModelsForHarness = (candidateHarnessId: string) =>
+      candidateHarnessId === GOOSE_PROVIDER_ID
+        ? cachedModels
+        : modelCache.getProvenModelsForProvider(candidateHarnessId);
+
+    const effectivePersona = persona
+      ? {
+          provider: args.harness_id ?? persona.provider,
+          modelProviderId: args.harness_id
+            ? args.harness_id === GOOSE_PROVIDER_ID
+              ? persona.modelProviderId
+              : args.harness_id
+            : persona.modelProviderId,
+          model: args.model_id ?? persona.model,
+        }
+      : null;
+    const personaResolution =
+      effectivePersona && hasSavedTarget && !completeExplicitTarget
+        ? resolvePersonaExecutionTarget(effectivePersona, {
+            providers,
+            models: cachedModels,
+            getModelsForHarness: modelsForHarness,
+            getProvenModelsForHarness: provenModelsForHarness,
+            isModelInventoryAuthoritative:
+              modelCache.isModelInventoryAuthoritative,
+            catalogEntries,
+          })
+        : { status: "absent" as const };
+    if (personaResolution.status === "invalid") {
+      throw new CommandError(
+        "agent_configuration_invalid",
+        `Agent "${persona?.id}" has a saved provider or model that is no longer available. Update the agent configuration before invoking it.`,
+      );
+    }
+    const personaTarget =
+      personaResolution.status === "valid"
+        ? personaResolution.target
+        : undefined;
+    const explicitModelId = args.model_id;
+    const explicitModelProviderBoundary =
+      harnessId === GOOSE_PROVIDER_ID &&
+      persona &&
+      !completeExplicitTarget &&
+      !args.harness_id &&
+      persona.modelProviderId
+        ? canonicalProviderCatalogIdFromEntries(
+            catalogEntries,
+            persona.modelProviderId,
+          )
+        : undefined;
+    const gooseInventoryIsAuthoritative = eligibleGooseProviderIds.every(
+      modelCache.isModelInventoryAuthoritative,
+    );
+    const inventoryIsAuthoritative =
+      harnessId === GOOSE_PROVIDER_ID
+        ? gooseInventoryIsAuthoritative
+        : modelCache.isModelInventoryAuthoritative(harnessId);
+    const inventoryModels =
+      harnessId === GOOSE_PROVIDER_ID
+        ? explicitModelProviderBoundary
+          ? modelCache.isModelInventoryAuthoritative(
+              explicitModelProviderBoundary,
+            )
+            ? modelCache
+                .getProvenModelsForProvider(explicitModelProviderBoundary)
+                .map((model) => ({
+                  ...model,
+                  providerId: model.providerId ?? explicitModelProviderBoundary,
+                }))
+            : modelCache
+                .getModelsForProvider(explicitModelProviderBoundary)
+                .map((model) => ({
+                  ...model,
+                  providerId: model.providerId ?? explicitModelProviderBoundary,
+                }))
+          : eligibleGooseModels
+        : inventoryIsAuthoritative
+          ? provenModelsForHarness(harnessId)
+          : modelsForHarness(harnessId);
+    const matchingExplicitModels = explicitModelId
+      ? inventoryModels.filter(
+          (model) =>
+            model.id === explicitModelId &&
+            (!explicitModelProviderBoundary ||
+              model.providerId === explicitModelProviderBoundary),
+        )
+      : [];
+    // Bare-model inference is runtime-scoped. Authoritative models from an
+    // ineligible provider cannot make the eligible provider ambiguous.
+    const matchingExplicitProviders = new Set(
+      (explicitModelId &&
+      harnessId === GOOSE_PROVIDER_ID &&
+      !explicitModelProviderBoundary
+        ? eligibleGooseModels
+        : matchingExplicitModels
+      ).flatMap((model) =>
+        model.id === explicitModelId && model.providerId
+          ? [model.providerId]
+          : [],
+      ),
+    );
+    if (
+      explicitModelId &&
+      harnessId === GOOSE_PROVIDER_ID &&
+      matchingExplicitProviders.size > 1
+    ) {
+      throw new CommandError(
+        "model_ambiguous",
+        `Model "${explicitModelId}" is available from multiple Goose providers; select an agent with a provider-qualified model.`,
+      );
+    }
+    const explicitModel = matchingExplicitModels[0];
+    if (explicitModelId && !explicitModel && inventoryIsAuthoritative) {
+      throw new CommandError(
+        "model_not_found",
+        `Model "${explicitModelId}" is not available on "${harnessId}"; list models with \`berdctl info models\`.`,
+      );
+    }
+    const explicitModelProviderId =
+      harnessId === GOOSE_PROVIDER_ID ? explicitModel?.providerId : harnessId;
+    if (
+      explicitModelId &&
+      harnessId === GOOSE_PROVIDER_ID &&
+      !explicitModelProviderBoundary &&
+      !gooseInventoryIsAuthoritative
+    ) {
+      throw new CommandError(
+        "model_not_found",
+        `Could not resolve a provider for model "${explicitModelId}" without authoritative inventory for every eligible Goose provider; list models with \`berdctl info models\` and retry.`,
+      );
+    }
+    if (explicitModelId && !explicitModelProviderId) {
+      throw new CommandError(
+        "model_not_found",
+        `Could not resolve a provider for model "${explicitModelId}"; list models with \`berdctl info models\` and retry.`,
+      );
+    }
+    const executionTarget = explicitModelId
       ? targetFromAgentModelSelection(harnessId, {
-          modelProviderId: modelProviderId ?? harnessId,
-          modelId: args.model_id,
-          modelName: args.model_id,
+          modelProviderId: explicitModelProviderId ?? harnessId,
+          modelId: explicitModelId,
+          modelName:
+            explicitModel?.displayName ??
+            explicitModel?.name ??
+            explicitModelId,
         })
-      : normalizeSessionExecutionTarget({ harnessId });
+      : args.harness_id
+        ? (personaTarget ?? normalizeSessionExecutionTarget({ harnessId }))
+        : (personaTarget ?? normalizeSessionExecutionTarget({ harnessId }));
     const requiresStartupName = Boolean(
       project && projectRequiresStartupWorkspaceName(project),
     );

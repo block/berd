@@ -82,6 +82,16 @@ export function useProviderModels() {
     [providers],
   );
 
+  const getProvenModelsForProvider = useCallback(
+    (providerId: string) => {
+      const entry = providers.get(providerId);
+      if (!entry?.provenModelIds) return EMPTY_MODELS;
+      const provenIds = new Set(entry.provenModelIds);
+      return entry.models.filter((model) => provenIds.has(model.id));
+    },
+    [providers],
+  );
+
   const isModelInventoryAuthoritative = useCallback(
     (providerId: string) =>
       isCachedModelInventoryAuthoritative(providers.get(providerId)),
@@ -123,6 +133,14 @@ export function useProviderModels() {
     ],
   );
 
+  const getProvenModelsForAgent = useCallback(
+    (agentId: string) =>
+      agentId === "goose"
+        ? configuredModelProviderIds.flatMap(getProvenModelsForProvider)
+        : getProvenModelsForProvider(agentId),
+    [configuredModelProviderIds, getProvenModelsForProvider],
+  );
+
   const isRefreshingProvider = useCallback(
     (providerId: string) => refreshingProviderIds.has(providerId),
     [refreshingProviderIds],
@@ -141,6 +159,7 @@ export function useProviderModels() {
     modelCacheRefreshProviderIds,
     getModelsForAgent,
     getModelsForProvider,
+    getProvenModelsForAgent,
     isModelInventoryAuthoritative,
     refreshProviderModels,
     refreshAllModelProviders,

@@ -34,7 +34,6 @@ import {
   type SessionExecutionTarget,
 } from "../lib/sessionExecutionTarget";
 import { gooseServeSelectionFromExecutionTarget } from "../lib/gooseServeExecutionTarget";
-import { replaceSessionTargetAfterDispatch } from "../lib/sessionTargetCoordinator";
 import type { ModelOption } from "../types";
 
 const MODEL_ALIAS_IDS = new Set(["current", "default"]);
@@ -133,6 +132,7 @@ function getPreferredSelectionForAgent(
 function resolveAvailableSelection(
   selection: PreferredModelSelection,
   models: readonly ModelOption[],
+  provenModels: readonly ModelOption[],
   selectedModelProviderId: string | null,
   isInventoryAuthoritative: (providerId: string) => boolean,
 ): PreferredModelSelection | null {
@@ -143,7 +143,10 @@ function resolveAvailableSelection(
     return null;
   }
 
-  const matchingModel = models.find(
+  const candidates = isInventoryAuthoritative(selection.modelProviderId)
+    ? provenModels
+    : models;
+  const matchingModel = candidates.find(
     (model) =>
       model.id === selection.id &&
       (!model.providerId || model.providerId === selection.modelProviderId),
@@ -337,6 +340,7 @@ export function useResolvedAgentModelPicker({
     pickerAgents,
     availableModels,
     getModelsForAgent,
+    getProvenModelsForAgent,
     isModelInventoryAuthoritative,
     modelsLoading,
     modelStatusMessage,
@@ -391,20 +395,18 @@ export function useResolvedAgentModelPicker({
         setGlobalSelectedProvider(resolvedRequestedAgentId);
       }
 
-      // A pending draft only has a client-generated id. Keep the selection on
-      // the draft so startup can apply it after ACP returns the backend id;
-      // sending a config request now would target a session ACP cannot know.
+      // A pending draft only has a client-generated id. Keep every target
+      // mutation under a fresh ownership token so provider-only changes can
+      // supersede creation/reconciliation work just like model changes do.
       if (session?.creationState === "pending") {
-        if (nextTarget.modelId) {
-          beginModelSelectionIntent(sessionId, {
-            requestId: createModelSelectionRequestId(),
-            target: nextTarget,
-            previousTarget: session.executionTarget,
-            preferenceAgentId: resolvedRequestedAgentId,
-          });
-        } else {
-          replaceSessionTargetAfterDispatch(sessionId, nextTarget);
-        }
+        beginModelSelectionIntent(sessionId, {
+          requestId: createModelSelectionRequestId(),
+          target: nextTarget,
+          previousTarget: session.executionTarget,
+          ...(nextTarget.modelId
+            ? { preferenceAgentId: resolvedRequestedAgentId }
+            : {}),
+        });
         return;
       }
 
@@ -695,6 +697,7 @@ export function useResolvedAgentModelPicker({
         const availableStoredSelection = resolveAvailableSelection(
           storedSelection,
           availableModels,
+          getProvenModelsForAgent(selectedAgentId),
           concreteSelectedProviderId,
           isModelInventoryAuthoritative,
         );
@@ -723,6 +726,7 @@ export function useResolvedAgentModelPicker({
           modelProviderId: defaultModelProviderId,
         },
         availableModels,
+        getProvenModelsForAgent(selectedAgentId),
         concreteSelectedProviderId,
         isModelInventoryAuthoritative,
       );
@@ -730,6 +734,7 @@ export function useResolvedAgentModelPicker({
       availableModels,
       catalogEntries,
       concreteSelectedProviderId,
+      getProvenModelsForAgent,
       gooseDefaultSelection,
       isModelInventoryAuthoritative,
       selectedAgentId,
@@ -742,7 +747,13 @@ export function useResolvedAgentModelPicker({
       return null;
     }
 
-    const modelsMatchingSessionId = availableModels.filter(
+    const inventoryAuthoritative =
+      executionTarget.modelProviderId != null &&
+      isModelInventoryAuthoritative(executionTarget.modelProviderId);
+    const sessionCandidates = inventoryAuthoritative
+      ? getProvenModelsForAgent(executionTarget.harnessId)
+      : availableModels;
+    const modelsMatchingSessionId = sessionCandidates.filter(
       (model) => model.id === executionTarget.modelId,
     );
     const exactProviderMatch =
@@ -767,7 +778,7 @@ export function useResolvedAgentModelPicker({
       };
     }
 
-    if (isModelAlias(executionTarget.modelId)) {
+    if (isModelAlias(executionTarget.modelId) || inventoryAuthoritative) {
       return null;
     }
 
@@ -777,17 +788,33 @@ export function useResolvedAgentModelPicker({
       modelProviderId: executionTarget.modelProviderId,
       source: "explicit",
     };
-  }, [availableModels, session]);
+  }, [
+    availableModels,
+    getProvenModelsForAgent,
+    isModelInventoryAuthoritative,
+    session,
+  ]);
 
   const availableDefaultModelSelection =
     useMemo<PreferredModelSelection | null>(() => {
+      const provenModels = getProvenModelsForAgent(selectedAgentId);
+      const selectableModels = availableModels.filter((model) => {
+        const providerId = model.providerId ?? concreteSelectedProviderId;
+        return provenModels.some(
+          (proven) =>
+            proven.id === model.id &&
+            (!providerId ||
+              !proven.providerId ||
+              proven.providerId === providerId),
+        );
+      });
       const compatibleModels = concreteSelectedProviderId
-        ? availableModels.filter(
+        ? selectableModels.filter(
             (model) =>
               !model.providerId ||
               model.providerId === concreteSelectedProviderId,
           )
-        : availableModels;
+        : selectableModels;
       const defaultModel =
         compatibleModels.find((model) => model.recommended) ??
         compatibleModels[0];
@@ -802,7 +829,13 @@ export function useResolvedAgentModelPicker({
         modelProviderId: defaultModel.providerId ?? selectedProvider,
         source: defaultModel.recommended ? "default" : "explicit",
       };
-    }, [availableModels, concreteSelectedProviderId, selectedProvider]);
+    }, [
+      availableModels,
+      concreteSelectedProviderId,
+      getProvenModelsForAgent,
+      selectedAgentId,
+      selectedProvider,
+    ]);
 
   const fallbackModelSelection = session
     ? null
@@ -817,6 +850,8 @@ export function useResolvedAgentModelPicker({
     pickerAgents,
     availableModels,
     getModelsForAgent,
+    getProvenModelsForAgent,
+    isModelInventoryAuthoritative,
     modelsLoading,
     modelStatusMessage,
     handleProviderChange,

@@ -16,7 +16,17 @@ import {
 } from "./sessionTargetCoordinator";
 
 const mockPrepare = vi.fn();
+const configurationIntentEvents: string[] = [];
+let nextConfigurationIntent = 0;
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => {
+    const id = ++nextConfigurationIntent;
+    configurationIntentEvents.push(`reserve:${id}`);
+    return {
+      sequence: id,
+      clear: () => configurationIntentEvents.push(`clear:${id}`),
+    };
+  },
   acpPrepareSession: (...args: unknown[]) => mockPrepare(...args),
 }));
 
@@ -47,6 +57,8 @@ const reasoningEffort = {
 describe("session target coordinator", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    configurationIntentEvents.length = 0;
+    nextConfigurationIntent = 0;
     resetSessionTargetCoordinatorsForTests();
     useChatSessionStore.setState({
       sessions: [
@@ -126,9 +138,44 @@ describe("session target coordinator", () => {
       target: target("c"),
     });
     expect(mockPrepare).toHaveBeenCalledTimes(1);
-    expect(mockPrepare).toHaveBeenCalledWith("s", "openai", "/w", {
-      modelId: "c",
+    expect(mockPrepare).toHaveBeenCalledWith(
+      "s",
+      "openai",
+      "/w",
+      { modelId: "c", selectionAlreadyResolved: true },
+      expect.objectContaining({ clear: expect.any(Function) }),
+    );
+  });
+
+  it("reserves the replacement before releasing superseded transition ownership", async () => {
+    const firstWire = deferred();
+    mockPrepare
+      .mockReturnValueOnce(firstWire.promise)
+      .mockResolvedValueOnce(undefined);
+
+    const first = transitionSessionTarget({
+      sessionId: "s",
+      target: target("b"),
+      workingDir: "/w",
     });
+    await vi.waitFor(() => expect(mockPrepare).toHaveBeenCalledTimes(1));
+
+    const replacement = transitionSessionTarget({
+      sessionId: "s",
+      target: target("c"),
+      workingDir: "/w",
+    });
+
+    expect(configurationIntentEvents.slice(0, 2)).toEqual([
+      "reserve:1",
+      "reserve:2",
+    ]);
+    firstWire.resolve();
+    await expect(first).resolves.toMatchObject({ status: "superseded" });
+    await expect(replacement).resolves.toMatchObject({ status: "committed" });
+    expect(configurationIntentEvents.indexOf("reserve:2")).toBeLessThan(
+      configurationIntentEvents.indexOf("clear:1"),
+    );
   });
 
   it("prevents an on-wire stale operation from committing over the winner", async () => {
@@ -405,10 +452,17 @@ describe("session target coordinator", () => {
       requireReasoningEffort: true,
     });
 
-    expect(mockPrepare).toHaveBeenCalledWith("s", "openai", "/w", {
-      modelId: "a",
-      forceConfigRefresh: true,
-    });
+    expect(mockPrepare).toHaveBeenCalledWith(
+      "s",
+      "openai",
+      "/w",
+      {
+        modelId: "a",
+        forceConfigRefresh: true,
+        selectionAlreadyResolved: true,
+      },
+      expect.objectContaining({ clear: expect.any(Function) }),
+    );
   });
 
   it("defers external hydration until the dispatch lease releases", () => {

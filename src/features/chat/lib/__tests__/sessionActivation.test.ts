@@ -37,6 +37,7 @@ const resolvePath = vi.hoisted(() => vi.fn());
 const checkDirectoriesExist = vi.hoisted(() => vi.fn());
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpGetSessionInfo: (...args: unknown[]) => acpGetSessionInfo(...args),
   acpLoadSession: (...args: unknown[]) => acpLoadSession(...args),
   acpPrepareSession: (...args: unknown[]) => acpPrepareSession(...args),
@@ -612,7 +613,8 @@ describe("loadSessionMessages", () => {
       "s-selection-race",
       "databricks_v2",
       "/resolved/existing/session",
-      { modelId: "goose-gpt-5-6-sol" },
+      { modelId: "goose-gpt-5-6-sol", selectionAlreadyResolved: true },
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
     expect(acpLoadSession.mock.invocationCallOrder[0]).toBeLessThan(
       acpPrepareSession.mock.invocationCallOrder[0],

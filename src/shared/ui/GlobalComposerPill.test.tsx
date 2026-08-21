@@ -24,6 +24,7 @@ const mockNormalizeImageBase64 = vi.fn();
 const mockSearchFilesForMentions = vi.fn();
 const mockResizeImage = vi.fn();
 const mockGetModelsForAgent = vi.fn();
+const mockGetProvenModelsForAgent = vi.fn();
 const pendingMentionLoad = new Promise<never>(() => {});
 const mockRefreshAllModelProviders = vi.fn();
 const mockRefreshAgentProviderStatus = vi.fn();
@@ -89,6 +90,8 @@ vi.mock("@/features/providers/hooks/useProviderModels", () => ({
     configuredModelProviderIds: ["openai", "anthropic"],
     modelCacheRefreshProviderIds: ["openai", "anthropic"],
     getModelsForAgent: (agentId: string) => mockGetModelsForAgent(agentId),
+    getProvenModelsForAgent: (agentId: string) =>
+      mockGetProvenModelsForAgent(agentId),
     isModelInventoryAuthoritative: () =>
       mockProviderModelsState.inventoryAuthoritative,
     refreshAllModelProviders: (...args: unknown[]) =>
@@ -255,6 +258,10 @@ describe("GlobalComposerPill", () => {
     vi.mocked(listSkills).mockImplementation(() => pendingMentionLoad);
     mockGetModelsForAgent.mockReset();
     mockGetModelsForAgent.mockReturnValue([]);
+    mockGetProvenModelsForAgent.mockReset();
+    mockGetProvenModelsForAgent.mockImplementation((agentId: string) =>
+      mockGetModelsForAgent(agentId),
+    );
     mockRefreshAllModelProviders.mockReset();
     mockRefreshAllModelProviders.mockResolvedValue(undefined);
     mockRefreshAgentProviderStatus.mockReset();
@@ -776,7 +783,7 @@ describe("GlobalComposerPill", () => {
     });
   });
 
-  it("keeps the Composer target when a persona has no plausible target", async () => {
+  it("blocks a persona that has saved model metadata but no plausible target", async () => {
     const user = userEvent.setup();
     useAgentStore.setState({
       personas: [
@@ -795,11 +802,64 @@ describe("GlobalComposerPill", () => {
     });
 
     await user.type(screen.getByRole("textbox"), "Hello");
-    await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expectSent(onSend, "Hello", {
-      personaId: "persona-1",
+    expect(
+      screen.getByRole("button", { name: /send message/i }),
+    ).toBeDisabled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        "This agent’s saved provider or model is no longer available.",
+      ),
+    ).toBeInTheDocument();
+
+    expect(
+      screen.queryByRole("button", { name: "Edit agent" }),
+    ).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Continue without this agent" }),
+    );
+
+    expect(
+      screen.queryByText(
+        "This agent’s saved provider or model is no longer available.",
+      ),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled();
+  });
+
+  it("offers to edit an invalid agent without clearing its saved selection", async () => {
+    const user = userEvent.setup();
+    const onEditAgent = vi.fn();
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Legacy agent",
+          systemPrompt: "Help.",
+          model: "unresolved-model",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
     });
+    renderGlobalComposer(vi.fn(), {
+      suggestedPersonaId: "persona-1",
+      onEditAgent,
+    });
+
+    await user.click(screen.getByRole("button", { name: "Edit agent" }));
+
+    expect(onEditAgent).toHaveBeenCalledWith("persona-1");
+    expect(screen.getByText("Legacy agent")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This agent’s saved provider or model is no longer available.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /send message/i }),
+    ).toBeDisabled();
   });
 
   it("applies a legacy persona target when inventory arrives", async () => {
@@ -881,16 +941,126 @@ describe("GlobalComposerPill", () => {
     });
 
     await user.type(screen.getByRole("textbox"), "Hello");
+
+    // The authoritative inventory disproves this persona's saved model, so it
+    // has no runnable target until the user explicitly selects a supported one.
+    expect(
+      screen.getByRole("button", { name: /send message/i }),
+    ).toBeDisabled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when authoritative inventory invalidates the active session model", async () => {
+    const user = userEvent.setup();
+    const activeTarget = {
+      harnessId: "goose",
+      modelProviderId: "databricks_v2",
+      modelId: "model-a",
+      modelName: "Model A",
+    };
+    mockGetModelsForAgent.mockReturnValue([
+      {
+        id: "model-a",
+        name: "Model A",
+        providerId: "databricks_v2",
+      },
+    ]);
+    mockGetProvenModelsForAgent.mockReturnValue([
+      {
+        id: "model-a",
+        name: "Model A",
+        providerId: "databricks_v2",
+      },
+    ]);
+    const onSend = vi.fn();
+    const { rerender } = render(
+      <GlobalComposerPill
+        onSend={onSend}
+        currentExecutionTarget={activeTarget}
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    expect(screen.getByRole("button", { name: /send message/i })).toBeEnabled();
+    expect(screen.getByText("Model A")).toBeInTheDocument();
+
+    // A successful refresh is now authoritative and excludes model A.
+    mockGetModelsForAgent.mockReturnValue([
+      {
+        id: "model-b",
+        name: "Model B",
+        providerId: "databricks_v2",
+      },
+    ]);
+    mockGetProvenModelsForAgent.mockReturnValue([
+      {
+        id: "model-b",
+        name: "Model B",
+        providerId: "databricks_v2",
+      },
+    ]);
+    rerender(
+      <GlobalComposerPill
+        onSend={onSend}
+        currentExecutionTarget={activeTarget}
+      />,
+    );
+
+    expect(screen.queryByText("Model A")).not.toBeInTheDocument();
+    const send = screen.getByRole("button", { name: /send message/i });
+    expect(send).toBeDisabled();
+    await user.click(send);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("does not synthesize an advisory model while inventory proof is unavailable", async () => {
+    const user = userEvent.setup();
+    mockProviderModelsState.inventoryAuthoritative = false;
+    useAgentStore.setState({ selectedProvider: "databricks_v2" });
+    mockGetModelsForAgent.mockReturnValue([
+      { id: "advisory", name: "Advisory", recommended: true },
+    ]);
+    mockGetProvenModelsForAgent.mockReturnValue([]);
+    const onSend = renderGlobalComposer(vi.fn(), {
+      currentExecutionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+      },
+    });
+
+    await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
     expectSent(onSend, "Hello", {
       executionTarget: {
         harnessId: "goose",
         modelProviderId: "databricks_v2",
-        modelId: "goose-claude-opus-4-8",
-        modelName: "goose-claude-opus-4-8",
       },
-      personaId: "persona-1",
+    });
+  });
+
+  it("does not synthesize an unqualified advisory model from authoritative empty inventory", async () => {
+    const user = userEvent.setup();
+    useAgentStore.setState({ selectedProvider: "databricks_v2" });
+    mockGetModelsForAgent.mockReturnValue([
+      { id: "advisory", name: "Advisory", recommended: true },
+    ]);
+    mockGetProvenModelsForAgent.mockReturnValue([]);
+    const onSend = renderGlobalComposer(vi.fn(), {
+      currentExecutionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+      },
+    });
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expectSent(onSend, "Hello", {
+      executionTarget: {
+        harnessId: "goose",
+        modelProviderId: "databricks_v2",
+      },
     });
   });
 
@@ -1156,17 +1326,15 @@ describe("GlobalComposerPill", () => {
     expect(screen.getByText("UX Critic")).toBeInTheDocument();
 
     await user.type(screen.getByRole("textbox"), "Hello");
-    await user.click(screen.getByRole("button", { name: /send message/i }));
 
-    expectSent(onSend, "Hello", {
-      executionTarget: {
-        harnessId: "goose",
-        modelProviderId: "databricks_v2",
-        modelId: "goose-default",
-        modelName: "goose-default",
-      },
-      personaId: "persona-2",
-    });
+    // `goose-default` is absent from the authoritative mock inventory, so the
+    // newly selected persona cannot dispatch through an implicit fallback.
+    expect(screen.queryByText("GPT-5.5")).not.toBeInTheDocument();
+    expect(screen.getByText("Goose")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /send message/i }),
+    ).toBeDisabled();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it("keeps the selected provider/model after clearing the suggested persona", async () => {
@@ -1194,13 +1362,10 @@ describe("GlobalComposerPill", () => {
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
 
+    // The unsupported persona target never becomes a live selection, so
+    // clearing it retains the composer fallback without stale metadata.
     expectSent(onSend, "Hello", {
-      executionTarget: {
-        harnessId: "claude-acp",
-        modelProviderId: "claude-acp",
-        modelId: "claude-sonnet-4",
-        modelName: "claude-sonnet-4",
-      },
+      executionTarget: { harnessId: "goose" },
     });
   });
 
@@ -1577,6 +1742,13 @@ describe("GlobalComposerPill", () => {
   it("expands with the controlled Home model", async () => {
     const user = userEvent.setup();
     const onExpand = vi.fn().mockResolvedValue(true);
+    mockGetModelsForAgent.mockReturnValue([
+      {
+        id: "goose-claude-fable",
+        name: "Claude Fable",
+        providerId: "anthropic",
+      },
+    ]);
     renderGlobalComposer(vi.fn(), {
       onExpand,
       currentExecutionTarget: {
@@ -1705,6 +1877,17 @@ describe("GlobalComposerPill", () => {
 
   it("uses a controlled external harness when the global provider differs", async () => {
     const user = userEvent.setup();
+    mockGetModelsForAgent.mockImplementation((agentId: string) =>
+      agentId === "claude-acp"
+        ? [
+            {
+              id: "claude-opus-4-1",
+              name: "Claude Opus 4.1",
+              providerId: "claude-acp",
+            },
+          ]
+        : [],
+    );
     const onSend = renderGlobalComposer(vi.fn(), {
       currentExecutionTarget: {
         harnessId: "claude-acp",

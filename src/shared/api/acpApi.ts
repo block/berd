@@ -215,7 +215,11 @@ export async function forkSession(
 export async function setModel(
   sessionId: string,
   modelId: string,
-  context: { providerId?: string; requestId?: string } = {},
+  context: {
+    providerId?: string;
+    requestId?: string;
+    canPublish?: () => boolean;
+  } = {},
 ): Promise<AcpSessionConfigSnapshots> {
   const sid = sessionId.slice(0, 8);
   const tClient = performance.now();
@@ -236,11 +240,14 @@ export async function setModel(
       snapshots.reasoningEffort,
     ),
   });
-  applySessionConfigOptionsSnapshot(sessionId, response, {
-    origin: "response",
-    ...context,
-    modelId: snapshots.model?.modelId ?? modelId,
-  });
+  const { canPublish, ...snapshotContext } = context;
+  if (canPublish?.() !== false) {
+    applySessionConfigOptionsSnapshot(sessionId, response, {
+      origin: "response",
+      ...snapshotContext,
+      modelId: snapshots.model?.modelId ?? modelId,
+    });
+  }
   perfLog(
     `[perf:api] ${sid} setModel(${modelId}) getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
   );
@@ -286,7 +293,7 @@ export async function setSessionConfigOption(
 export async function setProvider(
   sessionId: string,
   providerId: string,
-  context: { requestId?: string } = {},
+  context: { requestId?: string; canPublish?: () => boolean } = {},
 ): Promise<AcpSessionConfigSnapshots> {
   const sid = sessionId.slice(0, 8);
   const tClient = performance.now();
@@ -309,12 +316,15 @@ export async function setProvider(
       snapshots.reasoningEffort,
     ),
   });
-  applySessionConfigOptionsSnapshot(sessionId, response, {
-    origin: "response",
-    ...context,
-    providerId,
-    modelId: snapshots.model?.modelId,
-  });
+  const { canPublish, ...snapshotContext } = context;
+  if (canPublish?.() !== false) {
+    applySessionConfigOptionsSnapshot(sessionId, response, {
+      origin: "response",
+      ...snapshotContext,
+      providerId,
+      modelId: snapshots.model?.modelId,
+    });
+  }
   perfLog(
     `[perf:api] ${sid} setProvider(${providerId}→${wireProvider}) getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
   );

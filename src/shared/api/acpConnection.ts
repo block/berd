@@ -61,6 +61,21 @@ export function setPermissionHandler(handler: PermissionRequestHandler): void {
 let clientPromise: Promise<GooseClient> | null = null;
 let resolvedClient: GooseClient | null = null;
 let activeStream: ReturnType<typeof createWebSocketStream> | null = null;
+let connectionGeneration = 0;
+
+interface ConnectionAttempt {
+  generation: number;
+  stream: ReturnType<typeof createWebSocketStream> | null;
+  streamAborted: boolean;
+}
+
+let currentAttempt: ConnectionAttempt | null = null;
+
+async function abortAttemptStream(attempt: ConnectionAttempt): Promise<void> {
+  if (!attempt.stream || attempt.streamAborted) return;
+  attempt.streamAborted = true;
+  await attempt.stream.writable.abort();
+}
 
 function createClientCallbacks(): () => Client {
   return () => ({
@@ -95,14 +110,16 @@ function createClientCallbacks(): () => Client {
 function monitorConnection(
   client: GooseClient,
   stream: ReturnType<typeof createWebSocketStream>,
+  attempt: ConnectionAttempt,
 ): void {
   const clearCurrentConnection = () => {
-    if (activeStream !== stream) {
+    if (currentAttempt !== attempt || activeStream !== stream) {
       return;
     }
     resolvedClient = null;
     clientPromise = null;
     activeStream = null;
+    currentAttempt = null;
   };
   client.closed
     .then(() => {
@@ -125,16 +142,28 @@ function monitorConnection(
  * safer than allowing later mutations to race work still running remotely.
  */
 export async function invalidateClientConnection(): Promise<void> {
-  const stream = activeStream;
+  connectionGeneration += 1;
+  const attempt = currentAttempt;
+  currentAttempt = null;
+  const stream = attempt?.stream ?? activeStream;
   activeStream = null;
   resolvedClient = null;
   clientPromise = null;
-  if (stream) {
+  if (attempt) {
+    await abortAttemptStream(attempt);
+  } else if (stream) {
     await stream.writable.abort();
   }
 }
 
-async function initializeConnection(): Promise<GooseClient> {
+interface InitializedConnection {
+  client: GooseClient;
+  stream: ReturnType<typeof createWebSocketStream>;
+}
+
+async function initializeConnection(
+  attempt: ConnectionAttempt,
+): Promise<InitializedConnection> {
   // Dev-only: inject a real failure into startup so the WARP probe runs
   // for real against kgoose. `VITE_DEV_STARTUP_ERROR=warp just dev` lets
   // us experience the diagnostic UI with whatever real WARP state the
@@ -164,10 +193,18 @@ async function initializeConnection(): Promise<GooseClient> {
   perfLog(
     `[perf:conn] get_goose_serve_url in ${(performance.now() - tStart).toFixed(1)}ms`,
   );
+  if (
+    currentAttempt !== attempt ||
+    attempt.generation !== connectionGeneration
+  ) {
+    throw new Error(
+      "ACP connection initialization was superseded; retry the operation.",
+    );
+  }
 
   const tStream = performance.now();
   const stream = createWebSocketStream(wsUrl);
-  activeStream = stream;
+  attempt.stream = stream;
 
   const client = new GooseClient(createClientCallbacks(), stream);
   perfLog(
@@ -194,31 +231,54 @@ async function initializeConnection(): Promise<GooseClient> {
     `[perf:conn] client.initialize in ${(performance.now() - tInit).toFixed(1)}ms (total ${(performance.now() - tStart).toFixed(1)}ms)`,
   );
 
-  monitorConnection(client, stream);
-
-  return client;
+  return { client, stream };
 }
 
 export async function getClient(): Promise<GooseClient> {
-  if (resolvedClient) {
-    return resolvedClient;
-  }
-
+  if (resolvedClient) return resolvedClient;
   if (!clientPromise) {
     perfLog("[perf:conn] getClient() → initializing new ACP connection");
-    clientPromise = initializeConnection()
-      .then((client) => {
-        resolvedClient = client;
-        return client;
+    const attempt: ConnectionAttempt = {
+      generation: connectionGeneration,
+      stream: null,
+      streamAborted: false,
+    };
+    currentAttempt = attempt;
+    const initialization = initializeConnection(attempt)
+      .then(async ({ client, stream }) => {
+        if (
+          currentAttempt === attempt &&
+          attempt.generation === connectionGeneration
+        ) {
+          activeStream = stream;
+          resolvedClient = client;
+          monitorConnection(client, stream, attempt);
+          return client;
+        }
+        await abortAttemptStream(attempt);
+        throw new Error(
+          "ACP connection initialization was superseded; retry the operation.",
+        );
       })
-      .catch((error) => {
-        clientPromise = null;
+      .catch(async (error) => {
+        // initializeConnection may fail after opening the transport. Retire it
+        // before dropping the attempt while preserving the original failure.
+        await abortAttemptStream(attempt).catch((abortError) => {
+          console.warn(
+            "[acp] Failed to abort rejected connection attempt.",
+            abortError,
+          );
+        });
+        if (currentAttempt === attempt) {
+          currentAttempt = null;
+          clientPromise = null;
+        }
         throw error;
       });
+    clientPromise = initialization;
   } else {
     perfLog("[perf:conn] getClient() awaiting in-flight initializeConnection");
   }
-
   return clientPromise;
 }
 

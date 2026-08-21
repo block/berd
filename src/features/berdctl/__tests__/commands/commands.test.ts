@@ -15,6 +15,8 @@ import {
 } from "@/features/berdctl/commands/types";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
+import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { resetSessionTargetCoordinatorsForTests } from "@/features/chat/lib/sessionTargetCoordinator";
 import {
   applyPendingSessionWorkspaceActivation,
@@ -32,6 +34,7 @@ import { DEFAULT_PROJECT_COLOR } from "@/features/projects/lib/projectDefaults";
 import { DEFAULT_PROJECT_ICON } from "@/features/projects/lib/projectIcons";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { getModelProviders } from "@/features/providers/providerCatalog";
+import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import { resolveSkillPillTone } from "@/features/skills/lib/resolveSkillPillTone";
@@ -74,6 +77,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpCreateSession: (...args: unknown[]) => mocks.acpCreateSession(...args),
   acpDuplicateSession: (...args: unknown[]) =>
     mocks.acpDuplicateSession(...args),
@@ -289,9 +293,20 @@ function seedModelCache(cacheKey: string, modelIds: string[]): void {
       providerId: cacheKey,
       models: modelIds.map((id) => ({ id, name: id })),
       fetchedAt: Date.now(),
+      // Simulate a successful live inventory response: proof is what keeps
+      // this cache entry from being treated as stale and re-fetched.
+      provenModelIds: modelIds,
     });
     return { providers };
   });
+}
+
+function seedAuthoritativeGooseInventory(
+  modelsByProvider: Record<string, string[]> = {},
+): void {
+  for (const provider of getModelProviders()) {
+    seedModelCache(provider.id, modelsByProvider[provider.id] ?? []);
+  }
 }
 
 /** Fresh-but-empty cache entries for every catalog model provider, so goose
@@ -356,9 +371,15 @@ beforeEach(() => {
     hasFetchedProjects: false,
   });
   useAgentStore.setState({ personas: [], agents: [], activeAgentId: null });
+  useProviderCatalogStore.setState({
+    entries: useProviderCatalogStore.getInitialState().entries,
+  });
   useProviderModelCacheStore.setState({
     providers: emptyModelProviderCache(),
     refreshingProviderIds: new Set(),
+  });
+  useRuntimeConfigStore.setState({
+    config: DEFAULT_RUNTIME_CONFIG,
   });
 
   window.localStorage.clear();
@@ -639,6 +660,9 @@ describe("sessions.create", () => {
         id: "agent-7",
         displayName: "Reviewer",
         systemPrompt: "Review the work carefully.",
+        provider: "goose",
+        modelProviderId: "databricks_v2",
+        model: "model-9",
         isBuiltin: false,
         writable: true,
       },
@@ -700,6 +724,117 @@ describe("sessions.create", () => {
     expect(controller.openSession).not.toHaveBeenCalled();
   });
 
+  it("rejects an unconfigured agent before creating or sending", async () => {
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "empty-agent",
+        displayName: "Empty",
+        systemPrompt: "",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "create", prompt: "hi", agent_id: "empty-agent" },
+        ctx,
+      ),
+      "agent_configuration_invalid",
+    );
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().queuedMessageBySession).toEqual({});
+  });
+
+  it("creates a model-free non-agent session without refreshing inventory", async () => {
+    const refreshProviderModels = vi
+      .fn()
+      .mockRejectedValue(new Error("inventory unavailable"));
+    useProviderModelCacheStore.setState({ refreshProviderModels });
+    await dispatchCommand(
+      "sessions",
+      { action: "create", prompt: "hi", harness_id: "goose" },
+      ctx,
+    );
+    expect(refreshProviderModels).not.toHaveBeenCalled();
+    useProviderModelCacheStore.setState({
+      refreshProviderModels:
+        useProviderModelCacheStore.getInitialState().refreshProviderModels,
+    });
+    expect(mocks.acpCreateSession).toHaveBeenCalled();
+  });
+
+  it("keeps a model-only Goose override inside the saved provider", async () => {
+    useProviderModelCacheStore.setState((state) => ({
+      providers: new Map(state.providers)
+        .set("provider-a", {
+          providerId: "provider-a",
+          models: [{ id: "shared", name: "A" }],
+          fetchedAt: Date.now(),
+          provenModelIds: ["shared"],
+        })
+        .set("provider-b", {
+          providerId: "provider-b",
+          models: [{ id: "shared", name: "B" }],
+          fetchedAt: Date.now(),
+          provenModelIds: ["shared"],
+        }),
+    }));
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "agent-b",
+        displayName: "B",
+        systemPrompt: "",
+        provider: "goose",
+        modelProviderId: "provider-b",
+        model: "old",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+    await dispatchCommand(
+      "sessions",
+      {
+        action: "create",
+        prompt: "hi",
+        agent_id: "agent-b",
+        model_id: "shared",
+      },
+      ctx,
+    );
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "provider-b",
+      "/resolved/cwd",
+      expect.objectContaining({ modelId: "shared" }),
+    );
+  });
+
+  it("rejects an agent with an invalid saved target before creating", async () => {
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "invalid-agent",
+        displayName: "Invalid Agent",
+        systemPrompt: "Do not invoke.",
+        provider: "missing-provider",
+        model: "retired-model",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "create", prompt: "hi", agent_id: "invalid-agent" },
+        ctx,
+      ),
+      "agent_configuration_invalid",
+    );
+
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+  });
+
   it("rejects an unknown agent before creating the session", async () => {
     await expectCommandError(
       dispatchCommand(
@@ -735,6 +870,37 @@ describe("sessions.create", () => {
     );
   });
 
+  it("uses a valid agent's saved execution target when no explicit target is passed", async () => {
+    seedModelCache("databricks_v2", ["agent-model"]);
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "configured-agent",
+        displayName: "Configured Agent",
+        systemPrompt: "Use the saved target.",
+        provider: "goose",
+        modelProviderId: "databricks_v2",
+        model: "agent-model",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+
+    await dispatchCommand(
+      "sessions",
+      { action: "create", prompt: "hi", agent_id: "configured-agent" },
+      ctx,
+    );
+
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "databricks_v2",
+      "/resolved/cwd",
+      expect.objectContaining({
+        modelId: "agent-model",
+        personaId: "configured-agent",
+      }),
+    );
+  });
+
   it("rejects an unknown harness with harness_not_found before creating", async () => {
     const error = await expectCommandError(
       dispatchCommand(
@@ -766,7 +932,7 @@ describe("sessions.create", () => {
 
   it("resolves a goose model to its owning model provider", async () => {
     const modelProvider = getModelProviders()[0].id;
-    seedModelCache(modelProvider, ["model-a"]);
+    seedAuthoritativeGooseInventory({ [modelProvider]: ["model-a"] });
 
     await dispatchCommand(
       "sessions",
@@ -788,6 +954,213 @@ describe("sessions.create", () => {
         ctx,
       ),
       "model_not_found",
+    );
+  });
+
+  it("does not infer a bare Goose model while an eligible provider inventory is unavailable", async () => {
+    const [provenProvider] = getModelProviders();
+    useProviderCatalogStore.setState((state) => ({
+      entries: [
+        ...state.entries,
+        {
+          id: "unavailable-provider",
+          displayName: "Unavailable Provider",
+          category: "model",
+          description: "Eligible provider with unavailable inventory",
+          setupMethod: "single_api_key",
+          group: "additional",
+          setupCatalogProvider: true,
+        },
+      ],
+    }));
+    seedModelCache(provenProvider.id, ["model-a"]);
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "create", prompt: "hi", model_id: "model-a" },
+        ctx,
+      ),
+      "model_not_found",
+    );
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects an advisory ACP model excluded by authoritative proof", async () => {
+    useProviderModelCacheStore.setState((state) => ({
+      providers: new Map(state.providers).set("codex-acp", {
+        providerId: "codex-acp",
+        models: [
+          { id: "proven-model", name: "Proven" },
+          { id: "advisory-model", name: "Advisory" },
+        ],
+        fetchedAt: Date.now(),
+        provenModelIds: ["proven-model"],
+      }),
+    }));
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "create",
+          prompt: "hi",
+          harness_id: "codex-acp",
+          model_id: "advisory-model",
+        },
+        ctx,
+      ),
+      "model_not_found",
+    );
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("canonicalizes a saved provider alias for a model-only override", async () => {
+    seedModelCache("databricks_v2", ["alias-model"]);
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "legacy-alias-agent",
+        displayName: "Legacy Alias",
+        systemPrompt: "",
+        provider: "goose",
+        modelProviderId: "databricks",
+        model: "old-model",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+
+    await dispatchCommand(
+      "sessions",
+      {
+        action: "create",
+        prompt: "hi",
+        agent_id: "legacy-alias-agent",
+        model_id: "alias-model",
+      },
+      ctx,
+    );
+
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "databricks_v2",
+      "/resolved/cwd",
+      expect.objectContaining({ modelId: "alias-model" }),
+    );
+  });
+
+  it("ignores an ineligible provider when resolving a bare Goose model", async () => {
+    const [goose] = useProviderCatalogStore.getState().entries;
+    useProviderCatalogStore.setState({
+      entries: [
+        goose,
+        {
+          id: "eligible-provider",
+          displayName: "Eligible Provider",
+          category: "model",
+          description: "Runtime eligible",
+          setupMethod: "none",
+          group: "default",
+        },
+        {
+          id: "ineligible-provider",
+          displayName: "Ineligible Provider",
+          category: "model",
+          description: "Excluded by runtime policy",
+          setupMethod: "none",
+          group: "default",
+        },
+      ],
+    });
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          modelProviders: [
+            {
+              id: "eligible-provider",
+              displayName: "Eligible Provider",
+              models: [{ id: "shared-model", name: "Shared Model" }],
+            },
+          ],
+        },
+      },
+    });
+    seedModelCache("eligible-provider", ["shared-model"]);
+    seedModelCache("ineligible-provider", ["shared-model"]);
+
+    await dispatchCommand(
+      "sessions",
+      { action: "create", prompt: "hi", model_id: "shared-model" },
+      ctx,
+    );
+
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "eligible-provider",
+      "/resolved/cwd",
+      expect.objectContaining({ modelId: "shared-model" }),
+    );
+  });
+
+  it("rejects a complete explicit Goose target when its model id is provider-ambiguous", async () => {
+    const [goose] = useProviderCatalogStore.getState().entries;
+    const modelProviders = ["first-provider", "second-provider"].map((id) => ({
+      id,
+      displayName: id,
+      category: "model" as const,
+      description: "Runtime eligible",
+      setupMethod: "none" as const,
+      group: "default" as const,
+    }));
+    useProviderCatalogStore.setState({ entries: [goose, ...modelProviders] });
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          modelProviders: modelProviders.map(({ id, displayName }) => ({
+            id,
+            displayName,
+            models: [{ id: "shared-model", name: "Shared Model" }],
+          })),
+        },
+      },
+    });
+    seedModelCache("first-provider", ["shared-model"]);
+    seedModelCache("second-provider", ["shared-model"]);
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "create",
+          prompt: "hi",
+          harness_id: "goose",
+          model_id: "shared-model",
+        },
+        ctx,
+      ),
+      "model_ambiguous",
+    );
+    expect(mocks.acpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("accepts an explicit model for a ready ACP harness without authoritative inventory", async () => {
+    await dispatchCommand(
+      "sessions",
+      {
+        action: "create",
+        prompt: "hi",
+        harness_id: "codex-acp",
+        model_id: "unlisted-model",
+      },
+      ctx,
+    );
+
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "codex-acp",
+      "/resolved/cwd",
+      expect.objectContaining({ modelId: "unlisted-model" }),
     );
   });
 
@@ -840,7 +1213,9 @@ describe("sessions.create", () => {
     expect(mocks.acpCreateSession).toHaveBeenCalledWith(
       "codex-acp",
       "/resolved/cwd",
-      expect.objectContaining({ modelId: "gpt-6" }),
+      expect.objectContaining({
+        modelId: "gpt-6",
+      }),
     );
   });
 
@@ -1005,7 +1380,8 @@ describe("sessions.send", () => {
       "session-1",
       "codex-acp",
       "/resolved/cwd",
-      { modelId: "gpt-6" },
+      { modelId: "gpt-6", selectionAlreadyResolved: true },
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
     expect(controller.openSession).not.toHaveBeenCalled();
 
@@ -1082,7 +1458,8 @@ describe("sessions.send", () => {
       "session-1",
       "codex-acp",
       "/resolved/cwd",
-      {},
+      { selectionAlreadyResolved: true },
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
     expect(getPendingSessionWorkspaceActivation("session-1")).toBeNull();
   });
@@ -1131,7 +1508,8 @@ describe("sessions.send", () => {
       "session-1",
       "old-provider",
       "/resolved/cwd",
-      { modelId: "old-model" },
+      { modelId: "old-model", selectionAlreadyResolved: true },
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
     await vi.waitFor(() => {
       expect(mocks.acpSendMessage).toHaveBeenCalledWith(

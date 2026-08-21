@@ -28,6 +28,10 @@ export interface PersonaTargetContext {
   providers: readonly AvailableHarness[];
   models: readonly AvailableModel[];
   getModelsForHarness?: (harnessId: string) => readonly AvailableModel[];
+  /** Live inventory models, separate from display/advisory candidates. */
+  getProvenModelsForHarness?: (harnessId: string) => readonly AvailableModel[];
+  /** Whether the model inventory for a provider/harness is authoritative. */
+  isModelInventoryAuthoritative?: (providerId: string) => boolean;
   catalogEntries: ProviderCatalogEntry[];
 }
 
@@ -47,7 +51,7 @@ function canonicalModelProviderId(
   return canonicalProviderCatalogIdFromEntries(catalogEntries, providerId);
 }
 
-function harnessIdForPersona(
+export function personaHarnessId(
   providerId: string | undefined,
   providers: readonly AvailableHarness[],
   catalogEntries: ProviderCatalogEntry[],
@@ -75,17 +79,37 @@ function harnessIdForPersona(
   );
 }
 
+function isAgentProviderId(
+  providerId: string,
+  catalogEntries: ProviderCatalogEntry[],
+): boolean {
+  return (
+    resolveAgentProviderCatalogIdStrictFromEntries(
+      catalogEntries,
+      providerId,
+    ) !== null
+  );
+}
+
 function persistedModelProviderId(
   persona: Pick<Persona, "provider" | "modelProviderId">,
   harnessId: string,
   catalogEntries: ProviderCatalogEntry[],
 ): string | undefined {
-  if (persona.modelProviderId?.trim()) {
-    return canonicalModelProviderId(persona.modelProviderId, catalogEntries);
+  // A non-Goose harness is its own provider boundary. Its persisted model
+  // provider is display metadata from an older representation, never an
+  // independent provider that may be sent to Goose.
+  if (harnessId !== "goose") return harnessId;
+
+  const persistedProviderId = persona.modelProviderId?.trim();
+  if (
+    persistedProviderId &&
+    !isAgentProviderId(persistedProviderId, catalogEntries)
+  ) {
+    return canonicalModelProviderId(persistedProviderId, catalogEntries);
   }
   if (
     persona.provider?.trim() &&
-    harnessId === "goose" &&
     (INTERNAL_DATABRICKS_KEYS.has(normalizeProviderKey(persona.provider)) ||
       resolveModelProviderCatalogIdStrictFromEntries(
         catalogEntries,
@@ -94,14 +118,14 @@ function persistedModelProviderId(
   ) {
     return canonicalModelProviderId(persona.provider, catalogEntries);
   }
-  return harnessId === "goose" ? undefined : harnessId;
+  return undefined;
 }
 
 /**
  * Convert canonical saved agent metadata into PR #1085's runtime target.
  * An incomplete legacy target is no override; callers must leave chat state alone.
  */
-export function personaExecutionTarget(
+function resolvePersonaExecutionTargetValue(
   persona:
     | Pick<Persona, "provider" | "modelProviderId" | "model">
     | null
@@ -110,10 +134,12 @@ export function personaExecutionTarget(
     providers,
     models,
     getModelsForHarness,
+    getProvenModelsForHarness,
+    isModelInventoryAuthoritative,
     catalogEntries,
   }: PersonaTargetContext,
 ): SessionExecutionTarget | undefined {
-  const harnessId = harnessIdForPersona(
+  const harnessId = personaHarnessId(
     persona?.provider,
     providers,
     catalogEntries,
@@ -121,7 +147,10 @@ export function personaExecutionTarget(
   if (!harnessId) return undefined;
 
   const availableModels = getModelsForHarness?.(harnessId) ?? models;
+  const provenModels =
+    getProvenModelsForHarness?.(harnessId) ?? availableModels;
   const modelId = normalizeConcreteModelId(persona?.model);
+  if (!modelId) return undefined;
   let modelProviderId = persistedModelProviderId(
     persona ?? {},
     harnessId,
@@ -131,7 +160,7 @@ export function personaExecutionTarget(
   // Compatibility read until the migration write completes.
   if (modelId && !modelProviderId && harnessId === "goose") {
     const matches = new Set(
-      availableModels.flatMap((model) =>
+      provenModels.flatMap((model) =>
         model.id === modelId && model.providerId
           ? [canonicalModelProviderId(model.providerId, catalogEntries)]
           : [],
@@ -151,6 +180,21 @@ export function personaExecutionTarget(
         canonicalModelProviderId(model.providerId, catalogEntries) ===
           modelProviderId),
   );
+  const provenModel = provenModels.find(
+    (model) =>
+      model.id === modelId &&
+      (!model.providerId ||
+        canonicalModelProviderId(model.providerId, catalogEntries) ===
+          modelProviderId),
+  );
+  const inventoryIsAuthoritative =
+    isModelInventoryAuthoritative?.(modelProviderId ?? harnessId) ?? false;
+
+  if (modelId && !provenModel && inventoryIsAuthoritative) {
+    // Preserve the saved configuration for repair, but do not expose an
+    // incomplete execution target: agents require both provider and model.
+    return undefined;
+  }
 
   return normalizeSessionExecutionTarget({
     harnessId,
@@ -158,6 +202,38 @@ export function personaExecutionTarget(
     modelId,
     modelName: matchingModel?.displayName ?? matchingModel?.name ?? modelId,
   });
+}
+
+export type PersonaExecutionResolution =
+  | { status: "absent"; target?: undefined }
+  | { status: "invalid"; target?: undefined }
+  | { status: "valid"; target: SessionExecutionTarget };
+
+/** Distinguish legacy absence from saved metadata that cannot be invoked safely. */
+export function resolvePersonaExecutionTarget(
+  persona:
+    | Pick<Persona, "provider" | "modelProviderId" | "model">
+    | null
+    | undefined,
+  context: PersonaTargetContext,
+): PersonaExecutionResolution {
+  const hasSavedTarget = Boolean(
+    persona?.provider || persona?.modelProviderId || persona?.model,
+  );
+  if (!hasSavedTarget) return { status: "absent" };
+  const target = resolvePersonaExecutionTargetValue(persona, context);
+  return target ? { status: "valid", target } : { status: "invalid" };
+}
+
+export function personaExecutionTarget(
+  persona:
+    | Pick<Persona, "provider" | "modelProviderId" | "model">
+    | null
+    | undefined,
+  context: PersonaTargetContext,
+): SessionExecutionTarget | undefined {
+  const resolution = resolvePersonaExecutionTarget(persona, context);
+  return resolution.status === "valid" ? resolution.target : undefined;
 }
 
 /**
@@ -185,15 +261,27 @@ export function personaTargetMigration(
     );
     const unknownHarness =
       Boolean(persona.provider) &&
-      !harnessIdForPersona(
+      !personaHarnessId(
         persona.provider,
         context.providers,
         context.catalogEntries,
       );
+    const persistedAgentProviderForGoose =
+      personaHarnessId(
+        persona.provider,
+        context.providers,
+        context.catalogEntries,
+      ) === "goose" &&
+      Boolean(
+        persona.modelProviderId &&
+          isAgentProviderId(persona.modelProviderId, context.catalogEntries),
+      );
     // Clear only when the saved data itself proves it cannot form one target.
     // No inventory match may be a transient availability problem, so preserve
     // that legacy metadata until a later authoritative refresh can repair it.
-    return unknownHarness || matchingProviderIds.size > 1
+    return unknownHarness ||
+      persistedAgentProviderForGoose ||
+      matchingProviderIds.size > 1
       ? { provider: null, modelProviderId: null, model: null }
       : null;
   }

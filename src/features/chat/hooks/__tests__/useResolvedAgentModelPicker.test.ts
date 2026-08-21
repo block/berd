@@ -58,6 +58,7 @@ function renderModelPicker(overrides: Partial<ModelPickerOptions> = {}) {
 vi.mock("../useAgentModelPickerState", () => ({
   useAgentModelPickerState: (args: unknown) => ({
     getModelsForAgent: () => [],
+    getProvenModelsForAgent: () => [],
     isModelInventoryAuthoritative: () => false,
     ...mockUseAgentModelPickerState(args),
   }),
@@ -68,6 +69,7 @@ vi.mock("@/shared/api/acpConnection", () => ({
 }));
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpPrepareSession: (...args: unknown[]) => mockPrepareSession(...args),
 }));
 
@@ -211,6 +213,7 @@ describe("useResolvedAgentModelPicker", () => {
       "openai",
       "/w",
       expect.objectContaining({ modelId: "next" }),
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
   });
 
@@ -392,6 +395,55 @@ describe("useResolvedAgentModelPicker", () => {
         executionTarget: { harnessId: "codex-acp" },
       },
     );
+    const firstSelection = getSessionTargetSelection(session.id);
+    expect(firstSelection).toMatchObject({
+      target: { harnessId: "codex-acp" },
+    });
+
+    act(() => result.current.handleProviderChange("claude-acp"));
+
+    const secondSelection = getSessionTargetSelection(session.id);
+    expect(secondSelection).toMatchObject({
+      target: { harnessId: "claude-acp" },
+    });
+    expect(secondSelection?.operationId).not.toBe(firstSelection?.operationId);
+  });
+
+  it("gives a provider-only A to B to A draft change new ownership", () => {
+    useChatSessionStore.getState().createDraftSession({
+      workingDir: "/tmp/project",
+      executionTarget: { harnessId: "goose" },
+    });
+    const session = useChatSessionStore.getState().sessions[0];
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "codex-acp", label: "Codex" },
+      ],
+      sessionId: session.id,
+      session,
+    });
+
+    act(() => result.current.handleProviderChange("codex-acp"));
+    const providerB = getSessionTargetSelection(session.id);
+
+    const liveDraft = useChatSessionStore.getState().getSession(session.id);
+    const { result: rerendered } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "codex-acp", label: "Codex" },
+      ],
+      selectedProvider: "codex-acp",
+      sessionId: session.id,
+      session: liveDraft,
+    });
+    act(() => rerendered.current.handleProviderChange("goose"));
+
+    const providerAAgain = getSessionTargetSelection(session.id);
+    expect(providerAAgain).toMatchObject({
+      target: { harnessId: "goose" },
+    });
+    expect(providerAAgain?.operationId).not.toBe(providerB?.operationId);
   });
 
   it("routes explicit concrete model providers through the Goose harness", () => {
@@ -469,6 +521,14 @@ describe("useResolvedAgentModelPicker", () => {
             providerId: "anthropic",
           },
         ],
+        getProvenModelsForAgent: () => [
+          { id: "gpt-5.4", name: "GPT-5.4", providerId: "openai" },
+          {
+            id: "claude-sonnet-4",
+            name: "Claude Sonnet 4",
+            providerId: "anthropic",
+          },
+        ],
         modelsLoading: false,
         modelStatusMessage: null,
         handleProviderChange: (providerId: string) =>
@@ -493,6 +553,35 @@ describe("useResolvedAgentModelPicker", () => {
       modelProviderId: "openai",
       source: "explicit",
     });
+  });
+
+  it("does not accept an advisory retired model for an existing session", () => {
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        { id: "retired", name: "Retired", providerId: "openai" },
+        { id: "current", name: "Current", providerId: "openai" },
+      ],
+      getProvenModelsForAgent: () => [
+        { id: "current", name: "Current", providerId: "openai" },
+      ],
+      isModelInventoryAuthoritative: (providerId: string) =>
+        providerId === "openai",
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const session = makeSession({
+      harnessId: "goose",
+      modelProviderId: "openai",
+      modelId: "retired",
+      modelName: "Retired",
+    });
+    const { result } = renderModelPicker({ session });
+
+    expect(result.current.effectiveModelSelection?.id).not.toBe("retired");
   });
 
   it("does not synthesize a model for an existing provider-only session", () => {
@@ -544,6 +633,19 @@ describe("useResolvedAgentModelPicker", () => {
         { id: "codex-acp", label: "Codex" },
       ],
       availableModels: [
+        {
+          id: "gpt-5.4-mini",
+          name: "GPT Mini 5.4",
+          providerId: "codex-acp",
+        },
+        {
+          id: "gpt-5.5",
+          name: "GPT 5.5",
+          providerId: "codex-acp",
+          recommended: true,
+        },
+      ],
+      getProvenModelsForAgent: () => [
         {
           id: "gpt-5.4-mini",
           name: "GPT Mini 5.4",
@@ -1149,6 +1251,7 @@ describe("useResolvedAgentModelPicker", () => {
           recommended: true,
         },
       ],
+      getProvenModelsForAgent: () => [],
       isModelInventoryAuthoritative: () => false,
       modelsLoading: true,
       modelStatusMessage: null,
@@ -1201,6 +1304,14 @@ describe("useResolvedAgentModelPicker", () => {
           recommended: true,
         },
       ],
+      getProvenModelsForAgent: () => [
+        {
+          id: "gpt-5.6",
+          name: "GPT-5.6",
+          providerId: "openai",
+          recommended: true,
+        },
+      ],
       isModelInventoryAuthoritative: (providerId: string) =>
         providerId === "openai",
       modelsLoading: false,
@@ -1218,6 +1329,52 @@ describe("useResolvedAgentModelPicker", () => {
       id: "gpt-5.6",
       modelProviderId: "openai",
     });
+  });
+
+  it("does not auto-select an advisory model while inventory proof is unavailable", () => {
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        { id: "advisory", name: "Advisory", recommended: true },
+      ],
+      getProvenModelsForAgent: () => [],
+      isModelInventoryAuthoritative: () => false,
+      modelsLoading: true,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const { result } = renderModelPicker({
+      selectedProvider: "openai",
+      sessionId: null,
+      session: undefined,
+    });
+
+    expect(result.current.effectiveModelSelection).toBeNull();
+  });
+
+  it("does not auto-select an unqualified advisory model from authoritative empty inventory", () => {
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [{ id: "goose", label: "Goose" }],
+      availableModels: [
+        { id: "advisory", name: "Advisory", recommended: true },
+      ],
+      getProvenModelsForAgent: () => [],
+      isModelInventoryAuthoritative: () => true,
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const { result } = renderModelPicker({
+      selectedProvider: "openai",
+      sessionId: null,
+      session: undefined,
+    });
+
+    expect(result.current.effectiveModelSelection).toBeNull();
   });
 
   it("ignores a stored model missing from an authoritative populated inventory", () => {
@@ -1240,6 +1397,9 @@ describe("useResolvedAgentModelPicker", () => {
           providerId: "openai",
           recommended: true,
         },
+      ],
+      getProvenModelsForAgent: () => [
+        { id: "gpt-5.6", name: "GPT-5.6", providerId: "openai" },
       ],
       isModelInventoryAuthoritative: () => true,
       modelsLoading: true,

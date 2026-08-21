@@ -83,7 +83,10 @@ import {
   markAgentBuilderSessionPreparationFailed,
   preSeedDraftAgent,
 } from "@/features/agents/lib/agentBuilderSession";
-import { personaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
+import {
+  personaHarnessId,
+  resolvePersonaExecutionTarget,
+} from "@/features/agents/lib/personaExecutionTarget";
 import { deletePersonaSource } from "@/shared/api/agents";
 import type { Persona } from "@/shared/types/agents";
 import {
@@ -1093,6 +1096,8 @@ export function useChatSessionController({
     pickerAgents,
     availableModels,
     getModelsForAgent,
+    getProvenModelsForAgent,
+    isModelInventoryAuthoritative,
     modelsLoading,
     modelStatusMessage,
     handleProviderChange,
@@ -1204,13 +1209,21 @@ export function useChatSessionController({
 
   const resolvePersonaTarget = useCallback(
     (persona: Persona) =>
-      personaExecutionTarget(persona, {
+      resolvePersonaExecutionTarget(persona, {
         providers,
         models: getModelsForAgent("goose"),
         getModelsForHarness: getModelsForAgent,
+        getProvenModelsForHarness: getProvenModelsForAgent,
+        isModelInventoryAuthoritative,
         catalogEntries,
       }),
-    [catalogEntries, getModelsForAgent, providers],
+    [
+      catalogEntries,
+      getModelsForAgent,
+      getProvenModelsForAgent,
+      isModelInventoryAuthoritative,
+      providers,
+    ],
   );
   const prepareSessionForCurrentSelection = useCallback(
     async (
@@ -1436,7 +1449,16 @@ export function useChatSessionController({
       }
 
       const persona = personas.find((candidate) => candidate.id === personaId);
-      const personaTarget = persona ? resolvePersonaTarget(persona) : undefined;
+      const personaResolution = persona
+        ? resolvePersonaTarget(persona)
+        : { status: "absent" as const };
+      if (personaResolution.status === "invalid") {
+        return;
+      }
+      const personaTarget =
+        personaResolution.status === "valid"
+          ? personaResolution.target
+          : undefined;
 
       if (personaTarget) {
         const harnessId = personaTarget.harnessId;
@@ -1838,14 +1860,25 @@ export function useChatSessionController({
       const targetPersona = personas.find(
         (persona) => persona.id === overridePersona.id,
       );
+      const resolution = targetPersona
+        ? resolvePersonaTarget(targetPersona)
+        : undefined;
       return (
-        (targetPersona
-          ? resolvePersonaTarget(targetPersona)?.harnessId
-          : undefined) ?? selectedAgentId
+        (resolution?.status === "valid"
+          ? resolution.target.harnessId
+          : targetPersona
+            ? personaHarnessId(
+                targetPersona.provider,
+                providers,
+                catalogEntries,
+              )
+            : undefined) ?? selectedAgentId
       );
     },
     [
+      catalogEntries,
       personas,
+      providers,
       resolvePersonaTarget,
       selectedAgentId,
       session?.executionTarget?.harnessId,
@@ -2413,8 +2446,19 @@ export function useChatSessionController({
             availableSkillsCatalogPrompt,
           )
         : undefined;
+      const personaTarget = queuedPersona
+        ? resolvePersonaTarget(queuedPersona)
+        : undefined;
+      const {
+        sessionSelection: _previousPersonaSelection,
+        sessionSelectionToken: _previousPersonaSelectionToken,
+        ...retainedSendOptions
+      } = payload.sendOptions ?? {};
       const sendOptions = {
-        ...payload.sendOptions,
+        ...retainedSendOptions,
+        ...(personaTarget?.status === "valid"
+          ? { sessionSelection: personaTarget.target }
+          : {}),
         ...(capturedPersonaSystemPrompt !== undefined
           ? { capturedPersonaSystemPrompt }
           : {}),
@@ -2444,6 +2488,7 @@ export function useChatSessionController({
       availableSkillsCatalogPrompt,
       chatSourceSurface,
       includedWorkspacesPrompt,
+      resolvePersonaTarget,
       selectedPersona,
       workspaceContextReady,
       workspaceInstructionsPrompt,
@@ -2492,6 +2537,19 @@ export function useChatSessionController({
       if (currentPreSendWorkspaceSetup?.status === "creating") {
         return false;
       }
+      const intendedPersona = personaId
+        ? selectedPersona?.id === personaId
+          ? selectedPersona
+          : useAgentStore.getState().getPersonaById(personaId)
+        : personaId === undefined
+          ? selectedPersona
+          : undefined;
+      if (
+        (personaId && !intendedPersona && personaId !== selectedPersonaId) ||
+        (intendedPersona &&
+          resolvePersonaTarget(intendedPersona).status === "invalid")
+      )
+        return false;
       const personaName = personaId
         ? selectedPersona?.id === personaId
           ? selectedPersona.displayName
@@ -2725,6 +2783,7 @@ export function useChatSessionController({
       queue,
       readOnly,
       recordDraftPreservingSubmission,
+      resolvePersonaTarget,
       session?.agentBuilderOpen,
       session?.creationState,
       session?.intent,

@@ -16,7 +16,10 @@ import {
   type ChatAttachmentDraft,
   createUserMessage,
 } from "@/shared/types/messages";
-import { useChatStore } from "../../stores/chatStore";
+import {
+  type QueuedMessagePayload,
+  useChatStore,
+} from "../../stores/chatStore";
 import {
   type ChatSession,
   useChatSessionStore,
@@ -115,6 +118,7 @@ function deferred<T = void>() {
 }
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
   acpSetSessionConfigOption: (...args: unknown[]) =>
     mockAcpSetSessionConfigOption(...args),
@@ -255,6 +259,9 @@ vi.mock("../useAgentModelPickerState", () => ({
     getModelsForAgent: (agentId: string) =>
       mockPickerState.modelsByAgent.get(agentId) ??
       mockPickerState.availableModels,
+    getProvenModelsForAgent: (agentId: string) =>
+      mockPickerState.modelsByAgent.get(agentId) ??
+      mockPickerState.availableModels,
     isModelInventoryAuthoritative: () => false,
     modelsLoading: mockPickerState.modelsLoading,
     modelStatusMessage: mockPickerState.modelStatusMessage,
@@ -323,6 +330,7 @@ function expectSessionPreparation({
       ...(modelId ? { modelId } : {}),
       ...(forceConfigRefresh ? { forceConfigRefresh: true } : {}),
     }),
+    expect.objectContaining({ clear: expect.any(Function) }),
   );
 }
 
@@ -3099,6 +3107,7 @@ describe("useChatSessionController", () => {
           displayName: "Codex Planner",
           systemPrompt: "Plan clearly.",
           provider: "codex-acp",
+          model: "codex-model",
         }),
         personaFixture({
           id: "persona-2",
@@ -3195,6 +3204,12 @@ describe("useChatSessionController", () => {
         personaId: "persona-1",
         personaName: "Codex Planner",
         sendOptions: {
+          sessionSelection: {
+            harnessId: "codex-acp",
+            modelProviderId: "codex-acp",
+            modelId: "codex-model",
+            modelName: "codex-model",
+          },
           capturedPersonaSystemPrompt: expect.stringContaining("Plan clearly."),
           telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT,
         },
@@ -3204,6 +3219,12 @@ describe("useChatSessionController", () => {
         personaId: "persona-2",
         personaName: "Goose Reviewer",
         sendOptions: {
+          sessionSelection: {
+            harnessId: "goose",
+            modelProviderId: "databricks_v2",
+            modelId: "goose-claude-opus-4-8",
+            modelName: "Claude Opus 4.8",
+          },
           capturedPersonaSystemPrompt:
             expect.stringContaining("Review carefully."),
           telemetrySourceSurface: CHAT_SOURCE_SURFACE.MAIN_CHAT,
@@ -4764,64 +4785,45 @@ describe("useChatSessionController", () => {
     expect(result.current.currentModelName).toBe("Claude Sonnet 4");
   });
 
-  it("applies a persona's provider-only target exactly", async () => {
-    useProviderCatalogStore.getState().mergeEntries([
-      {
-        id: "openai",
-        displayName: "OpenAI",
-        category: "model",
-        description: "OpenAI",
-        setupMethod: "single_api_key",
-        group: "default",
-      },
-    ]);
+  it("rejects an invalid persona send before acceptance and preserves state", () => {
     useAgentStore.setState({
       personas: [
         personaFixture({
-          provider: "goose",
-          modelProviderId: "openai",
-          model: undefined,
+          provider: "missing-provider",
+          model: "missing-model",
         }),
       ],
+      activeAgentId: null,
     });
+    useChatStore.setState((state) => ({
+      draftsBySession: { ...state.draftsBySession, "session-1": "keep me" },
+    }));
+    const beforeSession = useChatSessionStore
+      .getState()
+      .getSession("session-1");
     const { result } = renderHook(() =>
       useChatSessionController({ sessionId: "session-1" }),
     );
-
+    let accepted: boolean | Promise<boolean> = true;
     act(() => {
-      result.current.handlePersonaChange("persona-1");
+      accepted = result.current.handleSend("do not send", "persona-1");
     });
-
-    await waitFor(() => {
-      expect(
-        useChatSessionStore.getState().getSession("session-1"),
-      ).toMatchObject({
-        personaId: "persona-1",
-        executionTarget: {
-          harnessId: "goose",
-          modelProviderId: "openai",
-        },
-      });
-    });
-    expect(mockAcpPrepareSession).toHaveBeenCalledWith(
-      "session-1",
-      "openai",
-      "/tmp/project",
-      expect.objectContaining({ requestId: expect.any(String) }),
+    expect(accepted).toBe(false);
+    expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+      "keep me",
     );
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"],
+    ).toBeUndefined();
+    expect(useChatSessionStore.getState().getSession("session-1")).toEqual(
+      beforeSession,
+    );
+    expect(useAgentStore.getState().activeAgentId).toBeNull();
+    expect(mockUseChatSendMessage).not.toHaveBeenCalled();
+    expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 
-  it("keeps a provider-only persona target local while session creation is pending", () => {
-    useProviderCatalogStore.getState().mergeEntries([
-      {
-        id: "openai",
-        displayName: "OpenAI",
-        category: "model",
-        description: "OpenAI",
-        setupMethod: "single_api_key",
-        group: "default",
-      },
-    ]);
+  it("rejects a persona's provider-only target", () => {
     useAgentStore.setState({
       personas: [
         personaFixture({
@@ -4831,30 +4833,16 @@ describe("useChatSessionController", () => {
         }),
       ],
     });
-    useChatSessionStore.setState((state) => ({
-      sessions: state.sessions.map((candidate) =>
-        candidate.id === "session-1"
-          ? { ...candidate, creationState: "pending" }
-          : candidate,
-      ),
-    }));
+    const before = useChatSessionStore.getState().getSession("session-1");
     const { result } = renderHook(() =>
       useChatSessionController({ sessionId: "session-1" }),
     );
-
     act(() => {
       result.current.handlePersonaChange("persona-1");
     });
-
-    expect(
-      useChatSessionStore.getState().getSession("session-1"),
-    ).toMatchObject({
-      personaId: "persona-1",
-      executionTarget: {
-        harnessId: "goose",
-        modelProviderId: "openai",
-      },
-    });
+    expect(useChatSessionStore.getState().getSession("session-1")).toEqual(
+      before,
+    );
     expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 
@@ -5183,7 +5171,7 @@ describe("useChatSessionController", () => {
     });
   });
 
-  it("leaves the current target alone when a legacy persona model cannot resolve", async () => {
+  it("rejects a legacy persona whose saved model cannot resolve", async () => {
     useAgentStore.setState({
       personas: [
         personaFixture({
@@ -5214,13 +5202,13 @@ describe("useChatSessionController", () => {
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
-      personaId: "persona-1",
       executionTarget: {
         harnessId: "goose",
         modelProviderId: "openai",
         modelId: "gpt-4o",
       },
     });
+    expect(useAgentStore.getState().activeAgentId).toBeNull();
     expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 
@@ -5278,6 +5266,63 @@ describe("useChatSessionController", () => {
     });
   });
 
+  it("replaces captured persona authority when a queued edit removes the persona", () => {
+    const update = vi.fn(
+      (_recordId: string, _payload: QueuedMessagePayload) => true,
+    );
+    const staleToken = Symbol("persona-a");
+    mockUseMessageQueue.mockReturnValue({
+      queuedMessage: null,
+      enqueue: vi.fn(),
+      update,
+      dismiss: vi.fn(),
+    });
+    useAgentStore.setState({
+      personas: [
+        personaFixture({
+          provider: "goose",
+          model: "goose-claude-fable-5",
+        }),
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.queue.update("queued-a", {
+        text: "send without persona",
+        persona: { kind: "none" },
+        sendOptions: {
+          sessionSelection: {
+            harnessId: "goose",
+            modelProviderId: "databricks_v2",
+            modelId: "goose-claude-fable-5",
+            modelName: "goose-claude-fable-5",
+          },
+          sessionSelectionToken: staleToken,
+          displayText: "preserved",
+        },
+      });
+    });
+
+    expect(update).toHaveBeenCalledWith(
+      "queued-a",
+      expect.objectContaining({
+        persona: { kind: "none" },
+        sendOptions: expect.objectContaining({ displayText: "preserved" }),
+      }),
+    );
+    const updateCall = update.mock.calls[0];
+    if (!updateCall) {
+      throw new Error("Expected the queued message to be recaptured");
+    }
+    const recaptured = updateCall[1].sendOptions;
+    expect(recaptured).not.toHaveProperty("sessionSelection");
+    expect(recaptured).not.toHaveProperty("sessionSelectionToken");
+  });
+
   it("removes the active persona without changing the selected model", async () => {
     useChatSessionStore.getState().replaceSessionExecutionTarget("session-1", {
       harnessId: "goose",
@@ -5322,7 +5367,7 @@ describe("useChatSessionController", () => {
     expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 
-  it("leaves the current target alone when a persona target cannot resolve", () => {
+  it("rejects a persona whose saved target cannot resolve", () => {
     useAgentStore.setState({
       personas: [
         personaFixture({
@@ -5344,17 +5389,17 @@ describe("useChatSessionController", () => {
     expect(
       useChatSessionStore.getState().getSession("session-1"),
     ).toMatchObject({
-      personaId: "persona-1",
       executionTarget: {
         harnessId: "goose",
         modelProviderId: "openai",
         modelId: "gpt-4o",
       },
     });
+    expect(useAgentStore.getState().activeAgentId).toBeNull();
     expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });
 
-  it("keeps the Home target when an unresolved persona is selected", async () => {
+  it("does not carry an unresolved persona into a later Home session", async () => {
     useAgentStore.setState({
       personas: [
         personaFixture({
@@ -5391,12 +5436,15 @@ describe("useChatSessionController", () => {
       expect(
         useChatSessionStore.getState().getSession("home-unresolved-persona"),
       ).toMatchObject({
-        personaId: "persona-1",
         executionTarget: {
           harnessId: "goose",
           modelProviderId: "openai",
         },
       });
+      expect(
+        useChatSessionStore.getState().getSession("home-unresolved-persona")
+          ?.personaId,
+      ).toBeUndefined();
     });
     expect(mockAcpPrepareSession).not.toHaveBeenCalled();
   });

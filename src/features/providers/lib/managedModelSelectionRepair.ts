@@ -1,15 +1,19 @@
 import packageJson from "../../../../package.json";
-import { getClient } from "@/shared/api/acpConnection";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
-import { subscribeToProviderModelInventoryInvalidation } from "./providerModelInventoryEvents";
 import {
+  providerModelInventoryGeneration,
+  subscribeToProviderModelInventoryInvalidation,
+} from "@/shared/runtime-config/providerModelInventoryInvalidation";
+import { publishProvenModelInventory } from "@/features/providers/stores/providerModelCacheStore";
+import {
+  readBoundedProvenModelInventory,
   resolveManagedGooseProviderSelection,
+  resolveValidatedManagedGooseProviderSelection,
   type GooseProviderSelection,
   type ManagedGooseProviderSelection,
 } from "@/shared/runtime-config/modelProviderPolicy";
 
-const DATABRICKS_V2_PROVIDER_ID = "databricks_v2";
 const VALIDATED_INVENTORY_TTL_MS = 5 * 60 * 1000;
 const validatedInventories = new Map<
   string,
@@ -19,16 +23,9 @@ const inventoryRequests = new Map<
   string,
   Promise<ReadonlySet<string> | null>
 >();
-const inventoryGenerations = new Map<string, number>();
-
-function inventoryGeneration(providerId: string): number {
-  return inventoryGenerations.get(providerId) ?? 0;
-}
-
 subscribeToProviderModelInventoryInvalidation((providerId) => {
   validatedInventories.delete(providerId);
   inventoryRequests.delete(providerId);
-  inventoryGenerations.set(providerId, inventoryGeneration(providerId) + 1);
 });
 
 export type ManagedModelRepairSource =
@@ -50,25 +47,24 @@ async function validatedModelIds(
   const existing = inventoryRequests.get(providerId);
   if (existing) return existing;
 
-  const generationAtStart = inventoryGeneration(providerId);
+  const generationAtStart = providerModelInventoryGeneration(providerId);
   let request!: Promise<ReadonlySet<string> | null>;
   request = (async () => {
     try {
-      const client = await getClient();
-      const response =
-        await client.goose.GooseUnstableProvidersSupportedModelsList({
-          providerId,
-        });
-      const modelIds = new Set<string>(response.models as string[]);
-      if (generationAtStart !== inventoryGeneration(providerId)) {
+      const modelIds = await readBoundedProvenModelInventory(providerId);
+      if (generationAtStart !== providerModelInventoryGeneration(providerId)) {
         return validatedModelIds(providerId);
       }
       validatedInventories.set(providerId, {
         modelIds,
         fetchedAt: Date.now(),
       });
+      publishProvenModelInventory(providerId, [...modelIds]);
       return modelIds;
     } catch (error) {
+      if (generationAtStart !== providerModelInventoryGeneration(providerId)) {
+        return validatedModelIds(providerId);
+      }
       console.warn("Could not validate managed provider model inventory", {
         providerId,
         error: error instanceof Error ? error.message : String(error),
@@ -102,11 +98,14 @@ export async function repairManagedGooseModelSelection(
   const config = useRuntimeConfigStore.getState().config;
   const initial = resolveManagedGooseProviderSelection(config, selection);
   if (!initial) return null;
+  if (initial.providerId !== selection.providerId) {
+    return resolveValidatedManagedGooseProviderSelection(config, selection);
+  }
+  if (!selection.modelId) {
+    return initial;
+  }
 
-  const targetModelIds =
-    initial.providerId === DATABRICKS_V2_PROVIDER_ID && selection.modelId
-      ? await validatedModelIds(initial.providerId)
-      : null;
+  const targetModelIds = await validatedModelIds(initial.providerId);
   const repaired = resolveManagedGooseProviderSelection(config, selection, {
     ...(targetModelIds ? { targetModelIds } : {}),
     targetInventoryValidated: targetModelIds !== null,
@@ -132,5 +131,4 @@ export async function repairManagedGooseModelSelection(
 export function resetManagedModelSelectionRepairCacheForTests(): void {
   validatedInventories.clear();
   inventoryRequests.clear();
-  inventoryGenerations.clear();
 }

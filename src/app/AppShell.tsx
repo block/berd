@@ -88,7 +88,7 @@ import {
 } from "@/features/chat/stores/chatSessionSelectors";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
-import { personaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
+import { resolvePersonaExecutionTarget } from "@/features/agents/lib/personaExecutionTarget";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { findExistingDraft } from "@/features/chat/lib/newChat";
@@ -179,7 +179,10 @@ import {
 } from "@/features/providers/providerCatalog";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { getBuildFeatureState } from "@/shared/profile/buildProfile";
-import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
+import {
+  executionTargetFromGooseServeBoundary,
+  gooseServeSelectionFromExecutionTarget,
+} from "@/features/chat/lib/gooseServeExecutionTarget";
 import {
   isModelExecutionTarget,
   materializeSessionExecutionModel,
@@ -1807,6 +1810,9 @@ export function AppShell({
             liveDraft,
             sessionExecutionTarget,
           );
+          const requestedTargetIntentId = getModelSelectionIntent(
+            session.id,
+          )?.requestId;
           const creationSelection =
             gooseServeSelectionFromExecutionTarget(requestedTarget);
           return acpCreateSession(
@@ -1820,12 +1826,14 @@ export function AppShell({
               // the backend session as soon as it exists.
               deferProviderSetup: false,
             },
-          ).then(({ sessionId, configOptionsSnapshot }) => {
+          ).then(({ sessionId, configOptionsSnapshot, resolvedSelection }) => {
             createdBackendSessionId = sessionId;
             return {
               sessionId,
               configOptionsSnapshot,
+              resolvedSelection,
               sessionExecutionTarget: requestedTarget,
+              requestedTargetIntentId,
               workingDir: resolvedWorkingDir,
             };
           });
@@ -1834,7 +1842,9 @@ export function AppShell({
           async ({
             sessionId,
             configOptionsSnapshot,
+            resolvedSelection,
             sessionExecutionTarget,
+            requestedTargetIntentId,
             workingDir,
           }) => {
             const sessionStore = useChatSessionStore.getState();
@@ -1847,7 +1857,26 @@ export function AppShell({
               );
               return;
             }
-            let appliedTarget = sessionExecutionTarget;
+            const creationTarget = executionTargetFromGooseServeBoundary(
+              resolvedSelection ??
+                gooseServeSelectionFromExecutionTarget(sessionExecutionTarget),
+              sessionExecutionTarget,
+            );
+            let appliedTarget = creationTarget;
+            if (
+              getModelSelectionIntent(session.id)?.requestId ===
+                requestedTargetIntentId &&
+              sameSessionExecutionTarget(
+                latestSession.executionTarget,
+                sessionExecutionTarget,
+              ) &&
+              !sameSessionExecutionTarget(
+                creationTarget,
+                sessionExecutionTarget,
+              )
+            ) {
+              replaceSessionTargetAfterDispatch(session.id, creationTarget);
+            }
             let resolvedConfigOptionsSnapshot = configOptionsSnapshot;
             const reconcileLatestDraftSelection = async () => {
               while (true) {
@@ -1861,6 +1890,9 @@ export function AppShell({
                 if (sameSessionExecutionTarget(latestTarget, appliedTarget)) {
                   return latestTarget;
                 }
+                const latestTargetIntentId = getModelSelectionIntent(
+                  session.id,
+                )?.requestId;
                 const result = await transitionSessionTarget({
                   sessionId,
                   target: latestTarget,
@@ -1895,6 +1927,12 @@ export function AppShell({
                       result.resolvedTarget,
                     );
                   }
+                }
+                if (
+                  getModelSelectionIntent(session.id)?.requestId ===
+                  latestTargetIntentId
+                ) {
+                  return effectiveTarget;
                 }
                 appliedTarget = effectiveTarget;
               }
@@ -1969,6 +2007,8 @@ export function AppShell({
                   providerId: pendingSelectionIntent.target.modelProviderId,
                 },
               );
+            }
+            if (pendingSelectionIntent) {
               clearCurrentModelSelectionIntent(
                 session.id,
                 pendingSelectionIntent.requestId,
@@ -2700,19 +2740,39 @@ export function AppShell({
         const persona = agentState.personas.find(
           (candidate) => candidate.id === agentId,
         );
-        const cachedModels = [
-          ...useProviderModelCacheStore.getState().providers,
-        ].flatMap(([providerId, entry]) =>
-          entry.models.map((model) => ({
+        const modelCache = useProviderModelCacheStore.getState();
+        const cachedModels = [...modelCache.providers].flatMap(
+          ([providerId, entry]) =>
+            entry.models.map((model) => ({
+              ...model,
+              providerId: model.providerId ?? providerId,
+            })),
+        );
+        const provenModels = [...modelCache.providers].flatMap(([providerId]) =>
+          modelCache.getProvenModelsForProvider(providerId).map((model) => ({
             ...model,
             providerId: model.providerId ?? providerId,
           })),
         );
-        const executionTarget = personaExecutionTarget(persona, {
+        const personaResolution = resolvePersonaExecutionTarget(persona, {
           providers: agentState.providers,
           models: cachedModels,
+          getProvenModelsForHarness: () => provenModels,
+          isModelInventoryAuthoritative: (providerId) =>
+            useProviderModelCacheStore
+              .getState()
+              .isModelInventoryAuthoritative(providerId),
           catalogEntries: getProviderCatalog(),
         });
+        if (personaResolution.status === "invalid") {
+          setActiveView("agents");
+          setAgentsPersonaId(agentId);
+          return;
+        }
+        const executionTarget =
+          personaResolution.status === "valid"
+            ? personaResolution.target
+            : undefined;
 
         void createNewTab(DEFAULT_CHAT_TITLE, undefined, {
           executionTarget,
@@ -5277,6 +5337,7 @@ export function AppShell({
                 onSend={handleGlobalCompose}
                 onExpand={handleGlobalComposerExpand}
                 onDismiss={dismissCenteredGlobalComposer}
+                onEditAgent={navigateAgents}
                 onHandoffStart={handleGlobalComposerHandoffStart}
                 placement={globalComposerPlacement}
                 mainLeftOffsetPx={sidebarDockedOuterWidth}

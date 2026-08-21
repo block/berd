@@ -11,11 +11,17 @@ import {
   shortLogId,
 } from "@/shared/lib/reasoningEffortDiagnostics";
 import { normalizeConcreteModelId } from "@/shared/lib/modelIdentity";
+import {
+  getModelInventoryProofRevision,
+  isModelSelectionAllowedByCachedInventory,
+} from "@/features/providers/stores/providerModelCacheStore";
 
 export interface AcpSessionExecutionSelection {
   providerId: string;
   /** Last model this window observed ACP acknowledge successfully. */
   modelId?: string;
+  /** Shared inventory proof already known when ACP acknowledged this selection. */
+  acknowledgedProofRevision?: number;
 }
 
 interface PreparedSession {
@@ -30,12 +36,43 @@ interface SessionConfigMutationOptions {
 
 const SESSION_MUTATION_TIMEOUT_MS = 60_000;
 
+interface SessionMutationQueue {
+  latestSequence: number;
+  tail: Promise<void>;
+  /** Configuration intent awaiting async preflight before it can enqueue. */
+  pendingSupersession?: {
+    sequence: number;
+    previousSequence: number;
+    settled: Promise<void>;
+    resolve: () => void;
+  };
+}
+
+/** Opaque ownership of a configuration intent that is awaiting preflight. */
+export interface SessionMutationSupersession {
+  readonly sequence: number;
+  clear(): void;
+}
+
 const prepared = new Map<string, PreparedSession>();
-const mutationQueues = new Map<
-  string,
-  { latestSequence: number; tail: Promise<void> }
->();
+const mutationQueues = new Map<string, SessionMutationQueue>();
 let nextMutationSequence = 1;
+
+function scheduleQueueCleanup(
+  sessionId: string,
+  queue: SessionMutationQueue,
+): void {
+  const tail = queue.tail;
+  void tail.then(() => {
+    if (
+      mutationQueues.get(sessionId) === queue &&
+      queue.tail === tail &&
+      queue.pendingSupersession === undefined
+    ) {
+      mutationQueues.delete(sessionId);
+    }
+  });
+}
 
 function clonePreparedSession(
   entry: PreparedSession | undefined,
@@ -58,12 +95,14 @@ function replaceExecutionSelection(
   entry.executionSelection = {
     providerId,
     ...(modelId ? { modelId } : {}),
+    acknowledgedProofRevision: getModelInventoryProofRevision(providerId),
   };
 }
 
 async function runBoundedSessionMutation<T>(
   sessionId: string,
   mutation: Promise<T>,
+  invalidate: () => void,
 ): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   let didTimeOut = false;
@@ -73,6 +112,7 @@ async function runBoundedSessionMutation<T>(
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
           didTimeOut = true;
+          invalidate();
           reject(
             new Error(
               `ACP operation timed out for session ${sessionId.slice(0, 8)}. Reconnect and retry.`,
@@ -101,7 +141,12 @@ async function runBoundedSessionMutation<T>(
 
 function serializeSessionMutation<T>(
   sessionId: string,
-  mutation: (isLatest: () => boolean) => Promise<T>,
+  mutation: (
+    isLatest: () => boolean,
+    sequence: number,
+    queue: SessionMutationQueue,
+    canPublish: () => boolean,
+  ) => Promise<T>,
   bounded = true,
 ): Promise<T> {
   let queue = mutationQueues.get(sessionId);
@@ -112,21 +157,88 @@ function serializeSessionMutation<T>(
 
   const sequence = nextMutationSequence++;
   queue.latestSequence = sequence;
-  const execute = () => mutation(() => queue?.latestSequence === sequence);
+  let canPublish = true;
+  const execute = () =>
+    mutation(
+      () =>
+        queue?.pendingSupersession === undefined &&
+        queue?.latestSequence === sequence,
+      sequence,
+      queue,
+      () => canPublish && queue?.pendingSupersession === undefined,
+    );
   const result = queue.tail.then(() =>
-    bounded ? runBoundedSessionMutation(sessionId, execute()) : execute(),
+    bounded
+      ? runBoundedSessionMutation(sessionId, execute(), () => {
+          canPublish = false;
+        })
+      : execute(),
   );
   const tail = result.then(
     () => undefined,
     () => undefined,
   );
   queue.tail = tail;
-  void tail.then(() => {
-    if (mutationQueues.get(sessionId)?.tail === tail) {
-      mutationQueues.delete(sessionId);
-    }
-  });
+  scheduleQueueCleanup(sessionId, queue);
   return result;
+}
+
+function consumeSessionSupersession(
+  sessionId: string,
+  supersession: SessionMutationSupersession | undefined,
+): boolean {
+  if (!supersession) return true;
+  const queue = mutationQueues.get(sessionId);
+  if (queue?.pendingSupersession?.sequence !== supersession.sequence) {
+    return false;
+  }
+  const pending = queue.pendingSupersession;
+  queue.pendingSupersession = undefined;
+  pending.resolve();
+  scheduleQueueCleanup(sessionId, queue);
+  return true;
+}
+
+export function supersedeSessionMutation(
+  sessionId: string,
+): SessionMutationSupersession {
+  let queue = mutationQueues.get(sessionId);
+  if (!queue) {
+    queue = { latestSequence: 0, tail: Promise.resolve() };
+    mutationQueues.set(sessionId, queue);
+  }
+  // Retain preflight intent before its authoritative I/O completes so a load
+  // cannot publish a snapshot that predates the requested configuration.
+  const sequence = nextMutationSequence++;
+  const previousSequence =
+    queue.pendingSupersession?.previousSequence ?? queue.latestSequence;
+  queue.pendingSupersession?.resolve();
+  let resolveSettled!: () => void;
+  const settled = new Promise<void>((resolve) => {
+    resolveSettled = resolve;
+  });
+  queue.latestSequence = sequence;
+  queue.pendingSupersession = {
+    sequence,
+    previousSequence,
+    settled,
+    resolve: resolveSettled,
+  };
+  scheduleQueueCleanup(sessionId, queue);
+
+  return {
+    sequence,
+    clear() {
+      if (queue?.pendingSupersession?.sequence !== sequence) return;
+      const pending = queue.pendingSupersession;
+      queue.pendingSupersession = undefined;
+      if (queue.latestSequence === sequence) {
+        queue.latestSequence = pending.previousSequence;
+      }
+      pending.resolve();
+      scheduleQueueCleanup(sessionId, queue);
+    },
+  };
 }
 
 export async function prepareSession(
@@ -134,10 +246,15 @@ export async function prepareSession(
   providerId: string,
   workingDir: string,
   options: SessionConfigMutationOptions = {},
+  supersession?: SessionMutationSupersession,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
-  return serializeSessionMutation(sessionId, () =>
-    prepareSessionNow(sessionId, providerId, workingDir, options),
+  if (!consumeSessionSupersession(sessionId, supersession)) return;
+  const snapshots = await serializeSessionMutation(
+    sessionId,
+    (_isLatest, _sequence, _queue, canPublish) =>
+      prepareSessionNow(sessionId, providerId, workingDir, options, canPublish),
   );
+  return snapshots;
 }
 
 async function prepareSessionNow(
@@ -145,6 +262,7 @@ async function prepareSessionNow(
   providerId: string,
   workingDir: string,
   options: SessionConfigMutationOptions,
+  canPublish: () => boolean,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
   const sid = sessionId.slice(0, 8);
   const existing = prepared.get(sessionId);
@@ -163,6 +281,7 @@ async function prepareSessionNow(
     });
     if (existing.workingDir !== workingDir) {
       await acpApi.updateWorkingDir(sessionId, workingDir);
+      if (!canPublish()) return;
       existing.workingDir = workingDir;
       changed = true;
     }
@@ -171,27 +290,41 @@ async function prepareSessionNow(
       try {
         snapshots = await acpApi.setProvider(sessionId, providerId, {
           requestId: options.requestId,
+          canPublish,
         });
       } catch (error) {
         // Goose can apply the provider and then fail while building the
         // response snapshot. The complete backend pair is unknown until the
         // UI selection is prepared again.
-        existing.executionSelection = undefined;
+        if (canPublish()) {
+          existing.executionSelection = undefined;
+        }
         throw error;
       }
       perfLog(
         `[perf:prepare] ${sid} reuse setProvider(${providerId}) in ${(performance.now() - tProv).toFixed(1)}ms`,
       );
-      replaceExecutionSelection(
-        existing,
-        providerId,
-        normalizeConcreteModelId(snapshots?.model?.modelId),
-      );
-      changed = true;
+      if (canPublish()) {
+        replaceExecutionSelection(
+          existing,
+          providerId,
+          normalizeConcreteModelId(snapshots?.model?.modelId),
+        );
+        changed = true;
+      }
     }
     perfLog(
       `[perf:prepare] ${sid} reuse existing session (updates=${changed}) in ${(performance.now() - tReuse).toFixed(1)}ms`,
     );
+    if (!snapshots && existing.executionSelection?.modelId) {
+      return {
+        model: {
+          modelId: existing.executionSelection.modelId,
+          modelName: existing.executionSelection.modelId,
+        },
+        reasoningEffort: null,
+      };
+    }
     return snapshots;
   }
 
@@ -201,6 +334,7 @@ async function prepareSessionNow(
     providerId,
   });
   await acpApi.loadSession(sessionId, workingDir);
+  if (!canPublish()) return;
   perfLog(
     `[perf:prepare] ${sid} registry loadSession ok in ${(performance.now() - tLoad).toFixed(1)}ms`,
   );
@@ -208,6 +342,7 @@ async function prepareSessionNow(
   const tProv = performance.now();
   const snapshots = await acpApi.setProvider(sessionId, providerId, {
     requestId: options.requestId,
+    canPublish,
   });
   perfLog(
     `[perf:prepare] ${sid} registry setProvider(${providerId}) in ${(performance.now() - tProv).toFixed(1)}ms`,
@@ -221,9 +356,12 @@ async function prepareSessionNow(
     executionSelection: {
       providerId,
       ...(acknowledgedModelId ? { modelId: acknowledgedModelId } : {}),
+      acknowledgedProofRevision: getModelInventoryProofRevision(providerId),
     },
   };
-  prepared.set(sessionId, entry);
+  if (canPublish()) {
+    prepared.set(sessionId, entry);
+  }
 
   return snapshots;
 }
@@ -241,8 +379,10 @@ export async function applySessionModel(
   if (!concreteModelId) {
     throw new Error(`Invalid model id: ${modelId}`);
   }
-  return serializeSessionMutation(sessionId, () =>
-    applySessionModelNow(sessionId, concreteModelId, options),
+  return serializeSessionMutation(
+    sessionId,
+    (_isLatest, _sequence, _queue, canPublish) =>
+      applySessionModelNow(sessionId, concreteModelId, options, canPublish),
   );
 }
 
@@ -250,6 +390,7 @@ async function applySessionModelNow(
   sessionId: string,
   modelId: string,
   options: SessionConfigMutationOptions,
+  canPublish: () => boolean,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
   const sid = sessionId.slice(0, 8);
   const entry = prepared.get(sessionId);
@@ -279,6 +420,7 @@ async function applySessionModelNow(
     snapshots = await acpApi.setModel(sessionId, modelId, {
       providerId: executionSelection.providerId,
       requestId: options.requestId,
+      canPublish,
     });
   } catch (error) {
     // Drop the cached value so the next attempt retries over the wire.
@@ -314,25 +456,39 @@ export async function configureSession(
   workingDir: string,
   modelId?: string,
   options: SessionConfigMutationOptions = {},
+  supersession?: SessionMutationSupersession,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
   const concreteModelId = normalizeConcreteModelId(modelId);
   if (modelId && !concreteModelId) {
     throw new Error(`Invalid model id: ${modelId}`);
   }
-  return serializeSessionMutation(sessionId, async () => {
-    let snapshots = await prepareSessionNow(
-      sessionId,
-      providerId,
-      workingDir,
-      concreteModelId ? {} : options,
-    );
-    if (concreteModelId) {
-      snapshots =
-        (await applySessionModelNow(sessionId, concreteModelId, options)) ??
-        snapshots;
-    }
-    return snapshots;
-  });
+  if (!consumeSessionSupersession(sessionId, supersession)) return;
+  const snapshots = await serializeSessionMutation(
+    sessionId,
+    async (_isLatest, _sequence, _queue, canPublish) => {
+      let snapshots = await prepareSessionNow(
+        sessionId,
+        providerId,
+        workingDir,
+        concreteModelId ? {} : options,
+        canPublish,
+      );
+      if (concreteModelId && canPublish()) {
+        const modelSnapshots = await applySessionModelNow(
+          sessionId,
+          concreteModelId,
+          options,
+          canPublish,
+        );
+        snapshots = modelSnapshots ?? {
+          model: { modelId: concreteModelId, modelName: concreteModelId },
+          reasoningEffort: null,
+        };
+      }
+      return snapshots;
+    },
+  );
+  return snapshots;
 }
 
 export function applySessionConfigOption(
@@ -365,7 +521,38 @@ export function requireSessionInvocationSelection(
       "Session requires a configured provider and model before prompting. Re-prepare the session after completing provider setup.",
     );
   }
-  return { ...selection, modelId: selection.modelId };
+  if (
+    !isModelSelectionAllowedByCachedInventory(
+      selection.providerId,
+      selection.modelId,
+      selection.acknowledgedProofRevision,
+    )
+  ) {
+    throw new Error(
+      `Session model ${selection.modelId} is no longer supported by provider ${selection.providerId}. Re-prepare the session before prompting.`,
+    );
+  }
+  const { acknowledgedProofRevision: _, ...invocationSelection } = selection;
+  return { ...invocationSelection, modelId: selection.modelId };
+}
+
+/** Run invocation transport without allowing session config to interleave. */
+export async function runPreparedSessionInvocation<T>(
+  sessionId: string,
+  invoke: (
+    selection: AcpSessionExecutionSelection & { modelId: string },
+  ) => Promise<T>,
+): Promise<T> {
+  let pending = mutationQueues.get(sessionId)?.pendingSupersession;
+  while (pending) {
+    await pending.settled;
+    pending = mutationQueues.get(sessionId)?.pendingSupersession;
+  }
+  return serializeSessionMutation(
+    sessionId,
+    () => invoke(requireSessionInvocationSelection(sessionId)),
+    false,
+  );
 }
 
 /** Run prompt setup and transport without allowing session config to interleave. */
@@ -373,10 +560,8 @@ export function runPreparedSessionPrompt<T>(
   sessionId: string,
   prompt: (providerId: string) => Promise<T>,
 ): Promise<T> {
-  return serializeSessionMutation(
-    sessionId,
-    () => prompt(requireSessionInvocationSelection(sessionId).providerId),
-    false,
+  return runPreparedSessionInvocation(sessionId, ({ providerId }) =>
+    prompt(providerId),
   );
 }
 
@@ -386,22 +571,44 @@ export async function loadSession(
 ): Promise<{
   response: Awaited<ReturnType<typeof acpApi.loadSession>>;
   isCurrent: boolean;
+  deferredCurrent?: Promise<boolean>;
   executionSelection?: AcpSessionExecutionSelection;
 }> {
   return serializeSessionMutation(
     sessionId,
-    async (isLatest) => {
+    async (isLatest, _sequence, queue) => {
       const response = await acpApi.loadSession(sessionId, workingDir);
+      const pendingAtResponse = queue.pendingSupersession;
       const isCurrentResult = isLatest();
+      const deferredCurrent = pendingAtResponse
+        ? (async () => {
+            let pending: SessionMutationQueue["pendingSupersession"] =
+              pendingAtResponse;
+            while (pending) {
+              await pending.settled;
+              pending = queue.pendingSupersession;
+            }
+            return isLatest();
+          })()
+        : undefined;
       const executionSnapshot = readSessionExecutionConfigSnapshot(response);
+      const executionSelection = executionSnapshot
+        ? {
+            ...executionSnapshot,
+            acknowledgedProofRevision: getModelInventoryProofRevision(
+              executionSnapshot.providerId,
+            ),
+          }
+        : undefined;
       prepared.set(sessionId, {
         workingDir,
-        executionSelection: executionSnapshot ?? undefined,
+        executionSelection,
       });
       return {
         response,
         isCurrent: isCurrentResult,
-        executionSelection: executionSnapshot ?? undefined,
+        ...(deferredCurrent ? { deferredCurrent } : {}),
+        executionSelection,
       };
     },
     false,
@@ -421,6 +628,7 @@ export function registerPreparedSession(
     executionSelection: {
       providerId,
       ...(acknowledgedModelId ? { modelId: acknowledgedModelId } : {}),
+      acknowledgedProofRevision: getModelInventoryProofRevision(providerId),
     },
   };
 

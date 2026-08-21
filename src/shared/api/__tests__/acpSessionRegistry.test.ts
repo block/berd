@@ -10,10 +10,14 @@ const mockSetSessionConfigOption = vi.fn();
 const mockUpdateWorkingDir = vi.fn();
 const mockLoadSession = vi.fn();
 const mockInvalidateClientConnection = vi.fn();
-const noRequestProviderContext = { requestId: undefined };
+const noRequestProviderContext = {
+  requestId: undefined,
+  canPublish: expect.any(Function),
+};
 const noRequestModelContext = (providerId: string) => ({
   providerId,
   requestId: undefined,
+  canPublish: expect.any(Function),
 });
 
 vi.mock("../acpConnection", () => ({
@@ -305,6 +309,70 @@ describe("applySessionModel", () => {
     expect(prompt).toHaveBeenCalledWith("anthropic");
   });
 
+  it("lets a successful load supersede existing negative proof but not newer proof", async () => {
+    const { publishProvenModelInventory } = await import(
+      "@/features/providers/stores/providerModelCacheStore"
+    );
+    publishProvenModelInventory("openai", ["gpt-other"]);
+    const registry = await importRegistry();
+    mockLoadSession.mockResolvedValueOnce(
+      executionConfigResponse("openai", "gpt-5.5"),
+    );
+    const prompt = vi.fn().mockResolvedValue("complete");
+
+    await registry.loadSession("session-1", "/project");
+
+    await expect(
+      registry.runPreparedSessionPrompt("session-1", prompt),
+    ).resolves.toBe("complete");
+    expect(prompt).toHaveBeenCalledWith("openai");
+
+    publishProvenModelInventory("openai", ["gpt-newer"]);
+
+    await expect(
+      registry.runPreparedSessionPrompt("session-1", prompt),
+    ).rejects.toThrow(
+      "Session model gpt-5.5 is no longer supported by provider openai",
+    );
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds prompt transport behind pending configuration intent until it clears", async () => {
+    const registry = await importPreparedRegistry("openai", "gpt-4.1");
+    const supersession = registry.supersedeSessionMutation("session-1");
+    const prompt = vi.fn().mockResolvedValue("complete");
+
+    const result = registry.runPreparedSessionPrompt("session-1", prompt);
+    await Promise.resolve();
+    expect(prompt).not.toHaveBeenCalled();
+
+    supersession.clear();
+    await expect(result).resolves.toBe("complete");
+    expect(prompt).toHaveBeenCalledWith("openai");
+  });
+
+  it("holds prompt transport until pending configuration is consumed", async () => {
+    const registry = await importPreparedRegistry("openai", "gpt-4.1");
+    const supersession = registry.supersedeSessionMutation("session-1");
+    const prompt = vi.fn().mockResolvedValue("complete");
+
+    const result = registry.runPreparedSessionPrompt("session-1", prompt);
+    const configure = registry.configureSession(
+      "session-1",
+      "anthropic",
+      "/project",
+      "claude-fable",
+      {},
+      supersession,
+    );
+    await expect(configure).resolves.toEqual({
+      model: { modelId: "claude-fable", modelName: "claude-fable" },
+      reasoningEffort: null,
+    });
+    await expect(result).resolves.toBe("complete");
+    expect(prompt).toHaveBeenCalledWith("anthropic");
+  });
+
   it("does not time out a long-running prompt or admit config work mid-turn", async () => {
     vi.useFakeTimers();
     try {
@@ -363,6 +431,63 @@ describe("applySessionModel", () => {
     }
   });
 
+  it("does not publish a timed-out prepare after newer preparation succeeds", async () => {
+    vi.useFakeTimers();
+    try {
+      const registry = await importRegistry();
+      const staleLoadResponse = deferred<AcpSessionConfigSnapshots>();
+      mockLoadSession.mockReturnValueOnce(staleLoadResponse.promise);
+      mockSetProvider.mockResolvedValueOnce(
+        modelConfigResponse("new-model", "New Model"),
+      );
+
+      const stalePrepare = registry.prepareSession(
+        "session-1",
+        "stale-provider",
+        "/stale-project",
+      );
+      await vi.waitFor(() => expect(mockLoadSession).toHaveBeenCalledTimes(1));
+      const staleRejection = expect(stalePrepare).rejects.toThrow(
+        "ACP operation timed out",
+      );
+
+      const newerPrepare = registry.prepareSession(
+        "session-1",
+        "new-provider",
+        "/new-project",
+      );
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await staleRejection;
+      await expect(newerPrepare).resolves.toEqual(
+        modelConfigResponse("new-model", "New Model"),
+      );
+      expect(registry.requireSessionInvocationSelection("session-1")).toEqual({
+        providerId: "new-provider",
+        modelId: "new-model",
+      });
+
+      staleLoadResponse.resolve(
+        modelConfigResponse("stale-model", "Stale Model"),
+      );
+      await Promise.resolve();
+
+      expect(mockSetProvider).toHaveBeenCalledTimes(1);
+      expect(mockSetProvider).toHaveBeenCalledWith(
+        "session-1",
+        "new-provider",
+        noRequestProviderContext,
+      );
+      expect(registry.getPreparedProviderId("session-1")).toBe("new-provider");
+      expect(registry.requireSessionInvocationSelection("session-1")).toEqual({
+        providerId: "new-provider",
+        modelId: "new-model",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("records a superseded load pair for the queued model mutation", async () => {
     const registry = await importPreparedRegistry("openai", "gpt-4.1");
     const loadResponse = deferred<ReturnType<typeof executionConfigResponse>>();
@@ -379,6 +504,43 @@ describe("applySessionModel", () => {
       "session-1",
       "gpt-5.6",
       noRequestModelContext("openai"),
+    );
+  });
+
+  it("keeps a mutation behind an owned preflight configuration after its old tail settles", async () => {
+    const registry = await importPreparedRegistry("openai", "gpt-4.1");
+    const firstProviderResponse = deferred<AcpSessionConfigSnapshots>();
+    mockSetProvider.mockReturnValueOnce(firstProviderResponse.promise);
+
+    const supersession = registry.supersedeSessionMutation("session-1");
+    const first = registry.prepareSession(
+      "session-1",
+      "anthropic",
+      "/project",
+      {},
+      supersession,
+    );
+
+    await vi.waitFor(() => expect(mockSetProvider).toHaveBeenCalledTimes(1));
+
+    // The owned intent was consumed before the real mutation was appended. A
+    // cleanup registered against the formerly resolved tail must not reclaim
+    // the queue while this provider call is still in flight.
+    const second = registry.prepareSession("session-1", "gemini", "/project");
+    await Promise.resolve();
+    expect(mockSetProvider).toHaveBeenCalledTimes(1);
+
+    firstProviderResponse.resolve(
+      modelConfigResponse("claude-default", "Claude Default"),
+    );
+    await first;
+    await second;
+
+    expect(mockSetProvider).toHaveBeenCalledTimes(2);
+    expect(mockSetProvider).toHaveBeenLastCalledWith(
+      "session-1",
+      "gemini",
+      noRequestProviderContext,
     );
   });
 
@@ -418,6 +580,26 @@ describe("applySessionModel", () => {
     await registry.applySessionModel("session-1", "claude-fable");
 
     expect(mockSetModel).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns the acknowledged requested model when setModel omits a snapshot", async () => {
+    const registry = await importPreparedRegistry("openai", "gpt-4.1");
+    mockSetProvider.mockResolvedValueOnce(
+      modelConfigResponse("claude-sonnet", "Claude Sonnet"),
+    );
+    mockSetModel.mockResolvedValueOnce(undefined);
+
+    await expect(
+      registry.configureSession(
+        "session-1",
+        "anthropic",
+        "/project",
+        "claude-fable",
+      ),
+    ).resolves.toEqual({
+      model: { modelId: "claude-fable", modelName: "claude-fable" },
+      reasoningEffort: null,
+    });
   });
 
   it("returns the final model snapshot without provider-default fields", async () => {

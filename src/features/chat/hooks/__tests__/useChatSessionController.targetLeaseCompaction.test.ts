@@ -31,6 +31,7 @@ function deferred<T = void>() {
 }
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpPrepareSession: async (...args: unknown[]) => {
     const result = await mockAcpPrepareSession(...args);
     preparedProviderBySession.set(args[0] as string, args[1] as string);

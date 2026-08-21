@@ -5,6 +5,7 @@ import { resetSessionTargetCoordinatorsForTests } from "./sessionTargetCoordinat
 const mockAcpPrepareSession = vi.fn();
 
 vi.mock("@/shared/api/acp", () => ({
+  reserveAcpSessionConfiguration: () => ({ sequence: 0, clear: () => {} }),
   acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
 }));
 
@@ -38,7 +39,8 @@ describe("transitionSessionTarget", () => {
       "session-latest",
       "new-provider",
       "/new",
-      { modelId: "new-model" },
+      { modelId: "new-model", selectionAlreadyResolved: true },
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
   });
 
@@ -63,8 +65,10 @@ describe("transitionSessionTarget", () => {
       {
         modelId: "goose-gpt-5-6-sol",
         forceConfigRefresh: true,
+        selectionAlreadyResolved: true,
         requestId: "request-5-6",
       },
+      expect.objectContaining({ clear: expect.any(Function) }),
     );
   });
 });

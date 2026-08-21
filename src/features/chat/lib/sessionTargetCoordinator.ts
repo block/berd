@@ -1,4 +1,7 @@
-import { acpPrepareSession } from "@/shared/api/acp";
+import {
+  acpPrepareSession,
+  reserveAcpSessionConfiguration,
+} from "@/shared/api/acp";
 import type {
   AcpModelConfigSnapshot,
   AcpReasoningEffortConfigSnapshot,
@@ -61,6 +64,7 @@ interface PendingOperation {
   selectionAtRequest?: SessionTargetSelection;
   targetAtRequest?: SessionExecutionTarget;
   settled: boolean;
+  intent: ReturnType<typeof reserveAcpSessionConfiguration>;
   resolve: (outcome: SessionTargetOutcome) => void;
 }
 
@@ -268,7 +272,7 @@ async function execute(
   actor: SessionActor,
   operation: PendingOperation,
 ): Promise<void> {
-  const { request, operationId } = operation;
+  const { request, operationId, intent } = operation;
   try {
     const effective = await resolveEffectiveTarget(request.target);
     const liveTarget = useChatSessionStore
@@ -325,9 +329,10 @@ async function execute(
       throw new Error("Session execution target requires a provider boundary.");
     }
     const forceConfigRefresh =
-      request.requireReasoningEffort &&
-      !useChatSessionStore.getState().getSession(request.sessionId)
-        ?.reasoningEffort;
+      (request.requireReasoningEffort &&
+        !useChatSessionStore.getState().getSession(request.sessionId)
+          ?.reasoningEffort) ||
+      (request.target.modelId !== undefined && effective.modelId === undefined);
     const snapshot = await acpPrepareSession(
       request.sessionId,
       selection.providerId,
@@ -335,10 +340,12 @@ async function execute(
       {
         ...(selection.modelId ? { modelId: selection.modelId } : {}),
         ...(forceConfigRefresh ? { forceConfigRefresh: true } : {}),
+        selectionAlreadyResolved: true,
         ...(request.operationId || request.requestId
           ? { requestId: operationId }
           : {}),
       },
+      intent,
     );
     if (!currentOperation(actor, operation)) {
       resolveSuperseded(actor, operation);
@@ -356,11 +363,14 @@ async function execute(
       settleOperation(operation, { status: "session-missing", applied: false });
       return;
     }
-    const acknowledged =
-      !effective.modelId && snapshot?.model
-        ? (materializeSessionExecutionModel(effective, snapshot.model) ??
-          effective)
-        : effective;
+    // The ACP response is the acknowledgement of the configuration actually
+    // applied. Always reconcile from it: inventory can change between
+    // preflight resolution and preparation, and a provider reset can select a
+    // replacement model.
+    const acknowledged = snapshot?.model
+      ? (materializeSessionExecutionModel(effective, snapshot.model) ??
+        effective)
+      : effective;
     const legacyIntent = actor.selection
       ? {
           requestId: actor.selection.operationId,
@@ -441,6 +451,8 @@ async function execute(
       error,
       fallback,
     });
+  } finally {
+    intent.clear();
   }
 }
 
@@ -493,8 +505,14 @@ function requestSessionTargetTransition(
   });
   const outcome = new Promise<SessionTargetOutcome>((resolve) => {
     const previous = actor.latest;
-    if (previous && previous !== actor.current)
+    // Reserve the replacement before releasing the superseded operation. The
+    // registry atomically transfers pending ownership to this intent, so a
+    // prompt waiter can never observe an unowned A-to-B handoff.
+    const intent = reserveAcpSessionConfiguration(request.sessionId);
+    if (previous && previous !== actor.current) {
+      previous.intent.clear();
       settleOperation(previous, { status: "superseded", applied: false });
+    }
     actor.latest = {
       sequence,
       request,
@@ -502,6 +520,7 @@ function requestSessionTargetTransition(
       selectionAtRequest,
       targetAtRequest,
       settled: false,
+      intent,
       resolve,
     };
   });
@@ -1219,6 +1238,7 @@ export function transferSessionTargetOwnership(
       ),
     );
     for (const operation of pending) {
+      operation.intent.clear();
       settleOperation(operation, { status: "superseded", applied: false });
     }
     source.current = undefined;
@@ -1247,6 +1267,7 @@ export function cancelSessionTarget(sessionId: string): void {
     ),
   );
   for (const operation of pending) {
+    operation.intent.clear();
     settleOperation(operation, { status: "session-missing", applied: false });
   }
   actor.latest = undefined;
