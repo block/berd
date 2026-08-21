@@ -107,7 +107,7 @@ standing rules.*
 
 ## Topics
 
-*Additional memories can be specified in their own files in the topics
+*Additional memories can be specified in their own files in the /topics
 folder. Agents only read a topic when it's relevant.*
 `;
 
