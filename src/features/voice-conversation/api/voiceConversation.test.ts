@@ -287,7 +287,7 @@ describe("voice conversation API", () => {
     });
   });
 
-  it("forwards input mute events without mutating browser capture", async () => {
+  it("applies AirPods input mute events to browser capture", async () => {
     const callback = vi.fn();
     mocks.listen.mockImplementation(async (_name, handler) => {
       handler({
@@ -311,7 +311,7 @@ describe("voice conversation API", () => {
     });
     await listenToVoiceConversation(callback);
 
-    expect(mocks.setMicrophoneMuted).not.toHaveBeenCalledWith(true);
+    expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(true);
     expect(callback).toHaveBeenCalledWith({
       type: "inputMute",
       sessionId: "session-1",

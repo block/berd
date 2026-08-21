@@ -82,7 +82,6 @@ enum NativeVoiceEvent {
         owner_window_label: String,
         line: String,
         revision: u64,
-        native_microphone_capture: bool,
     },
     User {
         session_id: String,
@@ -472,6 +471,15 @@ pub async fn start_native_voice_conversation(
             runtime.lifecycle_id.clone().unwrap_or_default(),
         )
     };
+    let _ = webview_window.emit(
+        EVENT_NAME,
+        NativeVoiceEvent::Startup {
+            session_id: session_id.clone(),
+            owner_window_label: window_label.clone(),
+            line: "Native Parakeet voice conversation is on".to_string(),
+            revision,
+        },
+    );
     let mute_window = webview_window.clone();
     let mute_session_id = session_id.clone();
     let audio_state = state.inner().clone();
@@ -499,16 +507,6 @@ pub async fn start_native_voice_conversation(
     state
         .native_microphone_capture
         .store(native_capture_started, Ordering::Release);
-    let _ = webview_window.emit(
-        EVENT_NAME,
-        NativeVoiceEvent::Startup {
-            session_id: session_id.clone(),
-            owner_window_label: window_label.clone(),
-            line: "Native Parakeet voice conversation is on".to_string(),
-            revision,
-            native_microphone_capture: native_capture_started,
-        },
-    );
 
     let event_app = app.clone();
     let event_window = webview_window.clone();
