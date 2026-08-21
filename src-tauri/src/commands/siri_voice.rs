@@ -14,7 +14,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
 
 #[derive(Clone, Debug, Default)]
 pub struct SiriVoiceState {
@@ -35,6 +37,7 @@ struct ActiveSiriStream {
     sender: mpsc::Sender<SiriStreamCommand>,
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug)]
 enum SiriStreamCommand {
     Append(String),
@@ -43,6 +46,7 @@ enum SiriStreamCommand {
     Stop,
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 enum SiriStreamEventState {
@@ -52,6 +56,7 @@ enum SiriStreamEventState {
     Failed,
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SiriStreamEvent {
@@ -60,6 +65,7 @@ struct SiriStreamEvent {
     error: Option<String>,
 }
 
+#[cfg(target_os = "macos")]
 const SIRI_STREAM_EVENT: &str = "siri-voice:stream-event";
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
@@ -201,6 +207,7 @@ unsafe extern "C" fn should_stop_siri_playback(context: *mut std::ffi::c_void) -
     !active.load(Ordering::SeqCst)
 }
 
+#[cfg(target_os = "macos")]
 fn begin_playback(state: &SiriVoiceState) -> Result<Arc<AtomicBool>, String> {
     let mut runtime = state
         .runtime
@@ -214,6 +221,7 @@ fn begin_playback(state: &SiriVoiceState) -> Result<Arc<AtomicBool>, String> {
     Ok(token)
 }
 
+#[cfg(target_os = "macos")]
 fn finish_playback(state: &SiriVoiceState, completed: &Arc<AtomicBool>) {
     if let Ok(mut runtime) = state.runtime.lock() {
         if runtime
@@ -273,6 +281,7 @@ unsafe extern "C" fn siri_playback_started(context: *mut std::ffi::c_void) {
     );
 }
 
+#[cfg(target_os = "macos")]
 fn emit_stream_event(
     app: &AppHandle,
     stream_id: &str,
