@@ -86,43 +86,29 @@ export function toDisplayPath(path: string, homeDir: string): string {
  */
 export const ME_FILE_TEMPLATE = `# Me
 
-*This file is yours. Agents read it to learn how to work with you, and
-anything they add shows up in Settings → Memory where you can remove it.
-Italic notes like this one are just for you — agents never see them.*
+*This file is yours. Agents read it to learn how to work with you. Italic
+notes like this one are just for you — agents never see them.*
 
-*Don't add passwords or credentials here. This file is read by every agent.*
+*Don't add passwords or credentials here. This file can be read by every
+agent.*
 
 ## About me
 
-*A quick introduction, in a sentence or two — your name, your pronouns,
-where you live, what you do with your days, who and what matters to you.
-Whatever helps an agent get who it's talking to.*
-
-## How to work with me
-
-*How you like information delivered — brief or thorough, bullets or prose,
-lead with the answer or walk through the reasoning.*
+*Details you want agents to know about you in every chat.*
 
 ## Preferences
 
-*Defaults you want agents to respect — tools you use, formats you like,
-things you always want done a certain way.*
+*How you want agents to work with you. Response style, behaviors, and
+standing rules.*
 
 ## Boundaries
 
 *Things agents should always ask about first, or never do at all.*
 
-## Standing rules
-
-*Rules for every agent, every time — like "draft anything sent on my behalf
-and show me first," or "prefix messages sent for me with 🤖."*
-
 ## Topics
 
-*Deeper knowledge lives in its own topic files in the "topics" folder
-here, like "home.md" or "social.md." Agents only read a topic when it's
-relevant to what they're working on. Add one manually, or just tell your
-agent.*
+*Additional memories can be specified in their own files in the topics
+folder. Agents only read a topic when it's relevant.*
 `;
 
 export type MeFileState =
