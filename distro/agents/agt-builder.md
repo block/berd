@@ -3,8 +3,6 @@ name: Agt. Builder
 display_name: Agt. Builder
 description: Builds your agents with you, then keeps making them better.
 avatar: app-avatar:gloopies-3
-good_for: growing your cast of doers
-vibes: sharp, seasoned, a little proud
 metadata:
   berdBundled: true
 ---

@@ -3,8 +3,6 @@ name: tinker
 display_name: Tinker
 description: Knows when you need an agent, a skill, or something else entirely, then builds it.
 avatar: app-avatar:gloopies-13
-good_for: making what you need, in Berd or out
-vibes: hands-on, resourceful
 metadata:
   berdBundled: true
   berdBundledSource: tinker

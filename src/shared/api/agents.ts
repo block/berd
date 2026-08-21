@@ -2,7 +2,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type { SourceEntry, SourceScope } from "@aaif/goose-sdk";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { getClient } from "@/shared/api/acpConnection";
-import { graphemeCount } from "@/shared/lib/graphemeCount";
 import type {
   Persona,
   CreatePersonaRequest,
@@ -143,8 +142,6 @@ function personaProperties(
     properties.modelProviderId = request.modelProviderId;
   }
   if (request.model) properties.model = request.model;
-  if (request.goodFor) properties.good_for = request.goodFor;
-  if (request.vibes) properties.vibes = request.vibes;
 
   const avatar = avatarToProperty(request.avatar);
   if (avatar) properties.avatar = avatar;
@@ -278,31 +275,6 @@ function sproutFrontmatterFromProperties(
   return propertyToRecord(sprout?.frontmatter) ?? {};
 }
 
-const AGENT_CARD_METADATA_LIMITS = { good_for: 44, vibes: 32 } as const;
-
-function normalizedAgentCardMetadata(
-  value: unknown,
-  key: keyof typeof AGENT_CARD_METADATA_LIMITS,
-): string | undefined {
-  const trimmed = trimmedPropertyString(value);
-  return trimmed && graphemeCount(trimmed) <= AGENT_CARD_METADATA_LIMITS[key]
-    ? trimmed
-    : undefined;
-}
-
-function agentCardMetadataProperty(
-  properties: AgentSourceProperties | undefined,
-  key: keyof typeof AGENT_CARD_METADATA_LIMITS,
-): string | undefined {
-  return (
-    normalizedAgentCardMetadata(properties?.[key], key) ??
-    normalizedAgentCardMetadata(
-      sproutFrontmatterFromProperties(properties)[key],
-      key,
-    )
-  );
-}
-
 function serializePersonaMarkdown(source: AgentSourceEntry): ExportResult {
   const properties = source.properties;
   const name = personaExportName(source);
@@ -323,11 +295,6 @@ function serializePersonaMarkdown(source: AgentSourceEntry): ExportResult {
   const avatar = normalizeAvatarUrl(properties?.avatar);
   if (avatar) {
     frontmatter.avatar = avatar;
-  }
-
-  for (const key of ["good_for", "vibes"] as const) {
-    const value = agentCardMetadataProperty(properties, key);
-    if (value) frontmatter[key] = value;
   }
 
   Object.assign(
@@ -525,14 +492,8 @@ function sanitizedNativeAgentImport(parsed: Record<string, unknown>): {
   const sanitizedMetadata = metadata ? { ...metadata } : undefined;
   const metadataFrontmatter = propertyToRecord(metadata?.frontmatter);
   for (const key of ["good_for", "vibes"] as const) {
-    const value =
-      normalizedAgentCardMetadata(sanitizedProperties[key], key) ??
-      normalizedAgentCardMetadata(metadataFrontmatter?.[key], key);
-    if (value) sanitizedProperties[key] = value;
-    else delete sanitizedProperties[key];
-    if (metadataFrontmatter && key in metadataFrontmatter) {
-      delete metadataFrontmatter[key];
-    }
+    delete sanitizedProperties[key];
+    if (metadataFrontmatter) delete metadataFrontmatter[key];
   }
   if (sanitizedMetadata && metadataFrontmatter) {
     if (hasEntries(metadataFrontmatter)) {
@@ -582,10 +543,6 @@ function personaMarkdownProperties(
   if (model) {
     applyPersonaModelProperty(properties, model);
   }
-  const goodFor = normalizedAgentCardMetadata(parsed.good_for, "good_for");
-  const vibes = normalizedAgentCardMetadata(parsed.vibes, "vibes");
-  if (goodFor) properties.good_for = goodFor;
-  if (vibes) properties.vibes = vibes;
   applyOptionalProperty(
     properties,
     "avatar",
@@ -701,12 +658,6 @@ export function agentSourceToPersona(source: AgentSourceEntry): Persona {
     isBuiltin: !writable,
     writable,
     sourceDescription: source.description,
-    ...(agentCardMetadataProperty(source.properties, "good_for")
-      ? { goodFor: agentCardMetadataProperty(source.properties, "good_for") }
-      : {}),
-    ...(agentCardMetadataProperty(source.properties, "vibes")
-      ? { vibes: agentCardMetadataProperty(source.properties, "vibes") }
-      : {}),
     sourceProperties: source.properties ? { ...source.properties } : undefined,
   };
 }
@@ -1023,8 +974,6 @@ export interface PersonaImportPreview {
   displayName: string;
   description?: string;
   systemPrompt: string;
-  goodFor?: string;
-  vibes?: string;
   /** Only local/data-backed media is safe to render before import consent. */
   avatar?: string;
   identity: string;
@@ -1060,8 +1009,6 @@ export function previewPersonaImport(
       displayName: request.name,
       description: previewDescription(request.description),
       systemPrompt: request.content,
-      goodFor: agentCardMetadataProperty(request.properties, "good_for"),
-      vibes: agentCardMetadataProperty(request.properties, "vibes"),
       avatar: previewSafeAvatar(request.properties.avatar),
       identity: fileName,
     };
@@ -1080,18 +1027,12 @@ export function previewPersonaImport(
     if (!displayName || !systemPrompt) {
       throw new Error("Agent JSON must include a name and instructions");
     }
-    const cardProperties: AgentSourceProperties = {
-      ...(properties ?? {}),
-      ...(propertyToRecord(metadata?.frontmatter) ? { sprout: metadata } : {}),
-    };
     return {
       displayName,
       description: previewDescription(
         parsed.description ?? metadata?.description,
       ),
       systemPrompt,
-      goodFor: agentCardMetadataProperty(cardProperties, "good_for"),
-      vibes: agentCardMetadataProperty(cardProperties, "vibes"),
       avatar: previewSafeAvatar(
         legacyAvatarToProperty(properties?.avatar) ??
           legacyAvatarToProperty(metadata?.avatar),

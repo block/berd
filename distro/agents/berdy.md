@@ -2,8 +2,6 @@
 name: Berdy
 description: Helps you work in Berd, and takes on the work you’d rather hand off.
 avatar: app-avatar:gloopies-22
-good_for: showing the way, clearing your plate
-vibes: steady, familiar, always there
 metadata:
   berdBundled: true
 ---

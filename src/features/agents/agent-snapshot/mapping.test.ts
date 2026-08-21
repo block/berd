@@ -123,8 +123,6 @@ describe("snapshot mappings", () => {
       profile: {
         displayName: "Builder",
         about: null,
-        goodFor: null,
-        vibes: null,
         avatarDataUrl: null,
         avatarUrl: null,
       },
@@ -176,42 +174,18 @@ describe("snapshot mappings", () => {
     );
   });
 
-  it("round-trips grapheme-bounded Unicode share-card metadata", () => {
-    const goodFor = "👨‍👩‍👧‍👦".repeat(44);
-    const vibes = "😀".repeat(32);
-    const exported = personaToSnapshot(persona({ goodFor, vibes }));
-    expect(snapshotToCreatePersonaRequest(exported)).toMatchObject({
-      goodFor,
-      vibes,
-    });
-  });
-
-  it.each([
-    [{ legacy: true }, ["calm"]],
-    ["x".repeat(4_097), "y".repeat(4_097)],
-    ["😀".repeat(45), "😀".repeat(33)],
-  ])("ignores incompatible v1 card metadata without rejecting the snapshot", (goodFor, vibes) => {
+  it("ignores legacy trait metadata without rejecting the snapshot", () => {
     const value = snapshot({
       profile: {
         displayName: "Display name",
-        goodFor: goodFor as string,
-        vibes: vibes as string,
+        goodFor: "legacy purpose",
+        vibes: "legacy tone",
       },
     });
 
     expect(snapshotToCreatePersonaRequest(value)).not.toMatchObject({
       goodFor: expect.anything(),
       vibes: expect.anything(),
-    });
-  });
-
-  it("round-trips short share-card metadata", () => {
-    const exported = personaToSnapshot(
-      persona({ goodFor: "building useful tools", vibes: "sharp, practical" }),
-    );
-    expect(snapshotToCreatePersonaRequest(exported)).toMatchObject({
-      goodFor: "building useful tools",
-      vibes: "sharp, practical",
     });
   });
 

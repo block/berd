@@ -19,9 +19,6 @@ export interface Persona {
   isBuiltin: boolean;
   writable: boolean;
   sourceDescription?: string;
-  /** Optional share-card copy sourced from agent frontmatter. */
-  goodFor?: string;
-  vibes?: string;
   sourceProperties?: Record<string, unknown>;
   createdAt?: string;
   updatedAt?: string;
@@ -32,8 +29,6 @@ export interface CreatePersonaRequest {
   description?: string;
   avatar?: Avatar | null;
   systemPrompt: string;
-  goodFor?: string;
-  vibes?: string;
   provider?: ProviderType;
   modelProviderId?: string;
   model?: string;
