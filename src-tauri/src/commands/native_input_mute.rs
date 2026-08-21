@@ -3,17 +3,15 @@ use std::sync::{
     Arc,
 };
 
-pub fn start<F, A, C>(
+pub fn start<F, A>(
     input_muted: &Arc<AtomicBool>,
     mute_epoch: &Arc<AtomicU64>,
     on_change: F,
     on_audio: A,
-    on_capture_state: C,
 ) -> bool
 where
     F: Fn(bool) + Send + Sync + 'static,
     A: Fn(&[f32]) + Send + Sync + 'static,
-    C: Fn(bool) + Send + Sync + 'static,
 {
     clear(input_muted, mute_epoch);
 
@@ -23,7 +21,6 @@ where
         Arc::clone(mute_epoch),
         Arc::new(on_change),
         Arc::new(on_audio),
-        Arc::new(on_capture_state),
     ) {
         Ok(()) => true,
         Err(error) => {
@@ -34,7 +31,7 @@ where
 
     #[cfg(not(target_os = "macos"))]
     let started = {
-        let _ = (on_change, on_audio, on_capture_state);
+        let _ = (on_change, on_audio);
         false
     };
 
@@ -97,14 +94,12 @@ mod macos {
 
     type MuteChangeHandler = Arc<dyn Fn(bool) + Send + Sync>;
     type AudioInputHandler = Arc<dyn Fn(&[f32]) + Send + Sync>;
-    type CaptureStateHandler = Arc<dyn Fn(bool) + Send + Sync>;
 
     struct CallbackState {
         input_muted: Arc<AtomicBool>,
         mute_epoch: Arc<AtomicU64>,
         on_change: MuteChangeHandler,
         on_audio: AudioInputHandler,
-        on_capture_state: CaptureStateHandler,
     }
 
     static CALLBACK_STATE: OnceLock<Mutex<Option<CallbackState>>> = OnceLock::new();
@@ -117,7 +112,6 @@ mod macos {
         fn berd_airpods_mute_start(
             callback: extern "C" fn(bool),
             audio_callback: extern "C" fn(*const f32, usize),
-            capture_state_callback: extern "C" fn(bool),
         ) -> bool;
         fn berd_airpods_mute_stop() -> bool;
         fn berd_airpods_mute_set_muted(muted: bool) -> bool;
@@ -155,25 +149,11 @@ mod macos {
         callback(samples);
     }
 
-    extern "C" fn handle_capture_state_change(available: bool) {
-        let callback = {
-            let Ok(state) = callback_state().lock() else {
-                return;
-            };
-            let Some(state) = state.as_ref() else {
-                return;
-            };
-            Arc::clone(&state.on_capture_state)
-        };
-        callback(available);
-    }
-
     pub fn install(
         input_muted: Arc<AtomicBool>,
         mute_epoch: Arc<AtomicU64>,
         on_change: MuteChangeHandler,
         on_audio: AudioInputHandler,
-        on_capture_state: CaptureStateHandler,
     ) -> Result<(), String> {
         *callback_state()
             .lock()
@@ -183,17 +163,10 @@ mod macos {
                 mute_epoch,
                 on_change,
                 on_audio,
-                on_capture_state,
             });
         // SAFETY: The Swift shim retains the callback and AVAudioEngine for its
         // process-wide lifecycle and invokes it with a C-compatible boolean.
-        if !unsafe {
-            berd_airpods_mute_start(
-                handle_input_mute_change,
-                handle_audio_input,
-                handle_capture_state_change,
-            )
-        } {
+        if !unsafe { berd_airpods_mute_start(handle_input_mute_change, handle_audio_input) } {
             callback_state()
                 .lock()
                 .map_err(|_| "input mute callback lock was poisoned".to_string())?

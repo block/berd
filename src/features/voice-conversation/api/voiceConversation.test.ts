@@ -171,7 +171,6 @@ describe("voice conversation API", () => {
       ownerWindowLabel: "main",
       revision: 3,
       nativeMicrophoneCapture: true,
-      nativeMicrophoneMuteControl: true,
     } as const;
     mocks.invoke.mockResolvedValue(undefined);
 
@@ -180,8 +179,6 @@ describe("voice conversation API", () => {
 
     expect(mocks.startMicrophone).not.toHaveBeenCalled();
     expect(mocks.invoke).toHaveBeenCalledWith("set_native_voice_input_muted", {
-      sessionId: "session-1",
-      revision: 3,
       muted: true,
     });
   });
@@ -209,60 +206,6 @@ describe("voice conversation API", () => {
       [true],
       [false],
     ]);
-    expect(mocks.invoke).not.toHaveBeenCalled();
-  });
-
-  it("preserves UI mute when native capture recovers from browser fallback", async () => {
-    const fallbackStatus = {
-      available: true,
-      unavailableReason: null,
-      lifecycle: "running",
-      sessionId: "session-1",
-      ownerWindowLabel: "main",
-      revision: 3,
-      nativeMicrophoneCapture: false,
-      nativeMicrophoneMuteControl: true,
-    } as const;
-    const recoveredStatus = {
-      ...fallbackStatus,
-      nativeMicrophoneCapture: true,
-    } as const;
-    mocks.invoke.mockResolvedValue(undefined);
-
-    await reconcileVoiceConversationMicrophone(fallbackStatus);
-    await setVoiceConversationMicrophoneMuted(true, fallbackStatus);
-    expect(mocks.invoke).toHaveBeenCalledTimes(1);
-    expect(mocks.invoke).toHaveBeenLastCalledWith(
-      "set_native_voice_input_muted",
-      {
-        sessionId: "session-1",
-        revision: 3,
-        muted: true,
-      },
-    );
-    await reconcileVoiceConversationMicrophone(recoveredStatus);
-
-    expect(mocks.invoke).toHaveBeenCalledTimes(2);
-    expect(mocks.stopMicrophone).toHaveBeenCalledOnce();
-  });
-
-  it("does not change native mute when browser fallback cannot start", async () => {
-    const fallbackStatus = {
-      available: true,
-      unavailableReason: null,
-      lifecycle: "running",
-      sessionId: "session-1",
-      ownerWindowLabel: "main",
-      revision: 3,
-      nativeMicrophoneCapture: false,
-      nativeMicrophoneMuteControl: true,
-    } as const;
-    mocks.startMicrophone.mockRejectedValueOnce(new Error("capture failed"));
-
-    await expect(
-      setVoiceConversationMicrophoneMuted(true, fallbackStatus),
-    ).rejects.toThrow("capture failed");
-
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 

@@ -24,7 +24,7 @@ import {
   createVoiceRouteMountRegistry,
   createVoiceTranscriptDeliveryQueue,
   hasDeliveredVoiceTranscript,
-  notifyInputMuteChanged,
+  notifyAirPodsInputMuteGesture,
   resetVoiceUiWhenRunSettles,
   resolveVoiceRouteMount,
   resolveVoiceToggleAction,
@@ -36,16 +36,18 @@ import {
 } from "./useVoiceConversationController";
 
 describe("voice transcript delivery coordination", () => {
-  it("shows an unmistakable input mute confirmation", () => {
-    notifyInputMuteChanged(true);
-    expect(toastMocks.message).toHaveBeenCalledWith("Microphone muted", {
-      id: "voice-input-mute",
-    });
+  it("shows an unmistakable AirPods gesture confirmation", () => {
+    notifyAirPodsInputMuteGesture(true);
+    expect(toastMocks.message).toHaveBeenCalledWith(
+      "AirPods gesture detected — microphone muted",
+      { id: "airpods-input-mute" },
+    );
 
-    notifyInputMuteChanged(false);
-    expect(toastMocks.message).toHaveBeenLastCalledWith("Microphone unmuted", {
-      id: "voice-input-mute",
-    });
+    notifyAirPodsInputMuteGesture(false);
+    expect(toastMocks.message).toHaveBeenLastCalledWith(
+      "AirPods gesture detected — microphone unmuted",
+      { id: "airpods-input-mute" },
+    );
   });
 
   it("recognizes a replayed transcript that was already delivered", () => {

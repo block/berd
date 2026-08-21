@@ -50,18 +50,6 @@ export async function reconcileVoiceConversationMicrophone(
   status: VoiceConversationStatus,
 ): Promise<void> {
   if (status.nativeMicrophoneCapture) {
-    const fallbackWasActive =
-      activeMicrophone !== null || microphoneStart !== null;
-    if (fallbackWasActive) {
-      if (!status.sessionId) {
-        throw new Error("Native voice microphone has no active session.");
-      }
-      await invoke("set_native_voice_input_muted", {
-        sessionId: status.sessionId,
-        revision: status.revision,
-        muted: microphoneMuted,
-      });
-    }
     stopActiveMicrophone();
     return;
   }
@@ -82,21 +70,9 @@ export async function setVoiceConversationMicrophoneMuted(
   const previous = microphoneMuted;
   microphoneMuted = muted;
   try {
-    if (status.nativeMicrophoneMuteControl) {
-      if (!status.nativeMicrophoneCapture) {
-        await reconcileVoiceConversationMicrophone(status);
-      }
-      if (!status.sessionId) {
-        throw new Error("Native voice microphone has no active session.");
-      }
-      await invoke("set_native_voice_input_muted", {
-        sessionId: status.sessionId,
-        revision: status.revision,
-        muted,
-      });
-      if (status.nativeMicrophoneCapture) {
-        stopActiveMicrophone();
-      }
+    if (status.nativeMicrophoneCapture) {
+      await invoke("set_native_voice_input_muted", { muted });
+      stopActiveMicrophone();
       return;
     }
     await reconcileVoiceConversationMicrophone(status);
@@ -105,13 +81,6 @@ export async function setVoiceConversationMicrophoneMuted(
     activeMicrophone?.setMuted(previous);
     throw error;
   }
-}
-
-export function applyVoiceConversationMicrophoneMuteEvent(
-  muted: boolean,
-): void {
-  microphoneMuted = muted;
-  activeMicrophone?.setMuted(muted);
 }
 
 export function stopActiveMicrophoneForTest(): void {
@@ -151,8 +120,6 @@ export interface VoiceConversationStatus {
   revision: number;
   /** The backend owns the PCM stream so device gestures reach that process. */
   nativeMicrophoneCapture?: boolean;
-  /** The process-wide native mute bridge remains usable during route recovery. */
-  nativeMicrophoneMuteControl?: boolean;
 }
 
 export type VoiceConversationEvent =
@@ -163,7 +130,6 @@ export type VoiceConversationEvent =
       line: string;
       revision: number;
       nativeMicrophoneCapture: boolean;
-      nativeMicrophoneMuteControl: boolean;
     }
   | {
       type: "user";
@@ -188,12 +154,6 @@ export type VoiceConversationEvent =
       type: "inputMute";
       sessionId: string;
       muted: boolean;
-      revision: number;
-    }
-  | {
-      type: "nativeMicrophoneCapture";
-      sessionId: string;
-      available: boolean;
       revision: number;
     }
   | {

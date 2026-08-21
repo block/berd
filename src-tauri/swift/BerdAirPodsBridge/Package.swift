@@ -13,12 +13,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "BerdObjCExceptionCatch",
-            publicHeadersPath: "include"
-        ),
-        .target(
             name: "BerdAirPodsBridge",
-            dependencies: ["BerdObjCExceptionCatch"],
             linkerSettings: [.linkedFramework("AVFAudio")]
         )
     ]
