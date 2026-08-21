@@ -2,7 +2,8 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { RefreshCw } from "lucide-react";
+import { ChevronDown, RefreshCw } from "lucide-react";
+import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Textarea } from "@/shared/ui/textarea";
@@ -19,6 +20,7 @@ import { StorePathLink } from "./StorePathLink";
 import {
   createMeFile,
   loadMeFile,
+  ME_FILE_TEMPLATE,
   saveMeFile,
   type MeFileState,
 } from "../lib/meFile";
@@ -110,10 +112,12 @@ function DocumentPanel({
       <div className="flex items-center justify-end">
         <Tabs value={mode} onValueChange={handleModeChange}>
           <TabsList variant="buttons">
-            <TabsTrigger value="preview" variant="buttons">
+            {/* h-7 matches the xs Button height used by every other action
+                on this page (Add topic, View, Refresh). */}
+            <TabsTrigger value="preview" variant="buttons" className="h-7">
               {previewText}
             </TabsTrigger>
-            <TabsTrigger value="edit" variant="buttons">
+            <TabsTrigger value="edit" variant="buttons" className="h-7">
               {editText}
             </TabsTrigger>
           </TabsList>
@@ -130,7 +134,7 @@ function DocumentPanel({
           className="min-h-[360px] resize-y bg-background"
         />
       ) : (
-        <article className="prose prose-sm dark:prose-invert max-w-none rounded-md border bg-muted/50 px-4 py-4 text-xs prose-p:text-xs prose-li:text-xs prose-headings:font-medium prose-h1:text-sm prose-h2:text-xs prose-h2:uppercase prose-h2:tracking-wide prose-h3:text-xs prose-em:text-muted-foreground">
+        <article className="prose prose-sm dark:prose-invert max-w-none rounded-md border bg-muted/50 px-4 py-4 text-xs prose-p:text-xs prose-p:my-4 prose-li:text-xs prose-ul:pl-4 prose-headings:font-medium prose-headings:mb-1 prose-h1:text-sm prose-h2:text-xs prose-h2:mt-6 prose-h3:text-xs prose-h3:mt-5 prose-em:text-muted-foreground prose-li:marker:text-[color:inherit] [&_h1+p]:mt-1 [&_h2+p]:mt-1 [&_h3+p]:mt-1 [&_h1+ul]:mt-1 [&_h2+ul]:mt-1 [&_h3+ul]:mt-1">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{contents}</ReactMarkdown>
         </article>
       )}
@@ -238,14 +242,6 @@ export function MeSettings() {
       });
   }, [memoryEnabled, state.status]);
 
-  const handleCreate = async () => {
-    try {
-      setState(await createMeFile());
-    } catch {
-      setState({ status: "error" });
-    }
-  };
-
   const handleAcknowledgeAdded = async (entry: AddedMemoryEntry) => {
     await acknowledgeAdded(entry);
   };
@@ -322,9 +318,7 @@ export function MeSettings() {
   return (
     <SettingsPage title={t("me.title")}>
       <SettingsSections>
-        <SettingsSection
-          className={memoryEnabled ? "border-b border-border" : undefined}
-        >
+        <SettingsSection>
           <SettingsRow
             label={t("me.toggle.label")}
             description={
@@ -413,7 +407,10 @@ export function MeSettings() {
         {memoryEnabled && (
           <>
             <SettingsSection title={t("me.spineTitle")}>
-              <div className="space-y-3">
+              {/* space-y-11 matches the 44px rhythm between settings sections,
+                  giving the document block clear separation from the
+                  About you description. */}
+              <div className="space-y-11">
                 <p className="text-xs text-muted-foreground">
                   {t("me.description")}
                 </p>
@@ -424,25 +421,33 @@ export function MeSettings() {
                   </p>
                 )}
 
+                {/* No file yet just means the starter template hasn't been
+                    written to disk — show it as the document, and the first
+                    save creates the file. */}
                 {state.status === "missing" && (
-                  <div className="flex items-center justify-between gap-4 rounded-md border bg-muted/50 px-4 py-3">
-                    <p className="text-xs text-muted-foreground">
-                      {t("me.emptyHint")}
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="shrink-0"
-                      onClick={() => void handleCreate()}
-                    >
-                      {t("me.create")}
-                    </Button>
-                  </div>
+                  <DocumentPanel
+                    contents={ME_FILE_TEMPLATE}
+                    // One write, one publish: seeding with createMeFile first
+                    // would race its template publication against this save's
+                    // publication of the user's content.
+                    onSave={async (next) => {
+                      await saveMeFile(state.path, next);
+                      await refresh();
+                    }}
+                    refreshLabel={t("me.refresh")}
+                    onRefresh={() => void refresh()}
+                    {...docStrings}
+                  />
                 )}
 
                 {state.status === "present" && (
                   <DocumentPanel
-                    contents={state.contents}
+                    // A file emptied by hand is the same story as no file
+                    // yet: show the starter template rather than a blank
+                    // card, and the next save writes it for real.
+                    contents={
+                      state.contents.trim() ? state.contents : ME_FILE_TEMPLATE
+                    }
                     onSave={async (next) => {
                       await saveMeFile(state.path, next);
                       await refresh();
@@ -456,26 +461,26 @@ export function MeSettings() {
             </SettingsSection>
 
             <SettingsSection title={t("me.topicsTitle")}>
-              {/* pr-4 matches SettingsRow's own right padding, so Add topic
-                  lines up with the View buttons in the rows below it. */}
-              <div className="flex items-start justify-between gap-4 border-b border-border pr-4 pb-3">
-                <p className="text-xs text-muted-foreground">
-                  {t("me.topicsHint")}
-                </p>
-                {!creatingTopic && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0"
-                    onClick={() => setCreatingTopic(true)}
-                  >
-                    {t("me.addTopic")}
-                  </Button>
-                )}
-              </div>
+              <SettingsRow
+                label={t("me.addTopic")}
+                description={t("me.topicsHint")}
+                className="border-b border-border"
+                action={
+                  !creatingTopic ? (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      className="shrink-0"
+                      onClick={() => setCreatingTopic(true)}
+                    >
+                      {t("me.addTopicAction")}
+                    </Button>
+                  ) : undefined
+                }
+              />
 
               {topics.length === 0 && !creatingTopic && (
-                <p className="py-3 text-sm text-muted-foreground">
+                <p className="pt-6 pb-3 text-xs text-muted-foreground">
                   {t("me.noTopics")}
                 </p>
               )}
@@ -485,31 +490,52 @@ export function MeSettings() {
                   key={topic.path}
                   label={topic.label}
                   description={topic.description ?? topic.fileName}
+                  // The whole row toggles the topic open; the chevron is the
+                  // keyboard-accessible control and stops propagation so the
+                  // row handler doesn't double-toggle.
+                  className="cursor-pointer"
+                  onClick={() =>
+                    setOpenTopic(openTopic === topic.path ? null : topic.path)
+                  }
                   action={
                     <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-expanded={openTopic === topic.path}
+                      aria-label={
+                        openTopic === topic.path
+                          ? t("me.closeTopic")
+                          : t("me.openTopic")
+                      }
+                      onClick={(event) => {
+                        event.stopPropagation();
                         setOpenTopic(
                           openTopic === topic.path ? null : topic.path,
-                        )
-                      }
+                        );
+                      }}
                     >
-                      {openTopic === topic.path
-                        ? t("me.closeTopic")
-                        : t("me.openTopic")}
+                      <ChevronDown
+                        aria-hidden="true"
+                        className={cn(openTopic === topic.path && "rotate-180")}
+                      />
                     </Button>
                   }
                   details={
                     openTopic === topic.path ? (
-                      <DocumentPanel
-                        contents={topic.contents}
-                        onSave={async (next) => {
-                          await saveTopic(topic.path, next);
-                          await refresh();
-                        }}
-                        {...docStrings}
-                      />
+                      // Interacting with the open document must not collapse
+                      // the row.
+                      // biome-ignore lint/a11y/noStaticElementInteractions: propagation guard, not an interactive control
+                      // biome-ignore lint/a11y/useKeyWithClickEvents: propagation guard only; keyboard events don't bubble a click
+                      <div onClick={(event) => event.stopPropagation()}>
+                        <DocumentPanel
+                          contents={topic.contents}
+                          onSave={async (next) => {
+                            await saveTopic(topic.path, next);
+                            await refresh();
+                          }}
+                          {...docStrings}
+                        />
+                      </div>
                     ) : undefined
                   }
                 />
@@ -517,7 +543,11 @@ export function MeSettings() {
 
               {creatingTopic && (
                 <SettingsRow
-                  label={t("me.newTopicDescription")}
+                  label={
+                    <span className="text-xs text-muted-foreground">
+                      {t("me.newTopicDescription")}
+                    </span>
+                  }
                   action={
                     <div className="flex items-center gap-2">
                       <Input

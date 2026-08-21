@@ -410,6 +410,7 @@
   },
   "me": {
     "addTopic": "Añadir tema",
+    "addTopicAction": "Añadir",
     "added": {
       "delete": "Eliminar",
       "description": "Berd agregó esto desde tus chats recientes. Elimina lo que prefieras que no guarde.",

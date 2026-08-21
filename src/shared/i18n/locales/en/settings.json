@@ -410,6 +410,7 @@
   },
   "me": {
     "addTopic": "Add topic",
+    "addTopicAction": "Add",
     "added": {
       "delete": "Delete",
       "description": "Berd added these from your recent chats. Delete anything you'd rather it not keep.",
