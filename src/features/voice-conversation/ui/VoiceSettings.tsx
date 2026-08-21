@@ -1,7 +1,7 @@
+import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { getPlatform } from "@/shared/lib/platform";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
-import { SettingsRow } from "@/shared/ui/settings-row";
 import {
   Select,
   SelectContent,
@@ -13,7 +13,7 @@ import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
 import { useSiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
 import { useVoiceOutputPreference } from "../lib/voiceOutputPreference";
-import { PocketVoiceSetupContent } from "./PocketVoiceSetupDialog";
+import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
 import { SiriVoiceSettings } from "./SiriVoiceSettings";
 
 export function VoiceSettings() {
@@ -22,6 +22,8 @@ export function VoiceSettings() {
   const output = useVoiceOutputPreference();
   const siriSetup = useSiriVoiceSetup(output.backend === "siri");
   const siriSupported = getPlatform() === "mac";
+  const outputHeadingId = useId();
+  const outputDescriptionId = useId();
 
   return (
     <SettingsPage
@@ -39,18 +41,29 @@ export function VoiceSettings() {
         />
       </section>
       <section className="space-y-2 overflow-hidden">
-        <h2 className="text-sm font-medium">{t("voice.speechOutput")}</h2>
-        <SettingsRow
-          label={t("voice.outputBackend")}
-          description={t("voice.outputBackendDescription")}
-          action={
+        <div className="flex min-w-0 items-center gap-4 py-4 pr-4">
+          <div className="min-w-0 flex-1">
+            <h2 id={outputHeadingId} className="text-sm font-medium">
+              {t("voice.speechOutput")}
+            </h2>
+            <p
+              id={outputDescriptionId}
+              className="mt-0.5 text-xs text-muted-foreground"
+            >
+              {t("voice.outputBackendDescription")}
+            </p>
+          </div>
+          <div className="min-w-0 shrink-0">
             <Select
               value={output.backend}
               onValueChange={(value) =>
                 output.setBackend(value as VoiceOutputBackend)
               }
             >
-              <SelectTrigger aria-label={t("voice.outputBackend")}>
+              <SelectTrigger
+                aria-labelledby={outputHeadingId}
+                aria-describedby={outputDescriptionId}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -62,8 +75,8 @@ export function VoiceSettings() {
                 ) : null}
               </SelectContent>
             </Select>
-          }
-        />
+          </div>
+        </div>
         {output.backend === "siri" ? (
           <SiriVoiceSettings setup={siriSetup} />
         ) : (

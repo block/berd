@@ -31,6 +31,7 @@ import {
 } from "@/features/settings/ui/settingsSections";
 import {
   OPEN_SETTINGS_EVENT,
+  requestOpenSettings,
   type AgentBuilderProviderSetupReturnTarget,
   type OpenSettingsEventDetail,
 } from "@/features/settings/lib/settingsEvents";
@@ -226,15 +227,8 @@ import { useOnboardingState } from "@/features/onboarding/model";
 import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
-import { PocketVoiceSetupDialog } from "@/features/voice-conversation/ui/PocketVoiceSetupDialog";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
 import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
-import {
-  cancelPendingVoiceStart,
-  continuePendingVoiceStart,
-  deferPendingVoiceStart,
-  type DeferredPendingVoiceStart,
-} from "@/features/voice-conversation/lib/pendingVoiceStart";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
@@ -726,10 +720,6 @@ export function AppShell({
     globalSiriVoiceSetup.status,
     globalVoiceOutput.backend,
   );
-  const [globalPocketVoiceSetupOpen, setGlobalPocketVoiceSetupOpen] =
-    useState(false);
-  const pendingGlobalVoiceStartRef =
-    useRef<DeferredPendingVoiceStart<GlobalComposerExpandPayload> | null>(null);
   const voiceConversationWasEnabledRef = useRef(capabilities.voiceConversation);
   useEffect(() => {
     const wasEnabled = voiceConversationWasEnabledRef.current;
@@ -745,8 +735,6 @@ export function AppShell({
     // The native process survives renderer reloads and may be owned by another
     // window, so an explicit on-to-off transition must clean up active use.
     // Mounting with the experiment already off performs no Voice native work.
-    cancelPendingVoiceStart(pendingGlobalVoiceStartRef);
-    setGlobalPocketVoiceSetupOpen(false);
     void stopVoiceConversation().catch(() => undefined);
   }, [capabilities.voiceConversation, stopVoiceConversation]);
   const sessions = useChatSessionStore(selectSessions);
@@ -3213,18 +3201,11 @@ export function AppShell({
   );
 
   const handleGlobalVoiceConversationStart = useCallback(
-    (
-      payload: GlobalComposerExpandPayload,
-      setupComplete = false,
-    ): Promise<boolean> => {
+    (payload: GlobalComposerExpandPayload): Promise<boolean> => {
       if (!capabilities.voiceConversation) return Promise.resolve(false);
-      if (!setupComplete && !globalVoiceReady) {
-        const pending = deferPendingVoiceStart(
-          pendingGlobalVoiceStartRef,
-          payload,
-        );
-        setGlobalPocketVoiceSetupOpen(true);
-        return pending;
+      if (!globalVoiceReady) {
+        requestOpenSettings("voice");
+        return Promise.resolve(false);
       }
 
       const options = payload.options;
@@ -3319,22 +3300,6 @@ export function AppShell({
       t,
     ],
   );
-  const handleGlobalPocketVoiceSetupOpenChange = useCallback(
-    (open: boolean) => {
-      if (!open) {
-        cancelPendingVoiceStart(pendingGlobalVoiceStartRef);
-      }
-      setGlobalPocketVoiceSetupOpen(open);
-    },
-    [],
-  );
-  const handleGlobalPocketVoiceUseSelected = useCallback(() => {
-    setGlobalPocketVoiceSetupOpen(false);
-    void continuePendingVoiceStart(pendingGlobalVoiceStartRef, (payload) =>
-      handleGlobalVoiceConversationStart(payload, true),
-    );
-  }, [handleGlobalVoiceConversationStart]);
-
   const handleStartConnectionSetupChat = useCallback(
     (request: SetupChatRequest) => {
       guardAppNavigation(() => {
@@ -5325,15 +5290,6 @@ export function AppShell({
           </StarterTasksProvider>
         )}
       </AppShellLayout>
-      <PocketVoiceSetupDialog
-        open={globalPocketVoiceSetupOpen}
-        onOpenChange={handleGlobalPocketVoiceSetupOpenChange}
-        onUseSelected={handleGlobalPocketVoiceUseSelected}
-        setup={globalPocketVoiceSetup}
-        siriSetup={globalSiriVoiceSetup}
-        backend={globalVoiceOutput.backend}
-        onBackendChange={globalVoiceOutput.setBackend}
-      />
       <SessionWorkspaceCleanupDialog
         open={Boolean(pendingWorkspaceCleanupConfirmation)}
         worktreeCount={pendingWorkspaceCleanupConfirmation?.worktreeCount ?? 0}

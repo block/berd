@@ -870,7 +870,6 @@
   "voice": {
     "backendPocket": "Pocket TTS",
     "backendSiri": "Voces de Siri (macOS)",
-    "description": "Instala el reconocimiento de voz y elige cómo habla Berd durante la conversación por voz.",
     "download": "Descargar modelo",
     "downloadVoice": "Descargar {{voice}}",
     "downloadingVoice": "Descargando {{voice}}",
@@ -887,8 +886,6 @@
     "modelInstalledSize": "Instalado · {{size}} en disco",
     "modelMissingSize": "No instalado · descarga de {{size}}",
     "modelNotInstalled": "No instalado",
-    "notNow": "Ahora no",
-    "outputBackend": "Motor de voz",
     "outputBackendDescription": "Elige cómo Berd reproduce las respuestas del asistente.",
     "playbackSpeed": "Velocidad de reproducción",
     "playing": "Reproduciendo",
@@ -914,9 +911,7 @@
     "siriUseVoice": "Usar voz",
     "speechInput": "Entrada de voz",
     "speechOutput": "Salida de voz",
-    "title": "Conversación por voz",
     "selectedVoice": "Voz seleccionada: {{voice}}",
-    "useSelected": "Usar la voz seleccionada",
     "useVoice": "Usar {{voice}}",
     "voiceLabel": "Voz de Pocket TTS"
   }

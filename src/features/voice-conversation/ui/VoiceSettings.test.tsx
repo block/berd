@@ -29,6 +29,46 @@ function setup(status: PocketVoiceStatus): PocketVoiceSetup {
 }
 
 describe("VoiceSettings", () => {
+  it("uses one accessible speech output heading for the backend picker", () => {
+    setupState.current = setup({
+      statusRevision: 0,
+      installed: false,
+      pocketInstalled: false,
+      parakeetInstalled: false,
+      pocketSizeBytes: null,
+      parakeetSizeBytes: null,
+      pocketDownloadBytes: 0,
+      parakeetDownloadBytes: 0,
+      downloading: false,
+      activeModel: null,
+      pocketAttemptId: null,
+      parakeetAttemptId: null,
+      pocketProgress: null,
+      parakeetProgress: null,
+      pocketError: null,
+      parakeetError: null,
+      removing: null,
+      removalQueued: false,
+      downloadedBytes: 0,
+      totalBytes: 0,
+      error: null,
+      selectedVoice: "mary",
+      playbackSpeed: 1,
+      voices: [],
+    });
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByRole("heading", { name: "Speech output" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Speech engine")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Speech output" }),
+    ).toHaveAccessibleDescription(
+      "Choose how Berd speaks assistant responses.",
+    );
+  });
+
   it("keeps the Voice settings page open while Parakeet completes in place", () => {
     const missing: PocketVoiceStatus = {
       statusRevision: 4,

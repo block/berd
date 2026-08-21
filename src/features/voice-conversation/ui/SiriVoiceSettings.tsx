@@ -15,29 +15,20 @@ import {
 
 const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 
-function localeLabel(locale: string): string {
+function localeLabel(locale: string, displayLocale?: string): string {
   try {
     return (
-      new Intl.DisplayNames(undefined, { type: "language" }).of(locale) ??
-      locale
+      new Intl.DisplayNames(displayLocale ? [displayLocale] : undefined, {
+        type: "language",
+        languageDisplay: "standard",
+      }).of(locale) ?? locale
     );
   } catch {
     return locale;
   }
 }
 
-function languageLabel(language: string): string {
-  try {
-    return (
-      new Intl.DisplayNames(undefined, { type: "language" }).of(language) ??
-      language
-    );
-  } catch {
-    return language;
-  }
-}
-
-function groupVoicesByLocale(voices: SiriVoice[]) {
+function groupVoicesByLocale(voices: SiriVoice[], displayLocale?: string) {
   const groups = new Map<string, SiriVoice[]>();
   for (const voice of voices) {
     groups.set(voice.language, [...(groups.get(voice.language) ?? []), voice]);
@@ -48,7 +39,9 @@ function groupVoicesByLocale(voices: SiriVoice[]) {
       left.name.localeCompare(right.name),
     ),
   })).sort((left, right) =>
-    localeLabel(left.locale).localeCompare(localeLabel(right.locale)),
+    localeLabel(left.locale, displayLocale).localeCompare(
+      localeLabel(right.locale, displayLocale),
+    ),
   );
 }
 
@@ -57,17 +50,20 @@ function formatBytes(bytes: number): string {
 }
 
 export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
-  const { t } = useTranslation("settings");
+  const { t, i18n } = useTranslation("settings");
+  const displayLocale = i18n.resolvedLanguage ?? i18n.language;
   const languages = useMemo(
     () =>
       [...setup.languages].sort((left, right) =>
-        languageLabel(left).localeCompare(languageLabel(right)),
+        localeLabel(left, displayLocale).localeCompare(
+          localeLabel(right, displayLocale),
+        ),
       ),
-    [setup.languages],
+    [displayLocale, setup.languages],
   );
   const groups = useMemo(
-    () => groupVoicesByLocale(setup.status?.voices ?? []),
-    [setup.status?.voices],
+    () => groupVoicesByLocale(setup.status?.voices ?? [], displayLocale),
+    [displayLocale, setup.status?.voices],
   );
   const selectedKey = setup.status?.selectedVoice
     ? voiceKey(setup.status.selectedVoice)
@@ -94,7 +90,7 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
           <SelectContent>
             {languages.map((language) => (
               <SelectItem key={language} value={language}>
-                {languageLabel(language)}
+                {localeLabel(language, displayLocale)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -147,7 +143,7 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
           {groups.map((group) => (
             <section key={group.locale} className="space-y-2">
               <h3 className="text-sm font-medium">
-                {localeLabel(group.locale)}
+                {localeLabel(group.locale, displayLocale)}
               </h3>
               <div className="divide-y divide-border rounded-md border border-border">
                 {group.voices.map((voice) => {
@@ -248,4 +244,4 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
   );
 }
 
-export { groupVoicesByLocale, languageLabel, localeLabel };
+export { groupVoicesByLocale, localeLabel };

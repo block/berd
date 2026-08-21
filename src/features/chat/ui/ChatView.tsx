@@ -72,12 +72,10 @@ import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
 import { useVoiceConversationController } from "@/features/voice-conversation/hooks/useVoiceConversationController";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
-import { PocketVoiceSetupDialog } from "@/features/voice-conversation/ui/PocketVoiceSetupDialog";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
 import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
-import { consumePendingVoiceStart } from "@/features/voice-conversation/lib/pendingVoiceStart";
-import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
+import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import {
   SecurityConfirmationPanel,
   useHasPendingSecurityConfirmation,
@@ -244,11 +242,6 @@ export function ChatView({
     siriVoiceSetup.status,
     voiceOutput.backend,
   );
-  const requestVoiceConversationStart = useVoiceConversationStore(
-    (state) => state.requestStart,
-  );
-  const [pocketVoiceSetupOpen, setPocketVoiceSetupOpen] = useState(false);
-  const pendingPocketVoiceStartRef = useRef<string | null>(null);
   const voiceConversation = useVoiceConversationController({
     sessionId,
     // Voice delivery only needs to wait for admission. Holding its per-session
@@ -259,8 +252,7 @@ export function ChatView({
     isGooseSession: controller.selectedProvider === "goose",
     pocketReady: voiceReady,
     onPocketSetupRequired: () => {
-      pendingPocketVoiceStartRef.current = sessionId;
-      setPocketVoiceSetupOpen(true);
+      requestOpenSettings("voice");
     },
     readOnly: Boolean(readOnlyStatus),
     disabled:
@@ -270,16 +262,6 @@ export function ChatView({
       !controller.workspaceContextReady ||
       controller.queue.queuedMessage !== null,
   });
-  const handlePocketVoiceSetupOpenChange = useCallback((open: boolean) => {
-    if (!open) pendingPocketVoiceStartRef.current = null;
-    setPocketVoiceSetupOpen(open);
-  }, []);
-  const handlePocketVoiceUseSelected = useCallback(() => {
-    const shouldStart =
-      consumePendingVoiceStart(pendingPocketVoiceStartRef) === sessionId;
-    setPocketVoiceSetupOpen(false);
-    if (shouldStart) requestVoiceConversationStart(sessionId);
-  }, [requestVoiceConversationStart, sessionId]);
   const isAgentBuilderOpen = agentBuilderOpenForLayout;
   const patchSession = useChatSessionStore((s) => s.patchSession);
   const agentBuilderContextState = effectiveSession?.agentBuilderContextState;
@@ -999,15 +981,6 @@ export function ChatView({
       sessionCwd={controller.sessionArtifactCwd}
       sessionId={sessionId}
     >
-      <PocketVoiceSetupDialog
-        open={pocketVoiceSetupOpen}
-        onOpenChange={handlePocketVoiceSetupOpenChange}
-        onUseSelected={handlePocketVoiceUseSelected}
-        setup={pocketVoiceSetup}
-        siriSetup={siriVoiceSetup}
-        backend={voiceOutput.backend}
-        onBackendChange={voiceOutput.setBackend}
-      />
       <ArtifactAutoOpenMount
         sessionId={sessionId}
         isHistoryLoading={controller.isLoadingHistory}

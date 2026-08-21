@@ -867,7 +867,6 @@
   "voice": {
     "backendPocket": "Pocket TTS",
     "backendSiri": "Siri voices (macOS)",
-    "description": "Install speech recognition and choose how Berd speaks during Voice Conversation.",
     "download": "Download model",
     "downloadVoice": "Download {{voice}}",
     "downloadingVoice": "Downloading {{voice}}",
@@ -884,8 +883,6 @@
     "modelInstalledSize": "Installed · {{size}} on disk",
     "modelMissingSize": "Not installed · {{size}} download",
     "modelNotInstalled": "Not installed",
-    "notNow": "Not now",
-    "outputBackend": "Speech engine",
     "outputBackendDescription": "Choose how Berd speaks assistant responses.",
     "playbackSpeed": "Playback speed",
     "playing": "Playing",
@@ -911,9 +908,7 @@
     "siriUseVoice": "Use voice",
     "speechInput": "Speech input",
     "speechOutput": "Speech output",
-    "title": "Voice conversation",
     "selectedVoice": "Selected voice: {{voice}}",
-    "useSelected": "Use selected voice",
     "useVoice": "Use {{voice}}",
     "voiceLabel": "Pocket TTS voice"
   }
