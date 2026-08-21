@@ -554,12 +554,12 @@ export function ChatInputToolbar({
               disabled={voiceConversation.disabled || dictationOwnsMicrophone}
               onClick={() => void voiceConversation.onToggle()}
               aria-label={voiceConversationTooltip}
-              visualState={voiceConversationFeedbackState}
+              visualState={
+                ownsActiveVoiceConversation
+                  ? "destructive"
+                  : voiceConversationFeedbackState
+              }
               tooltip={voiceConversationTooltip}
-              className={cn(
-                ownsActiveVoiceConversation &&
-                  "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground",
-              )}
             >
               {ownsActiveVoiceConversation ? (
                 <PhoneOff aria-hidden="true" />

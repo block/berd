@@ -198,6 +198,20 @@ describe("Button", () => {
     );
   });
 
+  it("owns destructive composer action interaction states", () => {
+    render(
+      <ComposerActionButton visualState="destructive">
+        Hang up
+      </ComposerActionButton>,
+    );
+
+    expect(screen.getByRole("button", { name: "Hang up" })).toHaveClass(
+      "bg-destructive",
+      "hover:bg-destructive/90",
+      "active:bg-destructive/90",
+    );
+  });
+
   it("renders the alert variant inheriting the surrounding alert color", () => {
     render(<Button variant="alert">Edit project</Button>);
 
