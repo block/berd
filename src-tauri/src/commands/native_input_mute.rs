@@ -71,6 +71,7 @@ fn clear(input_muted: &AtomicBool, mute_epoch: &AtomicU64) {
     mute_epoch.store(0, Ordering::Release);
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn apply_change(
     input_muted: &AtomicBool,
     mute_epoch: &AtomicU64,
