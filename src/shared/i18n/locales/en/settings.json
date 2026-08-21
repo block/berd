@@ -412,8 +412,8 @@
     "addTopic": "Add topic",
     "addTopicAction": "Add",
     "added": {
-      "delete": "Delete",
-      "description": "Berd added these from your recent chats. Delete anything you'd rather it not keep.",
+      "delete": "Remove",
+      "description": "Berd found these themes from recent chats. Confirm or remove any memories.",
       "inGeneral": "General preference",
       "inTopic": "In {{topic}}",
       "ok": "OK",

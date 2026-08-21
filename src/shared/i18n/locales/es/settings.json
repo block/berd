@@ -412,8 +412,8 @@
     "addTopic": "Añadir tema",
     "addTopicAction": "Añadir",
     "added": {
-      "delete": "Eliminar",
-      "description": "Berd agregó esto desde tus chats recientes. Elimina lo que prefieras que no guarde.",
+      "delete": "Quitar",
+      "description": "Berd encontró estos temas en chats recientes. Confirma o quita cualquier recuerdo.",
       "inGeneral": "Preferencia general",
       "inTopic": "En {{topic}}",
       "ok": "OK",

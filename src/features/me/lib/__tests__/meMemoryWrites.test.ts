@@ -73,6 +73,32 @@ beforeEach(() => {
 });
 
 describe("applyMemoryEntry", () => {
+  it("refuses an entry that carries a credential", async () => {
+    // Both doors funnel through here, and undo can't cover a saved secret:
+    // it would also reach the published agent files and the store history.
+    const topicPath = `${HOME}/.me/topics/tools.md`;
+    files[topicPath] = "# Tools\n";
+    mocks.listTopics.mockResolvedValue([
+      {
+        fileName: "tools.md",
+        label: "Tools",
+        path: topicPath,
+        contents: files[topicPath],
+      },
+    ]);
+
+    const entry = await applyMemoryEntry({
+      ...candidate(),
+      content: "Deploy token is ghp_16CharsAtLeastHere00",
+      topic: "Tools",
+    });
+
+    expect(entry).toBeNull();
+    expect(files[topicPath]).toBe("# Tools\n");
+    expect(files[RECENT]).toBeUndefined();
+    expect(mocks.recordMeHistory).not.toHaveBeenCalled();
+  });
+
   it("writes into a matching topic and logs it as recently added", async () => {
     const topicPath = `${HOME}/.me/topics/home.md`;
     files[topicPath] = "# Home\n\n- Existing.\n";

@@ -90,6 +90,8 @@ export const ME_FILE_TEMPLATE = `# Me
 nothing is added without your say-so. Italic notes like this one are just
 for you — agents never see them.*
 
+*Don't add passwords or credentials here. This file is read by every agent.*
+
 ## About me
 
 *A quick introduction, in a sentence or two — your name, your pronouns,

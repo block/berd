@@ -8,7 +8,9 @@ import {
 import { createMeFile, loadMeFile } from "./meFile";
 import { vocabularyTopicName } from "./memoryTopicVocabulary";
 import { publishMeFile } from "./mePublish";
+import { logRendererEvent } from "@/shared/api/rendererTelemetry";
 import { createTopic, listTopics } from "./meTopics";
+import { looksLikeCredential } from "./memoryCredentialGuard";
 import {
   appendBullet,
   insertIntoSection,
@@ -159,6 +161,18 @@ export async function clearAddedEntry(id: string): Promise<void> {
 export async function applyMemoryEntry(
   candidate: MemoryProposal,
 ): Promise<AddedMemoryEntry | null> {
+  // Refuse credentials before anything is written. Undo can't cover this
+  // case: a saved secret is also published to the agent files other tools
+  // read and committed to the store's history, so deleting the entry leaves
+  // copies behind. Prompts ask models not to do this; the check makes it so.
+  if (looksLikeCredential(candidate.content)) {
+    void logRendererEvent(
+      "warn",
+      "[me:memory] refused an entry that looked like a credential",
+    );
+    return null;
+  }
+
   const topicName = candidate.topic?.trim() ? candidate.topic.trim() : null;
 
   if (topicName) {

@@ -98,7 +98,7 @@ fn tool_definitions() -> Value {
         },
         {
             "name": "propose_memory",
-            "description": "Propose remembering a durable fact or preference about the user. Berd saves it and shows the user what was added, with a delete button. Only propose things the user actually said or clearly demonstrated, phrased close to their own words. Memory is for lasting facts about the person — anything about a current task, trip, or project belongs in that project instead. Propose at most once per conversation unless the user asks; if they decline, don't re-propose it.",
+            "description": "Propose remembering a durable fact or preference about the user. Berd saves it and shows the user what was added, with a delete button. Only propose things the user actually said or clearly demonstrated, phrased close to their own words. Memory is for lasting facts about the person — anything about a current task, trip, or project belongs in that project instead. Never propose a secret: no passwords, PINs, API keys, tokens, account or card numbers, or recovery codes, even if the user states one plainly. Be careful with health, money, and relationships: only what the user said plainly, and only when it will matter later. Propose at most once per conversation unless the user asks; if they decline, don't re-propose it.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
