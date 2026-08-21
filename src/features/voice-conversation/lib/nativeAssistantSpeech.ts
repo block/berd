@@ -8,6 +8,16 @@ import {
   stopPocketVoice,
   type PocketVoiceStreamEvent,
 } from "../api/pocketVoice";
+import {
+  appendSiriVoiceStream,
+  finishSiriVoiceStream,
+  flushSiriVoiceStream,
+  listenToSiriVoiceStream,
+  startSiriVoiceStream,
+  stopSiriVoice,
+  type SiriVoiceStreamEvent,
+} from "../api/siriVoice";
+import { getVoiceOutputBackend } from "./voiceOutputPreference";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
 type SpeechFailureHandler = (text: string, error: unknown) => void;
@@ -38,6 +48,7 @@ let generation = 0;
 let commandEpoch = 0;
 let activeSpeechSessionId: string | null = null;
 let activeUtterance: ActiveUtterance | null = null;
+let stopActiveVoice: () => Promise<boolean> = stopPocketVoice;
 const pendingNotices = new Map<string, string[]>();
 const recordedNoticeKeys = new Set<string>();
 
@@ -140,7 +151,9 @@ function queueStreamCommand(
   });
 }
 
-function handleStreamEvent(event: PocketVoiceStreamEvent) {
+function handleStreamEvent(
+  event: PocketVoiceStreamEvent | SiriVoiceStreamEvent,
+) {
   const utterance = activeUtterance;
   if (!utterance || utterance.id !== event.streamId) return;
   const voice = useVoiceConversationStore.getState();
@@ -201,9 +214,9 @@ function interruptActiveUtterance() {
     );
     utterance.onTerminal();
   }
-  void stopPocketVoice().catch(() => undefined);
+  void stopActiveVoice().catch(() => undefined);
   commandQueue = commandQueue.then(async () => {
-    await stopPocketVoice().catch(() => undefined);
+    await stopActiveVoice().catch(() => undefined);
   });
 }
 
@@ -227,15 +240,34 @@ export function startNativeAssistantSpeech(
   stopNativeAssistantSpeech();
   activeSpeechSessionId = sessionId;
   const activeGeneration = generation;
-  streamListenerReady = listenToPocketVoiceStream(handleStreamEvent).then(
-    (unlisten) => {
+  const streamBackend =
+    getVoiceOutputBackend() === "siri"
+      ? {
+          start: startSiriVoiceStream,
+          append: appendSiriVoiceStream,
+          flush: flushSiriVoiceStream,
+          finish: finishSiriVoiceStream,
+          stop: stopSiriVoice,
+          listen: listenToSiriVoiceStream,
+        }
+      : {
+          start: startPocketVoiceStream,
+          append: appendPocketVoiceStream,
+          flush: flushPocketVoiceStream,
+          finish: finishPocketVoiceStream,
+          stop: stopPocketVoice,
+          listen: listenToPocketVoiceStream,
+        };
+  stopActiveVoice = streamBackend.stop;
+  streamListenerReady = streamBackend
+    .listen(handleStreamEvent)
+    .then((unlisten) => {
       if (activeGeneration !== generation) {
         unlisten();
         return;
       }
       stopStreamSubscription = unlisten;
-    },
-  );
+    });
 
   const initialMessages =
     useChatStore.getState().messagesBySession[sessionId] ?? [];
@@ -291,7 +323,7 @@ export function startNativeAssistantSpeech(
       utterance,
       async () => {
         await streamListenerReady;
-        await startPocketVoiceStream(utterance.id);
+        await streamBackend.start(utterance.id);
       },
       onFailure,
     );
@@ -356,7 +388,7 @@ export function startNativeAssistantSpeech(
         utterance.text += delta;
         queueStreamCommand(
           utterance,
-          () => appendPocketVoiceStream(utterance.id, delta),
+          () => streamBackend.append(utterance.id, delta),
           onFailure,
         );
       }
@@ -365,7 +397,7 @@ export function startNativeAssistantSpeech(
       if (crossedToolBoundary && utterance && !utterance.finishing) {
         queueStreamCommand(
           utterance,
-          () => flushPocketVoiceStream(utterance.id),
+          () => streamBackend.flush(utterance.id),
           onFailure,
         );
       }
@@ -373,7 +405,7 @@ export function startNativeAssistantSpeech(
         utterance.finishing = true;
         queueStreamCommand(
           utterance,
-          () => finishPocketVoiceStream(utterance.id),
+          () => streamBackend.finish(utterance.id),
           onFailure,
         );
       }

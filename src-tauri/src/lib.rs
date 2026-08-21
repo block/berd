@@ -213,6 +213,7 @@ pub fn run() {
             app.manage(commands::agent_setup::AgentSetupRegistry::default());
             app.manage(commands::model_setup::ModelSetupRegistry::default());
             app.manage(commands::pocket_voice::PocketVoiceState::default());
+            app.manage(commands::siri_voice::SiriVoiceState::default());
             app.manage(commands::native_voice::NativeVoiceState::default());
             app.manage(commands::voice_capture::VoiceCaptureState::default());
             app.manage(commands::telemetry::TelemetryAuthState::new(
@@ -628,6 +629,16 @@ pub fn run() {
             commands::pocket_voice::finish_pocket_voice_stream,
             commands::pocket_voice::stop_pocket_voice,
             commands::pocket_voice::remove_voice_model,
+            commands::siri_voice::get_siri_voice_status,
+            commands::siri_voice::select_siri_voice,
+            commands::siri_voice::download_siri_voice,
+            commands::siri_voice::set_siri_playback_speed,
+            commands::siri_voice::preview_siri_voice,
+            commands::siri_voice::start_siri_voice_stream,
+            commands::siri_voice::append_siri_voice_stream,
+            commands::siri_voice::flush_siri_voice_stream,
+            commands::siri_voice::finish_siri_voice_stream,
+            commands::siri_voice::stop_siri_voice,
             commands::native_voice::get_native_voice_conversation_status,
             commands::native_voice::drain_native_voice_conversation_transcripts,
             commands::native_voice::acknowledge_native_voice_conversation_transcript,
@@ -666,6 +677,8 @@ pub fn run() {
                 app.state::<commands::terminal::TerminalState>().stop_all();
                 app.state::<commands::native_voice::NativeVoiceState>()
                     .stop_for_app_exit();
+                app.state::<commands::siri_voice::SiriVoiceState>()
+                    .stop_for_window_destroyed();
                 services::acp::goose_serve::GooseServeProcess::kill_singleton();
             }
             #[cfg(target_os = "macos")]

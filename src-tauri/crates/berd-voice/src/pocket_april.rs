@@ -898,7 +898,7 @@ where
     Ok(chunks)
 }
 
-fn take_streaming_chunks_at_natural_boundaries<F>(
+pub(crate) fn take_streaming_chunks_at_natural_boundaries<F>(
     text: &str,
     max_tokens: usize,
     mut first_chunk_pending: bool,

@@ -71,7 +71,10 @@ import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
 import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
 import { useVoiceConversationController } from "@/features/voice-conversation/hooks/useVoiceConversationController";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
+import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
 import { PocketVoiceSetupDialog } from "@/features/voice-conversation/ui/PocketVoiceSetupDialog";
+import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
+import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { consumePendingVoiceStart } from "@/features/voice-conversation/lib/pendingVoiceStart";
 import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
@@ -232,6 +235,15 @@ export function ChatView({
     useTerminalFallbackCwdPreference();
   const capabilities = useProfileCapabilities();
   const pocketVoiceSetup = usePocketVoiceSetup(capabilities.voiceConversation);
+  const voiceOutput = useVoiceOutputPreference();
+  const siriVoiceSetup = useSiriVoiceSetup(
+    capabilities.voiceConversation && voiceOutput.backend === "siri",
+  );
+  const voiceReady = isVoiceSetupReady(
+    pocketVoiceSetup.status,
+    siriVoiceSetup.status,
+    voiceOutput.backend,
+  );
   const requestVoiceConversationStart = useVoiceConversationStore(
     (state) => state.requestStart,
   );
@@ -245,7 +257,7 @@ export function ChatView({
     onSend: controller.handleSend,
     enabled: capabilities.voiceConversation,
     isGooseSession: controller.selectedProvider === "goose",
-    pocketReady: pocketVoiceSetup.status?.installed === true,
+    pocketReady: voiceReady,
     onPocketSetupRequired: () => {
       pendingPocketVoiceStartRef.current = sessionId;
       setPocketVoiceSetupOpen(true);
@@ -992,6 +1004,9 @@ export function ChatView({
         onOpenChange={handlePocketVoiceSetupOpenChange}
         onUseSelected={handlePocketVoiceUseSelected}
         setup={pocketVoiceSetup}
+        siriSetup={siriVoiceSetup}
+        backend={voiceOutput.backend}
+        onBackendChange={voiceOutput.setBackend}
       />
       <ArtifactAutoOpenMount
         sessionId={sessionId}
