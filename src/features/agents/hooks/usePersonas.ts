@@ -10,22 +10,8 @@ import type {
   Persona,
 } from "@/shared/types/agents";
 import * as api from "@/shared/api/agents";
-import { deleteUserAvatar } from "@/shared/api/avatars";
-import { isUserAvatarRef } from "@/shared/avatars/catalog";
 
 const REFRESH_INTERVAL_MS = 60_000;
-
-function deleteUnreferencedUserAvatar(avatar: string | null | undefined) {
-  if (!avatar || !isUserAvatarRef(avatar)) return;
-  const stillReferenced = useAgentStore
-    .getState()
-    .personas.some((persona) => persona.avatar === avatar);
-  if (!stillReferenced) {
-    void deleteUserAvatar(avatar).catch((error) => {
-      console.warn("Failed to clean up unreferenced agent avatar:", error);
-    });
-  }
-}
 
 export function usePersonas() {
   const personas = useAgentStore(selectPersonas);
@@ -130,18 +116,17 @@ export function usePersonas() {
     [addPersona, trackMutation],
   );
 
+  // Custom gloopies are library citizens, not per-agent attachments: a
+  // displaced or orphaned `user-avatar:<id>` stays in "Your gloopies" so any
+  // agent can wear it again. Library-level delete is a deliberate later
+  // feature (alongside export), so no reference-count garbage collection
+  // happens here.
   const updatePersona = useCallback(
     async (existing: Persona, req: UpdatePersonaRequest) => {
       const persona = await trackMutation(() =>
         api.updatePersona(existing, req),
       );
-      const displacedAvatar = useAgentStore
-        .getState()
-        .personas.find((candidate) => candidate.id === existing.id)?.avatar;
       updatePersonaInStore(existing.id, persona);
-      if (displacedAvatar !== persona.avatar) {
-        deleteUnreferencedUserAvatar(displacedAvatar);
-      }
       return persona;
     },
     [trackMutation, updatePersonaInStore],
@@ -149,12 +134,8 @@ export function usePersonas() {
 
   const deletePersona = useCallback(
     async (id: string) => {
-      const deletedAvatar = useAgentStore
-        .getState()
-        .personas.find((persona) => persona.id === id)?.avatar;
       await trackMutation(() => api.deletePersona(id));
       removePersona(id);
-      deleteUnreferencedUserAvatar(deletedAvatar);
     },
     [removePersona, trackMutation],
   );

@@ -14,7 +14,7 @@ import {
   IconSparkles,
   IconX,
 } from "@tabler/icons-react";
-import { avatarRef, parseAvatarRef } from "@/shared/avatars/catalog";
+import { avatarRef, isLibraryAvatarRef } from "@/shared/avatars/catalog";
 import { normalizeAvatarUrl } from "@/shared/lib/avatarUrl";
 import { cn } from "@/shared/lib/cn";
 import type { AgentSourceEntry } from "@/shared/api/agents";
@@ -200,13 +200,16 @@ export function AgentBuilderRail({
   const [selectedCollectionId, setSelectedCollectionId] = useState<
     string | null
   >(null);
-  const selectedCollection = useMemo(
-    () =>
+  const selectedCollectionLabel = useMemo(() => {
+    if (!selectedCollectionId) {
+      return null;
+    }
+    return (
       avatarLibrary.catalog?.collections.find(
         (collection) => collection.id === selectedCollectionId,
-      ) ?? null,
-    [avatarLibrary.catalog, selectedCollectionId],
-  );
+      )?.label ?? null
+    );
+  }, [avatarLibrary.catalog, selectedCollectionId]);
 
   const provider = (data?.properties?.provider as string | undefined) ?? "";
   const modelProviderId =
@@ -228,8 +231,8 @@ export function AgentBuilderRail({
   );
 
   const onSelectAvatar = useCallback(
-    (avatarId: string) => {
-      writeProperty("avatar", avatarRef(avatarId));
+    (selectedAvatarRef: string) => {
+      writeProperty("avatar", selectedAvatarRef);
       setSelectedCollectionId(null);
       setAvatarPanel("closed");
     },
@@ -258,11 +261,10 @@ export function AgentBuilderRail({
       : null;
   const effectiveAvatar =
     normalizedAvatar ?? (defaultAvatarId ? avatarRef(defaultAvatarId) : null);
-  const selectedAvatarRefValue = effectiveAvatar
-    ? parseAvatarRef(effectiveAvatar)
+  const selectedAvatarRefValue =
+    effectiveAvatar && isLibraryAvatarRef(effectiveAvatar)
       ? effectiveAvatar
-      : null
-    : null;
+      : null;
   const selectedAvatarMediaState = useAvatarMediaState(effectiveAvatar);
 
   const onChangeProvider = useCallback(
@@ -564,9 +566,7 @@ export function AgentBuilderRail({
         <IconArrowLeft className="size-4" aria-hidden="true" />
       </Button>
       <h2 className="truncate text-sm font-normal text-foreground">
-        {selectedCollection
-          ? selectedCollection.label
-          : t("builderRail.chooseAvatarTitle")}
+        {selectedCollectionLabel ?? t("builderRail.chooseAvatarTitle")}
       </h2>
     </div>
   );
@@ -845,9 +845,7 @@ export function AgentBuilderRail({
             <IconArrowLeft className="size-4" aria-hidden="true" />
           </Button>
           <h3 className="truncate text-sm font-normal text-foreground">
-            {selectedCollection
-              ? selectedCollection.label
-              : t("builderRail.chooseAvatarTitle")}
+            {selectedCollectionLabel ?? t("builderRail.chooseAvatarTitle")}
           </h3>
         </div>
         {avatarLibraryPickerNode}

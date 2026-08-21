@@ -7,10 +7,12 @@ import {
   refreshAvatarCache,
   type AvatarLibraryErrorCode,
 } from "@/shared/api/avatars";
-import type {
-  AvatarCatalog,
-  CachedAvatarCollection,
-  ResolvedAvatarMedia,
+import {
+  USER_AVATAR_CATALOG_VERSION,
+  USER_AVATAR_COLLECTION_ID,
+  type AvatarCatalog,
+  type CachedAvatarCollection,
+  type ResolvedAvatarMedia,
 } from "@/shared/avatars/catalog";
 
 interface CachedAvatarMediaEntry {
@@ -20,6 +22,13 @@ interface CachedAvatarMediaEntry {
 
 export interface AvatarLibraryState {
   catalog: AvatarCatalog | null;
+  /**
+   * Ids of the user's generated gloopies (newest first). They form the
+   * "Your gloopies" collection: local library citizens outside the published
+   * catalog, persisted on agents as `user-avatar:<id>`. Their media lives in
+   * `cachedAvatarMediaById` under `USER_AVATAR_CATALOG_VERSION`.
+   */
+  userAvatarIds: string[];
   cachedAvatarMediaById: Record<string, CachedAvatarMediaEntry>;
   loading: boolean;
   cacheChecking: boolean;
@@ -37,17 +46,33 @@ function cachedMediaForCatalog(
 ): Record<string, CachedAvatarMediaEntry> {
   const mediaById: Record<string, CachedAvatarMediaEntry> = {};
   for (const collection of collections) {
-    if (collection.catalogVersion !== catalogVersion) {
+    const expectedVersion =
+      collection.collectionId === USER_AVATAR_COLLECTION_ID
+        ? USER_AVATAR_CATALOG_VERSION
+        : catalogVersion;
+    if (collection.catalogVersion !== expectedVersion) {
       continue;
     }
     for (const asset of collection.assets) {
       mediaById[asset.id] = {
-        catalogVersion,
+        catalogVersion: collection.catalogVersion,
         media: cachedAssetToMedia(asset),
       };
     }
   }
   return mediaById;
+}
+
+function userAvatarIdsForCollections(
+  collections: CachedAvatarCollection[],
+): string[] {
+  return (
+    collections
+      .find(
+        (collection) => collection.collectionId === USER_AVATAR_COLLECTION_ID,
+      )
+      ?.assets.map((asset) => asset.id) ?? []
+  );
 }
 
 export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
@@ -66,6 +91,7 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
   const [cachedAvatarMediaById, setCachedAvatarMediaById] = useState<
     Record<string, CachedAvatarMediaEntry>
   >({});
+  const [userAvatarIds, setUserAvatarIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (!enabled) {
@@ -105,6 +131,9 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
         );
         setCatalog(snapshot.catalog);
         setCachedAvatarMediaById(cachedMedia);
+        setUserAvatarIds(
+          userAvatarIdsForCollections(snapshot.cachedCollections),
+        );
         setBackendMediaRefreshing(snapshot.mediaRefreshing);
         const hasIncompleteMedia = snapshot.cachedCollections.some(
           (collection) => collection.failedAssetIds.length > 0,
@@ -167,6 +196,7 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
 
   return {
     catalog,
+    userAvatarIds,
     cachedAvatarMediaById,
     loading,
     cacheChecking: loading || mediaRefreshing || backendMediaRefreshing,

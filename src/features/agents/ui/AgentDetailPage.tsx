@@ -14,7 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
-import { avatarRef, isBundledAvatarRef } from "@/shared/avatars/catalog";
+import { isLibraryAvatarRef } from "@/shared/avatars/catalog";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Badge } from "@/shared/ui/badge";
@@ -136,7 +136,7 @@ export function AgentDetailPage({
   const avatarLibrary = useAvatarLibrary(isEditable);
   const trimmedAvatarValue = avatarValue.trim();
   const normalizedAvatarValue = normalizeAvatarUrl(trimmedAvatarValue);
-  const customAvatarUrlValue = isBundledAvatarRef(trimmedAvatarValue)
+  const customAvatarUrlValue = isLibraryAvatarRef(trimmedAvatarValue)
     ? ""
     : avatarValue;
   const avatarUrlError =
@@ -144,13 +144,13 @@ export function AgentDetailPage({
       ? t("editor.avatarUrlInvalid")
       : null;
   const avatarMedia = useAvatarMedia(normalizedAvatarValue ?? null);
-  const selectedBundledAvatarRef =
-    normalizedAvatarValue && isBundledAvatarRef(normalizedAvatarValue)
+  const selectedLibraryAvatarRef =
+    normalizedAvatarValue && isLibraryAvatarRef(normalizedAvatarValue)
       ? normalizedAvatarValue
       : null;
   const canSaveCustomAvatar =
     Boolean(normalizedAvatarValue) &&
-    !isBundledAvatarRef(normalizedAvatarValue ?? "") &&
+    !isLibraryAvatarRef(normalizedAvatarValue ?? "") &&
     normalizedAvatarValue !== personaAvatarValue &&
     !avatarSavePending;
   const descriptionValue = getRealPersonaDescription(persona);
@@ -257,19 +257,18 @@ export function AgentDetailPage({
   }, [avatarUrlError, commitAvatar, normalizedAvatarValue]);
 
   const handleSelectAvatar = useCallback(
-    (avatarId: string) => {
-      const nextAvatar = avatarRef(avatarId);
-      setAvatarValue(nextAvatar);
+    (nextAvatarRef: string) => {
+      setAvatarValue(nextAvatarRef);
       setAvatarPreviewFailed(false);
-      void commitAvatar(nextAvatar);
+      void commitAvatar(nextAvatarRef);
     },
     [commitAvatar],
   );
 
   const handleSelectOverlayAvatar = useCallback(
-    (avatarId: string) => {
+    (nextAvatarRef: string) => {
       setShowAvatarOverlay(false);
-      handleSelectAvatar(avatarId);
+      handleSelectAvatar(nextAvatarRef);
     },
     [handleSelectAvatar],
   );
@@ -502,7 +501,7 @@ export function AgentDetailPage({
             onPreviewError={() => setAvatarPreviewFailed(true)}
             onSaveCustomAvatar={handleSaveCustomAvatar}
             onSelectAvatar={handleSelectAvatar}
-            selectedAvatarRef={selectedBundledAvatarRef}
+            selectedAvatarRef={selectedLibraryAvatarRef}
             showClearAvatar={trimmedAvatarValue.length > 0}
             title={t("editor.customizeAvatar")}
           />

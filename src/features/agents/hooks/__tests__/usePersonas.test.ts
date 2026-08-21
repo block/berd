@@ -220,7 +220,7 @@ describe("usePersonas", () => {
       ).toBe("Updated");
     });
 
-    it("reclaims a replaced user avatar after the final reference changes", async () => {
+    it("preserves a replaced gloopie in the library after its final agent reference changes", async () => {
       const existing = makePersona({
         id: "test-id",
         avatar: "user-avatar:shared",
@@ -251,12 +251,10 @@ describe("usePersonas", () => {
       await act(async () => {
         await result.current.updatePersona(shared, { avatar: null });
       });
-      expect(avatarApiMocks.deleteUserAvatar).toHaveBeenCalledWith(
-        "user-avatar:shared",
-      );
+      expect(avatarApiMocks.deleteUserAvatar).not.toHaveBeenCalled();
     });
 
-    it("reclaims avatars displaced by overlapping updates", async () => {
+    it("preserves gloopies displaced by overlapping updates", async () => {
       const existing = makePersona({ id: "test-id", avatar: "user-avatar:a" });
       vi.mocked(api.listPersonas).mockResolvedValueOnce([existing]);
       const first = makePersona({ id: "test-id", avatar: "user-avatar:b" });
@@ -290,12 +288,7 @@ describe("usePersonas", () => {
         await updateTwo;
       });
 
-      expect(avatarApiMocks.deleteUserAvatar).toHaveBeenCalledWith(
-        "user-avatar:a",
-      );
-      expect(avatarApiMocks.deleteUserAvatar).toHaveBeenCalledWith(
-        "user-avatar:b",
-      );
+      expect(avatarApiMocks.deleteUserAvatar).not.toHaveBeenCalled();
     });
 
     it("deletePersona calls API and removes from store", async () => {
@@ -320,7 +313,7 @@ describe("usePersonas", () => {
       ).toBeUndefined();
     });
 
-    it("reclaims a deleted user avatar only after its final reference", async () => {
+    it("preserves a gloopie in the library after its final agent is deleted", async () => {
       const first = makePersona({
         id: "first",
         avatar: "user-avatar:shared",
@@ -341,9 +334,7 @@ describe("usePersonas", () => {
       await act(async () => {
         await result.current.deletePersona("second");
       });
-      expect(avatarApiMocks.deleteUserAvatar).toHaveBeenCalledWith(
-        "user-avatar:shared",
-      );
+      expect(avatarApiMocks.deleteUserAvatar).not.toHaveBeenCalled();
     });
   });
 

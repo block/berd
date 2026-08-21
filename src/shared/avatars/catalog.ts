@@ -1,6 +1,16 @@
 export const APP_AVATAR_REF_PREFIX = "app-avatar:" as const;
 export const USER_AVATAR_REF_PREFIX = "user-avatar:" as const;
 
+/**
+ * Collection id and catalog version the backend assigns to user-generated
+ * gloopies (`src-tauri/src/commands/avatars.rs` mirrors these constants).
+ * User gloopies live outside the published catalog, so their media entries
+ * are stamped with `USER_AVATAR_CATALOG_VERSION` instead of the catalog's
+ * version string.
+ */
+export const USER_AVATAR_COLLECTION_ID = "generated-gloopies" as const;
+export const USER_AVATAR_CATALOG_VERSION = "user-generated" as const;
+
 export type AvatarMediaType = "image" | "video";
 export type AvatarAlphaMode = "stacked";
 export type AvatarAssetFormat = "webm" | "hevc";
@@ -102,6 +112,15 @@ export function parseUserAvatarRef(value: string): string | undefined {
 
 export function isUserAvatarRef(value: string): boolean {
   return parseUserAvatarRef(value) !== undefined;
+}
+
+/**
+ * Whether the value references an avatar the library owns — bundled catalog
+ * (`app-avatar:`) or user-generated (`user-avatar:`) — as opposed to a custom
+ * URL or data URL.
+ */
+export function isLibraryAvatarRef(value: string): boolean {
+  return isAppAvatarRef(value) || isUserAvatarRef(value);
 }
 
 export function mediaTypeFromMimeType(mimeType: string): AvatarMediaType {
