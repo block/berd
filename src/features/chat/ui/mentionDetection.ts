@@ -417,6 +417,7 @@ export function useMentionDetection(
   skills: SkillMentionItem[] = [],
   files: FileMentionItem[] = [],
   defaultAtMentionCategory: AtMentionDefaultCategory = "agents",
+  currentText?: string,
 ) {
   const [mentionState, setMentionState] = useState<{
     isOpen: boolean;
@@ -434,8 +435,21 @@ export function useMentionDetection(
     selectedIndex: 0,
   });
   const completedMentionsRef = useRef<Set<string>>(new Set());
+  const lastDetectedTextRef = useRef(currentText);
+  const dismissedMentionRef = useRef<{
+    trigger: MentionTrigger;
+    startIndex: number;
+    query: string;
+  } | null>(null);
   const mentionStateRef = useRef(mentionState);
   mentionStateRef.current = mentionState;
+
+  useEffect(() => {
+    if (currentText !== lastDetectedTextRef.current) {
+      dismissedMentionRef.current = null;
+      lastDetectedTextRef.current = currentText;
+    }
+  }, [currentText]);
 
   const registerCompletedMention = useCallback((mention: string) => {
     const trimmed = mention.trim();
@@ -537,17 +551,32 @@ export function useMentionDetection(
 
   const detectMention = useCallback(
     (value: string, cursorPos: number) => {
+      lastDetectedTextRef.current = value;
       const beforeCursor = value.slice(0, cursorPos);
       const lastAt = findLastAtMentionTrigger(beforeCursor);
       const lastSlash = findLastSlashMentionTrigger(beforeCursor);
 
       if (lastAt === -1 && lastSlash === -1) {
+        dismissedMentionRef.current = null;
         if (mentionState.isOpen) closeMentionState(setMentionState);
         return;
       }
 
+      const trigger: MentionTrigger = lastSlash > lastAt ? "/" : "@";
+      const startIndex = trigger === "/" ? lastSlash : lastAt;
+      const query = beforeCursor.slice(startIndex + 1);
+      const dismissedMention = dismissedMentionRef.current;
+      if (
+        dismissedMention?.trigger === trigger &&
+        dismissedMention.startIndex === startIndex &&
+        query.startsWith(dismissedMention.query)
+      ) {
+        if (mentionState.isOpen) closeMentionState(setMentionState);
+        return;
+      }
+      dismissedMentionRef.current = null;
+
       if (lastSlash > lastAt) {
-        const query = beforeCursor.slice(lastSlash + 1);
         if (
           (!isPromptStart(beforeCursor, lastSlash) && query.length === 0) ||
           query.includes(" ") ||
@@ -574,7 +603,6 @@ export function useMentionDetection(
         return;
       }
 
-      const query = beforeCursor.slice(lastAt + 1);
       if (isCompletedMentionQuery(query, completedMentionsRef.current)) {
         if (mentionState.isOpen) closeMentionState(setMentionState);
         return;
@@ -605,6 +633,18 @@ export function useMentionDetection(
   );
 
   const closeMention = useCallback(() => {
+    closeMentionState(setMentionState);
+  }, []);
+
+  const dismissMention = useCallback(() => {
+    const current = mentionStateRef.current;
+    dismissedMentionRef.current = current.isOpen
+      ? {
+          trigger: current.trigger,
+          startIndex: current.startIndex,
+          query: current.query,
+        }
+      : null;
     closeMentionState(setMentionState);
   }, []);
 
@@ -743,6 +783,7 @@ export function useMentionDetection(
     filteredFiles,
     detectMention,
     closeMention,
+    dismissMention,
     navigateMention,
     navigateAtMentionCategory,
     setAtMentionCategory,

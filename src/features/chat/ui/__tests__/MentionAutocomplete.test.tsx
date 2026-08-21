@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -72,7 +72,6 @@ function renderAutocomplete(props: {
   trigger?: "@" | "/";
   atCategory?: "agents" | "files" | "skills";
   onAtCategoryChange?: (category: "agents" | "files" | "skills") => void;
-  onClose?: () => void;
 }) {
   const atCategory =
     props.atCategory ?? (props.trigger === "/" ? "skills" : "agents");
@@ -88,7 +87,6 @@ function renderAutocomplete(props: {
         isOpen
         atCategory={atCategory}
         onAtCategoryChange={props.onAtCategoryChange}
-        onClose={props.onClose}
         onSelectPersona={vi.fn()}
         onSelectSkill={vi.fn()}
         onSelectFile={vi.fn()}
@@ -133,62 +131,6 @@ describe("MentionAutocomplete", () => {
     await user.click(screen.getByRole("tab", { name: "Agents" }));
     expect(onAtCategoryChange).toHaveBeenCalledTimes(3);
     expect(onAtCategoryChange).toHaveBeenCalledWith("agents");
-  });
-
-  it("closes when pointer interaction starts outside the menu", () => {
-    const onClose = vi.fn();
-    render(
-      <>
-        <button type="button">Outside menu</button>
-        <Popover open>
-          <PopoverAnchor asChild>
-            <div />
-          </PopoverAnchor>
-          <MentionAutocomplete
-            filteredPersonas={PERSONAS}
-            filteredSkills={[]}
-            filteredFiles={FILES}
-            isOpen
-            onClose={onClose}
-            onSelectPersona={vi.fn()}
-            onSelectSkill={vi.fn()}
-            onSelectFile={vi.fn()}
-          />
-        </Popover>
-      </>,
-    );
-
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Outside menu" }));
-
-    expect(onClose).toHaveBeenCalledTimes(1);
-  });
-
-  it("stays open when pointer interaction returns to the textarea", () => {
-    const onClose = vi.fn();
-    render(
-      <>
-        <textarea aria-label="Composer" />
-        <Popover open>
-          <PopoverAnchor asChild>
-            <div />
-          </PopoverAnchor>
-          <MentionAutocomplete
-            filteredPersonas={PERSONAS}
-            filteredSkills={[]}
-            filteredFiles={FILES}
-            isOpen
-            onClose={onClose}
-            onSelectPersona={vi.fn()}
-            onSelectSkill={vi.fn()}
-            onSelectFile={vi.fn()}
-          />
-        </Popover>
-      </>,
-    );
-
-    fireEvent.pointerDown(screen.getByRole("textbox", { name: "Composer" }));
-
-    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("highlights matched characters from the backend matcher", () => {

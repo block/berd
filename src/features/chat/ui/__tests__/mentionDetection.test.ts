@@ -40,6 +40,53 @@ function openFilesMention(
 }
 
 describe("useMentionDetection file ordering", () => {
+  it("keeps a dismissed mention closed while typing in the same token", () => {
+    const { result } = renderHook(() => useMentionDetection([], [], []));
+
+    act(() => {
+      result.current.detectMention("@log", 4);
+    });
+    expect(result.current.mentionOpen).toBe(true);
+
+    act(() => {
+      result.current.dismissMention();
+      result.current.detectMention("@logfold", 8);
+    });
+    expect(result.current.mentionOpen).toBe(false);
+
+    act(() => {
+      result.current.detectMention("@logfold @new", 13);
+    });
+    expect(result.current.mentionOpen).toBe(true);
+    expect(result.current.mentionQuery).toBe("new");
+  });
+
+  it("opens a replacement token at the same position after dismissal", () => {
+    const { result } = renderHook(() => useMentionDetection([], [], []));
+
+    act(() => {
+      result.current.detectMention("@old", 4);
+      result.current.dismissMention();
+      result.current.detectMention("@new", 4);
+    });
+
+    expect(result.current.mentionOpen).toBe(true);
+    expect(result.current.mentionQuery).toBe("new");
+  });
+
+  it("closing a selected mention does not suppress a later token", () => {
+    const { result } = renderHook(() => useMentionDetection([], [], []));
+
+    act(() => {
+      result.current.detectMention("@first", 6);
+      result.current.closeMention();
+      result.current.detectMention("@new", 4);
+    });
+
+    expect(result.current.mentionOpen).toBe(true);
+    expect(result.current.mentionQuery).toBe("new");
+  });
+
   it("defaults @ mentions to agents and shows skills only for slash commands", () => {
     const skill = {
       id: "global:/skills/code-review",

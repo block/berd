@@ -1735,7 +1735,7 @@ describe("ChatInput", () => {
     await user.keyboard("{Tab}");
     expect(input).toHaveValue(`@${projectRoot}/`);
 
-    await user.type(input, "src");
+    await user.keyboard("src");
 
     await waitFor(() => {
       expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
@@ -1774,6 +1774,56 @@ describe("ChatInput", () => {
     } finally {
       window.removeEventListener("keydown", windowKeyDown);
     }
+  });
+
+  it("dismisses mentions when the composer is clicked", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@missing");
+    expect(screen.getByRole("tab", { name: "Agents" })).not.toBeNull();
+
+    await user.click(input);
+
+    expect(screen.queryByRole("tab", { name: "Agents" })).toBeNull();
+    expect((input as HTMLTextAreaElement).value).toBe("@missing");
+  });
+
+  it("keeps mentions dismissed while the current token is still being typed", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@log");
+    expect(screen.getByRole("tab", { name: "Agents" })).not.toBeNull();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("tab", { name: "Agents" })).toBeNull();
+
+    await user.type(input, "fold");
+
+    expect((input as HTMLTextAreaElement).value).toBe("@logfold");
+    expect(screen.queryByRole("tab", { name: "Agents" })).toBeNull();
+  });
+
+  it("opens mentions in a new draft after the previous token was dismissed", async () => {
+    const onSend = vi.fn().mockResolvedValue(true);
+    const user = userEvent.setup();
+    renderProjectChatInput(onSend);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@missing");
+    expect(screen.getByRole("tab", { name: "Agents" })).not.toBeNull();
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("tab", { name: "Agents" })).toBeNull();
+
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect((input as HTMLTextAreaElement).value).toBe(""));
+
+    await user.type(input, "@");
+    expect(screen.getByRole("tab", { name: "Agents" })).not.toBeNull();
   });
 
   it("attaches folder and static root references as chips", async () => {
@@ -1815,7 +1865,7 @@ describe("ChatInput", () => {
     ).not.toBeInTheDocument();
     expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
 
-    await user.type(input, "/");
+    await user.keyboard("/");
     expect(
       await screen.findByRole("option", { name: /filesystem root/i }),
     ).toBeInTheDocument();
@@ -2012,7 +2062,7 @@ describe("ChatInput", () => {
 
     const input = screen.getByRole("textbox");
     await user.type(input, "@@/Users/wesb/My Project/");
-    await user.type(input, "src");
+    await user.keyboard("src");
 
     await waitFor(() => {
       expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
@@ -2173,7 +2223,7 @@ describe("ChatInput", () => {
       await screen.findByRole("option", { name: /readme\.md/i }),
     ).toBeInTheDocument();
 
-    await user.type(input, "m");
+    await user.keyboard("m");
     await waitFor(() => {
       expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
         roots: ["/Users/wesb/dev/goose2"],
@@ -2235,7 +2285,7 @@ describe("ChatInput", () => {
       "true",
     );
 
-    await user.type(input, "m");
+    await user.keyboard("m");
     await waitFor(() => {
       expect(screen.queryByText("reader.md")).not.toBeInTheDocument();
     });

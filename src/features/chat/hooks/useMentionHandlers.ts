@@ -547,6 +547,7 @@ export function useMentionHandlers({
     filteredFiles,
     detectMention,
     closeMention,
+    dismissMention,
     navigateMention,
     navigateAtMentionCategory,
     setAtMentionCategory,
@@ -558,6 +559,7 @@ export function useMentionHandlers({
     skillMentionItems,
     fileMentionItems,
     defaultAtMentionCategory,
+    text,
   );
 
   const pathMentionQuery = mentionQuery.trim();
@@ -866,6 +868,7 @@ export function useMentionHandlers({
         : null,
     detectMention,
     closeMention,
+    dismissMention,
     navigateMention,
     navigateAtMentionCategory,
     setAtMentionCategory,

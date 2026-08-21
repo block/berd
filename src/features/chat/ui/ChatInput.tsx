@@ -704,7 +704,7 @@ export function ChatInput({
     fileMentionsError,
     resolveSkillSlashCommand,
     detectMention,
-    closeMention,
+    dismissMention,
     navigateMention,
     setAtMentionCategory,
     handleMentionCategoryKey,
@@ -1180,7 +1180,7 @@ export function ChatInput({
       ) {
         event.preventDefault();
         event.stopPropagation();
-        closeMention();
+        dismissMention();
         return;
       }
       if (eventMatchesShortcutCommand(event.nativeEvent, "chat.mention.next")) {
@@ -1746,7 +1746,7 @@ export function ChatInput({
                 onSelectPersona={handlePersonaMentionSelect}
                 onSelectSkill={handleSkillMentionSelect}
                 onSelectFile={handleFileMentionSelect}
-                onClose={closeMention}
+                onDismiss={dismissMention}
                 selectedIndex={mentionSelectedIndex}
                 listboxId={mentionListboxId}
                 atCategory={atMentionCategory}
