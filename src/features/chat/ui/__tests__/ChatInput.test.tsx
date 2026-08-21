@@ -1735,7 +1735,7 @@ describe("ChatInput", () => {
     await user.keyboard("{Tab}");
     expect(input).toHaveValue(`@${projectRoot}/`);
 
-    await user.type(input, "src");
+    await user.keyboard("src");
 
     await waitFor(() => {
       expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
@@ -2062,7 +2062,7 @@ describe("ChatInput", () => {
 
     const input = screen.getByRole("textbox");
     await user.type(input, "@@/Users/wesb/My Project/");
-    await user.type(input, "src");
+    await user.keyboard("src");
 
     await waitFor(() => {
       expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
@@ -2223,7 +2223,7 @@ describe("ChatInput", () => {
       await screen.findByRole("option", { name: /readme\.md/i }),
     ).toBeInTheDocument();
 
-    await user.type(input, "m");
+    await user.keyboard("m");
     await waitFor(() => {
       expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
         roots: ["/Users/wesb/dev/goose2"],
@@ -2285,7 +2285,7 @@ describe("ChatInput", () => {
       "true",
     );
 
-    await user.type(input, "m");
+    await user.keyboard("m");
     await waitFor(() => {
       expect(screen.queryByText("reader.md")).not.toBeInTheDocument();
     });
