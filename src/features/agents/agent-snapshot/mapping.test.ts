@@ -189,8 +189,7 @@ describe("snapshot mappings", () => {
   it.each([
     [{ legacy: true }, ["calm"]],
     ["x".repeat(4_097), "y".repeat(4_097)],
-    ["😀".repeat(45), "😀".repeat(33)],
-  ])("ignores incompatible v1 card metadata without rejecting the snapshot", (goodFor, vibes) => {
+  ])("ignores malformed v1 trait metadata without rejecting the snapshot", (goodFor, vibes) => {
     const value = snapshot({
       profile: {
         displayName: "Display name",
@@ -202,6 +201,19 @@ describe("snapshot mappings", () => {
     expect(snapshotToCreatePersonaRequest(value)).not.toMatchObject({
       goodFor: expect.anything(),
       vibes: expect.anything(),
+    });
+  });
+
+  it("preserves trait metadata beyond the former card limits", () => {
+    const goodFor = "😀".repeat(45);
+    const vibes = "😀".repeat(33);
+    const value = snapshot({
+      profile: { displayName: "Display name", goodFor, vibes },
+    });
+
+    expect(snapshotToCreatePersonaRequest(value)).toMatchObject({
+      goodFor,
+      vibes,
     });
   });
 

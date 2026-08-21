@@ -1032,15 +1032,15 @@ describe("agents API", () => {
     expect(preview.description).toBeUndefined();
   });
 
-  it("drops overlong imported card metadata at ingestion", async () => {
+  it("preserves long imported trait metadata at ingestion", async () => {
     const { previewPersonaImport } = await import("../agents");
     const preview = previewPersonaImport(
       `---\nname: builder\ndescription: Agent\ngood_for: ${"😀".repeat(45)}\nvibes: ${"😀".repeat(33)}\n---\n\nBuild carefully.`,
       "builder.md",
     );
 
-    expect(preview.goodFor).toBeUndefined();
-    expect(preview.vibes).toBeUndefined();
+    expect(preview.goodFor).toBe("😀".repeat(45));
+    expect(preview.vibes).toBe("😀".repeat(33));
   });
 
   it("does not expose remote avatar URLs in pre-consent previews", async () => {
@@ -1378,7 +1378,7 @@ Research carefully.
     expect(mockGooseSourcesCreate).not.toHaveBeenCalled();
   });
 
-  it("drops overlong native agent card metadata before import", async () => {
+  it("preserves long native agent trait metadata during import", async () => {
     mockGooseSourcesImport.mockResolvedValue({ sources: [agentSource] });
     const { importPersonas } = await import("../agents");
     await importPersonas(
@@ -1401,6 +1401,8 @@ Research carefully.
       data: string;
     };
     expect(JSON.parse(importRequest.data).properties).toEqual({
+      good_for: "😀".repeat(45),
+      vibes: "😀".repeat(33),
       color: "blue",
     });
   });
