@@ -188,13 +188,10 @@ function addErrorNotification(sessionId: string | null, message: string) {
     .addMessage(sessionId, createSystemNotificationMessage(message, "error"));
 }
 
-export function notifyAirPodsInputMuteGesture(muted: boolean) {
-  toast.message(
-    muted
-      ? "AirPods gesture detected — microphone muted"
-      : "AirPods gesture detected — microphone unmuted",
-    { id: "airpods-input-mute" },
-  );
+export function notifyInputMuteChanged(muted: boolean) {
+  toast.message(muted ? "Microphone muted" : "Microphone unmuted", {
+    id: "voice-input-mute",
+  });
 }
 
 export function hasDeliveredVoiceTranscript(
@@ -325,7 +322,7 @@ function ensureVoiceEventDeliveryInitialized() {
       return;
     }
     if (event.type === "inputMute") {
-      notifyAirPodsInputMuteGesture(event.muted);
+      notifyInputMuteChanged(event.muted);
       return;
     }
     if (event.type === "activity") return;

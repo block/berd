@@ -7,6 +7,7 @@ import type {
 
 const mocks = vi.hoisted(() => ({
   acknowledge: vi.fn(),
+  applyInputMute: vi.fn(),
   drain: vi.fn(),
   getStatus: vi.fn(),
   listen: vi.fn(),
@@ -19,6 +20,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../api/voiceConversation", () => ({
   acknowledgeVoiceConversationTranscript: mocks.acknowledge,
+  applyVoiceConversationMicrophoneMuteEvent: mocks.applyInputMute,
   drainVoiceConversationTranscripts: mocks.drain,
   getVoiceConversationStatus: mocks.getStatus,
   listenToVoiceConversation: mocks.listen,
@@ -58,6 +60,7 @@ describe("voice conversation store lifecycle ordering", () => {
   beforeEach(() => {
     vi.resetModules();
     mocks.acknowledge.mockReset().mockResolvedValue(undefined);
+    mocks.applyInputMute.mockReset();
     mocks.drain.mockReset().mockResolvedValue([]);
     mocks.getStatus.mockReset().mockResolvedValue(status("stopped", 0));
     mocks.start.mockReset();
@@ -266,6 +269,7 @@ describe("voice conversation store lifecycle ordering", () => {
       line: "type\tid\ttext",
       revision: 2,
       nativeMicrophoneCapture: true,
+      nativeMicrophoneMuteControl: true,
     });
     response.resolve(status("starting", 1, "session-1"));
     await starting;
@@ -274,6 +278,7 @@ describe("voice conversation store lifecycle ordering", () => {
       status: {
         ...status("running", 2, "session-1"),
         nativeMicrophoneCapture: true,
+        nativeMicrophoneMuteControl: true,
       },
       uiState: "listening",
       error: null,
@@ -412,6 +417,42 @@ describe("voice conversation store lifecycle ordering", () => {
       microphoneMuted: true,
       userSpeaking: false,
       uiState: "listening",
+    });
+    expect(mocks.applyInputMute).toHaveBeenCalledWith(true);
+  });
+
+  it("falls back while native capture restarts and returns when it recovers", async () => {
+    const store = await loadStore();
+    store.setState({
+      status: {
+        ...status("running", 3, "session-1"),
+        nativeMicrophoneCapture: true,
+      },
+    });
+    mocks.reconcileMicrophone.mockClear();
+
+    emit({
+      type: "nativeMicrophoneCapture",
+      sessionId: "session-1",
+      available: false,
+      revision: 3,
+    });
+    await vi.waitFor(() => {
+      expect(mocks.reconcileMicrophone).toHaveBeenLastCalledWith(
+        expect.objectContaining({ nativeMicrophoneCapture: false }),
+      );
+    });
+
+    emit({
+      type: "nativeMicrophoneCapture",
+      sessionId: "session-1",
+      available: true,
+      revision: 3,
+    });
+    await vi.waitFor(() => {
+      expect(mocks.reconcileMicrophone).toHaveBeenLastCalledWith(
+        expect.objectContaining({ nativeMicrophoneCapture: true }),
+      );
     });
   });
 

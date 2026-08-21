@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import {
   acknowledgeVoiceConversationTranscript,
+  applyVoiceConversationMicrophoneMuteEvent,
   drainVoiceConversationTranscripts,
   getVoiceConversationStatus,
   listenToVoiceConversation,
@@ -241,6 +242,8 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                     ownerWindowLabel: event.ownerWindowLabel,
                     revision: event.revision,
                     nativeMicrophoneCapture: event.nativeMicrophoneCapture,
+                    nativeMicrophoneMuteControl:
+                      event.nativeMicrophoneMuteControl,
                   },
                   uiState: "listening",
                   microphoneMuted: false,
@@ -306,6 +309,17 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   uiState: activityUiState(nextState),
                 };
               }
+              case "nativeMicrophoneCapture":
+                return {
+                  ...state,
+                  status: {
+                    ...state.status,
+                    lifecycle: "running",
+                    sessionId: event.sessionId,
+                    revision: event.revision,
+                    nativeMicrophoneCapture: event.available,
+                  },
+                };
               case "cleanShutdown":
                 return {
                   ...state,
@@ -348,7 +362,20 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             }
           });
 
-          if (event.type === "user") {
+          if (event.type === "inputMute") {
+            applyVoiceConversationMicrophoneMuteEvent(event.muted);
+            for (const subscriber of [...eventSubscribers])
+              void subscriber(event);
+          } else if (event.type === "nativeMicrophoneCapture") {
+            void reconcileVoiceConversationMicrophone(get().status).catch(
+              (error) => {
+                set({
+                  uiState: "error",
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              },
+            );
+          } else if (event.type === "user") {
             void deliverTranscriptOnce(event).catch((error) => {
               const current = get();
               if (
