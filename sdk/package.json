@@ -31,7 +31,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "npm run generate && npm run build:ts",
+    "build": "tsx generate-schema.ts && tsc",
     "build:ts": "tsc",
     "build:native": "tsx scripts/build-native.ts",
     "build:native:all": "tsx scripts/build-native.ts --all",

@@ -69,18 +69,18 @@ _setup-dev-deps:
 
 [unix]
 _install-lefthook:
-    if [ -d .git ]; then lefthook install --force; else echo "Skipping lefthook install in Git worktree"; fi
+    ./scripts/install-lefthook.sh
 
 # Install dependencies, build workspace packages, and prepare local development hooks.
 [unix]
 _setup-no-goose: _setup-dev-deps
     just _install-lefthook
 
-# Install dependencies, build workspace packages, build managed Goose, and prepare local development hooks.
+# Install dependencies, build workspace packages, prepare local development hooks, and build managed Goose.
 [unix]
 setup: _setup-dev-deps
-    GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
     just _install-lefthook
+    GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
 
 # ── Build & Check ────────────────────────────────────────────
 
