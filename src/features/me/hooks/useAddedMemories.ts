@@ -37,7 +37,20 @@ export function useAddedMemories(sessionId?: string): AddedMemoriesState {
     try {
       const all = await listAddedEntries();
       setEntries(
-        sessionId ? all.filter((entry) => entry.sessionId === sessionId) : all,
+        sessionId
+          ? all.filter(
+              // Entries the MCP server queued have no session: it runs as a
+              // separate process and the protocol carries no session identity,
+              // so it can't know which chat it's serving. Claim those for the
+              // open chat rather than leaving them undisclosed — an agent that
+              // deliberately saved something is the case that most deserves a
+              // toast. With several chats open the entry can surface in the
+              // wrong one; the entry itself is still right, and Settings →
+              // Memory stays the full list either way.
+              (entry) =>
+                entry.sessionId === sessionId || entry.sessionId === null,
+            )
+          : all,
       );
     } catch {
       setEntries([]);

@@ -425,7 +425,6 @@
     "description": "The file every agent reads in every chat. Includes core details about you, standing rules and preferences, and other information you'd rather not repeat.",
     "editTab": "Edit",
     "editorLabel": "Edit your me.md",
-    "emptyHint": "No file yet.",
     "history": {
       "description": "This log tracks every change to your memory files, including what made the change and when. Kept as a git history inside the ~/.me folder.",
       "empty": "No changes recorded yet.",
