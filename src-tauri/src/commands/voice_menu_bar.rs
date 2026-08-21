@@ -1,6 +1,7 @@
 //! macOS menu bar controls for the process-wide native voice conversation.
 
 use serde::Serialize;
+use std::sync::mpsc;
 use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
@@ -21,6 +22,28 @@ struct OpenSessionPayload {
     session_id: String,
 }
 
+// AppKit traps if an NSStatusItem is created, mutated, or dropped off its main
+// queue. Tauri's tray wrapper drops the native item when it leaves the manager.
+fn on_main_thread<T, F>(app: &AppHandle, operation: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce(&AppHandle) -> Result<T, String> + Send + 'static,
+{
+    if objc2::MainThreadMarker::new().is_some() {
+        return operation(app);
+    }
+
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let main_thread_app = app.clone();
+    app.run_on_main_thread(move || {
+        let _ = sender.send(operation(&main_thread_app));
+    })
+    .map_err(|error| error.to_string())?;
+    receiver
+        .recv()
+        .map_err(|_| "The voice menu bar main-thread operation was interrupted.".to_string())?
+}
+
 fn menu(app: &AppHandle, muted: bool) -> tauri::Result<Menu<tauri::Wry>> {
     let status = MenuItem::new(app, "Voice conversation active", false, None::<&str>)?;
     let mute = CheckMenuItem::with_id(app, MUTE_ID, "Mute Microphone", true, muted, None::<&str>)?;
@@ -31,29 +54,38 @@ fn menu(app: &AppHandle, muted: bool) -> tauri::Result<Menu<tauri::Wry>> {
 }
 
 pub fn install(app: &AppHandle, muted: bool) -> Result<(), String> {
-    remove(app);
-    let menu = menu(app, muted).map_err(|error| error.to_string())?;
-    TrayIconBuilder::with_id(TRAY_ID)
-        .menu(&menu)
-        .title(if muted { "🔇" } else { "🎙" })
-        .tooltip("Berd voice conversation")
-        .build(app)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+    on_main_thread(app, move |app| {
+        let _ = app.remove_tray_by_id(TRAY_ID);
+        let menu = menu(app, muted).map_err(|error| error.to_string())?;
+        TrayIconBuilder::with_id(TRAY_ID)
+            .menu(&menu)
+            .title(if muted { "🔇" } else { "🎙" })
+            .tooltip("Berd voice conversation")
+            .build(app)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    })
 }
 
 pub fn set_muted(app: &AppHandle, muted: bool) -> Result<(), String> {
-    let Some(tray) = app.tray_by_id(TRAY_ID) else {
-        return Ok(());
-    };
-    tray.set_title(Some(if muted { "🔇" } else { "🎙" }))
-        .map_err(|error| error.to_string())?;
-    tray.set_menu(Some(menu(app, muted).map_err(|error| error.to_string())?))
-        .map_err(|error| error.to_string())
+    on_main_thread(app, move |app| {
+        let Some(tray) = app.tray_by_id(TRAY_ID) else {
+            return Ok(());
+        };
+        tray.set_title(Some(if muted { "🔇" } else { "🎙" }))
+            .map_err(|error| error.to_string())?;
+        tray.set_menu(Some(menu(app, muted).map_err(|error| error.to_string())?))
+            .map_err(|error| error.to_string())
+    })
 }
 
 pub fn remove(app: &AppHandle) {
-    let _ = app.remove_tray_by_id(TRAY_ID);
+    if let Err(error) = on_main_thread(app, |app| {
+        let _ = app.remove_tray_by_id(TRAY_ID);
+        Ok(())
+    }) {
+        log::warn!("Failed to remove the voice menu bar: {error}");
+    }
 }
 
 fn focus_window(window: &WebviewWindow) {
