@@ -23,6 +23,8 @@ vi.mock("../lib/nativeMicrophone", () => ({
 
 import {
   acknowledgeVoiceConversationTranscript,
+  applyVoiceConversationMicrophoneMuteEvent,
+  applyVoiceConversationTerminalEvent,
   drainVoiceConversationTranscripts,
   getVoiceConversationStatus,
   listenToVoiceConversation,
@@ -32,6 +34,16 @@ import {
   stopActiveMicrophoneForTest,
   stopVoiceConversation,
 } from "./voiceConversation";
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
 
 describe("voice conversation API", () => {
   beforeEach(() => {
@@ -179,12 +191,8 @@ describe("voice conversation API", () => {
 
     expect(mocks.startMicrophone).toHaveBeenCalledOnce();
     expect(mocks.stopMicrophone).not.toHaveBeenCalled();
-    expect(mocks.setMicrophoneMuted.mock.calls).toEqual([
-      [false],
-      [true],
-      [true],
-      [false],
-    ]);
+    expect(mocks.setMicrophoneMuted).toHaveBeenCalledWith(true);
+    expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(false);
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
@@ -209,6 +217,143 @@ describe("voice conversation API", () => {
       muted: true,
     });
     expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(true);
+  });
+
+  it("serializes opposite native mute intents so the latest command wins", async () => {
+    const status = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running",
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      revision: 3,
+      nativeMicrophoneMuteControl: true,
+    } as const;
+    const first = deferred<void>();
+    const second = deferred<void>();
+    mocks.invoke
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+
+    await reconcileVoiceConversationMicrophone(status);
+    const mute = setVoiceConversationMicrophoneMuted(true, status);
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledOnce());
+    expect(mocks.invoke).toHaveBeenLastCalledWith(
+      "set_native_voice_input_muted",
+      expect.objectContaining({ muted: true }),
+    );
+    const unmute = setVoiceConversationMicrophoneMuted(false, status);
+    expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(false);
+    first.resolve();
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(2));
+    expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(false);
+    expect(mocks.invoke).toHaveBeenLastCalledWith(
+      "set_native_voice_input_muted",
+      expect.objectContaining({ muted: false }),
+    );
+    second.resolve();
+    await Promise.all([mute, unmute]);
+
+    expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(false);
+  });
+
+  it("rolls browser capture back to the last applied mute after a failure", async () => {
+    const status = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running",
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      revision: 3,
+      nativeMicrophoneMuteControl: true,
+    } as const;
+    mocks.invoke
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("mute unavailable"));
+
+    await reconcileVoiceConversationMicrophone(status);
+    await setVoiceConversationMicrophoneMuted(true, status);
+    await expect(
+      setVoiceConversationMicrophoneMuted(false, status),
+    ).rejects.toThrow("mute unavailable");
+
+    expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(true);
+  });
+
+  it("does not let a stale UI completion replace a newer stem state", async () => {
+    const status = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running",
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      revision: 3,
+      nativeMicrophoneMuteControl: true,
+    } as const;
+    const pending = deferred<void>();
+    mocks.invoke
+      .mockReturnValueOnce(pending.promise)
+      .mockRejectedValueOnce(new Error("mute unavailable"));
+
+    await reconcileVoiceConversationMicrophone(status);
+    const staleMute = setVoiceConversationMicrophoneMuted(true, status);
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledOnce());
+    applyVoiceConversationMicrophoneMuteEvent(false);
+    pending.resolve();
+    await staleMute;
+
+    await expect(
+      setVoiceConversationMicrophoneMuted(true, status),
+    ).rejects.toThrow("mute unavailable");
+    expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(false);
+  });
+
+  it("does not run queued mute work after the conversation stops", async () => {
+    const running = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running",
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      revision: 3,
+      nativeMicrophoneMuteControl: true,
+    } as const;
+    const stopped = {
+      ...running,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      revision: 4,
+    };
+    const pending = deferred<void>();
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === "set_native_voice_input_muted") return pending.promise;
+      if (command === "stop_native_voice_conversation") {
+        return Promise.resolve(stopped);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    await reconcileVoiceConversationMicrophone(running);
+    const muting = setVoiceConversationMicrophoneMuted(true, running);
+    await vi.waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        "set_native_voice_input_muted",
+        expect.any(Object),
+      ),
+    );
+    const queuedUnmute = setVoiceConversationMicrophoneMuted(false, running);
+    await stopVoiceConversation();
+    pending.resolve();
+    await Promise.all([muting, queuedUnmute]);
+
+    expect(
+      mocks.invoke.mock.calls.filter(
+        ([command]) => command === "set_native_voice_input_muted",
+      ),
+    ).toHaveLength(1);
+    expect(mocks.startMicrophone).toHaveBeenCalledOnce();
+    expect(mocks.stopMicrophone).toHaveBeenCalledOnce();
   });
 
   it("restores the previous mute state when initial capture fails", async () => {
@@ -289,7 +434,7 @@ describe("voice conversation API", () => {
     });
   });
 
-  it("stops browser capture when native voice shuts down elsewhere", async () => {
+  it("stops browser capture for a validated terminal event", async () => {
     mocks.invoke.mockResolvedValue({
       available: true,
       unavailableReason: null,
@@ -299,18 +444,7 @@ describe("voice conversation API", () => {
       revision: 3,
     });
     await startVoiceConversation("session-1");
-    mocks.listen.mockImplementation(async (_name, handler) => {
-      handler({
-        payload: {
-          type: "cleanShutdown",
-          sessionId: "session-1",
-          revision: 4,
-        },
-      });
-      return vi.fn();
-    });
-
-    await listenToVoiceConversation(vi.fn());
+    applyVoiceConversationTerminalEvent();
 
     expect(mocks.stopMicrophone).toHaveBeenCalledOnce();
   });

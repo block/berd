@@ -1,9 +1,11 @@
 import { create } from "zustand";
 
 import {
+  applyVoiceConversationTerminalEvent,
   applyVoiceConversationMicrophoneMuteEvent,
   acknowledgeVoiceConversationTranscript,
   drainVoiceConversationTranscripts,
+  getVoiceConversationMicrophoneMuted,
   getVoiceConversationStatus,
   listenToVoiceConversation,
   reconcileVoiceConversationMicrophone,
@@ -57,6 +59,7 @@ interface VoiceConversationStore {
 
 let initialized = false;
 let stopInFlight: Promise<VoiceConversationStatus> | null = null;
+let microphoneMuteIntent = 0;
 const eventSubscribers = new Set<
   (event: VoiceConversationEvent) => void | Promise<void>
 >();
@@ -231,7 +234,16 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           if (!shouldApplyEventRevision(get().status, event.revision)) return;
 
           if (event.type === "inputMute") {
+            microphoneMuteIntent += 1;
             applyVoiceConversationMicrophoneMuteEvent(event.muted);
+          } else if (event.type === "startup") {
+            microphoneMuteIntent += 1;
+          } else if (
+            event.type === "cleanShutdown" ||
+            (event.type === "error" && event.terminal)
+          ) {
+            microphoneMuteIntent += 1;
+            applyVoiceConversationTerminalEvent();
           }
 
           set((state) => {
@@ -405,6 +417,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
     },
 
     start: async (sessionId) => {
+      microphoneMuteIntent += 1;
       set({ uiState: "starting", microphoneMuted: false, error: null });
       try {
         const status = await startVoiceConversation(sessionId);
@@ -439,6 +452,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
 
     stop: () => {
       if (stopInFlight) return stopInFlight;
+      microphoneMuteIntent += 1;
       set({
         uiState: "stopping",
         microphoneMuted: false,
@@ -514,18 +528,34 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
     setMicrophoneMuted: async (microphoneMuted) => {
       const current = get();
       if (current.status.lifecycle !== "running") return;
+      const intent = ++microphoneMuteIntent;
+      set((state) => {
+        const nextState = {
+          ...state,
+          microphoneMuted,
+          userSpeaking: microphoneMuted ? false : state.userSpeaking,
+        };
+        return {
+          microphoneMuted,
+          userSpeaking: nextState.userSpeaking,
+          uiState: activityUiState(nextState),
+        };
+      });
       try {
         await setVoiceConversationMicrophoneMuted(
           microphoneMuted,
           current.status,
         );
       } catch (error) {
+        if (intent !== microphoneMuteIntent) return;
         set({
+          microphoneMuted: getVoiceConversationMicrophoneMuted(),
           uiState: "error",
           error: error instanceof Error ? error.message : String(error),
         });
         throw error;
       }
+      if (intent !== microphoneMuteIntent) return;
       set((state) => {
         if (
           state.status.lifecycle !== "running" ||

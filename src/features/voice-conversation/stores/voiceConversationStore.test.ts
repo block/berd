@@ -7,8 +7,10 @@ import type {
 
 const mocks = vi.hoisted(() => ({
   applyMicrophoneMuteEvent: vi.fn(),
+  applyTerminalEvent: vi.fn(),
   acknowledge: vi.fn(),
   drain: vi.fn(),
+  getMicrophoneMuted: vi.fn(),
   getStatus: vi.fn(),
   listen: vi.fn(),
   reconcileMicrophone: vi.fn(),
@@ -20,8 +22,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../api/voiceConversation", () => ({
   applyVoiceConversationMicrophoneMuteEvent: mocks.applyMicrophoneMuteEvent,
+  applyVoiceConversationTerminalEvent: mocks.applyTerminalEvent,
   acknowledgeVoiceConversationTranscript: mocks.acknowledge,
   drainVoiceConversationTranscripts: mocks.drain,
+  getVoiceConversationMicrophoneMuted: mocks.getMicrophoneMuted,
   getVoiceConversationStatus: mocks.getStatus,
   listenToVoiceConversation: mocks.listen,
   reconcileVoiceConversationMicrophone: mocks.reconcileMicrophone,
@@ -48,10 +52,12 @@ function status(
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolver) => {
-    resolve = resolver;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 describe("voice conversation store lifecycle ordering", () => {
@@ -61,7 +67,9 @@ describe("voice conversation store lifecycle ordering", () => {
     vi.resetModules();
     mocks.acknowledge.mockReset().mockResolvedValue(undefined);
     mocks.applyMicrophoneMuteEvent.mockReset();
+    mocks.applyTerminalEvent.mockReset();
     mocks.drain.mockReset().mockResolvedValue([]);
+    mocks.getMicrophoneMuted.mockReset().mockReturnValue(false);
     mocks.getStatus.mockReset().mockResolvedValue(status("stopped", 0));
     mocks.start.mockReset();
     mocks.stop.mockReset();
@@ -220,6 +228,23 @@ describe("voice conversation store lifecycle ordering", () => {
       uiState: "off",
       error: null,
     });
+    expect(mocks.applyTerminalEvent).toHaveBeenCalledOnce();
+  });
+
+  it("does not tear down capture for a stale terminal event", async () => {
+    const store = await loadStore();
+    store.setState({
+      status: status("running", 5, "session-2"),
+      uiState: "listening",
+    });
+
+    emit({ type: "cleanShutdown", sessionId: "session-1", revision: 4 });
+
+    expect(mocks.applyTerminalEvent).not.toHaveBeenCalled();
+    expect(store.getState()).toMatchObject({
+      status: status("running", 5, "session-2"),
+      uiState: "listening",
+    });
   });
 
   it("returns to off after a no-op stop with an unchanged revision", async () => {
@@ -375,6 +400,86 @@ describe("voice conversation store lifecycle ordering", () => {
     });
   });
 
+  it("keeps the latest UI mute intent when requests settle out of order", async () => {
+    const store = await loadStore();
+    store.setState({
+      status: status("running", 2, "session-1"),
+      uiState: "listening",
+    });
+    const mute = deferred<void>();
+    const unmute = deferred<void>();
+    mocks.setMicrophoneMuted
+      .mockReturnValueOnce(mute.promise)
+      .mockReturnValueOnce(unmute.promise);
+
+    const muting = store.getState().setMicrophoneMuted(true);
+    const unmuting = store.getState().setMicrophoneMuted(false);
+    expect(store.getState().microphoneMuted).toBe(false);
+
+    unmute.resolve();
+    await unmuting;
+    mute.resolve();
+    await muting;
+
+    expect(store.getState().microphoneMuted).toBe(false);
+  });
+
+  it("rolls the latest failed intent back to the last successful mute", async () => {
+    const store = await loadStore();
+    store.setState({
+      status: status("running", 2, "session-1"),
+      uiState: "listening",
+    });
+    const mute = deferred<void>();
+    const unmute = deferred<void>();
+    mocks.setMicrophoneMuted
+      .mockReturnValueOnce(mute.promise)
+      .mockReturnValueOnce(unmute.promise);
+
+    const muting = store.getState().setMicrophoneMuted(true);
+    const unmuting = store.getState().setMicrophoneMuted(false);
+    mute.resolve();
+    await muting;
+    mocks.getMicrophoneMuted.mockReturnValue(true);
+    unmute.reject(new Error("mute unavailable"));
+    await expect(unmuting).rejects.toThrow("mute unavailable");
+
+    expect(store.getState()).toMatchObject({
+      microphoneMuted: true,
+      uiState: "error",
+      error: "mute unavailable",
+    });
+  });
+
+  it("keeps a newer stem state after a stale UI request settles", async () => {
+    const store = await loadStore();
+    store.setState({
+      status: status("running", 2, "session-1"),
+      uiState: "listening",
+    });
+    const pending = deferred<void>();
+    mocks.setMicrophoneMuted.mockReturnValueOnce(pending.promise);
+
+    const staleMute = store.getState().setMicrophoneMuted(true);
+    emit({
+      type: "inputMute",
+      sessionId: "session-1",
+      muted: false,
+      revision: 3,
+    });
+    pending.resolve();
+    await staleMute;
+    mocks.getMicrophoneMuted.mockReturnValue(false);
+    mocks.setMicrophoneMuted.mockRejectedValueOnce(
+      new Error("mute unavailable"),
+    );
+
+    await expect(store.getState().setMicrophoneMuted(true)).rejects.toThrow(
+      "mute unavailable",
+    );
+    expect(store.getState().microphoneMuted).toBe(false);
+  });
+
   it("applies a current stem mute event to capture and UI", async () => {
     const store = await loadStore();
     store.setState({
@@ -425,8 +530,14 @@ describe("voice conversation store lifecycle ordering", () => {
     store.setState({
       status: status("running", 2, "session-1"),
       uiState: "listening",
-      microphoneMuted: true,
     });
+    emit({
+      type: "inputMute",
+      sessionId: "session-1",
+      muted: true,
+      revision: 3,
+    });
+    mocks.getMicrophoneMuted.mockReturnValue(true);
     mocks.setMicrophoneMuted.mockRejectedValueOnce(
       new Error("microphone unavailable"),
     );

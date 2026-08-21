@@ -12,6 +12,15 @@ let microphoneGeneration = 0;
 let microphoneStart: { generation: number; promise: Promise<void> } | null =
   null;
 let microphoneMuted = false;
+let appliedMicrophoneMuted = false;
+let microphoneMuteIntent = 0;
+let microphoneMuteQueue: Promise<void> = Promise.resolve();
+
+function resetMicrophoneMuteState(): void {
+  microphoneMuteIntent += 1;
+  microphoneMuted = false;
+  appliedMicrophoneMuted = false;
+}
 
 function stopActiveMicrophone(): void {
   microphoneGeneration += 1;
@@ -63,10 +72,14 @@ export async function setVoiceConversationMicrophoneMuted(
   muted: boolean,
   status: VoiceConversationStatus,
 ): Promise<void> {
-  const previous = microphoneMuted;
+  const intent = ++microphoneMuteIntent;
   microphoneMuted = muted;
-  try {
+  activeMicrophone?.setMuted(muted);
+  const operation = microphoneMuteQueue.then(async () => {
+    if (intent !== microphoneMuteIntent) return;
     await reconcileVoiceConversationMicrophone(status);
+    if (intent !== microphoneMuteIntent) return;
+    activeMicrophone?.setMuted(microphoneMuted);
     if (status.nativeMicrophoneMuteControl) {
       await invoke("set_native_voice_input_muted", {
         sessionId: status.sessionId,
@@ -74,23 +87,43 @@ export async function setVoiceConversationMicrophoneMuted(
         muted,
       });
     }
+    if (intent === microphoneMuteIntent) {
+      appliedMicrophoneMuted = muted;
+    }
+  });
+  microphoneMuteQueue = operation.catch(() => undefined);
+  try {
+    await operation;
   } catch (error) {
-    microphoneMuted = previous;
-    activeMicrophone?.setMuted(previous);
+    if (intent === microphoneMuteIntent) {
+      microphoneMuted = appliedMicrophoneMuted;
+      activeMicrophone?.setMuted(appliedMicrophoneMuted);
+    }
     throw error;
   }
 }
 
 export function applyVoiceConversationMicrophoneMuteEvent(muted: boolean) {
+  microphoneMuteIntent += 1;
   microphoneMuted = muted;
+  appliedMicrophoneMuted = muted;
   activeMicrophone?.setMuted(muted);
+}
+
+export function getVoiceConversationMicrophoneMuted(): boolean {
+  return microphoneMuted;
+}
+
+export function applyVoiceConversationTerminalEvent(): void {
+  resetMicrophoneMuteState();
+  stopActiveMicrophone();
 }
 
 export function stopActiveMicrophoneForTest(): void {
   if (!import.meta.env.DEV) {
     throw new Error("Native microphone test controls are development-only.");
   }
-  microphoneMuted = false;
+  resetMicrophoneMuteState();
   stopActiveMicrophone();
 }
 
@@ -229,7 +262,7 @@ export function rejectVoiceConversationTranscript(
 export async function startVoiceConversation(
   sessionId: string,
 ): Promise<VoiceConversationStatus> {
-  microphoneMuted = false;
+  resetMicrophoneMuteState();
   const { rendererId, rendererEpoch } = await getRendererInstance();
   const status = await invoke<VoiceConversationStatus>(
     "start_native_voice_conversation",
@@ -252,7 +285,7 @@ export async function startVoiceConversation(
 }
 
 export async function stopVoiceConversation(): Promise<VoiceConversationStatus> {
-  microphoneMuted = false;
+  resetMicrophoneMuteState();
   stopActiveMicrophone();
   const { rendererId, rendererEpoch } = await getRendererInstance();
   return invoke<VoiceConversationStatus>("stop_native_voice_conversation", {
@@ -265,13 +298,6 @@ export function listenToVoiceConversation(
   onEvent: (event: VoiceConversationEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<VoiceConversationEvent>(VOICE_CONVERSATION_EVENT, (event) => {
-    if (
-      event.payload.type === "cleanShutdown" ||
-      (event.payload.type === "error" && event.payload.terminal)
-    ) {
-      microphoneMuted = false;
-      stopActiveMicrophone();
-    }
     onEvent(event.payload);
   });
 }
