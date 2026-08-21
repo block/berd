@@ -1865,7 +1865,7 @@ describe("ChatInput", () => {
     ).not.toBeInTheDocument();
     expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
 
-    await user.type(input, "/");
+    await user.keyboard("/");
     expect(
       await screen.findByRole("option", { name: /filesystem root/i }),
     ).toBeInTheDocument();
