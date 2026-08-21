@@ -864,10 +864,11 @@ fn stt_worker(
             Err(mpsc::RecvTimeoutError::Timeout) => None,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        if shutdown.load(Ordering::Acquire) && discard_on_shutdown.load(Ordering::Acquire) {
+        let shutting_down = shutdown.load(Ordering::Acquire);
+        if shutting_down && (discard_on_shutdown.load(Ordering::Acquire) || bytes.is_none()) {
             break;
         }
-        if input_muted.load(Ordering::Acquire) {
+        if !shutting_down && input_muted.load(Ordering::Acquire) {
             if clear_buffered_audio(
                 &mut input_48k,
                 &mut leftover_16k,
