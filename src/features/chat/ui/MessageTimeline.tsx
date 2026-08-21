@@ -40,6 +40,8 @@ import {
   MessageTimelineJumpToResponseStartGutterButton,
   REDUCED_MOTION_QUERY,
   RESPONSE_START_HINT_HIDE_DELAY_MS,
+  getTimelineMessageIdentity,
+  getVoiceSubmissionKey,
   isResponseStartHintInRelevanceBand,
   useStickyFlag,
   type MessageBubbleCallbacks,
@@ -933,9 +935,30 @@ export function MessageTimeline({
 
   const latestVisibleMessage = visibleMessages.at(-1);
   const latestVisibleMessageId = latestVisibleMessage?.id;
+  const visibleMessageIdentities = useMemo(
+    () => visibleMessages.map(getTimelineMessageIdentity),
+    [visibleMessages],
+  );
+  const visibleVoiceSubmissionKeys = useMemo(
+    () =>
+      visibleMessages
+        .map(getVoiceSubmissionKey)
+        .filter((key): key is string => key !== null),
+    [visibleMessages],
+  );
+  const seenVoiceSubmissionKeysRef = useRef(
+    new Set(visibleVoiceSubmissionKeys),
+  );
+  const previousVisibleTailIdentityRef = useRef(
+    visibleMessageIdentities.at(-1),
+  );
 
   useEffect(() => {
-    if (!latestVisibleMessageId || latestVisibleMessage?.role !== "user") {
+    if (
+      !latestVisibleMessageId ||
+      latestVisibleMessage?.role !== "user" ||
+      latestVisibleMessage.metadata?.origin === "voice_conversation"
+    ) {
       return;
     }
 
@@ -945,9 +968,46 @@ export function MessageTimeline({
   }, [
     clearProgrammaticFollowResumeSuppression,
     latestVisibleMessageId,
+    latestVisibleMessage?.metadata?.origin,
     latestVisibleMessage?.role,
     scrollToBottom,
     setDetachedFromLatest,
+  ]);
+
+  useEffect(() => {
+    let latestUnseenVoiceSubmissionIndex = -1;
+    for (let index = 0; index < visibleMessages.length; index += 1) {
+      const key = getVoiceSubmissionKey(visibleMessages[index]);
+      if (key && !seenVoiceSubmissionKeysRef.current.has(key)) {
+        latestUnseenVoiceSubmissionIndex = index;
+      }
+    }
+    const previousTailIdentity = previousVisibleTailIdentityRef.current;
+    const previousTailIndex = previousTailIdentity
+      ? visibleMessageIdentities.indexOf(previousTailIdentity)
+      : -1;
+    for (const key of visibleVoiceSubmissionKeys) {
+      seenVoiceSubmissionKeysRef.current.add(key);
+    }
+    previousVisibleTailIdentityRef.current = visibleMessageIdentities.at(-1);
+    if (
+      latestUnseenVoiceSubmissionIndex < 0 ||
+      (previousTailIdentity &&
+        (previousTailIndex < 0 ||
+          latestUnseenVoiceSubmissionIndex <= previousTailIndex))
+    ) {
+      return;
+    }
+    clearProgrammaticFollowResumeSuppression();
+    setDetachedFromLatest(false);
+    schedulePinnedBottomBurst();
+  }, [
+    clearProgrammaticFollowResumeSuppression,
+    schedulePinnedBottomBurst,
+    setDetachedFromLatest,
+    visibleMessageIdentities,
+    visibleMessages,
+    visibleVoiceSubmissionKeys,
   ]);
 
   const scheduleResponseStartHint = useCallback(

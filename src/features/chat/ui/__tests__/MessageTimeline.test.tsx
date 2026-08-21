@@ -1481,6 +1481,127 @@ describe("MessageTimeline", () => {
     });
   });
 
+  it("follows a new voice user turn like a composer submission", async () => {
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "Answer"),
+    ];
+    const { rerender } = renderWithProviders(
+      <MessageTimeline messages={messages} />,
+    );
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, { scrollTop: 500 });
+    const scrollTo = attachScrollTo(scroller);
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    scroller.scrollTop = 100;
+    fireEvent.scroll(scroller);
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+    scrollTo.mockClear();
+    const voiceMessage = {
+      ...message("voice-local", "user", "Spoken follow-up"),
+      metadata: {
+        userVisible: true,
+        origin: "voice_conversation" as const,
+        voiceConversationLifecycleId: "lifecycle-1",
+        voiceUtteranceId: "utterance-1",
+        voiceConversationRevision: 0,
+      },
+    };
+
+    rerender(<MessageTimeline messages={[...messages, voiceMessage]} />);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Jump to latest" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: 500,
+      behavior: "auto",
+    });
+
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    scroller.scrollTop = 100;
+    fireEvent.scroll(scroller);
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+    scrollTo.mockClear();
+
+    rerender(
+      <MessageTimeline
+        messages={[...messages, { ...voiceMessage, id: "voice-backend" }]}
+      />,
+    );
+
+    await waitFor(() => expect(scroller.scrollTop).toBe(100));
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+  });
+
+  it("follows a new voice turn appended with an assistant continuation", async () => {
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "Answer"),
+    ];
+    const { rerender } = renderWithProviders(
+      <MessageTimeline messages={messages} />,
+    );
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, {
+      scrollTop: 500,
+      scrollHeight: 1000,
+      clientHeight: 500,
+    });
+    const scrollTo = attachScrollTo(scroller);
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    scroller.scrollTop = 100;
+    fireEvent.scroll(scroller);
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+    scrollTo.mockClear();
+
+    setScrollMetrics(scroller, {
+      scrollTop: 100,
+      scrollHeight: 1200,
+      clientHeight: 500,
+    });
+    rerender(
+      <MessageTimeline
+        messages={[
+          ...messages,
+          {
+            ...message("voice-local", "user", "Spoken follow-up"),
+            metadata: {
+              userVisible: true,
+              origin: "voice_conversation",
+              voiceConversationLifecycleId: "lifecycle-1",
+              voiceUtteranceId: "utterance-1",
+              voiceConversationRevision: 0,
+            },
+          },
+          message("assistant-2", "assistant", "Working"),
+        ]}
+        streamingMessageId="assistant-2"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({
+        top: 700,
+        behavior: "auto",
+      }),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Jump to latest" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps manual position stable and shows Jump when resize leaves latest behind", () => {
     const animationFrame = mockRequestAnimationFrame();
     const messages = [

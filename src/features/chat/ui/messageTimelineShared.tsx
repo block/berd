@@ -11,7 +11,37 @@ import {
 } from "@/shared/ui/tooltip";
 import { cn } from "@/shared/lib/cn";
 import { SIDEBAR_GROUP_LABEL_TEXT_CLASS } from "@/shared/ui/sidebar-tokens";
+import type { Message } from "@/shared/types/messages";
 import type { McpAppMessageHandler } from "./mcpAppTypes";
+
+export function getVoiceSubmissionKey(
+  message: Message | undefined,
+): string | null {
+  if (
+    message?.role !== "user" ||
+    message.metadata?.origin !== "voice_conversation"
+  ) {
+    return null;
+  }
+
+  const utteranceId = message.metadata.voiceUtteranceId;
+  if (!utteranceId) {
+    return message.id;
+  }
+
+  return [
+    message.metadata.voiceConversationLifecycleId ?? "",
+    utteranceId,
+    message.metadata.voiceConversationRevision ?? "",
+  ].join(":");
+}
+
+export function getTimelineMessageIdentity(message: Message): string {
+  const voiceSubmissionKey = getVoiceSubmissionKey(message);
+  return voiceSubmissionKey
+    ? `voice:${voiceSubmissionKey}`
+    : `message:${message.id}`;
+}
 
 export interface MessageBubbleCallbacks {
   onRetryMessage?: (messageId: string) => void;

@@ -73,6 +73,8 @@ import {
   MessageTimelineJumpToResponseStartGutterButton,
   REDUCED_MOTION_QUERY,
   RESPONSE_START_HINT_HIDE_DELAY_MS,
+  getTimelineMessageIdentity,
+  getVoiceSubmissionKey,
   isResponseStartHintInRelevanceBand,
   useStickyFlag,
   type MessageBubbleCallbacks,
@@ -2435,6 +2437,34 @@ function VirtualMessageTimelineSession({
   }, [stableMessageByRowId, stableRows]);
   const latestMessage = latestMessageEntry?.message;
   const latestMessageId = latestMessageEntry?.messageId;
+  const timelineMessages = useMemo(() => {
+    const result: Message[] = [];
+    for (const row of stableRows) {
+      if (!isMessageTurnRow(row)) {
+        continue;
+      }
+      const message = stableMessageByRowId.get(row.rowId);
+      if (message) {
+        result.push(message);
+      }
+    }
+    return result;
+  }, [stableMessageByRowId, stableRows]);
+  const timelineMessageIdentities = useMemo(
+    () => timelineMessages.map(getTimelineMessageIdentity),
+    [timelineMessages],
+  );
+  const voiceSubmissionKeys = useMemo(
+    () =>
+      timelineMessages
+        .map(getVoiceSubmissionKey)
+        .filter((key): key is string => key !== null),
+    [timelineMessages],
+  );
+  const seenVoiceSubmissionKeysRef = useRef(new Set(voiceSubmissionKeys));
+  const previousTimelineTailIdentityRef = useRef(
+    timelineMessageIdentities.at(-1),
+  );
   const latestAssistantMessageEntry = useMemo(() => {
     for (let index = stableRows.length - 1; index >= 0; index -= 1) {
       const row = stableRows[index];
@@ -2909,7 +2939,11 @@ function VirtualMessageTimelineSession({
   }, [pulsingMessageId]);
 
   useEffect(() => {
-    if (!latestMessageId || latestMessage?.role !== "user") {
+    if (
+      !latestMessageId ||
+      latestMessage?.role !== "user" ||
+      latestMessage.metadata?.origin === "voice_conversation"
+    ) {
       return;
     }
 
@@ -2925,10 +2959,49 @@ function VirtualMessageTimelineSession({
   }, [
     clearProgrammaticFollowResumeSuppression,
     latestMessageId,
+    latestMessage?.metadata?.origin,
     latestMessage?.role,
     sessionId,
     scrollToBottom,
     setDetachedFromLatest,
+  ]);
+
+  useEffect(() => {
+    let latestUnseenVoiceSubmissionIndex = -1;
+    for (let index = 0; index < timelineMessages.length; index += 1) {
+      const key = getVoiceSubmissionKey(timelineMessages[index]);
+      if (key && !seenVoiceSubmissionKeysRef.current.has(key)) {
+        latestUnseenVoiceSubmissionIndex = index;
+      }
+    }
+    const previousTailIdentity = previousTimelineTailIdentityRef.current;
+    const previousTailIndex = previousTailIdentity
+      ? timelineMessageIdentities.indexOf(previousTailIdentity)
+      : -1;
+    for (const key of voiceSubmissionKeys) {
+      seenVoiceSubmissionKeysRef.current.add(key);
+    }
+    previousTimelineTailIdentityRef.current = timelineMessageIdentities.at(-1);
+    if (
+      latestUnseenVoiceSubmissionIndex < 0 ||
+      (previousTailIdentity &&
+        (previousTailIndex < 0 ||
+          latestUnseenVoiceSubmissionIndex <= previousTailIndex))
+    ) {
+      return;
+    }
+    clearProgrammaticFollowResumeSuppression();
+    setDetachedFromLatest(false);
+    scrollToBottom("auto");
+    requestBottomScroll();
+  }, [
+    clearProgrammaticFollowResumeSuppression,
+    requestBottomScroll,
+    scrollToBottom,
+    setDetachedFromLatest,
+    timelineMessageIdentities,
+    timelineMessages,
+    voiceSubmissionKeys,
   ]);
 
   const requestMcpAppAutoScroll = useCallback(
