@@ -15,6 +15,8 @@ import {
 } from "@/features/berdctl/commands/types";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
+import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { resetSessionTargetCoordinatorsForTests } from "@/features/chat/lib/sessionTargetCoordinator";
 import {
   applyPendingSessionWorkspaceActivation,
@@ -375,6 +377,9 @@ beforeEach(() => {
   useProviderModelCacheStore.setState({
     providers: emptyModelProviderCache(),
     refreshingProviderIds: new Set(),
+  });
+  useRuntimeConfigStore.setState({
+    config: DEFAULT_RUNTIME_CONFIG,
   });
 
   window.localStorage.clear();
@@ -1043,9 +1048,86 @@ describe("sessions.create", () => {
     );
   });
 
+  it("ignores an ineligible provider when resolving a bare Goose model", async () => {
+    const [goose] = useProviderCatalogStore.getState().entries;
+    useProviderCatalogStore.setState({
+      entries: [
+        goose,
+        {
+          id: "eligible-provider",
+          displayName: "Eligible Provider",
+          category: "model",
+          description: "Runtime eligible",
+          setupMethod: "none",
+          group: "default",
+        },
+        {
+          id: "ineligible-provider",
+          displayName: "Ineligible Provider",
+          category: "model",
+          description: "Excluded by runtime policy",
+          setupMethod: "none",
+          group: "default",
+        },
+      ],
+    });
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          modelProviders: [
+            {
+              id: "eligible-provider",
+              displayName: "Eligible Provider",
+              models: [{ id: "shared-model", name: "Shared Model" }],
+            },
+          ],
+        },
+      },
+    });
+    seedModelCache("eligible-provider", ["shared-model"]);
+    seedModelCache("ineligible-provider", ["shared-model"]);
+
+    await dispatchCommand(
+      "sessions",
+      { action: "create", prompt: "hi", model_id: "shared-model" },
+      ctx,
+    );
+
+    expect(mocks.acpCreateSession).toHaveBeenCalledWith(
+      "eligible-provider",
+      "/resolved/cwd",
+      expect.objectContaining({ modelId: "shared-model" }),
+    );
+  });
+
   it("rejects a complete explicit Goose target when its model id is provider-ambiguous", async () => {
-    seedModelCache("openai", ["shared-model"]);
-    seedModelCache("anthropic", ["shared-model"]);
+    const [goose] = useProviderCatalogStore.getState().entries;
+    const modelProviders = ["first-provider", "second-provider"].map((id) => ({
+      id,
+      displayName: id,
+      category: "model" as const,
+      description: "Runtime eligible",
+      setupMethod: "none" as const,
+      group: "default" as const,
+    }));
+    useProviderCatalogStore.setState({ entries: [goose, ...modelProviders] });
+    useRuntimeConfigStore.setState({
+      config: {
+        ...DEFAULT_RUNTIME_CONFIG,
+        goose: {
+          ...DEFAULT_RUNTIME_CONFIG.goose,
+          modelProviders: modelProviders.map(({ id, displayName }) => ({
+            id,
+            displayName,
+            models: [{ id: "shared-model", name: "Shared Model" }],
+          })),
+        },
+      },
+    });
+    seedModelCache("first-provider", ["shared-model"]);
+    seedModelCache("second-provider", ["shared-model"]);
 
     await expectCommandError(
       dispatchCommand(

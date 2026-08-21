@@ -276,14 +276,13 @@ Result:
               model.providerId === explicitModelProviderBoundary),
         )
       : [];
-    // Ambiguity is established by concrete proven matches even when the
-    // broader eligible inventory is incomplete. Incompleteness prevents a
-    // single implicit choice; it cannot make multiple known owners unique.
+    // Bare-model inference is runtime-scoped. Authoritative models from an
+    // ineligible provider cannot make the eligible provider ambiguous.
     const matchingExplicitProviders = new Set(
       (explicitModelId &&
       harnessId === GOOSE_PROVIDER_ID &&
       !explicitModelProviderBoundary
-        ? cachedModels
+        ? eligibleGooseModels
         : matchingExplicitModels
       ).flatMap((model) =>
         model.id === explicitModelId && model.providerId

@@ -427,6 +427,63 @@ describe("applySessionModel", () => {
     }
   });
 
+  it("does not publish a timed-out prepare after newer preparation succeeds", async () => {
+    vi.useFakeTimers();
+    try {
+      const registry = await importRegistry();
+      const staleLoadResponse = deferred<AcpSessionConfigSnapshots>();
+      mockLoadSession.mockReturnValueOnce(staleLoadResponse.promise);
+      mockSetProvider.mockResolvedValueOnce(
+        modelConfigResponse("new-model", "New Model"),
+      );
+
+      const stalePrepare = registry.prepareSession(
+        "session-1",
+        "stale-provider",
+        "/stale-project",
+      );
+      await vi.waitFor(() => expect(mockLoadSession).toHaveBeenCalledTimes(1));
+      const staleRejection = expect(stalePrepare).rejects.toThrow(
+        "ACP operation timed out",
+      );
+
+      const newerPrepare = registry.prepareSession(
+        "session-1",
+        "new-provider",
+        "/new-project",
+      );
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await staleRejection;
+      await expect(newerPrepare).resolves.toEqual(
+        modelConfigResponse("new-model", "New Model"),
+      );
+      expect(registry.requireSessionInvocationSelection("session-1")).toEqual({
+        providerId: "new-provider",
+        modelId: "new-model",
+      });
+
+      staleLoadResponse.resolve(
+        modelConfigResponse("stale-model", "Stale Model"),
+      );
+      await Promise.resolve();
+
+      expect(mockSetProvider).toHaveBeenCalledTimes(1);
+      expect(mockSetProvider).toHaveBeenCalledWith(
+        "session-1",
+        "new-provider",
+        { requestId: undefined },
+      );
+      expect(registry.getPreparedProviderId("session-1")).toBe("new-provider");
+      expect(registry.requireSessionInvocationSelection("session-1")).toEqual({
+        providerId: "new-provider",
+        modelId: "new-model",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("records a superseded load pair for the queued model mutation", async () => {
     const registry = await importPreparedRegistry("openai", "gpt-4.1");
     const loadResponse = deferred<ReturnType<typeof executionConfigResponse>>();

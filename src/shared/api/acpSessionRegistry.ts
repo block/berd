@@ -102,6 +102,7 @@ function replaceExecutionSelection(
 async function runBoundedSessionMutation<T>(
   sessionId: string,
   mutation: Promise<T>,
+  invalidate: () => void,
 ): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   let didTimeOut = false;
@@ -111,6 +112,7 @@ async function runBoundedSessionMutation<T>(
       new Promise<never>((_, reject) => {
         timeoutId = setTimeout(() => {
           didTimeOut = true;
+          invalidate();
           reject(
             new Error(
               `ACP operation timed out for session ${sessionId.slice(0, 8)}. Reconnect and retry.`,
@@ -143,6 +145,7 @@ function serializeSessionMutation<T>(
     isLatest: () => boolean,
     sequence: number,
     queue: SessionMutationQueue,
+    canPublish: () => boolean,
   ) => Promise<T>,
   bounded = true,
 ): Promise<T> {
@@ -154,6 +157,7 @@ function serializeSessionMutation<T>(
 
   const sequence = nextMutationSequence++;
   queue.latestSequence = sequence;
+  let canPublish = true;
   const execute = () =>
     mutation(
       () =>
@@ -161,9 +165,14 @@ function serializeSessionMutation<T>(
         queue?.latestSequence === sequence,
       sequence,
       queue,
+      () => canPublish && queue?.pendingSupersession === undefined,
     );
   const result = queue.tail.then(() =>
-    bounded ? runBoundedSessionMutation(sessionId, execute()) : execute(),
+    bounded
+      ? runBoundedSessionMutation(sessionId, execute(), () => {
+          canPublish = false;
+        })
+      : execute(),
   );
   const tail = result.then(
     () => undefined,
@@ -240,8 +249,10 @@ export async function prepareSession(
   supersession?: SessionMutationSupersession,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
   if (!consumeSessionSupersession(sessionId, supersession)) return;
-  const snapshots = await serializeSessionMutation(sessionId, () =>
-    prepareSessionNow(sessionId, providerId, workingDir, options),
+  const snapshots = await serializeSessionMutation(
+    sessionId,
+    (_isLatest, _sequence, _queue, canPublish) =>
+      prepareSessionNow(sessionId, providerId, workingDir, options, canPublish),
   );
   return snapshots;
 }
@@ -251,6 +262,7 @@ async function prepareSessionNow(
   providerId: string,
   workingDir: string,
   options: SessionConfigMutationOptions,
+  canPublish: () => boolean,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
   const sid = sessionId.slice(0, 8);
   const existing = prepared.get(sessionId);
@@ -269,6 +281,7 @@ async function prepareSessionNow(
     });
     if (existing.workingDir !== workingDir) {
       await acpApi.updateWorkingDir(sessionId, workingDir);
+      if (!canPublish()) return;
       existing.workingDir = workingDir;
       changed = true;
     }
@@ -282,18 +295,22 @@ async function prepareSessionNow(
         // Goose can apply the provider and then fail while building the
         // response snapshot. The complete backend pair is unknown until the
         // UI selection is prepared again.
-        existing.executionSelection = undefined;
+        if (canPublish()) {
+          existing.executionSelection = undefined;
+        }
         throw error;
       }
       perfLog(
         `[perf:prepare] ${sid} reuse setProvider(${providerId}) in ${(performance.now() - tProv).toFixed(1)}ms`,
       );
-      replaceExecutionSelection(
-        existing,
-        providerId,
-        normalizeConcreteModelId(snapshots?.model?.modelId),
-      );
-      changed = true;
+      if (canPublish()) {
+        replaceExecutionSelection(
+          existing,
+          providerId,
+          normalizeConcreteModelId(snapshots?.model?.modelId),
+        );
+        changed = true;
+      }
     }
     perfLog(
       `[perf:prepare] ${sid} reuse existing session (updates=${changed}) in ${(performance.now() - tReuse).toFixed(1)}ms`,
@@ -316,6 +333,7 @@ async function prepareSessionNow(
     providerId,
   });
   await acpApi.loadSession(sessionId, workingDir);
+  if (!canPublish()) return;
   perfLog(
     `[perf:prepare] ${sid} registry loadSession ok in ${(performance.now() - tLoad).toFixed(1)}ms`,
   );
@@ -339,7 +357,9 @@ async function prepareSessionNow(
       acknowledgedProofRevision: getModelInventoryProofRevision(providerId),
     },
   };
-  prepared.set(sessionId, entry);
+  if (canPublish()) {
+    prepared.set(sessionId, entry);
+  }
 
   return snapshots;
 }
@@ -437,26 +457,30 @@ export async function configureSession(
     throw new Error(`Invalid model id: ${modelId}`);
   }
   if (!consumeSessionSupersession(sessionId, supersession)) return;
-  const snapshots = await serializeSessionMutation(sessionId, async () => {
-    let snapshots = await prepareSessionNow(
-      sessionId,
-      providerId,
-      workingDir,
-      concreteModelId ? {} : options,
-    );
-    if (concreteModelId) {
-      const modelSnapshots = await applySessionModelNow(
+  const snapshots = await serializeSessionMutation(
+    sessionId,
+    async (_isLatest, _sequence, _queue, canPublish) => {
+      let snapshots = await prepareSessionNow(
         sessionId,
-        concreteModelId,
-        options,
+        providerId,
+        workingDir,
+        concreteModelId ? {} : options,
+        canPublish,
       );
-      snapshots = modelSnapshots ?? {
-        model: { modelId: concreteModelId, modelName: concreteModelId },
-        reasoningEffort: null,
-      };
-    }
-    return snapshots;
-  });
+      if (concreteModelId && canPublish()) {
+        const modelSnapshots = await applySessionModelNow(
+          sessionId,
+          concreteModelId,
+          options,
+        );
+        snapshots = modelSnapshots ?? {
+          model: { modelId: concreteModelId, modelName: concreteModelId },
+          reasoningEffort: null,
+        };
+      }
+      return snapshots;
+    },
+  );
   return snapshots;
 }
 
