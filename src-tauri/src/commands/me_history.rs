@@ -70,7 +70,13 @@ fn message_for(source: &str, summary: Option<&str>, is_first: bool) -> String {
         .map(shorten);
     match source {
         "created" => "Create me.md with starter template".to_string(),
-        "user" => "Edit".to_string(),
+        // A hand-edit knows the document, not the entry, so the caller
+        // derives a summary by diffing. Fall back to the bare verb when
+        // nothing meaningful changed.
+        "user" => match detail {
+            Some(text) => text,
+            None => "Edit".to_string(),
+        },
         "external" => "Edit outside Berd".to_string(),
         "delete" => match detail {
             Some(text) => format!("Remove: {text}"),
@@ -200,6 +206,38 @@ pub struct MeHistoryEntry {
 
 /// The recorded timeline for `file_path`, newest first (capped at 200).
 /// An absent history is an empty timeline, not an error.
+/// Remove the store's change history, leaving the memory files themselves
+/// alone.
+///
+/// Git can't drop one commit from the middle without rewriting every commit
+/// after it, so a per-entry purge would mean rebuilding the trail and risking
+/// corruption on failure. Clearing the whole thing is one reliable operation,
+/// and it satisfies the need behind the request: something removed should not
+/// stay recoverable.
+///
+/// Narrow by design. This deletes `.git` and nothing else:
+///
+/// - the memory documents are untouched;
+/// - `proposals/dismissed.jsonl` is untouched, so entries the user removed
+///   still can't be re-proposed (tombstones were never tracked here);
+/// - the next write starts a fresh history from the current contents.
+#[tauri::command]
+pub fn clear_me_history(file_path: String) -> Result<(), String> {
+    let file = Path::new(&file_path);
+    let dir = match history_root(file) {
+        Some((root, _)) => root.to_path_buf(),
+        None => file
+            .parent()
+            .ok_or_else(|| "memory file has no folder".to_string())?
+            .to_path_buf(),
+    };
+    let git_dir = dir.join(".git");
+    if !git_dir.exists() {
+        return Ok(());
+    }
+    std::fs::remove_dir_all(&git_dir).map_err(|error| format!("couldn't clear history: {error}"))
+}
+
 #[tauri::command]
 pub fn list_me_history(file_path: String) -> Result<Vec<MeHistoryEntry>, String> {
     let file = Path::new(file_path.trim());
@@ -364,11 +402,92 @@ mod tests {
 
     #[test]
     fn missing_summaries_fall_back_to_the_operation() {
-        // External sweeps and hand edits don't know an entry, and a subject
-        // that invents one would be worse than a general description.
+        // Without an entry, a subject that invented one would be worse than
+        // a general description.
         assert_eq!(message_for("agent:noticer", None, false), "Add entry");
         assert_eq!(message_for("delete", None, false), "Remove entry");
-        assert_eq!(message_for("user", Some("ignored"), false), "Edit");
+        assert_eq!(message_for("user", None, false), "Edit");
+        assert_eq!(message_for("external", None, false), "Edit outside Berd");
+    }
+
+    #[test]
+    fn clearing_history_keeps_the_files_and_the_tombstones() {
+        // The whole point of the narrow blast radius: a person clearing the
+        // trail must not silently make removed entries proposable again.
+        let (dir, file) = setup();
+        let proposals = dir.path().join("proposals");
+        std::fs::create_dir_all(&proposals).unwrap();
+        let tombstones = proposals.join("dismissed.jsonl");
+        std::fs::write(&tombstones, "{\"content\":\"gone\"}\n").unwrap();
+
+        let path = file.to_string_lossy().into_owned();
+        record_me_history(path.clone(), "created".into(), None).unwrap();
+        assert!(dir.path().join(".git").exists());
+
+        clear_me_history(path.clone()).unwrap();
+
+        assert!(!dir.path().join(".git").exists());
+        assert!(file.exists(), "the memory file survives");
+        assert!(tombstones.exists(), "tombstones survive");
+        assert_eq!(list_me_history(path).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn clearing_an_absent_history_is_not_an_error() {
+        let (_dir, file) = setup();
+        clear_me_history(file.to_string_lossy().into_owned()).unwrap();
+    }
+
+    #[test]
+    fn the_history_repo_never_tracks_the_proposals_queue() {
+        // Tombstones carry the text of removed entries. Tracking them would
+        // put that text back into history, which is what clearing exists to
+        // prevent.
+        let (dir, file) = setup();
+        let proposals = dir.path().join("proposals");
+        std::fs::create_dir_all(&proposals).unwrap();
+        std::fs::write(proposals.join("dismissed.jsonl"), "{}\n").unwrap();
+
+        record_me_history(
+            file.to_string_lossy().into_owned(),
+            "user".into(),
+            Some("Edit".into()),
+        )
+        .unwrap();
+
+        let repo = Repository::open(dir.path()).unwrap();
+        let tree = repo
+            .head()
+            .unwrap()
+            .peel_to_commit()
+            .unwrap()
+            .tree()
+            .unwrap();
+        let mut tracked = Vec::new();
+        tree.walk(git2::TreeWalkMode::PreOrder, |root, entry| {
+            tracked.push(format!("{root}{}", entry.name().unwrap_or_default()));
+            git2::TreeWalkResult::Ok
+        })
+        .unwrap();
+        assert!(
+            !tracked.iter().any(|path| path.contains("proposals")),
+            "proposals must stay out of the trail, got {tracked:?}"
+        );
+    }
+
+    #[test]
+    fn hand_edits_say_what_changed() {
+        // The caller derives this by diffing, since a hand-edit knows the
+        // document rather than the entry. Without it the history was least
+        // useful for the changes a person made deliberately.
+        assert_eq!(
+            message_for("user", Some("Remove: Git branch names"), false),
+            "Remove: Git branch names"
+        );
+        assert_eq!(
+            message_for("user", Some("Edit: added 2, removed 1"), false),
+            "Edit: added 2, removed 1"
+        );
     }
 
     #[test]

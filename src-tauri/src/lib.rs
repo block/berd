@@ -608,6 +608,7 @@ pub fn run() {
             commands::system::write_text_file,
             commands::me_history::record_me_history,
             commands::me_history::list_me_history,
+            commands::me_history::clear_me_history,
             commands::memory_mcp::set_memory_mcp_enabled,
             commands::terminal::start_terminal,
             commands::terminal::write_terminal,

@@ -224,6 +224,14 @@ export async function listMeHistory(
 }
 
 /**
+ * Clear the store's change history. The memory files and the record of what
+ * the user has removed both survive; only the timeline goes away.
+ */
+export async function clearMeHistory(filePath: string): Promise<void> {
+  await invoke("clear_me_history", { filePath });
+}
+
+/**
  * (De)register the memory MCP server for future goose sessions. Off means
  * the memory tools don't exist in sessions at all — the cleanest off state.
  */

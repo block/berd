@@ -2,9 +2,23 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 
-import { listMeHistory, type MeHistoryEntry } from "@/shared/api/system";
+import {
+  clearMeHistory,
+  listMeHistory,
+  type MeHistoryEntry,
+} from "@/shared/api/system";
 import { cn } from "@/shared/lib/cn";
-import { Button } from "@/shared/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/shared/ui/alert-dialog";
+import { Button, buttonVariants } from "@/shared/ui/button";
 import { SettingsSection } from "@/shared/ui/settings-section";
 
 /**
@@ -19,9 +33,10 @@ import { SettingsSection } from "@/shared/ui/settings-section";
  * comes up occasionally.
  */
 export function MemoryHistory({ filePath }: { filePath: string }) {
-  const { t } = useTranslation("settings");
+  const { t } = useTranslation(["settings", "common"]);
   const [open, setOpen] = useState(false);
   const [entries, setEntries] = useState<MeHistoryEntry[] | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -35,6 +50,12 @@ export function MemoryHistory({ filePath }: { filePath: string }) {
   useEffect(() => {
     if (open && entries === null) void load();
   }, [open, entries, load]);
+
+  const clear = useCallback(async () => {
+    setConfirming(false);
+    await clearMeHistory(filePath).catch(() => {});
+    setEntries([]);
+  }, [filePath]);
 
   return (
     <SettingsSection>
@@ -52,13 +73,15 @@ export function MemoryHistory({ filePath }: { filePath: string }) {
             {/* Mirrors the SettingsSection title treatment; the chevron
                 needs to sit beside it, so the section can't own the h2. */}
             <h2 className="font-display text-base font-medium tracking-tight text-foreground">
-              {t("me.history.title")}
+              {t("settings:me.history.title")}
             </h2>
             <Button
               size="icon-xs"
               variant="ghost"
               aria-expanded={open}
-              aria-label={open ? t("me.closeTopic") : t("me.openTopic")}
+              aria-label={
+                open ? t("settings:me.closeTopic") : t("settings:me.openTopic")
+              }
               onClick={(event) => {
                 event.stopPropagation();
                 setOpen((value) => !value);
@@ -71,24 +94,42 @@ export function MemoryHistory({ filePath }: { filePath: string }) {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            {t("me.history.description")}
+            {t("settings:me.history.description")}
           </p>
         </div>
 
         {open && (
-          <div className="mt-8">
+          <div className="mt-8 space-y-3">
+            {/* Right-aligned above the content, where the document panels
+                put Preview/Edit — same row, same xs height. */}
+            {entries && entries.length > 0 && (
+              <div className="flex items-center justify-end">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  destructive
+                  onClick={() => setConfirming(true)}
+                >
+                  {t("settings:me.history.clear")}
+                </Button>
+              </div>
+            )}
+
             {entries === null && (
               <p className="text-xs text-muted-foreground">
-                {t("me.history.loading")}
+                {t("settings:me.history.loading")}
               </p>
             )}
             {entries?.length === 0 && (
               <p className="text-xs text-muted-foreground">
-                {t("me.history.empty")}
+                {t("settings:me.history.empty")}
               </p>
             )}
             {entries && entries.length > 0 && (
-              <ul className="divide-y divide-border">
+              /* max-h-80 matches the trusted-domains list in Security —
+                 the same shape, a scrollable list of rows inside a section.
+                 overscroll-contain keeps the page still once the log ends. */
+              <ul className="max-h-80 divide-y divide-border overflow-y-auto overscroll-contain pr-1">
                 {entries.map((entry) => (
                   <li
                     key={`${entry.timestampMs}-${entry.message}`}
@@ -110,6 +151,33 @@ export function MemoryHistory({ filePath }: { filePath: string }) {
             )}
           </div>
         )}
+
+        <AlertDialog open={confirming} onOpenChange={setConfirming}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t("settings:me.history.clearConfirm.title")}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("settings:me.history.clearConfirm.description")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>
+                {t("common:actions.cancel")}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                className={buttonVariants({
+                  variant: "primary",
+                  destructive: true,
+                })}
+                onClick={() => void clear()}
+              >
+                {t("settings:me.history.clear")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </SettingsSection>
   );

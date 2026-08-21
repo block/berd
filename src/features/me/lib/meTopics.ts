@@ -7,6 +7,7 @@ import {
   recordMeHistory,
   writeTextFile,
 } from "@/shared/api/system";
+import { summarizeEdit } from "./editSummary";
 
 /**
  * Topic docs: the spokes of the memory-v2 hub-and-spokes shape. Every
@@ -89,9 +90,13 @@ export function parseTopicMeta(
 }
 
 /** Best-effort history, same contract as the spine: never breaks a write. */
-async function tryRecordHistory(path: string, source: string): Promise<void> {
+async function tryRecordHistory(
+  path: string,
+  source: string,
+  summary?: string | null,
+): Promise<void> {
   try {
-    await recordMeHistory(path, source);
+    await recordMeHistory(path, source, summary ?? undefined);
   } catch (error) {
     console.warn("[me] couldn't record topic history", error);
   }
@@ -149,8 +154,11 @@ export async function listTopics(): Promise<TopicDoc[]> {
 
 /** Save a user edit to a topic doc, with history attribution. */
 export async function saveTopic(path: string, contents: string): Promise<void> {
+  const before = await readTextFile(path)
+    .then((payload) => payload.contents)
+    .catch(() => "");
   await writeTextFile(path, contents);
-  void tryRecordHistory(path, "user");
+  void tryRecordHistory(path, "user", summarizeEdit(before, contents));
 }
 
 /** Turn a display name into a topic file name: "Side projects" → side-projects.md */

@@ -426,6 +426,11 @@
     "editTab": "Edit",
     "editorLabel": "Edit your me.md",
     "history": {
+      "clear": "Clear history",
+      "clearConfirm": {
+        "description": "Your memory files stay, and anything you've removed won't be proposed again.",
+        "title": "Clear change history?"
+      },
       "description": "This log tracks every change to your memory files, including what made the change and when. Kept as a git history inside the ~/.me folder.",
       "empty": "No changes recorded yet.",
       "loading": "Reading history...",

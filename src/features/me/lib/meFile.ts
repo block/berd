@@ -6,14 +6,19 @@ import {
   recordMeHistory,
   writeTextFile,
 } from "@/shared/api/system";
+import { summarizeEdit } from "./editSummary";
 
 /**
  * Best-effort history recording. History must never break a read or write:
  * the file is sacred, the timeline is a bonus. See me_history.rs.
  */
-async function tryRecordHistory(path: string, source: string): Promise<void> {
+async function tryRecordHistory(
+  path: string,
+  source: string,
+  summary?: string | null,
+): Promise<void> {
   try {
-    await recordMeHistory(path, source);
+    await recordMeHistory(path, source, summary ?? undefined);
   } catch (error) {
     console.warn("[me] couldn't record me.md history", error);
   }
@@ -193,7 +198,13 @@ export async function saveMeFile(
   path: string,
   contents: string,
 ): Promise<void> {
+  // Read the old text first so the history can say what changed. A
+  // hand-edit is the one write path that knows the whole document and not
+  // the entry, so the summary has to be derived.
+  const before = await readTextFile(path)
+    .then((payload) => payload.contents)
+    .catch(() => "");
   await writeTextFile(path, contents);
-  await tryRecordHistory(path, "user");
+  await tryRecordHistory(path, "user", summarizeEdit(before, contents));
   void tryPublish(contents);
 }

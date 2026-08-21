@@ -426,6 +426,11 @@
     "editTab": "Editar",
     "editorLabel": "Editar tu me.md",
     "history": {
+      "clear": "Borrar historial",
+      "clearConfirm": {
+        "description": "Tus archivos de memoria se mantienen, y lo que hayas quitado no se propondrá de nuevo.",
+        "title": "¿Borrar el historial de cambios?"
+      },
       "description": "Este registro rastrea cada cambio en tus archivos de memoria, incluido qué lo hizo y cuándo. Se guarda como historial de git dentro de la carpeta ~/.me.",
       "empty": "Aún no hay cambios registrados.",
       "loading": "Leyendo historial...",
