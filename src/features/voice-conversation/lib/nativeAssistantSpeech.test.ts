@@ -292,28 +292,32 @@ describe("native assistant speech stream", () => {
 
   it("queues the next reply until the finishing stream completes", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
-    useChatStore.getState().setMessages("session-1", [
-      assistant(
-        [{ type: "text", text: "First reply." }],
-        "completed",
-        "assistant-1",
-      ),
-    ]);
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant(
+          [{ type: "text", text: "First reply." }],
+          "completed",
+          "assistant-1",
+        ),
+      ]);
     await vi.waitFor(() => expect(mocks.finish).toHaveBeenCalledTimes(1));
     const firstStreamId = mocks.start.mock.calls[0]?.[0] as string;
 
-    useChatStore.getState().setMessages("session-1", [
-      assistant(
-        [{ type: "text", text: "First reply." }],
-        "completed",
-        "assistant-1",
-      ),
-      assistant(
-        [{ type: "text", text: "Second reply." }],
-        "completed",
-        "assistant-2",
-      ),
-    ]);
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant(
+          [{ type: "text", text: "First reply." }],
+          "completed",
+          "assistant-1",
+        ),
+        assistant(
+          [{ type: "text", text: "Second reply." }],
+          "completed",
+          "assistant-2",
+        ),
+      ]);
     await Promise.resolve();
     expect(mocks.start).toHaveBeenCalledTimes(1);
     expect(mocks.append).not.toHaveBeenCalledWith(
