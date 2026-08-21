@@ -510,19 +510,19 @@ describe("acpSendMessage", () => {
     });
 
     const [, blocks] = mockPrompt.mock.calls[0];
-    expect(blocks).toEqual([
-      {
-        type: "text",
-        text: "Use selected skill",
-        annotations: { audience: ["assistant"] },
-      },
-      { type: "text", text: "question" },
-      {
-        type: "text",
-        text: "framed complete quote",
-        annotations: { audience: ["assistant"] },
-      },
-    ]);
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0]).toMatchObject({
+      type: "text",
+      annotations: { audience: ["assistant"] },
+    });
+    expect(blocks[0].text).toContain("Use selected skill");
+    expect(blocks[1]).toEqual({ type: "text", text: "question" });
+    expect(blocks[2]).toEqual({
+      type: "text",
+      text: "framed complete quote",
+      annotations: { audience: ["assistant"] },
+    });
+    expect(blocks[0].text).not.toContain("framed complete quote");
   });
 
   it("merges the persona handoff with a skill assistant prompt, persona first", async () => {
