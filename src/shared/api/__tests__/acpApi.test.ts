@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { setSessionConfigSnapshotHandlers } from "../acpSessionConfigSnapshots";
+import { registerChatSessionConfigSnapshotHandlers } from "@/features/chat/acp/sessionConfigSnapshotAdapter";
+import { resetSessionTargetCoordinatorsForTests } from "@/features/chat/lib/sessionTargetCoordinator";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 
 const mocks = vi.hoisted(() => ({
   getClient: vi.fn(),
@@ -892,6 +895,98 @@ describe("provider wire translation", () => {
         modelId: "new-model",
       });
       expect(appliedModels).toEqual(["new-model"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    "provider",
+    "model",
+  ] as const)("keeps the real chat store and registry newer after a stale %s response settles", async (kind) => {
+    vi.useFakeTimers();
+    try {
+      const sessionId = `adapter-store-${kind}-session`;
+      const staleResponse =
+        deferred<ReturnType<typeof createConfigOptionsResponse>>();
+      useChatSessionStore.setState({ sessions: [] });
+      resetSessionTargetCoordinatorsForTests();
+      registerChatSessionConfigSnapshotHandlers();
+      useChatSessionStore.getState().addSession({
+        id: sessionId,
+        title: "Chat",
+        executionTarget: {
+          harnessId: "goose",
+          modelProviderId: "old-provider",
+          modelId: "old-model",
+          modelName: "old-model",
+        },
+        executionTargetSource: "acp",
+        createdAt: "2026-04-20T00:00:00.000Z",
+        updatedAt: "2026-04-20T00:00:00.000Z",
+        messageCount: 0,
+      });
+      mocks.getClient.mockResolvedValue({
+        loadSession: vi.fn().mockResolvedValue({ configOptions: [] }),
+        setSessionConfigOption: mocks.setSessionConfigOption,
+      });
+      mocks.setSessionConfigOption
+        .mockReset()
+        .mockReturnValueOnce(staleResponse.promise)
+        .mockResolvedValueOnce(createConfigOptionsResponse("new-model"));
+
+      const registry = await import("../acpSessionRegistry");
+      registry.registerPreparedSession(
+        sessionId,
+        "old-provider",
+        "/project",
+        "old-model",
+      );
+
+      const stale =
+        kind === "provider"
+          ? registry.prepareSession(sessionId, "stale-provider", "/project")
+          : registry.applySessionModel(sessionId, "stale-model");
+      await vi.waitFor(() =>
+        expect(mocks.setSessionConfigOption).toHaveBeenCalledTimes(1),
+      );
+      const staleRejection = expect(stale).rejects.toThrow(
+        "ACP operation timed out",
+      );
+      const newer = registry.prepareSession(
+        sessionId,
+        "new-provider",
+        "/project",
+      );
+      await vi.advanceTimersByTimeAsync(60_000);
+      await staleRejection;
+      await newer;
+
+      expect(
+        useChatSessionStore.getState().getSession(sessionId)?.executionTarget,
+      ).toMatchObject({
+        modelProviderId: "new-provider",
+        modelId: "new-model",
+      });
+      expect(registry.requireSessionInvocationSelection(sessionId)).toEqual({
+        providerId: "new-provider",
+        modelId: "new-model",
+      });
+
+      staleResponse.resolve(createConfigOptionsResponse("stale-model"));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(
+        useChatSessionStore.getState().getSession(sessionId)?.executionTarget,
+      ).toMatchObject({
+        modelProviderId: "new-provider",
+        modelId: "new-model",
+      });
+      expect(registry.requireSessionInvocationSelection(sessionId)).toEqual({
+        providerId: "new-provider",
+        modelId: "new-model",
+      });
     } finally {
       vi.useRealTimers();
     }
