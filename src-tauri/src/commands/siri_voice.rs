@@ -18,6 +18,10 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 
+use super::native_voice::NativeVoiceState;
+#[cfg(target_os = "macos")]
+use super::pocket_voice::{effective_output_device_name, output_device_uses_speakers};
+
 #[derive(Clone, Debug, Default)]
 pub struct SiriVoiceState {
     runtime: Arc<Mutex<SiriVoiceRuntime>>,
@@ -607,11 +611,12 @@ fn run_siri_stream(
 pub fn start_siri_voice_stream(
     app: AppHandle,
     state: tauri::State<'_, SiriVoiceState>,
+    native_voice: tauri::State<'_, NativeVoiceState>,
     stream_id: String,
 ) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, state, stream_id);
+        let _ = (app, state, native_voice, stream_id);
         Err("Siri TTS is only available on macOS".to_string())
     }
 
@@ -625,6 +630,11 @@ pub fn start_siri_voice_stream(
             "Select an installed Siri voice in Voice settings before using Siri TTS".to_string()
         })?;
         let active = begin_playback(&state)?;
+        let capture_suppression =
+            output_device_uses_speakers(effective_output_device_name(None).as_deref()).then(|| {
+                log::info!("[voice-echo-guard] speaker output detected");
+                native_voice.suppress_capture()
+            });
         let (sender, receiver) = mpsc::channel();
         {
             let mut runtime = state
@@ -639,6 +649,7 @@ pub fn start_siri_voice_stream(
         let playback_state = state.inner().clone();
         let playback_active = active.clone();
         tauri::async_runtime::spawn_blocking(move || {
+            let _capture_suppression = capture_suppression;
             let result = run_siri_stream(
                 app.clone(),
                 stream_id.clone(),
@@ -725,11 +736,12 @@ fn send_stream_command(
 pub async fn preview_siri_voice(
     app: AppHandle,
     state: tauri::State<'_, SiriVoiceState>,
+    native_voice: tauri::State<'_, NativeVoiceState>,
     voice: SiriVoiceSelection,
 ) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, state, voice);
+        let _ = (app, state, native_voice, voice);
         Err("Siri TTS is only available on macOS".to_string())
     }
 
@@ -744,9 +756,15 @@ pub async fn preview_siri_voice(
         let name = CString::new(voice.name.clone())
             .map_err(|_| "Siri voice name cannot contain NUL bytes".to_string())?;
         let active = begin_playback(&state)?;
+        let capture_suppression =
+            output_device_uses_speakers(effective_output_device_name(None).as_deref()).then(|| {
+                log::info!("[voice-echo-guard] speaker output detected");
+                native_voice.suppress_capture()
+            });
         let playback_state = state.inner().clone();
         let playback_active = active.clone();
         tauri::async_runtime::spawn_blocking(move || {
+            let _capture_suppression = capture_suppression;
             let result = (|| {
                 let mut error = std::ptr::null_mut();
                 // SAFETY: The bridge copies all strings synchronously. The Arc
