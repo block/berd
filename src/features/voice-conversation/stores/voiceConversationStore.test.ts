@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
   hydrateMicrophone: vi.fn(),
   listen: vi.fn(),
+  reconcileMicrophone: vi.fn(),
   reject: vi.fn(),
   setMicrophoneMuted: vi.fn(),
   start: vi.fn(),
@@ -29,6 +30,7 @@ vi.mock("../api/voiceConversation", () => ({
   getVoiceConversationStatus: mocks.getStatus,
   hydrateVoiceConversationMicrophone: mocks.hydrateMicrophone,
   listenToVoiceConversation: mocks.listen,
+  reconcileVoiceConversationMicrophone: mocks.reconcileMicrophone,
   rejectVoiceConversationTranscript: mocks.reject,
   setVoiceConversationMicrophoneMuted: mocks.setMicrophoneMuted,
   startVoiceConversation: mocks.start,
@@ -78,6 +80,7 @@ describe("voice conversation store lifecycle ordering", () => {
       return vi.fn();
     });
     mocks.hydrateMicrophone.mockReset().mockResolvedValue(undefined);
+    mocks.reconcileMicrophone.mockReset().mockResolvedValue(undefined);
     mocks.reject
       .mockReset()
       .mockResolvedValue({ attempts: 1, terminal: false });
@@ -150,6 +153,50 @@ describe("voice conversation store lifecycle ordering", () => {
     expect(store.getState().microphoneMuted).toBe(true);
   });
 
+  it("refreshes mute state for the same running lifecycle", async () => {
+    const unmuted = {
+      ...status("running", 2, "session-1"),
+      nativeMicrophoneMuteControl: true,
+      nativeMicrophoneMuted: false,
+    };
+    const muted = { ...unmuted, nativeMicrophoneMuted: true };
+    mocks.getStatus.mockResolvedValueOnce(unmuted).mockResolvedValueOnce(muted);
+    const store = await loadStore();
+
+    await store.getState().init();
+
+    expect(mocks.hydrateMicrophone).toHaveBeenLastCalledWith(muted);
+    expect(store.getState().microphoneMuted).toBe(true);
+  });
+
+  it("hydrates mute state when startup arrives before status", async () => {
+    const response = deferred<VoiceConversationStatus>();
+    mocks.getStatus.mockReturnValue(response.promise);
+    const { useVoiceConversationStore } = await import(
+      "./voiceConversationStore"
+    );
+    const initializing = useVoiceConversationStore.getState().init();
+    await vi.waitFor(() => expect(mocks.getStatus).toHaveBeenCalledOnce());
+    emit({
+      type: "startup",
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      line: "type\tid\ttext",
+      revision: 2,
+      nativeMicrophoneMuteControl: true,
+    });
+    const muted = {
+      ...status("running", 2, "session-1"),
+      nativeMicrophoneMuteControl: true,
+      nativeMicrophoneMuted: true,
+    };
+    response.resolve(muted);
+    await initializing;
+
+    expect(mocks.hydrateMicrophone).toHaveBeenCalledWith(muted);
+    expect(useVoiceConversationStore.getState().microphoneMuted).toBe(true);
+  });
+
   it("does not let stale status overwrite a newer mute event", async () => {
     const response = deferred<VoiceConversationStatus>();
     mocks.getStatus.mockReturnValue(response.promise);
@@ -173,6 +220,12 @@ describe("voice conversation store lifecycle ordering", () => {
     await initializing;
 
     expect(mocks.hydrateMicrophone).not.toHaveBeenCalled();
+    expect(mocks.reconcileMicrophone).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lifecycle: "running",
+        sessionId: "session-1",
+      }),
+    );
     expect(useVoiceConversationStore.getState().microphoneMuted).toBe(false);
     expect(useVoiceConversationStore.getState().status.revision).toBe(3);
   });

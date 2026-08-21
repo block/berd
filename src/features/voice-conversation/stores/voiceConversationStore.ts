@@ -9,6 +9,7 @@ import {
   getVoiceConversationStatus,
   hydrateVoiceConversationMicrophone,
   listenToVoiceConversation,
+  reconcileVoiceConversationMicrophone,
   rejectVoiceConversationTranscript,
   setVoiceConversationMicrophoneMuted,
   startVoiceConversation,
@@ -60,6 +61,7 @@ interface VoiceConversationStore {
 let initialized = false;
 let stopInFlight: Promise<VoiceConversationStatus> | null = null;
 let microphoneMuteIntent = 0;
+let microphoneMuteStateVersion = 0;
 const eventSubscribers = new Set<
   (event: VoiceConversationEvent) => void | Promise<void>
 >();
@@ -162,6 +164,17 @@ function shouldApplyResponseRevision(
   return revision > current.revision;
 }
 
+function isMatchingRunningSession(
+  current: VoiceConversationStatus,
+  next: VoiceConversationStatus,
+) {
+  return (
+    current.lifecycle === "running" &&
+    next.lifecycle === "running" &&
+    current.sessionId === next.sessionId
+  );
+}
+
 export const useVoiceConversationStore = create<VoiceConversationStore>(
   (set, get) => ({
     status: VOICE_CONVERSATION_OFF_STATUS,
@@ -185,13 +198,27 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
     init: async () => {
       if (initialized) {
         try {
-          const muteIntent = microphoneMuteIntent;
+          const muteStateVersion = microphoneMuteStateVersion;
           const status = await getVoiceConversationStatus();
+          const currentStatus = get().status;
+          const shouldAdopt = shouldApplyResponseRevision(
+            currentStatus,
+            status.revision,
+          );
+          const matchingRunningSession = isMatchingRunningSession(
+            currentStatus,
+            status,
+          );
+          const shouldReconcile = shouldAdopt || matchingRunningSession;
           const shouldHydrate =
-            shouldApplyResponseRevision(get().status, status.revision) &&
-            muteIntent === microphoneMuteIntent;
+            (shouldAdopt ||
+              (matchingRunningSession &&
+                currentStatus.revision === status.revision)) &&
+            muteStateVersion === microphoneMuteStateVersion;
           if (shouldHydrate) {
             await hydrateVoiceConversationMicrophone(status);
+          } else if (shouldReconcile) {
+            await reconcileVoiceConversationMicrophone(status);
           }
           set((state) => {
             if (
@@ -206,12 +233,11 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   state.uiState === "error"
                     ? state.uiState
                     : uiStateForStatus(status),
-                microphoneMuted:
-                  muteIntent === microphoneMuteIntent
-                    ? status.lifecycle === "running"
-                      ? (status.nativeMicrophoneMuted ?? false)
-                      : false
-                    : state.microphoneMuted,
+                microphoneMuted: shouldHydrate
+                  ? status.lifecycle === "running"
+                    ? (status.nativeMicrophoneMuted ?? false)
+                    : false
+                  : state.microphoneMuted,
                 hydrated: true,
               };
             }
@@ -222,6 +248,11 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   available: status.available,
                   unavailableReason: status.unavailableReason,
                 },
+                microphoneMuted: shouldHydrate
+                  ? status.lifecycle === "running"
+                    ? (status.nativeMicrophoneMuted ?? false)
+                    : false
+                  : state.microphoneMuted,
                 hydrated: true,
               };
             }
@@ -247,6 +278,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
 
           if (event.type === "inputMute") {
             microphoneMuteIntent += 1;
+            microphoneMuteStateVersion += 1;
             applyVoiceConversationMicrophoneMuteEvent(event.muted);
           } else if (event.type === "startup") {
             microphoneMuteIntent += 1;
@@ -255,6 +287,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             (event.type === "error" && event.terminal)
           ) {
             microphoneMuteIntent += 1;
+            microphoneMuteStateVersion += 1;
             applyVoiceConversationTerminalEvent();
           }
 
@@ -265,7 +298,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   ...state,
                   status: {
                     ...state.status,
-                    lifecycle: "running",
+                    lifecycle: "running" as const,
                     sessionId: event.sessionId,
                     ownerWindowLabel: event.ownerWindowLabel,
                     revision: event.revision,
@@ -280,7 +313,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   ...state,
                   status: {
                     ...state.status,
-                    lifecycle: "running",
+                    lifecycle: "running" as const,
                     sessionId: event.sessionId,
                     revision: event.revision,
                   },
@@ -322,6 +355,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   ...state,
                   status: {
                     ...state.status,
+                    lifecycle: "running" as const,
                     sessionId: event.sessionId,
                     revision: event.revision,
                   },
@@ -407,38 +441,60 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       }
 
       try {
-        const muteIntent = microphoneMuteIntent;
+        const muteStateVersion = microphoneMuteStateVersion;
         const status = await getVoiceConversationStatus();
+        const currentStatus = get().status;
+        const shouldAdopt =
+          shouldApplyResponseRevision(currentStatus, status.revision) ||
+          (!get().hydrated &&
+            get().status.revision === 0 &&
+            get().uiState === "off");
+        const matchingRunningSession = isMatchingRunningSession(
+          currentStatus,
+          status,
+        );
+        const shouldReconcile = shouldAdopt || matchingRunningSession;
         const shouldHydrate =
-          (shouldApplyResponseRevision(get().status, status.revision) ||
-            (!get().hydrated &&
-              get().status.revision === 0 &&
-              get().uiState === "off")) &&
-          muteIntent === microphoneMuteIntent;
+          (shouldAdopt ||
+            (matchingRunningSession &&
+              currentStatus.revision === status.revision)) &&
+          muteStateVersion === microphoneMuteStateVersion;
         if (shouldHydrate) {
           await hydrateVoiceConversationMicrophone(status);
+        } else if (shouldReconcile) {
+          await reconcileVoiceConversationMicrophone(status);
         }
-        set((state) =>
-          shouldApplyResponseRevision(state.status, status.revision) ||
-          (!state.hydrated &&
-            state.status.revision === 0 &&
-            state.uiState === "off")
-            ? {
-                status,
-                uiState:
-                  state.uiState === "error"
-                    ? state.uiState
-                    : uiStateForStatus(status),
-                microphoneMuted:
-                  muteIntent === microphoneMuteIntent
-                    ? status.lifecycle === "running"
-                      ? (status.nativeMicrophoneMuted ?? false)
-                      : false
-                    : state.microphoneMuted,
-                hydrated: true,
-              }
-            : { hydrated: true },
-        );
+        set((state) => {
+          if (
+            shouldApplyResponseRevision(state.status, status.revision) ||
+            (!state.hydrated &&
+              state.status.revision === 0 &&
+              state.uiState === "off")
+          ) {
+            return {
+              status,
+              uiState:
+                state.uiState === "error"
+                  ? state.uiState
+                  : uiStateForStatus(status),
+              microphoneMuted: shouldHydrate
+                ? status.lifecycle === "running"
+                  ? (status.nativeMicrophoneMuted ?? false)
+                  : false
+                : state.microphoneMuted,
+              hydrated: true,
+            };
+          }
+          if (isMatchingRunningSession(state.status, status)) {
+            return {
+              microphoneMuted: shouldHydrate
+                ? (status.nativeMicrophoneMuted ?? false)
+                : state.microphoneMuted,
+              hydrated: true,
+            };
+          }
+          return { hydrated: true };
+        });
       } catch (error) {
         set({
           error: error instanceof Error ? error.message : String(error),
@@ -450,6 +506,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
 
     start: async (sessionId) => {
       microphoneMuteIntent += 1;
+      microphoneMuteStateVersion += 1;
       set({ uiState: "starting", microphoneMuted: false, error: null });
       try {
         const status = await startVoiceConversation(sessionId);
@@ -485,6 +542,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
     stop: () => {
       if (stopInFlight) return stopInFlight;
       microphoneMuteIntent += 1;
+      microphoneMuteStateVersion += 1;
       set({
         uiState: "stopping",
         microphoneMuted: false,
@@ -561,6 +619,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       const current = get();
       if (current.status.lifecycle !== "running") return;
       const intent = ++microphoneMuteIntent;
+      microphoneMuteStateVersion += 1;
       set((state) => {
         const nextState = {
           ...state,
