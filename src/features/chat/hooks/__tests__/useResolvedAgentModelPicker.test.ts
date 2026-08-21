@@ -395,6 +395,55 @@ describe("useResolvedAgentModelPicker", () => {
         executionTarget: { harnessId: "codex-acp" },
       },
     );
+    const firstSelection = getSessionTargetSelection(session.id);
+    expect(firstSelection).toMatchObject({
+      target: { harnessId: "codex-acp" },
+    });
+
+    act(() => result.current.handleProviderChange("claude-acp"));
+
+    const secondSelection = getSessionTargetSelection(session.id);
+    expect(secondSelection).toMatchObject({
+      target: { harnessId: "claude-acp" },
+    });
+    expect(secondSelection?.operationId).not.toBe(firstSelection?.operationId);
+  });
+
+  it("gives a provider-only A to B to A draft change new ownership", () => {
+    useChatSessionStore.getState().createDraftSession({
+      workingDir: "/tmp/project",
+      executionTarget: { harnessId: "goose" },
+    });
+    const session = useChatSessionStore.getState().sessions[0];
+    const { result } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "codex-acp", label: "Codex" },
+      ],
+      sessionId: session.id,
+      session,
+    });
+
+    act(() => result.current.handleProviderChange("codex-acp"));
+    const providerB = getSessionTargetSelection(session.id);
+
+    const liveDraft = useChatSessionStore.getState().getSession(session.id);
+    const { result: rerendered } = renderModelPicker({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "codex-acp", label: "Codex" },
+      ],
+      selectedProvider: "codex-acp",
+      sessionId: session.id,
+      session: liveDraft,
+    });
+    act(() => rerendered.current.handleProviderChange("goose"));
+
+    const providerAAgain = getSessionTargetSelection(session.id);
+    expect(providerAAgain).toMatchObject({
+      target: { harnessId: "goose" },
+    });
+    expect(providerAAgain?.operationId).not.toBe(providerB?.operationId);
   });
 
   it("routes explicit concrete model providers through the Goose harness", () => {

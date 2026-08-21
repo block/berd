@@ -3516,6 +3516,66 @@ describe("AppShell global navigation", () => {
     expect(getModelSelectionIntent("created-session")).toBeUndefined();
   });
 
+  it("does not promote a stale provider-only draft change over a newer provider", async () => {
+    const pendingSession = deferred<{ sessionId: string }>();
+    const pendingProviderB = deferred<Record<string, never>>();
+    mockAcpCreateSession.mockReturnValueOnce(pendingSession.promise);
+    mockAcpPrepareSession
+      .mockReturnValueOnce(pendingProviderB.promise)
+      .mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    await waitFor(() => expect(mockAcpCreateSession).toHaveBeenCalled());
+    const draftSessionId = useChatSessionStore.getState().activeSessionId ?? "";
+
+    act(() => {
+      beginModelSelectionIntent(draftSessionId, {
+        requestId: "provider-b",
+        target: { harnessId: "codex-acp" },
+      });
+      pendingSession.resolve({ sessionId: "created-session" });
+    });
+
+    await waitFor(() => {
+      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+        "created-session",
+        "codex-acp",
+        "~/goose artifacts",
+        expect.any(Object),
+        expect.objectContaining({ clear: expect.any(Function) }),
+      );
+    });
+
+    act(() => {
+      beginModelSelectionIntent(draftSessionId, {
+        requestId: "provider-c",
+        target: { harnessId: "claude-acp" },
+      });
+      pendingProviderB.resolve({});
+    });
+
+    await waitFor(() => {
+      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+        "created-session",
+        "claude-acp",
+        "~/goose artifacts",
+        expect.any(Object),
+        expect.objectContaining({ clear: expect.any(Function) }),
+      );
+    });
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().activeSessionId).toBe(
+        "created-session",
+      );
+    });
+    expect(
+      useChatSessionStore.getState().getSession("created-session"),
+    ).toMatchObject({ executionTarget: { harnessId: "claude-acp" } });
+    expect(getModelSelectionIntent("created-session")).toBeUndefined();
+  });
+
   it("does not restore stale draft creation ownership after A to B to A", async () => {
     const pendingSession = deferred<{
       sessionId: string;

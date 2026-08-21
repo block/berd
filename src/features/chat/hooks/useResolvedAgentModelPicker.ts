@@ -34,7 +34,6 @@ import {
   type SessionExecutionTarget,
 } from "../lib/sessionExecutionTarget";
 import { gooseServeSelectionFromExecutionTarget } from "../lib/gooseServeExecutionTarget";
-import { replaceSessionTargetAfterDispatch } from "../lib/sessionTargetCoordinator";
 import type { ModelOption } from "../types";
 
 const MODEL_ALIAS_IDS = new Set(["current", "default"]);
@@ -396,20 +395,18 @@ export function useResolvedAgentModelPicker({
         setGlobalSelectedProvider(resolvedRequestedAgentId);
       }
 
-      // A pending draft only has a client-generated id. Keep the selection on
-      // the draft so startup can apply it after ACP returns the backend id;
-      // sending a config request now would target a session ACP cannot know.
+      // A pending draft only has a client-generated id. Keep every target
+      // mutation under a fresh ownership token so provider-only changes can
+      // supersede creation/reconciliation work just like model changes do.
       if (session?.creationState === "pending") {
-        if (nextTarget.modelId) {
-          beginModelSelectionIntent(sessionId, {
-            requestId: createModelSelectionRequestId(),
-            target: nextTarget,
-            previousTarget: session.executionTarget,
-            preferenceAgentId: resolvedRequestedAgentId,
-          });
-        } else {
-          replaceSessionTargetAfterDispatch(sessionId, nextTarget);
-        }
+        beginModelSelectionIntent(sessionId, {
+          requestId: createModelSelectionRequestId(),
+          target: nextTarget,
+          previousTarget: session.executionTarget,
+          ...(nextTarget.modelId
+            ? { preferenceAgentId: resolvedRequestedAgentId }
+            : {}),
+        });
         return;
       }
 
