@@ -250,9 +250,13 @@ impl SttPipeline {
     }
 
     fn begin_shutdown(&mut self) -> Option<thread::JoinHandle<()>> {
+        self.signal_shutdown();
+        self.thread.take()
+    }
+
+    fn signal_shutdown(&self) {
         self.latch_muted_shutdown();
         self.shutdown.store(true, Ordering::Release);
-        self.thread.take()
     }
 
     fn latch_muted_shutdown(&self) {
@@ -703,7 +707,7 @@ impl NativeVoiceState {
             }
             let pipeline = runtime.pipeline.take();
             if let Some(pipeline) = pipeline.as_ref() {
-                pipeline.latch_muted_shutdown();
+                pipeline.signal_shutdown();
             }
             native_input_mute::stop(&self.input_muted);
             (runtime.session_id.clone(), runtime.revision, pipeline)
@@ -860,6 +864,9 @@ fn stt_worker(
             Err(mpsc::RecvTimeoutError::Timeout) => None,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
+        if shutdown.load(Ordering::Acquire) {
+            break;
+        }
         if input_muted.load(Ordering::Acquire) {
             if clear_buffered_audio(
                 &mut input_48k,
@@ -1187,6 +1194,7 @@ mod tests {
     async fn window_destroy_schedules_blocked_worker_join_off_callback() {
         let state = NativeVoiceState::default();
         let (sender, _receiver) = mpsc::sync_channel(1);
+        let shutdown = Arc::new(AtomicBool::new(false));
         let worker = thread::spawn(|| thread::sleep(Duration::from_millis(250)));
         {
             let mut runtime = state.runtime.lock().expect("lock native runtime");
@@ -1196,7 +1204,7 @@ mod tests {
             });
             runtime.pipeline = Some(SttPipeline {
                 audio_tx: sender,
-                shutdown: Arc::new(AtomicBool::new(false)),
+                shutdown: Arc::clone(&shutdown),
                 discard_on_shutdown: Arc::new(AtomicBool::new(false)),
                 input_muted: Arc::new(AtomicBool::new(false)),
                 audio_seen: AtomicBool::new(false),
@@ -1207,6 +1215,7 @@ mod tests {
         let started = std::time::Instant::now();
         assert!(state.stop_for_window_destroyed("owner-window"));
         assert!(started.elapsed() < Duration::from_millis(50));
+        assert!(shutdown.load(Ordering::Acquire));
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(state
             .runtime
