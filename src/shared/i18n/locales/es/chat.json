@@ -543,6 +543,7 @@
     "voiceInputAutoSubmitHint": "Di \"submit\" para enviar",
     "voiceConversation": {
       "start": "Iniciar conversación de voz",
+      "hangUp": "Colgar",
       "muteMicrophone": "Silenciar micrófono",
       "unmuteMicrophone": "Activar micrófono",
       "buddy": {
@@ -550,10 +551,7 @@
         "gloopieAlt": "Asistente Gloopie de voz",
         "openSession": "Abrir sesión de voz",
         "hangUp": "Colgar",
-        "sendToMenuBar": "Enviar a la barra de menús",
         "listening": "Escuchando…",
-        "user-speaking": "Escuchándote…",
-        "agent-speaking": "Hablando…",
         "muted": "Micrófono silenciado"
       },
       "states": {

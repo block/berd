@@ -23,9 +23,9 @@ use services::{bundled_agents, bundled_skills, distro_bundle::DistroBundleState}
 use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
-use tauri::{Manager, RunEvent};
 #[cfg(target_os = "macos")]
-use tauri::{WebviewWindow, WindowEvent};
+use tauri::WebviewWindow;
+use tauri::{Manager, RunEvent, WindowEvent};
 use tauri_plugin_window_state::StateFlags;
 
 #[cfg(target_os = "macos")]
@@ -376,6 +376,8 @@ pub fn run() {
             // Surface WKWebView renderer memory and detect silent OOM reaps.
             services::renderer_monitor::start(app.handle().clone());
 
+            attach_main_window_lifecycle(app);
+
             // Build a custom macOS application menu so that the app submenu,
             // "About" item, and "Quit" item use the product name "Berd"
             // instead of the Cargo binary name.
@@ -383,8 +385,6 @@ pub fn run() {
             {
                 set_dev_dock_icon();
                 refresh_traffic_light_position_on_window_changes(app);
-                attach_main_window_lifecycle(app);
-                app.on_menu_event(commands::voice_menu_bar::handle_menu_event);
 
                 let app_menu = SubmenuBuilder::new(app, "Berd")
                     .about_with_text(
@@ -651,7 +651,7 @@ pub fn run() {
             commands::native_voice::set_native_voice_input_muted,
             commands::voice_buddy::open_voice_conversation_session,
             commands::voice_buddy::stop_voice_conversation_from_buddy,
-            commands::voice_buddy::send_voice_conversation_to_menu_bar,
+            commands::notifications::should_suppress_completion_notification,
             commands::voice_capture::register_voice_renderer_instance,
             commands::window_session::get_session_window_support,
             commands::window_session::open_session_window,
@@ -716,7 +716,6 @@ fn refresh_traffic_light_position_on_window_changes(app: &tauri::App) {
     }
 }
 
-#[cfg(target_os = "macos")]
 fn attach_main_window_lifecycle(app: &tauri::App) {
     let Some(main) = app.get_webview_window("main") else {
         return;
@@ -729,8 +728,12 @@ fn attach_main_window_lifecycle(app: &tauri::App) {
                 .webview_windows()
                 .keys()
                 .any(|label| label != "main");
+            let should_preserve = app_handle
+                .get_webview_window(commands::voice_buddy::WINDOW_LABEL)
+                .is_some()
+                || (cfg!(target_os = "macos") && has_secondary_window);
 
-            if has_secondary_window {
+            if should_preserve {
                 api.prevent_close();
                 if let Some(main) = app_handle.get_webview_window("main") {
                     let _ = main.hide();

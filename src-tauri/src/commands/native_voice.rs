@@ -190,6 +190,14 @@ impl NativeVoiceState {
         ))
     }
 
+    pub fn is_active_for_session(&self, session_id: &str) -> bool {
+        self.runtime
+            .lock()
+            .ok()
+            .and_then(|runtime| runtime.session_id.clone())
+            .is_some_and(|active_session_id| active_session_id == session_id)
+    }
+
     pub fn set_microphone_muted(&self, app: &AppHandle, muted: bool) -> Result<(), String> {
         let (session_id, owner_window_label, revision) = {
             let runtime = self
@@ -208,10 +216,6 @@ impl NativeVoiceState {
             (session_id, owner_window_label, runtime.revision)
         };
         self.microphone_muted.store(muted, Ordering::SeqCst);
-        #[cfg(target_os = "macos")]
-        if let Err(error) = super::voice_menu_bar::set_muted(app, muted) {
-            log::warn!("Failed to update the voice menu bar mute state: {error}");
-        }
         let event = NativeVoiceEvent::MicrophoneMute {
             session_id,
             muted,
@@ -611,7 +615,6 @@ pub async fn start_native_voice_conversation(
                         revision,
                     };
                     let _ = event_window.emit(EVENT_NAME, event.clone());
-                    super::voice_buddy::emit(&event_app, event);
                 }
                 SttMessage::Final { text, delivered } => {
                     let transcript = PendingTranscript {
@@ -673,8 +676,6 @@ pub async fn start_native_voice_conversation(
                         shutdown_pipeline(pipeline).await;
                     }
                     event_state.microphone_muted.store(false, Ordering::SeqCst);
-                    #[cfg(target_os = "macos")]
-                    super::voice_menu_bar::remove(&event_app);
                     super::voice_buddy::remove(&event_app);
                     event_app
                         .state::<VoiceCaptureState>()
@@ -765,8 +766,6 @@ impl NativeVoiceState {
             runtime.revision
         };
         self.microphone_muted.store(false, Ordering::SeqCst);
-        #[cfg(target_os = "macos")]
-        super::voice_menu_bar::remove(app);
         super::voice_buddy::remove(app);
         if let Some((owner, owner_id)) = owner.as_ref() {
             capture.release_owner(&owner.window_label, owner_id);
@@ -821,8 +820,6 @@ impl NativeVoiceState {
             runtime.revision
         };
         self.microphone_muted.store(false, Ordering::SeqCst);
-        #[cfg(target_os = "macos")]
-        super::voice_menu_bar::remove(app);
         super::voice_buddy::remove(app);
         if let (Some(owner), Some(session_id)) = (owner, session_id) {
             capture.release_owner(&owner.window_label, &native_owner_id(&session_id));

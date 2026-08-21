@@ -546,6 +546,7 @@
     "voiceInputAutoSubmitHint": "Say \"submit\" to send",
     "voiceConversation": {
       "start": "Start voice conversation",
+      "hangUp": "Hang up",
       "muteMicrophone": "Mute microphone",
       "unmuteMicrophone": "Unmute microphone",
       "buddy": {
@@ -553,10 +554,7 @@
         "gloopieAlt": "Gloopie voice buddy",
         "openSession": "Open voice session",
         "hangUp": "Hang up",
-        "sendToMenuBar": "Send to menu bar",
         "listening": "Listening…",
-        "user-speaking": "Listening to you…",
-        "agent-speaking": "Speaking…",
         "muted": "Microphone muted"
       },
       "states": {

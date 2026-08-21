@@ -1,46 +1,27 @@
-import { Menu, Mic, MicOff, PhoneOff } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Mic, MicOff, PhoneOff } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
   getVoiceConversationStatus,
   listenToVoiceConversation,
   openVoiceConversationSession,
-  sendVoiceConversationToMenuBar,
   setVoiceConversationMicrophoneMuted,
   stopVoiceConversationFromBuddy,
-  type VoiceConversationEvent,
   type VoiceConversationStatus,
 } from "@/features/voice-conversation/api/voiceConversation";
 import { useAvatarMediaState } from "@/shared/hooks/useAvatarSrc";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Button } from "@/shared/ui/button";
 
-type Activity = "listening" | "user-speaking" | "agent-speaking";
-
-function activityFromEvent(
-  event: VoiceConversationEvent,
-  current: Activity,
-): Activity {
-  if (event.type !== "activity") return current;
-  if (event.activity === "user-speaking") return "user-speaking";
-  if (event.activity === "assistant-speaking") return "agent-speaking";
-  return "listening";
-}
-
 export function VoiceBuddyApp() {
   const { t } = useTranslation("chat");
   const [status, setStatus] = useState<VoiceConversationStatus | null>(null);
-  const [activity, setActivity] = useState<Activity>("listening");
-  const [busyAction, setBusyAction] = useState<"mute" | "stop" | "menu" | null>(
+  const [busyAction, setBusyAction] = useState<"open" | "mute" | "stop" | null>(
     null,
   );
   const [error, setError] = useState<string | null>(null);
   const avatar = useAvatarMediaState("app-avatar:gloopies-22");
-  const menuBarAvailable = useMemo(
-    () => new URLSearchParams(window.location.search).has("menuBar"),
-    [],
-  );
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +34,6 @@ export function VoiceBuddyApp() {
         if (!cancelled) setError(String(cause));
       });
     void listenToVoiceConversation((event) => {
-      setActivity((current) => activityFromEvent(event, current));
       setStatus((current) => {
         if (!current || event.revision < current.revision) return current;
         switch (event.type) {
@@ -100,11 +80,11 @@ export function VoiceBuddyApp() {
 
   const microphoneMuted = status?.microphoneMuted ?? false;
   const activityLabel = microphoneMuted
-    ? t("composer.voiceConversation.buddy.muted")
-    : t(`composer.voiceConversation.buddy.${activity}`);
+    ? t("toolbar.voiceConversation.buddy.muted")
+    : t("toolbar.voiceConversation.buddy.listening");
 
   const run = async (
-    action: "mute" | "stop" | "menu",
+    action: "open" | "mute" | "stop",
     operation: () => Promise<void>,
   ) => {
     setBusyAction(action);
@@ -129,32 +109,27 @@ export function VoiceBuddyApp() {
   };
 
   return (
-    <main className="flex h-screen min-w-0 flex-col overflow-hidden rounded-3xl border border-border bg-card p-3 text-foreground smooth-shadow-sm">
+    <main className="flex h-screen min-w-0 flex-col overflow-hidden bg-transparent p-3 text-foreground">
       <div
-        className="flex h-5 shrink-0 cursor-move items-center justify-center text-muted-foreground text-xs"
+        className="flex h-5 shrink-0 cursor-move items-center justify-center text-muted-foreground text-xs [text-shadow:0_1px_2px_var(--canvas-base)]"
         data-tauri-drag-region
       >
-        {t("composer.voiceConversation.buddy.title")}
+        {t("toolbar.voiceConversation.buddy.title")}
       </div>
       <button
         type="button"
-        className="group relative flex min-h-0 flex-1 items-center justify-center rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        aria-label={t("composer.voiceConversation.buddy.openSession")}
-        title={t("composer.voiceConversation.buddy.openSession")}
-        onClick={() => void openVoiceConversationSession()}
+        className="group relative flex min-h-0 flex-1 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        aria-label={t("toolbar.voiceConversation.buddy.openSession")}
+        title={t("toolbar.voiceConversation.buddy.openSession")}
+        disabled={busyAction !== null}
+        onClick={() => void run("open", openVoiceConversationSession)}
       >
-        <div
-          className={`size-24 transition-transform duration-200 ${
-            activity === "user-speaking" || activity === "agent-speaking"
-              ? "scale-110"
-              : "scale-100"
-          }`}
-        >
+        <div className="size-24">
           {avatar.media ? (
             <AvatarMedia
               media={avatar.media}
-              alt={t("composer.voiceConversation.buddy.gloopieAlt")}
-              className="rounded-2xl"
+              alt={t("toolbar.voiceConversation.buddy.gloopieAlt")}
+              className="rounded-md"
             />
           ) : (
             <div className="flex size-full items-center justify-center rounded-full bg-accent font-semibold text-2xl text-accent-foreground">
@@ -163,23 +138,27 @@ export function VoiceBuddyApp() {
           )}
         </div>
       </button>
-      <p className="truncate px-1 text-center text-muted-foreground text-xs">
+      <p
+        className="mx-auto truncate rounded-full bg-card/90 px-2 py-0.5 text-center text-muted-foreground text-xs shadow-sm backdrop-blur-md"
+        role="status"
+        aria-live="polite"
+      >
         {error ?? activityLabel}
       </p>
-      <div className="mt-2 flex items-center justify-center gap-1">
+      <div className="mx-auto mt-2 flex items-center justify-center gap-1 rounded-full bg-card/90 p-1 shadow-sm backdrop-blur-md">
         <Button
           type="button"
           variant="subtle"
           size="icon-sm"
           aria-label={
             microphoneMuted
-              ? t("composer.voiceConversation.unmuteMicrophone")
-              : t("composer.voiceConversation.muteMicrophone")
+              ? t("toolbar.voiceConversation.unmuteMicrophone")
+              : t("toolbar.voiceConversation.muteMicrophone")
           }
           title={
             microphoneMuted
-              ? t("composer.voiceConversation.unmuteMicrophone")
-              : t("composer.voiceConversation.muteMicrophone")
+              ? t("toolbar.voiceConversation.unmuteMicrophone")
+              : t("toolbar.voiceConversation.muteMicrophone")
           }
           disabled={!status || busyAction !== null}
           onClick={toggleMute}
@@ -191,26 +170,13 @@ export function VoiceBuddyApp() {
           variant="subtle"
           size="icon-sm"
           destructive
-          aria-label={t("composer.voiceConversation.buddy.hangUp")}
-          title={t("composer.voiceConversation.buddy.hangUp")}
+          aria-label={t("toolbar.voiceConversation.buddy.hangUp")}
+          title={t("toolbar.voiceConversation.buddy.hangUp")}
           disabled={busyAction !== null}
           onClick={() => void run("stop", stopVoiceConversationFromBuddy)}
         >
           <PhoneOff />
         </Button>
-        {menuBarAvailable ? (
-          <Button
-            type="button"
-            variant="subtle"
-            size="icon-sm"
-            aria-label={t("composer.voiceConversation.buddy.sendToMenuBar")}
-            title={t("composer.voiceConversation.buddy.sendToMenuBar")}
-            disabled={busyAction !== null}
-            onClick={() => void run("menu", sendVoiceConversationToMenuBar)}
-          >
-            <Menu />
-          </Button>
-        ) : null}
       </div>
     </main>
   );

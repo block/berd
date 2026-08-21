@@ -120,6 +120,7 @@ function OptionalBerdctlBridge() {
 const entrypointParams = new URLSearchParams(window.location.search);
 const sessionKey = entrypointParams.get("sessionKey");
 const voiceBuddy = entrypointParams.has("voiceBuddy");
+if (voiceBuddy) document.documentElement.dataset.windowKind = "voice-buddy";
 let sessionId: string | null = null;
 let bootError: string | null = null;
 if (sessionKey) {

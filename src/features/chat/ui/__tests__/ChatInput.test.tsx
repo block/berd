@@ -1143,7 +1143,7 @@ describe("ChatInput", () => {
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
 
-  it("shows voice conversation as pressed with high-contrast active styling", () => {
+  it("shows a destructive hang-up control while voice is active", () => {
     render(
       <ChatInput
         onSend={vi.fn()}
@@ -1159,11 +1159,9 @@ describe("ChatInput", () => {
       />,
     );
 
-    const button = screen.getByRole("button", {
-      name: /voice conversation is listening/i,
-    });
-    expect(button).toHaveAttribute("aria-pressed", "true");
-    expect(button).toHaveClass("bg-info", "text-info-foreground");
+    const button = screen.getByRole("button", { name: "Hang up" });
+    expect(button).toHaveClass("bg-destructive", "text-destructive-foreground");
+    expect(button.querySelector(".lucide-phone-off")).toBeInTheDocument();
   });
 
   it("reports the muted microphone state on the voice conversation control", () => {
@@ -1182,14 +1180,15 @@ describe("ChatInput", () => {
       />,
     );
 
-    expect(
-      screen.getByRole("button", {
-        name: "Voice conversation microphone is muted for session session-1",
-      }),
-    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Hang up" })).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Unmute microphone" }),
     ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen
+        .getByRole("button", { name: "Unmute microphone" })
+        .querySelector(".lucide-mic-off"),
+    ).toBeInTheDocument();
   });
 
   it.each([
@@ -1214,13 +1213,13 @@ describe("ChatInput", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { pressed: true })).toHaveClass(
-      "bg-info",
-      "text-info-foreground",
+    expect(screen.getByRole("button", { name: "Hang up" })).toHaveClass(
+      "bg-destructive",
+      "text-destructive-foreground",
     );
   });
 
-  it("shows an animated activity indicator while voice is detected", () => {
+  it("keeps the hang-up icon while voice activity changes", () => {
     const { container } = render(
       <ChatInput
         onSend={vi.fn()}
@@ -1236,42 +1235,7 @@ describe("ChatInput", () => {
       />,
     );
 
-    const indicator = container.querySelector(
-      '[data-role="voice-activity-indicator"]',
-    );
-    expect(indicator).toBeInTheDocument();
-    expect(indicator).toHaveAttribute("data-activity", "user-speaking");
-    expect(indicator?.querySelectorAll(".voice-waveform-bar")).toHaveLength(3);
-    expect(
-      screen.getByRole("button", { name: "Receiving voice input…" }),
-    ).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("shows a distinct speaker indicator while the agent is speaking", () => {
-    const { container } = render(
-      <ChatInput
-        onSend={vi.fn()}
-        voiceConversation={{
-          visible: true,
-          state: "agent-speaking",
-          boundSessionId: "session-1",
-          active: true,
-          microphoneMuted: false,
-          onToggle: vi.fn(),
-          onMicrophoneMuteToggle: vi.fn(),
-        }}
-      />,
-    );
-
-    expect(
-      container.querySelector('[data-role="agent-voice-activity-indicator"]'),
-    ).toHaveAttribute("data-activity", "agent-speaking");
-    expect(
-      container.querySelector('[data-role="voice-activity-indicator"]'),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Agent is speaking…" }),
-    ).toHaveAttribute("aria-pressed", "true");
+    expect(container.querySelector(".lucide-phone-off")).toBeInTheDocument();
   });
 
   it("shows stop button when streaming", () => {
@@ -4352,9 +4316,7 @@ describe("ChatInput", () => {
       />,
     );
 
-    const callButton = screen.getByRole("button", {
-      name: /voice conversation is listening/i,
-    });
+    const callButton = screen.getByRole("button", { name: "Hang up" });
     const muteButton = screen.getByRole("button", {
       name: "Mute microphone",
     });

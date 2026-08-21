@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
   listen: vi.fn(),
   openSession: vi.fn(),
-  sendToMenuBar: vi.fn(),
   setMuted: vi.fn(),
   stop: vi.fn(),
 }));
@@ -21,7 +20,6 @@ vi.mock("@/features/voice-conversation/api/voiceConversation", () => ({
   getVoiceConversationStatus: mocks.getStatus,
   listenToVoiceConversation: mocks.listen,
   openVoiceConversationSession: mocks.openSession,
-  sendVoiceConversationToMenuBar: mocks.sendToMenuBar,
   setVoiceConversationMicrophoneMuted: mocks.setMuted,
   stopVoiceConversationFromBuddy: mocks.stop,
 }));
@@ -40,56 +38,60 @@ const runningStatus = {
 
 describe("VoiceBuddyApp", () => {
   beforeEach(() => {
-    window.history.replaceState({}, "", "/?voiceBuddy=1&menuBar=1");
+    window.history.replaceState({}, "", "/?voiceBuddy=1");
     mocks.getStatus.mockReset().mockResolvedValue(runningStatus);
     mocks.listen.mockReset().mockResolvedValue(vi.fn());
     mocks.openSession.mockReset().mockResolvedValue(undefined);
-    mocks.sendToMenuBar.mockReset().mockResolvedValue(undefined);
     mocks.setMuted.mockReset().mockResolvedValue(undefined);
     mocks.stop.mockReset().mockResolvedValue(undefined);
   });
 
-  it("opens the owner and exposes mute, hang-up, and macOS menu controls", async () => {
+  it("opens the owner and exposes mute and hang-up controls", async () => {
     const user = userEvent.setup();
     render(<VoiceBuddyApp />);
 
     await waitFor(() => expect(mocks.getStatus).toHaveBeenCalledOnce());
     await user.click(
       screen.getByRole("button", {
-        name: "composer.voiceConversation.buddy.openSession",
+        name: "toolbar.voiceConversation.buddy.openSession",
       }),
     );
     await user.click(
       screen.getByRole("button", {
-        name: "composer.voiceConversation.muteMicrophone",
+        name: "toolbar.voiceConversation.muteMicrophone",
       }),
     );
-    await user.click(
-      screen.getByRole("button", {
-        name: "composer.voiceConversation.buddy.hangUp",
-      }),
-    );
-    await user.click(
-      screen.getByRole("button", {
-        name: "composer.voiceConversation.buddy.sendToMenuBar",
-      }),
-    );
-
     expect(mocks.openSession).toHaveBeenCalledOnce();
     expect(mocks.setMuted).toHaveBeenCalledWith(true, runningStatus);
-    expect(mocks.stop).toHaveBeenCalledOnce();
-    expect(mocks.sendToMenuBar).toHaveBeenCalledOnce();
   });
 
-  it("omits the menu-bar control on Windows and Linux", async () => {
-    window.history.replaceState({}, "", "/?voiceBuddy=1");
+  it("hangs up the voice conversation", async () => {
+    const user = userEvent.setup();
     render(<VoiceBuddyApp />);
 
     await waitFor(() => expect(mocks.getStatus).toHaveBeenCalledOnce());
-    expect(
-      screen.queryByRole("button", {
-        name: "composer.voiceConversation.buddy.sendToMenuBar",
+    await user.click(
+      screen.getByRole("button", {
+        name: "toolbar.voiceConversation.buddy.hangUp",
       }),
-    ).not.toBeInTheDocument();
+    );
+
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it("reports an owner-opening failure", async () => {
+    const user = userEvent.setup();
+    mocks.openSession.mockRejectedValueOnce(new Error("owner unavailable"));
+    render(<VoiceBuddyApp />);
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "toolbar.voiceConversation.buddy.openSession",
+      }),
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "owner unavailable",
+    );
   });
 });

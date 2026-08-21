@@ -33,7 +33,6 @@ import {
   openVoiceConversationSession,
   reconcileVoiceConversationMicrophone,
   setVoiceConversationMicrophoneMuted,
-  sendVoiceConversationToMenuBar,
   startVoiceConversation,
   stopActiveMicrophoneForTest,
   stopVoiceConversationFromBuddy,
@@ -134,12 +133,10 @@ describe("voice conversation API", () => {
 
     await openVoiceConversationSession();
     await stopVoiceConversationFromBuddy();
-    await sendVoiceConversationToMenuBar();
 
     expect(mocks.invoke.mock.calls).toEqual([
       ["open_voice_conversation_session"],
       ["stop_voice_conversation_from_buddy"],
-      ["send_voice_conversation_to_menu_bar"],
     ]);
   });
 

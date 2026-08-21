@@ -3,9 +3,5 @@
   "identifier": "voice-buddy",
   "description": "Capability for the always-on-top voice conversation buddy",
   "windows": ["voice-buddy"],
-  "permissions": [
-    "core:default",
-    "core:window:allow-start-dragging",
-    "core:window:allow-close"
-  ]
+  "permissions": ["core:default", "core:window:allow-start-dragging"]
 }

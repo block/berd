@@ -248,10 +248,6 @@ export function stopVoiceConversationFromBuddy(): Promise<void> {
   return invoke("stop_voice_conversation_from_buddy");
 }
 
-export function sendVoiceConversationToMenuBar(): Promise<void> {
-  return invoke("send_voice_conversation_to_menu_bar");
-}
-
 export interface PendingVoiceTranscript {
   sessionId: string;
   lifecycleId: string;
