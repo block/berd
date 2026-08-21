@@ -966,4 +966,18 @@ mod tests {
             }))
         );
     }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn stream_watchdog_times_out_only_after_progress_stalls() {
+        let started = Instant::now();
+        let mut watchdog = SiriStreamWatchdog::new(1, started);
+
+        assert!(!watchdog.observe(2, started + SIRI_STREAM_STALL_TIMEOUT));
+        assert!(!watchdog.observe(
+            2,
+            started + SIRI_STREAM_STALL_TIMEOUT + Duration::from_millis(1),
+        ));
+        assert!(watchdog.observe(2, started + SIRI_STREAM_STALL_TIMEOUT * 2,));
+    }
 }
