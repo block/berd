@@ -238,6 +238,7 @@ unsafe extern "C" fn should_stop_siri_playback(context: *mut std::ffi::c_void) -
     !active.load(Ordering::SeqCst)
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn begin_playback(state: &SiriVoiceState, owner_window: &str) -> Result<Arc<AtomicBool>, String> {
     let mut runtime = state
         .runtime
@@ -252,6 +253,7 @@ fn begin_playback(state: &SiriVoiceState, owner_window: &str) -> Result<Arc<Atom
     Ok(token)
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn finish_playback(state: &SiriVoiceState, completed: &Arc<AtomicBool>) {
     if let Ok(mut runtime) = state.runtime.lock() {
         if runtime
