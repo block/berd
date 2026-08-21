@@ -228,6 +228,7 @@ describe("voice conversation store lifecycle ordering", () => {
 
   it("does not hydrate over a pending microphone mute request", async () => {
     const muteRequest = deferred<void>();
+    const recoveryStatus = deferred<VoiceConversationStatus>();
     const running = {
       ...status("running", 2, "session-1"),
       nativeMicrophoneMuteControl: true,
@@ -241,6 +242,7 @@ describe("voice conversation store lifecycle ordering", () => {
     await useVoiceConversationStore.getState().init();
     mocks.hydrateMicrophone.mockClear();
     mocks.reconcileMicrophone.mockClear();
+    mocks.getStatus.mockReturnValueOnce(recoveryStatus.promise);
 
     const muting = useVoiceConversationStore
       .getState()
@@ -248,14 +250,16 @@ describe("voice conversation store lifecycle ordering", () => {
     await vi.waitFor(() =>
       expect(mocks.setMicrophoneMuted).toHaveBeenCalledWith(true, running),
     );
-    await useVoiceConversationStore.getState().init();
-
-    expect(mocks.hydrateMicrophone).not.toHaveBeenCalled();
-    expect(mocks.reconcileMicrophone).toHaveBeenCalledWith(running);
-    expect(useVoiceConversationStore.getState().microphoneMuted).toBe(true);
+    const recovering = useVoiceConversationStore.getState().init();
+    await vi.waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(2));
 
     muteRequest.resolve();
     await muting;
+    recoveryStatus.resolve(running);
+    await recovering;
+
+    expect(mocks.hydrateMicrophone).not.toHaveBeenCalled();
+    expect(mocks.reconcileMicrophone).toHaveBeenCalledWith(running);
     expect(useVoiceConversationStore.getState().microphoneMuted).toBe(true);
   });
 

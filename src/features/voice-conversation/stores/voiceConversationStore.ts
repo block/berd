@@ -214,6 +214,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       if (initialized) {
         try {
           const muteStateVersion = microphoneMuteStateVersion;
+          const muteRequestWasPending = pendingMicrophoneMuteRequests > 0;
           const status = await getRecoveryStatus(() => get().status);
           const currentStatus = get().status;
           const shouldAdopt = shouldApplyResponseRevision(
@@ -227,6 +228,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           const shouldReconcile = shouldAdopt || sameRunningLifecycle;
           const shouldHydrate =
             (shouldAdopt || sameRunningLifecycle) &&
+            !muteRequestWasPending &&
             pendingMicrophoneMuteRequests === 0 &&
             muteStateVersion === microphoneMuteStateVersion;
           if (shouldHydrate) {
@@ -460,6 +462,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
 
       try {
         const muteStateVersion = microphoneMuteStateVersion;
+        const muteRequestWasPending = pendingMicrophoneMuteRequests > 0;
         const status = await getRecoveryStatus(() => get().status);
         const currentStatus = get().status;
         const shouldAdopt =
@@ -474,6 +477,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
         const shouldReconcile = shouldAdopt || sameRunningLifecycle;
         const shouldHydrate =
           (shouldAdopt || sameRunningLifecycle) &&
+          !muteRequestWasPending &&
           pendingMicrophoneMuteRequests === 0 &&
           muteStateVersion === microphoneMuteStateVersion;
         if (shouldHydrate) {
