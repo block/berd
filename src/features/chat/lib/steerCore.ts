@@ -1,5 +1,6 @@
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import { prepareStagedQuoteDispatch } from "@/features/chat/lib/stagedQuoteSend";
 import { acpSteerMessage } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import {
@@ -92,6 +93,14 @@ export async function steerPromptInSession(
 
   const promptWithPaths = appendAttachmentPaths(text.trim(), attachments);
   const acpPrompt = promptWithPaths || (images?.length ? " " : promptWithPaths);
+  // Quote serialization happens at the send attempt (see stagedQuoteSend.ts).
+  // A steer targets the currently running turn, so no compaction can
+  // intervene between here and pickup; the current transcript decides
+  // anchor-vs-full-excerpt per quote source.
+  const dispatchAssistantPrompt = prepareStagedQuoteDispatch({
+    assistantPrompt: sendOptions?.assistantPrompt,
+    stagedItems: sendOptions?.userMessageMetadata?.stagedItems,
+  });
   const chatStore = useChatStore.getState();
   chatStore.addMessage(sessionId, userMessage);
   chatStore.setPendingInterventionBoundary(sessionId, {
@@ -104,9 +113,8 @@ export async function steerPromptInSession(
       activeRunId,
       acpPrompt,
       {
-        ...(sendOptions?.assistantPrompt
-          ? { assistantPrompt: sendOptions.assistantPrompt }
-          : {}),
+        assistantPrompt: dispatchAssistantPrompt.assistantPrompt,
+        userAuthorityContent: dispatchAssistantPrompt.userAuthorityContent,
         goose: sendOptions?.acpGooseMetadata,
         images: images?.map(
           (img) => [img.base64, img.mimeType] as [string, string],

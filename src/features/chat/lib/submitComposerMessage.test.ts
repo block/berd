@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ChatAttachmentDraft } from "@/shared/types/messages";
+import type {
+  ChatAttachmentDraft,
+  StagedQuoteItem,
+} from "@/shared/types/messages";
 import { MAX_PROMPT_ATTACHMENT_BYTES } from "./attachmentPayloadBudget";
 import { submitComposerMessage } from "./submitComposerMessage";
 
@@ -30,6 +33,39 @@ function imageDraft(base64: string): ChatAttachmentDraft {
 }
 
 describe("submitComposerMessage", () => {
+  it("sends a staged quote as structured intent without pre-serializing it", async () => {
+    const onSend = vi.fn().mockReturnValue(true);
+    const quote: StagedQuoteItem = {
+      id: "quote-1",
+      kind: "quote",
+      excerpt: "Ask reviewers to separate product concerns from visual polish.",
+      source: { messageId: "message-1", role: "assistant" },
+    };
+
+    await submitComposerMessage({
+      text: "can you elaborate?",
+      attachments: [],
+      skills: [],
+      stagedItems: [quote],
+      onSend,
+      resolveSkillSlashCommand: () => null,
+    });
+
+    // Serialization (anchor vs full excerpt) is a dispatch-time decision
+    // made after any compaction for the attempt (see stagedQuoteSend.ts).
+    // The composer only snapshots the structured quote into the send.
+    expect(onSend).toHaveBeenCalledWith(
+      "can you elaborate?",
+      undefined,
+      undefined,
+      expect.objectContaining({
+        userMessageMetadata: { stagedItems: [quote] },
+      }),
+    );
+    const sendOptions = onSend.mock.calls[0][3];
+    expect(sendOptions.assistantPrompt).toBeUndefined();
+  });
+
   it("adds skill instructions when a slash skill command matches", async () => {
     const onSend = vi.fn().mockReturnValue(true);
 

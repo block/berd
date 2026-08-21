@@ -24,6 +24,7 @@ import { flushBufferedStreamingUpdatesForSession } from "../liveStreamingUpdates
 import { setActiveMessageId } from "@/shared/api/acpActiveMessageTracking";
 import { registerPreparedSession } from "@/shared/api/acpSessionRegistry";
 import { claimSessionPrompt } from "@/features/chat/lib/sessionPromptOwnership";
+import { buildStagedQuoteDispatchPrompt } from "@/features/chat/lib/stagedQuoteSend";
 
 const workspaceObservationMocks = vi.hoisted(() => ({
   clearWorkspaceToolCallObservations: vi.fn(),
@@ -2115,6 +2116,46 @@ describe("acpNotificationHandler", () => {
       metadata: {
         chips: [{ label: "capture-task", type: "skill" }],
       },
+    });
+  });
+
+  it("replay restores quote cards from assistant-visible user chunks", async () => {
+    const replaySessionId = "replay-quote-session";
+    useChatStore.setState({
+      loadingSessionIds: new Set<string>([replaySessionId]),
+    });
+    const quote = {
+      id: "quote-1",
+      kind: "quote" as const,
+      excerpt: "selected passage",
+      source: { messageId: "assistant-1", role: "assistant" as const },
+    };
+
+    await handleSessionNotification({
+      sessionId: replaySessionId,
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "user-1",
+        content: {
+          type: "text",
+          text: buildStagedQuoteDispatchPrompt([quote]),
+          annotations: { audience: ["assistant"] },
+        },
+      },
+    } as never);
+    await handleSessionNotification({
+      sessionId: replaySessionId,
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "user-1",
+        content: { type: "text", text: "explain this" },
+      },
+    } as never);
+
+    expect(getReplayBuffer(replaySessionId)?.[0]).toMatchObject({
+      id: "user-1",
+      content: [{ type: "text", text: "explain this" }],
+      metadata: { stagedItems: [quote] },
     });
   });
 

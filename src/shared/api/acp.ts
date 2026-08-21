@@ -54,6 +54,8 @@ export interface AcpProvider {
 export interface AcpSendMessageOptions {
   systemPrompt?: string;
   assistantPrompt?: string;
+  /** User-authored context persisted as an assistant-visible block in this turn. */
+  userAuthorityContent?: string;
   personaId?: string;
   personaName?: string;
   goose?: Record<string, unknown>;
@@ -159,6 +161,7 @@ async function acpSendMessageNow(
   const {
     systemPrompt,
     assistantPrompt,
+    userAuthorityContent,
     personaId,
     personaName,
     goose,
@@ -221,7 +224,8 @@ async function acpSendMessageNow(
   }
 
   // Merge the persona handoff (when present) with any skill/builder assistant
-  // prompt into a single assistant-audience block, persona first.
+  // prompt into a single assistant-audience block, persona first. User-authored
+  // quote context is deliberately excluded from this instruction channel.
   const assistantPromptParts = [
     personaHandoffClaim?.preamble,
     assistantPrompt?.trim(),
@@ -240,6 +244,13 @@ async function acpSendMessageNow(
     });
   }
   content.push({ type: "text", text: prompt });
+  if (userAuthorityContent) {
+    content.push({
+      type: "text",
+      text: userAuthorityContent,
+      annotations: { audience: ["assistant"] },
+    });
+  }
   if (images) {
     for (const [data, mimeType] of images) {
       content.push({ type: "image", data, mimeType } as ContentBlock);
@@ -295,11 +306,11 @@ export async function acpSteerMessage(
   prompt: string,
   options: Pick<
     AcpSendMessageOptions,
-    "assistantPrompt" | "goose" | "images"
+    "assistantPrompt" | "userAuthorityContent" | "goose" | "images"
   > = {},
 ): Promise<AcpSteerResponse> {
   sessionRegistry.requireSessionInvocationSelection(sessionId);
-  const { assistantPrompt, goose, images } = options;
+  const { assistantPrompt, userAuthorityContent, goose, images } = options;
   const content: ContentBlock[] = [];
   const assistantText = assistantPrompt?.trim();
   if (assistantText) {
@@ -310,6 +321,13 @@ export async function acpSteerMessage(
     });
   }
   content.push({ type: "text", text: prompt });
+  if (userAuthorityContent) {
+    content.push({
+      type: "text",
+      text: userAuthorityContent,
+      annotations: { audience: ["assistant"] },
+    });
+  }
   if (images) {
     for (const [data, mimeType] of images) {
       content.push({ type: "image", data, mimeType } as ContentBlock);

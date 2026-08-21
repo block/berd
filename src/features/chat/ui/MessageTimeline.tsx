@@ -23,6 +23,7 @@ import {
 } from "@/features/chat/transcript/projection";
 import { useResponseStartGutterPreference } from "@/features/chat/lib/responseStartGutterPreference";
 import { VirtualTranscriptRow } from "./VirtualTranscriptRow";
+import { TranscriptQuoteAffordance } from "./TranscriptQuoteAffordance";
 import { ASSISTIVE_UX_RULES } from "@/shared/assistive-ux/registry";
 import {
   hasAssistiveMomentBeenShown,
@@ -68,6 +69,8 @@ const GUTTER_RESPONSE_START_THRESHOLD_PX = 16;
 
 interface MessageTimelineProps extends MessageTimelineBubbleCallbacks {
   messages: Message[];
+  sessionId?: string;
+  quoteEnabled?: boolean;
   streamingMessageId?: string | null;
   scrollTargetMessageId?: string | null;
   scrollTargetQuery?: string | null;
@@ -115,6 +118,8 @@ function formatRowDateSeparator(
 
 export function MessageTimeline({
   messages,
+  sessionId,
+  quoteEnabled = true,
   streamingMessageId,
   scrollTargetMessageId,
   scrollTargetQuery,
@@ -1500,6 +1505,14 @@ export function MessageTimeline({
         className,
       )}
     >
+      {quoteEnabled ? (
+        <TranscriptQuoteAffordance
+          key={sessionId}
+          messages={messages}
+          rootRef={containerRef}
+          sessionId={sessionId}
+        />
+      ) : null}
       {hasFooter ? (
         <div
           aria-hidden="true"

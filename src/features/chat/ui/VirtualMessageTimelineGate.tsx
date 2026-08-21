@@ -33,7 +33,7 @@ export function VirtualMessageTimelineGate({
   );
 
   if (!loadedTranscript) {
-    return <MessageTimeline {...timelineProps} />;
+    return <MessageTimeline sessionId={sessionId} {...timelineProps} />;
   }
 
   return (

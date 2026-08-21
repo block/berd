@@ -30,6 +30,7 @@ import {
   ownsSessionPrompt,
   releaseSessionPrompt,
 } from "@/features/chat/lib/sessionPromptOwnership";
+import { prepareStagedQuoteDispatch } from "@/features/chat/lib/stagedQuoteSend";
 import { perfLog } from "@/shared/lib/perfLog";
 import { completeAssistantMessage } from "@/features/chat/lib/messageCompletion";
 import {
@@ -306,6 +307,14 @@ export async function dispatchPrompt(
     );
     const acpPrompt =
       promptWithPaths || (images?.length ? " " : promptWithPaths);
+    // Quote serialization happens here, at the authoritative send attempt:
+    // any compaction for this attempt already ran, so the current transcript
+    // decides per quote source whether an anchor suffices or the excerpt
+    // must be re-sent in full (see stagedQuoteSend.ts).
+    const dispatchAssistantPrompt = prepareStagedQuoteDispatch({
+      assistantPrompt,
+      stagedItems: userMessageMetadata?.stagedItems,
+    });
     const tAcp = performance.now();
     if (!background) {
       perfLog(
@@ -314,7 +323,8 @@ export async function dispatchPrompt(
     }
     const promptPromise = acpSendMessage(sessionId, acpPrompt, {
       systemPrompt,
-      ...(assistantPrompt ? { assistantPrompt } : {}),
+      assistantPrompt: dispatchAssistantPrompt.assistantPrompt,
+      userAuthorityContent: dispatchAssistantPrompt.userAuthorityContent,
       personaId: persona?.id,
       personaName: persona?.name,
       goose: acpGooseMetadata,

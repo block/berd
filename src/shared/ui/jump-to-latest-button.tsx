@@ -4,9 +4,11 @@ import { cn } from "@/shared/lib/cn";
 import { Button, type ButtonProps } from "@/shared/ui/button";
 
 /**
- * Chrome button for the floating "return to newest content" pill that
- * appears over scrollable streams (the chat transcript's jump-to-latest
- * control).
+ * Chrome button for floating action pills overlaid on the chat transcript.
+ *
+ * Documented consumers (restyle one, restyle all — that is the point):
+ * - the "jump to latest" back-to-live-edge control
+ * - the "quote in message" selection affordance
  *
  * Composes Button. Base semantic variant: `primary`.
  *
@@ -17,8 +19,8 @@ import { Button, type ButtonProps } from "@/shared/ui/button";
  * - `select-none` so rapid clicks never select the label
  * - hover dims the pill to 90% opacity instead of shifting color
  *
- * Use for floating "snap back to the live edge" affordances over streams
- * or feeds. For ordinary main actions, use `Button variant="primary"`.
+ * Use for floating action pills over streams, feeds, or transcript
+ * content. For ordinary main actions, use `Button variant="primary"`.
  *
  * Intent: the recipe owns every interactive state so the pill can never
  * drift when the base variant changes. The base `primary` contributes role,

@@ -2878,6 +2878,35 @@ describe("ChatInput", () => {
     expect(onCancelQueueEdit).not.toHaveBeenCalled();
   });
 
+  it("restores the displaced draft after saving a queued edit", async () => {
+    const onUpdateQueue = vi.fn(() => true);
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        queuedMessages={[
+          {
+            recordId: "head",
+            payload: { persona: { kind: "none" }, text: "queued" },
+          },
+        ]}
+        onEditQueue={vi.fn(() => true)}
+        onCancelQueueEdit={vi.fn(() => true)}
+        onUpdateQueue={onUpdateQueue}
+      />,
+    );
+    await user.type(screen.getByRole("textbox"), "later draft");
+    await user.click(
+      screen.getByRole("button", { name: "Edit queued message" }),
+    );
+    await user.clear(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "updated queued");
+    await user.keyboard("{Enter}");
+
+    expect(onUpdateQueue).toHaveBeenCalled();
+    expect(screen.getByRole("textbox")).toHaveValue("later draft");
+  });
+
   it("routes queued-edit voice auto-submit through the editor-local persona", async () => {
     const onSend = vi.fn();
     const onUpdateQueue = vi.fn(() => true);
