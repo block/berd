@@ -624,6 +624,7 @@ pub fn run() {
             commands::pocket_voice::speak_pocket_voice,
             commands::pocket_voice::start_pocket_voice_stream,
             commands::pocket_voice::append_pocket_voice_stream,
+            commands::pocket_voice::flush_pocket_voice_stream,
             commands::pocket_voice::finish_pocket_voice_stream,
             commands::pocket_voice::stop_pocket_voice,
             commands::pocket_voice::remove_voice_model,

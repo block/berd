@@ -13,6 +13,7 @@ import {
 } from "../stores/voiceConversationStore";
 import {
   startNativeAssistantSpeech,
+  stopNativeAssistantSpeech,
   takeVoicePlaybackNotices,
 } from "../lib/nativeAssistantSpeech";
 import type { VoiceConversationStatus } from "../api/voiceConversation";
@@ -623,9 +624,7 @@ export function useVoiceConversationController({
     status.sessionId,
   ]);
 
-  useEffect(() => {
-    if (status.lifecycle !== "running" || status.sessionId !== sessionId)
-      return;
+  const startAssistantSpeech = useCallback(() => {
     startNativeAssistantSpeech(sessionId, (text, playbackError) => {
       addErrorNotification(
         sessionId,
@@ -639,7 +638,13 @@ export function useVoiceConversationController({
         error: playbackError,
       });
     });
-  }, [sessionId, status.lifecycle, status.sessionId]);
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (status.lifecycle !== "running" || status.sessionId !== sessionId)
+      return;
+    startAssistantSpeech();
+  }, [sessionId, startAssistantSpeech, status.lifecycle, status.sessionId]);
 
   const isActive = status.sessionId !== null && status.lifecycle !== "stopped";
   const controlEnabled = enabled && isGooseSession && !readOnly && !disabled;
@@ -681,12 +686,16 @@ export function useVoiceConversationController({
       // subscriber must exist before the microphone lifecycle starts.
       ensureVoiceEventDeliveryInitialized();
       activeSendRoute = { sessionId, send: onSend };
+      // Capture the history boundary before native startup can admit a
+      // transcript and produce the first assistant response.
+      startAssistantSpeech();
       try {
         await start(sessionId);
       } catch (startError) {
         const backendStatus = useVoiceConversationStore.getState().status;
         if (backendStatus.sessionId !== sessionId) {
           activeSendRoute = null;
+          stopNativeAssistantSpeech();
         }
         addErrorNotification(sessionId, errorText(startError));
       }
@@ -700,6 +709,7 @@ export function useVoiceConversationController({
     pocketReady,
     sessionId,
     start,
+    startAssistantSpeech,
     stop,
   ]);
 

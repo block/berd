@@ -11,6 +11,7 @@ const UNITY_EPSILON: f32 = 0.000_1;
 
 pub(super) struct StreamingSpeedProcessor {
     speed: f32,
+    sample_rate: u32,
     stretch: Option<ssstretch::Stretch>,
     input_latency: usize,
     output_latency: usize,
@@ -27,6 +28,7 @@ impl StreamingSpeedProcessor {
         if (speed - DEFAULT_PLAYBACK_SPEED).abs() <= UNITY_EPSILON {
             return Ok(Self {
                 speed,
+                sample_rate,
                 stretch: None,
                 input_latency: 0,
                 output_latency: 0,
@@ -46,6 +48,7 @@ impl StreamingSpeedProcessor {
 
         Ok(Self {
             speed,
+            sample_rate,
             stretch: Some(stretch),
             input_latency,
             output_latency,
@@ -120,6 +123,12 @@ impl StreamingSpeedProcessor {
                 self.emitted_output, self.trim_remaining
             ));
         }
+        Ok(output)
+    }
+
+    pub(super) fn drain_and_reset(&mut self) -> Result<Vec<f32>, String> {
+        let output = self.finish()?;
+        *self = Self::new(self.speed, self.sample_rate)?;
         Ok(output)
     }
 
@@ -228,6 +237,50 @@ mod tests {
             "speech tail was truncated"
         );
         assert_frequency(&output[2_000..], frequency, 4.0);
+    }
+
+    #[test]
+    fn two_x_boundary_drain_emits_complete_stretched_length() {
+        let input: Vec<f32> = (0..SAMPLE_RATE)
+            .map(|sample| {
+                (2.0 * std::f32::consts::PI * 220.0 * sample as f32 / SAMPLE_RATE as f32).sin()
+            })
+            .collect();
+        let mut processor = StreamingSpeedProcessor::new(2.0, SAMPLE_RATE).expect("processor");
+        let mut output = Vec::new();
+        for block in input.chunks(1_920) {
+            output.extend(processor.process(block).expect("stream block"));
+        }
+
+        let tail = processor.drain_and_reset().expect("boundary drain");
+        assert!(!tail.is_empty(), "boundary drain did not emit a tail");
+        output.extend(tail);
+
+        assert_eq!(output.len(), stretched_len(input.len(), 2.0));
+    }
+
+    #[test]
+    fn two_x_processing_continues_after_boundary_reset() {
+        let first = vec![0.25; SAMPLE_RATE as usize];
+        let second: Vec<f32> = (0..SAMPLE_RATE)
+            .map(|sample| {
+                (2.0 * std::f32::consts::PI * 440.0 * sample as f32 / SAMPLE_RATE as f32).sin()
+            })
+            .collect();
+        let mut processor = StreamingSpeedProcessor::new(2.0, SAMPLE_RATE).expect("processor");
+        for block in first.chunks(1_920) {
+            processor.process(block).expect("first stream block");
+        }
+        processor.drain_and_reset().expect("boundary drain");
+
+        let mut output = Vec::new();
+        for block in second.chunks(1_920) {
+            output.extend(processor.process(block).expect("second stream block"));
+        }
+        output.extend(processor.finish().expect("finish second segment"));
+
+        assert_eq!(output.len(), stretched_len(second.len(), 2.0));
+        assert_frequency(&output[2_000..], 440.0, 8.0);
     }
 
     fn assert_frequency(samples: &[f32], expected: f32, tolerance: f32) {

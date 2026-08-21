@@ -34,6 +34,12 @@ export interface PocketVoiceStatus {
   voices: PocketVoice[];
 }
 
+export interface PocketVoiceStreamEvent {
+  streamId: string;
+  state: "started" | "completed" | "interrupted" | "failed";
+  error: string | null;
+}
+
 export type VoiceModelKind = "pocket" | "parakeet";
 export type VoiceModelDownloadPhase =
   | "queued"
@@ -81,6 +87,25 @@ export function speakPocketVoice(text: string): Promise<void> {
   return invoke("speak_pocket_voice", { text });
 }
 
+export function startPocketVoiceStream(streamId: string): Promise<void> {
+  return invoke("start_pocket_voice_stream", { streamId });
+}
+
+export function appendPocketVoiceStream(
+  streamId: string,
+  text: string,
+): Promise<void> {
+  return invoke("append_pocket_voice_stream", { streamId, text });
+}
+
+export function flushPocketVoiceStream(streamId: string): Promise<void> {
+  return invoke("flush_pocket_voice_stream", { streamId });
+}
+
+export function finishPocketVoiceStream(streamId: string): Promise<void> {
+  return invoke("finish_pocket_voice_stream", { streamId });
+}
+
 export function stopPocketVoice(): Promise<boolean> {
   return invoke<boolean>("stop_pocket_voice");
 }
@@ -96,5 +121,13 @@ export function listenToPocketVoiceStatus(
 ): Promise<UnlistenFn> {
   return listen<PocketVoiceStatus>("pocket-voice:event", (event) =>
     onStatus(event.payload),
+  );
+}
+
+export function listenToPocketVoiceStream(
+  onEvent: (event: PocketVoiceStreamEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<PocketVoiceStreamEvent>("pocket-voice:stream-event", (event) =>
+    onEvent(event.payload),
   );
 }
