@@ -10,10 +10,14 @@ const mockSetSessionConfigOption = vi.fn();
 const mockUpdateWorkingDir = vi.fn();
 const mockLoadSession = vi.fn();
 const mockInvalidateClientConnection = vi.fn();
-const noRequestProviderContext = { requestId: undefined };
+const noRequestProviderContext = {
+  requestId: undefined,
+  canPublish: expect.any(Function),
+};
 const noRequestModelContext = (providerId: string) => ({
   providerId,
   requestId: undefined,
+  canPublish: expect.any(Function),
 });
 
 vi.mock("../acpConnection", () => ({
@@ -472,7 +476,7 @@ describe("applySessionModel", () => {
       expect(mockSetProvider).toHaveBeenCalledWith(
         "session-1",
         "new-provider",
-        { requestId: undefined },
+        noRequestProviderContext,
       );
       expect(registry.getPreparedProviderId("session-1")).toBe("new-provider");
       expect(registry.requireSessionInvocationSelection("session-1")).toEqual({

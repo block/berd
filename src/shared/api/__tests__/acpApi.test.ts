@@ -19,7 +19,7 @@ const includeLastMessageSnippetMeta = {
   },
 };
 
-function createConfigOptionsResponse() {
+function createConfigOptionsResponse(modelId = "claude-opus-4-8") {
   return {
     configOptions: [
       {
@@ -27,10 +27,16 @@ function createConfigOptionsResponse() {
         category: "model",
         kind: {
           type: "select",
-          currentValue: "claude-opus-4-8",
+          currentValue: modelId,
           options: {
             type: "ungrouped",
-            values: [{ value: "claude-opus-4-8", name: "Claude Opus 4.8" }],
+            values: [
+              {
+                value: modelId,
+                name:
+                  modelId === "claude-opus-4-8" ? "Claude Opus 4.8" : modelId,
+              },
+            ],
           },
         },
       },
@@ -54,10 +60,21 @@ function createConfigOptionsResponse() {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 vi.mock("../acpConnection", () => ({
   getClient: (...args: unknown[]) => mocks.getClient(...args),
   interceptSessionNotifications: (...args: unknown[]) =>
     mocks.interceptSessionNotifications(...args),
+  invalidateClientConnection: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe("promptForText", () => {
@@ -813,6 +830,71 @@ describe("provider wire translation", () => {
         modelId: "claude-opus-4-8",
       },
     );
+  });
+
+  it.each([
+    "provider",
+    "model",
+  ] as const)("keeps newer preparation authoritative when a timed-out stale %s response settles", async (kind) => {
+    vi.useFakeTimers();
+    try {
+      const sessionId = `stale-${kind}-session`;
+      const appliedModels: string[] = [];
+      setSessionConfigSnapshotHandlers({
+        applyModelConfigSnapshot: (_sessionId, snapshot) => {
+          appliedModels.push(snapshot.modelId);
+        },
+      });
+      const staleResponse =
+        deferred<ReturnType<typeof createConfigOptionsResponse>>();
+      mocks.getClient.mockResolvedValue({
+        loadSession: vi.fn().mockResolvedValue({ configOptions: [] }),
+        setSessionConfigOption: mocks.setSessionConfigOption,
+      });
+      mocks.setSessionConfigOption
+        .mockReset()
+        .mockReturnValueOnce(staleResponse.promise)
+        .mockResolvedValueOnce(createConfigOptionsResponse("new-model"));
+      const registry = await import("../acpSessionRegistry");
+      registry.registerPreparedSession(
+        sessionId,
+        "old-provider",
+        "/project",
+        "old-model",
+      );
+
+      const stale =
+        kind === "provider"
+          ? registry.prepareSession(sessionId, "stale-provider", "/project")
+          : registry.applySessionModel(sessionId, "stale-model");
+      await vi.waitFor(() =>
+        expect(mocks.setSessionConfigOption).toHaveBeenCalledTimes(1),
+      );
+      const staleRejection = expect(stale).rejects.toThrow(
+        "ACP operation timed out",
+      );
+      await vi.advanceTimersByTimeAsync(60_000);
+      await staleRejection;
+
+      await registry.prepareSession(sessionId, "new-provider", "/project");
+      expect(registry.requireSessionInvocationSelection(sessionId)).toEqual({
+        providerId: "new-provider",
+        modelId: "new-model",
+      });
+      expect(appliedModels).toEqual(["new-model"]);
+
+      staleResponse.resolve(createConfigOptionsResponse("stale-model"));
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(registry.requireSessionInvocationSelection(sessionId)).toEqual({
+        providerId: "new-provider",
+        modelId: "new-model",
+      });
+      expect(appliedModels).toEqual(["new-model"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("warns instead of silently dropping snapshots when no handlers are registered", async () => {

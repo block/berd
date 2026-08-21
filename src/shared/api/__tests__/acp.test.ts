@@ -20,10 +20,14 @@ const mockAppendSessionSystemPrompt = vi.fn();
 const mockForkSession = vi.fn();
 const mockRenameSession = vi.fn();
 const mockArchiveSession = vi.fn();
-const noRequestProviderContext = { requestId: undefined };
+const noRequestProviderContext = {
+  requestId: undefined,
+  canPublish: expect.any(Function),
+};
 const noRequestModelContext = (providerId: string) => ({
   providerId,
   requestId: undefined,
+  canPublish: expect.any(Function),
 });
 
 const managedRuntimeConfig: RuntimeConfig = {

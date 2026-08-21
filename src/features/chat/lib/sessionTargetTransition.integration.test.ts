@@ -5,6 +5,16 @@ const mockLoadSession = vi.fn();
 const mockSetProvider = vi.fn();
 const mockSetModel = vi.fn();
 const mockGetClient = vi.fn();
+const noRequestProviderContext = {
+  requestId: undefined,
+  canPublish: expect.any(Function),
+};
+
+const noRequestModelContext = (providerId: string) => ({
+  providerId,
+  requestId: undefined,
+  canPublish: expect.any(Function),
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -143,12 +153,12 @@ describe("transitionSessionTarget with managed Goose models", () => {
     expect(mockSetProvider).toHaveBeenCalledWith(
       "legacy-session",
       "databricks_v2",
-      { requestId: undefined },
+      noRequestProviderContext,
     );
     expect(mockSetModel).toHaveBeenCalledWith(
       "legacy-session",
       "goose-gpt-5-5",
-      { providerId: "databricks_v2", requestId: undefined },
+      noRequestModelContext("databricks_v2"),
     );
     expect(mockSetModel).not.toHaveBeenCalledWith("legacy-session", "goose");
   });
@@ -299,7 +309,7 @@ describe("transitionSessionTarget with managed Goose models", () => {
     expect(mockSetProvider).toHaveBeenCalledWith(
       "no-default-session",
       "databricks_v2",
-      { requestId: undefined },
+      noRequestProviderContext,
     );
     expect(mockSetModel).not.toHaveBeenCalled();
     expect(mockGetClient).toHaveBeenCalledTimes(1);
@@ -458,13 +468,13 @@ describe("transitionSessionTarget with managed Goose models", () => {
     expect(mockSetProvider).toHaveBeenCalledWith(
       "managed-opus-session",
       "databricks_v2",
-      { requestId: undefined },
+      noRequestProviderContext,
     );
     expect(mockSetModel).toHaveBeenCalledOnce();
     expect(mockSetModel).toHaveBeenCalledWith(
       "managed-opus-session",
       "goose-claude-opus-4-8",
-      { providerId: "databricks_v2", requestId: undefined },
+      noRequestModelContext("databricks_v2"),
     );
   });
 });

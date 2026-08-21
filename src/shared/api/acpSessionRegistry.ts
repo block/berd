@@ -290,6 +290,7 @@ async function prepareSessionNow(
       try {
         snapshots = await acpApi.setProvider(sessionId, providerId, {
           requestId: options.requestId,
+          canPublish,
         });
       } catch (error) {
         // Goose can apply the provider and then fail while building the
@@ -341,6 +342,7 @@ async function prepareSessionNow(
   const tProv = performance.now();
   const snapshots = await acpApi.setProvider(sessionId, providerId, {
     requestId: options.requestId,
+    canPublish,
   });
   perfLog(
     `[perf:prepare] ${sid} registry setProvider(${providerId}) in ${(performance.now() - tProv).toFixed(1)}ms`,
@@ -377,8 +379,10 @@ export async function applySessionModel(
   if (!concreteModelId) {
     throw new Error(`Invalid model id: ${modelId}`);
   }
-  return serializeSessionMutation(sessionId, () =>
-    applySessionModelNow(sessionId, concreteModelId, options),
+  return serializeSessionMutation(
+    sessionId,
+    (_isLatest, _sequence, _queue, canPublish) =>
+      applySessionModelNow(sessionId, concreteModelId, options, canPublish),
   );
 }
 
@@ -386,6 +390,7 @@ async function applySessionModelNow(
   sessionId: string,
   modelId: string,
   options: SessionConfigMutationOptions,
+  canPublish: () => boolean,
 ): Promise<AcpSessionConfigSnapshots | undefined> {
   const sid = sessionId.slice(0, 8);
   const entry = prepared.get(sessionId);
@@ -415,6 +420,7 @@ async function applySessionModelNow(
     snapshots = await acpApi.setModel(sessionId, modelId, {
       providerId: executionSelection.providerId,
       requestId: options.requestId,
+      canPublish,
     });
   } catch (error) {
     // Drop the cached value so the next attempt retries over the wire.
@@ -472,6 +478,7 @@ export async function configureSession(
           sessionId,
           concreteModelId,
           options,
+          canPublish,
         );
         snapshots = modelSnapshots ?? {
           model: { modelId: concreteModelId, modelName: concreteModelId },
