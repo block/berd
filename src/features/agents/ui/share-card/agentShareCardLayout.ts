@@ -17,24 +17,6 @@ export interface AgentShareCardTextLayout {
   contentShift: number;
 }
 
-export const AGENT_CARD_TRAIT_MAX_LINES = 2;
-
-export function deriveAgentCardTraitLines(
-  label: string,
-  value: string,
-  maxWidth: number,
-  measure: TextWidthMeasure,
-  locale = "en",
-): string[] {
-  return wrapAgentCardText(
-    `${label} ${value}`,
-    maxWidth,
-    AGENT_CARD_TRAIT_MAX_LINES,
-    measure,
-    locale,
-  );
-}
-
 export function fitAgentCardText(
   text: string,
   maxWidth: number,

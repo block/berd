@@ -19,10 +19,6 @@ import YAML from "yaml";
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---(?:\n|$)/;
 const APP_AVATAR_REF_RE = /^app-avatar:[a-z0-9][a-z0-9_-]{0,63}$/;
-const CARD_COPY_MAX_GRAPHEMES = { good_for: 44, vibes: 32 } as const;
-const GRAPHEME_SEGMENTER = new Intl.Segmenter("en", {
-  granularity: "grapheme",
-});
 
 interface BundledAgentFrontmatter {
   name?: unknown;
@@ -98,30 +94,6 @@ export function validateBundledAgent(
         filePath,
       ),
     );
-  }
-
-  for (const key of ["good_for", "vibes"] as const) {
-    if (
-      typeof frontmatter[key] !== "string" ||
-      frontmatter[key].trim() === ""
-    ) {
-      errors.push(
-        error(
-          `frontmatter \`${key}\` is required and must be a non-empty string`,
-          filePath,
-        ),
-      );
-    } else if (
-      Array.from(GRAPHEME_SEGMENTER.segment(frontmatter[key].trim())).length >
-      CARD_COPY_MAX_GRAPHEMES[key]
-    ) {
-      errors.push(
-        error(
-          `frontmatter \`${key}\` must be ${CARD_COPY_MAX_GRAPHEMES[key]} characters or fewer so card copy is never truncated`,
-          filePath,
-        ),
-      );
-    }
   }
 
   if (
