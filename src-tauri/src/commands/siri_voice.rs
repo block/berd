@@ -14,9 +14,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
+use tauri::{AppHandle, Manager};
 
 #[derive(Clone, Debug, Default)]
 pub struct SiriVoiceState {
@@ -347,12 +347,13 @@ fn find_voice<'a>(
 }
 
 fn first_installed_voice(voices: &[SiriVoice]) -> Option<SiriVoiceSelection> {
-    voices.iter().find(|voice| voice.installed).map(|voice| {
-        SiriVoiceSelection {
+    voices
+        .iter()
+        .find(|voice| voice.installed)
+        .map(|voice| SiriVoiceSelection {
             name: voice.name.clone(),
             language: voice.language.clone(),
-        }
-    })
+        })
 }
 
 fn choose_installed_voice(
@@ -444,10 +445,7 @@ pub fn set_siri_playback_speed(app: AppHandle, speed: f32) -> Result<(), String>
 }
 
 #[tauri::command]
-pub async fn download_siri_voice(
-    app: AppHandle,
-    voice: SiriVoiceSelection,
-) -> Result<(), String> {
+pub async fn download_siri_voice(app: AppHandle, voice: SiriVoiceSelection) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (app, voice);
