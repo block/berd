@@ -223,8 +223,6 @@ export function AgentShareDialog({
     persona.systemPrompt,
     persona.sourceDescription,
     description,
-    persona.goodFor,
-    persona.vibes,
   ].join("\0");
 
   useEffect(() => {

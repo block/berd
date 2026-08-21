@@ -96,6 +96,17 @@ export function validateBundledAgent(
     );
   }
 
+  for (const key of ["good_for", "vibes"] as const) {
+    if (
+      frontmatter[key] !== undefined &&
+      typeof frontmatter[key] !== "string"
+    ) {
+      errors.push(
+        error(`frontmatter \`${key}\` must be a string when present`, filePath),
+      );
+    }
+  }
+
   if (
     typeof frontmatter.avatar !== "string" ||
     !APP_AVATAR_REF_RE.test(frontmatter.avatar)

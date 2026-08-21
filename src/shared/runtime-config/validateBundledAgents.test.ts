@@ -125,6 +125,20 @@ describe("validateBundledAgent", () => {
     expect(validateBundledAgent("support-bot.md", longMetadata)).toEqual([]);
   });
 
+  it.each([
+    "good_for",
+    "vibes",
+  ])("rejects non-string %s metadata when present", (key) => {
+    const errors = validateBundledAgent(
+      "support-bot.md",
+      VALID_AGENT.replace(new RegExp(`^${key}:.*$`, "m"), `${key}: 42`),
+    );
+
+    expect(errors).toContain(
+      `support-bot.md: frontmatter \`${key}\` must be a string when present`,
+    );
+  });
+
   it("rejects invalid UTF-8 files", () => {
     const dir = mkdtempSync(join(tmpdir(), "bundled-agent-"));
     tempDirs.push(dir);
