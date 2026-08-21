@@ -196,28 +196,26 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
                         {previewing ? t("voice.playing") : t("voice.preview")}
                       </Button>
                       {voice.installed ? (
-                        <>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={selected ? "primary" : "outline"}
-                            disabled={selected}
-                            aria-label={
-                              selected
-                                ? t("voice.selectedVoice", {
-                                    voice: voice.name,
-                                  })
-                                : t("voice.useVoice", {
-                                    voice: voice.name,
-                                  })
-                            }
-                            onClick={() => void setup.selectVoice(voice)}
-                          >
-                            {selected
-                              ? t("voice.siriSelected")
-                              : t("voice.siriUseVoice")}
-                          </Button>
-                        </>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={selected ? "primary" : "outline"}
+                          disabled={selected}
+                          aria-label={
+                            selected
+                              ? t("voice.selectedVoice", {
+                                  voice: voice.name,
+                                })
+                              : t("voice.useVoice", {
+                                  voice: voice.name,
+                                })
+                          }
+                          onClick={() => void setup.selectVoice(voice)}
+                        >
+                          {selected
+                            ? t("voice.siriSelected")
+                            : t("voice.siriUseVoice")}
+                        </Button>
                       ) : (
                         <Button
                           type="button"

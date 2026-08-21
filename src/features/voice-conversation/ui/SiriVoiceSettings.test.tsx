@@ -75,9 +75,12 @@ describe("SiriVoiceSettings", () => {
   });
 
   it("gives each voice action a voice-specific accessible name", () => {
+    const status = setup().status;
+    expect(status).not.toBeNull();
+    if (!status) return;
     const value = setup({
       status: {
-        ...setup().status!,
+        ...status,
         voices: [
           {
             name: "Aaron",
