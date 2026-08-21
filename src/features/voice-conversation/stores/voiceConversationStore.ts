@@ -245,6 +245,8 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                     sessionId: event.sessionId,
                     ownerWindowLabel: event.ownerWindowLabel,
                     revision: event.revision,
+                    nativeMicrophoneMuteControl:
+                      event.nativeMicrophoneMuteControl,
                   },
                   uiState: "listening",
                   microphoneMuted: false,
@@ -313,6 +315,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                     sessionId: null,
                     ownerWindowLabel: null,
                     revision: event.revision,
+                    nativeMicrophoneMuteControl: false,
                   },
                   uiState: "off",
                   userSpeaking: false,
@@ -331,6 +334,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                         sessionId: null,
                         ownerWindowLabel: null,
                         revision: event.revision,
+                        nativeMicrophoneMuteControl: false,
                       }
                     : {
                         ...state.status,

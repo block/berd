@@ -132,6 +132,7 @@ export type VoiceConversationEvent =
       ownerWindowLabel: string;
       line: string;
       revision: number;
+      nativeMicrophoneMuteControl: boolean;
     }
   | {
       type: "user";
