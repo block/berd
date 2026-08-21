@@ -215,6 +215,10 @@
       "description": "Show the Builderbot tasks and automations surface.",
       "title": "Builderbot"
     },
+    "relatedPullRequests": {
+      "description": "Find pull requests linked in a chat and show their current status in the context panel.",
+      "title": "Related pull requests"
+    },
     "defaultLabel": "default",
     "description": "Opt into in-progress Berd features on this device. Experiments can change, break, or disappear.",
     "emptyDescription": "New experiments will appear here when they are ready for opt-in testing.",

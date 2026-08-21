@@ -68,6 +68,9 @@ import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepositor
 import { useChangeSessionFolder } from "@/features/chat/hooks/useChangeSessionFolder";
 import { supersedePendingSessionWorkspaceActivation } from "@/features/chat/lib/sessionWorkspaceActivation";
 import { useChatStore } from "../stores/chatStore";
+import { SessionPullRequestsWidget } from "./widgets/PullRequestsWidget";
+import { RELATED_PULL_REQUESTS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import type { CreatedWorkspaceWorktreeContext } from "./widgets/WorkspaceCreateDialog";
 import type { WorkspaceRemovalPlan } from "./widgets/WorkspaceRowActionsMenu";
 
@@ -96,7 +99,11 @@ interface PendingCreatedWorktree {
 }
 
 type ContextPanelTab = "details" | "changes" | "files";
-type ContextPanelSection = "workspace" | "changes" | "artifacts";
+type ContextPanelSection =
+  | "workspace"
+  | "pullRequests"
+  | "changes"
+  | "artifacts";
 const TAB_CONTENT_CLASS =
   "scrollbar-none w-full min-h-0 flex-1 overflow-y-auto px-4 pb-4 pt-4";
 type ContextPanelSectionVisibility = Record<ContextPanelSection, boolean>;
@@ -104,6 +111,7 @@ type ContextPanelSectionVisibility = Record<ContextPanelSection, boolean>;
 const SECTION_VISIBILITY_STORAGE_KEY = "goose:context-panel:section-visibility";
 const DEFAULT_SECTION_VISIBILITY: ContextPanelSectionVisibility = {
   workspace: true,
+  pullRequests: true,
   changes: true,
   artifacts: true,
 };
@@ -119,6 +127,10 @@ function validateSectionVisibility(
       typeof parsed.workspace === "boolean"
         ? parsed.workspace
         : defaults.workspace,
+    pullRequests:
+      typeof parsed.pullRequests === "boolean"
+        ? parsed.pullRequests
+        : defaults.pullRequests,
     changes:
       typeof parsed.changes === "boolean" ? parsed.changes : defaults.changes,
     artifacts:
@@ -264,6 +276,12 @@ export function ContextPanel({
   onOpenTerminalAtPath,
 }: ContextPanelProps) {
   const { t } = useTranslation("chat");
+  const relatedPullRequestsExperiment = useExperiment(
+    RELATED_PULL_REQUESTS_EXPERIMENT_ID,
+  );
+  const relatedPullRequestsEnabled = Boolean(
+    relatedPullRequestsExperiment?.enabled,
+  );
   const workspaceRepository = useWorkspaceRepository();
   const [activeTab, setActiveTab] = useState<ContextPanelTab>("details");
   const [isAddWorkspaceOpen, setIsAddWorkspaceOpen] = useState(false);
@@ -1136,48 +1154,58 @@ export function ContextPanel({
       </TabsContent>
 
       <TabsContent value="changes" className={TAB_CONTENT_CLASS}>
-        {shouldShowChanges ? (
-          hasWorkspaceAttachments ? (
-            <WorkspaceChangesWidget
-              groups={workspaceChangedFileRuntimes}
-              onOpenFile={handleOpenWorkspaceChangedFile}
-              probeErrorMessage={
-                changesProbeError
-                  ? changesProbeError.message ||
-                    t("contextPanel.errors.gitChangesRead")
-                  : null
+        <div className="w-full pb-4">
+          {relatedPullRequestsEnabled && (
+            <SessionPullRequestsWidget
+              sessionId={sessionId}
+              workspacePath={gitTargetPath}
+              isOpen={sectionVisibility.pullRequests}
+              onToggleOpen={() => toggleSection("pullRequests")}
+            />
+          )}
+          {shouldShowChanges ? (
+            hasWorkspaceAttachments ? (
+              <WorkspaceChangesWidget
+                groups={workspaceChangedFileRuntimes}
+                onOpenFile={handleOpenWorkspaceChangedFile}
+                probeErrorMessage={
+                  changesProbeError
+                    ? changesProbeError.message ||
+                      t("contextPanel.errors.gitChangesRead")
+                    : null
+                }
+              />
+            ) : (
+              <ChangesWidget
+                files={fallbackChangedFiles}
+                isLoading={isFallbackFilesLoading}
+                error={
+                  fallbackChangedFilesError instanceof Error
+                    ? fallbackChangedFilesError
+                    : null
+                }
+                isLoadingError={isFallbackChangedFilesLoadingError}
+                currentBranch={fallbackGitState?.currentBranch ?? null}
+                dirtyFileCount={fallbackGitState?.dirtyFileCount ?? 0}
+                repoPath={gitTargetPath ?? ""}
+                onOpenFile={handleOpenChangedFile}
+                isOpen={sectionVisibility.changes}
+                onToggleOpen={() => toggleSection("changes")}
+              />
+            )
+          ) : isChangesProbeLoading ? (
+            <ChangesLoadingState />
+          ) : changesProbeError ? (
+            <ChangesErrorState
+              message={
+                changesProbeError.message ||
+                t("contextPanel.errors.gitChangesRead")
               }
             />
           ) : (
-            <ChangesWidget
-              files={fallbackChangedFiles}
-              isLoading={isFallbackFilesLoading}
-              error={
-                fallbackChangedFilesError instanceof Error
-                  ? fallbackChangedFilesError
-                  : null
-              }
-              isLoadingError={isFallbackChangedFilesLoadingError}
-              currentBranch={fallbackGitState?.currentBranch ?? null}
-              dirtyFileCount={fallbackGitState?.dirtyFileCount ?? 0}
-              repoPath={gitTargetPath ?? ""}
-              onOpenFile={handleOpenChangedFile}
-              isOpen={sectionVisibility.changes}
-              onToggleOpen={() => toggleSection("changes")}
-            />
-          )
-        ) : isChangesProbeLoading ? (
-          <ChangesLoadingState />
-        ) : changesProbeError ? (
-          <ChangesErrorState
-            message={
-              changesProbeError.message ||
-              t("contextPanel.errors.gitChangesRead")
-            }
-          />
-        ) : (
-          <ChangesEmptyState message={changesUnavailableMessage} />
-        )}
+            <ChangesEmptyState message={changesUnavailableMessage} />
+          )}
+        </div>
       </TabsContent>
 
       <TabsContent value="files" className={TAB_CONTENT_CLASS}>

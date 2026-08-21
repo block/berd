@@ -281,6 +281,21 @@
       "changes_one": "{{count}} cambio",
       "changes_other": "{{count}} cambios"
     },
+    "pullRequests": {
+      "fallbackTitle": "Pull request #{{number}}",
+      "open": "Abrir el pull request #{{number}} de {{repo}} en GitHub",
+      "state": {
+        "OPEN": "Abierto",
+        "CLOSED": "Cerrado",
+        "MERGED": "Fusionado",
+        "DRAFT": "Borrador"
+      },
+      "checks": {
+        "SUCCESS": "Verificaciones aprobadas",
+        "PENDING": "Verificaciones en curso",
+        "FAILURE": "Verificaciones fallidas"
+      }
+    },
     "tabs": {
       "details": "Contexto",
       "changes": "Cambios",
@@ -291,6 +306,7 @@
       "changes": "Cambios",
       "changesOnBranch": "en",
       "includedWorkspaces": "Espacios de trabajo incluidos",
+      "pullRequests": "Pull requests",
       "workspace": "Espacio de trabajo"
     }
   },

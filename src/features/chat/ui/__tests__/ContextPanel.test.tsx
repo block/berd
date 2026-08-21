@@ -15,6 +15,8 @@ import { useChatStore } from "../../stores/chatStore";
 import { getWorkspaceGitContext } from "../widgets/WorkspaceIdentity";
 import { ContextPanel, ContextPanelWorktreeTracker } from "../ContextPanel";
 import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
+import { RELATED_PULL_REQUESTS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 
 const {
   mockUseGitState,
@@ -30,6 +32,7 @@ const {
   mockToastError,
   mockToastSuccess,
   mockListenGitStateChanged,
+  mockGetPullRequestSummaries,
   gitStateChangedHandlers,
 } = vi.hoisted(() => {
   const gitStateChangedHandlers: Array<
@@ -55,6 +58,7 @@ const {
         return Promise.resolve(() => {});
       },
     ),
+    mockGetPullRequestSummaries: vi.fn().mockResolvedValue([]),
     gitStateChangedHandlers,
   };
 });
@@ -122,6 +126,10 @@ vi.mock("@/shared/api/git", () => ({
   stashChanges: vi.fn(),
   initRepo: vi.fn(),
   listenGitStateChanged: mockListenGitStateChanged,
+}));
+
+vi.mock("@/shared/api/pullRequests", () => ({
+  getPullRequestSummaries: mockGetPullRequestSummaries,
 }));
 
 vi.mock("../../hooks/ArtifactPolicyContext", () => ({
@@ -343,7 +351,7 @@ describe("ContextPanel", () => {
     gitStateChangedHandlers.length = 0;
     window.localStorage.clear();
     setMultiWorkspaceEnabled(true);
-    useChatStore.setState({ sessionStateById: {} });
+    useChatStore.setState({ messagesBySession: {}, sessionStateById: {} });
     useChatSessionStore.setState({
       sessions: [],
       activeSessionId: null,
@@ -781,6 +789,72 @@ describe("ContextPanel", () => {
     await user.click(screen.getByRole("tab", { name: /files/i }));
 
     expect(screen.getAllByText("goose2").length).toBeGreaterThan(0);
+  });
+
+  it("shows session pull requests only in the changes tab", async () => {
+    const user = userEvent.setup();
+    const sessionId = "test-session-related-pr";
+    useChatStore.setState({
+      messagesBySession: {
+        [sessionId]: [
+          {
+            id: "assistant-pr-link",
+            role: "assistant",
+            created: 1,
+            content: [
+              {
+                type: "text",
+                text: "https://github.com/squareup/berd/pull/891",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    renderContextPanel({ sessionId });
+
+    expect(screen.queryByText("Pull requests")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /changes/i }));
+    expect(await screen.findByText("Pull requests")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /files/i }));
+    expect(screen.queryByText("Pull requests")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: /context/i }));
+    expect(screen.queryByText("Pull requests")).not.toBeInTheDocument();
+  });
+
+  it("does not scan session messages when related pull requests are disabled", async () => {
+    const user = userEvent.setup();
+    const sessionId = "test-session-disabled-related-pr";
+    setExperimentEnabled(RELATED_PULL_REQUESTS_EXPERIMENT_ID, false);
+    useChatStore.setState({
+      messagesBySession: {
+        [sessionId]: [
+          {
+            id: "assistant-pr-link",
+            role: "assistant",
+            created: 1,
+            content: [
+              {
+                type: "text",
+                text: "https://github.com/squareup/berd/pull/891",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    renderContextPanel({ sessionId });
+
+    await user.click(screen.getByRole("tab", { name: /changes/i }));
+    expect(screen.queryByText("Pull requests")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /files/i }));
+    expect(screen.queryByText("Pull requests")).not.toBeInTheDocument();
+    expect(mockGetPullRequestSummaries).not.toHaveBeenCalled();
   });
 
   it("renders repo-relative titles for project subdirectories", () => {
