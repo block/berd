@@ -8,7 +8,8 @@ private let bridgeQueue = DispatchQueue(label: "com.berd.airpods-capture")
 private final class AirPodsCapture: @unchecked Sendable {
     private var engine: AVAudioEngine?
     private var inputNode: AVAudioInputNode?
-    private var observer: NSObjectProtocol?
+    private var configurationObserver: NSObjectProtocol?
+    private var inputMuteObserver: NSObjectProtocol?
     private var restart: DispatchWorkItem?
     private var generation: UInt64 = 0
     private var stopped = false
@@ -54,21 +55,32 @@ private final class AirPodsCapture: @unchecked Sendable {
             removeTap(from: inputNode)
             throw error
         }
-        observer = NotificationCenter.default.addObserver(
+        configurationObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
             object: engine,
             queue: nil
         ) { [weak self] _ in
             self?.scheduleRestart()
         }
+        inputMuteObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioApplication.inputMuteStateChangeNotification,
+            object: nil,
+            queue: nil
+        ) { _ in
+            _ = AVAudioApplication.shared.isInputMuted
+        }
         self.engine = engine
         self.inputNode = inputNode
     }
 
     private func tearDownEngine() {
-        if let observer {
-            NotificationCenter.default.removeObserver(observer)
-            self.observer = nil
+        if let configurationObserver {
+            NotificationCenter.default.removeObserver(configurationObserver)
+            self.configurationObserver = nil
+        }
+        if let inputMuteObserver {
+            NotificationCenter.default.removeObserver(inputMuteObserver)
+            self.inputMuteObserver = nil
         }
         if let inputNode { removeTap(from: inputNode) }
         engine?.stop()

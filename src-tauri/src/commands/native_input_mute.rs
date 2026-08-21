@@ -57,6 +57,7 @@ fn clear(input_muted: &AtomicBool) {
     input_muted.store(false, Ordering::Release);
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn apply_change(
     input_muted: &AtomicBool,
     mute_epoch: &AtomicU64,
@@ -91,19 +92,9 @@ mod macos {
     where
         F: Fn(bool) + Send + Sync + 'static,
     {
-        // SAFETY: The Swift bridge owns one process-global AVAudioEngine and
-        // exposes a C-compatible lifecycle API.
-        if !unsafe { berd_airpods_capture_start() } {
-            return Err("macOS microphone capture could not start".to_string());
-        }
         // SAFETY: Berd's minimum macOS version is 14.0, where
         // AVAudioApplication and these selectors are public API.
         let application = unsafe { AVAudioApplication::sharedInstance() };
-        if let Err(error) = unsafe { application.setInputMuted_error(false) } {
-            unsafe { berd_airpods_capture_stop() };
-            return Err(error.localizedDescription().to_string());
-        }
-
         let handler = RcBlock::new(move |muted: Bool| {
             let muted = muted.as_bool();
             apply_change(&input_muted, &mute_epoch, muted, &|muted| {
@@ -117,8 +108,17 @@ mod macos {
         if let Err(error) =
             unsafe { application.setInputMuteStateChangeHandler_error(Some(&handler)) }
         {
-            unsafe { berd_airpods_capture_stop() };
             return Err(error.localizedDescription().to_string());
+        }
+        if let Err(error) = unsafe { application.setInputMuted_error(false) } {
+            let _ = unsafe { application.setInputMuteStateChangeHandler_error(None) };
+            return Err(error.localizedDescription().to_string());
+        }
+        // SAFETY: The Swift bridge owns one process-global AVAudioEngine and
+        // exposes a C-compatible lifecycle API.
+        if !unsafe { berd_airpods_capture_start() } {
+            let _ = unsafe { application.setInputMuteStateChangeHandler_error(None) };
+            return Err("macOS microphone capture could not start".to_string());
         }
         log::info!("AirPods input mute listener started");
         Ok(())
@@ -128,14 +128,14 @@ mod macos {
         // SAFETY: Berd targets macOS 14+, and nil is the documented way to
         // cancel the process-wide handler at the end of a call lifecycle.
         let application = unsafe { AVAudioApplication::sharedInstance() };
-        let handler_result = unsafe { application.setInputMuteStateChangeHandler_error(None) }
-            .map_err(|error| error.localizedDescription().to_string());
         // Do not leave another Berd microphone feature inheriting the voice
         // conversation's last input-mute state after its handler is gone.
         let reset_result = unsafe { application.setInputMuted_error(false) }
             .map_err(|error| error.localizedDescription().to_string());
+        let handler_result = unsafe { application.setInputMuteStateChangeHandler_error(None) }
+            .map_err(|error| error.localizedDescription().to_string());
         unsafe { berd_airpods_capture_stop() };
-        handler_result.and(reset_result)
+        reset_result.and(handler_result)
     }
 
     pub fn set_muted(muted: bool) -> Result<(), String> {
