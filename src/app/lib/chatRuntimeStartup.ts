@@ -315,7 +315,9 @@ async function startChatRuntime(
       ...modelState.runtimeManagedProviderIds,
       ...refreshProviderIds.filter((providerId) => {
         const entry = modelState.providers.get(providerId);
-        return entry != null && !entry.error;
+        return (
+          !entry?.error && modelState.isModelInventoryAuthoritative(providerId)
+        );
       }),
     ]);
   };

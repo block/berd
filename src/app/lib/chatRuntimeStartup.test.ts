@@ -5,6 +5,20 @@ const mockLoadPersistedMessageQueues = vi.hoisted(() =>
 );
 const mockGetClient = vi.hoisted(() => vi.fn<() => Promise<unknown>>());
 const mockRefreshAllModelProviders = vi.hoisted(() => vi.fn());
+const mockGetModelCacheRefreshProviderIds = vi.hoisted(() => vi.fn());
+const mockIsModelInventoryAuthoritative = vi.hoisted(() => vi.fn());
+const mockPersonaTargetMigration = vi.hoisted(() => vi.fn());
+const mockAgentState = vi.hoisted(() => ({
+  personas: [] as Array<{ id: string; writable: boolean }>,
+  providers: [] as unknown[],
+}));
+const mockProviderModelState = vi.hoisted(() => ({
+  providers: new Map<
+    string,
+    { models: Array<Record<string, unknown>>; error?: string }
+  >(),
+  runtimeManagedProviderIds: new Set<string>(),
+}));
 
 // The latch under test wraps startChatRuntime, whose body touches most of the
 // startup module graph. Everything it reaches is stubbed inert (resolved,
@@ -12,12 +26,18 @@ const mockRefreshAllModelProviders = vi.hoisted(() => vi.fn());
 // getClient — the realistic startup failure point — and counts runs via
 // loadPersistedMessageQueues, the first call every run makes.
 
+vi.mock("@/features/agents/lib/personaExecutionTarget", () => ({
+  personaTargetMigration: mockPersonaTargetMigration,
+}));
+
 vi.mock("@/features/agents/stores/agentStore", () => ({
   useAgentStore: {
     getState: () => ({
+      ...mockAgentState,
       setProviders: () => {},
       setPersonas: () => {},
       setPersonasLoading: () => {},
+      updatePersona: () => {},
     }),
   },
 }));
@@ -48,7 +68,7 @@ vi.mock("@/features/providers/runtimeProviderConstraints", () => ({
 }));
 
 vi.mock("@/features/providers/modelCacheRefresh", () => ({
-  getModelCacheRefreshProviderIds: () => [],
+  getModelCacheRefreshProviderIds: mockGetModelCacheRefreshProviderIds,
 }));
 
 vi.mock("@/features/providers/providerCatalog", () => ({
@@ -110,9 +130,9 @@ vi.mock("@/features/providers/stores/defaultProviderReadinessStore", () => ({
 vi.mock("@/features/providers/stores/providerModelCacheStore", () => ({
   useProviderModelCacheStore: {
     getState: () => ({
-      providers: new Map(),
-      runtimeManagedProviderIds: new Set(),
+      ...mockProviderModelState,
       loadPersisted: () => {},
+      isModelInventoryAuthoritative: mockIsModelInventoryAuthoritative,
       refreshAllModelProviders: (...args: unknown[]) =>
         mockRefreshAllModelProviders(...args),
     }),
@@ -190,6 +210,16 @@ describe("runChatRuntimeStartup", () => {
     mockGetClient.mockResolvedValue({});
     mockRefreshAllModelProviders.mockReset();
     mockRefreshAllModelProviders.mockResolvedValue(undefined);
+    mockGetModelCacheRefreshProviderIds.mockReset();
+    mockGetModelCacheRefreshProviderIds.mockReturnValue([]);
+    mockIsModelInventoryAuthoritative.mockReset();
+    mockIsModelInventoryAuthoritative.mockReturnValue(false);
+    mockPersonaTargetMigration.mockReset();
+    mockPersonaTargetMigration.mockReturnValue(null);
+    mockAgentState.personas = [];
+    mockAgentState.providers = [];
+    mockProviderModelState.providers = new Map();
+    mockProviderModelState.runtimeManagedProviderIds = new Set();
   });
 
   it("collapses concurrent callers onto one startup run", async () => {
@@ -219,6 +249,51 @@ describe("runChatRuntimeStartup", () => {
     expect(mockRefreshAllModelProviders).toHaveBeenCalledTimes(1);
 
     inventoryRefresh.resolve();
+  });
+
+  it.each([
+    {
+      label: "authoritative",
+      authoritative: true,
+      error: undefined,
+      includesModel: true,
+    },
+    {
+      label: "provisional",
+      authoritative: false,
+      error: undefined,
+      includesModel: false,
+    },
+    {
+      label: "errored",
+      authoritative: true,
+      error: "refresh failed",
+      includesModel: false,
+    },
+  ])("uses only $label refreshed inventory for migration", async ({
+    authoritative,
+    error,
+    includesModel,
+  }) => {
+    const model = { id: "openrouter-model", providerId: "openrouter" };
+    mockAgentState.personas = [{ id: "persona-1", writable: true }];
+    mockProviderModelState.providers = new Map([
+      ["openrouter", { models: [model], ...(error ? { error } : {}) }],
+    ]);
+    mockGetModelCacheRefreshProviderIds.mockReturnValue(["openrouter"]);
+    mockIsModelInventoryAuthoritative.mockReturnValue(authoritative);
+    const { runChatRuntimeStartup } = await import("./chatRuntimeStartup");
+
+    await runChatRuntimeStartup();
+
+    await vi.waitFor(() =>
+      expect(mockPersonaTargetMigration).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "persona-1" }),
+        expect.objectContaining({
+          models: includesModel ? [model] : [],
+        }),
+      ),
+    );
   });
 
   it("stays latched after a successful run", async () => {
