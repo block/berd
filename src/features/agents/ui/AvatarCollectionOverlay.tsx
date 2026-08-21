@@ -139,6 +139,11 @@ interface AvatarCollectionOverlayProps {
   library: AvatarLibraryState;
   /** Collection to open with; null starts at the collections level. */
   initialCollectionId?: string | null;
+  /**
+   * Hands the selection to the owning editor. A synchronous owner has accepted
+   * it into its working buffer; an asynchronous owner can delay dismissal
+   * until its own commit boundary succeeds.
+   */
   onSelectAvatar: (avatarId: string) => void | Promise<void>;
   onClose: () => void;
 }
@@ -405,8 +410,8 @@ export function AvatarCollectionOverlay({
     setSelectionFailed(false);
     void Promise.resolve(onSelectAvatar(avatarId))
       .then(() => {
-        // The chosen avatar lands on the rail's preview; funnel toward it only
-        // after persistence succeeds so a failed save keeps retry context.
+        // The owner decides its acceptance boundary: the builder accepts into
+        // its working buffer, while the detail page waits for persistence.
         closeWithAnimation(onClose, "funnel");
       })
       .catch(() => {

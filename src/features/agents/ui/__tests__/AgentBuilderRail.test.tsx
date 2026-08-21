@@ -343,6 +343,93 @@ describe("AgentBuilderRail", () => {
     expect(update).not.toHaveBeenCalled();
   });
 
+  it("accepts an avatar into the working buffer without saving other edits", async () => {
+    vi.useFakeTimers();
+    try {
+      const { update, saveNow } = mockHook();
+      vi.mocked(useAvatarLibrary).mockReturnValue({
+        catalog: {
+          schemaVersion: 1,
+          catalogVersion: "v1",
+          collections: [
+            {
+              id: "gloopies",
+              label: "Gloopies",
+              coverAvatarId: "gloopy-1",
+              avatarIds: ["gloopy-1"],
+            },
+          ],
+          assets: [
+            {
+              id: "gloopy-1",
+              label: "Gloopy 1",
+              collectionId: "gloopies",
+              variants: {
+                webm: {
+                  path: "gloopy-1.webm",
+                  mimeType: "video/webm",
+                  byteSize: 1,
+                  sha256: "a".repeat(64),
+                },
+                hevc: {
+                  path: "gloopy-1.mov",
+                  mimeType: "video/quicktime",
+                  byteSize: 1,
+                  sha256: "b".repeat(64),
+                },
+              },
+            },
+          ],
+        },
+        cachedAvatarMediaById: {
+          "gloopy-1": {
+            catalogVersion: "v1",
+            media: { src: "/cached/gloopy-1.webm", mediaType: "video" },
+          },
+        },
+        loading: false,
+        cacheChecking: false,
+        error: false,
+        errorCode: null,
+        mediaError: false,
+        mediaErrorCode: null,
+        retryCatalog: vi.fn(),
+        retryMedia: vi.fn(),
+      });
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 1200,
+        bottom: 800,
+        width: 1200,
+        height: 800,
+        toJSON: () => ({}),
+      } as DOMRect);
+
+      renderWithProviders(
+        <AgentBuilderRail
+          sessionId="s1"
+          targetAgentPath={baseSource.path}
+          targetAgentSlug="draft-1"
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: /select avatar/i }));
+      fireEvent.click(screen.getAllByRole("button", { name: "Gloopy 1" })[0]);
+      fireEvent.click(screen.getByRole("button", { name: /^select$/i }));
+      await act(async () => {});
+
+      expect(update).toHaveBeenCalledWith({
+        properties: { avatar: "app-avatar:gloopy-1" },
+      });
+      expect(saveNow).not.toHaveBeenCalled();
+      act(() => vi.runAllTimers());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("opens avatar choices in the collection canvas", () => {
     mockHook();
     renderWithProviders(
