@@ -3,11 +3,14 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
+const toastMocks = vi.hoisted(() => ({ message: vi.fn() }));
 const nativeAssistantSpeechMocks = vi.hoisted(() => ({
   start: vi.fn(),
   stop: vi.fn(),
   takeNotices: vi.fn<() => string | null>(() => null),
 }));
+
+vi.mock("sonner", () => ({ toast: toastMocks }));
 
 vi.mock("../lib/nativeAssistantSpeech", () => ({
   startNativeAssistantSpeech: nativeAssistantSpeechMocks.start,
@@ -21,6 +24,7 @@ import {
   createVoiceRouteMountRegistry,
   createVoiceTranscriptDeliveryQueue,
   hasDeliveredVoiceTranscript,
+  notifyAirPodsInputMuteGesture,
   resetVoiceUiWhenRunSettles,
   resolveVoiceRouteMount,
   resolveVoiceToggleAction,
@@ -32,6 +36,20 @@ import {
 } from "./useVoiceConversationController";
 
 describe("voice transcript delivery coordination", () => {
+  it("shows an unmistakable AirPods gesture confirmation", () => {
+    notifyAirPodsInputMuteGesture(true);
+    expect(toastMocks.message).toHaveBeenCalledWith(
+      "AirPods gesture detected — microphone muted",
+      { id: "airpods-input-mute" },
+    );
+
+    notifyAirPodsInputMuteGesture(false);
+    expect(toastMocks.message).toHaveBeenLastCalledWith(
+      "AirPods gesture detected — microphone unmuted",
+      { id: "airpods-input-mute" },
+    );
+  });
+
   it("recognizes a replayed transcript that was already delivered", () => {
     useChatStore.setState({
       messagesBySession: {

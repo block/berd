@@ -287,6 +287,24 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   uiState: activityUiState(nextState),
                 };
               }
+              case "inputMute": {
+                const nextState = {
+                  ...state,
+                  microphoneMuted: event.muted,
+                  userSpeaking: event.muted ? false : state.userSpeaking,
+                  status: {
+                    ...state.status,
+                    lifecycle: "running" as const,
+                    sessionId: event.sessionId,
+                    revision: event.revision,
+                  },
+                  error: null,
+                };
+                return {
+                  ...nextState,
+                  uiState: activityUiState(nextState),
+                };
+              }
               case "cleanShutdown":
                 return {
                   ...state,
