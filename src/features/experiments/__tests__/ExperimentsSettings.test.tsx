@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  AVATAR_COLLECTION_PAGE_EXPERIMENT_ID,
   BERDY_ONBOARDING_EXPERIMENT_ID,
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
   EXPERIMENT_DEFINITIONS,
@@ -135,7 +134,6 @@ describe("ExperimentsSettings", () => {
       SKILL_DISCOVERY_EXPERIMENT_ID,
       STARTER_TASKS_EXPERIMENT_ID,
       VOICE_CONVERSATION_EXPERIMENT_ID,
-      AVATAR_COLLECTION_PAGE_EXPERIMENT_ID,
       BERDY_ONBOARDING_EXPERIMENT_ID,
       RELATED_PULL_REQUESTS_EXPERIMENT_ID,
     ]);

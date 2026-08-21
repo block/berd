@@ -18,7 +18,9 @@ import type {
 } from "@/shared/avatars/catalog";
 import { getAvatarCatalogEntry } from "@/shared/avatars/catalog";
 import { cn } from "@/shared/lib/cn";
+import { Alert, AlertDescription } from "@/shared/ui/alert";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
+import { BerdLoaderInline } from "@/shared/ui/berd-loader-inline";
 import { Button } from "@/shared/ui/button";
 import { CanvasNavButton } from "@/shared/ui/canvas-nav-button";
 import { Spinner } from "@/shared/ui/spinner";
@@ -28,7 +30,7 @@ import {
   type ScatterItemLayout,
 } from "@/features/agents/lib/avatarScatter";
 import { useAvatarScatterPan } from "@/features/agents/hooks/useAvatarScatterPan";
-import { getCachedAvatarMedia } from "@/features/agents/ui/AvatarLibraryPicker";
+import { getCachedAvatarMedia } from "@/features/agents/lib/getCachedAvatarMedia";
 
 /** Exit animation length; keep in sync with .avatar-overlay-exit. */
 const OVERLAY_EXIT_MS = 260;
@@ -137,7 +139,12 @@ interface AvatarCollectionOverlayProps {
   library: AvatarLibraryState;
   /** Collection to open with; null starts at the collections level. */
   initialCollectionId?: string | null;
-  onSelectAvatar: (avatarId: string) => void;
+  /**
+   * Hands the selection to the owning editor. A synchronous owner has accepted
+   * it into its working buffer; an asynchronous owner can delay dismissal
+   * until its own commit boundary succeeds.
+   */
+  onSelectAvatar: (avatarId: string) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -177,6 +184,8 @@ export function AvatarCollectionOverlay({
   );
   const [pendingAvatarId, setPendingAvatarId] = useState<string | null>(null);
   const [hoveredAvatarId, setHoveredAvatarId] = useState<string | null>(null);
+  const [selectionPending, setSelectionPending] = useState(false);
+  const [selectionFailed, setSelectionFailed] = useState(false);
   const [closing, setClosing] = useState(false);
   // Where the funnel exit collapses to (viewport px); null = plain fade.
   const [exitTarget, setExitTarget] = useState<{
@@ -259,17 +268,35 @@ export function AvatarCollectionOverlay({
     [],
   );
 
+  const clearPendingSelection = useCallback(() => {
+    setPendingAvatarId(null);
+    setSelectionFailed(false);
+  }, []);
+
+  const togglePendingSelection = useCallback((avatarId: string) => {
+    setPendingAvatarId((current) => (current === avatarId ? null : avatarId));
+    setSelectionFailed(false);
+  }, []);
+
   const goBack = useCallback(() => {
-    if (closing) {
+    if (closing || selectionPending) {
       return;
     }
     if (collection && hasCollectionsLevel) {
-      setPendingAvatarId(null);
+      clearPendingSelection();
       setCollectionId(null);
       return;
     }
     closeWithAnimation(onClose);
-  }, [closing, closeWithAnimation, collection, hasCollectionsLevel, onClose]);
+  }, [
+    clearPendingSelection,
+    closing,
+    closeWithAnimation,
+    collection,
+    hasCollectionsLevel,
+    onClose,
+    selectionPending,
+  ]);
 
   // Esc mirrors the back control at every level.
   useEffect(() => {
@@ -367,7 +394,7 @@ export function AvatarCollectionOverlay({
 
   const onCanvasClick = useCallback(
     (event: React.MouseEvent) => {
-      if (closing) {
+      if (closing || selectionPending) {
         return;
       }
       const target = event.target as HTMLElement;
@@ -382,24 +409,50 @@ export function AvatarCollectionOverlay({
         // highlight — everything fades back up. Deliberately not a dismiss:
         // mis-clicking near an avatar must not throw the user out of the
         // picker.
-        setPendingAvatarId(null);
+        clearPendingSelection();
         return;
       }
       // On the collections level, empty-canvas clicks light-dismiss the
       // overlay like a dialog scrim.
       closeWithAnimation(onClose);
     },
-    [closing, closeWithAnimation, collection, onClose],
+    [
+      clearPendingSelection,
+      closing,
+      closeWithAnimation,
+      collection,
+      onClose,
+      selectionPending,
+    ],
   );
 
   const onConfirmSelect = useCallback(() => {
-    if (!pendingAvatarId || closing) {
+    if (!pendingAvatarId || closing || selectionPending) {
       return;
     }
     const avatarId = pendingAvatarId;
-    // The chosen avatar lands on the rail's preview; funnel toward it.
-    closeWithAnimation(() => onSelectAvatar(avatarId), "funnel");
-  }, [closing, closeWithAnimation, onSelectAvatar, pendingAvatarId]);
+    setSelectionPending(true);
+    setSelectionFailed(false);
+    void Promise.resolve(onSelectAvatar(avatarId))
+      .then(() => {
+        // The owner decides its acceptance boundary: the builder accepts into
+        // its working buffer, while the detail page waits for persistence.
+        closeWithAnimation(onClose, "funnel");
+      })
+      .catch(() => {
+        setSelectionFailed(true);
+      })
+      .finally(() => {
+        setSelectionPending(false);
+      });
+  }, [
+    closing,
+    closeWithAnimation,
+    onClose,
+    onSelectAvatar,
+    pendingAvatarId,
+    selectionPending,
+  ]);
 
   const hoverHandlers = useCallback(
     (id: string) => ({
@@ -448,13 +501,9 @@ export function AvatarCollectionOverlay({
             )}
             aria-label={entry.label}
             aria-pressed={pending}
-            disabled={!cachedMedia || closing}
+            disabled={!cachedMedia || closing || selectionPending}
             {...hoverHandlers(entry.id)}
-            onClick={() =>
-              setPendingAvatarId((current) =>
-                current === entry.id ? null : entry.id,
-              )
-            }
+            onClick={() => togglePendingSelection(entry.id)}
           >
             {cachedMedia ? (
               <AvatarMedia
@@ -488,6 +537,8 @@ export function AvatarCollectionOverlay({
               <Button
                 type="button"
                 variant="primary"
+                feedbackState={selectionPending ? "loading" : "idle"}
+                loadingLabel={t("editor.avatarLoading")}
                 disabled={closing}
                 onClick={onConfirmSelect}
               >
@@ -509,7 +560,9 @@ export function AvatarCollectionOverlay({
       pendingAvatarId,
       readyIds,
       registerTileNode,
+      selectionPending,
       t,
+      togglePendingSelection,
     ],
   );
 
@@ -535,7 +588,7 @@ export function AvatarCollectionOverlay({
           aria-label={t("collectionPage.openCollection", {
             label: entry.label,
           })}
-          disabled={closing}
+          disabled={closing || selectionPending}
           onClick={() => setCollectionId(entry.id)}
         >
           <span className={COLLECTION_CARD_BADGE_CLASS}>
@@ -573,6 +626,7 @@ export function AvatarCollectionOverlay({
       library.catalog,
       markReady,
       readyIds,
+      selectionPending,
       t,
     ],
   );
@@ -699,6 +753,37 @@ export function AvatarCollectionOverlay({
             </div>
           </div>
 
+          {library.loading && !library.catalog ? (
+            <div
+              className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm text-muted-foreground"
+              role="status"
+              aria-live="polite"
+            >
+              <BerdLoaderInline
+                size={56}
+                decorative
+                className="text-foreground"
+              />
+              <span>{t("editor.avatarLoading")}</span>
+            </div>
+          ) : null}
+
+          {selectionFailed ? (
+            <Alert className="absolute bottom-6 left-1/2 z-10 w-auto max-w-[calc(100%_-_3rem)] -translate-x-1/2">
+              <AlertDescription className="grid-cols-[1fr_auto] items-center gap-3">
+                <span>{t("builderRail.saveError")}</span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onConfirmSelect}
+                >
+                  {t("builderRail.retrySave")}
+                </Button>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
           {/* Navigation chrome, per design feedback (Berd-Updates 704-3688):
             one black icon-only circle in the top-right corner. An arrow when
             it goes up a level, an X when it dismisses the takeover outright;
@@ -710,6 +795,7 @@ export function AvatarCollectionOverlay({
                 size="icon-lg"
                 aria-label={backLabel}
                 title={backLabel}
+                disabled={selectionPending}
                 onClick={goBack}
               >
                 {collection && hasCollectionsLevel ? (
