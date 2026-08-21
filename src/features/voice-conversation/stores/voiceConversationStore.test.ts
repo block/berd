@@ -85,7 +85,12 @@ describe("voice conversation store lifecycle ordering", () => {
     mocks.reject
       .mockReset()
       .mockResolvedValue({ attempts: 1, terminal: false });
-    mocks.setMicrophoneMuted.mockReset().mockResolvedValue(undefined);
+    mocks.setMicrophoneMuted
+      .mockReset()
+      .mockImplementation(async (muted, current) => ({
+        ...current,
+        microphoneMuted: muted,
+      }));
   });
 
   async function loadStore() {
@@ -439,6 +444,9 @@ describe("voice conversation store lifecycle ordering", () => {
 
     expect(second).toBe(first);
     expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(mocks.stop).toHaveBeenCalledWith(
+      status("running", 1, "session-1"),
+    );
     expect(store.getState().requestedStartSessionId).toBeNull();
 
     response.resolve(status("stopped", 2));
@@ -608,7 +616,10 @@ describe("voice conversation store lifecycle ordering", () => {
     );
     expect(mocks.stop).not.toHaveBeenCalled();
     expect(store.getState()).toMatchObject({
-      status: status("running", 2, "session-1"),
+      status: {
+        ...status("running", 2, "session-1"),
+        microphoneMuted: true,
+      },
       microphoneMuted: true,
       userSpeaking: false,
       uiState: "listening",

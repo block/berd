@@ -95,7 +95,7 @@ describe("voice conversation API", () => {
       }),
     ).resolves.toEqual(status);
     await expect(startVoiceConversation("session-1")).resolves.toEqual(status);
-    await expect(stopVoiceConversation()).resolves.toEqual(status);
+    await expect(stopVoiceConversation(status)).resolves.toEqual(status);
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(
       1,
@@ -127,6 +127,8 @@ describe("voice conversation API", () => {
       {
         rendererId: "renderer-test",
         rendererEpoch: 7,
+        sessionId: "session-1",
+        expectedRevision: 3,
       },
     );
   });
@@ -166,12 +168,21 @@ describe("voice conversation API", () => {
 
   it("exposes the buddy control commands", async () => {
     mocks.invoke.mockResolvedValue(undefined);
+    const status = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running" as const,
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      microphoneMuted: false,
+      revision: 3,
+    };
 
     await openVoiceConversationSession();
     await showVoiceConversationControls("session-1", 3);
     await setVoiceConversationControlsSuppressed("session-1", 3, true);
     await setVoiceConversationAssistantSpeaking("session-1", 3, true);
-    await stopVoiceConversationFromBuddy();
+    await stopVoiceConversationFromBuddy(status);
 
     expect(mocks.invoke.mock.calls).toEqual([
       ["open_voice_conversation_session"],
@@ -187,7 +198,10 @@ describe("voice conversation API", () => {
         "set_native_voice_assistant_speaking",
         { sessionId: "session-1", expectedRevision: 3, speaking: true },
       ],
-      ["stop_voice_conversation_from_buddy"],
+      [
+        "stop_voice_conversation_from_buddy",
+        { sessionId: "session-1", expectedRevision: 3 },
+      ],
     ]);
   });
 
@@ -275,6 +289,12 @@ describe("voice conversation API", () => {
       revision: 3,
     } as const;
 
+    mocks.invoke.mockImplementation((_command, payload) =>
+      Promise.resolve({
+        ...status,
+        microphoneMuted: (payload as { muted: boolean }).muted,
+      }),
+    );
     await reconcileVoiceConversationMicrophone(status);
     await setVoiceConversationMicrophoneMuted(true, status);
     await reconcileVoiceConversationMicrophone({
@@ -292,8 +312,14 @@ describe("voice conversation API", () => {
       [false],
     ]);
     expect(mocks.invoke.mock.calls).toEqual([
-      ["set_native_voice_microphone_muted", { muted: true }],
-      ["set_native_voice_microphone_muted", { muted: false }],
+      [
+        "set_native_voice_microphone_muted",
+        { sessionId: "session-1", expectedRevision: 3, muted: true },
+      ],
+      [
+        "set_native_voice_microphone_muted",
+        { sessionId: "session-1", expectedRevision: 3, muted: false },
+      ],
     ]);
     expect(mocks.setMicrophoneMuted.mock.invocationCallOrder[1]).toBeLessThan(
       mocks.invoke.mock.invocationCallOrder[0],

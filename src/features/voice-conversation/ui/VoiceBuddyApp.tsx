@@ -194,9 +194,14 @@ export function VoiceBuddyApp() {
   const toggleMute = () => {
     if (!status) return;
     void run("mute", async () => {
-      await setVoiceConversationMicrophoneMuted(!microphoneMuted, status);
+      const nextStatus = await setVoiceConversationMicrophoneMuted(
+        !microphoneMuted,
+        status,
+      );
       setStatus((current) =>
-        current ? { ...current, microphoneMuted: !microphoneMuted } : current,
+        current && current.revision > nextStatus.revision
+          ? current
+          : nextStatus,
       );
     });
   };
@@ -225,7 +230,7 @@ export function VoiceBuddyApp() {
           activity={activity.assistantSpeaking}
           aria-label={t("toolbar.voiceConversation.buddy.openSession")}
           title={t("toolbar.voiceConversation.buddy.openSession")}
-          disabled={busyAction !== null}
+          disabled={!status || busyAction !== null}
           onClick={() => void run("open", openVoiceConversationSession)}
         >
           <BerdIcon aria-hidden="true" />
@@ -257,8 +262,12 @@ export function VoiceBuddyApp() {
           destructive
           aria-label={t("toolbar.voiceConversation.buddy.hangUp")}
           title={t("toolbar.voiceConversation.buddy.hangUp")}
-          disabled={busyAction !== null}
-          onClick={() => void run("stop", stopVoiceConversationFromBuddy)}
+          disabled={!status || busyAction !== null}
+          onClick={() => {
+            if (status) {
+              void run("stop", () => stopVoiceConversationFromBuddy(status));
+            }
+          }}
         >
           <PhoneOff />
         </Button>

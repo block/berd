@@ -83,35 +83,34 @@ export async function hydrateVoiceConversationMicrophone(
 export async function setVoiceConversationMicrophoneMuted(
   muted: boolean,
   status: VoiceConversationStatus,
-): Promise<void> {
-  const intent = ++microphoneMuteIntent;
+): Promise<VoiceConversationStatus> {
+  const previous = microphoneMuted;
   microphoneMuted = muted;
-  activeMicrophone?.setMuted(muted);
-  const operation = microphoneMuteQueue.then(async () => {
-    if (intent !== microphoneMuteIntent) return;
-    await reconcileVoiceConversationMicrophone(status);
-    if (intent !== microphoneMuteIntent) return;
-    activeMicrophone?.setMuted(microphoneMuted);
-    await invoke("set_native_voice_microphone_muted", { muted });
-    if (status.nativeMicrophoneMuteControl) {
-      await invoke("set_native_voice_input_muted", {
-        sessionId: status.sessionId,
-        revision: status.revision,
-        muted,
-      });
-    }
-    if (intent === microphoneMuteIntent) {
-      appliedMicrophoneMuted = muted;
-    }
-  });
-  microphoneMuteQueue = operation.catch(() => undefined);
   try {
-    await operation;
-  } catch (error) {
-    if (intent === microphoneMuteIntent) {
-      microphoneMuted = appliedMicrophoneMuted;
-      activeMicrophone?.setMuted(appliedMicrophoneMuted);
+    await reconcileVoiceConversationMicrophone({
+      ...status,
+      microphoneMuted: muted,
+    });
+    const nextStatus = await invoke<VoiceConversationStatus>(
+      "set_native_voice_microphone_muted",
+      {
+        sessionId: status.sessionId,
+        expectedRevision: status.revision,
+        muted,
+      },
+    );
+    microphoneMuted = nextStatus.microphoneMuted;
+    if (
+      nextStatus.sessionId !== status.sessionId ||
+      nextStatus.revision !== status.revision ||
+      nextStatus.microphoneMuted !== muted
+    ) {
+      await reconcileVoiceConversationMicrophone(nextStatus);
     }
+    return nextStatus;
+  } catch (error) {
+    microphoneMuted = previous;
+    activeMicrophone?.setMuted(previous);
     throw error;
   }
 }
@@ -283,10 +282,15 @@ export function setVoiceConversationAssistantSpeaking(
   });
 }
 
-export function stopVoiceConversationFromBuddy(): Promise<void> {
+export function stopVoiceConversationFromBuddy(
+  status: VoiceConversationStatus,
+): Promise<void> {
   microphoneMuted = false;
   stopActiveMicrophone();
-  return invoke("stop_voice_conversation_from_buddy");
+  return invoke("stop_voice_conversation_from_buddy", {
+    sessionId: status.sessionId,
+    expectedRevision: status.revision,
+  });
 }
 
 export interface PendingVoiceTranscript {
@@ -360,13 +364,17 @@ export async function startVoiceConversation(
   }
 }
 
-export async function stopVoiceConversation(): Promise<VoiceConversationStatus> {
+export async function stopVoiceConversation(
+  status: VoiceConversationStatus,
+): Promise<VoiceConversationStatus> {
   resetMicrophoneMuteState();
   stopActiveMicrophone();
   const { rendererId, rendererEpoch } = await getRendererInstance();
   return invoke<VoiceConversationStatus>("stop_native_voice_conversation", {
     rendererId,
     rendererEpoch,
+    sessionId: status.sessionId,
+    expectedRevision: status.revision,
   });
 }
 

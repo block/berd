@@ -47,7 +47,10 @@ describe("VoiceBuddyApp", () => {
       return vi.fn();
     });
     mocks.openSession.mockReset().mockResolvedValue(undefined);
-    mocks.setMuted.mockReset().mockResolvedValue(undefined);
+    mocks.setMuted.mockReset().mockImplementation(async (muted) => ({
+      ...runningStatus,
+      microphoneMuted: muted,
+    }));
     mocks.show.mockReset().mockResolvedValue(undefined);
     mocks.stop.mockReset().mockResolvedValue(undefined);
   });
@@ -176,7 +179,7 @@ describe("VoiceBuddyApp", () => {
       }),
     );
 
-    expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(mocks.stop).toHaveBeenCalledWith(runningStatus);
   });
 
   it("reports an owner-opening failure", async () => {

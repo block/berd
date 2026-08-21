@@ -594,6 +594,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       if (stopInFlight) return stopInFlight;
       microphoneMuteIntent += 1;
       microphoneMuteStateVersion += 1;
+      const activeStatus = get().status;
       set({
         uiState: "stopping",
         microphoneMuted: false,
@@ -602,7 +603,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       });
       const request = (async () => {
         try {
-          const status = await stopVoiceConversation();
+          const status = await stopVoiceConversation(activeStatus);
           set((state) =>
             shouldApplyResponseRevision(state.status, status.revision) ||
             (status.revision === state.status.revision &&
@@ -684,8 +685,9 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           uiState: activityUiState(nextState),
         };
       });
+      let status: VoiceConversationStatus;
       try {
-        await setVoiceConversationMicrophoneMuted(
+        status = await setVoiceConversationMicrophoneMuted(
           microphoneMuted,
           current.status,
         );
@@ -702,19 +704,18 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       }
       if (intent !== microphoneMuteIntent) return;
       set((state) => {
-        if (
-          state.status.lifecycle !== "running" ||
-          state.status.sessionId !== current.status.sessionId
-        ) {
+        if (status.revision < state.status.revision) {
           return state;
         }
         const nextState = {
           ...state,
-          microphoneMuted,
-          userSpeaking: microphoneMuted ? false : state.userSpeaking,
+          status,
+          microphoneMuted: status.microphoneMuted,
+          userSpeaking: status.microphoneMuted ? false : state.userSpeaking,
         };
         return {
-          microphoneMuted,
+          status,
+          microphoneMuted: status.microphoneMuted,
           userSpeaking: nextState.userSpeaking,
           uiState: activityUiState(nextState),
         };

@@ -26,6 +26,26 @@ fn focus_window(window: &WebviewWindow) {
     let _ = window.set_focus();
 }
 
+fn require_controls_window(window_label: &str) -> Result<(), String> {
+    if window_label != WINDOW_LABEL {
+        return Err("Only the floating voice controls can use this command.".to_string());
+    }
+    Ok(())
+}
+
+pub fn restore_hidden_owner(app: &AppHandle, owner_window_label: &str) {
+    #[cfg(not(target_os = "macos"))]
+    if let Some(owner) = app
+        .get_webview_window(owner_window_label)
+        .filter(|owner| !owner.is_visible().unwrap_or(false))
+    {
+        focus_window(&owner);
+    }
+
+    #[cfg(target_os = "macos")]
+    let _ = (app, owner_window_label);
+}
+
 pub fn open_active_session(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<NativeVoiceState>();
     let Some((session_id, owner_window_label)) = state.active_session_target() else {
@@ -282,18 +302,44 @@ pub async fn stop_voice_conversation_from_buddy(
     app: AppHandle,
     state: tauri::State<'_, NativeVoiceState>,
     capture: tauri::State<'_, VoiceCaptureState>,
+    window: WebviewWindow,
+    session_id: String,
+    expected_revision: u64,
 ) -> Result<(), String> {
+    require_controls_window(window.label())?;
     #[cfg(not(target_os = "macos"))]
     let hidden_owner = state
-        .active_session_target()
-        .and_then(|(_, owner_window_label)| app.get_webview_window(&owner_window_label))
+        .active_session_lifecycle_target()
+        .filter(|(active_session_id, _, revision)| {
+            active_session_id == &session_id && *revision == expected_revision
+        })
+        .and_then(|(_, owner_window_label, _)| app.get_webview_window(&owner_window_label))
         .filter(|owner| !owner.is_visible().unwrap_or(false));
 
-    state.stop_active(&app, capture.inner()).await?;
+    let stopped = state
+        .stop_active_for_lifecycle(&app, capture.inner(), &session_id, expected_revision)
+        .await?;
+
+    #[cfg(target_os = "macos")]
+    let _ = stopped;
 
     #[cfg(not(target_os = "macos"))]
-    if let Some(owner) = hidden_owner {
-        focus_window(&owner);
+    if stopped {
+        if let Some(owner) = hidden_owner {
+            focus_window(&owner);
+        }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hang_up_accepts_only_the_floating_controls_window() {
+        assert!(require_controls_window(WINDOW_LABEL).is_ok());
+        assert!(require_controls_window("main").is_err());
+        assert!(require_controls_window("session:other").is_err());
+    }
 }
