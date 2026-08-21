@@ -87,8 +87,8 @@ export function toDisplayPath(path: string, homeDir: string): string {
 export const ME_FILE_TEMPLATE = `# Me
 
 *This file is yours. Agents read it to learn how to work with you, and
-nothing is added without your say-so. Italic notes like this one are just
-for you — agents never see them.*
+anything they add shows up in Settings → Memory where you can remove it.
+Italic notes like this one are just for you — agents never see them.*
 
 *Don't add passwords or credentials here. This file is read by every agent.*
 
