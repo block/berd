@@ -910,7 +910,7 @@ fn push_audio_for_session(
     let Some(pipeline) = runtime.pipeline.as_ref() else {
         return Ok(());
     };
-    let mut bytes = Vec::with_capacity(size_of_val(samples));
+    let mut bytes = Vec::with_capacity(samples.len() * size_of::<f32>());
     for sample in samples {
         bytes.extend_from_slice(&sample.to_ne_bytes());
     }
