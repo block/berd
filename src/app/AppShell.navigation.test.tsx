@@ -2588,9 +2588,9 @@ describe("AppShell global navigation", () => {
     stopRequest.resolve(undefined);
     await expect(outcome).resolves.toEqual({ ok: true });
     expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
-    expect(
-      stopVoiceConversation.mock.invocationCallOrder[0],
-    ).toBeLessThan(mockAcpArchiveSession.mock.invocationCallOrder[0]);
+    expect(stopVoiceConversation.mock.invocationCallOrder[0]).toBeLessThan(
+      mockAcpArchiveSession.mock.invocationCallOrder[0],
+    );
   });
 
   it("keeps the session unarchived when voice cannot stop", async () => {

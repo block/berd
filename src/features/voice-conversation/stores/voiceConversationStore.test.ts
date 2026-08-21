@@ -444,9 +444,7 @@ describe("voice conversation store lifecycle ordering", () => {
 
     expect(second).toBe(first);
     expect(mocks.stop).toHaveBeenCalledOnce();
-    expect(mocks.stop).toHaveBeenCalledWith(
-      status("running", 1, "session-1"),
-    );
+    expect(mocks.stop).toHaveBeenCalledWith(status("running", 1, "session-1"));
     expect(store.getState().requestedStartSessionId).toBeNull();
 
     response.resolve(status("stopped", 2));
