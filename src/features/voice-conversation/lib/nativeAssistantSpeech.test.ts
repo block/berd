@@ -229,6 +229,14 @@ describe("native assistant speech stream", () => {
         "First live reply.",
       ),
     );
+    emit("started");
+    await vi.waitFor(() =>
+      expect(mocks.setAssistantSpeaking).toHaveBeenCalledWith(
+        "session-1",
+        1,
+        true,
+      ),
+    );
     expect(mocks.append).not.toHaveBeenCalledWith(
       expect.any(String),
       "Historical response.",

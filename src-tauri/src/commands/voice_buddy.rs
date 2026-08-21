@@ -206,5 +206,17 @@ pub async fn stop_voice_conversation_from_buddy(
     state: tauri::State<'_, NativeVoiceState>,
     capture: tauri::State<'_, VoiceCaptureState>,
 ) -> Result<(), String> {
-    state.stop_active(&app, capture.inner()).await
+    #[cfg(not(target_os = "macos"))]
+    let hidden_owner = state
+        .active_session_target()
+        .and_then(|(_, owner_window_label)| app.get_webview_window(&owner_window_label))
+        .filter(|owner| !owner.is_visible().unwrap_or(false));
+
+    state.stop_active(&app, capture.inner()).await?;
+
+    #[cfg(not(target_os = "macos"))]
+    if let Some(owner) = hidden_owner {
+        focus_window(&owner);
+    }
+    Ok(())
 }

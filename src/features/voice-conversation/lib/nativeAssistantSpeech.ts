@@ -302,8 +302,7 @@ export function startNativeAssistantSpeech(
   if (activeSpeechSessionId === sessionId) return;
   stopNativeAssistantSpeech();
   activeSpeechSessionId = sessionId;
-  const voiceRevision = useVoiceConversationStore.getState().status.revision;
-  activeSpeechRevision = voiceRevision;
+  activeSpeechRevision = useVoiceConversationStore.getState().status.revision;
   const activeGeneration = generation;
   const streamBackend =
     getVoiceOutputBackend() === "siri"
@@ -376,7 +375,9 @@ export function startNativeAssistantSpeech(
     const utterance: ActiveUtterance = {
       id: crypto.randomUUID(),
       sessionId,
-      voiceRevision,
+      voiceRevision:
+        activeSpeechRevision ??
+        useVoiceConversationStore.getState().status.revision,
       targets: [target],
       text: "",
       finishing: false,
@@ -494,6 +495,9 @@ export function startNativeAssistantSpeech(
   let reachedRunning =
     initialVoice.status.lifecycle === "running" &&
     initialVoice.status.sessionId === sessionId;
+  if (reachedRunning) {
+    activeSpeechRevision = initialVoice.status.revision;
+  }
   let wasUserSpeaking = initialVoice.userSpeaking;
   stopVoiceSubscription = useVoiceConversationStore.subscribe((voice) => {
     const runningForSession =
@@ -511,6 +515,7 @@ export function startNativeAssistantSpeech(
       return;
     }
     reachedRunning = true;
+    activeSpeechRevision = voice.status.revision;
     inspect();
     const becameUserSpeaking = voice.userSpeaking && !wasUserSpeaking;
     wasUserSpeaking = voice.userSpeaking;
