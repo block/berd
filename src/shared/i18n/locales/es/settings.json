@@ -650,7 +650,7 @@
           "hostWithOauthFallback": "Agrega los datos requeridos para usar este proveedor.",
           "singleApiKey": "Agrega tu clave API para usar este proveedor."
         },
-        "hostWithOauthFallbackTerminal": "Deja en blanco el token de acceso, guarda la URL del host y luego ejecuta `goose configure` en tu terminal para iniciar sesión.",
+        "hostWithOauthFallbackNative": "Deja en blanco el **token de acceso** para iniciar sesión mediante Berd después de guardar, o introduce un token para conectarte directamente.",
         "nativeConnectDescription": "Inicia sesión con tu cuenta existente.",
         "pending": {
           "cloudCredentials": "Configura tus credenciales de nube en el entorno de tu terminal antes de usar este proveedor.",

@@ -261,7 +261,7 @@ describe("mergeRuntimeProviderCatalog", () => {
     expect(databricks.displayName).toBe("Databricks AI Gateway");
   });
 
-  it("keeps only the Databricks host field when runtime config has no endpoint env", () => {
+  it("keeps Databricks host and token fields when runtime config has no endpoint env", () => {
     const configWithoutEndpointEnv: RuntimeConfig = {
       ...DEFAULT_RUNTIME_CONFIG,
       goose: {
@@ -301,6 +301,7 @@ describe("mergeRuntimeProviderCatalog", () => {
 
     expect(databricks?.fields?.map((field) => field.key)).toEqual([
       "DATABRICKS_HOST",
+      "DATABRICKS_TOKEN",
     ]);
   });
 });

@@ -57,6 +57,7 @@ const providerCatalog: ProviderCatalogEntry[] = [
     category: "model",
     description: "Databricks Foundation Models",
     setupMethod: "host_with_oauth_fallback",
+    nativeConnectQuery: "databricks",
     fields: [
       {
         key: "DATABRICKS_HOST",
@@ -120,6 +121,18 @@ const providerCatalog: ProviderCatalogEntry[] = [
   },
 ];
 
+function hostWithOauthProvider() {
+  const provider = providerCatalog.find((entry) => entry.id === "databricks");
+  if (!provider) {
+    throw new Error("missing host-with-OAuth provider fixture");
+  }
+  return {
+    ...provider,
+    id: "databricks_v2",
+    status: "not_configured" as const,
+  };
+}
+
 describe("ModelProviderRow", () => {
   const onGetConfig = vi.fn();
   const onSaveFields = vi.fn();
@@ -139,6 +152,12 @@ describe("ModelProviderRow", () => {
     onSaveFields.mockResolvedValue(undefined);
     onRemoveConfig.mockResolvedValue(undefined);
     onCompleteNativeSetup.mockResolvedValue(undefined);
+    vi.mocked(startModelSetup).mockResolvedValue({
+      phase: "authenticating",
+      status: "running",
+      output: [],
+      error: null,
+    });
   });
 
   it("shows setup placeholders while provider config loads", async () => {
@@ -355,12 +374,83 @@ describe("ModelProviderRow", () => {
     expect(controlledRegion).not.toHaveAttribute("inert");
   });
 
-  it("saves all changed setup fields from one setup submit", async () => {
+  it("saves a changed host before starting native authentication", async () => {
     const user = userEvent.setup();
 
     render(
       <ModelProviderRow
-        provider={modelProvider("databricks", "not_configured")}
+        provider={hostWithOauthProvider()}
+        onGetConfig={onGetConfig}
+        onSaveFields={onSaveFields}
+        onRemoveConfig={onRemoveConfig}
+        onCompleteNativeSetup={onCompleteNativeSetup}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /databricks/i }));
+    await user.type(
+      await screen.findByPlaceholderText(/cloud\.databricks\.com/i),
+      "https://dbc-test.cloud.databricks.com",
+    );
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(startModelSetup).toHaveBeenCalledTimes(1));
+    expect(onSaveFields).toHaveBeenCalledWith([
+      {
+        key: "DATABRICKS_HOST",
+        value: "https://dbc-test.cloud.databricks.com",
+        isSecret: false,
+      },
+    ]);
+    expect(startModelSetup).toHaveBeenCalledWith("databricks_v2", {
+      providerLabel: "databricks",
+    });
+    expect(onSaveFields.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(startModelSetup).mock.invocationCallOrder[0],
+    );
+    expect(
+      await screen.findByText(/waiting for sign-in/i, { selector: "p span" }),
+    ).toBeInTheDocument();
+  });
+
+  it("starts native authentication when the host is already saved", async () => {
+    const user = userEvent.setup();
+    onGetConfig.mockResolvedValue([
+      {
+        key: "DATABRICKS_HOST",
+        value: "https://dbc-saved.cloud.databricks.com",
+        isSet: true,
+        isSecret: false,
+        required: true,
+      },
+    ]);
+
+    render(
+      <ModelProviderRow
+        provider={hostWithOauthProvider()}
+        onGetConfig={onGetConfig}
+        onSaveFields={onSaveFields}
+        onRemoveConfig={onRemoveConfig}
+        onCompleteNativeSetup={onCompleteNativeSetup}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /databricks/i }));
+    expect(
+      await screen.findByDisplayValue("https://dbc-saved.cloud.databricks.com"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+
+    await waitFor(() => expect(startModelSetup).toHaveBeenCalledTimes(1));
+    expect(onSaveFields).not.toHaveBeenCalled();
+  });
+
+  it("saves an access token without starting native authentication", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ModelProviderRow
+        provider={hostWithOauthProvider()}
         onGetConfig={onGetConfig}
         onSaveFields={onSaveFields}
         onRemoveConfig={onRemoveConfig}
@@ -392,6 +482,48 @@ describe("ModelProviderRow", () => {
         isSecret: true,
       },
     ]);
+    expect(startModelSetup).not.toHaveBeenCalled();
+  });
+
+  it("surfaces native authentication failure in the field setup row", async () => {
+    const user = userEvent.setup();
+    onGetConfig.mockResolvedValue([
+      {
+        key: "DATABRICKS_HOST",
+        value: "https://dbc-saved.cloud.databricks.com",
+        isSet: true,
+        isSecret: false,
+        required: true,
+      },
+    ]);
+
+    render(
+      <ModelProviderRow
+        provider={hostWithOauthProvider()}
+        onGetConfig={onGetConfig}
+        onSaveFields={onSaveFields}
+        onRemoveConfig={onRemoveConfig}
+        onCompleteNativeSetup={onCompleteNativeSetup}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /databricks/i }));
+    await screen.findByDisplayValue("https://dbc-saved.cloud.databricks.com");
+    await user.click(screen.getByRole("button", { name: /^save$/i }));
+    await waitFor(() => expect(startModelSetup).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      useModelSetupStore.getState().setOperation("databricks_v2", {
+        phase: "idle",
+        status: "failed",
+        output: ["Authentication failed"],
+        error: "Databricks sign-in was cancelled",
+      });
+    });
+
+    expect(
+      await screen.findByText(/databricks sign-in was cancelled/i),
+    ).toBeInTheDocument();
   });
 
   it("pre-fills and saves provider field defaults", async () => {

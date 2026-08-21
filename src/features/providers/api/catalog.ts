@@ -68,10 +68,10 @@ export function selectDatabricksHostConfigProvider(
   const entry = entries.find(
     (candidate) => candidate.id === SETUP_CATALOG_DATABRICKS_PROVIDER_ID,
   );
-  const fields = entry?.fields?.filter(
+  const hasHostField = entry?.fields?.some(
     (field) => field.key === SETUP_CATALOG_DATABRICKS_HOST_FIELD_KEY,
   );
-  return entry && fields?.length ? { ...entry, fields } : null;
+  return entry && hasHostField ? entry : null;
 }
 
 export async function listProviderSetupCatalog(): Promise<
