@@ -117,8 +117,8 @@ export function usePersonas() {
   );
 
   // Custom gloopies are library citizens, not per-agent attachments: a
-  // displaced or orphaned `user-avatar:<id>` stays in "Your gloopies" so any
-  // agent can wear it again. Library-level delete is a deliberate later
+  // displaced or orphaned `user-avatar:<id>` stays in the Gloopies collection
+  // so any agent can wear it again. Library-level delete is a deliberate later
   // feature (alongside export), so no reference-count garbage collection
   // happens here.
   const updatePersona = useCallback(

@@ -3,6 +3,7 @@ import {
   cachedAssetToMedia,
   getAvatarLibrarySnapshot,
   listenAvatarCacheWarmed,
+  listenUserAvatarLibraryChanged,
   normalizeAvatarLibraryError,
   refreshAvatarCache,
   type AvatarLibraryErrorCode,
@@ -23,9 +24,9 @@ interface CachedAvatarMediaEntry {
 export interface AvatarLibraryState {
   catalog: AvatarCatalog | null;
   /**
-   * Ids of the user's generated gloopies (newest first). They form the
-   * "Your gloopies" collection: local library citizens outside the published
-   * catalog, persisted on agents as `user-avatar:<id>`. Their media lives in
+   * Ids of the user's generated gloopies (newest first). They are local
+   * library citizens prepended to the published Gloopies collection and
+   * persisted on agents as `user-avatar:<id>`. Their media lives in
    * `cachedAvatarMediaById` under `USER_AVATAR_CATALOG_VERSION`.
    */
   userAvatarIds: string[];
@@ -99,15 +100,21 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
     }
 
     let cancelled = false;
-    const unlistenPromise = listenAvatarCacheWarmed(() => {
+    const reload = () => {
       if (!cancelled) {
         setReloadToken((value) => value + 1);
       }
-    });
+    };
+    const unlistenPromises = [
+      listenAvatarCacheWarmed(reload),
+      listenUserAvatarLibraryChanged(reload),
+    ];
 
     return () => {
       cancelled = true;
-      void unlistenPromise.then((unlisten) => unlisten());
+      for (const unlistenPromise of unlistenPromises) {
+        void unlistenPromise.then((unlisten) => unlisten());
+      }
     };
   }, [enabled]);
 

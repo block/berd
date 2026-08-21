@@ -130,7 +130,13 @@ describe("AvatarLibraryPicker", () => {
     const onSelectAvatar = vi.fn();
     renderWithProviders(picker(library, onSelectAvatar));
 
-    fireEvent.click(screen.getByRole("button", { name: "Gloopies" }));
+    const collectionButton = screen.getByRole("button", { name: "Gloopies" });
+    expect(collectionButton.querySelector("video")).toHaveAttribute(
+      "src",
+      "asset://gloopie-custom.webm",
+    );
+
+    fireEvent.click(collectionButton);
     const avatarButtons = screen
       .getAllByRole("button")
       .filter((button) =>

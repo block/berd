@@ -22,6 +22,7 @@ const USER_AVATAR_REF_PREFIX: &str = "user-avatar:";
 const USER_AVATAR_CATALOG_VERSION: &str = "user-generated";
 const USER_AVATAR_COLLECTION_ID: &str = "generated-gloopies";
 const AVATAR_CACHE_WARMED_EVENT: &str = "berd:avatar-cache-warmed";
+const USER_AVATAR_LIBRARY_CHANGED_EVENT: &str = "berd:user-avatar-library-changed";
 const LATEST_PATH: &str = "latest.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const AVATAR_REFRESH_INTERVAL: Duration = Duration::from_secs(12 * 60 * 60);
@@ -456,13 +457,17 @@ pub async fn import_user_avatar_data_url(
         .as_deref()
         .map(decode_imported_poster_data_url)
         .transpose()?;
-    write_user_avatar_with_poster(
+    let avatar_ref = write_user_avatar_with_poster(
         &app,
         &bytes,
         mime_type,
         alpha_mode.as_deref(),
         poster.as_deref().map(|bytes| (bytes, "image/png")),
-    )
+    )?;
+    if let Err(error) = app.emit(USER_AVATAR_LIBRARY_CHANGED_EVENT, ()) {
+        log::warn!("Failed to emit user avatar library change event: {error}");
+    }
+    Ok(avatar_ref)
 }
 
 fn decode_imported_avatar_data_url(data_url: &str) -> Result<(Vec<u8>, &'static str), String> {

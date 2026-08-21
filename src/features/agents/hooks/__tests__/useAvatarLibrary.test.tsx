@@ -5,7 +5,8 @@ import type {
   CachedAvatarCollection,
 } from "@/shared/avatars/catalog";
 
-const listeners: Array<() => void> = [];
+const cacheWarmedListeners: Array<() => void> = [];
+const userLibraryChangedListeners: Array<() => void> = [];
 vi.mock("@/shared/api/avatars", async () => {
   const actual = await vi.importActual<typeof import("@/shared/api/avatars")>(
     "@/shared/api/avatars",
@@ -15,7 +16,11 @@ vi.mock("@/shared/api/avatars", async () => {
     getAvatarLibrarySnapshot: vi.fn(),
     refreshAvatarCache: vi.fn(),
     listenAvatarCacheWarmed: vi.fn(async (handler: () => void) => {
-      listeners.push(handler);
+      cacheWarmedListeners.push(handler);
+      return vi.fn();
+    }),
+    listenUserAvatarLibraryChanged: vi.fn(async (handler: () => void) => {
+      userLibraryChangedListeners.push(handler);
       return vi.fn();
     }),
     cachedAssetToMedia: (asset: { path: string; mimeType: string }) => ({
@@ -73,7 +78,8 @@ function cachedCollection(path: string): CachedAvatarCollection {
 
 describe("useAvatarLibrary", () => {
   beforeEach(() => {
-    listeners.length = 0;
+    cacheWarmedListeners.length = 0;
+    userLibraryChangedListeners.length = 0;
     vi.clearAllMocks();
     vi.mocked(getAvatarLibrarySnapshot).mockResolvedValue({
       catalog,
@@ -182,12 +188,51 @@ describe("useAvatarLibrary", () => {
       mediaRefreshing: false,
       mediaRefreshCompleted: true,
     });
-    act(() => listeners[0]?.());
+    act(() => cacheWarmedListeners[0]?.());
 
     await waitFor(() =>
       expect(result.current.cachedAvatarMediaById["a-1"].media.src).toBe(
         "/cache/refreshed.webm",
       ),
     );
+  });
+
+  it("adds a newly created gloopie after the user library change event", async () => {
+    const { result } = renderHook(() => useAvatarLibrary(true));
+    await waitFor(() => expect(result.current.catalog).toEqual(catalog));
+
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValue({
+      catalog,
+      cachedCollections: [
+        cachedCollection("/cache/a-1.webm"),
+        {
+          catalogVersion: "user-generated",
+          collectionId: "generated-gloopies",
+          assets: [
+            {
+              id: "gloopie-new",
+              path: "/user-avatars/gloopie-new.mp4",
+              mimeType: "video/mp4",
+              alphaMode: "stacked",
+            },
+          ],
+          failedAssetIds: [],
+        },
+      ],
+      mediaRefreshing: false,
+      mediaRefreshCompleted: true,
+    });
+    act(() => userLibraryChangedListeners[0]?.());
+
+    await waitFor(() =>
+      expect(result.current.userAvatarIds).toEqual(["gloopie-new"]),
+    );
+    expect(result.current.cachedAvatarMediaById["gloopie-new"]).toMatchObject({
+      catalogVersion: "user-generated",
+      media: {
+        src: "/user-avatars/gloopie-new.mp4",
+        mediaType: "video",
+      },
+    });
   });
 });
