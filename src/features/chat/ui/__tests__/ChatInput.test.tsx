@@ -1141,6 +1141,11 @@ describe("ChatInput", () => {
       screen.getByRole("button", { name: "Start voice conversation" }),
     );
     expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(
+      screen
+        .getByRole("button", { name: "Start voice conversation" })
+        .querySelector(".lucide-phone"),
+    ).toBeInTheDocument();
   });
 
   it("shows a destructive hang-up control while voice is active", () => {
@@ -1160,8 +1165,37 @@ describe("ChatInput", () => {
     );
 
     const button = screen.getByRole("button", { name: "Hang up" });
+    const mute = screen.getByRole("button", { name: "Mute microphone" });
+    expect(
+      mute.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(button).toHaveClass("bg-destructive", "text-destructive-foreground");
     expect(button.querySelector(".lucide-phone-off")).toBeInTheDocument();
+  });
+
+  it("shows a non-destructive open control outside the owning session", () => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        voiceConversation={{
+          visible: true,
+          state: "listening",
+          boundSessionId: "session-1",
+          active: true,
+          ownsActiveConversation: false,
+          microphoneMuted: false,
+          onToggle: vi.fn(),
+          onMicrophoneMuteToggle: vi.fn(),
+        }}
+      />,
+    );
+
+    const open = screen.getByRole("button", { name: "Open voice session" });
+    expect(open).not.toHaveClass("bg-destructive");
+    expect(open.querySelector(".lucide-phone")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Mute microphone" }),
+    ).not.toBeInTheDocument();
   });
 
   it("reports the muted microphone state on the voice conversation control", () => {
@@ -4277,7 +4311,7 @@ describe("ChatInput", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("repurposes the existing dictation mic as voice-call mute without reordering controls", async () => {
+  it("keeps voice-call mute immediately left of hang-up", async () => {
     const onMicrophoneMuteToggle = vi.fn();
     const user = userEvent.setup();
 
@@ -4322,7 +4356,7 @@ describe("ChatInput", () => {
     });
 
     expect(
-      callButton.compareDocumentPosition(muteButton) &
+      muteButton.compareDocumentPosition(callButton) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(muteButton).toHaveAttribute("aria-pressed", "false");

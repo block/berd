@@ -242,6 +242,22 @@ export function openVoiceConversationSession(): Promise<void> {
   return invoke("open_voice_conversation_session");
 }
 
+export function showVoiceConversationControls(): Promise<void> {
+  return invoke("show_voice_conversation_controls");
+}
+
+export function setVoiceConversationAssistantSpeaking(
+  sessionId: string,
+  expectedRevision: number,
+  speaking: boolean,
+): Promise<void> {
+  return invoke("set_native_voice_assistant_speaking", {
+    sessionId,
+    expectedRevision,
+    speaking,
+  });
+}
+
 export function stopVoiceConversationFromBuddy(): Promise<void> {
   microphoneMuted = false;
   stopActiveMicrophone();

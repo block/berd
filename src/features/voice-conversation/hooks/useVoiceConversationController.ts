@@ -718,6 +718,7 @@ export function useVoiceConversationController({
       state: uiState,
       boundSessionId: status.sessionId,
       active: isActive,
+      ownsActiveConversation: isActive && status.sessionId === sessionId,
       microphoneMuted,
       error:
         error ??
@@ -735,6 +736,7 @@ export function useVoiceConversationController({
       isGooseSession,
       microphoneMuted,
       pocketReady,
+      sessionId,
       status,
       toggle,
       toggleMicrophoneMute,

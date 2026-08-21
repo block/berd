@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   listen: vi.fn(),
   openSession: vi.fn(),
   setMuted: vi.fn(),
+  show: vi.fn(),
   stop: vi.fn(),
 }));
 
@@ -18,10 +19,13 @@ vi.mock("@/features/voice-conversation/api/voiceConversation", () => ({
   listenToVoiceConversation: mocks.listen,
   openVoiceConversationSession: mocks.openSession,
   setVoiceConversationMicrophoneMuted: mocks.setMuted,
+  showVoiceConversationControls: mocks.show,
   stopVoiceConversationFromBuddy: mocks.stop,
 }));
 
 import { VoiceBuddyApp } from "./VoiceBuddyApp";
+
+let voiceEventListener: ((event: Record<string, unknown>) => void) | undefined;
 
 const runningStatus = {
   available: true,
@@ -37,10 +41,84 @@ describe("VoiceBuddyApp", () => {
   beforeEach(() => {
     window.history.replaceState({}, "", "/?voiceBuddy=1");
     mocks.getStatus.mockReset().mockResolvedValue(runningStatus);
-    mocks.listen.mockReset().mockResolvedValue(vi.fn());
+    voiceEventListener = undefined;
+    mocks.listen.mockReset().mockImplementation(async (listener) => {
+      voiceEventListener = listener;
+      return vi.fn();
+    });
     mocks.openSession.mockReset().mockResolvedValue(undefined);
     mocks.setMuted.mockReset().mockResolvedValue(undefined);
+    mocks.show.mockReset().mockResolvedValue(undefined);
     mocks.stop.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("shows live user and assistant speaking activity", async () => {
+    render(<VoiceBuddyApp />);
+
+    await waitFor(() => expect(voiceEventListener).toBeDefined());
+    act(() => {
+      voiceEventListener?.({
+        type: "activity",
+        sessionId: "session-a",
+        activity: "user-speaking",
+        revision: 4,
+      });
+    });
+    expect(document.querySelector(".lucide-mic")).toHaveClass(
+      "motion-safe:animate-pulse",
+    );
+
+    act(() => {
+      voiceEventListener?.({
+        type: "activity",
+        sessionId: "session-a",
+        activity: "assistant-speaking",
+        revision: 5,
+      });
+    });
+    expect(
+      screen
+        .getByRole("button", {
+          name: "toolbar.voiceConversation.buddy.openSession",
+        })
+        .querySelector('[role="img"]'),
+    ).toHaveClass("motion-safe:animate-pulse");
+    expect(document.querySelector(".lucide-mic")).not.toHaveClass(
+      "motion-safe:animate-pulse",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "toolbar.voiceConversation.buddy.listening",
+    );
+  });
+
+  it("waits for listener registration and status hydration before showing", async () => {
+    let resolveStatus: ((status: typeof runningStatus) => void) | undefined;
+    mocks.getStatus.mockReturnValueOnce(
+      new Promise<typeof runningStatus>((resolve) => {
+        resolveStatus = resolve;
+      }),
+    );
+    render(<VoiceBuddyApp />);
+
+    await waitFor(() => expect(mocks.listen).toHaveBeenCalledOnce());
+    expect(mocks.show).not.toHaveBeenCalled();
+    act(() => resolveStatus?.(runningStatus));
+    await waitFor(() => expect(mocks.show).toHaveBeenCalledOnce());
+    act(() => {
+      voiceEventListener?.({
+        type: "activity",
+        sessionId: "session-a",
+        activity: "assistant-speaking",
+        revision: 2,
+      });
+    });
+    expect(
+      screen
+        .getByRole("button", {
+          name: "toolbar.voiceConversation.buddy.openSession",
+        })
+        .querySelector('[role="img"]'),
+    ).not.toHaveClass("motion-safe:animate-pulse");
   });
 
   it("opens the owner and exposes mute and hang-up controls", async () => {
@@ -48,6 +126,7 @@ describe("VoiceBuddyApp", () => {
     render(<VoiceBuddyApp />);
 
     await waitFor(() => expect(mocks.getStatus).toHaveBeenCalledOnce());
+    await waitFor(() => expect(mocks.show).toHaveBeenCalledOnce());
     const avatar = screen.getByRole("button", {
       name: "toolbar.voiceConversation.buddy.openSession",
     });

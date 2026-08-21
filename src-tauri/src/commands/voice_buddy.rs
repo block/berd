@@ -108,6 +108,10 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
         let _ = window.show();
         return Ok(());
     }
+    let (session_id, owner_window_label, revision) = app
+        .state::<NativeVoiceState>()
+        .active_session_lifecycle_target()
+        .ok_or_else(|| "No native voice conversation is active.".to_string())?;
 
     let builder = WebviewWindowBuilder::new(
         app,
@@ -135,7 +139,40 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
         }
     });
     position_near_bottom_right(app, &window);
-    window.show().map_err(|error| error.to_string())
+    let fallback_app = app.clone();
+    let fallback_window = window.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        if !fallback_window.is_visible().unwrap_or(false) {
+            log::error!(
+                "Floating voice controls did not become ready; stopping the voice conversation"
+            );
+            let state = fallback_app.state::<NativeVoiceState>();
+            if state.active_session_lifecycle_target()
+                != Some((session_id.clone(), owner_window_label.clone(), revision))
+            {
+                return;
+            }
+            if let Some(owner) = fallback_app.get_webview_window(&owner_window_label) {
+                focus_window(&owner);
+            }
+            let capture = fallback_app.state::<VoiceCaptureState>();
+            if let Err(error) = state
+                .stop_active_if_lifecycle(
+                    &fallback_app,
+                    capture.inner(),
+                    &session_id,
+                    revision,
+                    "Voice controls could not open, so the voice conversation was stopped.",
+                )
+                .await
+            {
+                log::error!("Failed to stop voice after controls readiness timeout: {error}");
+                remove(&fallback_app);
+            }
+        }
+    });
+    Ok(())
 }
 
 pub fn remove(app: &AppHandle) {
@@ -153,6 +190,14 @@ pub fn emit<T: Clone + Serialize>(app: &AppHandle, payload: T) {
 #[tauri::command]
 pub fn open_voice_conversation_session(app: AppHandle) -> Result<(), String> {
     open_active_session(&app)
+}
+
+#[tauri::command]
+pub fn show_voice_conversation_controls(window: WebviewWindow) -> Result<(), String> {
+    if window.label() != WINDOW_LABEL {
+        return Err("Only the floating voice controls can show this window.".to_string());
+    }
+    window.show().map_err(|error| error.to_string())
 }
 
 #[tauri::command]

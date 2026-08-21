@@ -1,5 +1,5 @@
-import { Mic, MicOff, PhoneOff } from "lucide-react";
-import { useEffect, useState } from "react";
+import { GripVertical, Mic, MicOff, PhoneOff } from "lucide-react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -7,7 +7,9 @@ import {
   listenToVoiceConversation,
   openVoiceConversationSession,
   setVoiceConversationMicrophoneMuted,
+  showVoiceConversationControls,
   stopVoiceConversationFromBuddy,
+  type VoiceConversationEvent,
   type VoiceConversationStatus,
 } from "@/features/voice-conversation/api/voiceConversation";
 import { Button } from "@/shared/ui/button";
@@ -20,18 +22,74 @@ export function VoiceBuddyApp() {
     null,
   );
   const [error, setError] = useState<string | null>(null);
+  const [activity, setActivity] = useState({
+    userSpeaking: false,
+    assistantSpeaking: false,
+    sessionId: null as string | null,
+    revision: 0,
+  });
+  const [initialized, setInitialized] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!initialized) return;
+    void showVoiceConversationControls().catch((cause) => {
+      console.error("Failed to show floating voice controls", cause);
+      setError(String(cause));
+    });
+  }, [initialized]);
 
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    void getVoiceConversationStatus()
-      .then((nextStatus) => {
-        if (!cancelled) setStatus(nextStatus);
-      })
-      .catch((cause) => {
-        if (!cancelled) setError(String(cause));
+    const onEvent = (event: VoiceConversationEvent) => {
+      setActivity((current) => {
+        if (event.revision < current.revision) return current;
+        if (
+          event.type === "activity" &&
+          current.sessionId !== null &&
+          event.sessionId !== current.sessionId
+        ) {
+          return current;
+        }
+        if (event.type === "startup" || event.type === "cleanShutdown") {
+          return {
+            userSpeaking: false,
+            assistantSpeaking: false,
+            sessionId: event.type === "startup" ? event.sessionId : null,
+            revision: event.revision,
+          };
+        }
+        if (event.type === "microphoneMute" && event.muted) {
+          return {
+            ...current,
+            userSpeaking: false,
+            revision: event.revision,
+          };
+        }
+        if (event.type !== "activity") {
+          return { ...current, revision: event.revision };
+        }
+        return {
+          sessionId: current.sessionId ?? event.sessionId,
+          userSpeaking:
+            event.activity === "user-speaking"
+              ? true
+              : event.activity === "assistant-speaking"
+                ? false
+                : event.activity === "user-idle"
+                  ? false
+                  : current.userSpeaking,
+          assistantSpeaking:
+            event.activity === "assistant-speaking"
+              ? true
+              : event.activity === "user-speaking"
+                ? false
+                : event.activity === "assistant-idle"
+                  ? false
+                  : current.assistantSpeaking,
+          revision: event.revision,
+        };
       });
-    void listenToVoiceConversation((event) => {
       setStatus((current) => {
         if (!current || event.revision < current.revision) return current;
         switch (event.type) {
@@ -50,6 +108,8 @@ export function VoiceBuddyApp() {
               microphoneMuted: event.muted,
               revision: event.revision,
             };
+          case "activity":
+            return { ...current, revision: event.revision };
           case "cleanShutdown":
             return {
               ...current,
@@ -66,10 +126,43 @@ export function VoiceBuddyApp() {
             return { ...current, revision: event.revision };
         }
       });
-    }).then((nextUnlisten) => {
-      if (cancelled) nextUnlisten();
-      else unlisten = nextUnlisten;
-    });
+    };
+
+    void (async () => {
+      try {
+        const nextUnlisten = await listenToVoiceConversation(onEvent);
+        if (cancelled) nextUnlisten();
+        else unlisten = nextUnlisten;
+      } catch (cause) {
+        if (!cancelled) setError(String(cause));
+      }
+
+      try {
+        const nextStatus = await getVoiceConversationStatus();
+        if (!cancelled) {
+          setStatus((current) =>
+            current && current.revision > nextStatus.revision
+              ? current
+              : nextStatus,
+          );
+          setActivity((current) =>
+            current.revision >= nextStatus.revision
+              ? current
+              : {
+                  userSpeaking: false,
+                  assistantSpeaking: false,
+                  sessionId: nextStatus.sessionId,
+                  revision: nextStatus.revision,
+                },
+          );
+        }
+      } catch (cause) {
+        if (!cancelled) setError(String(cause));
+      } finally {
+        if (!cancelled) setInitialized(true);
+      }
+    })();
+
     return () => {
       cancelled = true;
       unlisten?.();
@@ -116,6 +209,13 @@ export function VoiceBuddyApp() {
         data-tauri-drag-region="deep"
         title={error ?? t("toolbar.voiceConversation.buddy.title")}
       >
+        <div
+          className="flex h-8 cursor-move items-center justify-center px-1 text-muted-foreground"
+          data-tauri-drag-region="deep"
+          aria-hidden="true"
+        >
+          <GripVertical className="size-3.5" />
+        </div>
         <Button
           type="button"
           variant="subtle"
@@ -125,7 +225,12 @@ export function VoiceBuddyApp() {
           disabled={busyAction !== null}
           onClick={() => void run("open", openVoiceConversationSession)}
         >
-          <BerdIcon aria-hidden="true" />
+          <BerdIcon
+            aria-hidden="true"
+            className={
+              activity.assistantSpeaking ? "motion-safe:animate-pulse" : ""
+            }
+          />
         </Button>
         <Button
           type="button"
@@ -144,7 +249,15 @@ export function VoiceBuddyApp() {
           disabled={!status || busyAction !== null}
           onClick={toggleMute}
         >
-          {microphoneMuted ? <MicOff /> : <Mic />}
+          {microphoneMuted ? (
+            <MicOff />
+          ) : (
+            <Mic
+              className={
+                activity.userSpeaking ? "motion-safe:animate-pulse" : ""
+              }
+            />
+          )}
         </Button>
         <Button
           type="button"

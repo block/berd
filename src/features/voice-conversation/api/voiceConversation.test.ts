@@ -32,8 +32,10 @@ import {
   listenToVoiceConversation,
   openVoiceConversationSession,
   reconcileVoiceConversationMicrophone,
+  setVoiceConversationAssistantSpeaking,
   setVoiceConversationMicrophoneMuted,
   startVoiceConversation,
+  showVoiceConversationControls,
   stopActiveMicrophoneForTest,
   stopVoiceConversationFromBuddy,
   stopVoiceConversation,
@@ -132,10 +134,17 @@ describe("voice conversation API", () => {
     mocks.invoke.mockResolvedValue(undefined);
 
     await openVoiceConversationSession();
+    await showVoiceConversationControls();
+    await setVoiceConversationAssistantSpeaking("session-1", 3, true);
     await stopVoiceConversationFromBuddy();
 
     expect(mocks.invoke.mock.calls).toEqual([
       ["open_voice_conversation_session"],
+      ["show_voice_conversation_controls"],
+      [
+        "set_native_voice_assistant_speaking",
+        { sessionId: "session-1", expectedRevision: 3, speaking: true },
+      ],
       ["stop_voice_conversation_from_buddy"],
     ]);
   });

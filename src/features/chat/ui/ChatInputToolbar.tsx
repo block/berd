@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import {
   Mic,
   MicOff,
-  Headphones,
+  Phone,
   PhoneOff,
   ArrowUp,
   File,
@@ -153,17 +153,22 @@ export function ChatInputToolbar({
     : sendDisabledReason;
   const voiceConversationState = voiceConversation?.state ?? "off";
   const voiceConversationRunning = voiceConversation?.active === true;
+  const ownsActiveVoiceConversation =
+    voiceConversationRunning &&
+    voiceConversation?.ownsActiveConversation !== false;
   const voiceConversationMicrophoneMuted =
     voiceConversation?.microphoneMuted ?? false;
-  const voiceConversationTooltip = voiceConversationRunning
+  const voiceConversationTooltip = ownsActiveVoiceConversation
     ? t("toolbar.voiceConversation.hangUp")
-    : voiceConversationState !== "off"
-      ? t(`toolbar.voiceConversation.states.${voiceConversationState}`, {
-          sessionId: voiceConversation?.boundSessionId ?? "",
-          error: voiceConversation?.error ?? "",
-        })
-      : t("toolbar.voiceConversation.start");
-  const voiceInputTooltip = voiceConversationRunning
+    : voiceConversationRunning
+      ? t("toolbar.voiceConversation.buddy.openSession")
+      : voiceConversationState !== "off"
+        ? t(`toolbar.voiceConversation.states.${voiceConversationState}`, {
+            sessionId: voiceConversation?.boundSessionId ?? "",
+            error: voiceConversation?.error ?? "",
+          })
+        : t("toolbar.voiceConversation.start");
+  const voiceInputTooltip = ownsActiveVoiceConversation
     ? voiceConversationMicrophoneMuted
       ? t("toolbar.voiceConversation.unmuteMicrophone")
       : t("toolbar.voiceConversation.muteMicrophone")
@@ -176,7 +181,8 @@ export function ChatInputToolbar({
     voiceConversationState === "error" ? "error" : undefined;
   const nativeVoiceOwnsMicrophone =
     voiceConversationState === "starting" ||
-    voiceConversationState === "stopping";
+    voiceConversationState === "stopping" ||
+    (voiceConversationRunning && !ownsActiveVoiceConversation);
   const dictationOwnsMicrophone =
     anyVoiceDictationActive ||
     voiceStarting ||
@@ -473,45 +479,23 @@ export function ChatInputToolbar({
             </Popover>
           )}
 
-          {voiceConversation?.visible ? (
-            <ComposerActionButton
-              type="button"
-              size="icon-pill-sm"
-              disabled={voiceConversation.disabled || dictationOwnsMicrophone}
-              onClick={() => void voiceConversation.onToggle()}
-              aria-label={voiceConversationTooltip}
-              visualState={voiceConversationFeedbackState}
-              tooltip={voiceConversationTooltip}
-              className={cn(
-                voiceConversationRunning &&
-                  "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground",
-              )}
-            >
-              {voiceConversationRunning ? (
-                <PhoneOff aria-hidden="true" />
-              ) : (
-                <Headphones aria-hidden="true" />
-              )}
-            </ComposerActionButton>
-          ) : null}
-
-          {(voiceEnabled || voiceRecording || voiceConversationRunning) && (
+          {(voiceEnabled || voiceRecording || ownsActiveVoiceConversation) && (
             <ComposerActionButton
               type="button"
               size="icon-pill-sm"
               disabled={
                 nativeVoiceOwnsMicrophone ||
-                (!voiceConversationRunning &&
+                (!ownsActiveVoiceConversation &&
                   !voiceRecording &&
                   (!voiceEnabled || disabled))
               }
               onClick={
-                voiceConversationRunning
+                ownsActiveVoiceConversation
                   ? () => void voiceConversation?.onMicrophoneMuteToggle()
                   : onVoiceToggle
               }
               aria-label={
-                voiceConversationRunning
+                ownsActiveVoiceConversation
                   ? voiceConversationMicrophoneMuted
                     ? t("toolbar.voiceConversation.unmuteMicrophone")
                     : t("toolbar.voiceConversation.muteMicrophone")
@@ -520,12 +504,12 @@ export function ChatInputToolbar({
                     : t("toolbar.voiceInput")
               }
               aria-pressed={
-                voiceConversationRunning
+                ownsActiveVoiceConversation
                   ? voiceConversationMicrophoneMuted
                   : voiceRecording
               }
               tooltip={
-                !voiceConversationRunning &&
+                !ownsActiveVoiceConversation &&
                 !voiceRecording &&
                 !voiceTranscribing &&
                 voiceShortcutDisplayParts?.length ? (
@@ -547,13 +531,36 @@ export function ChatInputToolbar({
                 voiceTranscribing && "animate-pulse",
               )}
             >
-              {voiceConversationRunning && voiceConversationMicrophoneMuted ? (
+              {ownsActiveVoiceConversation &&
+              voiceConversationMicrophoneMuted ? (
                 <MicOff aria-hidden="true" />
               ) : (
                 <Mic aria-hidden="true" />
               )}
             </ComposerActionButton>
           )}
+
+          {voiceConversation?.visible ? (
+            <ComposerActionButton
+              type="button"
+              size="icon-pill-sm"
+              disabled={voiceConversation.disabled || dictationOwnsMicrophone}
+              onClick={() => void voiceConversation.onToggle()}
+              aria-label={voiceConversationTooltip}
+              visualState={voiceConversationFeedbackState}
+              tooltip={voiceConversationTooltip}
+              className={cn(
+                ownsActiveVoiceConversation &&
+                  "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground",
+              )}
+            >
+              {ownsActiveVoiceConversation ? (
+                <PhoneOff aria-hidden="true" />
+              ) : (
+                <Phone aria-hidden="true" />
+              )}
+            </ComposerActionButton>
+          ) : null}
         </div>
 
         <div>

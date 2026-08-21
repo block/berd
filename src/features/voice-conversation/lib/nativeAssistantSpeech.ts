@@ -17,6 +17,7 @@ import {
   stopSiriVoice,
   type SiriVoiceStreamEvent,
 } from "../api/siriVoice";
+import { setVoiceConversationAssistantSpeaking } from "../api/voiceConversation";
 import { getVoiceOutputBackend } from "./voiceOutputPreference";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
@@ -25,6 +26,7 @@ type SpeechTarget = { messageId: string; textOrdinal: number };
 type ActiveUtterance = {
   id: string;
   sessionId: string;
+  voiceRevision: number;
   targets: SpeechTarget[];
   text: string;
   finishing: boolean;
@@ -47,10 +49,36 @@ let commandQueue = Promise.resolve();
 let generation = 0;
 let commandEpoch = 0;
 let activeSpeechSessionId: string | null = null;
+let activeSpeechRevision: number | null = null;
 let activeUtterance: ActiveUtterance | null = null;
 let stopActiveVoice: () => Promise<boolean> = stopPocketVoice;
+let activityReportQueue = Promise.resolve();
 const pendingNotices = new Map<string, string[]>();
 const recordedNoticeKeys = new Set<string>();
+
+function reportAssistantActivity(
+  sessionId: string,
+  expectedRevision: number,
+  speaking: boolean,
+): void {
+  activityReportQueue = activityReportQueue
+    .catch(() => undefined)
+    .then(() =>
+      setVoiceConversationAssistantSpeaking(
+        sessionId,
+        expectedRevision,
+        speaking,
+      ),
+    )
+    .catch((error) => {
+      console.error("Failed to synchronize assistant voice activity", {
+        sessionId,
+        expectedRevision,
+        speaking,
+        error,
+      });
+    });
+}
 
 function recordPlaybackNotice(
   sessionId: string,
@@ -131,6 +159,7 @@ function failActiveUtterance(
   );
   useVoiceConversationStore.getState().setUiState("listening");
   activeUtterance = null;
+  reportAssistantActivity(utterance.sessionId, utterance.voiceRevision, false);
   onFailure(utterance.text, error);
   utterance.onTerminal();
 }
@@ -162,11 +191,21 @@ function handleStreamEvent(
     case "started":
       setUtteranceStatus(utterance, "speaking");
       voice.setUiState("agent-speaking");
+      reportAssistantActivity(
+        utterance.sessionId,
+        utterance.voiceRevision,
+        true,
+      );
       break;
     case "completed":
       setUtteranceStatus(utterance, "spoken");
       voice.setUiState("listening");
       activeUtterance = null;
+      reportAssistantActivity(
+        utterance.sessionId,
+        utterance.voiceRevision,
+        false,
+      );
       utterance.onTerminal();
       break;
     case "interrupted":
@@ -179,6 +218,11 @@ function handleStreamEvent(
       );
       voice.setUiState("listening");
       activeUtterance = null;
+      reportAssistantActivity(
+        utterance.sessionId,
+        utterance.voiceRevision,
+        false,
+      );
       utterance.onTerminal();
       break;
     case "failed":
@@ -191,6 +235,11 @@ function handleStreamEvent(
       );
       voice.setUiState("listening");
       activeUtterance = null;
+      reportAssistantActivity(
+        utterance.sessionId,
+        utterance.voiceRevision,
+        false,
+      );
       utterance.onFailure(
         utterance.text,
         event.error ?? new Error("Pocket voice stream failed"),
@@ -200,7 +249,7 @@ function handleStreamEvent(
   }
 }
 
-function interruptActiveUtterance() {
+function interruptActiveUtterance(): boolean {
   const utterance = activeUtterance;
   commandEpoch += 1;
   activeUtterance = null;
@@ -212,17 +261,30 @@ function interruptActiveUtterance() {
       utterance.text,
       "interrupted",
     );
+    reportAssistantActivity(
+      utterance.sessionId,
+      utterance.voiceRevision,
+      false,
+    );
     utterance.onTerminal();
   }
   void stopActiveVoice().catch(() => undefined);
   commandQueue = commandQueue.then(async () => {
     await stopActiveVoice().catch(() => undefined);
   });
+  return utterance !== null;
 }
 
 export function stopNativeAssistantSpeech(): void {
   generation += 1;
-  interruptActiveUtterance();
+  const interruptedUtterance = interruptActiveUtterance();
+  if (
+    !interruptedUtterance &&
+    activeSpeechSessionId &&
+    activeSpeechRevision !== null
+  ) {
+    reportAssistantActivity(activeSpeechSessionId, activeSpeechRevision, false);
+  }
   stopSubscription?.();
   stopSubscription = null;
   stopVoiceSubscription?.();
@@ -230,6 +292,7 @@ export function stopNativeAssistantSpeech(): void {
   stopStreamSubscription?.();
   stopStreamSubscription = null;
   activeSpeechSessionId = null;
+  activeSpeechRevision = null;
 }
 
 export function startNativeAssistantSpeech(
@@ -239,6 +302,8 @@ export function startNativeAssistantSpeech(
   if (activeSpeechSessionId === sessionId) return;
   stopNativeAssistantSpeech();
   activeSpeechSessionId = sessionId;
+  const voiceRevision = useVoiceConversationStore.getState().status.revision;
+  activeSpeechRevision = voiceRevision;
   const activeGeneration = generation;
   const streamBackend =
     getVoiceOutputBackend() === "siri"
@@ -311,6 +376,7 @@ export function startNativeAssistantSpeech(
     const utterance: ActiveUtterance = {
       id: crypto.randomUUID(),
       sessionId,
+      voiceRevision,
       targets: [target],
       text: "",
       finishing: false,
