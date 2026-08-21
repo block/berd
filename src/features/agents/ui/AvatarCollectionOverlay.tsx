@@ -138,9 +138,12 @@ const COLLECTION_CARD_LABEL_CLASS =
 
 interface AvatarCollectionOverlayProps {
   library: AvatarLibraryState;
-  /** Collection to open with; null starts at the collections level. */
-  initialCollectionId?: string | null;
-  /** Receives the full persisted ref (`app-avatar:<id>` or `user-avatar:<id>`). */
+  /**
+   * Hands the full persisted ref (`app-avatar:<id>` or `user-avatar:<id>`) to
+   * the owning editor. A synchronous owner has accepted it into its working
+   * buffer; an asynchronous owner can delay dismissal until its own commit
+   * boundary succeeds.
+   */
   onSelectAvatar: (avatarRef: string) => void | Promise<void>;
   onClose: () => void;
 }
@@ -415,8 +418,8 @@ export function AvatarCollectionOverlay({
     setSelectionFailed(false);
     void Promise.resolve(onSelectAvatar(pendingRef))
       .then(() => {
-        // The chosen avatar lands on the rail's preview; funnel toward it only
-        // after persistence succeeds so a failed save keeps retry context.
+        // The owner decides its acceptance boundary: the builder accepts into
+        // its working buffer, while the detail page waits for persistence.
         closeWithAnimation(onClose, "funnel");
       })
       .catch(() => {

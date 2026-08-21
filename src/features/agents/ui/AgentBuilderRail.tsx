@@ -205,6 +205,9 @@ export function AgentBuilderRail({
 
   const onSelectAvatar = useCallback(
     (selectedAvatarRef: string) => {
+      // Avatar selection joins the same working buffer as every other field.
+      // Existing-agent edits stay local until Save; drafts keep their normal
+      // debounced durability rather than making this field a separate commit.
       writeProperty("avatar", selectedAvatarRef);
     },
     [writeProperty],
