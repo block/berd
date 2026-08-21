@@ -76,6 +76,7 @@ import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voic
 import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
+import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import {
   SecurityConfirmationPanel,
   useHasPendingSecurityConfirmation,
@@ -242,6 +243,9 @@ export function ChatView({
     siriVoiceSetup.status,
     voiceOutput.backend,
   );
+  const requestVoiceConversationStart = useVoiceConversationStore(
+    (state) => state.requestStart,
+  );
   const voiceConversation = useVoiceConversationController({
     sessionId,
     // Voice delivery only needs to wait for admission. Holding its per-session
@@ -252,7 +256,10 @@ export function ChatView({
     isGooseSession: controller.selectedProvider === "goose",
     pocketReady: voiceReady,
     onPocketSetupRequired: () => {
-      requestOpenSettings("voice");
+      requestVoiceConversationStart(sessionId);
+      requestOpenSettings("voice", {
+        returnTarget: { type: "voice-setup", sessionId },
+      });
     },
     readOnly: Boolean(readOnlyStatus),
     disabled:

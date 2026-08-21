@@ -26,6 +26,7 @@ import type { Message } from "@/shared/types/messages";
 import type { GitState } from "@/shared/types/git";
 import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
+import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
@@ -1054,6 +1055,7 @@ describe("AppShell global navigation", () => {
       activeWorkspaceBySession: {},
       archiveMutationBySessionId: {},
     });
+    useVoiceConversationStore.setState({ requestedStartSessionId: null });
     useAgentStore.setState({
       selectedProvider: "goose",
     });
@@ -4078,6 +4080,43 @@ describe("AppShell global navigation", () => {
     expect(
       screen.queryByText("Save this agent draft?"),
     ).not.toBeInTheDocument();
+  });
+
+  it("returns from voice setup to its session and cancels an unready start", async () => {
+    const user = userEvent.setup();
+    const session = useChatSessionStore.getState().createDraftSession({
+      title: "Voice setup target",
+      workingDir: "/tmp/voice-setup-target",
+    });
+    useVoiceConversationStore.getState().requestStart(session.id);
+    renderAppShell();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(OPEN_SETTINGS_EVENT, {
+          detail: {
+            section: "voice",
+            returnTarget: {
+              type: "voice-setup",
+              sessionId: session.id,
+            },
+          },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+    await user.click(screen.getByRole("button", { name: "Back" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(useChatSessionStore.getState().activeSessionId).toBe(session.id);
+    expect(
+      useVoiceConversationStore.getState().requestedStartSessionId,
+    ).toBeNull();
   });
 
   it("discarding a dirty agent draft continues the pending navigation", async () => {

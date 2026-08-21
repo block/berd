@@ -34,6 +34,7 @@ import {
   requestOpenSettings,
   type AgentBuilderProviderSetupReturnTarget,
   type OpenSettingsEventDetail,
+  type VoiceSetupReturnTarget,
 } from "@/features/settings/lib/settingsEvents";
 import type { ExtensionEntry } from "@/features/extensions/types";
 import { acceptFirstSend } from "@/features/chat/lib/firstWorkspaceSend";
@@ -886,6 +887,8 @@ export function AppShell({
     agentBuilderSettingsReturnTarget,
     setAgentBuilderSettingsReturnTarget,
   ] = useState<AgentBuilderProviderSetupReturnTarget | null>(null);
+  const [voiceSettingsReturnTarget, setVoiceSettingsReturnTarget] =
+    useState<VoiceSetupReturnTarget | null>(null);
   const [homeSessionId, setHomeSessionId] = useState<string | null>(() =>
     loadStoredHomeSessionId(),
   );
@@ -3203,11 +3206,6 @@ export function AppShell({
   const handleGlobalVoiceConversationStart = useCallback(
     (payload: GlobalComposerExpandPayload): Promise<boolean> => {
       if (!capabilities.voiceConversation) return Promise.resolve(false);
-      if (!globalVoiceReady) {
-        requestOpenSettings("voice");
-        return Promise.resolve(false);
-      }
-
       const options = payload.options;
       const project = options?.projectId
         ? projects.find((candidate) => candidate.id === options.projectId)
@@ -3262,8 +3260,15 @@ export function AppShell({
         chatState.setDraft(sessionId, payload.text);
         chatState.setSkillDrafts(sessionId, payload.selectedSkills);
         chatState.setDraftAttachments(sessionId, options?.attachments ?? []);
-        handleNavigateToSession(sessionId);
         requestVoiceConversationStart(sessionId);
+        if (!globalVoiceReady) {
+          requestOpenSettings("voice", {
+            returnTarget: { type: "voice-setup", sessionId },
+          });
+          resetGlobalComposerTransition();
+          return true;
+        }
+        handleNavigateToSession(sessionId);
         resetGlobalComposerTransition();
         return true;
       };
@@ -3436,6 +3441,40 @@ export function AppShell({
     setChatActiveSession,
   ]);
 
+  const returnToVoiceSettingsTarget = useCallback(() => {
+    const target = voiceSettingsReturnTarget;
+    if (!target) {
+      return false;
+    }
+
+    const session = useChatSessionStore.getState().getSession(target.sessionId);
+    setVoiceSettingsReturnTarget(null);
+    if (!session || session.archivedAt) {
+      useVoiceConversationStore
+        .getState()
+        .clearRequestedStart(target.sessionId);
+      return false;
+    }
+    if (!globalVoiceReady) {
+      useVoiceConversationStore
+        .getState()
+        .clearRequestedStart(target.sessionId);
+    }
+
+    clearSettingsSectionUrl();
+    setActiveSession(target.sessionId);
+    setActiveView("chat");
+    setChatActiveSession(target.sessionId);
+    useChatStore.getState().markSessionRead(target.sessionId);
+    void loadSessionMessagesAndPrepare(target.sessionId);
+    return true;
+  }, [
+    globalVoiceReady,
+    setActiveSession,
+    setChatActiveSession,
+    voiceSettingsReturnTarget,
+  ]);
+
   const openSettings = useCallback(
     (section: SectionId = DEFAULT_SETTINGS_SECTION) => {
       const enabledSection = resolveEnabledSettingsSection(
@@ -3456,12 +3495,15 @@ export function AppShell({
   );
 
   const leaveSecondarySurface = useCallback(() => {
+    if (returnToVoiceSettingsTarget()) {
+      return;
+    }
     if (returnToAgentBuilderSettingsTarget()) {
       return;
     }
     clearSettingsSectionUrl();
     setActiveView(lastNonSecondaryViewRef.current);
-  }, [returnToAgentBuilderSettingsTarget]);
+  }, [returnToAgentBuilderSettingsTarget, returnToVoiceSettingsTarget]);
 
   const selectSettingsSection = useCallback(
     (section: SectionId) => {
@@ -3507,6 +3549,11 @@ export function AppShell({
       const section = detail?.section;
       setAgentBuilderSettingsReturnTarget(
         detail?.returnTarget?.type === "agent-builder-provider-setup"
+          ? detail.returnTarget
+          : null,
+      );
+      setVoiceSettingsReturnTarget(
+        detail?.returnTarget?.type === "voice-setup"
           ? detail.returnTarget
           : null,
       );
@@ -4193,6 +4240,10 @@ export function AppShell({
   );
 
   const goBack = useCallback(() => {
+    if (activeView === "settings" && returnToVoiceSettingsTarget()) {
+      updateNavigationAvailability();
+      return;
+    }
     if (activeView === "settings" && agentBuilderSettingsReturnTarget) {
       const history = navigationHistoryRef.current;
       const previousLocation =
@@ -4227,6 +4278,7 @@ export function AppShell({
     applyNavigationLocation,
     guardAppNavigation,
     returnToAgentBuilderSettingsTarget,
+    returnToVoiceSettingsTarget,
     updateNavigationAvailability,
   ]);
 
