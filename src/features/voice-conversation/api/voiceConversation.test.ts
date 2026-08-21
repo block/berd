@@ -26,7 +26,9 @@ import {
   applyVoiceConversationMicrophoneMuteEvent,
   applyVoiceConversationTerminalEvent,
   drainVoiceConversationTranscripts,
+  getVoiceConversationMicrophoneMuted,
   getVoiceConversationStatus,
+  hydrateVoiceConversationMicrophone,
   listenToVoiceConversation,
   reconcileVoiceConversationMicrophone,
   setVoiceConversationMicrophoneMuted,
@@ -157,6 +159,25 @@ describe("voice conversation API", () => {
     expect(mocks.startMicrophone).toHaveBeenCalledOnce();
     stopActiveMicrophoneForTest();
     expect(mocks.stopMicrophone).toHaveBeenCalledOnce();
+  });
+
+  it("hydrates browser capture from the authoritative native mute state", async () => {
+    const status = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running",
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      revision: 3,
+      nativeMicrophoneMuteControl: true,
+      nativeMicrophoneMuted: true,
+    } as const;
+
+    await hydrateVoiceConversationMicrophone(status);
+
+    expect(getVoiceConversationMicrophoneMuted()).toBe(true);
+    expect(mocks.startMicrophone).toHaveBeenCalledOnce();
+    expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(true);
   });
 
   it("does not attach browser capture in a non-owning window", async () => {

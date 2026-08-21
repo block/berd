@@ -7,8 +7,8 @@ import {
   drainVoiceConversationTranscripts,
   getVoiceConversationMicrophoneMuted,
   getVoiceConversationStatus,
+  hydrateVoiceConversationMicrophone,
   listenToVoiceConversation,
-  reconcileVoiceConversationMicrophone,
   rejectVoiceConversationTranscript,
   setVoiceConversationMicrophoneMuted,
   startVoiceConversation,
@@ -185,8 +185,14 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
     init: async () => {
       if (initialized) {
         try {
+          const muteIntent = microphoneMuteIntent;
           const status = await getVoiceConversationStatus();
-          await reconcileVoiceConversationMicrophone(status);
+          const shouldHydrate =
+            shouldApplyResponseRevision(get().status, status.revision) &&
+            muteIntent === microphoneMuteIntent;
+          if (shouldHydrate) {
+            await hydrateVoiceConversationMicrophone(status);
+          }
           set((state) => {
             if (
               shouldApplyResponseRevision(state.status, status.revision) ||
@@ -200,6 +206,12 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   state.uiState === "error"
                     ? state.uiState
                     : uiStateForStatus(status),
+                microphoneMuted:
+                  muteIntent === microphoneMuteIntent
+                    ? status.lifecycle === "running"
+                      ? (status.nativeMicrophoneMuted ?? false)
+                      : false
+                    : state.microphoneMuted,
                 hydrated: true,
               };
             }
@@ -308,10 +320,16 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
               case "inputMute": {
                 const nextState = {
                   ...state,
+                  status: {
+                    ...state.status,
+                    sessionId: event.sessionId,
+                    revision: event.revision,
+                  },
                   microphoneMuted: event.muted,
                   userSpeaking: event.muted ? false : state.userSpeaking,
                 };
                 return {
+                  status: nextState.status,
                   microphoneMuted: event.muted,
                   userSpeaking: nextState.userSpeaking,
                   uiState: activityUiState(nextState),
@@ -389,8 +407,17 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       }
 
       try {
+        const muteIntent = microphoneMuteIntent;
         const status = await getVoiceConversationStatus();
-        await reconcileVoiceConversationMicrophone(status);
+        const shouldHydrate =
+          (shouldApplyResponseRevision(get().status, status.revision) ||
+            (!get().hydrated &&
+              get().status.revision === 0 &&
+              get().uiState === "off")) &&
+          muteIntent === microphoneMuteIntent;
+        if (shouldHydrate) {
+          await hydrateVoiceConversationMicrophone(status);
+        }
         set((state) =>
           shouldApplyResponseRevision(state.status, status.revision) ||
           (!state.hydrated &&
@@ -402,6 +429,12 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   state.uiState === "error"
                     ? state.uiState
                     : uiStateForStatus(status),
+                microphoneMuted:
+                  muteIntent === microphoneMuteIntent
+                    ? status.lifecycle === "running"
+                      ? (status.nativeMicrophoneMuted ?? false)
+                      : false
+                    : state.microphoneMuted,
                 hydrated: true,
               }
             : { hydrated: true },

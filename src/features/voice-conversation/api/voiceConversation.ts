@@ -68,6 +68,17 @@ export async function reconcileVoiceConversationMicrophone(
   }
 }
 
+export async function hydrateVoiceConversationMicrophone(
+  status: VoiceConversationStatus,
+): Promise<void> {
+  if (status.lifecycle === "running") {
+    applyVoiceConversationMicrophoneMuteEvent(
+      status.nativeMicrophoneMuted ?? false,
+    );
+  }
+  await reconcileVoiceConversationMicrophone(status);
+}
+
 export async function setVoiceConversationMicrophoneMuted(
   muted: boolean,
   status: VoiceConversationStatus,
@@ -156,6 +167,8 @@ export interface VoiceConversationStatus {
   revision: number;
   /** macOS owns an input session capable of receiving headset mute controls. */
   nativeMicrophoneMuteControl?: boolean;
+  /** Authoritative native input-mute state for renderer recovery. */
+  nativeMicrophoneMuted?: boolean;
 }
 
 export type VoiceConversationEvent =

@@ -50,6 +50,7 @@ pub struct NativeVoiceStatus {
     owner_window_label: Option<String>,
     revision: u64,
     native_microphone_mute_control: bool,
+    native_microphone_muted: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -334,6 +335,8 @@ fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
             .map(|owner| owner.window_label.clone()),
         revision: runtime.revision,
         native_microphone_mute_control: runtime.native_microphone_mute_control,
+        native_microphone_muted: runtime.session_id.is_some()
+            && state.input_muted.load(Ordering::Acquire),
     }
 }
 
