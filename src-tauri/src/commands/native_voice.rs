@@ -566,7 +566,9 @@ pub async fn start_native_voice_conversation(
     };
     if let Err(error) = super::voice_buddy::install(&app) {
         state.stop_active(&app, &capture).await?;
-        return Err(format!("Could not show the Gloopie voice buddy: {error}"));
+        return Err(format!(
+            "Could not show the floating voice controls: {error}"
+        ));
     }
     let _ = webview_window.emit(
         EVENT_NAME,

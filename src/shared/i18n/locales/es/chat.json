@@ -548,7 +548,6 @@
       "unmuteMicrophone": "Activar micrófono",
       "buddy": {
         "title": "Conversación por voz",
-        "gloopieAlt": "Asistente Gloopie de voz",
         "openSession": "Abrir sesión de voz",
         "hangUp": "Colgar",
         "listening": "Escuchando…",

@@ -551,7 +551,6 @@
       "unmuteMicrophone": "Unmute microphone",
       "buddy": {
         "title": "Voice conversation",
-        "gloopieAlt": "Gloopie voice buddy",
         "openSession": "Open voice session",
         "hangUp": "Hang up",
         "listening": "Listening…",
