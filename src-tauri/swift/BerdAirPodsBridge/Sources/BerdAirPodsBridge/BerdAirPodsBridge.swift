@@ -62,6 +62,8 @@ private final class AirPodsCapture: @unchecked Sendable {
         ) { [weak self] _ in
             self?.scheduleRestart()
         }
+        // Observing this notification and reading the state opts this capture
+        // session into AirPods mute delivery. Rust's handler remains the event path.
         inputMuteObserver = NotificationCenter.default.addObserver(
             forName: AVAudioApplication.inputMuteStateChangeNotification,
             object: nil,
