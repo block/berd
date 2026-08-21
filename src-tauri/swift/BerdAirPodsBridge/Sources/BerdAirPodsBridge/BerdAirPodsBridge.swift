@@ -59,8 +59,8 @@ private final class AirPodsMuteBridge: @unchecked Sendable {
         engine.prepare()
         try engine.start()
 
-        // Match voice-conversation-cli exactly: seed before registration and
-        // ignore the expected error when no prior process handler exists.
+        // Clear stale process mute before registering this lifecycle's handler.
+        // The reset can fail when no earlier handler exists, which is harmless.
         try? AVAudioApplication.shared.setInputMuted(false)
         try AVAudioApplication.shared.setInputMuteStateChangeHandler { [weak self] muted in
             self?.callback(muted)

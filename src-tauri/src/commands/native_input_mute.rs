@@ -1,18 +1,24 @@
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc,
 };
 
-pub fn start<F, A>(input_muted: &Arc<AtomicBool>, on_change: F, on_audio: A) -> bool
+pub fn start<F, A>(
+    input_muted: &Arc<AtomicBool>,
+    mute_epoch: &Arc<AtomicU64>,
+    on_change: F,
+    on_audio: A,
+) -> bool
 where
     F: Fn(bool) + Send + Sync + 'static,
     A: Fn(&[f32]) + Send + Sync + 'static,
 {
-    clear(input_muted);
+    clear(input_muted, mute_epoch);
 
     #[cfg(target_os = "macos")]
     let started = match macos::install(
         Arc::clone(input_muted),
+        Arc::clone(mute_epoch),
         Arc::new(on_change),
         Arc::new(on_audio),
     ) {
@@ -32,8 +38,8 @@ where
     started
 }
 
-pub fn stop(input_muted: &Arc<AtomicBool>) {
-    clear(input_muted);
+pub fn stop(input_muted: &Arc<AtomicBool>, mute_epoch: &Arc<AtomicU64>) {
+    clear(input_muted, mute_epoch);
 
     #[cfg(target_os = "macos")]
     if let Err(error) = macos::uninstall() {
@@ -41,28 +47,41 @@ pub fn stop(input_muted: &Arc<AtomicBool>) {
     }
 }
 
-pub fn set_muted(input_muted: &AtomicBool, muted: bool) -> Result<(), String> {
+pub fn set_muted(
+    input_muted: &AtomicBool,
+    mute_epoch: &AtomicU64,
+    muted: bool,
+) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         macos::set_muted(muted)?;
-        input_muted.store(muted, Ordering::Release);
+        apply_change(input_muted, mute_epoch, muted, &|_| {});
         Ok(())
     }
 
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (input_muted, muted);
+        let _ = (input_muted, mute_epoch, muted);
         Err("native microphone mute is only available on macOS".to_string())
     }
 }
 
-fn clear(input_muted: &AtomicBool) {
+fn clear(input_muted: &AtomicBool, mute_epoch: &AtomicU64) {
     input_muted.store(false, Ordering::Release);
+    mute_epoch.store(0, Ordering::Release);
 }
 
-fn apply_change(input_muted: &AtomicBool, muted: bool, on_change: &dyn Fn(bool)) {
+fn apply_change(
+    input_muted: &AtomicBool,
+    mute_epoch: &AtomicU64,
+    muted: bool,
+    on_change: &dyn Fn(bool),
+) {
     let previous = input_muted.swap(muted, Ordering::AcqRel);
     if previous != muted {
+        if muted {
+            mute_epoch.fetch_add(1, Ordering::AcqRel);
+        }
         on_change(muted);
     }
 }
@@ -77,6 +96,7 @@ mod macos {
 
     struct CallbackState {
         input_muted: Arc<AtomicBool>,
+        mute_epoch: Arc<AtomicU64>,
         on_change: MuteChangeHandler,
         on_audio: AudioInputHandler,
     }
@@ -103,7 +123,7 @@ mod macos {
         let Some(state) = state.as_ref() else {
             return;
         };
-        apply_change(&state.input_muted, muted, &|muted| {
+        apply_change(&state.input_muted, &state.mute_epoch, muted, &|muted| {
             log::info!("AirPods input mute changed muted={muted}");
             (state.on_change)(muted);
         });
@@ -130,6 +150,7 @@ mod macos {
 
     pub fn install(
         input_muted: Arc<AtomicBool>,
+        mute_epoch: Arc<AtomicU64>,
         on_change: MuteChangeHandler,
         on_audio: AudioInputHandler,
     ) -> Result<(), String> {
@@ -138,6 +159,7 @@ mod macos {
             .map_err(|_| "input mute callback lock was poisoned".to_string())? =
             Some(CallbackState {
                 input_muted,
+                mute_epoch,
                 on_change,
                 on_audio,
             });
@@ -183,28 +205,32 @@ mod tests {
     #[test]
     fn lifecycle_boundary_clears_mute() {
         let input_muted = Arc::new(AtomicBool::new(true));
-        clear(&input_muted);
+        let mute_epoch = Arc::new(AtomicU64::new(3));
+        clear(&input_muted, &mute_epoch);
         assert!(!input_muted.load(Ordering::Acquire));
+        assert_eq!(mute_epoch.load(Ordering::Acquire), 0);
     }
 
     #[test]
     fn unchanged_initial_state_is_not_reported_as_a_gesture() {
         let input_muted = AtomicBool::new(false);
+        let mute_epoch = AtomicU64::new(0);
         let changes = std::sync::Mutex::new(Vec::new());
 
-        apply_change(&input_muted, false, &|muted| {
+        apply_change(&input_muted, &mute_epoch, false, &|muted| {
             changes.lock().expect("changes lock").push(muted);
         });
-        apply_change(&input_muted, true, &|muted| {
+        apply_change(&input_muted, &mute_epoch, true, &|muted| {
             changes.lock().expect("changes lock").push(muted);
         });
-        apply_change(&input_muted, true, &|muted| {
+        apply_change(&input_muted, &mute_epoch, true, &|muted| {
             changes.lock().expect("changes lock").push(muted);
         });
-        apply_change(&input_muted, false, &|muted| {
+        apply_change(&input_muted, &mute_epoch, false, &|muted| {
             changes.lock().expect("changes lock").push(muted);
         });
 
         assert_eq!(*changes.lock().expect("changes lock"), vec![true, false]);
+        assert_eq!(mute_epoch.load(Ordering::Acquire), 1);
     }
 }
