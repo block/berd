@@ -3678,16 +3678,29 @@ export function AppShell({
         }
         await useVoiceConversationStore.getState().init();
         const voiceBeforeMutation = useVoiceConversationStore.getState().status;
-        if (
-          cleanupPolicy !== "confirm" &&
+        const targetOwnsVoice =
           voiceBeforeMutation.sessionId === sessionId &&
           voiceBeforeMutation.lifecycle !== "stopped" &&
-          voiceBeforeMutation.lifecycle !== "unavailable"
-        ) {
+          voiceBeforeMutation.lifecycle !== "unavailable";
+        if (cleanupPolicy !== "confirm" && targetOwnsVoice) {
           return {
             ok: false as const,
             reason: "target_session_running" as const,
           };
+        }
+        if (targetOwnsVoice) {
+          try {
+            await useVoiceConversationStore.getState().stop();
+          } catch (error) {
+            console.error("Failed to stop voice before archiving:", error);
+            toast.error(t("chat:notifications.voiceStopBeforeArchiveError"), {
+              description: formatAcpErrorMessage(error),
+            });
+            return {
+              ok: false as const,
+              reason: "voice_stop_failed" as const,
+            };
+          }
         }
 
         try {
@@ -3719,23 +3732,6 @@ export function AppShell({
                 ? ("session_not_found" as const)
                 : ("backend_archive_failed" as const),
           };
-        }
-
-        await useVoiceConversationStore.getState().init();
-        const voice = useVoiceConversationStore.getState();
-        if (
-          voice.status.sessionId === sessionId &&
-          voice.status.lifecycle !== "stopped" &&
-          voice.status.lifecycle !== "unavailable"
-        ) {
-          try {
-            await voice.stop();
-          } catch (error) {
-            console.error(
-              "Failed to stop voice for the archived session:",
-              error,
-            );
-          }
         }
 
         let cleanupFailureReason:

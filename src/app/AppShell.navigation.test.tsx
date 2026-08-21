@@ -2548,6 +2548,91 @@ describe("AppShell global navigation", () => {
     expect(stopVoiceConversation).not.toHaveBeenCalled();
   });
 
+  it("stops active voice before confirmed archival", async () => {
+    const stopRequest = deferred<unknown>();
+    const stopVoiceConversation = vi.fn(() => stopRequest.promise);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Voice archive",
+          executionTarget: { harnessId: "goose" },
+          workingDir: "~/voice-archive",
+          createdAt: "2026-08-21T00:00:00.000Z",
+          updatedAt: "2026-08-21T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      stop: stopVoiceConversation as never,
+    });
+    renderAppShell();
+
+    const outcome = getAppNavigationController().archiveSession(
+      "session-1",
+      "confirm",
+    );
+    await waitFor(() => expect(stopVoiceConversation).toHaveBeenCalledOnce());
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+
+    stopRequest.resolve(undefined);
+    await expect(outcome).resolves.toEqual({ ok: true });
+    expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    expect(
+      stopVoiceConversation.mock.invocationCallOrder[0],
+    ).toBeLessThan(mockAcpArchiveSession.mock.invocationCallOrder[0]);
+  });
+
+  it("keeps the session unarchived when voice cannot stop", async () => {
+    const stopError = new Error("microphone shutdown failed");
+    const stopVoiceConversation = vi.fn().mockRejectedValue(stopError);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Voice archive",
+          executionTarget: { harnessId: "goose" },
+          workingDir: "~/voice-archive",
+          createdAt: "2026-08-21T00:00:00.000Z",
+          updatedAt: "2026-08-21T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      stop: stopVoiceConversation,
+    });
+    renderAppShell();
+
+    await expect(
+      getAppNavigationController().archiveSession("session-1", "confirm"),
+    ).resolves.toEqual({ ok: false, reason: "voice_stop_failed" });
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    expect(mockToastError).toHaveBeenCalledWith(
+      "Couldn't stop voice, so the chat wasn't archived",
+      { description: "microphone shutdown failed" },
+    );
+  });
+
   it("rechecks background voice immediately before auto-archive", async () => {
     const inspection = deferred<GitState>();
     mockPathExists.mockResolvedValue(true);
