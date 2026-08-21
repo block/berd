@@ -269,7 +269,7 @@ export function AvatarCollectionOverlay({
   );
 
   const goBack = useCallback(() => {
-    if (closing) {
+    if (closing || selectionPending) {
       return;
     }
     if (collection && hasCollectionsLevel) {
@@ -278,7 +278,14 @@ export function AvatarCollectionOverlay({
       return;
     }
     closeWithAnimation(onClose);
-  }, [closing, closeWithAnimation, collection, hasCollectionsLevel, onClose]);
+  }, [
+    closing,
+    closeWithAnimation,
+    collection,
+    hasCollectionsLevel,
+    onClose,
+    selectionPending,
+  ]);
 
   // Esc mirrors the back control at every level.
   useEffect(() => {
@@ -376,7 +383,7 @@ export function AvatarCollectionOverlay({
 
   const onCanvasClick = useCallback(
     (event: React.MouseEvent) => {
-      if (closing) {
+      if (closing || selectionPending) {
         return;
       }
       const target = event.target as HTMLElement;
@@ -398,7 +405,7 @@ export function AvatarCollectionOverlay({
       // overlay like a dialog scrim.
       closeWithAnimation(onClose);
     },
-    [closing, closeWithAnimation, collection, onClose],
+    [closing, closeWithAnimation, collection, onClose, selectionPending],
   );
 
   const onConfirmSelect = useCallback(() => {
@@ -476,7 +483,7 @@ export function AvatarCollectionOverlay({
             )}
             aria-label={entry.label}
             aria-pressed={pending}
-            disabled={!cachedMedia || closing}
+            disabled={!cachedMedia || closing || selectionPending}
             {...hoverHandlers(entry.id)}
             onClick={() =>
               setPendingAvatarId((current) =>
@@ -566,7 +573,7 @@ export function AvatarCollectionOverlay({
           aria-label={t("collectionPage.openCollection", {
             label: entry.label,
           })}
-          disabled={closing}
+          disabled={closing || selectionPending}
           onClick={() => setCollectionId(entry.id)}
         >
           <span className={COLLECTION_CARD_BADGE_CLASS}>
@@ -604,6 +611,7 @@ export function AvatarCollectionOverlay({
       library.catalog,
       markReady,
       readyIds,
+      selectionPending,
       t,
     ],
   );
@@ -772,6 +780,7 @@ export function AvatarCollectionOverlay({
                 size="icon-lg"
                 aria-label={backLabel}
                 title={backLabel}
+                disabled={selectionPending}
                 onClick={goBack}
               >
                 {collection && hasCollectionsLevel ? (
