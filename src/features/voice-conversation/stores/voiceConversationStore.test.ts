@@ -226,6 +226,39 @@ describe("voice conversation store lifecycle ordering", () => {
     expect(useVoiceConversationStore.getState().microphoneMuted).toBe(false);
   });
 
+  it("does not hydrate over a pending microphone mute request", async () => {
+    const muteRequest = deferred<void>();
+    const running = {
+      ...status("running", 2, "session-1"),
+      nativeMicrophoneMuteControl: true,
+      nativeMicrophoneMuted: false,
+    };
+    mocks.getStatus.mockResolvedValue(running);
+    mocks.setMicrophoneMuted.mockReturnValue(muteRequest.promise);
+    const { useVoiceConversationStore } = await import(
+      "./voiceConversationStore"
+    );
+    await useVoiceConversationStore.getState().init();
+    mocks.hydrateMicrophone.mockClear();
+    mocks.reconcileMicrophone.mockClear();
+
+    const muting = useVoiceConversationStore
+      .getState()
+      .setMicrophoneMuted(true);
+    await vi.waitFor(() =>
+      expect(mocks.setMicrophoneMuted).toHaveBeenCalledWith(true, running),
+    );
+    await useVoiceConversationStore.getState().init();
+
+    expect(mocks.hydrateMicrophone).not.toHaveBeenCalled();
+    expect(mocks.reconcileMicrophone).toHaveBeenCalledWith(running);
+    expect(useVoiceConversationStore.getState().microphoneMuted).toBe(true);
+
+    muteRequest.resolve();
+    await muting;
+    expect(useVoiceConversationStore.getState().microphoneMuted).toBe(true);
+  });
+
   it("does not let stale status overwrite a newer mute event", async () => {
     const response = deferred<VoiceConversationStatus>();
     const current = {

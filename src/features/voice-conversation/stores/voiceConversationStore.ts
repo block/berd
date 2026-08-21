@@ -62,6 +62,7 @@ let initialized = false;
 let stopInFlight: Promise<VoiceConversationStatus> | null = null;
 let microphoneMuteIntent = 0;
 let microphoneMuteStateVersion = 0;
+let pendingMicrophoneMuteRequests = 0;
 const eventSubscribers = new Set<
   (event: VoiceConversationEvent) => void | Promise<void>
 >();
@@ -226,6 +227,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           const shouldReconcile = shouldAdopt || sameRunningLifecycle;
           const shouldHydrate =
             (shouldAdopt || sameRunningLifecycle) &&
+            pendingMicrophoneMuteRequests === 0 &&
             muteStateVersion === microphoneMuteStateVersion;
           if (shouldHydrate) {
             await hydrateVoiceConversationMicrophone(status);
@@ -233,7 +235,9 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             await reconcileVoiceConversationMicrophone(status);
           }
           const applyHydratedMute =
-            shouldHydrate && muteStateVersion === microphoneMuteStateVersion;
+            shouldHydrate &&
+            pendingMicrophoneMuteRequests === 0 &&
+            muteStateVersion === microphoneMuteStateVersion;
           set((state) => {
             if (
               shouldApplyResponseRevision(state.status, status.revision) ||
@@ -470,6 +474,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
         const shouldReconcile = shouldAdopt || sameRunningLifecycle;
         const shouldHydrate =
           (shouldAdopt || sameRunningLifecycle) &&
+          pendingMicrophoneMuteRequests === 0 &&
           muteStateVersion === microphoneMuteStateVersion;
         if (shouldHydrate) {
           await hydrateVoiceConversationMicrophone(status);
@@ -477,7 +482,9 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           await reconcileVoiceConversationMicrophone(status);
         }
         const applyHydratedMute =
-          shouldHydrate && muteStateVersion === microphoneMuteStateVersion;
+          shouldHydrate &&
+          pendingMicrophoneMuteRequests === 0 &&
+          muteStateVersion === microphoneMuteStateVersion;
         set((state) => {
           if (
             shouldApplyResponseRevision(state.status, status.revision) ||
@@ -634,6 +641,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       if (current.status.lifecycle !== "running") return;
       const intent = ++microphoneMuteIntent;
       microphoneMuteStateVersion += 1;
+      pendingMicrophoneMuteRequests += 1;
       set((state) => {
         const nextState = {
           ...state,
@@ -659,6 +667,8 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           error: error instanceof Error ? error.message : String(error),
         });
         throw error;
+      } finally {
+        pendingMicrophoneMuteRequests -= 1;
       }
       if (intent !== microphoneMuteIntent) return;
       set((state) => {
