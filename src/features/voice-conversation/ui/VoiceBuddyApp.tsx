@@ -1,4 +1,4 @@
-import { CircleAlert, GripVertical, Mic, MicOff, PhoneOff } from "lucide-react";
+import { Mic, MicOff, PhoneOff } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -111,11 +111,15 @@ export function VoiceBuddyApp() {
       className="flex h-screen min-w-0 select-none items-center justify-center overflow-hidden bg-transparent p-2 text-foreground"
       data-tauri-drag-region="deep"
     >
-      <div className="flex items-center justify-center gap-1">
+      <div
+        className={`flex items-center justify-center gap-1 rounded-full bg-card/90 p-1 shadow-sm backdrop-blur-md ${error ? "ring-2 ring-destructive" : ""}`}
+        data-tauri-drag-region="deep"
+        title={error ?? t("toolbar.voiceConversation.buddy.title")}
+      >
         <Button
           type="button"
           variant="subtle"
-          size="icon"
+          size="icon-sm"
           aria-label={t("toolbar.voiceConversation.buddy.openSession")}
           title={t("toolbar.voiceConversation.buddy.openSession")}
           disabled={busyAction !== null}
@@ -123,53 +127,37 @@ export function VoiceBuddyApp() {
         >
           <BerdIcon aria-hidden="true" />
         </Button>
-        <div className="flex items-center justify-center gap-1 rounded-full bg-card/90 p-1 shadow-sm backdrop-blur-md">
-          <div
-            className="flex h-8 cursor-move items-center justify-center px-1 text-muted-foreground"
-            data-tauri-drag-region="deep"
-            title={error ?? t("toolbar.voiceConversation.buddy.title")}
-          >
-            {error ? (
-              <CircleAlert
-                aria-hidden="true"
-                className="size-3.5 text-destructive"
-              />
-            ) : (
-              <GripVertical aria-hidden="true" className="size-3.5" />
-            )}
-          </div>
-          <Button
-            type="button"
-            variant="subtle"
-            size="icon-sm"
-            aria-label={
-              microphoneMuted
-                ? t("toolbar.voiceConversation.unmuteMicrophone")
-                : t("toolbar.voiceConversation.muteMicrophone")
-            }
-            title={
-              microphoneMuted
-                ? t("toolbar.voiceConversation.unmuteMicrophone")
-                : t("toolbar.voiceConversation.muteMicrophone")
-            }
-            disabled={!status || busyAction !== null}
-            onClick={toggleMute}
-          >
-            {microphoneMuted ? <MicOff /> : <Mic />}
-          </Button>
-          <Button
-            type="button"
-            variant="subtle"
-            size="icon-sm"
-            destructive
-            aria-label={t("toolbar.voiceConversation.buddy.hangUp")}
-            title={t("toolbar.voiceConversation.buddy.hangUp")}
-            disabled={busyAction !== null}
-            onClick={() => void run("stop", stopVoiceConversationFromBuddy)}
-          >
-            <PhoneOff />
-          </Button>
-        </div>
+        <Button
+          type="button"
+          variant="subtle"
+          size="icon-sm"
+          aria-label={
+            microphoneMuted
+              ? t("toolbar.voiceConversation.unmuteMicrophone")
+              : t("toolbar.voiceConversation.muteMicrophone")
+          }
+          title={
+            microphoneMuted
+              ? t("toolbar.voiceConversation.unmuteMicrophone")
+              : t("toolbar.voiceConversation.muteMicrophone")
+          }
+          disabled={!status || busyAction !== null}
+          onClick={toggleMute}
+        >
+          {microphoneMuted ? <MicOff /> : <Mic />}
+        </Button>
+        <Button
+          type="button"
+          variant="subtle"
+          size="icon-sm"
+          destructive
+          aria-label={t("toolbar.voiceConversation.buddy.hangUp")}
+          title={t("toolbar.voiceConversation.buddy.hangUp")}
+          disabled={busyAction !== null}
+          onClick={() => void run("stop", stopVoiceConversationFromBuddy)}
+        >
+          <PhoneOff />
+        </Button>
       </div>
       <p className="sr-only" role="status" aria-live="polite">
         {error ?? activityLabel}

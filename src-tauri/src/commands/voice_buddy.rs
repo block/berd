@@ -10,7 +10,7 @@ use super::{native_voice::NativeVoiceState, voice_capture::VoiceCaptureState};
 
 pub const WINDOW_LABEL: &str = "voice-buddy";
 pub const OPEN_SESSION_EVENT: &str = "voice-conversation:open-session";
-const WINDOW_WIDTH: f64 = 160.0;
+const WINDOW_WIDTH: f64 = 168.0;
 const WINDOW_HEIGHT: f64 = 56.0;
 const SCREEN_INSET: i32 = 24;
 
