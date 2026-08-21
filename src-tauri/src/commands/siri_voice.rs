@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 #[cfg(target_os = "macos")]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
@@ -71,6 +71,8 @@ struct SiriStreamEvent {
 
 #[cfg(target_os = "macos")]
 const SIRI_STREAM_EVENT: &str = "siri-voice:stream-event";
+#[cfg(target_os = "macos")]
+const SIRI_STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
 
@@ -194,6 +196,7 @@ unsafe extern "C" {
     ) -> bool;
     fn berd_siri_tts_stream_finish(stream: *mut std::ffi::c_void);
     fn berd_siri_tts_stream_is_finished(stream: *mut std::ffi::c_void) -> bool;
+    fn berd_siri_tts_stream_progress(stream: *mut std::ffi::c_void) -> u64;
     fn berd_siri_tts_stream_copy_error(stream: *mut std::ffi::c_void) -> *mut c_char;
     fn berd_siri_tts_stream_cancel(stream: *mut std::ffi::c_void);
     fn berd_siri_tts_stream_release(stream: *mut std::ffi::c_void);
@@ -239,6 +242,32 @@ fn finish_playback(state: &SiriVoiceState, completed: &Arc<AtomicBool>) {
                 runtime.stream = None;
             }
         }
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct SiriStreamWatchdog {
+    progress: u64,
+    last_progress_at: Instant,
+}
+
+#[cfg(target_os = "macos")]
+impl SiriStreamWatchdog {
+    fn new(progress: u64, now: Instant) -> Self {
+        Self {
+            progress,
+            last_progress_at: now,
+        }
+    }
+
+    fn observe(&mut self, progress: u64, now: Instant) -> bool {
+        if progress != self.progress {
+            self.progress = progress;
+            self.last_progress_at = now;
+            return false;
+        }
+        now.duration_since(self.last_progress_at) >= SIRI_STREAM_STALL_TIMEOUT
     }
 }
 
@@ -535,6 +564,7 @@ fn run_siri_stream(
         let mut pending = String::new();
         let mut first_chunk_pending = true;
         let mut finishing = false;
+        let mut watchdog: Option<SiriStreamWatchdog> = None;
         loop {
             if !active.load(Ordering::SeqCst) {
                 unsafe { berd_siri_tts_stream_cancel(stream) };
@@ -544,6 +574,13 @@ fn run_siri_stream(
                 let native_error =
                     take_bridge_string(unsafe { berd_siri_tts_stream_copy_error(stream) });
                 return native_error.map_or(Ok(SiriStreamEventState::Completed), Err);
+            }
+            if let Some(watchdog) = watchdog.as_mut() {
+                let progress = unsafe { berd_siri_tts_stream_progress(stream) };
+                if watchdog.observe(progress, Instant::now()) {
+                    unsafe { berd_siri_tts_stream_cancel(stream) };
+                    return Err("Siri synthesis stopped making progress".to_string());
+                }
             }
 
             let command = match receiver.recv_timeout(Duration::from_millis(10)) {
@@ -589,6 +626,10 @@ fn run_siri_stream(
                     pending.clear();
                     finishing = true;
                     unsafe { berd_siri_tts_stream_finish(stream) };
+                    watchdog = Some(SiriStreamWatchdog::new(
+                        unsafe { berd_siri_tts_stream_progress(stream) },
+                        Instant::now(),
+                    ));
                 }
                 SiriStreamCommand::Stop => {
                     active.store(false, Ordering::SeqCst);

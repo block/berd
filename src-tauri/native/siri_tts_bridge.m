@@ -286,6 +286,7 @@ typedef void (^BerdAudioHandler)(
 @property(nonatomic, assign) BOOL inputFinished;
 @property(nonatomic, assign) BOOL playbackStarted;
 @property(nonatomic, assign) BOOL finished;
+@property(nonatomic, assign) uint64_t progressGeneration;
 @property(nonatomic, assign) BerdSiriTTSPlaybackStarted startedCallback;
 @property(nonatomic, assign) void *callbackContext;
 @property(nonatomic, copy) NSString *language;
@@ -312,6 +313,7 @@ typedef void (^BerdAudioHandler)(
     if (self.finished) return;
     self.finished = YES;
     self.error = error;
+    self.progressGeneration += 1;
     dispatch_semaphore_signal(self.completionSemaphore);
 }
 - (void)finishIfReady {
@@ -405,6 +407,7 @@ typedef void (^BerdAudioHandler)(
 - (void)enqueueData:(NSData *)data format:(AudioStreamBasicDescription)format
          packetCount:(UInt32)packetCount packetDescriptions:(NSData *)packetDescriptions {
     if (self.finished || !data.length) return;
+    self.progressGeneration += 1;
     NSError *error = nil;
     AVAudioPCMBuffer *buffer = [self decodeData:data format:format packetCount:packetCount
                             packetDescriptions:packetDescriptions error:&error];
@@ -421,6 +424,7 @@ typedef void (^BerdAudioHandler)(
                completionHandler:^(__unused AVAudioPlayerNodeCompletionCallbackType type) {
         dispatch_async(self.queue, ^{
             self.pendingBuffers = MAX(0, self.pendingBuffers - 1);
+            self.progressGeneration += 1;
             [self finishIfReady];
         });
     }];
@@ -437,6 +441,7 @@ typedef void (^BerdAudioHandler)(
     }
     NSString *text = self.pendingTexts.firstObject;
     [self.pendingTexts removeObjectAtIndex:0];
+    self.progressGeneration += 1;
     __weak typeof(self) weakSelf = self;
     self.session = [[BerdSiriSynthesisSession alloc]
         initWithAudioHandler:^(NSData *data, AudioStreamBasicDescription format,
@@ -449,6 +454,7 @@ typedef void (^BerdAudioHandler)(
     [self.session synthesizeText:text language:self.language voiceName:self.voiceName rate:self.rate
                       completion:^(NSError *error) {
         dispatch_async(weakSelf.queue, ^{
+            weakSelf.progressGeneration += 1;
             weakSelf.session = nil;
             if (error && error.code != NSUserCancelledError) {
                 [weakSelf finish:error];
@@ -462,12 +468,14 @@ typedef void (^BerdAudioHandler)(
     dispatch_async(self.queue, ^{
         if (self.finished || self.inputFinished || !text.length) return;
         [self.pendingTexts addObject:text];
+        self.progressGeneration += 1;
         [self startNextSynthesis];
     });
 }
 - (void)finishInput {
     dispatch_async(self.queue, ^{
         self.inputFinished = YES;
+        self.progressGeneration += 1;
         [self startNextSynthesis];
         [self finishIfReady];
     });
@@ -988,6 +996,14 @@ bool berd_siri_tts_stream_is_finished(void *stream) {
     __block BOOL finished = NO;
     dispatch_sync(player.queue, ^{ finished = player.finished; });
     return finished;
+}
+
+uint64_t berd_siri_tts_stream_progress(void *stream) {
+    if (!stream) return 0;
+    BerdSiriSpeechPlayer *player = (__bridge BerdSiriSpeechPlayer *)stream;
+    __block uint64_t progress = 0;
+    dispatch_sync(player.queue, ^{ progress = player.progressGeneration; });
+    return progress;
 }
 
 char *berd_siri_tts_stream_copy_error(void *stream) {

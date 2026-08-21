@@ -2,6 +2,7 @@
 #define BERD_SIRI_TTS_BRIDGE_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -52,6 +53,7 @@ void *berd_siri_tts_stream_create(
 bool berd_siri_tts_stream_enqueue(void *stream, const char *text, char **error_out);
 void berd_siri_tts_stream_finish(void *stream);
 bool berd_siri_tts_stream_is_finished(void *stream);
+uint64_t berd_siri_tts_stream_progress(void *stream);
 char *berd_siri_tts_stream_copy_error(void *stream);
 void berd_siri_tts_stream_cancel(void *stream);
 void berd_siri_tts_stream_release(void *stream);
