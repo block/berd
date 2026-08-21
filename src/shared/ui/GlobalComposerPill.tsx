@@ -1325,14 +1325,7 @@ export function GlobalComposerPill({
             !expanded && "flex h-full items-center",
           )}
         >
-          <Popover
-            open={mentionOpen}
-            onOpenChange={(open) => {
-              if (!open && mentionOpen) {
-                dismissMention();
-              }
-            }}
-          >
+          <Popover open={mentionOpen}>
             <div
               id={mentionStatusId}
               role="status"
@@ -1461,6 +1454,7 @@ export function GlobalComposerPill({
               onSelectFile={(file) =>
                 handleMentionConfirm({ type: "file", file })
               }
+              onDismiss={dismissMention}
               listboxId={mentionListboxId}
               pathsLoading={fileMentionsLoading}
               pathsError={fileMentionsError}

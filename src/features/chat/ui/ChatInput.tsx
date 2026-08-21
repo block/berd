@@ -1685,14 +1685,7 @@ export function ChatInput({
               : "mx-auto max-w-[var(--chat-composer-max-width)]",
           )}
         >
-          <Popover
-            open={mentionOpen}
-            onOpenChange={(open) => {
-              if (!open && mentionOpen) {
-                dismissMention();
-              }
-            }}
-          >
+          <Popover open={mentionOpen}>
             {queuedMessageAccessory ? (
               <div
                 data-slot="queued-message-accessory"
@@ -1753,6 +1746,7 @@ export function ChatInput({
                 onSelectPersona={handlePersonaMentionSelect}
                 onSelectSkill={handleSkillMentionSelect}
                 onSelectFile={handleFileMentionSelect}
+                onDismiss={dismissMention}
                 selectedIndex={mentionSelectedIndex}
                 listboxId={mentionListboxId}
                 atCategory={atMentionCategory}

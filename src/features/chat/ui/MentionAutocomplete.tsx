@@ -33,6 +33,7 @@ interface MentionAutocompleteProps {
   onSelectPersona: (persona: Persona) => void;
   onSelectSkill?: (skill: SkillMentionItem) => void;
   onSelectFile?: (file: FileMentionItem) => void;
+  onDismiss?: () => void;
   selectedIndex?: number;
   listboxId?: string;
   atCategory?: AtMentionCategory;
@@ -49,6 +50,7 @@ export function MentionAutocomplete({
   onSelectPersona,
   onSelectSkill,
   onSelectFile,
+  onDismiss,
   selectedIndex: controlledIndex,
   listboxId = "mention-autocomplete-listbox",
   atCategory = "agents",
@@ -154,6 +156,11 @@ export function MentionAutocomplete({
       className="w-72 p-2"
       onOpenAutoFocus={(e) => e.preventDefault()}
       onCloseAutoFocus={(e) => e.preventDefault()}
+      onPointerDownOutside={() => onDismiss?.()}
+      onEscapeKeyDown={(event) => {
+        event.preventDefault();
+        onDismiss?.();
+      }}
     >
       <Tabs
         value={atCategory}
