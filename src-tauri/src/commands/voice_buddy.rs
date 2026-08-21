@@ -10,8 +10,8 @@ use super::{native_voice::NativeVoiceState, voice_capture::VoiceCaptureState};
 
 pub const WINDOW_LABEL: &str = "voice-buddy";
 pub const OPEN_SESSION_EVENT: &str = "voice-conversation:open-session";
-const WINDOW_WIDTH: f64 = 248.0;
-const WINDOW_HEIGHT: f64 = 196.0;
+const WINDOW_WIDTH: f64 = 160.0;
+const WINDOW_HEIGHT: f64 = 56.0;
 const SCREEN_INSET: i32 = 24;
 
 #[derive(Clone, Serialize)]
@@ -92,7 +92,7 @@ fn make_macos_transparent(window: &WebviewWindow) -> Result<(), String> {
                 if let Some(ns_number) = AnyClass::get(c"NSNumber") {
                     let key = NSString::from_str("drawsBackground");
                     let no_value: *mut AnyObject = msg_send![ns_number, numberWithBool: false];
-                    let _: () = msg_send![&*webview, setValue: no_value forKey: &*key];
+                    let _: () = msg_send![&*webview, setValue: no_value, forKey: &*key];
                 }
             })
             .map_err(|error| error.to_string())?;

@@ -13,9 +13,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
-vi.mock("@/shared/hooks/useAvatarSrc", () => ({
-  useAvatarMediaState: () => ({ media: undefined }),
-}));
 vi.mock("@/features/voice-conversation/api/voiceConversation", () => ({
   getVoiceConversationStatus: mocks.getStatus,
   listenToVoiceConversation: mocks.listen,
@@ -51,11 +48,10 @@ describe("VoiceBuddyApp", () => {
     render(<VoiceBuddyApp />);
 
     await waitFor(() => expect(mocks.getStatus).toHaveBeenCalledOnce());
-    await user.click(
-      screen.getByRole("button", {
-        name: "toolbar.voiceConversation.buddy.openSession",
-      }),
-    );
+    const avatar = screen.getByRole("button", {
+      name: "toolbar.voiceConversation.buddy.openSession",
+    });
+    await user.click(avatar);
     await user.click(
       screen.getByRole("button", {
         name: "toolbar.voiceConversation.muteMicrophone",
@@ -90,8 +86,9 @@ describe("VoiceBuddyApp", () => {
       }),
     );
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "owner unavailable",
-    );
+    const error = await screen.findByRole("status");
+    expect(error).toHaveTextContent("owner unavailable");
+    expect(error).toHaveClass("sr-only");
+    expect(screen.getByTitle("Error: owner unavailable")).toBeInTheDocument();
   });
 });
