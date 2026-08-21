@@ -75,10 +75,19 @@ describe("voice conversation API", () => {
       microphoneMuted: false,
       revision: 3,
     } as const;
+    const stoppedStatus = {
+      ...status,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      revision: 4,
+    };
     mocks.invoke
       .mockResolvedValueOnce(status)
       .mockResolvedValueOnce([])
-      .mockResolvedValue(status);
+      .mockResolvedValueOnce(status)
+      .mockResolvedValueOnce(status)
+      .mockResolvedValueOnce(stoppedStatus);
 
     await expect(getVoiceConversationStatus()).resolves.toEqual(status);
     await expect(
@@ -95,7 +104,7 @@ describe("voice conversation API", () => {
       }),
     ).resolves.toEqual(status);
     await expect(startVoiceConversation("session-1")).resolves.toEqual(status);
-    await expect(stopVoiceConversation(status)).resolves.toEqual(status);
+    await expect(stopVoiceConversation(status)).resolves.toEqual(stoppedStatus);
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(
       1,
@@ -222,6 +231,67 @@ describe("voice conversation API", () => {
 
     expect(mocks.stopMicrophone).toHaveBeenCalledOnce();
     expect(mocks.invoke).toHaveBeenCalledOnce();
+  });
+
+  it("rolls back the exact native lifecycle when browser capture cannot start", async () => {
+    const runningStatus = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running",
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      microphoneMuted: false,
+      revision: 3,
+    } as const;
+    mocks.invoke.mockResolvedValueOnce(runningStatus).mockResolvedValueOnce({
+      ...runningStatus,
+      lifecycle: "stopped",
+      sessionId: null,
+      ownerWindowLabel: null,
+      revision: 4,
+    });
+    mocks.startMicrophone.mockRejectedValueOnce(new Error("capture failed"));
+
+    await expect(startVoiceConversation("session-1")).rejects.toThrow(
+      "capture failed",
+    );
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(
+      2,
+      "stop_native_voice_conversation",
+      {
+        rendererId: "renderer-test",
+        rendererEpoch: 7,
+        sessionId: "session-1",
+        expectedRevision: 3,
+      },
+    );
+  });
+
+  it("keeps capture attached when a stale stop returns a running lifecycle", async () => {
+    const initialStatus = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running",
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      microphoneMuted: false,
+      revision: 3,
+    } as const;
+    const replacementStatus = {
+      ...initialStatus,
+      sessionId: "session-2",
+      revision: 5,
+    };
+    await reconcileVoiceConversationMicrophone(initialStatus);
+    mocks.invoke.mockResolvedValueOnce(replacementStatus);
+
+    await expect(stopVoiceConversation(initialStatus)).resolves.toEqual(
+      replacementStatus,
+    );
+
+    expect(mocks.startMicrophone).toHaveBeenCalledOnce();
+    expect(mocks.stopMicrophone).not.toHaveBeenCalled();
   });
 
   it("reattaches browser capture when a reloaded renderer finds a running session", async () => {

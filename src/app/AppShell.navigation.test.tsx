@@ -2549,8 +2549,21 @@ describe("AppShell global navigation", () => {
   });
 
   it("stops active voice before confirmed archival", async () => {
-    const stopRequest = deferred<unknown>();
-    const stopVoiceConversation = vi.fn(() => stopRequest.promise);
+    const stoppedStatus = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 2,
+    };
+    const stopRequest = deferred<typeof stoppedStatus>();
+    const stopVoiceConversation = vi.fn(async () => {
+      const status = await stopRequest.promise;
+      useVoiceConversationStore.setState({ status });
+      return status;
+    });
     useChatSessionStore.setState({
       sessions: [
         {
@@ -2585,11 +2598,55 @@ describe("AppShell global navigation", () => {
     await waitFor(() => expect(stopVoiceConversation).toHaveBeenCalledOnce());
     expect(mockAcpArchiveSession).not.toHaveBeenCalled();
 
-    stopRequest.resolve(undefined);
+    stopRequest.resolve(stoppedStatus);
     await expect(outcome).resolves.toEqual({ ok: true });
     expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
     expect(stopVoiceConversation.mock.invocationCallOrder[0]).toBeLessThan(
       mockAcpArchiveSession.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("keeps the session unarchived when voice restarts during shutdown", async () => {
+    const replacementStatus = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running" as const,
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      microphoneMuted: false,
+      revision: 2,
+    };
+    const stopVoiceConversation = vi.fn(async () => {
+      useVoiceConversationStore.setState({ status: replacementStatus });
+      return replacementStatus;
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Voice archive",
+          executionTarget: { harnessId: "goose" },
+          workingDir: "~/voice-archive",
+          createdAt: "2026-08-21T00:00:00.000Z",
+          updatedAt: "2026-08-21T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    useVoiceConversationStore.setState({
+      status: { ...replacementStatus, revision: 1 },
+      stop: stopVoiceConversation,
+    });
+    renderAppShell();
+
+    await expect(
+      getAppNavigationController().archiveSession("session-1", "confirm"),
+    ).resolves.toEqual({ ok: false, reason: "voice_stop_failed" });
+
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    expect(mockToastError).toHaveBeenCalledWith(
+      "Couldn't stop voice, so the chat wasn't archived",
+      { description: "Voice is still active for this chat." },
     );
   });
 
@@ -2704,7 +2761,19 @@ describe("AppShell global navigation", () => {
 
   it("archives the active session with Cmd+E", async () => {
     const user = userEvent.setup();
-    const stopVoiceConversation = vi.fn().mockResolvedValue(undefined);
+    const stopVoiceConversation = vi.fn(async () => {
+      const status = {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "stopped" as const,
+        sessionId: null,
+        ownerWindowLabel: null,
+        microphoneMuted: false,
+        revision: 2,
+      };
+      useVoiceConversationStore.setState({ status });
+      return status;
+    });
     const session: ChatSession = {
       id: "session-1",
       title: "Active chat",

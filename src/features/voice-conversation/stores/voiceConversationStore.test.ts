@@ -548,6 +548,26 @@ describe("voice conversation store lifecycle ordering", () => {
     });
   });
 
+  it("reattaches capture when a failed stop leaves voice running", async () => {
+    const store = await loadStore();
+    const runningStatus = status("running", 4, "session-1");
+    store.setState({
+      status: status("running", 2, "session-1"),
+      uiState: "listening",
+    });
+    mocks.stop.mockRejectedValue(new Error("kill failed"));
+    mocks.getStatus.mockResolvedValue(runningStatus);
+
+    await expect(store.getState().stop()).rejects.toThrow("kill failed");
+
+    expect(mocks.reconcileMicrophone).toHaveBeenCalledWith(runningStatus);
+    expect(store.getState()).toMatchObject({
+      status: runningStatus,
+      uiState: "error",
+      error: "kill failed",
+    });
+  });
+
   it("never exposes an empty error message", async () => {
     const store = await loadStore();
     store.getState().setUiState("error");

@@ -359,6 +359,8 @@ export async function startVoiceConversation(
     await invoke("stop_native_voice_conversation", {
       rendererId,
       rendererEpoch,
+      sessionId: status.sessionId,
+      expectedRevision: status.revision,
     }).catch(() => undefined);
     throw error;
   }
@@ -368,14 +370,18 @@ export async function stopVoiceConversation(
   status: VoiceConversationStatus,
 ): Promise<VoiceConversationStatus> {
   resetMicrophoneMuteState();
-  stopActiveMicrophone();
   const { rendererId, rendererEpoch } = await getRendererInstance();
-  return invoke<VoiceConversationStatus>("stop_native_voice_conversation", {
-    rendererId,
-    rendererEpoch,
-    sessionId: status.sessionId,
-    expectedRevision: status.revision,
-  });
+  const nextStatus = await invoke<VoiceConversationStatus>(
+    "stop_native_voice_conversation",
+    {
+      rendererId,
+      rendererEpoch,
+      sessionId: status.sessionId,
+      expectedRevision: status.revision,
+    },
+  );
+  await reconcileVoiceConversationMicrophone(nextStatus);
+  return nextStatus;
 }
 
 export function listenToVoiceConversation(

@@ -3690,7 +3690,19 @@ export function AppShell({
         }
         if (targetOwnsVoice) {
           try {
-            await useVoiceConversationStore.getState().stop();
+            const stoppedStatus = await useVoiceConversationStore
+              .getState()
+              .stop();
+            const currentStatus = useVoiceConversationStore.getState().status;
+            const targetStillOwnsVoice = [stoppedStatus, currentStatus].some(
+              (status) =>
+                status.sessionId === sessionId &&
+                status.lifecycle !== "stopped" &&
+                status.lifecycle !== "unavailable",
+            );
+            if (targetStillOwnsVoice) {
+              throw new Error("Voice is still active for this chat.");
+            }
           } catch (error) {
             console.error("Failed to stop voice before archiving:", error);
             toast.error(t("chat:notifications.voiceStopBeforeArchiveError"), {

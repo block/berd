@@ -627,6 +627,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                 ? { status, uiState: "error", error: message }
                 : state,
             );
+            await reconcileVoiceConversationMicrophone(status);
           } catch {
             set({ uiState: "error", error: message });
           }
