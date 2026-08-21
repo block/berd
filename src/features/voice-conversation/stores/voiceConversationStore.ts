@@ -261,7 +261,6 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                       event.nativeMicrophoneMuteControl,
                   },
                   uiState: "listening",
-                  microphoneMuted: false,
                   error: null,
                 };
               case "user":

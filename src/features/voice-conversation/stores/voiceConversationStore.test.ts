@@ -309,6 +309,32 @@ describe("voice conversation store lifecycle ordering", () => {
     expect(store.getState().status.nativeMicrophoneMuteControl).toBe(true);
   });
 
+  it("preserves a stem mute observed immediately before startup", async () => {
+    const store = await loadStore();
+
+    emit({
+      type: "inputMute",
+      sessionId: "session-1",
+      muted: true,
+      revision: 2,
+    });
+    emit({
+      type: "startup",
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      line: "type\tid\ttext",
+      revision: 2,
+      nativeMicrophoneMuteControl: true,
+    });
+
+    expect(mocks.applyMicrophoneMuteEvent).toHaveBeenCalledWith(true);
+    expect(store.getState()).toMatchObject({
+      status: status("running", 2, "session-1"),
+      uiState: "listening",
+      microphoneMuted: true,
+    });
+  });
+
   it("ignores an older start response after a newer startup event", async () => {
     const store = await loadStore();
     const response = deferred<VoiceConversationStatus>();
