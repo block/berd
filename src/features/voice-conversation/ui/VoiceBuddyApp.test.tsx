@@ -64,7 +64,12 @@ describe("VoiceBuddyApp", () => {
         revision: 4,
       });
     });
-    expect(document.querySelector(".lucide-mic")).toHaveClass(
+    const muteButton = screen.getByRole("button", {
+      name: "toolbar.voiceConversation.muteMicrophone",
+    });
+    expect(muteButton).toHaveClass(
+      "bg-primary/15",
+      "ring-2",
       "motion-safe:animate-pulse",
     );
 
@@ -76,16 +81,34 @@ describe("VoiceBuddyApp", () => {
         revision: 5,
       });
     });
-    expect(
-      screen
-        .getByRole("button", {
-          name: "toolbar.voiceConversation.buddy.openSession",
-        })
-        .querySelector('[role="img"]'),
-    ).toHaveClass("motion-safe:animate-pulse");
-    expect(document.querySelector(".lucide-mic")).not.toHaveClass(
+    const openButton = screen.getByRole("button", {
+      name: "toolbar.voiceConversation.buddy.openSession",
+    });
+    expect(openButton).toHaveClass(
+      "bg-primary/15",
+      "ring-2",
       "motion-safe:animate-pulse",
     );
+    expect(openButton.querySelector('[role="img"]')).not.toHaveClass(
+      "motion-safe:animate-pulse",
+    );
+    expect(muteButton).not.toHaveClass("motion-safe:animate-pulse");
+
+    act(() => {
+      voiceEventListener?.({
+        type: "activity",
+        sessionId: "session-a",
+        activity: "user-speaking",
+        revision: 6,
+      });
+      voiceEventListener?.({
+        type: "activity",
+        sessionId: "session-a",
+        activity: "user-idle",
+        revision: 6,
+      });
+    });
+    expect(muteButton).not.toHaveClass("bg-primary/15", "ring-2");
     expect(screen.getByRole("status")).toHaveTextContent(
       "toolbar.voiceConversation.buddy.listening",
     );

@@ -179,6 +179,12 @@ export function ChatInputToolbar({
         : t("toolbar.voiceInput");
   const voiceConversationFeedbackState =
     voiceConversationState === "error" ? "error" : undefined;
+  const voiceConversationMicrophoneFeedbackState =
+    ownsActiveVoiceConversation &&
+    !voiceConversationMicrophoneMuted &&
+    voiceConversationState === "user-speaking"
+      ? "active"
+      : undefined;
   const nativeVoiceOwnsMicrophone =
     voiceConversationState === "starting" ||
     voiceConversationState === "stopping" ||
@@ -483,6 +489,7 @@ export function ChatInputToolbar({
             <ComposerActionButton
               type="button"
               size="icon-pill-sm"
+              visualState={voiceConversationMicrophoneFeedbackState}
               disabled={
                 nativeVoiceOwnsMicrophone ||
                 (!ownsActiveVoiceConversation &&

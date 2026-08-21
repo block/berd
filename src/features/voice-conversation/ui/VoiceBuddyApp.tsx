@@ -220,22 +220,19 @@ export function VoiceBuddyApp() {
           type="button"
           variant="subtle"
           size="icon-sm"
+          activity={activity.assistantSpeaking}
           aria-label={t("toolbar.voiceConversation.buddy.openSession")}
           title={t("toolbar.voiceConversation.buddy.openSession")}
           disabled={busyAction !== null}
           onClick={() => void run("open", openVoiceConversationSession)}
         >
-          <BerdIcon
-            aria-hidden="true"
-            className={
-              activity.assistantSpeaking ? "motion-safe:animate-pulse" : ""
-            }
-          />
+          <BerdIcon aria-hidden="true" />
         </Button>
         <Button
           type="button"
           variant="subtle"
           size="icon-sm"
+          activity={activity.userSpeaking && !microphoneMuted}
           aria-label={
             microphoneMuted
               ? t("toolbar.voiceConversation.unmuteMicrophone")
@@ -249,15 +246,7 @@ export function VoiceBuddyApp() {
           disabled={!status || busyAction !== null}
           onClick={toggleMute}
         >
-          {microphoneMuted ? (
-            <MicOff />
-          ) : (
-            <Mic
-              className={
-                activity.userSpeaking ? "motion-safe:animate-pulse" : ""
-              }
-            />
-          )}
+          {microphoneMuted ? <MicOff /> : <Mic />}
         </Button>
         <Button
           type="button"

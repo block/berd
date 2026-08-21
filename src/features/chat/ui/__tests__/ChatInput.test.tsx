@@ -1270,6 +1270,10 @@ describe("ChatInput", () => {
     );
 
     expect(container.querySelector(".lucide-phone-off")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mute microphone" })).toHaveClass(
+      "bg-info",
+      "animate-pulse",
+    );
   });
 
   it("shows stop button when streaming", () => {
