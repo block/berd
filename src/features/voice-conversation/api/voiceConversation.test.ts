@@ -162,27 +162,6 @@ describe("voice conversation API", () => {
     expect(mocks.startMicrophone).not.toHaveBeenCalled();
   });
 
-  it("uses backend capture and mute when the native process owns microphone audio", async () => {
-    const status = {
-      available: true,
-      unavailableReason: null,
-      lifecycle: "running",
-      sessionId: "session-1",
-      ownerWindowLabel: "main",
-      revision: 3,
-      nativeMicrophoneCapture: true,
-    } as const;
-    mocks.invoke.mockResolvedValue(undefined);
-
-    await reconcileVoiceConversationMicrophone(status);
-    await setVoiceConversationMicrophoneMuted(true, status);
-
-    expect(mocks.startMicrophone).not.toHaveBeenCalled();
-    expect(mocks.invoke).toHaveBeenCalledWith("set_native_voice_input_muted", {
-      muted: true,
-    });
-  });
-
   it("mutes and unmutes without reopening browser capture", async () => {
     const status = {
       available: true,
@@ -284,39 +263,6 @@ describe("voice conversation API", () => {
       sessionId: "session-1",
       activity: "user-speaking",
       revision: 5,
-    });
-  });
-
-  it("applies AirPods input mute events to browser capture", async () => {
-    const callback = vi.fn();
-    mocks.listen.mockImplementation(async (_name, handler) => {
-      handler({
-        payload: {
-          type: "inputMute",
-          sessionId: "session-1",
-          muted: true,
-          revision: 6,
-        },
-      });
-      return vi.fn();
-    });
-
-    await reconcileVoiceConversationMicrophone({
-      available: true,
-      unavailableReason: null,
-      lifecycle: "running",
-      sessionId: "session-1",
-      ownerWindowLabel: "main",
-      revision: 5,
-    });
-    await listenToVoiceConversation(callback);
-
-    expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(true);
-    expect(callback).toHaveBeenCalledWith({
-      type: "inputMute",
-      sessionId: "session-1",
-      muted: true,
-      revision: 6,
     });
   });
 

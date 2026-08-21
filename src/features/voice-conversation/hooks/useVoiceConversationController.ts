@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { toast } from "sonner";
 
 import type {
   ChatInputSendHandler,
@@ -188,15 +187,6 @@ function addErrorNotification(sessionId: string | null, message: string) {
     .addMessage(sessionId, createSystemNotificationMessage(message, "error"));
 }
 
-export function notifyAirPodsInputMuteGesture(muted: boolean) {
-  toast.message(
-    muted
-      ? "AirPods gesture detected — microphone muted"
-      : "AirPods gesture detected — microphone unmuted",
-    { id: "airpods-input-mute" },
-  );
-}
-
 export function hasDeliveredVoiceTranscript(
   sessionId: string,
   lifecycleId: string,
@@ -322,10 +312,6 @@ function ensureVoiceEventDeliveryInitialized() {
         activeSendRoute = null;
       }
       addErrorNotification(sessionId ?? null, event.message);
-      return;
-    }
-    if (event.type === "inputMute") {
-      notifyAirPodsInputMuteGesture(event.muted);
       return;
     }
     if (event.type === "activity") return;

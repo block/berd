@@ -389,28 +389,6 @@ describe("voice conversation store lifecycle ordering", () => {
     });
   });
 
-  it("reflects AirPods input mute events in the microphone control", async () => {
-    const store = await loadStore();
-    store.setState({
-      status: status("running", 2, "session-1"),
-      uiState: "user-speaking",
-      userSpeaking: true,
-    });
-
-    emit({
-      type: "inputMute",
-      sessionId: "session-1",
-      muted: true,
-      revision: 3,
-    });
-
-    expect(store.getState()).toMatchObject({
-      microphoneMuted: true,
-      userSpeaking: false,
-      uiState: "listening",
-    });
-  });
-
   it("surfaces an unmute failure without losing muted state", async () => {
     const store = await loadStore();
     store.setState({

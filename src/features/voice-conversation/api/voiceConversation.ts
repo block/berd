@@ -49,10 +49,6 @@ async function ensureActiveMicrophone(): Promise<void> {
 export async function reconcileVoiceConversationMicrophone(
   status: VoiceConversationStatus,
 ): Promise<void> {
-  if (status.nativeMicrophoneCapture) {
-    stopActiveMicrophone();
-    return;
-  }
   if (
     status.lifecycle === "running" &&
     status.ownerWindowLabel === getCurrentWindow().label
@@ -70,11 +66,6 @@ export async function setVoiceConversationMicrophoneMuted(
   const previous = microphoneMuted;
   microphoneMuted = muted;
   try {
-    if (status.nativeMicrophoneCapture) {
-      await invoke("set_native_voice_input_muted", { muted });
-      stopActiveMicrophone();
-      return;
-    }
     await reconcileVoiceConversationMicrophone(status);
   } catch (error) {
     microphoneMuted = previous;
@@ -118,8 +109,6 @@ export interface VoiceConversationStatus {
   ownerWindowLabel: string | null;
   /** Monotonic native lifecycle revision used to reject stale responses/events. */
   revision: number;
-  /** The backend owns the PCM stream so device gestures reach that process. */
-  nativeMicrophoneCapture?: boolean;
 }
 
 export type VoiceConversationEvent =
@@ -147,12 +136,6 @@ export type VoiceConversationEvent =
         | "user-idle"
         | "assistant-speaking"
         | "assistant-idle";
-      revision: number;
-    }
-  | {
-      type: "inputMute";
-      sessionId: string;
-      muted: boolean;
       revision: number;
     }
   | {
@@ -261,10 +244,6 @@ export function listenToVoiceConversation(
   onEvent: (event: VoiceConversationEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<VoiceConversationEvent>(VOICE_CONVERSATION_EVENT, (event) => {
-    if (event.payload.type === "inputMute") {
-      microphoneMuted = event.payload.muted;
-      activeMicrophone?.setMuted(event.payload.muted);
-    }
     if (
       event.payload.type === "cleanShutdown" ||
       (event.payload.type === "error" && event.payload.terminal)

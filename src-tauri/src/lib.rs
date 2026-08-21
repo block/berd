@@ -646,7 +646,6 @@ pub fn run() {
             commands::native_voice::start_native_voice_conversation,
             commands::native_voice::stop_native_voice_conversation,
             commands::native_voice::push_native_voice_audio,
-            commands::native_voice::set_native_voice_input_muted,
             commands::voice_capture::register_voice_renderer_instance,
             commands::window_session::get_session_window_support,
             commands::window_session::open_session_window,

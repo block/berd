@@ -49,7 +49,6 @@ pub struct NativeVoiceStatus {
     session_id: Option<String>,
     owner_window_label: Option<String>,
     revision: u64,
-    native_microphone_capture: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -96,11 +95,6 @@ enum NativeVoiceEvent {
         activity: &'static str,
         revision: u64,
     },
-    InputMute {
-        session_id: String,
-        muted: bool,
-        revision: u64,
-    },
     CleanShutdown {
         session_id: String,
         revision: u64,
@@ -133,7 +127,6 @@ pub struct NativeVoiceState {
     pending: Arc<Mutex<VecDeque<PendingTranscript>>>,
     capture_suppressions: Arc<AtomicUsize>,
     input_muted: Arc<AtomicBool>,
-    native_microphone_capture: Arc<AtomicBool>,
 }
 
 #[must_use = "capture suppression ends when the guard is dropped"]
@@ -166,12 +159,6 @@ impl NativeVoiceState {
 
     fn capture_is_suppressed(&self) -> bool {
         self.capture_suppressions.load(Ordering::SeqCst) > 0
-    }
-
-    fn stop_native_microphone(&self) {
-        native_input_mute::stop(&self.input_muted);
-        self.native_microphone_capture
-            .store(false, Ordering::Release);
     }
 }
 
@@ -321,7 +308,6 @@ fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
             .as_ref()
             .map(|owner| owner.window_label.clone()),
         revision: runtime.revision,
-        native_microphone_capture: state.native_microphone_capture.load(Ordering::Acquire),
     }
 }
 
@@ -466,6 +452,7 @@ pub async fn start_native_voice_conversation(
             window_label: window_label.clone(),
         });
         runtime.pipeline = Some(pipeline);
+        native_input_mute::start(&state.input_muted);
         (
             runtime.revision,
             runtime.lifecycle_id.clone().unwrap_or_default(),
@@ -480,40 +467,12 @@ pub async fn start_native_voice_conversation(
             revision,
         },
     );
-    let mute_window = webview_window.clone();
-    let mute_session_id = session_id.clone();
-    let audio_state = state.inner().clone();
-    let audio_session_id = session_id.clone();
-    let native_capture_started = native_input_mute::start(
-        &state.input_muted,
-        move |muted| {
-            let _ = mute_window.emit(
-                EVENT_NAME,
-                NativeVoiceEvent::InputMute {
-                    session_id: mute_session_id.clone(),
-                    muted,
-                    revision,
-                },
-            );
-        },
-        move |samples| {
-            if let Err(error) =
-                push_audio_for_session(&audio_state, &audio_session_id, revision, samples)
-            {
-                log::warn!("Native microphone audio was not accepted: {error}");
-            }
-        },
-    );
-    state
-        .native_microphone_capture
-        .store(native_capture_started, Ordering::Release);
 
     let event_app = app.clone();
     let event_window = webview_window.clone();
     let runtime = Arc::clone(&state.runtime);
     let pending = Arc::clone(&state.pending);
     let input_muted = Arc::clone(&state.input_muted);
-    let native_microphone_capture = Arc::clone(&state.native_microphone_capture);
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
             let active = runtime.lock().ok().is_some_and(|current| {
@@ -587,7 +546,6 @@ pub async fn start_native_voice_conversation(
                             break;
                         }
                         native_input_mute::stop(&input_muted);
-                        native_microphone_capture.store(false, Ordering::Release);
                         current.session_id = None;
                         current.lifecycle_id = None;
                         current.owner = None;
@@ -654,7 +612,7 @@ pub async fn stop_native_voice_conversation(
             .lock()
             .map_err(|_| "native voice state lock was poisoned".to_string())?;
         if runtime.revision == revision && runtime.session_id == session_id {
-            state.stop_native_microphone();
+            native_input_mute::stop(&state.input_muted);
             runtime.session_id = None;
             runtime.lifecycle_id = None;
             runtime.owner = None;
@@ -712,7 +670,7 @@ impl NativeVoiceState {
                 .lock()
                 .map_err(|_| "native voice state lock was poisoned".to_string())?;
             if runtime.revision == revision && runtime.session_id == session_id {
-                self.stop_native_microphone();
+                native_input_mute::stop(&self.input_muted);
                 runtime.session_id = None;
                 runtime.lifecycle_id = None;
                 runtime.owner = None;
@@ -751,7 +709,7 @@ impl NativeVoiceState {
             if let Some(pipeline) = pipeline.as_ref() {
                 pipeline.signal_shutdown();
             }
-            self.stop_native_microphone();
+            native_input_mute::stop(&self.input_muted);
             (runtime.session_id.clone(), runtime.revision, pipeline)
         };
         if pipeline.is_none() {
@@ -788,7 +746,7 @@ impl NativeVoiceState {
             if let Some(pipeline) = runtime.pipeline.as_ref() {
                 pipeline.latch_muted_shutdown();
             }
-            self.stop_native_microphone();
+            native_input_mute::stop(&self.input_muted);
             (
                 runtime.session_id.clone(),
                 runtime.revision,
@@ -819,28 +777,6 @@ pub fn push_native_voice_audio(
     push_audio_for_window(&state, webview_window.label(), bytes.to_vec())
 }
 
-#[tauri::command]
-pub fn set_native_voice_input_muted(
-    state: State<'_, NativeVoiceState>,
-    webview_window: WebviewWindow,
-    muted: bool,
-) -> Result<(), String> {
-    let runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "native voice state lock was poisoned".to_string())?;
-    if runtime.session_id.is_none()
-        || runtime
-            .owner
-            .as_ref()
-            .is_none_or(|owner| owner.window_label != webview_window.label())
-    {
-        return Err("Only the active voice owner may mute its microphone.".to_string());
-    }
-    drop(runtime);
-    native_input_mute::set_muted(&state.input_muted, muted)
-}
-
 fn push_audio_for_window(
     state: &NativeVoiceState,
     window_label: &str,
@@ -864,32 +800,6 @@ fn push_audio_for_window(
         pipeline.push(bytes)?;
     }
     Ok(())
-}
-
-fn push_audio_for_session(
-    state: &NativeVoiceState,
-    session_id: &str,
-    revision: u64,
-    samples: &[f32],
-) -> Result<(), String> {
-    if state.capture_is_suppressed() {
-        return Ok(());
-    }
-    let runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "native voice state lock was poisoned".to_string())?;
-    if runtime.session_id.as_deref() != Some(session_id) || runtime.revision != revision {
-        return Ok(());
-    }
-    let Some(pipeline) = runtime.pipeline.as_ref() else {
-        return Ok(());
-    };
-    let mut bytes = Vec::with_capacity(samples.len() * size_of::<f32>());
-    for sample in samples {
-        bytes.extend_from_slice(&sample.to_ne_bytes());
-    }
-    pipeline.push(bytes)
 }
 
 fn enqueue_pending_transcript(
@@ -1377,21 +1287,6 @@ mod tests {
                 "text": "hello",
                 "revision": 2,
                 "deliveryAttempts": 0,
-            }),
-        );
-
-        let event = NativeVoiceEvent::InputMute {
-            session_id: "session-1".to_string(),
-            muted: true,
-            revision: 3,
-        };
-        assert_eq!(
-            serde_json::to_value(event).expect("serialize input mute event"),
-            serde_json::json!({
-                "type": "inputMute",
-                "sessionId": "session-1",
-                "muted": true,
-                "revision": 3,
             }),
         );
     }
