@@ -67,11 +67,23 @@ export async function setVoiceConversationMicrophoneMuted(
   microphoneMuted = muted;
   try {
     await reconcileVoiceConversationMicrophone(status);
+    if (status.nativeMicrophoneMuteControl) {
+      await invoke("set_native_voice_input_muted", {
+        sessionId: status.sessionId,
+        revision: status.revision,
+        muted,
+      });
+    }
   } catch (error) {
     microphoneMuted = previous;
     activeMicrophone?.setMuted(previous);
     throw error;
   }
+}
+
+export function applyVoiceConversationMicrophoneMuteEvent(muted: boolean) {
+  microphoneMuted = muted;
+  activeMicrophone?.setMuted(muted);
 }
 
 export function stopActiveMicrophoneForTest(): void {
@@ -109,6 +121,8 @@ export interface VoiceConversationStatus {
   ownerWindowLabel: string | null;
   /** Monotonic native lifecycle revision used to reject stale responses/events. */
   revision: number;
+  /** macOS owns an input session capable of receiving headset mute controls. */
+  nativeMicrophoneMuteControl?: boolean;
 }
 
 export type VoiceConversationEvent =
@@ -136,6 +150,12 @@ export type VoiceConversationEvent =
         | "user-idle"
         | "assistant-speaking"
         | "assistant-idle";
+      revision: number;
+    }
+  | {
+      type: "inputMute";
+      sessionId: string;
+      muted: boolean;
       revision: number;
     }
   | {

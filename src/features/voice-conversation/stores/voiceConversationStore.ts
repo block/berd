@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import {
+  applyVoiceConversationMicrophoneMuteEvent,
   acknowledgeVoiceConversationTranscript,
   drainVoiceConversationTranscripts,
   getVoiceConversationStatus,
@@ -229,6 +230,10 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
         await listenToVoiceConversation((event) => {
           if (!shouldApplyEventRevision(get().status, event.revision)) return;
 
+          if (event.type === "inputMute") {
+            applyVoiceConversationMicrophoneMuteEvent(event.muted);
+          }
+
           set((state) => {
             switch (event.type) {
               case "startup":
@@ -284,6 +289,18 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                 };
                 return {
                   ...nextState,
+                  uiState: activityUiState(nextState),
+                };
+              }
+              case "inputMute": {
+                const nextState = {
+                  ...state,
+                  microphoneMuted: event.muted,
+                  userSpeaking: event.muted ? false : state.userSpeaking,
+                };
+                return {
+                  microphoneMuted: event.muted,
+                  userSpeaking: nextState.userSpeaking,
                   uiState: activityUiState(nextState),
                 };
               }

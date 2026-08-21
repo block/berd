@@ -50,6 +50,7 @@ dependencies = [
  "sherpa-onnx",
  "sqlx",
  "ssstretch",
+ "swift-rs",
  "sysinfo",
  "tar",
  "tauri",

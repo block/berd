@@ -49,6 +49,7 @@ pub struct NativeVoiceStatus {
     session_id: Option<String>,
     owner_window_label: Option<String>,
     revision: u64,
+    native_microphone_mute_control: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -95,6 +96,11 @@ enum NativeVoiceEvent {
         activity: &'static str,
         revision: u64,
     },
+    InputMute {
+        session_id: String,
+        muted: bool,
+        revision: u64,
+    },
     CleanShutdown {
         session_id: String,
         revision: u64,
@@ -114,6 +120,7 @@ struct Runtime {
     revision: u64,
     owner: Option<RuntimeOwner>,
     pipeline: Option<SttPipeline>,
+    native_microphone_mute_control: bool,
 }
 
 #[derive(Clone)]
@@ -308,6 +315,7 @@ fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
             .as_ref()
             .map(|owner| owner.window_label.clone()),
         revision: runtime.revision,
+        native_microphone_mute_control: runtime.native_microphone_mute_control,
     }
 }
 
@@ -452,7 +460,20 @@ pub async fn start_native_voice_conversation(
             window_label: window_label.clone(),
         });
         runtime.pipeline = Some(pipeline);
-        native_input_mute::start(&state.input_muted);
+        let runtime_revision = runtime.revision;
+        let mute_window = webview_window.clone();
+        let mute_session_id = session_id.clone();
+        runtime.native_microphone_mute_control =
+            native_input_mute::start(&state.input_muted, move |muted| {
+                let _ = mute_window.emit(
+                    EVENT_NAME,
+                    NativeVoiceEvent::InputMute {
+                        session_id: mute_session_id.clone(),
+                        muted,
+                        revision: runtime_revision,
+                    },
+                );
+            });
         (
             runtime.revision,
             runtime.lifecycle_id.clone().unwrap_or_default(),
@@ -546,6 +567,7 @@ pub async fn start_native_voice_conversation(
                             break;
                         }
                         native_input_mute::stop(&input_muted);
+                        current.native_microphone_mute_control = false;
                         current.session_id = None;
                         current.lifecycle_id = None;
                         current.owner = None;
@@ -613,6 +635,7 @@ pub async fn stop_native_voice_conversation(
             .map_err(|_| "native voice state lock was poisoned".to_string())?;
         if runtime.revision == revision && runtime.session_id == session_id {
             native_input_mute::stop(&state.input_muted);
+            runtime.native_microphone_mute_control = false;
             runtime.session_id = None;
             runtime.lifecycle_id = None;
             runtime.owner = None;
@@ -671,6 +694,7 @@ impl NativeVoiceState {
                 .map_err(|_| "native voice state lock was poisoned".to_string())?;
             if runtime.revision == revision && runtime.session_id == session_id {
                 native_input_mute::stop(&self.input_muted);
+                runtime.native_microphone_mute_control = false;
                 runtime.session_id = None;
                 runtime.lifecycle_id = None;
                 runtime.owner = None;
@@ -710,6 +734,7 @@ impl NativeVoiceState {
                 pipeline.signal_shutdown();
             }
             native_input_mute::stop(&self.input_muted);
+            runtime.native_microphone_mute_control = false;
             (runtime.session_id.clone(), runtime.revision, pipeline)
         };
         if pipeline.is_none() {
@@ -747,6 +772,7 @@ impl NativeVoiceState {
                 pipeline.latch_muted_shutdown();
             }
             native_input_mute::stop(&self.input_muted);
+            runtime.native_microphone_mute_control = false;
             (
                 runtime.session_id.clone(),
                 runtime.revision,
@@ -763,6 +789,39 @@ impl NativeVoiceState {
             }
         }
     }
+}
+
+#[tauri::command]
+pub fn set_native_voice_input_muted(
+    state: State<'_, NativeVoiceState>,
+    webview_window: WebviewWindow,
+    session_id: String,
+    revision: u64,
+    muted: bool,
+) -> Result<(), String> {
+    let runtime = state
+        .runtime
+        .lock()
+        .map_err(|_| "native voice state lock was poisoned".to_string())?;
+    if !owns_native_mute_control(&runtime, webview_window.label(), &session_id, revision) {
+        return Err("Native microphone mute is unavailable for this conversation.".to_string());
+    }
+    native_input_mute::set_muted(&state.input_muted, muted)
+}
+
+fn owns_native_mute_control(
+    runtime: &Runtime,
+    window_label: &str,
+    session_id: &str,
+    revision: u64,
+) -> bool {
+    runtime.native_microphone_mute_control
+        && runtime.session_id.as_deref() == Some(session_id)
+        && runtime.revision == revision
+        && runtime
+            .owner
+            .as_ref()
+            .is_some_and(|owner| owner.window_label == window_label)
 }
 
 #[tauri::command]
@@ -999,6 +1058,24 @@ fn deliver_recognition_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_mute_control_is_bound_to_window_session_and_revision() {
+        let runtime = Runtime {
+            session_id: Some("session-1".to_string()),
+            revision: 4,
+            owner: Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            }),
+            native_microphone_mute_control: true,
+            ..Runtime::default()
+        };
+
+        assert!(owns_native_mute_control(&runtime, "main", "session-1", 4));
+        assert!(!owns_native_mute_control(&runtime, "other", "session-1", 4));
+        assert!(!owns_native_mute_control(&runtime, "main", "session-2", 4));
+        assert!(!owns_native_mute_control(&runtime, "main", "session-1", 5));
+    }
 
     #[test]
     fn speaker_playback_blocks_vad_ingestion_until_all_guards_finish() {

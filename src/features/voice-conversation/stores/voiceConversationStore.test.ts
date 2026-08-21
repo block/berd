@@ -6,6 +6,7 @@ import type {
 } from "../api/voiceConversation";
 
 const mocks = vi.hoisted(() => ({
+  applyMicrophoneMuteEvent: vi.fn(),
   acknowledge: vi.fn(),
   drain: vi.fn(),
   getStatus: vi.fn(),
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/voiceConversation", () => ({
+  applyVoiceConversationMicrophoneMuteEvent: mocks.applyMicrophoneMuteEvent,
   acknowledgeVoiceConversationTranscript: mocks.acknowledge,
   drainVoiceConversationTranscripts: mocks.drain,
   getVoiceConversationStatus: mocks.getStatus,
@@ -58,6 +60,7 @@ describe("voice conversation store lifecycle ordering", () => {
   beforeEach(() => {
     vi.resetModules();
     mocks.acknowledge.mockReset().mockResolvedValue(undefined);
+    mocks.applyMicrophoneMuteEvent.mockReset();
     mocks.drain.mockReset().mockResolvedValue([]);
     mocks.getStatus.mockReset().mockResolvedValue(status("stopped", 0));
     mocks.start.mockReset();
@@ -361,6 +364,29 @@ describe("voice conversation store lifecycle ordering", () => {
     expect(mocks.stop).not.toHaveBeenCalled();
     expect(store.getState()).toMatchObject({
       status: status("running", 2, "session-1"),
+      microphoneMuted: true,
+      userSpeaking: false,
+      uiState: "listening",
+    });
+  });
+
+  it("applies a current stem mute event to capture and UI", async () => {
+    const store = await loadStore();
+    store.setState({
+      status: status("running", 2, "session-1"),
+      uiState: "user-speaking",
+      userSpeaking: true,
+    });
+
+    emit({
+      type: "inputMute",
+      sessionId: "session-1",
+      muted: true,
+      revision: 3,
+    });
+
+    expect(mocks.applyMicrophoneMuteEvent).toHaveBeenCalledWith(true);
+    expect(store.getState()).toMatchObject({
       microphoneMuted: true,
       userSpeaking: false,
       uiState: "listening",

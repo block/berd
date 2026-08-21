@@ -18,6 +18,7 @@ members = ["crates/berd-voice", "crates/berdctl", "plugins/berdctl"]
 exclude = ["plugins/app-test-driver"]
 
 [build-dependencies]
+swift-rs = { version = "1.0.7", features = ["build"] }
 tauri-build = { version = "2", features = [] }
 cc = "1"
 

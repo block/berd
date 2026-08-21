@@ -188,6 +188,29 @@ describe("voice conversation API", () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
+  it("routes UI mute through macOS while keeping browser capture in sync", async () => {
+    const status = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running",
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      revision: 3,
+      nativeMicrophoneMuteControl: true,
+    } as const;
+    mocks.invoke.mockResolvedValue(undefined);
+
+    await reconcileVoiceConversationMicrophone(status);
+    await setVoiceConversationMicrophoneMuted(true, status);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("set_native_voice_input_muted", {
+      sessionId: "session-1",
+      revision: 3,
+      muted: true,
+    });
+    expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(true);
+  });
+
   it("restores the previous mute state when initial capture fails", async () => {
     const status = {
       available: true,

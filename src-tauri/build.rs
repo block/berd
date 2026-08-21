@@ -19,6 +19,11 @@ fn main() {
             println!("cargo:rustc-link-lib=framework={framework}");
         }
 
+        if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+            swift_rs::SwiftLinker::new("14.0")
+                .with_package("BerdAirPodsBridge", "swift/BerdAirPodsBridge")
+                .link();
+        }
     }
     tauri_build::build()
 }

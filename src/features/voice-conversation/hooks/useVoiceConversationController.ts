@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { toast } from "sonner";
 
 import type {
   ChatInputSendHandler,
@@ -315,6 +316,12 @@ function ensureVoiceEventDeliveryInitialized() {
       return;
     }
     if (event.type === "activity") return;
+    if (event.type === "inputMute") {
+      toast.message(`Microphone ${event.muted ? "muted" : "unmuted"}`, {
+        id: "voice-input-mute",
+      });
+      return;
+    }
     if (event.type !== "user" || !event.text.trim()) return;
     if (
       hasDeliveredVoiceTranscript(
