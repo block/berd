@@ -240,6 +240,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                     sessionId: event.sessionId,
                     ownerWindowLabel: event.ownerWindowLabel,
                     revision: event.revision,
+                    nativeMicrophoneCapture: event.nativeMicrophoneCapture,
                   },
                   uiState: "listening",
                   microphoneMuted: false,

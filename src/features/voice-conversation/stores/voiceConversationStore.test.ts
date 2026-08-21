@@ -265,12 +265,16 @@ describe("voice conversation store lifecycle ordering", () => {
       ownerWindowLabel: "main",
       line: "type\tid\ttext",
       revision: 2,
+      nativeMicrophoneCapture: true,
     });
     response.resolve(status("starting", 1, "session-1"));
     await starting;
 
     expect(store.getState()).toMatchObject({
-      status: status("running", 2, "session-1"),
+      status: {
+        ...status("running", 2, "session-1"),
+        nativeMicrophoneCapture: true,
+      },
       uiState: "listening",
       error: null,
     });

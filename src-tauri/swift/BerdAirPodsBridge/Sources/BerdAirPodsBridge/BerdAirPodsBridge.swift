@@ -10,6 +10,8 @@ private final class AirPodsMuteBridge: @unchecked Sendable {
     private let inputNode: AVAudioInputNode
     private let callback: InputMuteCallback
     private let audioCallback: AudioInputCallback
+    private let targetFormat: AVAudioFormat
+    private let converter: AVAudioConverter?
     private var inputMuteObserver: NSObjectProtocol?
 
     init(
@@ -25,20 +27,34 @@ private final class AirPodsMuteBridge: @unchecked Sendable {
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             throw BridgeError.noInputFormat
         }
+        guard let targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: 48_000,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw BridgeError.noOutputFormat
+        }
+        let converter: AVAudioConverter?
+        if inputFormat == targetFormat {
+            converter = nil
+        } else {
+            guard let created = AVAudioConverter(from: inputFormat, to: targetFormat) else {
+                throw BridgeError.noConverter
+            }
+            converter = created
+        }
         self.engine = engine
         self.inputNode = inputNode
+        self.targetFormat = targetFormat
+        self.converter = converter
 
         inputNode.installTap(
             onBus: 0,
             bufferSize: 4096,
             format: inputFormat
         ) { [weak self] buffer, _ in
-            guard
-                let self,
-                let channel = buffer.floatChannelData?.pointee,
-                buffer.frameLength > 0
-            else { return }
-            self.audioCallback(channel, Int(buffer.frameLength))
+            self?.forward(buffer)
         }
         engine.prepare()
         try engine.start()
@@ -72,8 +88,42 @@ private final class AirPodsMuteBridge: @unchecked Sendable {
         engine.stop()
     }
 
+    private func forward(_ source: AVAudioPCMBuffer) {
+        let output: AVAudioPCMBuffer
+        if let converter {
+            let capacity = AVAudioFrameCount(ceil(
+                Double(source.frameLength) * targetFormat.sampleRate / source.format.sampleRate
+            ))
+            guard capacity > 0,
+                  let converted = AVAudioPCMBuffer(
+                    pcmFormat: targetFormat,
+                    frameCapacity: capacity
+                  ) else { return }
+            var error: NSError?
+            nonisolated(unsafe) var consumed = false
+            converter.convert(to: converted, error: &error) { _, status in
+                if !consumed {
+                    consumed = true
+                    status.pointee = .haveData
+                    return source
+                }
+                status.pointee = .noDataNow
+                return nil
+            }
+            guard error == nil, converted.frameLength > 0 else { return }
+            output = converted
+        } else {
+            output = source
+        }
+        guard let channel = output.floatChannelData?.pointee,
+              output.frameLength > 0 else { return }
+        audioCallback(channel, Int(output.frameLength))
+    }
+
     private enum BridgeError: Error {
         case noInputFormat
+        case noOutputFormat
+        case noConverter
     }
 }
 

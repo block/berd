@@ -129,6 +129,7 @@ export type VoiceConversationEvent =
       ownerWindowLabel: string;
       line: string;
       revision: number;
+      nativeMicrophoneCapture: boolean;
     }
   | {
       type: "user";
@@ -261,10 +262,6 @@ export function listenToVoiceConversation(
   onEvent: (event: VoiceConversationEvent) => void,
 ): Promise<UnlistenFn> {
   return listen<VoiceConversationEvent>(VOICE_CONVERSATION_EVENT, (event) => {
-    if (event.payload.type === "inputMute") {
-      microphoneMuted = event.payload.muted;
-      activeMicrophone?.setMuted(event.payload.muted);
-    }
     if (
       event.payload.type === "cleanShutdown" ||
       (event.payload.type === "error" && event.payload.terminal)
