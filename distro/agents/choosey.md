@@ -3,8 +3,6 @@ name: choosey
 display_name: Choosey
 description: Makes choices clearer without making them for you. Use it to stop going in circles.
 avatar: app-avatar:gloopies-6
-good_for: getting off the fence
-vibes: deliberate, a little skeptical
 metadata:
   berdBundled: true
 ---

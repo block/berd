@@ -10,8 +10,6 @@ import {
 const VALID_AGENT = `---
 name: Support bot
 description: Answers support questions.
-good_for: solving support problems
-vibes: patient, resourceful
 avatar: app-avatar:gloopies-19
 metadata:
   berdBundled: true
@@ -108,37 +106,6 @@ describe("validateBundledAgent", () => {
     );
   });
 
-  it.each([
-    "good_for",
-    "vibes",
-  ])("allows missing or unconstrained %s metadata", (key) => {
-    const withoutMetadata = VALID_AGENT.replace(
-      new RegExp(`^${key}:.*\\n`, "m"),
-      "",
-    );
-    const longMetadata = VALID_AGENT.replace(
-      new RegExp(`^${key}:.*$`, "m"),
-      `${key}: ${"x".repeat(100)}`,
-    );
-
-    expect(validateBundledAgent("support-bot.md", withoutMetadata)).toEqual([]);
-    expect(validateBundledAgent("support-bot.md", longMetadata)).toEqual([]);
-  });
-
-  it.each([
-    "good_for",
-    "vibes",
-  ])("rejects non-string %s metadata when present", (key) => {
-    const errors = validateBundledAgent(
-      "support-bot.md",
-      VALID_AGENT.replace(new RegExp(`^${key}:.*$`, "m"), `${key}: 42`),
-    );
-
-    expect(errors).toContain(
-      `support-bot.md: frontmatter \`${key}\` must be a string when present`,
-    );
-  });
-
   it("rejects invalid UTF-8 files", () => {
     const dir = mkdtempSync(join(tmpdir(), "bundled-agent-"));
     tempDirs.push(dir);
@@ -159,8 +126,6 @@ describe("validateBundledAgent", () => {
       `---
 name: ""
 description: ""
-good_for: solving support problems
-vibes: patient, resourceful
 avatar: app-avatar:gloopies-19
 metadata:
   berdBundled: true

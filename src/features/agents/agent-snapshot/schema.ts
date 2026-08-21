@@ -36,8 +36,6 @@ export interface SnapshotV1Definition {
 export interface SnapshotV1Profile {
   displayName?: string;
   about?: string | null;
-  goodFor?: string | null;
-  vibes?: string | null;
   avatarDataUrl?: string | null;
   avatarUrl?: string | null;
   [field: string]: unknown;

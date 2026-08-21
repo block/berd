@@ -23,8 +23,6 @@ const APP_AVATAR_REF_RE = /^app-avatar:[a-z0-9][a-z0-9_-]{0,63}$/;
 interface BundledAgentFrontmatter {
   name?: unknown;
   description?: unknown;
-  good_for?: unknown;
-  vibes?: unknown;
   avatar?: unknown;
   metadata?: { berdBundled?: unknown; [key: string]: unknown };
 }
@@ -94,17 +92,6 @@ export function validateBundledAgent(
         filePath,
       ),
     );
-  }
-
-  for (const key of ["good_for", "vibes"] as const) {
-    if (
-      frontmatter[key] !== undefined &&
-      typeof frontmatter[key] !== "string"
-    ) {
-      errors.push(
-        error(`frontmatter \`${key}\` must be a string when present`, filePath),
-      );
-    }
   }
 
   if (

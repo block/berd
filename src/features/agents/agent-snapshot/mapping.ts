@@ -12,16 +12,6 @@ import {
   validateSnapshotV1,
 } from "./schema";
 
-const MAX_CARD_COPY_RAW_LENGTH = 4_096;
-
-function validOptionalTraitMetadata(value: unknown): string | undefined {
-  if (typeof value !== "string" || value.length > MAX_CARD_COPY_RAW_LENGTH) {
-    return undefined;
-  }
-  const trimmed = value.trim();
-  return trimmed || undefined;
-}
-
 export interface SnapshotMappingSupport {
   /** Return true only when this exact provider/model can be selected locally. */
   supportsConfiguration?: (provider: string, model: string) => boolean;
@@ -57,10 +47,6 @@ export function snapshotToCreatePersonaRequest(
   if (typeof about === "string" && about.trim()) {
     request.description = truncateCardGraphemes(about.trim(), 110);
   }
-  const goodFor = validOptionalTraitMetadata(snapshot.profile?.goodFor);
-  const vibes = validOptionalTraitMetadata(snapshot.profile?.vibes);
-  if (goodFor) request.goodFor = goodFor;
-  if (vibes) request.vibes = vibes;
   const avatarDataUrl = snapshot.profile?.avatarDataUrl;
   if (
     typeof avatarDataUrl === "string" &&
@@ -99,8 +85,6 @@ export function personaToSnapshot(persona: Persona): SnapshotV1 {
       about: authoredDescription
         ? truncateCardGraphemes(authoredDescription, 110)
         : null,
-      goodFor: persona.goodFor ?? null,
-      vibes: persona.vibes ?? null,
       avatarDataUrl:
         typeof persona.avatar === "string" &&
         isSafePngAvatarDataUrl(persona.avatar)
