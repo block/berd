@@ -33,6 +33,7 @@ import {
   openVoiceConversationSession,
   reconcileVoiceConversationMicrophone,
   setVoiceConversationAssistantSpeaking,
+  setVoiceConversationControlsSuppressed,
   setVoiceConversationMicrophoneMuted,
   startVoiceConversation,
   showVoiceConversationControls,
@@ -130,17 +131,58 @@ describe("voice conversation API", () => {
     );
   });
 
+  it("serializes floating-control visibility updates", async () => {
+    let releaseFirst: (() => void) | undefined;
+    mocks.invoke
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+          }),
+      )
+      .mockResolvedValue(undefined);
+
+    const first = setVoiceConversationControlsSuppressed("session-1", 3, true);
+    const second = setVoiceConversationControlsSuppressed(
+      "session-1",
+      3,
+      false,
+    );
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(1));
+    releaseFirst?.();
+    await Promise.all([first, second]);
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      [
+        "set_voice_conversation_controls_suppressed",
+        { sessionId: "session-1", expectedRevision: 3, suppressed: true },
+      ],
+      [
+        "set_voice_conversation_controls_suppressed",
+        { sessionId: "session-1", expectedRevision: 3, suppressed: false },
+      ],
+    ]);
+  });
+
   it("exposes the buddy control commands", async () => {
     mocks.invoke.mockResolvedValue(undefined);
 
     await openVoiceConversationSession();
-    await showVoiceConversationControls();
+    await showVoiceConversationControls("session-1", 3);
+    await setVoiceConversationControlsSuppressed("session-1", 3, true);
     await setVoiceConversationAssistantSpeaking("session-1", 3, true);
     await stopVoiceConversationFromBuddy();
 
     expect(mocks.invoke.mock.calls).toEqual([
       ["open_voice_conversation_session"],
-      ["show_voice_conversation_controls"],
+      [
+        "show_voice_conversation_controls",
+        { sessionId: "session-1", expectedRevision: 3 },
+      ],
+      [
+        "set_voice_conversation_controls_suppressed",
+        { sessionId: "session-1", expectedRevision: 3, suppressed: true },
+      ],
       [
         "set_native_voice_assistant_speaking",
         { sessionId: "session-1", expectedRevision: 3, speaking: true },

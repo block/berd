@@ -242,8 +242,33 @@ export function openVoiceConversationSession(): Promise<void> {
   return invoke("open_voice_conversation_session");
 }
 
-export function showVoiceConversationControls(): Promise<void> {
-  return invoke("show_voice_conversation_controls");
+export function showVoiceConversationControls(
+  sessionId: string,
+  expectedRevision: number,
+): Promise<void> {
+  return invoke("show_voice_conversation_controls", {
+    sessionId,
+    expectedRevision,
+  });
+}
+
+let controlsVisibilityQueue = Promise.resolve();
+export function setVoiceConversationControlsSuppressed(
+  sessionId: string,
+  expectedRevision: number,
+  suppressed: boolean,
+): Promise<void> {
+  const operation = controlsVisibilityQueue
+    .catch(() => undefined)
+    .then(() =>
+      invoke<void>("set_voice_conversation_controls_suppressed", {
+        sessionId,
+        expectedRevision,
+        suppressed,
+      }),
+    );
+  controlsVisibilityQueue = operation.catch(() => undefined);
+  return operation;
 }
 
 export function setVoiceConversationAssistantSpeaking(

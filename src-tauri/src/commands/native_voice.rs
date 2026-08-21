@@ -129,6 +129,8 @@ struct Runtime {
     owner: Option<RuntimeOwner>,
     pipeline: Option<SttPipeline>,
     native_microphone_mute_control: bool,
+    controls_ready: bool,
+    controls_suppressed: bool,
 }
 
 #[derive(Clone)]
@@ -204,6 +206,102 @@ impl NativeVoiceState {
             runtime.owner.as_ref()?.window_label.clone(),
             runtime.revision,
         ))
+    }
+
+    pub fn controls_suppression_for(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+    ) -> Result<Option<bool>, String> {
+        let runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.session_id.as_deref() != Some(session_id)
+            || runtime.revision != expected_revision
+        {
+            return Ok(None);
+        }
+        Ok(Some(runtime.controls_suppressed))
+    }
+
+    pub fn mark_controls_ready_after_apply(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+        applied_suppression: bool,
+    ) -> Result<Option<bool>, String> {
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.session_id.as_deref() != Some(session_id)
+            || runtime.revision != expected_revision
+        {
+            return Ok(None);
+        }
+        if runtime.controls_suppressed != applied_suppression {
+            return Ok(Some(false));
+        }
+        runtime.controls_ready = true;
+        Ok(Some(true))
+    }
+
+    pub fn controls_ready_for(&self, session_id: &str, revision: u64) -> bool {
+        self.runtime.lock().ok().is_some_and(|runtime| {
+            runtime.session_id.as_deref() == Some(session_id)
+                && runtime.revision == revision
+                && runtime.controls_ready
+        })
+    }
+
+    pub fn set_controls_suppressed(
+        &self,
+        caller_window_label: &str,
+        session_id: &str,
+        expected_revision: u64,
+        suppressed: bool,
+    ) -> Result<Option<(bool, bool)>, String> {
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.session_id.as_deref() != Some(session_id)
+            || runtime.revision != expected_revision
+        {
+            return Ok(None);
+        }
+        if runtime
+            .owner
+            .as_ref()
+            .map(|owner| owner.window_label.as_str())
+            != Some(caller_window_label)
+        {
+            return Err("Only the voice conversation owner can change control visibility.".into());
+        }
+        let previous_suppression = runtime.controls_suppressed;
+        runtime.controls_suppressed = suppressed;
+        Ok(Some((
+            runtime.controls_ready && !suppressed,
+            previous_suppression,
+        )))
+    }
+
+    pub fn rollback_controls_suppression(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+        failed_suppression: bool,
+        previous_suppression: bool,
+    ) {
+        if let Ok(mut runtime) = self.runtime.lock() {
+            if runtime.session_id.as_deref() == Some(session_id)
+                && runtime.revision == expected_revision
+                && runtime.controls_suppressed == failed_suppression
+            {
+                runtime.controls_suppressed = previous_suppression;
+            }
+        }
     }
 
     pub fn is_active_for_session(&self, session_id: &str) -> bool {
@@ -652,6 +750,11 @@ pub async fn start_native_voice_conversation(
                     },
                 );
             });
+        runtime.controls_ready = false;
+        // Voice always starts from its owning session, where the in-session
+        // controls are already available. The owner renderer reveals the
+        // floating controls when that session stops being foreground.
+        runtime.controls_suppressed = true;
         state.microphone_muted.store(false, Ordering::SeqCst);
         (
             runtime.revision,
@@ -1490,6 +1593,62 @@ mod tests {
         let runtime = state.runtime.lock().expect("lock native runtime");
         assert!(runtime.session_id.is_none());
         assert!(runtime.owner.is_none());
+    }
+
+    #[test]
+    fn floating_controls_follow_only_the_exact_owner_lifecycle() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.revision = 4;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+            runtime.controls_suppressed = true;
+        }
+
+        assert_eq!(
+            state
+                .controls_suppression_for("session-1", 4)
+                .expect("read control suppression"),
+            Some(true),
+        );
+        assert_eq!(
+            state
+                .mark_controls_ready_after_apply("session-1", 4, true)
+                .expect("mark controls ready after apply"),
+            Some(true),
+        );
+        assert!(state.controls_ready_for("session-1", 4));
+        assert_eq!(
+            state
+                .mark_controls_ready_after_apply("session-1", 3, true)
+                .expect("stale readiness is ignored"),
+            None,
+        );
+        assert_eq!(
+            state
+                .set_controls_suppressed("main", "session-1", 4, false)
+                .expect("owner reveals controls"),
+            Some((true, true)),
+        );
+        state.rollback_controls_suppression("session-1", 4, false, true);
+        assert_eq!(
+            state
+                .controls_suppression_for("session-1", 4)
+                .expect("failed visibility is rolled back"),
+            Some(true),
+        );
+        assert_eq!(
+            state
+                .set_controls_suppressed("main", "session-1", 3, true)
+                .expect("stale lifecycle is ignored"),
+            None,
+        );
+        assert!(state
+            .set_controls_suppressed("other-window", "session-1", 4, true)
+            .is_err());
     }
 
     #[test]

@@ -31,12 +31,14 @@ export function VoiceBuddyApp() {
   const [initialized, setInitialized] = useState(false);
 
   useLayoutEffect(() => {
-    if (!initialized) return;
-    void showVoiceConversationControls().catch((cause) => {
-      console.error("Failed to show floating voice controls", cause);
-      setError(String(cause));
-    });
-  }, [initialized]);
+    if (!initialized || !status?.sessionId) return;
+    void showVoiceConversationControls(status.sessionId, status.revision).catch(
+      (cause) => {
+        console.error("Failed to show floating voice controls", cause);
+        setError(String(cause));
+      },
+    );
+  }, [initialized, status?.revision, status?.sessionId]);
 
   useEffect(() => {
     let cancelled = false;

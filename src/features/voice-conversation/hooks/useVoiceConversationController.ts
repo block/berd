@@ -16,7 +16,10 @@ import {
   stopNativeAssistantSpeech,
   takeVoicePlaybackNotices,
 } from "../lib/nativeAssistantSpeech";
-import { openVoiceConversationSession } from "../api/voiceConversation";
+import {
+  openVoiceConversationSession,
+  setVoiceConversationControlsSuppressed,
+} from "../api/voiceConversation";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -67,6 +70,99 @@ export function resolveActiveVoiceButtonAction(
   candidateSessionId: string,
 ): "stop" | "open-owner" {
   return activeSessionId === candidateSessionId ? "stop" : "open-owner";
+}
+
+export function shouldSuppressVoiceConversationControls(options: {
+  activeSessionId: string | null;
+  currentSessionId: string;
+  ownerWindowLabel: string | null;
+  currentWindowLabel: string;
+  focused: boolean;
+}): boolean {
+  return (
+    options.focused &&
+    options.activeSessionId === options.currentSessionId &&
+    options.ownerWindowLabel === options.currentWindowLabel
+  );
+}
+
+interface VoiceControlsOwnerWindow {
+  label: string;
+  isFocused: () => Promise<boolean>;
+  onFocusChanged: (
+    listener: (event: { payload: boolean }) => void,
+  ) => Promise<() => void>;
+}
+
+export async function observeVoiceConversationControlVisibility(options: {
+  activeSessionId: string;
+  currentSessionId: string;
+  ownerWindowLabel: string;
+  currentWindow: VoiceControlsOwnerWindow;
+  report: (suppressed: boolean) => Promise<void>;
+  onError: (error: unknown) => void;
+}): Promise<() => void> {
+  if (options.currentWindow.label !== options.ownerWindowLabel) {
+    return () => undefined;
+  }
+  let stopped = false;
+  let focusGeneration = 0;
+  let unlisten: (() => void) | undefined;
+  const publish = (focused: boolean) => {
+    if (stopped) return;
+    const suppressed = shouldSuppressVoiceConversationControls({
+      activeSessionId: options.activeSessionId,
+      currentSessionId: options.currentSessionId,
+      ownerWindowLabel: options.ownerWindowLabel,
+      currentWindowLabel: options.currentWindow.label,
+      focused,
+    });
+    void options.report(suppressed).catch(options.onError);
+  };
+  const failOpen = () => {
+    void options.report(false).catch(options.onError);
+  };
+
+  try {
+    unlisten = await options.currentWindow.onFocusChanged((event) => {
+      focusGeneration += 1;
+      publish(event.payload);
+    });
+    const sampledGeneration = focusGeneration;
+    const focused = await options.currentWindow.isFocused();
+    if (focusGeneration === sampledGeneration) publish(focused);
+  } catch (error) {
+    unlisten?.();
+    failOpen();
+    throw error;
+  }
+
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    unlisten?.();
+    failOpen();
+  };
+}
+
+let controlsVisibilityLeaseGeneration = 0;
+
+export function beginVoiceControlsVisibilityLease() {
+  const generation = ++controlsVisibilityLeaseGeneration;
+  const isCurrent = () => generation === controlsVisibilityLeaseGeneration;
+  return {
+    run(operation: () => Promise<void>): Promise<void> {
+      return isCurrent() ? operation() : Promise.resolve();
+    },
+    release(failOpen: () => Promise<void>): Promise<void> {
+      if (!isCurrent()) return Promise.resolve();
+      controlsVisibilityLeaseGeneration += 1;
+      return failOpen();
+    },
+    invalidate(): void {
+      if (isCurrent()) controlsVisibilityLeaseGeneration += 1;
+    },
+  };
 }
 
 export function shouldStartRequestedVoiceConversation({
@@ -594,6 +690,91 @@ export function useVoiceConversationController({
       return;
     startAssistantSpeech();
   }, [sessionId, startAssistantSpeech, status.lifecycle, status.sessionId]);
+
+  useEffect(() => {
+    if (
+      !window.__TAURI_INTERNALS__ ||
+      status.lifecycle !== "running" ||
+      !status.sessionId ||
+      !status.ownerWindowLabel
+    ) {
+      return;
+    }
+    let disposed = false;
+    let stopVisibilityObserver: (() => void) | undefined;
+    const visibilityLease = beginVoiceControlsVisibilityLease();
+    const activeSessionId = status.sessionId;
+    const ownerWindowLabel = status.ownerWindowLabel;
+    const revision = status.revision;
+
+    void import("@tauri-apps/api/window")
+      .then(async ({ getCurrentWindow }) => {
+        const currentWindow = getCurrentWindow();
+        const report = (suppressed: boolean) =>
+          visibilityLease.run(() =>
+            setVoiceConversationControlsSuppressed(
+              activeSessionId,
+              revision,
+              suppressed,
+            ),
+          );
+        const onError = (visibilityError: unknown) => {
+          console.warn(
+            "Could not synchronize floating voice control visibility",
+            visibilityError,
+          );
+        };
+        const stop = await observeVoiceConversationControlVisibility({
+          activeSessionId,
+          currentSessionId: sessionId,
+          ownerWindowLabel,
+          currentWindow,
+          report,
+          onError,
+        });
+        if (disposed) stop();
+        else stopVisibilityObserver = stop;
+      })
+      .catch((visibilityError) => {
+        void visibilityLease
+          .run(() =>
+            setVoiceConversationControlsSuppressed(
+              activeSessionId,
+              revision,
+              false,
+            ),
+          )
+          .catch(() => undefined);
+        console.warn(
+          "Could not observe the voice owner window focus",
+          visibilityError,
+        );
+      });
+
+    return () => {
+      disposed = true;
+      if (stopVisibilityObserver) {
+        stopVisibilityObserver();
+        visibilityLease.invalidate();
+      } else {
+        void visibilityLease
+          .release(() =>
+            setVoiceConversationControlsSuppressed(
+              activeSessionId,
+              revision,
+              false,
+            ),
+          )
+          .catch(() => undefined);
+      }
+    };
+  }, [
+    sessionId,
+    status.lifecycle,
+    status.ownerWindowLabel,
+    status.revision,
+    status.sessionId,
+  ]);
 
   const isActive = status.sessionId !== null && status.lifecycle !== "stopped";
   const controlEnabled = enabled && isGooseSession && !readOnly && !disabled;

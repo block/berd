@@ -140,14 +140,13 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     });
     position_near_bottom_right(app, &window);
     let fallback_app = app.clone();
-    let fallback_window = window.clone();
     tauri::async_runtime::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        if !fallback_window.is_visible().unwrap_or(false) {
+        let state = fallback_app.state::<NativeVoiceState>();
+        if !state.controls_ready_for(&session_id, revision) {
             log::error!(
                 "Floating voice controls did not become ready; stopping the voice conversation"
             );
-            let state = fallback_app.state::<NativeVoiceState>();
             if state.active_session_lifecycle_target()
                 != Some((session_id.clone(), owner_window_label.clone(), revision))
             {
@@ -193,11 +192,89 @@ pub fn open_voice_conversation_session(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn show_voice_conversation_controls(window: WebviewWindow) -> Result<(), String> {
+pub fn show_voice_conversation_controls(
+    window: WebviewWindow,
+    state: tauri::State<'_, NativeVoiceState>,
+    session_id: String,
+    expected_revision: u64,
+) -> Result<(), String> {
     if window.label() != WINDOW_LABEL {
         return Err("Only the floating voice controls can show this window.".to_string());
     }
-    window.show().map_err(|error| error.to_string())
+    for _ in 0..3 {
+        let Some(suppressed) = state.controls_suppression_for(&session_id, expected_revision)?
+        else {
+            return Ok(());
+        };
+        if suppressed {
+            window.hide()
+        } else {
+            window.show()
+        }
+        .map_err(|error| error.to_string())?;
+        match state.mark_controls_ready_after_apply(&session_id, expected_revision, suppressed)? {
+            None | Some(true) => return Ok(()),
+            Some(false) => continue,
+        }
+    }
+    Err("Voice control visibility changed repeatedly during startup.".to_string())
+}
+
+#[tauri::command]
+pub fn set_voice_conversation_controls_suppressed(
+    window: WebviewWindow,
+    state: tauri::State<'_, NativeVoiceState>,
+    session_id: String,
+    expected_revision: u64,
+    suppressed: bool,
+) -> Result<(), String> {
+    let Some((should_show, previous_suppression)) = state.set_controls_suppressed(
+        window.label(),
+        &session_id,
+        expected_revision,
+        suppressed,
+    )?
+    else {
+        return Ok(());
+    };
+    let Some(controls) = window.app_handle().get_webview_window(WINDOW_LABEL) else {
+        state.rollback_controls_suppression(
+            &session_id,
+            expected_revision,
+            suppressed,
+            previous_suppression,
+        );
+        if should_show {
+            open_active_session(window.app_handle()).map_err(|recovery_error| {
+                format!(
+                    "The floating voice controls are no longer available, and the voice session could not be restored: {recovery_error}"
+                )
+            })?;
+        }
+        return Err("The floating voice controls are no longer available.".to_string());
+    };
+    let result = if should_show {
+        controls.show()
+    } else {
+        controls.hide()
+    };
+    if let Err(error) = result {
+        state.rollback_controls_suppression(
+            &session_id,
+            expected_revision,
+            suppressed,
+            previous_suppression,
+        );
+        if should_show {
+            open_active_session(window.app_handle()).map_err(|recovery_error| {
+                format!(
+                    "The floating voice controls could not be shown ({error}), and the voice session could not be restored: {recovery_error}"
+                )
+            })?;
+        }
+        return Err(error.to_string());
+    }
+    Ok(())
 }
 
 #[tauri::command]

@@ -126,7 +126,9 @@ describe("VoiceBuddyApp", () => {
     await waitFor(() => expect(mocks.listen).toHaveBeenCalledOnce());
     expect(mocks.show).not.toHaveBeenCalled();
     act(() => resolveStatus?.(runningStatus));
-    await waitFor(() => expect(mocks.show).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(mocks.show).toHaveBeenCalledWith("session-a", 3),
+    );
     act(() => {
       voiceEventListener?.({
         type: "activity",

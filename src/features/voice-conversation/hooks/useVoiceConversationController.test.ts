@@ -18,12 +18,15 @@ vi.mock("../lib/nativeAssistantSpeech", () => ({
 import {
   canBindVoiceSendRoute,
   canClaimVoiceSendRoute,
+  beginVoiceControlsVisibilityLease,
   createVoiceTranscriptDeliveryQueue,
   hasDeliveredVoiceTranscript,
+  observeVoiceConversationControlVisibility,
   resetVoiceUiWhenRunSettles,
   resolveActiveVoiceButtonAction,
   resolveVoiceRouteMount,
   resolveVoiceToggleAction,
+  shouldSuppressVoiceConversationControls,
   shouldStartRequestedVoiceConversation,
   startPendingTranscriptRecovery,
   useVoiceConversationController,
@@ -31,6 +34,87 @@ import {
 } from "./useVoiceConversationController";
 
 describe("voice transcript delivery coordination", () => {
+  it("suppresses floating controls only for the focused owner session", () => {
+    const base = {
+      activeSessionId: "session-1",
+      currentSessionId: "session-1",
+      ownerWindowLabel: "main",
+      currentWindowLabel: "main",
+      focused: true,
+    };
+
+    expect(shouldSuppressVoiceConversationControls(base)).toBe(true);
+    expect(
+      shouldSuppressVoiceConversationControls({
+        ...base,
+        currentSessionId: "session-2",
+      }),
+    ).toBe(false);
+    expect(
+      shouldSuppressVoiceConversationControls({ ...base, focused: false }),
+    ).toBe(false);
+    expect(
+      shouldSuppressVoiceConversationControls({
+        ...base,
+        currentWindowLabel: "session-window",
+      }),
+    ).toBe(false);
+  });
+
+  it("observes focus before sampling and fails open when the owner unmounts", async () => {
+    let focusListener: ((event: { payload: boolean }) => void) | undefined;
+    let resolveFocused: ((focused: boolean) => void) | undefined;
+    const focused = new Promise<boolean>((resolve) => {
+      resolveFocused = resolve;
+    });
+    const reports: boolean[] = [];
+    const stopPromise = observeVoiceConversationControlVisibility({
+      activeSessionId: "session-1",
+      currentSessionId: "session-1",
+      ownerWindowLabel: "main",
+      currentWindow: {
+        label: "main",
+        isFocused: () => focused,
+        onFocusChanged: async (listener) => {
+          focusListener = listener;
+          return () => undefined;
+        },
+      },
+      report: async (suppressed) => {
+        reports.push(suppressed);
+      },
+      onError: vi.fn(),
+    });
+
+    await vi.waitFor(() => expect(focusListener).toBeDefined());
+    focusListener?.({ payload: false });
+    resolveFocused?.(true);
+    const stop = await stopPromise;
+    await vi.waitFor(() => expect(reports).toEqual([false]));
+
+    stop();
+    await vi.waitFor(() => expect(reports).toEqual([false, false]));
+  });
+
+  it("ignores a visibility observer that resolves after its replacement", async () => {
+    const reports: string[] = [];
+    const first = beginVoiceControlsVisibilityLease();
+    await first.release(async () => {
+      reports.push("first:cleanup");
+    });
+    const replacement = beginVoiceControlsVisibilityLease();
+
+    await first.run(async () => {
+      reports.push("first:late");
+    });
+    await replacement.run(async () => {
+      reports.push("replacement:focused");
+    });
+
+    expect(reports).toEqual(["first:cleanup", "replacement:focused"]);
+    replacement.invalidate();
+  });
+
   it("recognizes a replayed transcript that was already delivered", () => {
     useChatStore.setState({
       messagesBySession: {
