@@ -197,9 +197,45 @@ describe("voice conversation store lifecycle ordering", () => {
     expect(useVoiceConversationStore.getState().microphoneMuted).toBe(true);
   });
 
+  it("preserves a mute event that arrives while hydration is pending", async () => {
+    const hydration = deferred<void>();
+    const muted = {
+      ...status("running", 2, "session-1"),
+      nativeMicrophoneMuteControl: true,
+      nativeMicrophoneMuted: true,
+    };
+    mocks.getStatus.mockResolvedValue(muted);
+    mocks.hydrateMicrophone.mockReturnValue(hydration.promise);
+    const { useVoiceConversationStore } = await import(
+      "./voiceConversationStore"
+    );
+
+    const initializing = useVoiceConversationStore.getState().init();
+    await vi.waitFor(() =>
+      expect(mocks.hydrateMicrophone).toHaveBeenCalledWith(muted),
+    );
+    emit({
+      type: "inputMute",
+      sessionId: "session-1",
+      muted: false,
+      revision: 2,
+    });
+    hydration.resolve();
+    await initializing;
+
+    expect(useVoiceConversationStore.getState().microphoneMuted).toBe(false);
+  });
+
   it("does not let stale status overwrite a newer mute event", async () => {
     const response = deferred<VoiceConversationStatus>();
-    mocks.getStatus.mockReturnValue(response.promise);
+    const current = {
+      ...status("running", 3, "session-1"),
+      nativeMicrophoneMuteControl: true,
+      nativeMicrophoneMuted: false,
+    };
+    mocks.getStatus
+      .mockReturnValueOnce(response.promise)
+      .mockResolvedValueOnce(current);
     const { useVoiceConversationStore } = await import(
       "./voiceConversationStore"
     );
@@ -220,12 +256,8 @@ describe("voice conversation store lifecycle ordering", () => {
     await initializing;
 
     expect(mocks.hydrateMicrophone).not.toHaveBeenCalled();
-    expect(mocks.reconcileMicrophone).toHaveBeenCalledWith(
-      expect.objectContaining({
-        lifecycle: "running",
-        sessionId: "session-1",
-      }),
-    );
+    expect(mocks.reconcileMicrophone).toHaveBeenCalledWith(current);
+    expect(mocks.getStatus).toHaveBeenCalledTimes(2);
     expect(useVoiceConversationStore.getState().microphoneMuted).toBe(false);
     expect(useVoiceConversationStore.getState().status.revision).toBe(3);
   });

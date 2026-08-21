@@ -164,15 +164,29 @@ function shouldApplyResponseRevision(
   return revision > current.revision;
 }
 
-function isMatchingRunningSession(
+function isSameRunningLifecycle(
   current: VoiceConversationStatus,
   next: VoiceConversationStatus,
 ) {
   return (
     current.lifecycle === "running" &&
     next.lifecycle === "running" &&
-    current.sessionId === next.sessionId
+    current.sessionId === next.sessionId &&
+    current.revision === next.revision &&
+    (current.ownerWindowLabel === null ||
+      current.ownerWindowLabel === next.ownerWindowLabel)
   );
+}
+
+async function getRecoveryStatus(
+  currentStatus: () => VoiceConversationStatus,
+): Promise<VoiceConversationStatus> {
+  let status = await getVoiceConversationStatus();
+  const current = currentStatus();
+  if (current.lifecycle === "running" && status.revision < current.revision) {
+    status = await getVoiceConversationStatus();
+  }
+  return status;
 }
 
 export const useVoiceConversationStore = create<VoiceConversationStore>(
@@ -199,27 +213,27 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       if (initialized) {
         try {
           const muteStateVersion = microphoneMuteStateVersion;
-          const status = await getVoiceConversationStatus();
+          const status = await getRecoveryStatus(() => get().status);
           const currentStatus = get().status;
           const shouldAdopt = shouldApplyResponseRevision(
             currentStatus,
             status.revision,
           );
-          const matchingRunningSession = isMatchingRunningSession(
+          const sameRunningLifecycle = isSameRunningLifecycle(
             currentStatus,
             status,
           );
-          const shouldReconcile = shouldAdopt || matchingRunningSession;
+          const shouldReconcile = shouldAdopt || sameRunningLifecycle;
           const shouldHydrate =
-            (shouldAdopt ||
-              (matchingRunningSession &&
-                currentStatus.revision === status.revision)) &&
+            (shouldAdopt || sameRunningLifecycle) &&
             muteStateVersion === microphoneMuteStateVersion;
           if (shouldHydrate) {
             await hydrateVoiceConversationMicrophone(status);
           } else if (shouldReconcile) {
             await reconcileVoiceConversationMicrophone(status);
           }
+          const applyHydratedMute =
+            shouldHydrate && muteStateVersion === microphoneMuteStateVersion;
           set((state) => {
             if (
               shouldApplyResponseRevision(state.status, status.revision) ||
@@ -233,7 +247,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   state.uiState === "error"
                     ? state.uiState
                     : uiStateForStatus(status),
-                microphoneMuted: shouldHydrate
+                microphoneMuted: applyHydratedMute
                   ? status.lifecycle === "running"
                     ? (status.nativeMicrophoneMuted ?? false)
                     : false
@@ -248,7 +262,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   available: status.available,
                   unavailableReason: status.unavailableReason,
                 },
-                microphoneMuted: shouldHydrate
+                microphoneMuted: applyHydratedMute
                   ? status.lifecycle === "running"
                     ? (status.nativeMicrophoneMuted ?? false)
                     : false
@@ -442,28 +456,28 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
 
       try {
         const muteStateVersion = microphoneMuteStateVersion;
-        const status = await getVoiceConversationStatus();
+        const status = await getRecoveryStatus(() => get().status);
         const currentStatus = get().status;
         const shouldAdopt =
           shouldApplyResponseRevision(currentStatus, status.revision) ||
           (!get().hydrated &&
             get().status.revision === 0 &&
             get().uiState === "off");
-        const matchingRunningSession = isMatchingRunningSession(
+        const sameRunningLifecycle = isSameRunningLifecycle(
           currentStatus,
           status,
         );
-        const shouldReconcile = shouldAdopt || matchingRunningSession;
+        const shouldReconcile = shouldAdopt || sameRunningLifecycle;
         const shouldHydrate =
-          (shouldAdopt ||
-            (matchingRunningSession &&
-              currentStatus.revision === status.revision)) &&
+          (shouldAdopt || sameRunningLifecycle) &&
           muteStateVersion === microphoneMuteStateVersion;
         if (shouldHydrate) {
           await hydrateVoiceConversationMicrophone(status);
         } else if (shouldReconcile) {
           await reconcileVoiceConversationMicrophone(status);
         }
+        const applyHydratedMute =
+          shouldHydrate && muteStateVersion === microphoneMuteStateVersion;
         set((state) => {
           if (
             shouldApplyResponseRevision(state.status, status.revision) ||
@@ -477,7 +491,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                 state.uiState === "error"
                   ? state.uiState
                   : uiStateForStatus(status),
-              microphoneMuted: shouldHydrate
+              microphoneMuted: applyHydratedMute
                 ? status.lifecycle === "running"
                   ? (status.nativeMicrophoneMuted ?? false)
                   : false
@@ -485,9 +499,9 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
               hydrated: true,
             };
           }
-          if (isMatchingRunningSession(state.status, status)) {
+          if (isSameRunningLifecycle(state.status, status)) {
             return {
-              microphoneMuted: shouldHydrate
+              microphoneMuted: applyHydratedMute
                 ? (status.nativeMicrophoneMuted ?? false)
                 : state.microphoneMuted,
               hydrated: true,
