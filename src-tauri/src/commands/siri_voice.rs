@@ -6,7 +6,7 @@ use std::fs;
 #[cfg(target_os = "macos")]
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -76,6 +76,8 @@ const SIRI_STREAM_EVENT: &str = "siri-voice:stream-event";
 const SIRI_STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
+static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
+static SIRI_SETTINGS_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -146,9 +148,30 @@ fn write_settings(path: &Path, settings: &SiriVoiceSettings) -> Result<(), Strin
     fs::create_dir_all(parent).map_err(|error| format!("create Siri TTS settings: {error}"))?;
     let data = serde_json::to_vec_pretty(settings)
         .map_err(|error| format!("encode Siri TTS settings: {error}"))?;
-    let temporary = path.with_extension("json.tmp");
+    let temporary = path.with_extension(format!(
+        "json.{}.{}.tmp",
+        std::process::id(),
+        SIRI_SETTINGS_TEMP_COUNTER.fetch_add(1, Ordering::Relaxed),
+    ));
     fs::write(&temporary, data).map_err(|error| format!("write Siri TTS settings: {error}"))?;
-    fs::rename(&temporary, path).map_err(|error| format!("publish Siri TTS settings: {error}"))
+    fs::rename(&temporary, path).map_err(|error| {
+        let _ = fs::remove_file(&temporary);
+        format!("publish Siri TTS settings: {error}")
+    })
+}
+
+fn update_settings(
+    path: &Path,
+    update: impl FnOnce(&mut SiriVoiceSettings) -> bool,
+) -> Result<SiriVoiceSettings, String> {
+    let _guard = SIRI_SETTINGS_LOCK
+        .lock()
+        .map_err(|_| "Siri TTS settings lock was poisoned".to_string())?;
+    let mut settings = read_settings(path);
+    if update(&mut settings) {
+        write_settings(path, &settings)?;
+    }
+    Ok(settings)
 }
 
 #[cfg(target_os = "macos")]
@@ -405,13 +428,19 @@ fn status(app: &AppHandle, language_prefix: &str) -> Result<SiriVoiceStatus, Str
     let voices = discover_voices(language_prefix)?;
     let available_languages = discover_languages()?;
     let path = settings_path(app)?;
-    let mut settings = read_settings(&path);
-    if settings.selected_voice.is_none() {
-        settings.selected_voice = choose_installed_voice(&voices, || discover_voices(""))?;
-        if settings.selected_voice.is_some() {
-            write_settings(&path, &settings)?;
+    let automatic_selection = if read_settings(&path).selected_voice.is_none() {
+        choose_installed_voice(&voices, || discover_voices(""))?
+    } else {
+        None
+    };
+    let settings = update_settings(&path, |settings| {
+        if settings.selected_voice.is_none() && automatic_selection.is_some() {
+            settings.selected_voice = automatic_selection;
+            true
+        } else {
+            false
         }
-    }
+    })?;
     let selected_voice_installed = settings.selected_voice.as_ref().is_some_and(|selection| {
         find_voice(&voices, selection).is_some_and(|voice| voice.installed)
             || discover_voices(&selection.language)
@@ -458,13 +487,11 @@ pub async fn select_siri_voice(app: AppHandle, voice: SiriVoiceSelection) -> Res
             voice.name, voice.language
         ));
     }
-    write_settings(
-        &settings_path(&app)?,
-        &SiriVoiceSettings {
-            selected_voice: Some(voice),
-            playback_speed: read_settings(&settings_path(&app)?).playback_speed,
-        },
-    )
+    update_settings(&settings_path(&app)?, |settings| {
+        settings.selected_voice = Some(voice);
+        true
+    })
+    .map(|_| ())
 }
 
 #[tauri::command]
@@ -473,9 +500,11 @@ pub fn set_siri_playback_speed(app: AppHandle, speed: f32) -> Result<(), String>
         return Err("Siri playback speed must be between 0.5 and 2.0".to_string());
     }
     let path = settings_path(&app)?;
-    let mut settings = read_settings(&path);
-    settings.playback_speed = speed;
-    write_settings(&path, &settings)
+    update_settings(&path, |settings| {
+        settings.playback_speed = speed;
+        true
+    })
+    .map(|_| ())
 }
 
 #[tauri::command]
@@ -933,6 +962,64 @@ mod tests {
             read_settings(&directory.path().join("missing.json")).selected_voice,
             None
         );
+    }
+
+    #[test]
+    fn concurrent_settings_updates_preserve_both_fields() {
+        let directory = tempfile::tempdir().expect("tempdir");
+        let path = Arc::new(directory.path().join("settings.json"));
+        let (selection_entered_tx, selection_entered_rx) = std::sync::mpsc::channel();
+        let (release_selection_tx, release_selection_rx) = std::sync::mpsc::channel();
+
+        let selection_path = path.clone();
+        let selection_writer = std::thread::spawn(move || {
+            update_settings(&selection_path, |settings| {
+                selection_entered_tx.send(()).expect("signal settings read");
+                release_selection_rx
+                    .recv()
+                    .expect("release selection write");
+                settings.selected_voice = Some(SiriVoiceSelection {
+                    name: "Aaron".to_string(),
+                    language: "en-US".to_string(),
+                });
+                true
+            })
+            .expect("write selected voice");
+        });
+
+        selection_entered_rx
+            .recv()
+            .expect("selection acquired lock");
+        assert!(matches!(
+            SIRI_SETTINGS_LOCK.try_lock(),
+            Err(std::sync::TryLockError::WouldBlock)
+        ));
+        let speed_path = path.clone();
+        let (speed_started_tx, speed_started_rx) = std::sync::mpsc::channel();
+        let speed_writer = std::thread::spawn(move || {
+            speed_started_tx.send(()).expect("signal speed update");
+            update_settings(&speed_path, |settings| {
+                settings.playback_speed = 1.5;
+                true
+            })
+            .expect("write playback speed");
+        });
+        speed_started_rx.recv().expect("speed update started");
+        release_selection_tx.send(()).expect("release selection");
+        selection_writer.join().expect("selection writer");
+        speed_writer.join().expect("speed writer");
+
+        let settings = read_settings(&path);
+        assert_eq!(
+            settings.selected_voice,
+            Some(SiriVoiceSelection {
+                name: "Aaron".to_string(),
+                language: "en-US".to_string(),
+            })
+        );
+        assert_eq!(settings.playback_speed, 1.5);
+        serde_json::from_slice::<SiriVoiceSettings>(&fs::read(&*path).expect("settings JSON"))
+            .expect("valid settings JSON");
     }
 
     #[test]
