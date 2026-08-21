@@ -3455,6 +3455,21 @@ export function AppShell({
         .clearRequestedStart(target.sessionId);
       return false;
     }
+
+    const history = navigationHistoryRef.current;
+    const previousLocation =
+      history.index > 0 ? history.entries[history.index - 1] : null;
+    if (
+      previousLocation?.view === "chat" &&
+      previousLocation.sessionId === target.sessionId
+    ) {
+      history.index -= 1;
+    } else {
+      history.entries.splice(history.index, 0, {
+        view: "chat",
+        sessionId: target.sessionId,
+      });
+    }
     if (!globalVoiceReady) {
       useVoiceConversationStore
         .getState()
@@ -3467,13 +3482,25 @@ export function AppShell({
     setChatActiveSession(target.sessionId);
     useChatStore.getState().markSessionRead(target.sessionId);
     void loadSessionMessagesAndPrepare(target.sessionId);
+    updateNavigationAvailability();
     return true;
   }, [
     globalVoiceReady,
     setActiveSession,
     setChatActiveSession,
+    updateNavigationAvailability,
     voiceSettingsReturnTarget,
   ]);
+
+  useEffect(() => {
+    if (activeView === "settings" || !voiceSettingsReturnTarget) {
+      return;
+    }
+    useVoiceConversationStore
+      .getState()
+      .clearRequestedStart(voiceSettingsReturnTarget.sessionId);
+    setVoiceSettingsReturnTarget(null);
+  }, [activeView, voiceSettingsReturnTarget]);
 
   const openSettings = useCallback(
     (section: SectionId = DEFAULT_SETTINGS_SECTION) => {

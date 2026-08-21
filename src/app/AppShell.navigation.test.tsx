@@ -4117,6 +4117,46 @@ describe("AppShell global navigation", () => {
     expect(
       useVoiceConversationStore.getState().requestedStartSessionId,
     ).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Forward" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+  });
+
+  it("cancels a voice start when navigating away from setup", async () => {
+    const user = userEvent.setup();
+    const session = useChatSessionStore.getState().createDraftSession({
+      title: "Voice setup target",
+      workingDir: "/tmp/voice-setup-target",
+    });
+    useVoiceConversationStore.getState().requestStart(session.id);
+    renderAppShell();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(OPEN_SETTINGS_EVENT, {
+          detail: {
+            section: "voice",
+            returnTarget: {
+              type: "voice-setup",
+              sessionId: session.id,
+            },
+          },
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("skills");
+    });
+    expect(
+      useVoiceConversationStore.getState().requestedStartSessionId,
+    ).toBeNull();
   });
 
   it("discarding a dirty agent draft continues the pending navigation", async () => {
