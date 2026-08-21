@@ -309,6 +309,31 @@ describe("voice conversation store lifecycle ordering", () => {
     expect(store.getState().status.nativeMicrophoneMuteControl).toBe(true);
   });
 
+  it("ignores an older start response after a newer startup event", async () => {
+    const store = await loadStore();
+    const response = deferred<VoiceConversationStatus>();
+    mocks.start.mockReturnValue(response.promise);
+
+    const starting = store.getState().start("session-1");
+    emit({
+      type: "startup",
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      line: "type\tid\ttext",
+      revision: 2,
+      nativeMicrophoneMuteControl: true,
+    });
+    response.resolve(status("starting", 1, "session-1"));
+    await starting;
+
+    expect(store.getState()).toMatchObject({
+      status: status("running", 2, "session-1"),
+      uiState: "listening",
+      error: null,
+    });
+    expect(store.getState().status.nativeMicrophoneMuteControl).toBe(true);
+  });
+
   it("reconciles status after a failed stop", async () => {
     const store = await loadStore();
     store.setState({
