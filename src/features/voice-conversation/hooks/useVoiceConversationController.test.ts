@@ -3,6 +3,18 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
+const nativeAssistantSpeechMocks = vi.hoisted(() => ({
+  start: vi.fn(),
+  stop: vi.fn(),
+  takeNotices: vi.fn<() => string | null>(() => null),
+}));
+
+vi.mock("../lib/nativeAssistantSpeech", () => ({
+  startNativeAssistantSpeech: nativeAssistantSpeechMocks.start,
+  stopNativeAssistantSpeech: nativeAssistantSpeechMocks.stop,
+  takeVoicePlaybackNotices: nativeAssistantSpeechMocks.takeNotices,
+}));
+
 import {
   canBindVoiceSendRoute,
   canClaimVoiceSendRoute,
@@ -73,6 +85,9 @@ describe("voice transcript delivery coordination", () => {
   });
 
   beforeEach(() => {
+    nativeAssistantSpeechMocks.start.mockClear();
+    nativeAssistantSpeechMocks.stop.mockClear();
+    nativeAssistantSpeechMocks.takeNotices.mockClear();
     useChatStore.setState({ messagesBySession: {}, sessionStateById: {} });
   });
   it("serializes deliveries for the same session and re-evaluates in order", async () => {

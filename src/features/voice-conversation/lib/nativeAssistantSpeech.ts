@@ -20,6 +20,7 @@ type ActiveUtterance = {
   finishing: boolean;
   status: SpeechStatus | null;
   onFailure: SpeechFailureHandler;
+  onTerminal: () => void;
 };
 type SpeechStatus =
   | "speaking"
@@ -120,6 +121,7 @@ function failActiveUtterance(
   useVoiceConversationStore.getState().setUiState("listening");
   activeUtterance = null;
   onFailure(utterance.text, error);
+  utterance.onTerminal();
 }
 
 function queueStreamCommand(
@@ -152,6 +154,7 @@ function handleStreamEvent(event: PocketVoiceStreamEvent) {
       setUtteranceStatus(utterance, "spoken");
       voice.setUiState("listening");
       activeUtterance = null;
+      utterance.onTerminal();
       break;
     case "interrupted":
       setUtteranceStatus(utterance, "interrupted");
@@ -163,6 +166,7 @@ function handleStreamEvent(event: PocketVoiceStreamEvent) {
       );
       voice.setUiState("listening");
       activeUtterance = null;
+      utterance.onTerminal();
       break;
     case "failed":
       setUtteranceStatus(utterance, "failed");
@@ -178,6 +182,7 @@ function handleStreamEvent(event: PocketVoiceStreamEvent) {
         utterance.text,
         event.error ?? new Error("Pocket voice stream failed"),
       );
+      utterance.onTerminal();
       break;
   }
 }
@@ -194,6 +199,7 @@ function interruptActiveUtterance() {
       utterance.text,
       "interrupted",
     );
+    utterance.onTerminal();
   }
   void stopPocketVoice().catch(() => undefined);
   commandQueue = commandQueue.then(async () => {
@@ -278,6 +284,7 @@ export function startNativeAssistantSpeech(
       finishing: false,
       status: null,
       onFailure,
+      onTerminal: () => queueMicrotask(inspect),
     };
     activeUtterance = utterance;
     queueStreamCommand(
@@ -300,6 +307,10 @@ export function startNativeAssistantSpeech(
     ) {
       return;
     }
+    // The backend owns the current stream until its terminal playback event.
+    // Leave later transcript changes entirely unconsumed so that terminal
+    // handling can inspect them into a distinct utterance.
+    if (activeUtterance?.finishing) return;
 
     const messages = useChatStore.getState().messagesBySession[sessionId] ?? [];
     for (const message of messages) {
