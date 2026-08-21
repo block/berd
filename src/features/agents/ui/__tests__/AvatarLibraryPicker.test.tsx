@@ -10,6 +10,7 @@ function libraryWithError(
   return {
     catalog: null,
     userAvatarIds: [],
+    userAvatarMediaById: {},
     cachedAvatarMediaById: {},
     loading: false,
     cacheChecking: false,
@@ -59,6 +60,7 @@ function libraryWithMediaError(): AvatarLibraryState {
       ],
     },
     userAvatarIds: [],
+    userAvatarMediaById: {},
     cachedAvatarMediaById: {},
     loading: false,
     cacheChecking: false,
@@ -118,14 +120,11 @@ describe("AvatarLibraryPicker", () => {
   it("prepends and selects a reusable custom gloopie in Gloopies", () => {
     const library = libraryWithMediaError();
     library.userAvatarIds = ["gloopie-custom"];
-    library.cachedAvatarMediaById["gloopie-custom"] = {
-      catalogVersion: "user-generated",
-      media: {
-        src: "asset://gloopie-custom.webm",
-        mediaType: "video",
-        alphaMode: "stacked",
-        posterSrc: "asset://gloopie-custom.poster.png",
-      },
+    library.userAvatarMediaById["gloopie-custom"] = {
+      src: "asset://gloopie-custom.webm",
+      mediaType: "video",
+      alphaMode: "stacked",
+      posterSrc: "asset://gloopie-custom.poster.png",
     };
     const onSelectAvatar = vi.fn();
     renderWithProviders(picker(library, onSelectAvatar));

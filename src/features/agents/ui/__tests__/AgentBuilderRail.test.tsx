@@ -37,6 +37,7 @@ vi.mock("@/features/agents/hooks/useAvatarLibrary", () => ({
   useAvatarLibrary: vi.fn(() => ({
     catalog: null,
     userAvatarIds: [],
+    userAvatarMediaById: {},
     cachedAvatarMediaById: {},
     loading: false,
     cacheChecking: false,
@@ -136,6 +137,7 @@ describe("AgentBuilderRail", () => {
     vi.mocked(useAvatarLibrary).mockReturnValue({
       catalog: null,
       userAvatarIds: [],
+      userAvatarMediaById: {},
       cachedAvatarMediaById: {},
       loading: false,
       cacheChecking: false,
@@ -368,6 +370,7 @@ describe("AgentBuilderRail", () => {
         ],
       },
       userAvatarIds: [],
+      userAvatarMediaById: {},
       cachedAvatarMediaById: {
         "gloopy-1": {
           catalogVersion: "v1",

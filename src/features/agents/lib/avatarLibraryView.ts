@@ -1,6 +1,5 @@
 import type { AvatarLibraryState } from "@/features/agents/hooks/useAvatarLibrary";
 import {
-  USER_AVATAR_CATALOG_VERSION,
   avatarRef,
   getAvatarCatalogEntry,
   mediaTypeFromMimeType,
@@ -16,6 +15,7 @@ const GLOOPIES_COLLECTION_ID = "gloopies";
 /** One selectable avatar in a browsing surface. */
 export interface AvatarDisplayEntry {
   id: string;
+  /** Full persisted ref; also the stable identity across avatar namespaces. */
   ref: string;
   label?: string;
   media?: ResolvedAvatarMedia;
@@ -29,25 +29,42 @@ export interface AvatarDisplayEntry {
 export interface AvatarDisplayCollection {
   id: string;
   label?: string;
+  /** Cover presentation is independent from the ordered collection entries. */
+  cover?: AvatarDisplayEntry;
   entries: AvatarDisplayEntry[];
 }
 
-function cachedMedia(
+function bundledEntry(
   library: AvatarLibraryState,
-  expectedCatalogVersion: string | undefined,
   avatarId: string,
-): ResolvedAvatarMedia | undefined {
-  const entry = library.cachedAvatarMediaById[avatarId];
-  return entry?.catalogVersion === expectedCatalogVersion
-    ? entry.media
-    : undefined;
+): AvatarDisplayEntry | undefined {
+  const entry = getAvatarCatalogEntry(library.catalog, avatarId);
+  if (!entry) {
+    return undefined;
+  }
+  const cachedMedia = library.cachedAvatarMediaById[avatarId];
+  const catalogVersion = library.catalog?.catalogVersion;
+  const fallbackVariant = entry.variants.webm ?? entry.variants.hevc;
+  return {
+    id: entry.id,
+    ref: avatarRef(entry.id),
+    label: entry.label,
+    media:
+      cachedMedia?.catalogVersion === catalogVersion
+        ? cachedMedia.media
+        : undefined,
+    fallbackMediaType: fallbackVariant
+      ? mediaTypeFromMimeType(fallbackVariant.mimeType)
+      : "image",
+    isUserAvatar: false,
+  };
 }
 
 function userGloopieEntries(library: AvatarLibraryState): AvatarDisplayEntry[] {
   return library.userAvatarIds.map((avatarId) => ({
     id: avatarId,
     ref: userAvatarRef(avatarId),
-    media: cachedMedia(library, USER_AVATAR_CATALOG_VERSION, avatarId),
+    media: library.userAvatarMediaById[avatarId],
     fallbackMediaType: "video",
     isUserAvatar: true,
   }));
@@ -56,43 +73,29 @@ function userGloopieEntries(library: AvatarLibraryState): AvatarDisplayEntry[] {
 /**
  * Builds the single browsing model shared by the inline picker and full-screen
  * gallery. Custom gloopies are prepended to the existing Gloopies collection;
- * they remain a separate local storage source and are never written into the
- * published catalog.
+ * the newest custom gloopie also becomes that collection's cover. Other
+ * collections retain their catalog-authored cover independently of tile order.
  */
 export function buildAvatarDisplayCollections(
   library: AvatarLibraryState,
 ): AvatarDisplayCollection[] {
-  const catalogVersion = library.catalog?.catalogVersion;
   const customGloopies = userGloopieEntries(library);
 
   return (library.catalog?.collections ?? []).map((collection) => {
     const bundledEntries = collection.avatarIds.flatMap((avatarId) => {
-      const entry = getAvatarCatalogEntry(library.catalog, avatarId);
-      if (!entry) {
-        return [];
-      }
-      const fallbackVariant = entry.variants.webm ?? entry.variants.hevc;
-      return [
-        {
-          id: entry.id,
-          ref: avatarRef(entry.id),
-          label: entry.label,
-          media: cachedMedia(library, catalogVersion, entry.id),
-          fallbackMediaType: fallbackVariant
-            ? mediaTypeFromMimeType(fallbackVariant.mimeType)
-            : "image",
-          isUserAvatar: false,
-        },
-      ];
+      const entry = bundledEntry(library, avatarId);
+      return entry ? [entry] : [];
     });
+    const catalogCover = bundledEntry(library, collection.coverAvatarId);
+    const isGloopies = collection.id === GLOOPIES_COLLECTION_ID;
 
     return {
       id: collection.id,
       label: collection.label,
-      entries:
-        collection.id === GLOOPIES_COLLECTION_ID
-          ? [...customGloopies, ...bundledEntries]
-          : bundledEntries,
+      cover: isGloopies ? (customGloopies[0] ?? catalogCover) : catalogCover,
+      entries: isGloopies
+        ? [...customGloopies, ...bundledEntries]
+        : bundledEntries,
     };
   });
 }

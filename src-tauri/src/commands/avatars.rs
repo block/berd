@@ -457,17 +457,13 @@ pub async fn import_user_avatar_data_url(
         .as_deref()
         .map(decode_imported_poster_data_url)
         .transpose()?;
-    let avatar_ref = write_user_avatar_with_poster(
+    write_user_avatar_with_poster(
         &app,
         &bytes,
         mime_type,
         alpha_mode.as_deref(),
         poster.as_deref().map(|bytes| (bytes, "image/png")),
-    )?;
-    if let Err(error) = app.emit(USER_AVATAR_LIBRARY_CHANGED_EVENT, ()) {
-        log::warn!("Failed to emit user avatar library change event: {error}");
-    }
-    Ok(avatar_ref)
+    )
 }
 
 fn decode_imported_avatar_data_url(data_url: &str) -> Result<(Vec<u8>, &'static str), String> {
@@ -1707,7 +1703,11 @@ pub(crate) fn write_user_avatar_with_poster(
 ) -> Result<String, String> {
     let id = format!("gloopie-{}", Uuid::new_v4());
     let paths = user_avatar_paths(app)?;
-    write_user_avatar_at(&paths, &id, bytes, mime_type, alpha_mode, poster)
+    let avatar_ref = write_user_avatar_at(&paths, &id, bytes, mime_type, alpha_mode, poster)?;
+    if let Err(error) = app.emit(USER_AVATAR_LIBRARY_CHANGED_EVENT, ()) {
+        log::warn!("Failed to emit user avatar library change event: {error}");
+    }
+    Ok(avatar_ref)
 }
 
 fn write_user_avatar_at(

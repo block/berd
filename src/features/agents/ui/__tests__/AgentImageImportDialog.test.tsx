@@ -179,7 +179,7 @@ describe("AgentImageImportDialog", () => {
     await waitFor(() => expect(onConfirm).toHaveBeenCalledTimes(1));
   });
 
-  it("cleans up an imported animation when agent creation fails", async () => {
+  it("preserves an imported library gloopie when agent creation fails", async () => {
     snapshotMocks.decodeAvatarAnimation.mockReturnValue({
       bytes: new Uint8Array([1, 2, 3]),
       mimeType: "video/mp4",
@@ -201,11 +201,8 @@ describe("AgentImageImportDialog", () => {
       screen.getByRole("button", { name: "imageImport.add" }),
     );
 
-    await waitFor(() =>
-      expect(avatarApiMocks.deleteUserAvatar).toHaveBeenCalledWith(
-        "user-avatar:temporary",
-      ),
-    );
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledOnce());
+    expect(avatarApiMocks.deleteUserAvatar).not.toHaveBeenCalled();
   });
 
   it("does not claim memory is present when the field is omitted", () => {

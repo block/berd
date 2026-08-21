@@ -26,10 +26,11 @@ export interface AvatarLibraryState {
   /**
    * Ids of the user's generated gloopies (newest first). They are local
    * library citizens prepended to the published Gloopies collection and
-   * persisted on agents as `user-avatar:<id>`. Their media lives in
-   * `cachedAvatarMediaById` under `USER_AVATAR_CATALOG_VERSION`.
+   * persisted on agents as `user-avatar:<id>`. Their media remains separate
+   * from the bundled cache so the two durable ref namespaces cannot collide.
    */
   userAvatarIds: string[];
+  userAvatarMediaById: Record<string, ResolvedAvatarMedia>;
   cachedAvatarMediaById: Record<string, CachedAvatarMediaEntry>;
   loading: boolean;
   cacheChecking: boolean;
@@ -47,11 +48,10 @@ function cachedMediaForCatalog(
 ): Record<string, CachedAvatarMediaEntry> {
   const mediaById: Record<string, CachedAvatarMediaEntry> = {};
   for (const collection of collections) {
-    const expectedVersion =
-      collection.collectionId === USER_AVATAR_COLLECTION_ID
-        ? USER_AVATAR_CATALOG_VERSION
-        : catalogVersion;
-    if (collection.catalogVersion !== expectedVersion) {
+    if (
+      collection.collectionId === USER_AVATAR_COLLECTION_ID ||
+      collection.catalogVersion !== catalogVersion
+    ) {
       continue;
     }
     for (const asset of collection.assets) {
@@ -60,6 +60,21 @@ function cachedMediaForCatalog(
         media: cachedAssetToMedia(asset),
       };
     }
+  }
+  return mediaById;
+}
+
+function userAvatarMediaForCollections(
+  collections: CachedAvatarCollection[],
+): Record<string, ResolvedAvatarMedia> {
+  const mediaById: Record<string, ResolvedAvatarMedia> = {};
+  const collection = collections.find(
+    (candidate) =>
+      candidate.collectionId === USER_AVATAR_COLLECTION_ID &&
+      candidate.catalogVersion === USER_AVATAR_CATALOG_VERSION,
+  );
+  for (const asset of collection?.assets ?? []) {
+    mediaById[asset.id] = cachedAssetToMedia(asset);
   }
   return mediaById;
 }
@@ -93,6 +108,9 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
     Record<string, CachedAvatarMediaEntry>
   >({});
   const [userAvatarIds, setUserAvatarIds] = useState<string[]>([]);
+  const [userAvatarMediaById, setUserAvatarMediaById] = useState<
+    Record<string, ResolvedAvatarMedia>
+  >({});
 
   useEffect(() => {
     if (!enabled) {
@@ -100,20 +118,40 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
     }
 
     let cancelled = false;
+    const unlisteners: Array<() => void> = [];
     const reload = () => {
       if (!cancelled) {
         setReloadToken((value) => value + 1);
       }
     };
-    const unlistenPromises = [
+
+    void Promise.allSettled([
       listenAvatarCacheWarmed(reload),
       listenUserAvatarLibraryChanged(reload),
-    ];
+    ]).then((registrations) => {
+      for (const registration of registrations) {
+        if (registration.status === "rejected") {
+          console.warn(
+            "Failed to subscribe to avatar library changes:",
+            registration.reason,
+          );
+          continue;
+        }
+        if (cancelled) {
+          registration.value();
+        } else {
+          unlisteners.push(registration.value);
+        }
+      }
+      // Close the snapshot/subscription gap: mutations emitted before listener
+      // registration completed are recovered by one post-subscribe read.
+      reload();
+    });
 
     return () => {
       cancelled = true;
-      for (const unlistenPromise of unlistenPromises) {
-        void unlistenPromise.then((unlisten) => unlisten());
+      for (const unlisten of unlisteners) {
+        unlisten();
       }
     };
   }, [enabled]);
@@ -140,6 +178,9 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
         setCachedAvatarMediaById(cachedMedia);
         setUserAvatarIds(
           userAvatarIdsForCollections(snapshot.cachedCollections),
+        );
+        setUserAvatarMediaById(
+          userAvatarMediaForCollections(snapshot.cachedCollections),
         );
         setBackendMediaRefreshing(snapshot.mediaRefreshing);
         const hasIncompleteMedia = snapshot.cachedCollections.some(
@@ -204,6 +245,7 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
   return {
     catalog,
     userAvatarIds,
+    userAvatarMediaById,
     cachedAvatarMediaById,
     loading,
     cacheChecking: loading || mediaRefreshing || backendMediaRefreshing,

@@ -57,6 +57,7 @@ function libraryWith(
   return {
     catalog,
     userAvatarIds: [],
+    userAvatarMediaById: {},
     cachedAvatarMediaById,
     loading: false,
     cacheChecking: false,

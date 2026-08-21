@@ -92,7 +92,7 @@ export function AvatarLibraryPicker({
 
       return (
         <button
-          key={entry.id}
+          key={entry.ref}
           type="button"
           className={cn(
             "relative flex aspect-square min-h-24 items-center justify-center overflow-hidden rounded-sm bg-popover p-2",
@@ -141,7 +141,7 @@ export function AvatarLibraryPicker({
 
   const renderCollectionButton = useCallback(
     (collection: AvatarDisplayCollection) => {
-      const cover = collection.entries[0];
+      const cover = collection.cover;
       if (!cover) {
         return null;
       }

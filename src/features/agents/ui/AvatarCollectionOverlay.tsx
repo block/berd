@@ -177,8 +177,8 @@ export function AvatarCollectionOverlay({
   const [collectionId, setCollectionId] = useState<string | null>(
     initialCollectionId,
   );
-  const [pendingAvatarId, setPendingAvatarId] = useState<string | null>(null);
-  const [hoveredAvatarId, setHoveredAvatarId] = useState<string | null>(null);
+  const [pendingAvatarRef, setPendingAvatarRef] = useState<string | null>(null);
+  const [hoveredAvatarRef, setHoveredAvatarRef] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
   // Where the funnel exit collapses to (viewport px); null = plain fade.
   const [exitTarget, setExitTarget] = useState<{
@@ -269,7 +269,7 @@ export function AvatarCollectionOverlay({
       return;
     }
     if (collection && hasCollectionsLevel) {
-      setPendingAvatarId(null);
+      setPendingAvatarRef(null);
       setCollectionId(null);
       return;
     }
@@ -330,7 +330,7 @@ export function AvatarCollectionOverlay({
     // runs straight across the wordmark like the reference (the wordmark
     // renders *behind* the avatars; hover brings a tile further forward).
     return buildCollectionLayout(
-      collection.entries.map((entry) => entry.id),
+      collection.entries.map((entry) => entry.ref),
       tileSize.width + panMargin * 2,
       tileSize.height + panMargin * 2,
       {
@@ -387,7 +387,7 @@ export function AvatarCollectionOverlay({
         // highlight — everything fades back up. Deliberately not a dismiss:
         // mis-clicking near an avatar must not throw the user out of the
         // picker.
-        setPendingAvatarId(null);
+        setPendingAvatarRef(null);
         return;
       }
       // On the collections level, empty-canvas clicks light-dismiss the
@@ -398,11 +398,11 @@ export function AvatarCollectionOverlay({
   );
 
   const onConfirmSelect = useCallback(() => {
-    if (!pendingAvatarId || closing) {
+    if (!pendingAvatarRef || closing) {
       return;
     }
     const pendingRef = collection?.entries.find(
-      (entry) => entry.id === pendingAvatarId,
+      (entry) => entry.ref === pendingAvatarRef,
     )?.ref;
     if (!pendingRef) {
       return;
@@ -414,24 +414,26 @@ export function AvatarCollectionOverlay({
     closeWithAnimation,
     collection,
     onSelectAvatar,
-    pendingAvatarId,
+    pendingAvatarRef,
   ]);
 
   const hoverHandlers = useCallback(
-    (id: string) => ({
-      onPointerEnter: () => setHoveredAvatarId(id),
+    (avatarRef: string) => ({
+      onPointerEnter: () => setHoveredAvatarRef(avatarRef),
       onPointerLeave: () =>
-        setHoveredAvatarId((current) => (current === id ? null : current)),
+        setHoveredAvatarRef((current) =>
+          current === avatarRef ? null : current,
+        ),
     }),
     [],
   );
 
   const renderAvatarItem = useCallback(
     (entry: AvatarDisplayEntry, item: ScatterItemLayout) => {
-      const pending = pendingAvatarId === entry.id;
+      const pending = pendingAvatarRef === entry.ref;
       // Highlighting an avatar fades everything else back instead of drawing
       // a ring; the highlighted one stays at full strength (and animates).
-      const dimmed = pendingAvatarId !== null && !pending;
+      const dimmed = pendingAvatarRef !== null && !pending;
       const cachedMedia = entry.media;
       const label = entry.label ?? t("editor.userGloopieLabel");
       return (
@@ -445,10 +447,10 @@ export function AvatarCollectionOverlay({
             pending && "z-10",
             // Hold the entrance (paused at opacity 0) until the media has
             // painted, so tiles never pop in empty and fill in later.
-            cachedMedia && !readyIds.has(entry.id) && "avatar-scatter-waiting",
+            cachedMedia && !readyIds.has(entry.ref) && "avatar-scatter-waiting",
           )}
           style={scatterItemStyle(item)}
-          ref={registerTileNode(entry.id)}
+          ref={registerTileNode(entry.ref)}
         >
           <button
             type="button"
@@ -462,10 +464,10 @@ export function AvatarCollectionOverlay({
             aria-label={label}
             aria-pressed={pending}
             disabled={!cachedMedia || closing}
-            {...hoverHandlers(entry.id)}
+            {...hoverHandlers(entry.ref)}
             onClick={() =>
-              setPendingAvatarId((current) =>
-                current === entry.id ? null : entry.id,
+              setPendingAvatarRef((current) =>
+                current === entry.ref ? null : entry.ref,
               )
             }
           >
@@ -481,10 +483,10 @@ export function AvatarCollectionOverlay({
                 loadingStrategy="eager"
                 // Calm by default: only the hovered or highlighted avatar
                 // plays; everything else sits on its first frame.
-                paused={hoveredAvatarId !== entry.id && !pending}
+                paused={hoveredAvatarRef !== entry.ref && !pending}
                 className="avatar-scatter-media h-full w-full object-contain"
                 onError={() => {}}
-                onReady={() => markReady(entry.id)}
+                onReady={() => markReady(entry.ref)}
               />
             ) : (
               <span className="max-w-full truncate px-2 text-xs text-muted-foreground">
@@ -513,11 +515,11 @@ export function AvatarCollectionOverlay({
     },
     [
       closing,
-      hoveredAvatarId,
+      hoveredAvatarRef,
       hoverHandlers,
       markReady,
       onConfirmSelect,
-      pendingAvatarId,
+      pendingAvatarRef,
       readyIds,
       registerTileNode,
       t,
@@ -526,7 +528,7 @@ export function AvatarCollectionOverlay({
 
   const renderCollectionRowItem = useCallback(
     (entry: AvatarDisplayCollection, index: number) => {
-      const cachedMedia = entry.entries[0]?.media;
+      const cachedMedia = entry.cover?.media;
       const label = collectionDisplayLabel(entry);
       return (
         <button
@@ -655,7 +657,7 @@ export function AvatarCollectionOverlay({
             >
               {layout.map((item) => {
                 const entry = collection.entries.find(
-                  (candidate) => candidate.id === item.id,
+                  (candidate) => candidate.ref === item.id,
                 );
                 return entry ? (
                   <div key={item.id} className="contents">

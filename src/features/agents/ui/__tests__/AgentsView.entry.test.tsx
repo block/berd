@@ -161,6 +161,7 @@ vi.mock("@/features/agents/hooks/useAvatarLibrary", () => ({
 const EMPTY_AVATAR_LIBRARY: AvatarLibraryState = {
   catalog: null,
   userAvatarIds: [],
+  userAvatarMediaById: {},
   cachedAvatarMediaById: {},
   loading: false,
   cacheChecking: false,
