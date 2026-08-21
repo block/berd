@@ -66,13 +66,50 @@ fn position_near_bottom_right(app: &AppHandle, window: &WebviewWindow) {
     let _ = window.set_position(PhysicalPosition::new(x, y));
 }
 
+fn make_macos_transparent(window: &WebviewWindow) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::msg_send;
+        use objc2::runtime::{AnyClass, AnyObject};
+        use objc2_foundation::NSString;
+
+        window
+            .with_webview(|platform_webview| unsafe {
+                let webview = platform_webview.inner() as *mut AnyObject;
+                if webview.is_null() {
+                    return;
+                }
+
+                let ns_window: *mut AnyObject = msg_send![&*webview, window];
+                if !ns_window.is_null() {
+                    let _: () = msg_send![&*ns_window, setOpaque: false];
+                    if let Some(ns_color) = AnyClass::get(c"NSColor") {
+                        let clear_color: *mut AnyObject = msg_send![ns_color, clearColor];
+                        let _: () = msg_send![&*ns_window, setBackgroundColor: clear_color];
+                    }
+                }
+
+                if let Some(ns_number) = AnyClass::get(c"NSNumber") {
+                    let key = NSString::from_str("drawsBackground");
+                    let no_value: *mut AnyObject = msg_send![ns_number, numberWithBool: false];
+                    let _: () = msg_send![&*webview, setValue: no_value forKey: &*key];
+                }
+            })
+            .map_err(|error| error.to_string())?;
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+    Ok(())
+}
+
 pub fn install(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
         let _ = window.show();
         return Ok(());
     }
 
-    let window = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         WINDOW_LABEL,
         WebviewUrl::App("index.html?voiceBuddy=1".into()),
@@ -83,14 +120,15 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     .maximizable(false)
     .minimizable(false)
     .decorations(false)
-    .transparent(true)
     .shadow(false)
     .always_on_top(true)
     .skip_taskbar(true)
     .focused(false)
-    .visible(false)
-    .build()
-    .map_err(|error| error.to_string())?;
+    .visible(false);
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+    let window = builder.build().map_err(|error| error.to_string())?;
+    make_macos_transparent(&window)?;
     window.on_window_event(|event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
