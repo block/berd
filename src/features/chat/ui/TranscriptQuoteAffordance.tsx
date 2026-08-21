@@ -32,6 +32,7 @@ export function TranscriptQuoteAffordance({
 }) {
   const { t } = useTranslation("chat");
   const [pendingQuote, setPendingQuote] = useState<PendingQuote | null>(null);
+  const [announcementSequence, setAnnouncementSequence] = useState(0);
   // True while a pointer drag that started in the transcript is still in
   // progress. The affordance must not appear mid-selection; it shows once
   // the gesture releases.
@@ -59,6 +60,14 @@ export function TranscriptQuoteAffordance({
     updateFromSelection();
   }, [updateFromSelection]);
 
+  const stagePendingQuote = useCallback(() => {
+    if (!sessionId || !pendingQuote) return;
+    useChatStore.getState().setStagedItems(sessionId, [pendingQuote.item]);
+    window.getSelection()?.removeAllRanges();
+    setPendingQuote(null);
+    setAnnouncementSequence((sequence) => sequence + 1);
+  }, [pendingQuote, sessionId]);
+
   // The key on the affordance remounts it when the rendered session changes,
   // so pending selection state can never cross sessions.
   useEffect(() => {
@@ -73,57 +82,75 @@ export function TranscriptQuoteAffordance({
       isSelectingRef.current = false;
       updateFromSelection();
     };
+    const handleKeyboardContextMenu = (event: KeyboardEvent) => {
+      const activeElement = document.activeElement;
+      if (
+        pendingQuote &&
+        activeElement &&
+        root?.contains(activeElement) &&
+        (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))
+      ) {
+        event.preventDefault();
+        stagePendingQuote();
+      }
+    };
     document.addEventListener("selectionchange", updateUnlessSelecting);
     window.addEventListener("resize", updateUnlessSelecting);
     document.addEventListener("pointerup", handlePointerEnd);
     document.addEventListener("pointercancel", handlePointerEnd);
+    document.addEventListener("mouseup", handlePointerEnd);
     root?.addEventListener("pointerdown", handlePointerDown);
     root?.addEventListener("keyup", updateUnlessSelecting);
+    document.addEventListener("keydown", handleKeyboardContextMenu);
     root?.addEventListener("scroll", updateUnlessSelecting);
     return () => {
       document.removeEventListener("selectionchange", updateUnlessSelecting);
       window.removeEventListener("resize", updateUnlessSelecting);
       document.removeEventListener("pointerup", handlePointerEnd);
       document.removeEventListener("pointercancel", handlePointerEnd);
+      document.removeEventListener("mouseup", handlePointerEnd);
       root?.removeEventListener("pointerdown", handlePointerDown);
       root?.removeEventListener("keyup", updateUnlessSelecting);
+      document.removeEventListener("keydown", handleKeyboardContextMenu);
       root?.removeEventListener("scroll", updateUnlessSelecting);
     };
-  }, [rootRef, updateFromSelection, updateUnlessSelecting]);
-
-  if (!pendingQuote || !sessionId) return null;
+  }, [
+    pendingQuote,
+    rootRef,
+    stagePendingQuote,
+    updateFromSelection,
+    updateUnlessSelecting,
+  ]);
 
   return (
-    <div
-      className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full"
-      style={{ left: pendingQuote.left, top: pendingQuote.top }}
-    >
-      <JumpToLatestButton
-        type="button"
-        size="xs"
-        className="pointer-events-auto"
-        leftIcon={<IconQuote />}
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={() => {
-          const root = rootRef.current;
-          const selection = window.getSelection();
-          const currentItem =
-            root && selection
-              ? stagedQuoteFromSelection({ messages, root, selection })
-              : null;
-          if (!currentItem) {
-            setPendingQuote(null);
-            return;
-          }
-          // Version 1 sends one quote per message. The store model remains an
-          // array so later slices can lift this presentation limit safely.
-          useChatStore.getState().setStagedItems(sessionId, [currentItem]);
-          window.getSelection()?.removeAllRanges();
-          setPendingQuote(null);
-        }}
-      >
-        {t("quotes.quoteInMessage")}
-      </JumpToLatestButton>
-    </div>
+    <>
+      {announcementSequence > 0 ? (
+        <div
+          key={announcementSequence}
+          className="sr-only"
+          role="status"
+          aria-live="polite"
+        >
+          {t("quotes.quoteAdded")}
+        </div>
+      ) : null}
+      {pendingQuote && sessionId ? (
+        <div
+          className="pointer-events-none absolute z-30 -translate-x-1/2 -translate-y-full"
+          style={{ left: pendingQuote.left, top: pendingQuote.top }}
+        >
+          <JumpToLatestButton
+            type="button"
+            size="xs"
+            className="pointer-events-auto"
+            leftIcon={<IconQuote />}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={stagePendingQuote}
+          >
+            {t("quotes.quoteInMessage")}
+          </JumpToLatestButton>
+        </div>
+      ) : null}
+    </>
   );
 }

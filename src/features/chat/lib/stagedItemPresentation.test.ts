@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { StagedQuoteItem } from "@/shared/types/messages";
 import {
   stagedQuoteLabel,
+  stagedQuoteMessageCount,
   stagedQuoteSourceKind,
   stagedQuoteWordCount,
 } from "./stagedItemPresentation";
@@ -11,15 +12,7 @@ function quote(overrides: Partial<StagedQuoteItem> = {}): StagedQuoteItem {
     id: "quote-1",
     kind: "quote",
     excerpt: "Saturn",
-    sources: [
-      {
-        messageId: "message-1",
-        role: "assistant",
-        contentBlockIndex: 0,
-        start: 0,
-        end: 6,
-      },
-    ],
+    source: { messageId: "message-1", role: "assistant" },
     ...overrides,
   };
 }
@@ -37,31 +30,14 @@ describe("staged quote presentation", () => {
     expect(label.length).toBeLessThanOrEqual(73);
   });
 
-  it("describes source and extent without replacing the excerpt", () => {
+  it("describes its one logical source without replacing the excerpt", () => {
+    expect(stagedQuoteMessageCount(quote())).toBe(1);
     expect(stagedQuoteSourceKind(quote())).toBe("agentResponse");
     expect(stagedQuoteWordCount(quote())).toBe(1);
     expect(
       stagedQuoteSourceKind(
-        quote({
-          sources: [
-            quote().sources[0],
-            { ...quote().sources[0], messageId: "message-2" },
-          ],
-        }),
+        quote({ source: { messageId: "user-1", role: "user" } }),
       ),
-    ).toBe("multipleMessages");
-  });
-
-  it("treats multiple blocks of one message as a single-message quote", () => {
-    expect(
-      stagedQuoteSourceKind(
-        quote({
-          sources: [
-            quote().sources[0],
-            { ...quote().sources[0], contentBlockIndex: 1 },
-          ],
-        }),
-      ),
-    ).toBe("agentResponse");
+    ).toBe("yourMessage");
   });
 });

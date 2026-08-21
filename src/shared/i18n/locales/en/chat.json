@@ -16,6 +16,8 @@
   },
   "quotes": {
     "quoteInMessage": "Quote in message",
+    "quoteAdded": "Quote added to message",
+    "persistenceWarning": "This quote is available now, but it could not be saved and will not survive reopening Berd.",
     "remove": "Remove quote",
     "source": {
       "agentResponse": "Agent response",

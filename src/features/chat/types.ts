@@ -201,6 +201,7 @@ export interface ChatInputProps {
   initialValue?: string;
   initialAttachments?: ChatAttachmentDraft[];
   stagedItems?: StagedItem[];
+  onStagedItemsChange?: (items: StagedItem[]) => void;
   onRemoveStagedItem?: (itemId: string) => void;
   placeholder?: string;
   onDraftChange?: (text: string) => void;

@@ -312,11 +312,8 @@ export async function dispatchPrompt(
     // decides per quote source whether an anchor suffices or the excerpt
     // must be re-sent in full (see stagedQuoteSend.ts).
     const dispatchAssistantPrompt = prepareStagedQuoteDispatch({
-      sessionId,
       assistantPrompt,
-      acpPrompt,
       stagedItems: userMessageMetadata?.stagedItems,
-      liveMessages: useChatStore.getState().messagesBySession[sessionId] ?? [],
     });
     const tAcp = performance.now();
     if (!background) {
@@ -326,9 +323,8 @@ export async function dispatchPrompt(
     }
     const promptPromise = acpSendMessage(sessionId, acpPrompt, {
       systemPrompt,
-      ...(dispatchAssistantPrompt
-        ? { assistantPrompt: dispatchAssistantPrompt }
-        : {}),
+      assistantPrompt: dispatchAssistantPrompt.assistantPrompt,
+      userAuthorityContent: dispatchAssistantPrompt.userAuthorityContent,
       personaId: persona?.id,
       personaName: persona?.name,
       goose: acpGooseMetadata,

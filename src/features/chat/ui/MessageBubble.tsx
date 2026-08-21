@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Check,
@@ -47,7 +47,7 @@ import { useArtifactLinkHandler } from "@/features/chat/hooks/useArtifactLinkHan
 import { detectProviderErrorNotice } from "@/features/chat/lib/providerErrorNotice";
 import {
   quoteMessageAttributes,
-  quoteTextBlockAttributes,
+  quoteSurfaceAttributes,
 } from "@/features/chat/lib/transcriptQuoteSelection";
 import type { CustomRenderer } from "streamdown";
 import { RUNNABLE_SHELL_LANGUAGES } from "@/shared/lib/runnableShellCommand";
@@ -347,8 +347,6 @@ interface MessageBubbleProps {
   actionsAlwaysVisible?: boolean;
   animateEntry?: boolean;
   contentOverride?: readonly MessageContent[];
-  /** Canonical coordinates for a projected text fragment. */
-  quoteSource?: { contentBlockIndex: number; textStart: number };
   contentContext?: readonly MessageContent[];
   actionMessageId?: string;
   fragmentRole?: "single" | "start" | "middle" | "end";
@@ -582,7 +580,6 @@ function renderContentBlock(
               options.onRunShellCommand ? options.runItCodeRenderers : undefined
             }
             imageRenderer={MarkdownImage}
-            sourceSegments
           >
             {displayText}
           </MessageResponse>
@@ -705,7 +702,6 @@ export const MessageBubble = memo(function MessageBubble({
   actionsAlwaysVisible = false,
   animateEntry = true,
   contentOverride,
-  quoteSource,
   contentContext,
   actionMessageId = message.id,
   fragmentRole,
@@ -824,14 +820,6 @@ export const MessageBubble = memo(function MessageBubble({
           ),
     [attachedImageContentIndexes, content],
   );
-  const sourceContentBlockIndex = useCallback(
-    (block: MessageContent, renderedIndex: number) => {
-      if (quoteSource) return quoteSource.contentBlockIndex;
-      const canonicalIndex = rawContent.indexOf(block);
-      return canonicalIndex >= 0 ? canonicalIndex : renderedIndex;
-    },
-    [quoteSource, rawContent],
-  );
   const messageChips = message.metadata?.chips ?? [];
 
   // Skip empty user bubbles (all blocks filtered as assistant-only).
@@ -852,7 +840,7 @@ export const MessageBubble = memo(function MessageBubble({
     return (
       <div
         className="flex justify-center px-4 py-2"
-        {...quoteMessageAttributes(message.id)}
+        {...quoteMessageAttributes(actionMessageId, role)}
         {...rowRootAttributes}
       >
         <div className="w-full max-w-md text-center text-xs text-muted-foreground">
@@ -952,7 +940,7 @@ export const MessageBubble = memo(function MessageBubble({
       )}
       data-role={isUser ? "user-message" : "assistant-message"}
       data-message-fragment-role={fragmentRole}
-      {...quoteMessageAttributes(message.id)}
+      {...quoteMessageAttributes(actionMessageId, role)}
       {...rowRootAttributes}
     >
       {showPersonaGutterAvatar && showLeadingAssistantChrome ? (
@@ -1085,13 +1073,7 @@ export const MessageBubble = memo(function MessageBubble({
               return (
                 <div
                   key={`${message.id}-${section.key}`}
-                  {...quoteTextBlockAttributes(
-                    sourceContentBlockIndex(
-                      block,
-                      section.contentBlockIndex ?? 0,
-                    ),
-                    quoteSource?.textStart ?? 0,
-                  )}
+                  {...quoteSurfaceAttributes()}
                 >
                   {couldOverflowUserMessagePreview(block.text) ? (
                     <UserMessageClamp
@@ -1107,15 +1089,7 @@ export const MessageBubble = memo(function MessageBubble({
             return (
               <div
                 key={`${message.id}-${section.key}`}
-                {...(block.type === "text"
-                  ? quoteTextBlockAttributes(
-                      sourceContentBlockIndex(
-                        block,
-                        section.contentBlockIndex ?? 0,
-                      ),
-                      quoteSource?.textStart ?? 0,
-                    )
-                  : {})}
+                {...(block.type === "text" ? quoteSurfaceAttributes() : {})}
               >
                 {renderContentBlock(
                   block,

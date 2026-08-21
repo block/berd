@@ -136,10 +136,6 @@ export interface TranscriptAssistantContentFragmentPayload {
   fragmentCount: number;
   role: TranscriptAssistantContentFragmentRole;
   content: readonly MessageContent[];
-  /** Canonical coordinates of this rendered fragment in message.content. */
-  sourceContentBlockIndex: number;
-  sourceTextStart: number;
-  sourceTextEnd: number;
   isStreamingTail: boolean;
   messageScrollTarget: boolean;
   isCodeContinuationChunk: boolean;

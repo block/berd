@@ -98,11 +98,8 @@ export async function steerPromptInSession(
   // intervene between here and pickup; the current transcript decides
   // anchor-vs-full-excerpt per quote source.
   const dispatchAssistantPrompt = prepareStagedQuoteDispatch({
-    sessionId,
     assistantPrompt: sendOptions?.assistantPrompt,
-    acpPrompt,
     stagedItems: sendOptions?.userMessageMetadata?.stagedItems,
-    liveMessages: useChatStore.getState().messagesBySession[sessionId] ?? [],
   });
   const chatStore = useChatStore.getState();
   chatStore.addMessage(sessionId, userMessage);
@@ -116,9 +113,8 @@ export async function steerPromptInSession(
       activeRunId,
       acpPrompt,
       {
-        ...(dispatchAssistantPrompt
-          ? { assistantPrompt: dispatchAssistantPrompt }
-          : {}),
+        assistantPrompt: dispatchAssistantPrompt.assistantPrompt,
+        userAuthorityContent: dispatchAssistantPrompt.userAuthorityContent,
         goose: sendOptions?.acpGooseMetadata,
         images: images?.map(
           (img) => [img.base64, img.mimeType] as [string, string],

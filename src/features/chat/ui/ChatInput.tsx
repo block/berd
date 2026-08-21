@@ -78,7 +78,11 @@ import {
   getStreamingShortcutAction,
   useStreamingShortcutPreference,
 } from "../lib/streamingShortcutPreference";
-import type { ChatAttachmentDraft, MessageChip } from "@/shared/types/messages";
+import type {
+  ChatAttachmentDraft,
+  MessageChip,
+  StagedItem,
+} from "@/shared/types/messages";
 import { useTextareaAutosize } from "@/shared/hooks/useTextareaAutosize";
 import { useVoiceDictationShortcutTarget } from "../lib/voiceDictationShortcutController";
 
@@ -203,6 +207,7 @@ export function ChatInput({
   initialValue = "",
   initialAttachments,
   stagedItems: stagedItemsProp = [],
+  onStagedItemsChange,
   onRemoveStagedItem,
   placeholder,
   onDraftChange,
@@ -309,14 +314,26 @@ export function ChatInput({
   >(null);
   const [editingQueuedPersona, setEditingQueuedPersona] =
     useState<PersonaIntent | null>(null);
+  const [editingStagedItems, setEditingStagedItems] = useState<
+    StagedItem[] | null
+  >(null);
   const editingQueuedRecordIdRef = useRef<string | null>(null);
+  const preQueueEditDraftRef = useRef<{
+    text: string;
+    attachments: ChatAttachmentDraft[];
+    skills: ChatSkillDraft[];
+    stagedItems: StagedItem[];
+    cancelEdit?: (recordId: string) => boolean;
+  } | null>(null);
+  const restorePreQueueEditDraftRef = useRef<() => void>(() => {});
   const onCancelQueueEditRef = useRef(onCancelQueueEdit);
   onCancelQueueEditRef.current = onCancelQueueEdit;
   useEffect(() => {
     return () => {
       const recordId = editingQueuedRecordIdRef.current;
       if (recordId) {
-        onCancelQueueEditRef.current?.(recordId);
+        preQueueEditDraftRef.current?.cancelEdit?.(recordId);
+        restorePreQueueEditDraftRef.current();
       }
     };
   }, []);
@@ -515,12 +532,25 @@ export function ChatInput({
   });
   // One quote capability decision: a composer without quotes neither shows
   // staged quote chips nor includes staged quotes in sends.
-  const stagedItems = scopedControls.quotes ? stagedItemsProp : [];
+  const stagedItems = scopedControls.quotes
+    ? (editingStagedItems ?? stagedItemsProp)
+    : [];
   const hasDraftContext =
     (scopedControls.attachments && attachments.length > 0) ||
     visibleSelectedSkills.length > 0;
   const stagedItemsRef = useRef(stagedItems);
   stagedItemsRef.current = stagedItems;
+  restorePreQueueEditDraftRef.current = () => {
+    const snapshot = preQueueEditDraftRef.current;
+    if (!snapshot) return;
+    setText(snapshot.text);
+    replaceAttachments(snapshot.attachments);
+    onDraftAttachmentsChange?.(snapshot.attachments);
+    setSelectedSkills(snapshot.skills);
+    onStagedItemsChange?.(snapshot.stagedItems);
+    setEditingStagedItems(null);
+    preQueueEditDraftRef.current = null;
+  };
   // Staged quotes are draft context but cannot form a message by
   // themselves: a quote-only send would dispatch an empty ACP prompt,
   // which breaks replay provenance matching (and asks the agent to answer
@@ -537,6 +567,7 @@ export function ChatInput({
     !attachmentWorkPending &&
     isStreaming &&
     canSteerMessage &&
+    editingQueuedRecordId === null &&
     visibleQueuedMessages.length === 0 &&
     Boolean(onSteerMessage);
   // Steering acts on the true queue head, so it is only offered when that
@@ -737,6 +768,7 @@ export function ChatInput({
     );
     if (!stillQueued) {
       onCancelQueueEditRef.current?.(editingQueuedRecordId);
+      restorePreQueueEditDraftRef.current();
       setEditingQueuedRecord(null);
       setEditingQueuedPersona(null);
       setRestoredQueuedSendOptions(null);
@@ -823,14 +855,19 @@ export function ChatInput({
                 submittedAttachments.length > 0
                   ? submittedAttachments
                   : undefined,
-              sendOptions: restoredSendOptions
-                ? {
-                    ...restoredSendOptions,
-                    ...(restoredSendOptions.displayText === undefined
-                      ? {}
-                      : { displayText: submittedText.trim() }),
-                  }
-                : undefined,
+              sendOptions:
+                restoredSendOptions || submittedStagedItems.length > 0
+                  ? {
+                      ...restoredSendOptions,
+                      ...(restoredSendOptions?.displayText === undefined
+                        ? {}
+                        : { displayText: submittedText.trim() }),
+                      userMessageMetadata: {
+                        ...restoredSendOptions?.userMessageMetadata,
+                        stagedItems: submittedStagedItems,
+                      },
+                    }
+                  : undefined,
             })
           : restoredSendOptions
             ? await submitRestoredQueuedMessage(
@@ -852,6 +889,11 @@ export function ChatInput({
       setRestoredQueuedSendOptions(null);
       setEditingQueuedRecord(null);
       setEditingQueuedPersona(null);
+      setEditingStagedItems(null);
+      if (editingQueuedRecordId) {
+        restorePreQueueEditDraftRef.current();
+        return true;
+      }
       const textStillMatchesSubmission = textRef.current === submittedText;
       const skillsStillMatchSubmission = skillDraftSnapshotsMatch(
         selectedSkillsRef.current,
@@ -1006,6 +1048,8 @@ export function ChatInput({
             sendOptions,
           );
 
+    if (editingQueuedRecordId) return;
+
     if (restoredSendOptions) {
       void submitRestoredQueuedMessage(
         submittedText,
@@ -1082,7 +1126,15 @@ export function ChatInput({
       if (!isLegacyMessage) {
         const previousRecordId = editingQueuedRecordIdRef.current;
         if (!onEditQueue?.(recordId)) return false;
-        if (previousRecordId && previousRecordId !== recordId) {
+        if (!previousRecordId) {
+          preQueueEditDraftRef.current = {
+            text: textRef.current,
+            attachments: [...attachmentsRef.current],
+            skills: [...selectedSkillsRef.current],
+            stagedItems: [...stagedItemsRef.current],
+            cancelEdit: onCancelQueueEdit,
+          };
+        } else if (previousRecordId !== recordId) {
           onCancelQueueEdit?.(previousRecordId);
         }
       }
@@ -1096,6 +1148,11 @@ export function ChatInput({
       replaceAttachments(
         scopedControls.attachments ? (message.attachments ?? []) : [],
       );
+      setEditingStagedItems(
+        scopedControls.quotes
+          ? (message.sendOptions?.userMessageMetadata?.stagedItems ?? [])
+          : [],
+      );
       setSelectedSkills([]);
       if (isLegacyMessage) onDismissQueue?.();
       return true;
@@ -1107,6 +1164,7 @@ export function ChatInput({
       onUpdateQueue,
       replaceAttachments,
       scopedControls.attachments,
+      scopedControls.quotes,
       setEditingQueuedRecord,
       setSelectedSkills,
       setTextWithCursorAtEnd,
@@ -1711,7 +1769,16 @@ export function ChatInput({
 
               <ChatInputStagedItems
                 items={stagedItems}
-                onRemove={(itemId) => onRemoveStagedItem?.(itemId)}
+                onRemove={(itemId) => {
+                  if (editingStagedItems) {
+                    setEditingStagedItems(
+                      (items) =>
+                        items?.filter((item) => item.id !== itemId) ?? null,
+                    );
+                  } else {
+                    onRemoveStagedItem?.(itemId);
+                  }
+                }}
               />
 
               <ChatInputSelectionChips

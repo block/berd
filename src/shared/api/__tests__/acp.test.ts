@@ -494,6 +494,37 @@ describe("acpSendMessage", () => {
     expect(retryBlocks[0].text).toContain("You are Starfriend.");
   });
 
+  it("sends staged quotes as an assistant-visible block in the user turn", async () => {
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+    sessionRegistry.registerPreparedSession(
+      "acp-session-quotes",
+      "claude-acp",
+      "/tmp/project",
+      "test-model",
+    );
+
+    await acpSendMessage("acp-session-quotes", "question", {
+      assistantPrompt: "Use selected skill",
+      userAuthorityContent: "framed complete quote",
+    });
+
+    const [, blocks] = mockPrompt.mock.calls[0];
+    expect(blocks).toEqual([
+      {
+        type: "text",
+        text: "Use selected skill",
+        annotations: { audience: ["assistant"] },
+      },
+      { type: "text", text: "question" },
+      {
+        type: "text",
+        text: "framed complete quote",
+        annotations: { audience: ["assistant"] },
+      },
+    ]);
+  });
+
   it("merges the persona handoff with a skill assistant prompt, persona first", async () => {
     const sessionRegistry = await import("../acpSessionRegistry");
     const { __resetAllPersonaHandoffs } = await import("../acpPersonaHandoff");

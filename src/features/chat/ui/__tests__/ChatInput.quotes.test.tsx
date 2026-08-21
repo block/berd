@@ -20,15 +20,10 @@ function makeQuote(id = "quote-1"): StagedQuoteItem {
     id,
     kind: "quote",
     excerpt: "a memorable earlier passage",
-    sources: [
-      {
-        messageId: "message-1",
-        role: "assistant",
-        contentBlockIndex: 0,
-        start: 0,
-        end: 27,
-      },
-    ],
+    source: {
+      messageId: "message-1",
+      role: "assistant",
+    },
   };
 }
 
@@ -50,10 +45,7 @@ describe("ChatInput quotes control", () => {
   });
 
   it("refuses a quote-only send until the user types a message", async () => {
-    // A quote-only dispatch would carry an empty ACP prompt, which breaks
-    // replay provenance matching (withRestoredStagedItems skips empty-text
-    // turns): the quote card would silently vanish after replay. Staged
-    // quotes therefore never make an empty composer sendable.
+    // A quote provides context for a message; it is not a standalone message.
     const onSend = vi.fn().mockReturnValue(true);
     render(<ChatInput onSend={onSend} stagedItems={[makeQuote()]} />);
 

@@ -39,14 +39,7 @@ describe("submitComposerMessage", () => {
       id: "quote-1",
       kind: "quote",
       excerpt: "Ask reviewers to separate product concerns from visual polish.",
-      sources: [
-        {
-          messageId: "message-1",
-          contentBlockIndex: 0,
-          start: 10,
-          end: 72,
-        },
-      ],
+      source: { messageId: "message-1", role: "assistant" },
     };
 
     await submitComposerMessage({

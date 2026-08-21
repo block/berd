@@ -93,22 +93,17 @@ export type ChatAttachmentDraft =
 
 // ── Composer staged items ──────────────────────────────────────────────
 
-/** A canonical text range in a transcript message. Offsets use UTF-16 code
- * units, matching DOM Range and JavaScript string offsets. */
-export interface StagedQuoteSourceRange {
+/** Lightweight provenance for the rendered message a quote came from. */
+export interface StagedQuoteSource {
   messageId: string;
-  /** Captured provenance for compact labels; the message id remains authoritative. */
-  role?: Extract<MessageRole, "user" | "assistant" | "system">;
-  contentBlockIndex: number;
-  start: number;
-  end: number;
+  role: Extract<MessageRole, "user" | "assistant">;
 }
 
 export interface StagedQuoteItem {
   id: string;
   kind: "quote";
   excerpt: string;
-  sources: StagedQuoteSourceRange[];
+  source: StagedQuoteSource;
 }
 
 /** Structured composer content staged alongside, rather than pasted into,

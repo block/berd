@@ -17,13 +17,11 @@ function Fixture() {
   return (
     <div className="relative">
       <div ref={rootRef} data-testid="transcript-root">
-        <div data-quote-message-id="message-1">
-          <div
-            data-quote-content-block-index="0"
-            data-quote-source-text-start="0"
-          >
-            Select this plain text
-          </div>
+        <div
+          data-quote-message-id="message-1"
+          data-quote-message-role="assistant"
+        >
+          <div data-quote-surface="true">Select this plain text</div>
         </div>
       </div>
       <TranscriptQuoteAffordance
@@ -36,9 +34,7 @@ function Fixture() {
 }
 
 function selectTranscriptText(root: HTMLElement) {
-  const textNode = root.querySelector(
-    "[data-quote-content-block-index]",
-  )?.firstChild;
+  const textNode = root.querySelector("[data-quote-surface]")?.firstChild;
   if (!textNode) throw new Error("missing transcript text");
 
   const range = document.createRange();
@@ -98,6 +94,21 @@ describe("TranscriptQuoteAffordance", () => {
     ).toBeInTheDocument();
   });
 
+  it("stages a keyboard selection from the document context-menu shortcut", () => {
+    renderWithProviders(<Fixture />);
+    const root = screen.getByTestId("transcript-root");
+    root.tabIndex = -1;
+    root.focus();
+    selectTranscriptText(root);
+    fireEvent.keyUp(root, { key: "Shift" });
+
+    fireEvent.keyDown(document, { key: "F10", shiftKey: true });
+
+    expect(screen.getByRole("status", { name: "" })).toHaveTextContent(
+      "Quote added to message",
+    );
+  });
+
   it("shows after the user finishes selecting transcript text", async () => {
     const nativeAddEventListener = document.addEventListener.bind(document);
     vi.spyOn(document, "addEventListener").mockImplementation(
@@ -111,9 +122,7 @@ describe("TranscriptQuoteAffordance", () => {
     );
     renderWithProviders(<Fixture />);
     const root = screen.getByTestId("transcript-root");
-    const textNode = root.querySelector(
-      "[data-quote-content-block-index]",
-    )?.firstChild;
+    const textNode = root.querySelector("[data-quote-surface]")?.firstChild;
     if (!textNode) throw new Error("missing transcript text");
 
     const range = document.createRange();

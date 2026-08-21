@@ -2640,6 +2640,12 @@ export function useChatSessionController({
     },
     [stateSessionId],
   );
+  const handleStagedItemsChange = useCallback(
+    (items: StagedItem[]) => {
+      useChatStore.getState().setStagedItems(stateSessionId, items);
+    },
+    [stateSessionId],
+  );
   const handleRemoveStagedItem = useCallback(
     (itemId: string) => {
       useChatStore.getState().removeStagedItem(stateSessionId, itemId);
@@ -3100,6 +3106,7 @@ export function useChatSessionController({
     draftAttachments,
     handleDraftAttachmentsChange,
     stagedItems,
+    handleStagedItemsChange,
     handleRemoveStagedItem,
     selectedSkills,
     handleSkillsChange,

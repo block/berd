@@ -855,6 +855,7 @@ export function ChatView({
           initialValue={controller.draftValue}
           initialAttachments={controller.draftAttachments}
           stagedItems={controller.stagedItems}
+          onStagedItemsChange={controller.handleStagedItemsChange}
           onRemoveStagedItem={controller.handleRemoveStagedItem}
           onDraftChange={controller.handleDraftChange}
           onDraftAttachmentsChange={controller.handleDraftAttachmentsChange}

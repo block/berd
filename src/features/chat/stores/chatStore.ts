@@ -1,4 +1,6 @@
 import { create, type StateCreator } from "zustand";
+import { toast } from "sonner";
+import { i18n } from "@/shared/i18n";
 import { subscribeWithSelector } from "zustand/middleware";
 import type {
   ChatAttachmentDraft,
@@ -38,6 +40,16 @@ import {
   type AdmittedQueuedMessagePayload,
   type QueuedMessagePayload,
 } from "../lib/admittedSend";
+
+function persistStagedItemsWithWarning(
+  sessionId: string,
+  itemsBySession: Record<string, StagedItem[]>,
+): void {
+  if (persistStagedItems(itemsBySession)) return;
+  toast.warning(i18n.t("chat:quotes.persistenceWarning"), {
+    id: `staged-items-persistence:${sessionId}`,
+  });
+}
 
 const MESSAGE_SESSION_CACHE_LIMIT = 10;
 
@@ -1783,7 +1795,7 @@ const createChatStore: StateCreator<
         },
       };
     });
-    persistStagedItems(get().stagedItemsBySession);
+    persistStagedItemsWithWarning(sessionId, get().stagedItemsBySession);
   },
 
   addStagedItem: (sessionId, item) => {
@@ -1917,7 +1929,7 @@ const createChatStore: StateCreator<
       backendSessionId,
     ]);
     persistDrafts(get().draftsBySession);
-    persistStagedItems(get().stagedItemsBySession);
+    persistStagedItemsWithWarning(backendSessionId, get().stagedItemsBySession);
     persistUnreadStateIfChanged(
       previousSessionStateById,
       get().sessionStateById,
@@ -1976,7 +1988,7 @@ const createChatStore: StateCreator<
     });
     persistMessageQueues(get().queuedMessageBySession, [sessionId]);
     persistDrafts(get().draftsBySession);
-    persistStagedItems(get().stagedItemsBySession);
+    persistStagedItemsWithWarning(sessionId, get().stagedItemsBySession);
     persistUnreadStateIfChanged(
       previousSessionStateById,
       get().sessionStateById,

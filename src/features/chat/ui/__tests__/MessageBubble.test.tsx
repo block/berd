@@ -180,14 +180,7 @@ describe("MessageBubble", () => {
             kind: "quote",
             excerpt:
               "Ask reviewers to separate product concerns from visual polish.",
-            sources: [
-              {
-                messageId: "assistant-1",
-                contentBlockIndex: 0,
-                start: 10,
-                end: 72,
-              },
-            ],
+            source: { messageId: "assistant-1", role: "assistant" },
           },
         ],
       },

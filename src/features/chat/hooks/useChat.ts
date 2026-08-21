@@ -23,7 +23,6 @@ import {
 } from "../lib/sendCore";
 import { perfLog } from "@/shared/lib/perfLog";
 import { sanitizeReplayMessages } from "../lib/replaySanitizer";
-import { withRestoredStagedItems } from "../lib/submittedQuoteProvenance";
 import { i18n } from "@/shared/i18n";
 import type { ChatSendOptions } from "../types";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
@@ -165,10 +164,8 @@ export function useChat(
       const sid = sessionId.slice(0, 8);
       const hasAttachments = (attachments?.length ?? 0) > 0;
       const hasAssistantPrompt = Boolean(sendOptions?.assistantPrompt?.trim());
-      // Staged quotes deliberately do NOT make an empty send valid: a
-      // quote-only dispatch would carry an empty ACP prompt, which breaks
-      // replay provenance matching (withRestoredStagedItems skips
-      // empty-text turns). The composer enforces the same policy.
+      // A quote is context for the user's message, not a standalone message.
+      // The composer enforces the same quote-plus-text policy.
       const currentChatState = useChatStore
         .getState()
         .getSessionRuntime(sessionId).chatState;
@@ -461,10 +458,7 @@ export function useChat(
         const buffer = getAndDeleteReplayBuffer(sessionId);
         if (buffer) {
           setMessages(sessionId, [
-            ...withRestoredStagedItems(
-              sessionId,
-              sanitizeReplayMessages(buffer),
-            ),
+            ...sanitizeReplayMessages(buffer),
             createCompactionConfirmationMessage(),
           ]);
         } else {

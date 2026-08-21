@@ -16,27 +16,18 @@ export function stagedQuoteLabel(quote: StagedQuoteItem): string {
   return `${excerpt.slice(0, SHORT_QUOTE_CHARACTER_LIMIT).trimEnd()}…`;
 }
 
-export type StagedQuoteSourceKind =
-  | "agentResponse"
-  | "yourMessage"
-  | "systemMessage"
-  | "multipleMessages";
+export type StagedQuoteSourceKind = "agentResponse" | "yourMessage";
 
-/** Distinct messages the quote draws from; multiple blocks of one message
- * still count as one message. */
-export function stagedQuoteMessageCount(quote: StagedQuoteItem): number {
-  return new Set(quote.sources.map((source) => source.messageId)).size;
+export function stagedQuoteMessageCount(_quote: StagedQuoteItem): number {
+  return 1;
 }
 
 export function stagedQuoteSourceKind(
   quote: StagedQuoteItem,
 ): StagedQuoteSourceKind {
-  if (stagedQuoteMessageCount(quote) > 1) return "multipleMessages";
-  switch (quote.sources[0]?.role) {
+  switch (quote.source.role) {
     case "user":
       return "yourMessage";
-    case "system":
-      return "systemMessage";
     default:
       return "agentResponse";
   }

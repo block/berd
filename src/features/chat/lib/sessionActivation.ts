@@ -3,7 +3,6 @@ import {
   getAndDeleteReplayBuffer,
 } from "@/features/chat/hooks/replayBuffer";
 import { sanitizeReplayMessages } from "@/features/chat/lib/replaySanitizer";
-import { withRestoredStagedItems } from "@/features/chat/lib/submittedQuoteProvenance";
 import { completeReplayAssistantMessage } from "@/features/chat/acp/acpReplayAssistant";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
@@ -402,9 +401,7 @@ async function performSessionMessagesLoad(
     }
     const tFlush = performance.now();
     const buffer = getAndDeleteReplayBuffer(sessionId);
-    const replayMessages = buffer
-      ? withRestoredStagedItems(sessionId, sanitizeReplayMessages(buffer))
-      : undefined;
+    const replayMessages = buffer ? sanitizeReplayMessages(buffer) : undefined;
     const replayStats = getReplayPerf(sessionId);
     clearReplayPerf(sessionId);
     if (replayMessages) {
