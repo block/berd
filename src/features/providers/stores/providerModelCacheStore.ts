@@ -124,7 +124,10 @@ async function fetchProviderSupportedModels(
 export function isCachedModelInventoryAuthoritative(
   entry: CachedProviderModels | undefined,
 ): boolean {
-  return entry != null && (entry.runtimeManaged || entry.fetchedAt > 0);
+  return (
+    entry != null &&
+    (entry.runtimeManaged || (entry.models.length > 0 && entry.fetchedAt > 0))
+  );
 }
 
 function isStale(entry: CachedProviderModels | undefined): boolean {
@@ -259,6 +262,25 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
         try {
           const ids = await fetchProviderSupportedModels(providerId);
           const discoveredModels = providerModelOptionsFromIds(providerId, ids);
+          if (discoveredModels.length === 0) {
+            if (
+              !existing ||
+              versionAtStart !== refreshVersion(providerId) ||
+              (existing.fetchedAt === 0 && !existing.error)
+            ) {
+              return;
+            }
+            const retryableEntry = { ...existing, fetchedAt: 0 };
+            delete retryableEntry.error;
+            notifyProviderModelInventoryInvalidated(providerId);
+            set((state) => {
+              const providers = new Map(state.providers);
+              providers.set(providerId, retryableEntry);
+              persistModels(providers);
+              return { providers };
+            });
+            return;
+          }
           const configuredModels = existing?.configuredModels ?? [];
           const configuredModelsById = new Map(
             configuredModels.map((model) => [model.id, model]),

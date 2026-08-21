@@ -27,7 +27,7 @@ function seededModel(overrides: Partial<ModelOption> = {}): ModelOption {
 
 describe("providerModelCacheStore", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     window.localStorage.clear();
     useProviderModelCacheStore.setState({
       providers: new Map(),
@@ -126,6 +126,196 @@ describe("providerModelCacheStore", () => {
         .getState()
         .isModelInventoryAuthoritative("databricks_v2"),
     ).toBe(true);
+  });
+
+  it.each([
+    {
+      label: "stale",
+      fetchedAt: 1,
+      force: false,
+      error: undefined,
+    },
+    {
+      label: "fresh forced with an error",
+      fetchedAt: Date.now(),
+      force: true,
+      error: "authentication failed",
+    },
+    {
+      label: "retryable with an error",
+      fetchedAt: 0,
+      force: false,
+      error: "authentication failed",
+    },
+  ])("preserves a $label populated cache and retries after empty discovery", async ({
+    fetchedAt,
+    force,
+    error,
+  }) => {
+    const cachedEntry = {
+      providerId: "openrouter",
+      models: [
+        seededModel({
+          providerId: "openrouter",
+          providerName: "OpenRouter",
+        }),
+      ],
+      fetchedAt,
+      ...(error ? { error } : {}),
+    };
+    window.localStorage.setItem(
+      "goose:providerModelCache:v1",
+      JSON.stringify([cachedEntry]),
+    );
+    useProviderModelCacheStore.getState().loadPersisted();
+    mocks.supportedModelsList
+      .mockResolvedValueOnce({ models: [] })
+      .mockResolvedValueOnce({ models: ["replacement-model"] });
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("openrouter", { force });
+
+    const retryableEntry = { ...cachedEntry, fetchedAt: 0 };
+    delete retryableEntry.error;
+    expect(
+      useProviderModelCacheStore.getState().providers.get("openrouter"),
+    ).toEqual(retryableEntry);
+    expect(
+      JSON.parse(
+        window.localStorage.getItem("goose:providerModelCache:v1") ?? "[]",
+      ),
+    ).toEqual([retryableEntry]);
+    expect(useProviderModelCacheStore.getState().getError("openrouter")).toBe(
+      null,
+    );
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("openrouter");
+
+    expect(mocks.supportedModelsList).toHaveBeenCalledTimes(2);
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .getModelsForProvider("openrouter")
+        .map((model) => model.id),
+    ).toEqual(["replacement-model"]);
+  });
+
+  it("keeps configured models provisional and retryable after empty discovery", async () => {
+    const configuredModel = seededModel({
+      providerId: "openrouter",
+      providerName: "OpenRouter",
+    });
+    useProviderModelCacheStore
+      .getState()
+      .seedRuntimeModels(new Map([["openrouter", [configuredModel]]]), {
+        runtimeManagedProviderIds: new Set(),
+      });
+    mocks.supportedModelsList
+      .mockResolvedValueOnce({ models: [] })
+      .mockResolvedValueOnce({ models: ["discovered-model"] });
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("openrouter");
+
+    const provisionalEntry = useProviderModelCacheStore
+      .getState()
+      .providers.get("openrouter");
+    expect(provisionalEntry).toEqual({
+      providerId: "openrouter",
+      models: [configuredModel],
+      configuredModels: [configuredModel],
+      fetchedAt: 0,
+    });
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("openrouter"),
+    ).toBe(false);
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("openrouter");
+
+    expect(mocks.supportedModelsList).toHaveBeenCalledTimes(2);
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .getModelsForProvider("openrouter")
+        .map((model) => model.id),
+    ).toEqual(["discovered-model", configuredModel.id]);
+  });
+
+  it("retries after an empty refresh with no cached entry", async () => {
+    mocks.supportedModelsList
+      .mockResolvedValueOnce({ models: [] })
+      .mockResolvedValueOnce({ models: ["openrouter-model"] });
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("openrouter");
+    expect(
+      useProviderModelCacheStore.getState().providers.has("openrouter"),
+    ).toBe(false);
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("openrouter");
+
+    expect(mocks.supportedModelsList).toHaveBeenCalledTimes(2);
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .getModelsForProvider("openrouter")
+        .map((model) => model.id),
+    ).toEqual(["openrouter-model"]);
+  });
+
+  it("recovers from a persisted fresh-empty cache entry", async () => {
+    window.localStorage.setItem(
+      "goose:providerModelCache:v1",
+      JSON.stringify([
+        {
+          providerId: "openrouter",
+          models: [],
+          fetchedAt: Date.now(),
+        },
+      ]),
+    );
+    useProviderModelCacheStore.getState().loadPersisted();
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("openrouter"),
+    ).toBe(false);
+    mocks.supportedModelsList
+      .mockResolvedValueOnce({ models: [] })
+      .mockResolvedValueOnce({ models: ["openrouter-model"] });
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("openrouter");
+
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("openrouter"),
+    ).toBe(false);
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("openrouter");
+
+    expect(mocks.supportedModelsList).toHaveBeenCalledTimes(2);
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .getModelsForProvider("openrouter")
+        .map((model) => model.id),
+    ).toEqual(["openrouter-model"]);
   });
 
   it("preserves bundled metadata while refreshing the available model list", async () => {
