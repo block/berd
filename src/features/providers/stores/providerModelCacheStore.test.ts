@@ -129,11 +129,28 @@ describe("providerModelCacheStore", () => {
   });
 
   it.each([
-    { label: "stale", fetchedAt: 1, force: false },
-    { label: "fresh forced", fetchedAt: Date.now(), force: true },
+    {
+      label: "stale",
+      fetchedAt: 1,
+      force: false,
+      error: undefined,
+    },
+    {
+      label: "fresh forced with an error",
+      fetchedAt: Date.now(),
+      force: true,
+      error: "authentication failed",
+    },
+    {
+      label: "retryable with an error",
+      fetchedAt: 0,
+      force: false,
+      error: "authentication failed",
+    },
   ])("preserves a $label populated cache and retries after empty discovery", async ({
     fetchedAt,
     force,
+    error,
   }) => {
     const cachedEntry = {
       providerId: "openrouter",
@@ -144,6 +161,7 @@ describe("providerModelCacheStore", () => {
         }),
       ],
       fetchedAt,
+      ...(error ? { error } : {}),
     };
     window.localStorage.setItem(
       "goose:providerModelCache:v1",
@@ -159,6 +177,7 @@ describe("providerModelCacheStore", () => {
       .refreshProviderModels("openrouter", { force });
 
     const retryableEntry = { ...cachedEntry, fetchedAt: 0 };
+    delete retryableEntry.error;
     expect(
       useProviderModelCacheStore.getState().providers.get("openrouter"),
     ).toEqual(retryableEntry);
@@ -167,6 +186,9 @@ describe("providerModelCacheStore", () => {
         window.localStorage.getItem("goose:providerModelCache:v1") ?? "[]",
       ),
     ).toEqual([retryableEntry]);
+    expect(useProviderModelCacheStore.getState().getError("openrouter")).toBe(
+      null,
+    );
 
     await useProviderModelCacheStore
       .getState()

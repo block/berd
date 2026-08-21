@@ -265,15 +265,17 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
           if (discoveredModels.length === 0) {
             if (
               !existing ||
-              existing.fetchedAt === 0 ||
-              versionAtStart !== refreshVersion(providerId)
+              versionAtStart !== refreshVersion(providerId) ||
+              (existing.fetchedAt === 0 && !existing.error)
             ) {
               return;
             }
+            const retryableEntry = { ...existing, fetchedAt: 0 };
+            delete retryableEntry.error;
             notifyProviderModelInventoryInvalidated(providerId);
             set((state) => {
               const providers = new Map(state.providers);
-              providers.set(providerId, { ...existing, fetchedAt: 0 });
+              providers.set(providerId, retryableEntry);
               persistModels(providers);
               return { providers };
             });
