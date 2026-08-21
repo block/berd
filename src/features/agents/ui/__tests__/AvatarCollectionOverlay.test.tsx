@@ -155,6 +155,47 @@ describe("AvatarCollectionOverlay", () => {
     finishExitAnimation();
   });
 
+  it("keeps the canvas and highlighted selection locked while persistence is pending", async () => {
+    let resolveSelection: (() => void) | undefined;
+    const onSelectAvatar = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSelection = resolve;
+        }),
+    );
+    const onClose = vi.fn();
+    renderWithProviders(
+      <AvatarCollectionOverlay
+        library={libraryWith(catalogWith({ gloopies: ["g-1", "g-2"] }))}
+        onSelectAvatar={onSelectAvatar}
+        onClose={onClose}
+      />,
+    );
+
+    const selectedTile = overlay().getAllByRole("button", { name: "g-1" })[0];
+    fireEvent.click(selectedTile);
+    fireEvent.click(overlay().getByRole("button", { name: /^select$/i }));
+
+    expect(selectedTile).toBeDisabled();
+    expect(overlay().getAllByRole("button", { name: "g-2" })[0]).toBeDisabled();
+    expect(overlay().getByRole("button", { name: /^close$/i })).toBeDisabled();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(screen.getByTestId("avatar-collection-overlay"));
+    finishExitAnimation();
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(
+      overlay()
+        .getAllByRole("button", { name: "g-1" })
+        .some((tile) => tile.getAttribute("aria-pressed") === "true"),
+    ).toBe(true);
+
+    await act(async () => resolveSelection?.());
+    finishExitAnimation();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it("shows a neutral loading state while the catalog loads", () => {
     const onClose = vi.fn();
     renderWithProviders(
