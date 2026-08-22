@@ -117,7 +117,7 @@ describe("voice conversation API", () => {
         rendererEpoch: 7,
       },
     );
-    expect(mocks.stopMicrophone).toHaveBeenCalledOnce();
+    expect(mocks.stopMicrophone).not.toHaveBeenCalled();
     expect(mocks.invoke).toHaveBeenNthCalledWith(
       5,
       "stop_native_voice_conversation",

@@ -35,6 +35,21 @@ const mockDeletePersonaSource = vi.hoisted(() => vi.fn());
 const mockLoadSessionMessages = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 
+vi.mock(
+  "@/features/voice-conversation/api/voiceConversation",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/features/voice-conversation/api/voiceConversation")
+    >()),
+    blockNativeVoiceConversationStarts: vi
+      .fn()
+      .mockResolvedValue("archive-token"),
+    releaseNativeVoiceConversationStartBlock: vi
+      .fn()
+      .mockResolvedValue(undefined),
+  }),
+);
+
 vi.mock("sonner", () => ({
   toast: {
     error: (...args: unknown[]) => mockToastError(...args),

@@ -57,6 +57,21 @@ import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStor
 import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
 import { ASSISTIVE_UX_STORAGE_KEY } from "@/shared/assistive-ux/registry";
 
+vi.mock(
+  "@/features/voice-conversation/api/voiceConversation",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/features/voice-conversation/api/voiceConversation")
+    >()),
+    blockNativeVoiceConversationStarts: vi
+      .fn()
+      .mockResolvedValue("archive-token"),
+    releaseNativeVoiceConversationStartBlock: vi
+      .fn()
+      .mockResolvedValue(undefined),
+  }),
+);
+
 import {
   DEFAULT_RUNTIME_CONFIG,
   type RuntimeConfig,
