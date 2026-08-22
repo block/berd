@@ -26,6 +26,7 @@ import type { Message } from "@/shared/types/messages";
 import type { GitState } from "@/shared/types/git";
 import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
+import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
@@ -105,6 +106,29 @@ const mockAfterNextPaint = vi.hoisted(() => ({
 }));
 const mockSessionWindowSupport = vi.hoisted(() => ({ supported: false }));
 const mockFocusSessionWindow = vi.hoisted(() => vi.fn());
+const mockVoiceSetupReadiness = vi.hoisted(() => ({ ready: false }));
+const mockVoiceSettingsEnabled = vi.hoisted(() => ({ enabled: false }));
+
+vi.mock("@/features/settings/ui/settingsSections", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/features/settings/ui/settingsSections")
+    >();
+  return {
+    ...actual,
+    resolveEnabledSettingsSection: (
+      section: Parameters<typeof actual.resolveEnabledSettingsSection>[0],
+      capabilities: Parameters<typeof actual.resolveEnabledSettingsSection>[1],
+    ) =>
+      section === "voice" && mockVoiceSettingsEnabled.enabled
+        ? "voice"
+        : actual.resolveEnabledSettingsSection(section, capabilities),
+  };
+});
+
+vi.mock("@/features/voice-conversation/lib/voiceSetupReadiness", () => ({
+  isVoiceSetupReady: () => mockVoiceSetupReadiness.ready,
+}));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -932,6 +956,8 @@ describe("AppShell global navigation", () => {
     useShortcutsDialogStore.setState({ open: false });
     document.documentElement.removeAttribute("data-global-composer-visible");
     mockSessionWindowSupport.supported = false;
+    mockVoiceSetupReadiness.ready = false;
+    mockVoiceSettingsEnabled.enabled = false;
     mockFocusSessionWindow.mockReset();
     useSessionWindowStore.getState().setSnapshot([]);
     mockListExtensions.mockReset();
@@ -1054,6 +1080,7 @@ describe("AppShell global navigation", () => {
       activeWorkspaceBySession: {},
       archiveMutationBySessionId: {},
     });
+    useVoiceConversationStore.setState({ requestedStartSessionId: null });
     useAgentStore.setState({
       selectedProvider: "goose",
     });
@@ -4078,6 +4105,164 @@ describe("AppShell global navigation", () => {
     expect(
       screen.queryByText("Save this agent draft?"),
     ).not.toBeInTheDocument();
+  });
+
+  it("returns from voice setup to its session and cancels an unready start", async () => {
+    const user = userEvent.setup();
+    const session = useChatSessionStore.getState().createDraftSession({
+      title: "Voice setup target",
+      workingDir: "/tmp/voice-setup-target",
+    });
+    useVoiceConversationStore.getState().requestStart(session.id);
+    mockVoiceSettingsEnabled.enabled = true;
+    renderAppShell();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(OPEN_SETTINGS_EVENT, {
+          detail: {
+            section: "voice",
+            returnTarget: {
+              type: "voice-setup",
+              sessionId: session.id,
+            },
+          },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+    await user.click(screen.getByRole("button", { name: "Back" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(useChatSessionStore.getState().activeSessionId).toBe(session.id);
+    expect(
+      useVoiceConversationStore.getState().requestedStartSessionId,
+    ).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Forward" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+  });
+
+  it("cancels a voice start when navigating away from setup", async () => {
+    const user = userEvent.setup();
+    const session = useChatSessionStore.getState().createDraftSession({
+      title: "Voice setup target",
+      workingDir: "/tmp/voice-setup-target",
+    });
+    useVoiceConversationStore.getState().requestStart(session.id);
+    mockVoiceSettingsEnabled.enabled = true;
+    renderAppShell();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(OPEN_SETTINGS_EVENT, {
+          detail: {
+            section: "voice",
+            returnTarget: {
+              type: "voice-setup",
+              sessionId: session.id,
+            },
+          },
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("skills");
+    });
+    expect(
+      useVoiceConversationStore.getState().requestedStartSessionId,
+    ).toBeNull();
+  });
+
+  it("cancels a voice start when another settings section replaces Voice setup", async () => {
+    const user = userEvent.setup();
+    const session = useChatSessionStore.getState().createDraftSession({
+      title: "Voice setup target",
+      workingDir: "/tmp/voice-setup-target",
+    });
+    useVoiceConversationStore.getState().requestStart(session.id);
+    mockVoiceSettingsEnabled.enabled = true;
+    renderAppShell();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(OPEN_SETTINGS_EVENT, {
+          detail: {
+            section: "voice",
+            returnTarget: {
+              type: "voice-setup",
+              sessionId: session.id,
+            },
+          },
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Sidebar providers" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("settings-section")).toHaveTextContent(
+        "providers",
+      );
+    });
+    expect(
+      useVoiceConversationStore.getState().requestedStartSessionId,
+    ).toBeNull();
+  });
+
+  it("preserves a ready voice start when returning from setup", async () => {
+    const user = userEvent.setup();
+    const session = useChatSessionStore.getState().createDraftSession({
+      title: "Voice setup target",
+      workingDir: "/tmp/voice-setup-target",
+    });
+    useVoiceConversationStore.getState().requestStart(session.id);
+    mockVoiceSettingsEnabled.enabled = true;
+    const view = renderAppShell();
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(OPEN_SETTINGS_EVENT, {
+          detail: {
+            section: "voice",
+            returnTarget: {
+              type: "voice-setup",
+              sessionId: session.id,
+            },
+          },
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+
+    mockVoiceSetupReadiness.ready = true;
+    view.rerender(appShellWithTheme());
+    await user.click(screen.getByRole("button", { name: "Back" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(useChatSessionStore.getState().activeSessionId).toBe(session.id);
+    expect(useVoiceConversationStore.getState().requestedStartSessionId).toBe(
+      session.id,
+    );
   });
 
   it("discarding a dirty agent draft continues the pending navigation", async () => {

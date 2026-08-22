@@ -17,7 +17,7 @@ function setup(overrides: Partial<SiriVoiceSetup> = {}): SiriVoiceSetup {
   return {
     status: {
       supported: true,
-      availableLanguages: ["en-US", "en-AU", "en-IN"],
+      availableLanguages: ["en-US", "en-AU", "en-IN", "en-IE"],
       selectedVoice: null,
       selectedVoiceInstalled: false,
       playbackSpeed: 1,
@@ -31,7 +31,7 @@ function setup(overrides: Partial<SiriVoiceSetup> = {}): SiriVoiceSetup {
       ],
     },
     language: "en-US",
-    languages: ["en-AU", "en-IN", "en-US"],
+    languages: ["en-AU", "en-IN", "en-IE", "en-US"],
     loading: false,
     error: null,
     downloadingVoiceKey: null,
@@ -52,13 +52,35 @@ describe("SiriVoiceSettings", () => {
 
     await userEvent.click(screen.getByRole("combobox", { name: "Language" }));
     expect(
-      screen.getByRole("option", { name: "American English" }),
+      screen.getByRole("option", { name: "English (United States)" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "Australian English" }),
+      screen.getByRole("option", { name: "English (Australia)" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /India/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "English (India)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "English (Ireland)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "American English" }),
+    ).toBeNull();
     expect(screen.queryByRole("option", { name: "English" })).toBeNull();
+
+    await userEvent.click(
+      screen.getByRole("option", { name: "English (Australia)" }),
+    );
+    expect(value.setLanguage).toHaveBeenCalledWith("en-AU");
+  });
+
+  it("uses the same regional label for voice groups", () => {
+    const value = setup();
+    renderWithProviders(<SiriVoiceSettings setup={value} />);
+
+    expect(
+      screen.getByRole("heading", { name: "English (United States)" }),
+    ).toBeInTheDocument();
   });
 
   it("previews a Siri voice before download", async () => {
@@ -76,7 +98,7 @@ describe("SiriVoiceSettings", () => {
     ).toBeInTheDocument();
   });
 
-  it("gives each voice action a voice-specific accessible name", () => {
+  it("selects installed voices from a compact, accessible row", async () => {
     const status = setup().status;
     expect(status).not.toBeNull();
     if (!status) return;
@@ -110,6 +132,15 @@ describe("SiriVoiceSettings", () => {
     expect(
       screen.getByRole("button", { name: "Download Quinn" }),
     ).toBeInTheDocument();
+    expect(screen.getByText("Installed · 0.0 MB on disk")).toBeInTheDocument();
+    expect(screen.getByText("310.5 MB")).toBeInTheDocument();
+    expect(screen.queryByText("Use voice")).not.toBeInTheDocument();
+    expect(screen.queryByText("Download model")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Use Aaron" }));
+    expect(value.selectVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Aaron", installed: true }),
+    );
   });
 
   it("exposes preview and download progress in accessible names", () => {
