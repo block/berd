@@ -15,13 +15,21 @@ import {
 import { Button } from "@/shared/ui/button";
 import { BerdIcon } from "@/shared/ui/icons/BerdIcon";
 
+type VoiceControlsError =
+  | "conversation"
+  | "initialize"
+  | "mute"
+  | "open"
+  | "show"
+  | "stop";
+
 export function VoiceBuddyApp() {
   const { t } = useTranslation("chat");
   const [status, setStatus] = useState<VoiceConversationStatus | null>(null);
   const [busyAction, setBusyAction] = useState<"open" | "mute" | "stop" | null>(
     null,
   );
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<VoiceControlsError | null>(null);
   const [activity, setActivity] = useState({
     userSpeaking: false,
     assistantSpeaking: false,
@@ -42,7 +50,7 @@ export function VoiceBuddyApp() {
     void showVoiceConversationControls(status.sessionId, status.revision).catch(
       (cause) => {
         console.error("Failed to show floating voice controls", cause);
-        setError(String(cause));
+        setError("show");
       },
     );
   }, [initialized, status?.revision, status?.sessionId]);
@@ -156,7 +164,10 @@ export function VoiceBuddyApp() {
                 revision: event.revision,
               };
             case "error":
-              if (event.terminal) setError(event.message);
+              if (event.terminal) {
+                console.error("Voice conversation failed", event.message);
+                setError("conversation");
+              }
               return { ...current, revision: event.revision };
             default:
               return { ...current, revision: event.revision };
@@ -173,7 +184,10 @@ export function VoiceBuddyApp() {
         if (cancelled) nextUnlisten();
         else unlisten = nextUnlisten;
       } catch (cause) {
-        if (!cancelled) setError(String(cause));
+        if (!cancelled) {
+          console.error("Failed to listen for voice conversation state", cause);
+          setError("initialize");
+        }
       }
 
       try {
@@ -212,7 +226,10 @@ export function VoiceBuddyApp() {
           );
         }
       } catch (cause) {
-        if (!cancelled) setError(String(cause));
+        if (!cancelled) {
+          console.error("Failed to load voice conversation state", cause);
+          setError("initialize");
+        }
       } finally {
         if (!cancelled) setInitialized(true);
       }
@@ -225,12 +242,16 @@ export function VoiceBuddyApp() {
   }, []);
 
   const microphoneMuted = status?.microphoneMuted ?? false;
+  const errorLabel = error
+    ? t(`toolbar.voiceConversation.buddy.errors.${error}`)
+    : null;
   const activityLabel = microphoneMuted
     ? t("toolbar.voiceConversation.buddy.muted")
     : t("toolbar.voiceConversation.buddy.listening");
 
   const run = async (
     action: "open" | "mute" | "stop",
+    errorType: VoiceControlsError,
     operation: () => Promise<void>,
   ) => {
     setBusyAction(action);
@@ -238,7 +259,8 @@ export function VoiceBuddyApp() {
     try {
       await operation();
     } catch (cause) {
-      setError(String(cause));
+      console.error(`Voice control action failed: ${action}`, cause);
+      setError(errorType);
     } finally {
       setBusyAction(null);
     }
@@ -247,7 +269,7 @@ export function VoiceBuddyApp() {
   const toggleMute = () => {
     if (!status) return;
     const generation = microphoneMuteGeneration.current;
-    void run("mute", async () => {
+    void run("mute", "mute", async () => {
       const nextStatus = await setVoiceConversationMicrophoneMuted(
         !microphoneMuted,
         status,
@@ -272,7 +294,7 @@ export function VoiceBuddyApp() {
       <div
         className={`flex items-center justify-center gap-1 rounded-full bg-card/90 p-1 shadow-sm backdrop-blur-md ${error ? "ring-2 ring-destructive" : ""}`}
         data-tauri-drag-region="deep"
-        title={error ?? t("toolbar.voiceConversation.buddy.title")}
+        title={errorLabel ?? t("toolbar.voiceConversation.buddy.title")}
       >
         <div
           className="flex h-8 cursor-move items-center justify-center px-1 text-muted-foreground"
@@ -286,10 +308,14 @@ export function VoiceBuddyApp() {
           variant="subtle"
           size="icon-sm"
           activity={activity.assistantSpeaking}
-          aria-label={t("toolbar.voiceConversation.buddy.openSession")}
+          aria-label={
+            activity.assistantSpeaking
+              ? t("toolbar.voiceConversation.buddy.assistantSpeaking")
+              : t("toolbar.voiceConversation.buddy.openSession")
+          }
           title={t("toolbar.voiceConversation.buddy.openSession")}
           disabled={!status || busyAction !== null}
-          onClick={() => void run("open", openVoiceConversationSession)}
+          onClick={() => void run("open", "open", openVoiceConversationSession)}
         >
           <BerdIcon aria-hidden="true" />
         </Button>
@@ -299,9 +325,11 @@ export function VoiceBuddyApp() {
           size="icon-sm"
           activity={activity.userSpeaking && !microphoneMuted}
           aria-label={
-            microphoneMuted
-              ? t("toolbar.voiceConversation.unmuteMicrophone")
-              : t("toolbar.voiceConversation.muteMicrophone")
+            activity.userSpeaking && !microphoneMuted
+              ? t("toolbar.voiceConversation.buddy.userSpeaking")
+              : microphoneMuted
+                ? t("toolbar.voiceConversation.unmuteMicrophone")
+                : t("toolbar.voiceConversation.muteMicrophone")
           }
           title={
             microphoneMuted
@@ -323,7 +351,9 @@ export function VoiceBuddyApp() {
           disabled={!status || busyAction !== null}
           onClick={() => {
             if (status) {
-              void run("stop", () => stopVoiceConversationFromBuddy(status));
+              void run("stop", "stop", () =>
+                stopVoiceConversationFromBuddy(status),
+              );
             }
           }}
         >
@@ -331,7 +361,7 @@ export function VoiceBuddyApp() {
         </Button>
       </div>
       <p className="sr-only" role="status" aria-live="polite">
-        {error ?? activityLabel}
+        {errorLabel ?? activityLabel}
       </p>
     </main>
   );

@@ -68,7 +68,7 @@ describe("VoiceBuddyApp", () => {
       });
     });
     const muteButton = screen.getByRole("button", {
-      name: "toolbar.voiceConversation.muteMicrophone",
+      name: "toolbar.voiceConversation.buddy.userSpeaking",
     });
     expect(muteButton).toHaveClass(
       "bg-primary/15",
@@ -85,7 +85,7 @@ describe("VoiceBuddyApp", () => {
       });
     });
     const openButton = screen.getByRole("button", {
-      name: "toolbar.voiceConversation.buddy.openSession",
+      name: "toolbar.voiceConversation.buddy.assistantSpeaking",
     });
     expect(openButton).toHaveClass(
       "bg-primary/15",
@@ -295,8 +295,55 @@ describe("VoiceBuddyApp", () => {
     );
 
     const error = await screen.findByRole("status");
-    expect(error).toHaveTextContent("owner unavailable");
+    expect(error).toHaveTextContent(
+      "toolbar.voiceConversation.buddy.errors.open",
+    );
     expect(error).toHaveClass("sr-only");
-    expect(screen.getByTitle("Error: owner unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByTitle("toolbar.voiceConversation.buddy.errors.open"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("owner unavailable")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      action: "toolbar.voiceConversation.muteMicrophone",
+      error: "toolbar.voiceConversation.buddy.errors.mute",
+      fail: () => mocks.setMuted.mockRejectedValueOnce(new Error("mute ipc")),
+    },
+    {
+      action: "toolbar.voiceConversation.buddy.hangUp",
+      error: "toolbar.voiceConversation.buddy.errors.stop",
+      fail: () => mocks.stop.mockRejectedValueOnce(new Error("stop ipc")),
+    },
+  ])("localizes a failed $action action", async ({ action, error, fail }) => {
+    const user = userEvent.setup();
+    fail();
+    render(<VoiceBuddyApp />);
+
+    await user.click(await screen.findByRole("button", { name: action }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(error);
+    expect(screen.queryByText(/ipc/)).not.toBeInTheDocument();
+  });
+
+  it("localizes initialization failures", async () => {
+    mocks.getStatus.mockRejectedValueOnce(new Error("status ipc"));
+    render(<VoiceBuddyApp />);
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "toolbar.voiceConversation.buddy.errors.initialize",
+    );
+    expect(screen.queryByText("status ipc")).not.toBeInTheDocument();
+  });
+
+  it("localizes failures to reveal the controls", async () => {
+    mocks.show.mockRejectedValueOnce(new Error("show ipc"));
+    render(<VoiceBuddyApp />);
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "toolbar.voiceConversation.buddy.errors.show",
+    );
+    expect(screen.queryByText("show ipc")).not.toBeInTheDocument();
   });
 });

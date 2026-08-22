@@ -552,7 +552,17 @@
         "openSession": "Abrir sesión de voz",
         "hangUp": "Colgar",
         "listening": "Escuchando…",
-        "muted": "Micrófono silenciado"
+        "muted": "Micrófono silenciado",
+        "userSpeaking": "Voz detectada",
+        "assistantSpeaking": "Berd está hablando",
+        "errors": {
+          "initialize": "No se pudieron iniciar los controles de voz. Abre la sesión de voz para intentarlo de nuevo.",
+          "show": "No se pudieron mostrar los controles de voz. Abre la sesión de voz para continuar.",
+          "open": "No se pudo abrir la sesión de voz. Inténtalo de nuevo.",
+          "mute": "No se pudo cambiar la configuración del micrófono. Inténtalo de nuevo.",
+          "stop": "No se pudo finalizar la conversación de voz. Inténtalo de nuevo.",
+          "conversation": "La conversación de voz se detuvo debido a un error. Abre la sesión para intentarlo de nuevo."
+        }
       },
       "states": {
         "off": "Iniciar conversación de voz",
