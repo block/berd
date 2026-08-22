@@ -280,11 +280,13 @@ export function setVoiceConversationControlsSuppressed(
     .then(async () => {
       const { rendererId, rendererEpoch } = await getRendererInstance();
       return invoke<void>("set_voice_conversation_controls_suppressed", {
-        sessionId,
-        expectedRevision,
-        suppressed,
-        rendererId,
-        rendererEpoch,
+        request: {
+          sessionId,
+          expectedRevision,
+          suppressed,
+          rendererId,
+          rendererEpoch,
+        },
       });
     });
   controlsVisibilityQueue = operation.catch(() => undefined);

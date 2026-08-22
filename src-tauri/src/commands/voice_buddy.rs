@@ -1,6 +1,6 @@
 //! Cross-platform always-on-top controls for the process-wide voice conversation.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
     WindowEvent,
@@ -18,6 +18,16 @@ const SCREEN_INSET: i32 = 24;
 #[serde(rename_all = "camelCase")]
 struct OpenSessionPayload {
     session_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlsVisibilityRequest {
+    session_id: String,
+    expected_revision: u64,
+    suppressed: bool,
+    renderer_id: String,
+    renderer_epoch: u64,
 }
 
 fn focus_window(window: &WebviewWindow) {
@@ -245,27 +255,27 @@ pub fn set_voice_conversation_controls_suppressed(
     window: WebviewWindow,
     state: tauri::State<'_, NativeVoiceState>,
     capture: tauri::State<'_, VoiceCaptureState>,
-    session_id: String,
-    expected_revision: u64,
-    suppressed: bool,
-    renderer_id: String,
-    renderer_epoch: u64,
+    request: ControlsVisibilityRequest,
 ) -> Result<(), String> {
-    capture.with_active_renderer(window.label(), &renderer_id, renderer_epoch, || {
+    capture.with_active_renderer(
+        window.label(),
+        &request.renderer_id,
+        request.renderer_epoch,
+        || {
         let Some((should_show, previous_suppression)) = state.set_controls_suppressed(
             window.label(),
-            &session_id,
-            expected_revision,
-            suppressed,
+            &request.session_id,
+            request.expected_revision,
+            request.suppressed,
         )?
         else {
             return Ok(());
         };
         let Some(controls) = window.app_handle().get_webview_window(WINDOW_LABEL) else {
             state.rollback_controls_suppression(
-                &session_id,
-                expected_revision,
-                suppressed,
+                &request.session_id,
+                request.expected_revision,
+                request.suppressed,
                 previous_suppression,
             );
             if should_show {
@@ -284,9 +294,9 @@ pub fn set_voice_conversation_controls_suppressed(
         };
         if let Err(error) = result {
             state.rollback_controls_suppression(
-                &session_id,
-                expected_revision,
-                suppressed,
+                &request.session_id,
+                request.expected_revision,
+                request.suppressed,
                 previous_suppression,
             );
             if should_show {
@@ -299,7 +309,8 @@ pub fn set_voice_conversation_controls_suppressed(
             return Err(error.to_string());
         }
         Ok(())
-    })
+    },
+    )
 }
 
 #[tauri::command]

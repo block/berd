@@ -184,21 +184,25 @@ describe("voice conversation API", () => {
       [
         "set_voice_conversation_controls_suppressed",
         {
-          sessionId: "session-1",
-          expectedRevision: 3,
-          suppressed: true,
-          rendererId: "renderer-test",
-          rendererEpoch: 7,
+          request: {
+            sessionId: "session-1",
+            expectedRevision: 3,
+            suppressed: true,
+            rendererId: "renderer-test",
+            rendererEpoch: 7,
+          },
         },
       ],
       [
         "set_voice_conversation_controls_suppressed",
         {
-          sessionId: "session-1",
-          expectedRevision: 3,
-          suppressed: false,
-          rendererId: "renderer-test",
-          rendererEpoch: 7,
+          request: {
+            sessionId: "session-1",
+            expectedRevision: 3,
+            suppressed: false,
+            rendererId: "renderer-test",
+            rendererEpoch: 7,
+          },
         },
       ],
     ]);
@@ -231,11 +235,13 @@ describe("voice conversation API", () => {
       [
         "set_voice_conversation_controls_suppressed",
         {
-          sessionId: "session-1",
-          expectedRevision: 3,
-          suppressed: true,
-          rendererId: "renderer-test",
-          rendererEpoch: 7,
+          request: {
+            sessionId: "session-1",
+            expectedRevision: 3,
+            suppressed: true,
+            rendererId: "renderer-test",
+            rendererEpoch: 7,
+          },
         },
       ],
       [
