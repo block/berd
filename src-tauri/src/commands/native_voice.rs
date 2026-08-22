@@ -1555,9 +1555,8 @@ fn stt_worker(
             Err(mpsc::RecvTimeoutError::Timeout) => None,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        let shutting_down = shutdown.load(Ordering::Acquire);
-        let current_mute_epoch =
-            effective_mute_epoch(shutting_down, &input_mute_epoch, &shutdown_mute_epoch);
+        let (shutting_down, current_mute_epoch) =
+            sample_effective_mute_epoch(&input_mute_epoch, &shutdown, &shutdown_mute_epoch);
         if current_mute_epoch != observed_mute_epoch {
             observed_mute_epoch = current_mute_epoch;
             if clear_buffered_audio(
@@ -1659,15 +1658,17 @@ fn stt_worker(
     }
 }
 
-fn effective_mute_epoch(
-    shutting_down: bool,
+fn sample_effective_mute_epoch(
     input_mute_epoch: &AtomicU64,
+    shutdown: &AtomicBool,
     shutdown_mute_epoch: &AtomicU64,
-) -> u64 {
+) -> (bool, u64) {
+    let live_mute_epoch = input_mute_epoch.load(Ordering::Acquire);
+    let shutting_down = shutdown.load(Ordering::Acquire);
     if shutting_down {
-        shutdown_mute_epoch.load(Ordering::Acquire)
+        (true, shutdown_mute_epoch.load(Ordering::Acquire))
     } else {
-        input_mute_epoch.load(Ordering::Acquire)
+        (false, live_mute_epoch)
     }
 }
 
@@ -1718,11 +1719,8 @@ fn flush_speech(
         .get_result()
         .map(|result| result.text.trim().to_string())
         .unwrap_or_default();
-    if effective_mute_epoch(
-        shutdown.load(Ordering::Acquire),
-        input_mute_epoch,
-        shutdown_mute_epoch,
-    ) != expected_mute_epoch
+    if sample_effective_mute_epoch(input_mute_epoch, shutdown, shutdown_mute_epoch).1
+        != expected_mute_epoch
     {
         if let Some(delivered) = delivered {
             let _ = delivered.send(());
@@ -2214,12 +2212,20 @@ mod tests {
         assert!(!discard_on_shutdown.load(Ordering::Acquire));
         assert_eq!(pipeline.shutdown_mute_epoch.load(Ordering::Acquire), 0);
         assert_eq!(
-            effective_mute_epoch(false, &input_mute_epoch, &pipeline.shutdown_mute_epoch),
-            1,
+            sample_effective_mute_epoch(
+                &input_mute_epoch,
+                &AtomicBool::new(false),
+                &pipeline.shutdown_mute_epoch,
+            ),
+            (false, 1),
         );
         assert_eq!(
-            effective_mute_epoch(true, &input_mute_epoch, &pipeline.shutdown_mute_epoch),
-            0,
+            sample_effective_mute_epoch(
+                &input_mute_epoch,
+                &pipeline.shutdown,
+                &pipeline.shutdown_mute_epoch,
+            ),
+            (true, 0),
         );
     }
 
