@@ -154,6 +154,14 @@ describe("VoiceSettings", () => {
     ).toHaveAccessibleDescription(
       "Choose how Berd speaks assistant responses.",
     );
+    const outputPicker = screen.getByRole("combobox", {
+      name: "Speech output",
+    });
+    expect(outputPicker).toHaveClass("w-full", "sm:w-auto");
+    expect(
+      screen.getByRole("heading", { name: "Speech output" }).parentElement
+        ?.parentElement,
+    ).toHaveClass("flex-col", "sm:flex-row");
   });
 
   it("keeps the Voice settings page open while Parakeet completes in place", () => {

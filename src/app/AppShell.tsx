@@ -229,7 +229,10 @@ import { useVoiceConversationStore } from "@/features/voice-conversation/stores/
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
-import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
+import {
+  isVoiceSetupReady,
+  refreshVoiceSetupReadiness,
+} from "@/features/voice-conversation/lib/voiceSetupReadiness";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
@@ -890,6 +893,7 @@ export function AppShell({
   const [voiceSettingsReturnTarget, setVoiceSettingsReturnTarget] =
     useState<VoiceSetupReturnTarget | null>(null);
   const voiceSettingsReturnTargetRef = useRef(voiceSettingsReturnTarget);
+  const voiceSettingsReturnInFlightRef = useRef<string | null>(null);
   voiceSettingsReturnTargetRef.current = voiceSettingsReturnTarget;
   const [homeSessionId, setHomeSessionId] = useState<string | null>(() =>
     loadStoredHomeSessionId(),
@@ -3449,46 +3453,75 @@ export function AppShell({
       return false;
     }
 
+    if (voiceSettingsReturnInFlightRef.current === target.sessionId) {
+      return true;
+    }
+
     const session = useChatSessionStore.getState().getSession(target.sessionId);
-    voiceSettingsReturnTargetRef.current = null;
-    setVoiceSettingsReturnTarget(null);
     if (!session || session.archivedAt) {
+      voiceSettingsReturnTargetRef.current = null;
+      setVoiceSettingsReturnTarget(null);
       useVoiceConversationStore
         .getState()
         .clearRequestedStart(target.sessionId);
       return false;
     }
 
-    const history = navigationHistoryRef.current;
-    const previousLocation =
-      history.index > 0 ? history.entries[history.index - 1] : null;
-    if (
-      previousLocation?.view === "chat" &&
-      previousLocation.sessionId === target.sessionId
-    ) {
-      history.index -= 1;
-    } else {
-      history.entries.splice(history.index, 0, {
-        view: "chat",
-        sessionId: target.sessionId,
-      });
-    }
-    if (!globalVoiceReady) {
-      useVoiceConversationStore
-        .getState()
-        .clearRequestedStart(target.sessionId);
-    }
+    voiceSettingsReturnInFlightRef.current = target.sessionId;
+    void refreshVoiceSetupReadiness(
+      globalVoiceOutput.backend,
+      globalSiriVoiceSetup.language,
+    )
+      .then((ready) => {
+        if (!ready) {
+          useVoiceConversationStore
+            .getState()
+            .clearRequestedStart(target.sessionId);
+        }
+      })
+      .catch(() => {
+        // Preserve the requested start when readiness cannot be confirmed.
+        // The session controller will consume it only after its live status is ready.
+      })
+      .finally(() => {
+        if (voiceSettingsReturnInFlightRef.current === target.sessionId) {
+          voiceSettingsReturnInFlightRef.current = null;
+        }
+        if (
+          voiceSettingsReturnTargetRef.current?.sessionId !== target.sessionId
+        ) {
+          return;
+        }
+        voiceSettingsReturnTargetRef.current = null;
+        setVoiceSettingsReturnTarget(null);
 
-    clearSettingsSectionUrl();
-    setActiveSession(target.sessionId);
-    setActiveView("chat");
-    setChatActiveSession(target.sessionId);
-    useChatStore.getState().markSessionRead(target.sessionId);
-    void loadSessionMessagesAndPrepare(target.sessionId);
-    updateNavigationAvailability();
+        const history = navigationHistoryRef.current;
+        const previousLocation =
+          history.index > 0 ? history.entries[history.index - 1] : null;
+        if (
+          previousLocation?.view === "chat" &&
+          previousLocation.sessionId === target.sessionId
+        ) {
+          history.index -= 1;
+        } else {
+          history.entries.splice(history.index, 0, {
+            view: "chat",
+            sessionId: target.sessionId,
+          });
+        }
+
+        clearSettingsSectionUrl();
+        setActiveSession(target.sessionId);
+        setActiveView("chat");
+        setChatActiveSession(target.sessionId);
+        useChatStore.getState().markSessionRead(target.sessionId);
+        void loadSessionMessagesAndPrepare(target.sessionId);
+        updateNavigationAvailability();
+      });
     return true;
   }, [
-    globalVoiceReady,
+    globalSiriVoiceSetup.language,
+    globalVoiceOutput.backend,
     setActiveSession,
     setChatActiveSession,
     updateNavigationAvailability,
@@ -3581,27 +3614,39 @@ export function AppShell({
     const handleOpenSettingsEvent = (event: Event) => {
       const detail = (event as CustomEvent<OpenSettingsEventDetail>).detail;
       const section = detail?.section;
-      setAgentBuilderSettingsReturnTarget(
-        detail?.returnTarget?.type === "agent-builder-provider-setup"
-          ? detail.returnTarget
-          : null,
-      );
-      const currentVoiceTarget = voiceSettingsReturnTargetRef.current;
       const nextVoiceTarget =
         detail?.returnTarget?.type === "voice-setup"
           ? detail.returnTarget
           : null;
-      if (
-        currentVoiceTarget &&
-        currentVoiceTarget.sessionId !== nextVoiceTarget?.sessionId
-      ) {
-        useVoiceConversationStore
-          .getState()
-          .clearRequestedStart(currentVoiceTarget.sessionId);
+      const commitNavigation = () => {
+        setAgentBuilderSettingsReturnTarget(
+          detail?.returnTarget?.type === "agent-builder-provider-setup"
+            ? detail.returnTarget
+            : null,
+        );
+        const currentVoiceTarget = voiceSettingsReturnTargetRef.current;
+        if (
+          currentVoiceTarget &&
+          currentVoiceTarget.sessionId !== nextVoiceTarget?.sessionId
+        ) {
+          useVoiceConversationStore
+            .getState()
+            .clearRequestedStart(currentVoiceTarget.sessionId);
+        }
+        voiceSettingsReturnTargetRef.current = nextVoiceTarget;
+        setVoiceSettingsReturnTarget(nextVoiceTarget);
+        openSettings(resolveSettingsSection(section ?? null));
+      };
+
+      if (nextVoiceTarget) {
+        guardAppNavigation(commitNavigation, () => {
+          useVoiceConversationStore
+            .getState()
+            .clearRequestedStart(nextVoiceTarget.sessionId);
+        });
+        return;
       }
-      voiceSettingsReturnTargetRef.current = nextVoiceTarget;
-      setVoiceSettingsReturnTarget(nextVoiceTarget);
-      openSettings(resolveSettingsSection(section ?? null));
+      commitNavigation();
     };
 
     window.addEventListener(
@@ -3614,7 +3659,7 @@ export function AppShell({
         handleOpenSettingsEvent as EventListener,
       );
     };
-  }, [openSettings]);
+  }, [guardAppNavigation, openSettings]);
 
   const settleWorkspaceCleanupConfirmation = useCallback(
     (confirmed: boolean) => {

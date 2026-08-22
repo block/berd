@@ -84,8 +84,8 @@ export function VoiceSettings() {
           showPocketVoiceControls={false}
         />
       </section>
-      <section className="space-y-2 overflow-hidden">
-        <div className="flex min-w-0 items-center gap-4 py-4 pr-4">
+      <section className="space-y-2">
+        <div className="flex min-w-0 flex-col gap-4 py-4 pr-4 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1">
             <h2 id={outputHeadingId} className="text-sm font-medium">
               {t("voice.speechOutput")}
@@ -97,7 +97,7 @@ export function VoiceSettings() {
               {t("voice.outputBackendDescription")}
             </p>
           </div>
-          <div className="min-w-0 shrink-0">
+          <div className="w-full min-w-0 sm:w-auto sm:shrink-0">
             <Select
               value={output.backend}
               onValueChange={(value) =>
@@ -105,6 +105,7 @@ export function VoiceSettings() {
               }
             >
               <SelectTrigger
+                className="w-full sm:w-auto"
                 aria-labelledby={outputHeadingId}
                 aria-describedby={outputDescriptionId}
               >

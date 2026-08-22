@@ -106,7 +106,11 @@ const mockAfterNextPaint = vi.hoisted(() => ({
 }));
 const mockSessionWindowSupport = vi.hoisted(() => ({ supported: false }));
 const mockFocusSessionWindow = vi.hoisted(() => vi.fn());
-const mockVoiceSetupReadiness = vi.hoisted(() => ({ ready: false }));
+const mockVoiceSetupReadiness = vi.hoisted(() => ({
+  ready: false,
+  authoritativeReady: false,
+  refreshPromise: null as Promise<boolean> | null,
+}));
 const mockVoiceSettingsEnabled = vi.hoisted(() => ({ enabled: false }));
 
 vi.mock("@/features/settings/ui/settingsSections", async (importOriginal) => {
@@ -128,6 +132,9 @@ vi.mock("@/features/settings/ui/settingsSections", async (importOriginal) => {
 
 vi.mock("@/features/voice-conversation/lib/voiceSetupReadiness", () => ({
   isVoiceSetupReady: () => mockVoiceSetupReadiness.ready,
+  refreshVoiceSetupReadiness: () =>
+    mockVoiceSetupReadiness.refreshPromise ??
+    Promise.resolve(mockVoiceSetupReadiness.authoritativeReady),
 }));
 
 function deferred<T>() {
@@ -957,6 +964,8 @@ describe("AppShell global navigation", () => {
     document.documentElement.removeAttribute("data-global-composer-visible");
     mockSessionWindowSupport.supported = false;
     mockVoiceSetupReadiness.ready = false;
+    mockVoiceSetupReadiness.authoritativeReady = false;
+    mockVoiceSetupReadiness.refreshPromise = null;
     mockVoiceSettingsEnabled.enabled = false;
     mockFocusSessionWindow.mockReset();
     useSessionWindowStore.getState().setSnapshot([]);
@@ -4225,7 +4234,7 @@ describe("AppShell global navigation", () => {
     ).toBeNull();
   });
 
-  it("preserves a ready voice start when returning from setup", async () => {
+  it("preserves a voice start when authoritative readiness leads the AppShell snapshot", async () => {
     const user = userEvent.setup();
     const session = useChatSessionStore.getState().createDraftSession({
       title: "Voice setup target",
@@ -4252,7 +4261,7 @@ describe("AppShell global navigation", () => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
     });
 
-    mockVoiceSetupReadiness.ready = true;
+    mockVoiceSetupReadiness.authoritativeReady = true;
     view.rerender(appShellWithTheme());
     await user.click(screen.getByRole("button", { name: "Back" }));
 
@@ -4263,6 +4272,116 @@ describe("AppShell global navigation", () => {
     expect(useVoiceConversationStore.getState().requestedStartSessionId).toBe(
       session.id,
     );
+  });
+
+  it("lets a replacement Voice target return while the previous readiness refresh is pending", async () => {
+    const user = userEvent.setup();
+    const first = useChatSessionStore.getState().createDraftSession({
+      title: "First voice target",
+      workingDir: "/tmp/first-voice-target",
+    });
+    const second = useChatSessionStore.getState().createDraftSession({
+      title: "Second voice target",
+      workingDir: "/tmp/second-voice-target",
+    });
+    const firstRefresh = deferred<boolean>();
+    const secondRefresh = deferred<boolean>();
+    mockVoiceSettingsEnabled.enabled = true;
+    renderAppShell();
+
+    const openVoiceSetup = (sessionId: string) => {
+      useVoiceConversationStore.getState().requestStart(sessionId);
+      window.dispatchEvent(
+        new CustomEvent(OPEN_SETTINGS_EVENT, {
+          detail: {
+            section: "voice",
+            returnTarget: { type: "voice-setup", sessionId },
+          },
+        }),
+      );
+    };
+
+    act(() => openVoiceSetup(first.id));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+    mockVoiceSetupReadiness.refreshPromise = firstRefresh.promise;
+    await user.click(screen.getByRole("button", { name: "Back" }));
+
+    act(() => openVoiceSetup(second.id));
+    mockVoiceSetupReadiness.refreshPromise = secondRefresh.promise;
+    await user.click(screen.getByRole("button", { name: "Back" }));
+
+    firstRefresh.resolve(true);
+    await act(async () => {
+      await firstRefresh.promise;
+    });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+
+    secondRefresh.resolve(true);
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(useChatSessionStore.getState().activeSessionId).toBe(second.id);
+  });
+
+  it("guards Voice setup navigation from a dirty agent draft", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    await user.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    await waitForCreatedAgentBuilderTarget();
+
+    const dirtyDraft = {
+      type: "agent" as const,
+      path: "/Users/test/.agents/agents/untitled-agent-created-session.md",
+      name: "Reviewer",
+      description: "Draft",
+      content: "Review code carefully.",
+      global: true,
+      writable: true,
+      properties: { draft: true, builderSessionId: "created-session" },
+    };
+    mockListPersonaSources.mockResolvedValue([dirtyDraft]);
+    mockReadAgentSourceFile.mockResolvedValue(dirtyDraft);
+    mockVoiceSettingsEnabled.enabled = true;
+
+    const openVoiceSetup = () => {
+      useVoiceConversationStore.getState().requestStart("created-session");
+      window.dispatchEvent(
+        new CustomEvent(OPEN_SETTINGS_EVENT, {
+          detail: {
+            section: "voice",
+            returnTarget: {
+              type: "voice-setup",
+              sessionId: "created-session",
+            },
+          },
+        }),
+      );
+    };
+
+    act(openVoiceSetup);
+    await waitFor(() => {
+      expect(screen.getByText("Save this agent draft?")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+
+    await user.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    expect(
+      useVoiceConversationStore.getState().requestedStartSessionId,
+    ).toBeNull();
+
+    act(openVoiceSetup);
+    await user.click(await screen.findByRole("button", { name: "Discard" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
   });
 
   it("discarding a dirty agent draft continues the pending navigation", async () => {

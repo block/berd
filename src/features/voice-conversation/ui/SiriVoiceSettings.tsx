@@ -28,7 +28,11 @@ function localeLabel(locale: string, displayLocale?: string): string {
   }
 }
 
-function groupVoicesByLocale(voices: SiriVoice[], displayLocale?: string) {
+function groupVoicesByLocale(
+  voices: SiriVoice[],
+  displayLocale: string,
+  collator: Intl.Collator,
+) {
   const groups = new Map<string, SiriVoice[]>();
   for (const voice of voices) {
     groups.set(voice.language, [...(groups.get(voice.language) ?? []), voice]);
@@ -36,10 +40,11 @@ function groupVoicesByLocale(voices: SiriVoice[], displayLocale?: string) {
   return Array.from(groups, ([locale, groupedVoices]) => ({
     locale,
     voices: groupedVoices.sort((left, right) =>
-      left.name.localeCompare(right.name),
+      collator.compare(left.name, right.name),
     ),
   })).sort((left, right) =>
-    localeLabel(left.locale, displayLocale).localeCompare(
+    collator.compare(
+      localeLabel(left.locale, displayLocale),
       localeLabel(right.locale, displayLocale),
     ),
   );
@@ -52,18 +57,24 @@ function formatBytes(bytes: number): string {
 export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
   const { t, i18n } = useTranslation("settings");
   const displayLocale = i18n.resolvedLanguage ?? i18n.language;
+  const collator = useMemo(
+    () => new Intl.Collator(displayLocale),
+    [displayLocale],
+  );
   const languages = useMemo(
     () =>
       [...setup.languages].sort((left, right) =>
-        localeLabel(left, displayLocale).localeCompare(
+        collator.compare(
+          localeLabel(left, displayLocale),
           localeLabel(right, displayLocale),
         ),
       ),
-    [displayLocale, setup.languages],
+    [collator, displayLocale, setup.languages],
   );
   const groups = useMemo(
-    () => groupVoicesByLocale(setup.status?.voices ?? [], displayLocale),
-    [displayLocale, setup.status?.voices],
+    () =>
+      groupVoicesByLocale(setup.status?.voices ?? [], displayLocale, collator),
+    [collator, displayLocale, setup.status?.voices],
   );
   const selectedKey = setup.status?.selectedVoice
     ? voiceKey(setup.status.selectedVoice)

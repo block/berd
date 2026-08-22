@@ -1,5 +1,8 @@
-import type { PocketVoiceStatus } from "../api/pocketVoice";
-import type { SiriVoiceStatus } from "../api/siriVoice";
+import {
+  getPocketVoiceStatus,
+  type PocketVoiceStatus,
+} from "../api/pocketVoice";
+import { getSiriVoiceStatus, type SiriVoiceStatus } from "../api/siriVoice";
 import type { VoiceOutputBackend } from "./voiceOutputPreference";
 
 export function isVoiceSetupReady(
@@ -12,4 +15,15 @@ export function isVoiceSetupReady(
   return Boolean(
     siri?.supported && siri.selectedVoice && siri.selectedVoiceInstalled,
   );
+}
+
+export async function refreshVoiceSetupReadiness(
+  backend: VoiceOutputBackend,
+  siriLanguage: string,
+): Promise<boolean> {
+  const [pocket, siri] = await Promise.all([
+    getPocketVoiceStatus(),
+    backend === "siri" ? getSiriVoiceStatus(siriLanguage) : null,
+  ]);
+  return isVoiceSetupReady(pocket, siri, backend);
 }

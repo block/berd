@@ -2,6 +2,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
+import { i18n } from "@/shared/i18n";
 import type { SiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
 import { SiriVoiceSettings } from "./SiriVoiceSettings";
 
@@ -81,6 +82,67 @@ describe("SiriVoiceSettings", () => {
     expect(
       screen.getByRole("heading", { name: "English (United States)" }),
     ).toBeInTheDocument();
+  });
+
+  it("sorts language options and groups with the active Berd locale", async () => {
+    const nativeCollator = Intl.Collator;
+    await i18n.changeLanguage("es");
+    try {
+      const voices = [
+        {
+          name: "Voz española",
+          language: "es-ES",
+          sizeBytes: 1,
+          installed: true,
+        },
+        {
+          name: "Voz francesa",
+          language: "fr-FR",
+          sizeBytes: 1,
+          installed: true,
+        },
+        {
+          name: "Voz inglesa",
+          language: "en-US",
+          sizeBytes: 1,
+          installed: true,
+        },
+      ];
+      const status = setup().status;
+      expect(status).not.toBeNull();
+      if (!status) return;
+      const value = setup({
+        languages: ["fr-FR", "en-US", "es-ES"],
+        status: {
+          ...status,
+          availableLanguages: ["fr-FR", "en-US", "es-ES"],
+          voices,
+        },
+      });
+
+      renderWithProviders(<SiriVoiceSettings setup={value} />);
+
+      const displayNames = new Intl.DisplayNames(["es"], {
+        type: "language",
+        languageDisplay: "standard",
+      });
+      const collator = new nativeCollator("es");
+      const expected = ["fr-FR", "en-US", "es-ES"]
+        .map((locale) => displayNames.of(locale) ?? locale)
+        .sort(collator.compare);
+      expect(
+        screen
+          .getAllByRole("heading", { level: 3 })
+          .map((heading) => heading.textContent),
+      ).toEqual(expected);
+
+      await userEvent.click(screen.getByRole("combobox", { name: "Idioma" }));
+      expect(
+        screen.getAllByRole("option").map((option) => option.textContent),
+      ).toEqual(expected);
+    } finally {
+      await i18n.changeLanguage("en");
+    }
   });
 
   it("previews a Siri voice before download", async () => {
