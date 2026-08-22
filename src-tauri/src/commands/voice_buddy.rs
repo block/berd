@@ -17,6 +17,19 @@ const WINDOW_WIDTH: f64 = 176.0;
 const WINDOW_HEIGHT: f64 = 56.0;
 const SCREEN_INSET: i32 = 24;
 
+fn controls_url(revision: u64) -> String {
+    format!("index.html?voiceBuddy=1&voiceRevision={revision}")
+}
+
+fn controls_revision_from_url(url: &str) -> Option<u64> {
+    url.split_once('?')?
+        .1
+        .split('#')
+        .next()?
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("voiceRevision=")?.parse().ok())
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OpenSessionPayload {
@@ -153,7 +166,7 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     let builder = WebviewWindowBuilder::new(
         app,
         WINDOW_LABEL,
-        WebviewUrl::App("index.html?voiceBuddy=1".into()),
+        WebviewUrl::App(controls_url(revision).into()),
     )
     .title("Berd voice conversation")
     .inner_size(WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -221,21 +234,46 @@ fn reconcile_terminal_controls(
     }
 }
 
-pub fn dismiss_after_terminal_event<T: Clone + Serialize>(app: &AppHandle, payload: T) {
+pub fn dismiss_after_terminal_event<T: Clone + Serialize>(
+    app: &AppHandle,
+    revision: u64,
+    payload: T,
+) {
     let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
         return;
     };
+    let window_matches_lifecycle = window
+        .url()
+        .ok()
+        .and_then(|url| controls_revision_from_url(url.as_str()))
+        == Some(revision);
     reconcile_terminal_controls(
         || {
             let _ = window.emit(super::native_voice::EVENT_NAME, payload);
         },
-        || window.destroy().map_err(|error| error.to_string()),
-        || window.hide().map_err(|error| error.to_string()),
+        || {
+            if window_matches_lifecycle {
+                window.destroy().map_err(|error| error.to_string())
+            } else {
+                Ok(())
+            }
+        },
+        || {
+            if window_matches_lifecycle {
+                window.hide().map_err(|error| error.to_string())
+            } else {
+                Ok(())
+            }
+        },
     );
 }
 
 pub fn dismiss_after_terminal(app: &AppHandle, revision: u64) {
-    dismiss_after_terminal_event(app, NativeVoiceEvent::ControlsDismissed { revision });
+    dismiss_after_terminal_event(
+        app,
+        revision,
+        NativeVoiceEvent::ControlsDismissed { revision },
+    );
 }
 
 pub fn emit<T: Clone + Serialize>(app: &AppHandle, payload: T) {
@@ -428,5 +466,15 @@ mod tests {
 
         assert!(emitted.get());
         assert!(hidden.get());
+    }
+
+    #[test]
+    fn floating_controls_url_carries_its_lifecycle_revision() {
+        let url = format!("tauri://localhost/{}", controls_url(42));
+        assert_eq!(controls_revision_from_url(&url), Some(42));
+        assert_eq!(
+            controls_revision_from_url("tauri://localhost/index.html?voiceBuddy=1"),
+            None
+        );
     }
 }

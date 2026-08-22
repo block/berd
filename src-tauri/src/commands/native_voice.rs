@@ -1188,7 +1188,11 @@ pub async fn start_native_voice_conversation(
                         revision: revision.wrapping_add(1),
                     };
                     let _ = event_window.emit(EVENT_NAME, shutdown_event.clone());
-                    super::voice_buddy::dismiss_after_terminal_event(&event_app, shutdown_event);
+                    super::voice_buddy::dismiss_after_terminal_event(
+                        &event_app,
+                        revision.wrapping_add(1),
+                        shutdown_event,
+                    );
                     super::voice_buddy::restore_hidden_owner(&event_app, &window_label);
                     break;
                 }
@@ -1364,7 +1368,7 @@ impl NativeVoiceState {
         if let Some(target) = app.get_webview_window(&owner.window_label) {
             let _ = target.emit(EVENT_NAME, shutdown_event.clone());
         }
-        super::voice_buddy::dismiss_after_terminal_event(app, shutdown_event);
+        super::voice_buddy::dismiss_after_terminal_event(app, next_revision, shutdown_event);
         super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
         Ok(true)
     }
@@ -1470,7 +1474,7 @@ impl NativeVoiceState {
             if let Some(window) = app.get_webview_window(&owner.window_label) {
                 let _ = window.emit(EVENT_NAME, shutdown_event.clone());
             }
-            super::voice_buddy::dismiss_after_terminal_event(app, shutdown_event);
+            super::voice_buddy::dismiss_after_terminal_event(app, next_revision, shutdown_event);
             super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
         } else {
             super::voice_buddy::dismiss_after_terminal(app, next_revision);
@@ -1501,15 +1505,17 @@ impl NativeVoiceState {
             (runtime.session_id.clone(), runtime.revision, pipeline)
         };
         if pipeline.is_none() {
+            let mut stopped = false;
             if let Ok(mut runtime) = self.runtime.lock() {
                 if runtime.revision == revision && runtime.session_id == session_id {
                     runtime.session_id = None;
                     runtime.lifecycle_id = None;
                     runtime.owner = None;
                     runtime.revision = runtime.revision.wrapping_add(1);
+                    stopped = true;
                 }
             }
-            return Some(revision.wrapping_add(1));
+            return stopped.then_some(revision.wrapping_add(1));
         }
         let runtime = Arc::clone(&self.runtime);
         tauri::async_runtime::spawn(async move {
