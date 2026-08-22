@@ -30,6 +30,10 @@ fn controls_revision_from_url(url: &str) -> Option<u64> {
         .find_map(|pair| pair.strip_prefix("voiceRevision=")?.parse().ok())
 }
 
+fn controls_window_matches_revision(url: &str, controls_revision: u64) -> bool {
+    controls_revision_from_url(url) == Some(controls_revision)
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OpenSessionPayload {
@@ -236,7 +240,7 @@ fn reconcile_terminal_controls(
 
 pub fn dismiss_after_terminal_event<T: Clone + Serialize>(
     app: &AppHandle,
-    revision: u64,
+    controls_revision: u64,
     payload: T,
 ) {
     let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
@@ -245,8 +249,7 @@ pub fn dismiss_after_terminal_event<T: Clone + Serialize>(
     let window_matches_lifecycle = window
         .url()
         .ok()
-        .and_then(|url| controls_revision_from_url(url.as_str()))
-        == Some(revision);
+        .is_some_and(|url| controls_window_matches_revision(url.as_str(), controls_revision));
     reconcile_terminal_controls(
         || {
             let _ = window.emit(super::native_voice::EVENT_NAME, payload);
@@ -268,11 +271,31 @@ pub fn dismiss_after_terminal_event<T: Clone + Serialize>(
     );
 }
 
-pub fn dismiss_after_terminal(app: &AppHandle, revision: u64) {
+pub fn dismiss_after_terminal(app: &AppHandle, controls_revision: u64, terminal_revision: u64) {
     dismiss_after_terminal_event(
         app,
-        revision,
-        NativeVoiceEvent::ControlsDismissed { revision },
+        controls_revision,
+        NativeVoiceEvent::ControlsDismissed {
+            revision: terminal_revision,
+        },
+    );
+}
+
+pub fn dismiss_stale_after_terminal(app: &AppHandle, terminal_revision: u64) {
+    let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
+        return;
+    };
+    reconcile_terminal_controls(
+        || {
+            let _ = window.emit(
+                super::native_voice::EVENT_NAME,
+                NativeVoiceEvent::ControlsDismissed {
+                    revision: terminal_revision,
+                },
+            );
+        },
+        || window.destroy().map_err(|error| error.to_string()),
+        || window.hide().map_err(|error| error.to_string()),
     );
 }
 
@@ -469,9 +492,11 @@ mod tests {
     }
 
     #[test]
-    fn floating_controls_url_carries_its_lifecycle_revision() {
+    fn floating_controls_match_active_revision_not_terminal_revision() {
         let url = format!("tauri://localhost/{}", controls_url(42));
         assert_eq!(controls_revision_from_url(&url), Some(42));
+        assert!(controls_window_matches_revision(&url, 42));
+        assert!(!controls_window_matches_revision(&url, 43));
         assert_eq!(
             controls_revision_from_url("tauri://localhost/index.html?voiceBuddy=1"),
             None

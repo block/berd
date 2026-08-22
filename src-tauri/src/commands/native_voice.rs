@@ -184,9 +184,16 @@ type StopSnapshot = (
 
 struct StopCompletion {
     session_id: String,
+    controls_revision: u64,
     next_revision: u64,
     owner: RuntimeOwner,
     owner_id: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct WindowDestroyedVoiceStop {
+    pub controls_revision: u64,
+    pub terminal_revision: u64,
 }
 
 #[derive(Clone, Default)]
@@ -1190,7 +1197,7 @@ pub async fn start_native_voice_conversation(
                     let _ = event_window.emit(EVENT_NAME, shutdown_event.clone());
                     super::voice_buddy::dismiss_after_terminal_event(
                         &event_app,
-                        revision.wrapping_add(1),
+                        revision,
                         shutdown_event,
                     );
                     super::voice_buddy::restore_hidden_owner(&event_app, &window_label);
@@ -1340,6 +1347,7 @@ impl NativeVoiceState {
             .await?;
         let Some(StopCompletion {
             session_id,
+            controls_revision,
             next_revision,
             owner,
             owner_id,
@@ -1368,7 +1376,7 @@ impl NativeVoiceState {
         if let Some(target) = app.get_webview_window(&owner.window_label) {
             let _ = target.emit(EVENT_NAME, shutdown_event.clone());
         }
-        super::voice_buddy::dismiss_after_terminal_event(app, next_revision, shutdown_event);
+        super::voice_buddy::dismiss_after_terminal_event(app, controls_revision, shutdown_event);
         super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
         Ok(true)
     }
@@ -1422,6 +1430,7 @@ impl NativeVoiceState {
         };
         Ok(Some(StopCompletion {
             session_id,
+            controls_revision: revision,
             next_revision,
             owner,
             owner_id,
@@ -1474,15 +1483,18 @@ impl NativeVoiceState {
             if let Some(window) = app.get_webview_window(&owner.window_label) {
                 let _ = window.emit(EVENT_NAME, shutdown_event.clone());
             }
-            super::voice_buddy::dismiss_after_terminal_event(app, next_revision, shutdown_event);
+            super::voice_buddy::dismiss_after_terminal_event(app, revision, shutdown_event);
             super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
         } else {
-            super::voice_buddy::dismiss_after_terminal(app, next_revision);
+            super::voice_buddy::dismiss_stale_after_terminal(app, next_revision);
         }
         Ok(())
     }
 
-    pub fn stop_for_window_destroyed(&self, window_label: &str) -> Option<u64> {
+    pub fn stop_for_window_destroyed(
+        &self,
+        window_label: &str,
+    ) -> Option<WindowDestroyedVoiceStop> {
         self.release_start_blocks_for_window(window_label);
         let (session_id, revision, pipeline) = {
             let Ok(mut runtime) = self.runtime.lock() else {
@@ -1515,7 +1527,10 @@ impl NativeVoiceState {
                     stopped = true;
                 }
             }
-            return stopped.then_some(revision.wrapping_add(1));
+            return stopped.then_some(WindowDestroyedVoiceStop {
+                controls_revision: revision,
+                terminal_revision: revision.wrapping_add(1),
+            });
         }
         let runtime = Arc::clone(&self.runtime);
         tauri::async_runtime::spawn(async move {
@@ -1529,7 +1544,10 @@ impl NativeVoiceState {
                 }
             }
         });
-        Some(revision.wrapping_add(1))
+        Some(WindowDestroyedVoiceStop {
+            controls_revision: revision,
+            terminal_revision: revision.wrapping_add(1),
+        })
     }
 
     pub fn stop_for_app_exit(&self) {
@@ -2208,7 +2226,13 @@ mod tests {
             Some("session-1")
         );
 
-        assert_eq!(state.stop_for_window_destroyed("session-window"), Some(1));
+        assert_eq!(
+            state.stop_for_window_destroyed("session-window"),
+            Some(WindowDestroyedVoiceStop {
+                controls_revision: 0,
+                terminal_revision: 1,
+            })
+        );
         let runtime = state.runtime.lock().expect("lock native runtime");
         assert!(runtime.session_id.is_none());
         assert!(runtime.owner.is_none());
@@ -2558,7 +2582,13 @@ mod tests {
         }
 
         let started = std::time::Instant::now();
-        assert_eq!(state.stop_for_window_destroyed("owner-window"), Some(1));
+        assert_eq!(
+            state.stop_for_window_destroyed("owner-window"),
+            Some(WindowDestroyedVoiceStop {
+                controls_revision: 0,
+                terminal_revision: 1,
+            })
+        );
         assert!(started.elapsed() < Duration::from_millis(50));
         assert!(shutdown.load(Ordering::Acquire));
         assert!(!state.microphone_muted.load(Ordering::SeqCst));

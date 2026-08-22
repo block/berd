@@ -683,8 +683,12 @@ pub fn open_session_window(
             let stopped_native_voice_revision = app_for_close
                 .state::<crate::commands::native_voice::NativeVoiceState>()
                 .stop_for_window_destroyed(&label_for_close);
-            if let Some(revision) = stopped_native_voice_revision {
-                crate::commands::voice_buddy::dismiss_after_terminal(&app_for_close, revision);
+            if let Some(stopped) = stopped_native_voice_revision {
+                crate::commands::voice_buddy::dismiss_after_terminal(
+                    &app_for_close,
+                    stopped.controls_revision,
+                    stopped.terminal_revision,
+                );
                 app_for_close
                     .state::<crate::commands::pocket_voice::PocketVoiceState>()
                     .stop_for_window_destroyed();
