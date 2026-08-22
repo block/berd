@@ -142,7 +142,21 @@ struct Runtime {
     pipeline: Option<SttPipeline>,
     controls_ready: bool,
     controls_suppressed: bool,
+    controls_visibility_generation: u64,
     native_microphone_mute_control: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ControlsVisibilityTarget {
+    pub(crate) suppressed: bool,
+    pub(crate) generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ControlsVisibilityAcknowledgement {
+    Inactive,
+    Ready,
+    Superseded(ControlsVisibilityTarget),
 }
 
 #[derive(Clone)]
@@ -309,11 +323,11 @@ impl NativeVoiceState {
         ))
     }
 
-    pub fn controls_suppression_for(
+    pub(crate) fn controls_visibility_target(
         &self,
         session_id: &str,
         expected_revision: u64,
-    ) -> Result<Option<bool>, String> {
+    ) -> Result<Option<ControlsVisibilityTarget>, String> {
         let runtime = self
             .runtime
             .lock()
@@ -323,15 +337,18 @@ impl NativeVoiceState {
         {
             return Ok(None);
         }
-        Ok(Some(runtime.controls_suppressed))
+        Ok(Some(ControlsVisibilityTarget {
+            suppressed: runtime.controls_suppressed,
+            generation: runtime.controls_visibility_generation,
+        }))
     }
 
-    pub fn mark_controls_ready_after_apply(
+    pub(crate) fn acknowledge_controls_visibility(
         &self,
         session_id: &str,
         expected_revision: u64,
-        applied_suppression: bool,
-    ) -> Result<Option<bool>, String> {
+        applied_generation: u64,
+    ) -> Result<ControlsVisibilityAcknowledgement, String> {
         let mut runtime = self
             .runtime
             .lock()
@@ -339,13 +356,19 @@ impl NativeVoiceState {
         if runtime.session_id.as_deref() != Some(session_id)
             || runtime.revision != expected_revision
         {
-            return Ok(None);
-        }
-        if runtime.controls_suppressed != applied_suppression {
-            return Ok(Some(false));
+            return Ok(ControlsVisibilityAcknowledgement::Inactive);
         }
         runtime.controls_ready = true;
-        Ok(Some(true))
+        if runtime.controls_visibility_generation == applied_generation {
+            Ok(ControlsVisibilityAcknowledgement::Ready)
+        } else {
+            Ok(ControlsVisibilityAcknowledgement::Superseded(
+                ControlsVisibilityTarget {
+                    suppressed: runtime.controls_suppressed,
+                    generation: runtime.controls_visibility_generation,
+                },
+            ))
+        }
     }
 
     pub fn controls_ready_for(&self, session_id: &str, revision: u64) -> bool {
@@ -381,7 +404,11 @@ impl NativeVoiceState {
             return Err("Only the voice conversation owner can change control visibility.".into());
         }
         let previous_suppression = runtime.controls_suppressed;
-        runtime.controls_suppressed = suppressed;
+        if previous_suppression != suppressed {
+            runtime.controls_suppressed = suppressed;
+            runtime.controls_visibility_generation =
+                runtime.controls_visibility_generation.wrapping_add(1);
+        }
         Ok(Some((
             runtime.controls_ready && !suppressed,
             previous_suppression,
@@ -401,6 +428,8 @@ impl NativeVoiceState {
                 && runtime.controls_suppressed == failed_suppression
             {
                 runtime.controls_suppressed = previous_suppression;
+                runtime.controls_visibility_generation =
+                    runtime.controls_visibility_generation.wrapping_add(1);
             }
         }
     }
@@ -962,6 +991,7 @@ pub async fn start_native_voice_conversation(
         // controls are already available. The owner renderer reveals the
         // floating controls when that session stops being foreground.
         runtime.controls_suppressed = true;
+        runtime.controls_visibility_generation = 0;
         state.microphone_muted.store(false, Ordering::SeqCst);
         let runtime_revision = runtime.revision;
         let mute_app = app.clone();
@@ -2053,22 +2083,25 @@ mod tests {
 
         assert_eq!(
             state
-                .controls_suppression_for("session-1", 4)
-                .expect("read control suppression"),
-            Some(true),
+                .controls_visibility_target("session-1", 4)
+                .expect("read control visibility"),
+            Some(ControlsVisibilityTarget {
+                suppressed: true,
+                generation: 0,
+            }),
         );
         assert_eq!(
             state
-                .mark_controls_ready_after_apply("session-1", 4, true)
-                .expect("mark controls ready after apply"),
-            Some(true),
+                .acknowledge_controls_visibility("session-1", 4, 0)
+                .expect("acknowledge controls visibility"),
+            ControlsVisibilityAcknowledgement::Ready,
         );
         assert!(state.controls_ready_for("session-1", 4));
         assert_eq!(
             state
-                .mark_controls_ready_after_apply("session-1", 3, true)
+                .acknowledge_controls_visibility("session-1", 3, 0)
                 .expect("stale readiness is ignored"),
-            None,
+            ControlsVisibilityAcknowledgement::Inactive,
         );
         assert_eq!(
             state
@@ -2079,9 +2112,12 @@ mod tests {
         state.rollback_controls_suppression("session-1", 4, false, true);
         assert_eq!(
             state
-                .controls_suppression_for("session-1", 4)
+                .controls_visibility_target("session-1", 4)
                 .expect("failed visibility is rolled back"),
-            Some(true),
+            Some(ControlsVisibilityTarget {
+                suppressed: true,
+                generation: 2,
+            }),
         );
         assert_eq!(
             state
@@ -2092,6 +2128,46 @@ mod tests {
         assert!(state
             .set_controls_suppressed("other-window", "session-1", 4, true)
             .is_err());
+    }
+
+    #[test]
+    fn floating_controls_remain_ready_while_visibility_converges() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.revision = 4;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+            runtime.controls_suppressed = true;
+        }
+
+        let mut target = state
+            .controls_visibility_target("session-1", 4)
+            .expect("read initial visibility")
+            .expect("active lifecycle");
+        for _ in 0..4 {
+            state
+                .set_controls_suppressed("main", "session-1", 4, !target.suppressed)
+                .expect("change visibility");
+            target = match state
+                .acknowledge_controls_visibility("session-1", 4, target.generation)
+                .expect("acknowledge superseded visibility")
+            {
+                ControlsVisibilityAcknowledgement::Superseded(next_target) => next_target,
+                acknowledgement => panic!("expected superseded target, got {acknowledgement:?}"),
+            };
+            assert!(state.controls_ready_for("session-1", 4));
+        }
+
+        assert_eq!(
+            state
+                .acknowledge_controls_visibility("session-1", 4, target.generation)
+                .expect("acknowledge newest visibility"),
+            ControlsVisibilityAcknowledgement::Ready,
+        );
+        assert!(state.controls_ready_for("session-1", 4));
     }
 
     #[test]

@@ -6,7 +6,10 @@ use tauri::{
     WindowEvent,
 };
 
-use super::{native_voice::NativeVoiceState, voice_capture::VoiceCaptureState};
+use super::{
+    native_voice::{ControlsVisibilityAcknowledgement, NativeVoiceState},
+    voice_capture::VoiceCaptureState,
+};
 
 pub const WINDOW_LABEL: &str = "voice-buddy";
 pub const OPEN_SESSION_EVENT: &str = "voice-conversation:open-session";
@@ -231,23 +234,28 @@ pub fn show_voice_conversation_controls(
     if window.label() != WINDOW_LABEL {
         return Err("Only the floating voice controls can show this window.".to_string());
     }
-    for _ in 0..3 {
-        let Some(suppressed) = state.controls_suppression_for(&session_id, expected_revision)?
-        else {
-            return Ok(());
-        };
-        if suppressed {
+    let Some(mut target) = state.controls_visibility_target(&session_id, expected_revision)? else {
+        return Ok(());
+    };
+    loop {
+        if target.suppressed {
             window.hide()
         } else {
             window.show()
         }
         .map_err(|error| error.to_string())?;
-        match state.mark_controls_ready_after_apply(&session_id, expected_revision, suppressed)? {
-            None | Some(true) => return Ok(()),
-            Some(false) => continue,
+        match state.acknowledge_controls_visibility(
+            &session_id,
+            expected_revision,
+            target.generation,
+        )? {
+            ControlsVisibilityAcknowledgement::Inactive
+            | ControlsVisibilityAcknowledgement::Ready => return Ok(()),
+            ControlsVisibilityAcknowledgement::Superseded(next_target) => {
+                target = next_target;
+            }
         }
     }
-    Err("Voice control visibility changed repeatedly during startup.".to_string())
 }
 
 #[tauri::command]
