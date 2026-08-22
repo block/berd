@@ -54,10 +54,6 @@ const buttonVariants = cva(
         true: "",
         false: "",
       },
-      activity: {
-        true: "bg-primary/15 text-primary ring-2 ring-primary/50 hover:bg-primary/20 hover:text-primary active:bg-primary/20 active:text-primary motion-safe:animate-pulse",
-        false: "",
-      },
     },
     compoundVariants: [
       {
@@ -326,7 +322,6 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       size,
       destructive,
       flush,
-      activity,
       asChild = false,
       leftIcon,
       rightIcon,
@@ -522,7 +517,6 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           props: {
             destructive: resolvedDestructive,
             flush: resolvedFlush,
-            activity: Boolean(activity),
             asChild,
             disabled: resolvedDisabled,
             leftIcon: Boolean(resolvedLeftIcon),
@@ -549,7 +543,6 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             size,
             destructive: resolvedDestructive,
             flush: resolvedFlush,
-            activity,
             className,
           }),
           asChild && resolvedDisabled && "pointer-events-none",

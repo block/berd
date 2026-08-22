@@ -4,7 +4,7 @@ import {
   IconChevronDown,
   IconSparkles,
 } from "@tabler/icons-react";
-import { Plus, RefreshCw, Search, X } from "lucide-react";
+import { Mic, Plus, RefreshCw, Search, X } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 import { useTheme } from "@/shared/theme/ThemeProvider";
@@ -56,6 +56,7 @@ import { GlassButton } from "@/shared/ui/glass-button";
 import { JumpToLatestButton } from "@/shared/ui/jump-to-latest-button";
 import { PageHeaderButton } from "@/shared/ui/page-header-button";
 import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
+import { VoiceConversationButton } from "@/shared/ui/voice-conversation-button";
 import { ButtonGroup, ButtonGroupText } from "@/shared/ui/button-group";
 import { Calendar } from "@/shared/ui/calendar";
 import { Carousel, CarouselContent, CarouselItem } from "@/shared/ui/carousel";
@@ -3185,6 +3186,32 @@ const chromeButtonEntries: ChromeButtonEntry[] = [
     surfaceClassName: "bg-muted",
     surfaceLabel: "media/canvas",
     preview: <GlassButton size="sm">Recenter</GlassButton>,
+  },
+  {
+    manifestName: "Voice Conversation Button",
+    base: "subtle",
+    useWhen: "User or assistant controls in the floating voice surface.",
+    surfaceClassName: "bg-card-glass",
+    surfaceLabel: "voice conversation",
+    preview: (
+      <div className="flex items-center gap-2">
+        <VoiceConversationButton
+          speaking
+          size="icon-sm"
+          aria-label="Mute microphone while speech is detected"
+        >
+          <Mic aria-hidden="true" />
+        </VoiceConversationButton>
+        <VoiceConversationButton
+          speaking
+          disabled
+          size="icon-sm"
+          aria-label="Disabled speaking control"
+        >
+          <Mic aria-hidden="true" />
+        </VoiceConversationButton>
+      </div>
+    ),
   },
   {
     manifestName: "Jump To Latest Button",

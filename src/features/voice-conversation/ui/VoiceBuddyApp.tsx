@@ -13,6 +13,7 @@ import {
   type VoiceConversationStatus,
 } from "@/features/voice-conversation/api/voiceConversation";
 import { Button } from "@/shared/ui/button";
+import { VoiceConversationButton } from "@/shared/ui/voice-conversation-button";
 import { BerdIcon } from "@/shared/ui/icons/BerdIcon";
 
 type VoiceControlsError =
@@ -303,11 +304,10 @@ export function VoiceBuddyApp() {
         >
           <GripVertical className="size-3.5" />
         </div>
-        <Button
+        <VoiceConversationButton
           type="button"
-          variant="subtle"
           size="icon-sm"
-          activity={activity.assistantSpeaking}
+          speaking={activity.assistantSpeaking}
           aria-label={t("toolbar.voiceConversation.buddy.openSession")}
           aria-describedby={
             activity.assistantSpeaking
@@ -319,12 +319,11 @@ export function VoiceBuddyApp() {
           onClick={() => void run("open", "open", openVoiceConversationSession)}
         >
           <BerdIcon aria-hidden="true" />
-        </Button>
-        <Button
+        </VoiceConversationButton>
+        <VoiceConversationButton
           type="button"
-          variant="subtle"
           size="icon-sm"
-          activity={activity.userSpeaking && !microphoneMuted}
+          speaking={activity.userSpeaking && !microphoneMuted}
           aria-label={
             microphoneMuted
               ? t("toolbar.voiceConversation.unmuteMicrophone")
@@ -344,7 +343,7 @@ export function VoiceBuddyApp() {
           onClick={toggleMute}
         >
           {microphoneMuted ? <MicOff /> : <Mic />}
-        </Button>
+        </VoiceConversationButton>
         <Button
           type="button"
           variant="subtle"
