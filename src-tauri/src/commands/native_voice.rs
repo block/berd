@@ -836,15 +836,12 @@ pub async fn start_native_voice_conversation(
         }
     };
     let lifecycle_guard = state.stop_serial.lock().await;
-    let (revision, lifecycle_id) = {
+    let install_result = (|| -> Result<(u64, String), String> {
         let start_blocks = state
             .start_blocks
             .lock()
             .map_err(|_| "native voice start block lock was poisoned".to_string())?;
         if start_blocks.contains_key(&session_id) {
-            if microphone_claimed {
-                capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
-            }
             return Err("Voice cannot start while this chat is being archived.".to_string());
         }
         let mut runtime = state
@@ -852,9 +849,6 @@ pub async fn start_native_voice_conversation(
             .lock()
             .map_err(|_| "native voice state lock was poisoned".to_string())?;
         if runtime.session_id.is_some() {
-            if microphone_claimed {
-                capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
-            }
             return Err("A native voice conversation is already active.".to_string());
         }
         runtime.revision = runtime.revision.wrapping_add(1);
@@ -870,10 +864,20 @@ pub async fn start_native_voice_conversation(
         // floating controls when that session stops being foreground.
         runtime.controls_suppressed = true;
         state.microphone_muted.store(false, Ordering::SeqCst);
-        (
+        Ok((
             runtime.revision,
             runtime.lifecycle_id.clone().unwrap_or_default(),
-        )
+        ))
+    })();
+    let (revision, lifecycle_id) = match install_result {
+        Ok(lifecycle) => lifecycle,
+        Err(error) => {
+            drop(lifecycle_guard);
+            if microphone_claimed {
+                capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
+            }
+            return Err(error);
+        }
     };
     if let Err(error) = super::voice_buddy::install(&app) {
         drop(lifecycle_guard);
