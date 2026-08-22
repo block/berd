@@ -190,12 +190,6 @@ struct StopCompletion {
     owner_id: String,
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) struct WindowDestroyedVoiceStop {
-    pub controls_revision: u64,
-    pub terminal_revision: u64,
-}
-
 #[derive(Clone, Default)]
 pub struct NativeVoiceState {
     runtime: Arc<Mutex<Runtime>>,
@@ -1050,6 +1044,16 @@ pub async fn start_native_voice_conversation(
             return Err(error);
         }
     };
+    if app.get_webview_window(&window_label).is_none()
+        || state.active_session_lifecycle_target()
+            != Some((session_id.clone(), window_label.clone(), revision))
+    {
+        drop(lifecycle_guard);
+        state
+            .stop_active_for_lifecycle(&app, capture.inner(), &session_id, revision)
+            .await?;
+        return Err("The voice conversation owner closed during startup.".to_string());
+    }
     if let Err(error) = super::voice_buddy::install(&app) {
         drop(lifecycle_guard);
         state.stop_active(&app, &capture).await?;
@@ -1491,63 +1495,60 @@ impl NativeVoiceState {
         Ok(())
     }
 
-    pub fn stop_for_window_destroyed(
+    async fn stop_destroyed_owner_lifecycle(
         &self,
         window_label: &str,
-    ) -> Option<WindowDestroyedVoiceStop> {
-        self.release_start_blocks_for_window(window_label);
-        let (session_id, revision, pipeline) = {
-            let Ok(mut runtime) = self.runtime.lock() else {
-                return None;
-            };
+    ) -> Result<Option<StopCompletion>, String> {
+        let _stop_guard = self.stop_serial.lock().await;
+        let expected_lifecycle = {
+            let runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| "native voice state lock was poisoned".to_string())?;
             if runtime
                 .owner
                 .as_ref()
                 .is_none_or(|owner| owner.window_label != window_label)
             {
-                return None;
+                return Ok(None);
             }
-            let pipeline = runtime.pipeline.take();
-            if let Some(pipeline) = pipeline.as_ref() {
-                pipeline.signal_shutdown();
-            }
-            native_input_mute::stop(&self.input_muted);
-            self.microphone_muted.store(false, Ordering::SeqCst);
-            runtime.native_microphone_mute_control = false;
-            (runtime.session_id.clone(), runtime.revision, pipeline)
+            runtime
+                .session_id
+                .clone()
+                .map(|session_id| (session_id, runtime.revision))
         };
-        if pipeline.is_none() {
-            let mut stopped = false;
-            if let Ok(mut runtime) = self.runtime.lock() {
-                if runtime.revision == revision && runtime.session_id == session_id {
-                    runtime.session_id = None;
-                    runtime.lifecycle_id = None;
-                    runtime.owner = None;
-                    runtime.revision = runtime.revision.wrapping_add(1);
-                    stopped = true;
-                }
-            }
-            return stopped.then_some(WindowDestroyedVoiceStop {
-                controls_revision: revision,
-                terminal_revision: revision.wrapping_add(1),
-            });
+        let Some((session_id, revision)) = expected_lifecycle else {
+            return Ok(None);
+        };
+        let completion = self
+            .stop_lifecycle_locked(Some((&session_id, revision)))
+            .await?;
+        if completion.is_some() {
+            self.microphone_muted.store(false, Ordering::SeqCst);
         }
-        let runtime = Arc::clone(&self.runtime);
-        tauri::async_runtime::spawn(async move {
-            shutdown_pipeline(pipeline.expect("pipeline checked above")).await;
-            if let Ok(mut runtime) = runtime.lock() {
-                if runtime.revision == revision && runtime.session_id == session_id {
-                    runtime.session_id = None;
-                    runtime.lifecycle_id = None;
-                    runtime.owner = None;
-                    runtime.revision = runtime.revision.wrapping_add(1);
-                }
-            }
-        });
-        Some(WindowDestroyedVoiceStop {
-            controls_revision: revision,
-            terminal_revision: revision.wrapping_add(1),
-        })
+        Ok(completion)
+    }
+
+    pub async fn stop_for_window_destroyed(
+        &self,
+        app: &AppHandle,
+        capture: &VoiceCaptureState,
+        window_label: &str,
+    ) -> Result<bool, String> {
+        self.release_start_blocks_for_window(window_label);
+        let Some(completion) = self.stop_destroyed_owner_lifecycle(window_label).await? else {
+            return Ok(false);
+        };
+        capture.release_owner(&completion.owner.window_label, &completion.owner_id);
+        super::voice_buddy::dismiss_after_terminal_event(
+            app,
+            completion.controls_revision,
+            NativeVoiceEvent::CleanShutdown {
+                session_id: completion.session_id,
+                revision: completion.next_revision,
+            },
+        );
+        Ok(true)
     }
 
     pub fn stop_for_app_exit(&self) {
@@ -2202,8 +2203,8 @@ mod tests {
             .expect("owner can stop current lifecycle"));
     }
 
-    #[test]
-    fn window_destroy_stops_only_its_owned_voice_lifecycle() {
+    #[tokio::test]
+    async fn window_destroy_stops_only_its_owned_voice_lifecycle() {
         let state = NativeVoiceState::default();
         state.microphone_muted.store(true, Ordering::SeqCst);
         {
@@ -2215,7 +2216,11 @@ mod tests {
             });
         }
 
-        assert!(state.stop_for_window_destroyed("other-window").is_none());
+        assert!(state
+            .stop_destroyed_owner_lifecycle("other-window")
+            .await
+            .expect("check unrelated owner")
+            .is_none());
         assert_eq!(
             state
                 .runtime
@@ -2226,13 +2231,13 @@ mod tests {
             Some("session-1")
         );
 
-        assert_eq!(
-            state.stop_for_window_destroyed("session-window"),
-            Some(WindowDestroyedVoiceStop {
-                controls_revision: 0,
-                terminal_revision: 1,
-            })
-        );
+        let completion = state
+            .stop_destroyed_owner_lifecycle("session-window")
+            .await
+            .expect("stop destroyed owner")
+            .expect("owned lifecycle stops");
+        assert_eq!(completion.controls_revision, 0);
+        assert_eq!(completion.next_revision, 1);
         let runtime = state.runtime.lock().expect("lock native runtime");
         assert!(runtime.session_id.is_none());
         assert!(runtime.owner.is_none());
@@ -2557,7 +2562,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn window_destroy_schedules_blocked_worker_join_off_callback() {
+    async fn window_destroy_awaits_bounded_worker_shutdown_off_callback() {
         let state = NativeVoiceState::default();
         state.microphone_muted.store(true, Ordering::SeqCst);
         let (sender, _receiver) = mpsc::sync_channel(1);
@@ -2581,24 +2586,72 @@ mod tests {
             });
         }
 
-        let started = std::time::Instant::now();
-        assert_eq!(
-            state.stop_for_window_destroyed("owner-window"),
-            Some(WindowDestroyedVoiceStop {
-                controls_revision: 0,
-                terminal_revision: 1,
-            })
-        );
-        assert!(started.elapsed() < Duration::from_millis(50));
+        let completion = state
+            .stop_destroyed_owner_lifecycle("owner-window")
+            .await
+            .expect("stop destroyed owner")
+            .expect("owned lifecycle stops");
+        assert_eq!(completion.controls_revision, 0);
+        assert_eq!(completion.next_revision, 1);
         assert!(shutdown.load(Ordering::Acquire));
         assert!(!state.microphone_muted.load(Ordering::SeqCst));
-        tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(state
             .runtime
             .lock()
             .expect("lock native runtime")
             .session_id
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn owner_destroy_waits_for_start_serialization_before_stopping_exact_lifecycle() {
+        let state = NativeVoiceState::default();
+        let startup_guard = state.stop_serial.lock().await;
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-a".to_string());
+            runtime.lifecycle_id = Some("lifecycle-a".to_string());
+            runtime.revision = 4;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "owner-window".to_string(),
+            });
+        }
+
+        let close_state = state.clone();
+        let close = tokio::spawn(async move {
+            close_state
+                .stop_destroyed_owner_lifecycle("owner-window")
+                .await
+                .expect("stop destroyed owner")
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(
+            state.active_session_lifecycle_target(),
+            Some(("session-a".to_string(), "owner-window".to_string(), 4,))
+        );
+
+        drop(startup_guard);
+        let completion = close.await.expect("join owner close").expect("stopped A");
+        assert_eq!(completion.controls_revision, 4);
+        assert_eq!(completion.next_revision, 5);
+
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-b".to_string());
+            runtime.lifecycle_id = Some("lifecycle-b".to_string());
+            runtime.revision = 6;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+        }
+        assert!(state
+            .take_stop_snapshot(Some(("session-a", 4)))
+            .expect("stale A cleanup is rejected")
+            .is_none());
+        assert_eq!(
+            state.active_session_lifecycle_target(),
+            Some(("session-b".to_string(), "main".to_string(), 6))
+        );
     }
 
     #[test]
