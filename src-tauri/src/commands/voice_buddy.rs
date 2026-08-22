@@ -239,9 +239,10 @@ fn should_destroy_stale_candidate(
 
 fn verify_stale_candidate_removed(
     candidate_url: &str,
-    current_url: Option<&str>,
+    current_url: Result<Option<&str>, String>,
     destroy_result: Result<(), String>,
 ) -> Result<(), String> {
+    let current_url = current_url?;
     if current_url != Some(candidate_url) {
         return Ok(());
     }
@@ -285,14 +286,16 @@ pub fn destroy_stale_for_main_close(app: &AppHandle) -> Result<(), String> {
     let destroy_result = window
         .destroy()
         .map_err(|error| format!("Could not remove stale floating voice controls: {error}"));
-    let current_url = app
-        .get_webview_window(WINDOW_LABEL)
-        .and_then(|current| current.url().ok());
-    verify_stale_candidate_removed(
-        candidate_url.as_str(),
-        current_url.as_ref().map(|url| url.as_str()),
-        destroy_result,
-    )
+    let current_window = app.get_webview_window(WINDOW_LABEL);
+    let current_url = current_window
+        .as_ref()
+        .map(|current| current.url().map_err(|error| error.to_string()))
+        .transpose();
+    let current_url = current_url
+        .as_ref()
+        .map(|url| url.as_ref().map(|url| url.as_str()))
+        .map_err(Clone::clone);
+    verify_stale_candidate_removed(candidate_url.as_str(), current_url, destroy_result)
 }
 
 fn reconcile_terminal_controls(
@@ -547,13 +550,19 @@ mod tests {
         ));
         assert!(verify_stale_candidate_removed(
             &controls_url(3),
-            Some(&controls_url(4)),
+            Ok(Some(&controls_url(4))),
             Err("old handle is gone".to_string()),
         )
         .is_ok());
         assert!(verify_stale_candidate_removed(
             &controls_url(3),
-            Some(&controls_url(3)),
+            Ok(Some(&controls_url(3))),
+            Err("old handle is stuck".to_string()),
+        )
+        .is_err());
+        assert!(verify_stale_candidate_removed(
+            &controls_url(3),
+            Err("could not inspect current controls".to_string()),
             Err("old handle is stuck".to_string()),
         )
         .is_err());
