@@ -364,6 +364,7 @@
     "modelSwitchError": "No se pudo cambiar a {{model}}. Este chat sigue usando {{fallbackModel}}.",
     "modelSwitchErrorWithoutFallback": "No se pudo cambiar a {{model}}.",
     "archiveError": "No se pudo archivar el chat",
+    "voiceStopBeforeArchiveError": "No se pudo detener la conversación de voz, así que el chat no se archivó",
     "gitInspectionError": "No se pudieron inspeccionar los worktrees o las ramas. El chat no se archivó.",
     "gitCleanupError": "El chat se archivó, pero no se pudo completar la limpieza de Git",
     "moveError": "No se pudo mover el chat",
@@ -543,8 +544,27 @@
     "voiceInputAutoSubmitHint": "Di \"submit\" para enviar",
     "voiceConversation": {
       "start": "Iniciar conversación de voz",
+      "hangUp": "Colgar",
       "muteMicrophone": "Silenciar micrófono",
       "unmuteMicrophone": "Activar micrófono",
+      "buddy": {
+        "title": "Conversación por voz",
+        "openSession": "Abrir sesión de voz",
+        "hangUp": "Colgar",
+        "listening": "Escuchando…",
+        "muted": "Micrófono silenciado",
+        "stopped": "La conversación de voz terminó",
+        "userSpeaking": "Voz detectada",
+        "assistantSpeaking": "Berd está hablando",
+        "errors": {
+          "initialize": "No se pudieron iniciar los controles de voz. Abre la sesión de voz para intentarlo de nuevo.",
+          "show": "No se pudieron mostrar los controles de voz. Abre la sesión de voz para continuar.",
+          "open": "No se pudo abrir la sesión de voz. Inténtalo de nuevo.",
+          "mute": "No se pudo cambiar la configuración del micrófono. Inténtalo de nuevo.",
+          "stop": "No se pudo finalizar la conversación de voz. Inténtalo de nuevo.",
+          "conversation": "La conversación de voz se detuvo debido a un error. Abre la sesión para intentarlo de nuevo."
+        }
+      },
       "states": {
         "off": "Iniciar conversación de voz",
         "starting": "Iniciando conversación de voz…",

@@ -95,6 +95,7 @@ export interface ChatInputVoiceConversation {
     | "error";
   boundSessionId: string | null;
   active: boolean;
+  ownsActiveConversation?: boolean;
   microphoneMuted: boolean;
   error?: string | null;
   disabled?: boolean;

@@ -51,6 +51,7 @@ pub mod system;
 pub mod telemetry;
 pub mod terminal;
 pub mod updates;
+pub mod voice_buddy;
 pub mod voice_capture;
 pub mod whoami;
 pub mod window_session;

@@ -23,6 +23,20 @@ import type { Message } from "@/shared/types/messages";
 
 const COMPLETION_NOTIFICATION_CLICKED_EVENT = "completion-notification-clicked";
 
+async function shouldSuppressCompletionNotification(
+  sessionId: string,
+): Promise<boolean> {
+  if (!window.__TAURI_INTERNALS__) return false;
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return await invoke<boolean>("should_suppress_completion_notification", {
+      sessionId,
+    });
+  } catch {
+    return false;
+  }
+}
+
 function focusCurrentWindow(): void {
   import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
     const appWindow = getCurrentWindow();
@@ -208,42 +222,58 @@ export function useCompletionNotifications(
                 ? session.title
                 : "";
             const body = getNotificationBody(outcome, title);
+            void shouldSuppressCompletionNotification(sessionId).then(
+              (suppress) => {
+                if (suppress) return;
+                const currentPrefs = getNotificationPrefs();
+                if (!currentPrefs.enabled) return;
+                const windowFocused = windowFocusedRef.current;
+                if (
+                  windowFocused &&
+                  isSessionActivelyViewed(useChatStore.getState(), sessionId)
+                ) {
+                  return;
+                }
+                if (!windowFocused) {
+                  if (!currentPrefs.desktop) return;
+                  import("@tauri-apps/api/core").then(({ invoke }) => {
+                    void invoke("show_completion_notification", {
+                      body,
+                      sessionId,
+                      sound:
+                        getNotificationSoundResource(
+                          currentPrefs.desktopSound,
+                        ) ?? null,
+                    });
+                  });
+                  return;
+                }
 
-            if (!windowFocusedRef.current) {
-              if (!prefs.desktop) continue;
-              import("@tauri-apps/api/core").then(({ invoke }) => {
-                void invoke("show_completion_notification", {
-                  body,
-                  sessionId,
-                  sound:
-                    getNotificationSoundResource(prefs.desktopSound) ?? null,
-                });
-              });
-            } else {
-              if (!prefs.inApp) continue;
-              playNotificationSound(prefs.inAppSound);
-              const shouldShowChangeSound = shouldShowAssistiveMoment(
-                ASSISTIVE_UX_RULES.notificationsChangeSound.id,
-              );
-              if (shouldShowChangeSound) {
-                recordAssistiveMomentShown(
+                if (!currentPrefs.inApp) return;
+                playNotificationSound(currentPrefs.inAppSound);
+                const shouldShowChangeSound = shouldShowAssistiveMoment(
                   ASSISTIVE_UX_RULES.notificationsChangeSound.id,
                 );
-              }
-              showCompletionNotificationToast({
-                title: body,
-                outcome,
-                onView: () => navigateRef.current(sessionId),
-                onChangeSound: shouldShowChangeSound
-                  ? () => {
-                      recordAssistiveMomentAccepted(
-                        ASSISTIVE_UX_RULES.notificationsChangeSound.id,
-                      );
-                      requestOpenSettings("notifications");
-                    }
-                  : undefined,
-              });
-            }
+                if (shouldShowChangeSound) {
+                  recordAssistiveMomentShown(
+                    ASSISTIVE_UX_RULES.notificationsChangeSound.id,
+                  );
+                }
+                showCompletionNotificationToast({
+                  title: body,
+                  outcome,
+                  onView: () => navigateRef.current(sessionId),
+                  onChangeSound: shouldShowChangeSound
+                    ? () => {
+                        recordAssistiveMomentAccepted(
+                          ASSISTIVE_UX_RULES.notificationsChangeSound.id,
+                        );
+                        requestOpenSettings("notifications");
+                      }
+                    : undefined,
+                });
+              },
+            );
           }
         }
       },

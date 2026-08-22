@@ -99,6 +99,8 @@ function archiveFailureMessage(
       return sessionNotFoundMessage(sessionId);
     case "backend_archive_failed":
       return backendArchiveFailedMessage("session", sessionId);
+    case "voice_stop_failed":
+      return `Could not stop voice for session "${sessionId}"; the session was not archived.`;
     case "target_session_running":
       return `Refusing to archive session "${sessionId}" because it started running or opened in another window; wait for the turn to finish or close that window.`;
     case "cleanup_requires_discard":

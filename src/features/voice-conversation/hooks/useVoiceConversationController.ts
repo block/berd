@@ -16,7 +16,10 @@ import {
   stopNativeAssistantSpeech,
   takeVoicePlaybackNotices,
 } from "../lib/nativeAssistantSpeech";
-import type { VoiceConversationStatus } from "../api/voiceConversation";
+import {
+  openVoiceConversationSession,
+  setVoiceConversationControlsSuppressed,
+} from "../api/voiceConversation";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -29,45 +32,6 @@ interface VoiceSendRoute {
 let activeSendRoute: VoiceSendRoute | null = null;
 let deliveryInitialized = false;
 let operationInFlight = false;
-
-export function createVoiceRouteMountRegistry(
-  schedule: (callback: () => void) => void = queueMicrotask,
-) {
-  const mountsBySession = new Map<string, Set<symbol>>();
-  return {
-    register(sessionId: string, onLastUnmount: () => void): () => void {
-      const token = Symbol(sessionId);
-      const mounts = mountsBySession.get(sessionId) ?? new Set<symbol>();
-      mounts.add(token);
-      mountsBySession.set(sessionId, mounts);
-
-      return () => {
-        const currentMounts = mountsBySession.get(sessionId);
-        currentMounts?.delete(token);
-        if (currentMounts?.size === 0) mountsBySession.delete(sessionId);
-
-        // React development mode may immediately remount the same view. Defer
-        // the ownership check so that remount can reclaim the session first.
-        schedule(() => {
-          if (!mountsBySession.has(sessionId)) onLastUnmount();
-        });
-      };
-    },
-  };
-}
-
-const voiceRouteMountRegistry = createVoiceRouteMountRegistry();
-
-export function shouldStopVoiceWhenRouteUnmounts(
-  status: VoiceConversationStatus,
-  unmountedSessionId: string,
-): boolean {
-  return (
-    status.sessionId === unmountedSessionId &&
-    status.lifecycle !== "stopped" &&
-    status.lifecycle !== "unavailable"
-  );
-}
 
 export function createVoiceTranscriptDeliveryQueue() {
   const queues = new Map<string, Promise<void>>();
@@ -99,6 +63,106 @@ export function canBindVoiceSendRoute(options: {
     !options.readOnly &&
     !options.disabled
   );
+}
+
+export function resolveActiveVoiceButtonAction(
+  activeSessionId: string | null,
+  candidateSessionId: string,
+): "stop" | "open-owner" {
+  return activeSessionId === candidateSessionId ? "stop" : "open-owner";
+}
+
+export function shouldSuppressVoiceConversationControls(options: {
+  activeSessionId: string | null;
+  currentSessionId: string;
+  ownerWindowLabel: string | null;
+  currentWindowLabel: string;
+  focused: boolean;
+}): boolean {
+  return (
+    options.focused &&
+    options.activeSessionId === options.currentSessionId &&
+    options.ownerWindowLabel === options.currentWindowLabel
+  );
+}
+
+interface VoiceControlsOwnerWindow {
+  label: string;
+  isFocused: () => Promise<boolean>;
+  onFocusChanged: (
+    listener: (event: { payload: boolean }) => void,
+  ) => Promise<() => void>;
+}
+
+export async function observeVoiceConversationControlVisibility(options: {
+  activeSessionId: string;
+  currentSessionId: string;
+  ownerWindowLabel: string;
+  currentWindow: VoiceControlsOwnerWindow;
+  report: (suppressed: boolean) => Promise<void>;
+  onError: (error: unknown) => void;
+}): Promise<() => void> {
+  if (options.currentWindow.label !== options.ownerWindowLabel) {
+    return () => undefined;
+  }
+  let stopped = false;
+  let focusGeneration = 0;
+  let unlisten: (() => void) | undefined;
+  const publish = (focused: boolean) => {
+    if (stopped) return;
+    const suppressed = shouldSuppressVoiceConversationControls({
+      activeSessionId: options.activeSessionId,
+      currentSessionId: options.currentSessionId,
+      ownerWindowLabel: options.ownerWindowLabel,
+      currentWindowLabel: options.currentWindow.label,
+      focused,
+    });
+    void options.report(suppressed).catch(options.onError);
+  };
+  const failOpen = () => {
+    void options.report(false).catch(options.onError);
+  };
+
+  try {
+    unlisten = await options.currentWindow.onFocusChanged((event) => {
+      focusGeneration += 1;
+      publish(event.payload);
+    });
+    const sampledGeneration = focusGeneration;
+    const focused = await options.currentWindow.isFocused();
+    if (focusGeneration === sampledGeneration) publish(focused);
+  } catch (error) {
+    unlisten?.();
+    failOpen();
+    throw error;
+  }
+
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    unlisten?.();
+    failOpen();
+  };
+}
+
+let controlsVisibilityLeaseGeneration = 0;
+
+export function beginVoiceControlsVisibilityLease() {
+  const generation = ++controlsVisibilityLeaseGeneration;
+  const isCurrent = () => generation === controlsVisibilityLeaseGeneration;
+  return {
+    run(operation: () => Promise<void>): Promise<void> {
+      return isCurrent() ? operation() : Promise.resolve();
+    },
+    release(failOpen: () => Promise<void>): Promise<void> {
+      if (!isCurrent()) return Promise.resolve();
+      controlsVisibilityLeaseGeneration += 1;
+      return failOpen();
+    },
+    invalidate(): void {
+      if (isCurrent()) controlsVisibilityLeaseGeneration += 1;
+    },
+  };
 }
 
 export function shouldStartRequestedVoiceConversation({
@@ -301,7 +365,7 @@ function ensureVoiceEventDeliveryInitialized() {
   if (deliveryInitialized) return;
   deliveryInitialized = true;
   subscribeToVoiceConversationEvents(async (event) => {
-    if (event.type === "cleanShutdown") {
+    if (event.type === "cleanShutdown" || event.type === "controlsDismissed") {
       return;
     }
     if (event.type === "error") {
@@ -315,7 +379,6 @@ function ensureVoiceEventDeliveryInitialized() {
       return;
     }
     if (event.type === "activity") return;
-    if (event.type === "inputMute") return;
     if (event.type !== "user" || !event.text.trim()) return;
     if (
       hasDeliveredVoiceTranscript(
@@ -512,26 +575,6 @@ export function useVoiceConversationController({
   );
   const previousPocketReady = useRef(pocketReady);
 
-  useEffect(
-    () =>
-      voiceRouteMountRegistry.register(sessionId, () => {
-        const voice = useVoiceConversationStore.getState();
-        if (!shouldStopVoiceWhenRouteUnmounts(voice.status, sessionId)) return;
-
-        void voice
-          .stop()
-          .catch((stopError) => {
-            addErrorNotification(sessionId, errorText(stopError));
-          })
-          .finally(() => {
-            if (activeSendRoute?.sessionId === sessionId) {
-              activeSendRoute = null;
-            }
-          });
-      }),
-    [sessionId],
-  );
-
   useEffect(() => {
     if (!enabled || !isGooseSession) return;
     void init().catch((initError) => {
@@ -647,6 +690,91 @@ export function useVoiceConversationController({
     startAssistantSpeech();
   }, [sessionId, startAssistantSpeech, status.lifecycle, status.sessionId]);
 
+  useEffect(() => {
+    if (
+      !window.__TAURI_INTERNALS__ ||
+      status.lifecycle !== "running" ||
+      !status.sessionId ||
+      !status.ownerWindowLabel
+    ) {
+      return;
+    }
+    let disposed = false;
+    let stopVisibilityObserver: (() => void) | undefined;
+    const visibilityLease = beginVoiceControlsVisibilityLease();
+    const activeSessionId = status.sessionId;
+    const ownerWindowLabel = status.ownerWindowLabel;
+    const revision = status.revision;
+
+    void import("@tauri-apps/api/window")
+      .then(async ({ getCurrentWindow }) => {
+        const currentWindow = getCurrentWindow();
+        const report = (suppressed: boolean) =>
+          visibilityLease.run(() =>
+            setVoiceConversationControlsSuppressed(
+              activeSessionId,
+              revision,
+              suppressed,
+            ),
+          );
+        const onError = (visibilityError: unknown) => {
+          console.warn(
+            "Could not synchronize floating voice control visibility",
+            visibilityError,
+          );
+        };
+        const stop = await observeVoiceConversationControlVisibility({
+          activeSessionId,
+          currentSessionId: sessionId,
+          ownerWindowLabel,
+          currentWindow,
+          report,
+          onError,
+        });
+        if (disposed) stop();
+        else stopVisibilityObserver = stop;
+      })
+      .catch((visibilityError) => {
+        void visibilityLease
+          .run(() =>
+            setVoiceConversationControlsSuppressed(
+              activeSessionId,
+              revision,
+              false,
+            ),
+          )
+          .catch(() => undefined);
+        console.warn(
+          "Could not observe the voice owner window focus",
+          visibilityError,
+        );
+      });
+
+    return () => {
+      disposed = true;
+      if (stopVisibilityObserver) {
+        stopVisibilityObserver();
+        visibilityLease.invalidate();
+      } else {
+        void visibilityLease
+          .release(() =>
+            setVoiceConversationControlsSuppressed(
+              activeSessionId,
+              revision,
+              false,
+            ),
+          )
+          .catch(() => undefined);
+      }
+    };
+  }, [
+    sessionId,
+    status.lifecycle,
+    status.ownerWindowLabel,
+    status.revision,
+    status.sessionId,
+  ]);
+
   const isActive = status.sessionId !== null && status.lifecycle !== "stopped";
   const controlEnabled = enabled && isGooseSession && !readOnly && !disabled;
   const canToggle = controlEnabled && (!pocketReady || status.available);
@@ -667,6 +795,17 @@ export function useVoiceConversationController({
       });
       if (action === "stop") {
         const boundSessionId = currentStatus.sessionId;
+        if (
+          resolveActiveVoiceButtonAction(boundSessionId, sessionId) ===
+          "open-owner"
+        ) {
+          try {
+            await openVoiceConversationSession();
+          } catch (openError) {
+            addErrorNotification(boundSessionId, errorText(openError));
+          }
+          return;
+        }
         try {
           await stop();
         } catch (stopError) {
@@ -759,6 +898,7 @@ export function useVoiceConversationController({
       state: uiState,
       boundSessionId: status.sessionId,
       active: isActive,
+      ownsActiveConversation: isActive && status.sessionId === sessionId,
       microphoneMuted,
       error:
         error ??
@@ -776,6 +916,7 @@ export function useVoiceConversationController({
       isGooseSession,
       microphoneMuted,
       pocketReady,
+      sessionId,
       status,
       toggle,
       toggleMicrophoneMute,

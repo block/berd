@@ -11,6 +11,14 @@ const mocks = vi.hoisted(() => ({
   flush: vi.fn<(streamId: string) => Promise<void>>(),
   finish: vi.fn<(streamId: string) => Promise<void>>(),
   stop: vi.fn<() => Promise<boolean>>(),
+  setAssistantSpeaking:
+    vi.fn<
+      (
+        sessionId: string,
+        expectedRevision: number,
+        speaking: boolean,
+      ) => Promise<void>
+    >(),
   streamHandler: null as ((event: PocketVoiceStreamEvent) => void) | null,
   siriStart: vi.fn<(streamId: string) => Promise<void>>(),
   siriAppend: vi.fn<(streamId: string, text: string) => Promise<void>>(),
@@ -18,6 +26,9 @@ const mocks = vi.hoisted(() => ({
   siriFinish: vi.fn<(streamId: string) => Promise<void>>(),
   siriStop: vi.fn<() => Promise<boolean>>(),
   siriStreamHandler: null as ((event: PocketVoiceStreamEvent) => void) | null,
+}));
+vi.mock("../api/voiceConversation", () => ({
+  setVoiceConversationAssistantSpeaking: mocks.setAssistantSpeaking,
 }));
 
 vi.mock("../api/pocketVoice", () => ({
@@ -92,6 +103,7 @@ describe("native assistant speech stream", () => {
     mocks.flush.mockReset().mockResolvedValue();
     mocks.finish.mockReset().mockResolvedValue();
     mocks.stop.mockReset().mockResolvedValue(true);
+    mocks.setAssistantSpeaking.mockReset().mockResolvedValue(undefined);
     mocks.streamHandler = null;
     mocks.siriStart.mockReset().mockResolvedValue();
     mocks.siriAppend.mockReset().mockResolvedValue();
@@ -110,6 +122,7 @@ describe("native assistant speech stream", () => {
         lifecycle: "running",
         sessionId: "session-1",
         ownerWindowLabel: "main",
+        microphoneMuted: false,
         revision: 1,
       },
       uiState: "listening",
@@ -216,6 +229,14 @@ describe("native assistant speech stream", () => {
         "First live reply.",
       ),
     );
+    emit("started");
+    await vi.waitFor(() =>
+      expect(mocks.setAssistantSpeaking).toHaveBeenCalledWith(
+        "session-1",
+        1,
+        true,
+      ),
+    );
     expect(mocks.append).not.toHaveBeenCalledWith(
       expect.any(String),
       "Historical response.",
@@ -232,6 +253,13 @@ describe("native assistant speech stream", () => {
     await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
 
     emit("started");
+    await vi.waitFor(() =>
+      expect(mocks.setAssistantSpeaking).toHaveBeenCalledWith(
+        "session-1",
+        1,
+        true,
+      ),
+    );
     expect(
       useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
     ).toMatchObject({ speech: { status: "speaking" } });
@@ -253,9 +281,59 @@ describe("native assistant speech stream", () => {
       ]);
     await vi.waitFor(() => expect(mocks.finish).toHaveBeenCalledTimes(1));
     emit("completed");
+    await vi.waitFor(() =>
+      expect(mocks.setAssistantSpeaking).toHaveBeenCalledWith(
+        "session-1",
+        1,
+        false,
+      ),
+    );
     expect(
       useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
     ).toMatchObject({ speech: { status: "spoken" } });
+  });
+
+  it("serializes terminal idle behind the speaking activity report", async () => {
+    let finishSpeakingReport: (() => void) | undefined;
+    mocks.setAssistantSpeaking.mockImplementation(
+      (_sessionId, _revision, speaking) =>
+        speaking
+          ? new Promise<void>((resolve) => {
+              finishSpeakingReport = resolve;
+            })
+          : Promise.resolve(),
+    );
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Brief reply." }], "completed"),
+      ]);
+    await vi.waitFor(() => expect(mocks.finish).toHaveBeenCalledOnce());
+
+    emit("started");
+    emit("completed");
+    await vi.waitFor(() =>
+      expect(mocks.setAssistantSpeaking).toHaveBeenCalledWith(
+        "session-1",
+        1,
+        true,
+      ),
+    );
+    expect(mocks.setAssistantSpeaking).not.toHaveBeenCalledWith(
+      "session-1",
+      1,
+      false,
+    );
+
+    finishSpeakingReport?.();
+    await vi.waitFor(() =>
+      expect(mocks.setAssistantSpeaking).toHaveBeenCalledWith(
+        "session-1",
+        1,
+        false,
+      ),
+    );
   });
 
   it("flushes buffered text at a tool boundary without ending the stream", async () => {

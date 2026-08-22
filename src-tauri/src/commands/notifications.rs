@@ -2,9 +2,9 @@
 use std::path::{Component, Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Command;
-use tauri::AppHandle;
 #[cfg(target_os = "macos")]
 use tauri::Manager;
+use tauri::{AppHandle, State};
 
 struct CompletionNotificationRequest {
     session_id: String,
@@ -27,10 +27,14 @@ struct CompletionNotificationState {
 #[tauri::command]
 pub fn show_completion_notification(
     app: AppHandle,
+    voice_state: State<'_, crate::commands::native_voice::NativeVoiceState>,
     session_id: String,
     body: String,
     sound: Option<String>,
 ) -> Result<(), String> {
+    if voice_state.is_active_for_session(&session_id) {
+        return Ok(());
+    }
     show_platform_completion_notification(
         app,
         CompletionNotificationRequest {
@@ -39,6 +43,14 @@ pub fn show_completion_notification(
             sound,
         },
     )
+}
+
+#[tauri::command]
+pub fn should_suppress_completion_notification(
+    voice_state: State<'_, crate::commands::native_voice::NativeVoiceState>,
+    session_id: String,
+) -> bool {
+    voice_state.is_active_for_session(&session_id)
 }
 
 #[cfg(target_os = "macos")]

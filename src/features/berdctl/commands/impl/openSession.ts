@@ -59,6 +59,7 @@ function openFailureMessage(
     case "focus_failed":
       return "The session is open in a separate window that could not be focused; tell the user.";
     case "backend_archive_failed":
+    case "voice_stop_failed":
     case "target_session_running":
     case "cleanup_requires_discard":
     case "git_inspection_failed":

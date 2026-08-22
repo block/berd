@@ -18,20 +18,103 @@ vi.mock("../lib/nativeAssistantSpeech", () => ({
 import {
   canBindVoiceSendRoute,
   canClaimVoiceSendRoute,
-  createVoiceRouteMountRegistry,
+  beginVoiceControlsVisibilityLease,
   createVoiceTranscriptDeliveryQueue,
   hasDeliveredVoiceTranscript,
+  observeVoiceConversationControlVisibility,
   resetVoiceUiWhenRunSettles,
+  resolveActiveVoiceButtonAction,
   resolveVoiceRouteMount,
   resolveVoiceToggleAction,
+  shouldSuppressVoiceConversationControls,
   shouldStartRequestedVoiceConversation,
-  shouldStopVoiceWhenRouteUnmounts,
   startPendingTranscriptRecovery,
   useVoiceConversationController,
   waitForVoiceDeliveryOpportunity,
 } from "./useVoiceConversationController";
 
 describe("voice transcript delivery coordination", () => {
+  it("suppresses floating controls only for the focused owner session", () => {
+    const base = {
+      activeSessionId: "session-1",
+      currentSessionId: "session-1",
+      ownerWindowLabel: "main",
+      currentWindowLabel: "main",
+      focused: true,
+    };
+
+    expect(shouldSuppressVoiceConversationControls(base)).toBe(true);
+    expect(
+      shouldSuppressVoiceConversationControls({
+        ...base,
+        currentSessionId: "session-2",
+      }),
+    ).toBe(false);
+    expect(
+      shouldSuppressVoiceConversationControls({ ...base, focused: false }),
+    ).toBe(false);
+    expect(
+      shouldSuppressVoiceConversationControls({
+        ...base,
+        currentWindowLabel: "session-window",
+      }),
+    ).toBe(false);
+  });
+
+  it("observes focus before sampling and fails open when the owner unmounts", async () => {
+    let focusListener: ((event: { payload: boolean }) => void) | undefined;
+    let resolveFocused: ((focused: boolean) => void) | undefined;
+    const focused = new Promise<boolean>((resolve) => {
+      resolveFocused = resolve;
+    });
+    const reports: boolean[] = [];
+    const stopPromise = observeVoiceConversationControlVisibility({
+      activeSessionId: "session-1",
+      currentSessionId: "session-1",
+      ownerWindowLabel: "main",
+      currentWindow: {
+        label: "main",
+        isFocused: () => focused,
+        onFocusChanged: async (listener) => {
+          focusListener = listener;
+          return () => undefined;
+        },
+      },
+      report: async (suppressed) => {
+        reports.push(suppressed);
+      },
+      onError: vi.fn(),
+    });
+
+    await vi.waitFor(() => expect(focusListener).toBeDefined());
+    focusListener?.({ payload: false });
+    resolveFocused?.(true);
+    const stop = await stopPromise;
+    await vi.waitFor(() => expect(reports).toEqual([false]));
+
+    stop();
+    await vi.waitFor(() => expect(reports).toEqual([false, false]));
+  });
+
+  it("ignores a visibility observer that resolves after its replacement", async () => {
+    const reports: string[] = [];
+    const first = beginVoiceControlsVisibilityLease();
+    await first.release(async () => {
+      reports.push("first:cleanup");
+    });
+    const replacement = beginVoiceControlsVisibilityLease();
+
+    await first.run(async () => {
+      reports.push("first:late");
+    });
+    await replacement.run(async () => {
+      reports.push("replacement:focused");
+    });
+
+    expect(reports).toEqual(["first:cleanup", "replacement:focused"]);
+    replacement.invalidate();
+  });
+
   it("recognizes a replayed transcript that was already delivered", () => {
     useChatStore.setState({
       messagesBySession: {
@@ -68,6 +151,7 @@ describe("voice transcript delivery coordination", () => {
         lifecycle: "running",
         sessionId: "session-1",
         ownerWindowLabel: "main",
+        microphoneMuted: false,
         revision: 3,
       },
       uiState: "agent-working",
@@ -143,6 +227,7 @@ describe("voice transcript delivery coordination", () => {
         lifecycle: "stopped",
         sessionId: null,
         ownerWindowLabel: null,
+        microphoneMuted: false,
         revision: 4,
       },
     });
@@ -292,6 +377,7 @@ describe("voice transcript delivery coordination", () => {
       lifecycle: "starting" as const,
       sessionId: "session-1",
       ownerWindowLabel: "main",
+      microphoneMuted: false,
       revision: 1,
     });
     useVoiceConversationStore.setState({
@@ -301,6 +387,7 @@ describe("voice transcript delivery coordination", () => {
         lifecycle: "unavailable",
         sessionId: null,
         ownerWindowLabel: null,
+        microphoneMuted: false,
         revision: 0,
       },
       hydrated: true,
@@ -354,75 +441,13 @@ describe("voice transcript delivery coordination", () => {
     expect(canClaimVoiceSendRoute(null, null, "session-2")).toBe(true);
   });
 
-  it("stops only after the final view for the bound chat unmounts", () => {
-    const scheduled: Array<() => void> = [];
-    const registry = createVoiceRouteMountRegistry((callback) =>
-      scheduled.push(callback),
+  it("opens the owner instead of stopping voice from another session", () => {
+    expect(resolveActiveVoiceButtonAction("session-1", "session-2")).toBe(
+      "open-owner",
     );
-    const onLastUnmount = vi.fn();
-    const unregisterFirst = registry.register("session-1", onLastUnmount);
-    const unregisterSecond = registry.register("session-1", onLastUnmount);
-
-    unregisterFirst();
-    scheduled.splice(0).forEach((callback) => {
-      callback();
-    });
-    expect(onLastUnmount).not.toHaveBeenCalled();
-
-    unregisterSecond();
-    const remounted = registry.register("session-1", onLastUnmount);
-    scheduled.splice(0).forEach((callback) => {
-      callback();
-    });
-    expect(onLastUnmount).not.toHaveBeenCalled();
-
-    remounted();
-    scheduled.splice(0).forEach((callback) => {
-      callback();
-    });
-    expect(onLastUnmount).toHaveBeenCalledOnce();
-  });
-
-  it("stops a starting or running voice lifecycle when its chat disappears", () => {
-    expect(
-      shouldStopVoiceWhenRouteUnmounts(
-        {
-          available: true,
-          unavailableReason: null,
-          lifecycle: "running",
-          sessionId: "session-1",
-          ownerWindowLabel: "main",
-          revision: 3,
-        },
-        "session-1",
-      ),
-    ).toBe(true);
-    expect(
-      shouldStopVoiceWhenRouteUnmounts(
-        {
-          available: true,
-          unavailableReason: null,
-          lifecycle: "starting",
-          sessionId: "session-1",
-          ownerWindowLabel: "main",
-          revision: 3,
-        },
-        "session-1",
-      ),
-    ).toBe(true);
-    expect(
-      shouldStopVoiceWhenRouteUnmounts(
-        {
-          available: true,
-          unavailableReason: null,
-          lifecycle: "running",
-          sessionId: "session-1",
-          ownerWindowLabel: "main",
-          revision: 3,
-        },
-        "session-2",
-      ),
-    ).toBe(false);
+    expect(resolveActiveVoiceButtonAction("session-1", "session-1")).toBe(
+      "stop",
+    );
   });
 
   it("drains retained transcripts without stealing a stopped session route", () => {

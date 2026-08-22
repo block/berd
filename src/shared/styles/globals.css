@@ -1611,6 +1611,13 @@ body,
   background-color: var(--canvas-base);
 }
 
+html[data-window-kind="voice-buddy"],
+html[data-window-kind="voice-buddy"] body,
+html[data-window-kind="voice-buddy"] #root {
+  background-color: transparent;
+  background-image: none;
+}
+
 @layer base {
   *,
   ::after,

@@ -3596,4 +3596,37 @@ export const designSystemComponentManifest = [
     stateClasses: [],
     sourceTokenClasses: [],
   },
+  {
+    name: "Voice Conversation Button",
+    source: "src/shared/ui/voice-conversation-button.tsx",
+    description:
+      "Icon control for the floating voice-conversation surface.\n\nComposes the subtle Button treatment and gives `speaking` one narrow,\nconsistent meaning: live user or assistant speech activity. The recipe owns\nthe active colors and reduced-motion-safe pulse so feature code only chooses\nwhether the corresponding participant is speaking.",
+    exports: ["VoiceConversationButton", "VoiceConversationButtonProps"],
+    slots: [],
+    cva: [],
+    tokenClasses: [
+      "active:bg-primary/20",
+      "active:text-primary",
+      "bg-primary/15",
+      "hover:bg-primary/20",
+      "hover:text-primary",
+      "ring-primary/50",
+      "text-primary",
+    ],
+    stateClasses: [
+      "active:bg-primary/20",
+      "active:text-primary",
+      "hover:bg-primary/20",
+      "hover:text-primary",
+    ],
+    sourceTokenClasses: [
+      "active:bg-primary/20",
+      "active:text-primary",
+      "bg-primary/15",
+      "hover:bg-primary/20",
+      "hover:text-primary",
+      "ring-primary/50",
+      "text-primary",
+    ],
+  },
 ] as const satisfies readonly DesignSystemComponentManifestItem[];

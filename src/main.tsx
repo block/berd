@@ -117,9 +117,10 @@ function OptionalBerdctlBridge() {
   return Bridge ? <Bridge /> : null;
 }
 
-const sessionKey = new URLSearchParams(window.location.search).get(
-  "sessionKey",
-);
+const entrypointParams = new URLSearchParams(window.location.search);
+const sessionKey = entrypointParams.get("sessionKey");
+const voiceBuddy = entrypointParams.has("voiceBuddy");
+if (voiceBuddy) document.documentElement.dataset.windowKind = "voice-buddy";
 let sessionId: string | null = null;
 let bootError: string | null = null;
 if (sessionKey) {
@@ -132,9 +133,35 @@ if (sessionKey) {
   }
 }
 
-installRendererDiagnostics({ windowKind: sessionId ? "session" : "main" });
+installRendererDiagnostics({
+  windowKind: voiceBuddy ? "voice-buddy" : sessionId ? "session" : "main",
+});
 
-if (bootError) {
+if (voiceBuddy) {
+  import("@/features/voice-conversation/ui/VoiceBuddyApp")
+    .then(({ VoiceBuddyApp }) => {
+      reactRoot.render(
+        <React.StrictMode>
+          <QueryClientProvider client={queryClient}>
+            <I18nProvider>
+              <ThemeProvider>
+                <TooltipProvider>
+                  <RendererErrorBoundary>
+                    <VoiceBuddyApp />
+                  </RendererErrorBoundary>
+                </TooltipProvider>
+              </ThemeProvider>
+            </I18nProvider>
+          </QueryClientProvider>
+        </React.StrictMode>,
+      );
+    })
+    .catch((error) => {
+      console.error("Failed to load voice buddy bundle:", error);
+      reportRendererError("voice_buddy_bundle_load_failed", error);
+      renderBootError("The voice buddy could not be loaded.");
+    });
+} else if (bootError) {
   renderBootError(bootError);
 } else if (sessionId) {
   const decodedSessionId = sessionId;

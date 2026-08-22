@@ -1,7 +1,7 @@
 //! Native Parakeet speech recognition for Desktop voice conversations.
 
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tokio::sync::mpsc as tokio_mpsc;
 
@@ -20,7 +20,7 @@ use super::{
     native_input_mute, pocket_voice::parakeet_model_dir, voice_capture::VoiceCaptureState,
 };
 
-const EVENT_NAME: &str = "voice-conversation:event";
+pub(crate) const EVENT_NAME: &str = "voice-conversation:event";
 const MAX_AUDIO_BATCH_BYTES: usize = 100 * 1024;
 const AUDIO_QUEUE_DEPTH: usize = 50;
 const MAX_PENDING_TRANSCRIPTS: usize = 64;
@@ -31,6 +31,26 @@ const VAD_THRESHOLD: f32 = 0.5;
 // Keep ordinary pauses between words inside one offline recognition request.
 // At 16 kHz with 256-sample frames this is 1.2 seconds.
 const SILENCE_FLUSH_FRAMES: usize = 75;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrophoneMuteRequest {
+    session_id: String,
+    expected_revision: u64,
+    muted: bool,
+    renderer_id: String,
+    renderer_epoch: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantSpeakingRequest {
+    session_id: String,
+    expected_revision: u64,
+    speaking: bool,
+    renderer_id: String,
+    renderer_epoch: u64,
+}
 
 #[derive(Clone, Copy, Debug, Default, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -48,9 +68,8 @@ pub struct NativeVoiceStatus {
     lifecycle: Lifecycle,
     session_id: Option<String>,
     owner_window_label: Option<String>,
+    microphone_muted: bool,
     revision: u64,
-    native_microphone_mute_control: bool,
-    native_microphone_muted: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -77,13 +96,12 @@ pub struct TranscriptRejection {
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
-enum NativeVoiceEvent {
+pub(crate) enum NativeVoiceEvent {
     Startup {
         session_id: String,
         owner_window_label: String,
         line: String,
         revision: u64,
-        native_microphone_mute_control: bool,
     },
     User {
         session_id: String,
@@ -98,13 +116,16 @@ enum NativeVoiceEvent {
         activity: &'static str,
         revision: u64,
     },
-    InputMute {
+    MicrophoneMute {
         session_id: String,
         muted: bool,
         revision: u64,
     },
     CleanShutdown {
         session_id: String,
+        revision: u64,
+    },
+    ControlsDismissed {
         revision: u64,
     },
     Error {
@@ -122,7 +143,23 @@ struct Runtime {
     revision: u64,
     owner: Option<RuntimeOwner>,
     pipeline: Option<SttPipeline>,
+    controls_ready: bool,
+    controls_suppressed: bool,
+    controls_visibility_generation: u64,
     native_microphone_mute_control: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ControlsVisibilityTarget {
+    pub(crate) suppressed: bool,
+    pub(crate) generation: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ControlsVisibilityAcknowledgement {
+    Inactive,
+    Ready,
+    Superseded(ControlsVisibilityTarget),
 }
 
 #[derive(Clone)]
@@ -130,11 +167,43 @@ struct RuntimeOwner {
     window_label: String,
 }
 
+#[derive(Clone)]
+struct VoiceStartBlock {
+    token: String,
+    window_label: String,
+    renderer_id: String,
+    renderer_epoch: u64,
+}
+
+type StopSnapshot = (
+    Option<String>,
+    u64,
+    Option<SttPipeline>,
+    Option<(RuntimeOwner, String)>,
+);
+
+struct StopCompletion {
+    session_id: String,
+    controls_revision: u64,
+    next_revision: u64,
+    owner: RuntimeOwner,
+    owner_id: String,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct WindowDestroyedVoiceStop {
+    pub controls_revision: u64,
+    pub terminal_revision: u64,
+}
+
 #[derive(Clone, Default)]
 pub struct NativeVoiceState {
     runtime: Arc<Mutex<Runtime>>,
+    stop_serial: Arc<tokio::sync::Mutex<()>>,
+    start_blocks: Arc<Mutex<HashMap<String, Vec<VoiceStartBlock>>>>,
     pending: Arc<Mutex<VecDeque<PendingTranscript>>>,
     capture_suppressions: Arc<AtomicUsize>,
+    microphone_muted: Arc<AtomicBool>,
     input_muted: Arc<AtomicBool>,
     input_mute_epoch: Arc<AtomicU64>,
 }
@@ -156,6 +225,78 @@ impl Drop for CaptureSuppressionGuard {
 }
 
 impl NativeVoiceState {
+    fn block_starts(
+        &self,
+        session_id: String,
+        window_label: String,
+        renderer_id: String,
+        renderer_epoch: u64,
+    ) -> Result<String, String> {
+        let token = uuid::Uuid::new_v4().to_string();
+        self.start_blocks
+            .lock()
+            .map_err(|_| "native voice start block lock was poisoned".to_string())?
+            .entry(session_id)
+            .or_default()
+            .push(VoiceStartBlock {
+                token: token.clone(),
+                window_label,
+                renderer_id,
+                renderer_epoch,
+            });
+        Ok(token)
+    }
+
+    fn release_start_block(&self, session_id: &str, token: &str) -> Result<(), String> {
+        let mut blocks = self
+            .start_blocks
+            .lock()
+            .map_err(|_| "native voice start block lock was poisoned".to_string())?;
+        let Some(session_blocks) = blocks.get_mut(session_id) else {
+            return Ok(());
+        };
+        session_blocks.retain(|block| block.token != token);
+        if session_blocks.is_empty() {
+            blocks.remove(session_id);
+        }
+        Ok(())
+    }
+
+    fn release_start_blocks_for_window(&self, window_label: &str) {
+        let Ok(mut blocks) = self.start_blocks.lock() else {
+            return;
+        };
+        blocks.retain(|_, session_blocks| {
+            session_blocks.retain(|block| block.window_label != window_label);
+            !session_blocks.is_empty()
+        });
+    }
+
+    pub(crate) fn release_start_blocks_for_replaced_renderer(
+        &self,
+        window_label: &str,
+        renderer_id: &str,
+        renderer_epoch: u64,
+    ) {
+        let Ok(mut blocks) = self.start_blocks.lock() else {
+            return;
+        };
+        blocks.retain(|_, session_blocks| {
+            session_blocks.retain(|block| {
+                block.window_label != window_label
+                    || (block.renderer_id == renderer_id && block.renderer_epoch == renderer_epoch)
+            });
+            !session_blocks.is_empty()
+        });
+    }
+
+    #[cfg(test)]
+    fn starts_blocked(&self, session_id: &str) -> bool {
+        self.start_blocks
+            .lock()
+            .is_ok_and(|blocks| blocks.contains_key(session_id))
+    }
+
     pub fn suppress_capture(&self) -> CaptureSuppressionGuard {
         let previous = self.capture_suppressions.fetch_add(1, Ordering::SeqCst);
         log::info!(
@@ -169,6 +310,328 @@ impl NativeVoiceState {
 
     fn capture_is_suppressed(&self) -> bool {
         self.capture_suppressions.load(Ordering::SeqCst) > 0
+    }
+
+    pub fn microphone_is_muted(&self) -> bool {
+        self.microphone_muted.load(Ordering::SeqCst) || self.input_muted.load(Ordering::Acquire)
+    }
+
+    pub fn active_session_target(&self) -> Option<(String, String)> {
+        let runtime = self.runtime.lock().ok()?;
+        Some((
+            runtime.session_id.clone()?,
+            runtime.owner.as_ref()?.window_label.clone(),
+        ))
+    }
+
+    pub fn active_session_lifecycle_target(&self) -> Option<(String, String, u64)> {
+        let runtime = self.runtime.lock().ok()?;
+        Some((
+            runtime.session_id.clone()?,
+            runtime.owner.as_ref()?.window_label.clone(),
+            runtime.revision,
+        ))
+    }
+
+    pub(crate) fn controls_visibility_target(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+    ) -> Result<Option<ControlsVisibilityTarget>, String> {
+        let runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.session_id.as_deref() != Some(session_id)
+            || runtime.revision != expected_revision
+        {
+            return Ok(None);
+        }
+        Ok(Some(ControlsVisibilityTarget {
+            suppressed: runtime.controls_suppressed,
+            generation: runtime.controls_visibility_generation,
+        }))
+    }
+
+    pub(crate) fn acknowledge_controls_visibility(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+        applied_generation: u64,
+    ) -> Result<ControlsVisibilityAcknowledgement, String> {
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.session_id.as_deref() != Some(session_id)
+            || runtime.revision != expected_revision
+        {
+            return Ok(ControlsVisibilityAcknowledgement::Inactive);
+        }
+        runtime.controls_ready = true;
+        if runtime.controls_visibility_generation == applied_generation {
+            Ok(ControlsVisibilityAcknowledgement::Ready)
+        } else {
+            Ok(ControlsVisibilityAcknowledgement::Superseded(
+                ControlsVisibilityTarget {
+                    suppressed: runtime.controls_suppressed,
+                    generation: runtime.controls_visibility_generation,
+                },
+            ))
+        }
+    }
+
+    pub fn controls_ready_for(&self, session_id: &str, revision: u64) -> bool {
+        self.runtime.lock().ok().is_some_and(|runtime| {
+            runtime.session_id.as_deref() == Some(session_id)
+                && runtime.revision == revision
+                && runtime.controls_ready
+        })
+    }
+
+    pub fn set_controls_suppressed(
+        &self,
+        caller_window_label: &str,
+        session_id: &str,
+        expected_revision: u64,
+        suppressed: bool,
+    ) -> Result<Option<(bool, bool)>, String> {
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.session_id.as_deref() != Some(session_id)
+            || runtime.revision != expected_revision
+        {
+            return Ok(None);
+        }
+        if runtime
+            .owner
+            .as_ref()
+            .map(|owner| owner.window_label.as_str())
+            != Some(caller_window_label)
+        {
+            return Err("Only the voice conversation owner can change control visibility.".into());
+        }
+        let previous_suppression = runtime.controls_suppressed;
+        if previous_suppression != suppressed {
+            runtime.controls_suppressed = suppressed;
+            runtime.controls_visibility_generation =
+                runtime.controls_visibility_generation.wrapping_add(1);
+        }
+        Ok(Some((
+            runtime.controls_ready && !suppressed,
+            previous_suppression,
+        )))
+    }
+
+    pub fn rollback_controls_suppression(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+        failed_suppression: bool,
+        previous_suppression: bool,
+    ) {
+        if let Ok(mut runtime) = self.runtime.lock() {
+            if runtime.session_id.as_deref() == Some(session_id)
+                && runtime.revision == expected_revision
+                && runtime.controls_suppressed == failed_suppression
+            {
+                runtime.controls_suppressed = previous_suppression;
+                runtime.controls_visibility_generation =
+                    runtime.controls_visibility_generation.wrapping_add(1);
+            }
+        }
+    }
+
+    pub fn is_active_for_session(&self, session_id: &str) -> bool {
+        self.runtime
+            .lock()
+            .ok()
+            .and_then(|runtime| runtime.session_id.clone())
+            .is_some_and(|active_session_id| active_session_id == session_id)
+    }
+
+    fn set_microphone_muted_target(
+        &self,
+        caller_window_label: &str,
+        session_id: &str,
+        expected_revision: u64,
+        muted: bool,
+    ) -> Result<Option<String>, String> {
+        let owner_window_label = {
+            let runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| "native voice state lock was poisoned".to_string())?;
+            if runtime.session_id.as_deref() != Some(session_id)
+                || runtime.revision != expected_revision
+            {
+                return Ok(None);
+            }
+            let owner_window_label = runtime
+                .owner
+                .as_ref()
+                .map(|owner| owner.window_label.clone())
+                .ok_or_else(|| "The native voice conversation has no owning window.".to_string())?;
+            if caller_window_label != owner_window_label
+                && caller_window_label != super::voice_buddy::WINDOW_LABEL
+            {
+                return Err(
+                    "Only the voice conversation owner or floating controls can mute the microphone."
+                        .to_string(),
+                );
+            }
+            let native_microphone_mute_control = runtime.native_microphone_mute_control;
+            if native_microphone_mute_control {
+                native_input_mute::set_muted(&self.input_muted, &self.input_mute_epoch, muted)?;
+            }
+            // Native input mute is authoritative when installed so a hardware
+            // unmute cannot be masked by a stale renderer fallback latch.
+            self.microphone_muted.store(
+                software_microphone_mute(native_microphone_mute_control, muted),
+                Ordering::SeqCst,
+            );
+            owner_window_label
+        };
+        Ok(Some(owner_window_label))
+    }
+
+    pub fn set_microphone_muted(
+        &self,
+        app: &AppHandle,
+        caller_window_label: &str,
+        session_id: &str,
+        expected_revision: u64,
+        muted: bool,
+    ) -> Result<(), String> {
+        let Some(owner_window_label) = self.set_microphone_muted_target(
+            caller_window_label,
+            session_id,
+            expected_revision,
+            muted,
+        )?
+        else {
+            return Ok(());
+        };
+        let event = NativeVoiceEvent::MicrophoneMute {
+            session_id: session_id.to_string(),
+            muted,
+            revision: expected_revision,
+        };
+        if let Some(window) = app.get_webview_window(&owner_window_label) {
+            let _ = window.emit(EVENT_NAME, event.clone());
+        }
+        super::voice_buddy::emit(app, event);
+        Ok(())
+    }
+
+    fn assistant_activity_target(
+        &self,
+        caller_window_label: &str,
+        session_id: &str,
+        expected_revision: u64,
+    ) -> Result<Option<(String, u64)>, String> {
+        let runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.session_id.as_deref() != Some(session_id)
+            || runtime.revision != expected_revision
+        {
+            return Ok(None);
+        }
+        let owner_window_label = runtime
+            .owner
+            .as_ref()
+            .map(|owner| owner.window_label.clone())
+            .ok_or_else(|| "The native voice conversation has no owning window.".to_string())?;
+        if owner_window_label != caller_window_label {
+            return Err("Only the voice conversation owner can report assistant activity.".into());
+        }
+        Ok(Some((owner_window_label, runtime.revision)))
+    }
+
+    fn set_assistant_speaking(
+        &self,
+        app: &AppHandle,
+        caller_window_label: &str,
+        session_id: &str,
+        expected_revision: u64,
+        speaking: bool,
+    ) -> Result<(), String> {
+        let Some((owner_window_label, revision)) =
+            self.assistant_activity_target(caller_window_label, session_id, expected_revision)?
+        else {
+            return Ok(());
+        };
+        let event = NativeVoiceEvent::Activity {
+            session_id: session_id.to_string(),
+            activity: if speaking {
+                "assistant-speaking"
+            } else {
+                "assistant-idle"
+            },
+            revision,
+        };
+        if let Some(window) = app.get_webview_window(&owner_window_label) {
+            let _ = window.emit(EVENT_NAME, event.clone());
+        }
+        super::voice_buddy::emit(app, event);
+        Ok(())
+    }
+
+    fn take_stop_snapshot(
+        &self,
+        expected_lifecycle: Option<(&str, u64)>,
+    ) -> Result<Option<StopSnapshot>, String> {
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if expected_lifecycle.is_some_and(|(session_id, revision)| {
+            runtime.session_id.as_deref() != Some(session_id) || runtime.revision != revision
+        }) {
+            return Ok(None);
+        }
+        if runtime.session_id.is_none() {
+            return Ok(None);
+        }
+        let owner = runtime.owner.clone();
+        let session_id = runtime.session_id.clone();
+        let owner_id = session_id.as_deref().map(native_owner_id);
+        Ok(Some((
+            session_id,
+            runtime.revision,
+            runtime.pipeline.take(),
+            owner.zip(owner_id),
+        )))
+    }
+
+    fn owner_matches_lifecycle(
+        &self,
+        caller_window_label: &str,
+        session_id: &str,
+        expected_revision: u64,
+    ) -> Result<bool, String> {
+        let runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.session_id.as_deref() != Some(session_id)
+            || runtime.revision != expected_revision
+        {
+            return Ok(false);
+        }
+        if runtime
+            .owner
+            .as_ref()
+            .map(|owner| owner.window_label.as_str())
+            != Some(caller_window_label)
+        {
+            return Err("Only the voice conversation owner can stop it.".to_string());
+        }
+        Ok(true)
     }
 }
 
@@ -188,6 +651,7 @@ struct SttPipeline {
     discard_on_shutdown: Arc<AtomicBool>,
     input_muted: Arc<AtomicBool>,
     input_mute_epoch: Arc<AtomicU64>,
+    shutdown_mute_epoch: Arc<AtomicU64>,
     thread: Option<thread::JoinHandle<()>>,
 }
 
@@ -206,10 +670,12 @@ impl SttPipeline {
         let (event_tx, event_rx) = tokio_mpsc::channel(64);
         let shutdown = Arc::new(AtomicBool::new(false));
         let discard_on_shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_mute_epoch = Arc::new(AtomicU64::new(0));
         let worker_shutdown = Arc::clone(&shutdown);
         let worker_discard_on_shutdown = Arc::clone(&discard_on_shutdown);
         let worker_input_muted = Arc::clone(&input_muted);
         let worker_input_mute_epoch = Arc::clone(&input_mute_epoch);
+        let worker_shutdown_mute_epoch = Arc::clone(&shutdown_mute_epoch);
         let thread = thread::Builder::new()
             .name("berd-native-stt".into())
             .spawn(move || {
@@ -221,6 +687,7 @@ impl SttPipeline {
                     worker_discard_on_shutdown,
                     worker_input_muted,
                     worker_input_mute_epoch,
+                    worker_shutdown_mute_epoch,
                 )
             })
             .map_err(|error| format!("start native transcription: {error}"))?;
@@ -232,6 +699,7 @@ impl SttPipeline {
                 discard_on_shutdown,
                 input_muted,
                 input_mute_epoch,
+                shutdown_mute_epoch,
                 thread: Some(thread),
             },
             event_rx,
@@ -281,6 +749,13 @@ impl SttPipeline {
     }
 
     fn signal_shutdown(&self) {
+        if self.shutdown.load(Ordering::Acquire) {
+            return;
+        }
+        self.shutdown_mute_epoch.store(
+            self.input_mute_epoch.load(Ordering::Acquire),
+            Ordering::Release,
+        );
         self.latch_muted_shutdown();
         self.shutdown.store(true, Ordering::Release);
     }
@@ -304,11 +779,29 @@ impl Drop for SttPipeline {
     }
 }
 
+#[cfg(not(test))]
+const STT_WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const STT_WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
+
 async fn shutdown_pipeline(mut pipeline: SttPipeline) {
     let worker = pipeline.begin_shutdown();
     drop(pipeline);
     if let Some(worker) = worker {
-        let _ = tauri::async_runtime::spawn_blocking(move || worker.join()).await;
+        let deadline = tokio::time::Instant::now() + STT_WORKER_SHUTDOWN_TIMEOUT;
+        while !worker.is_finished() {
+            if tokio::time::Instant::now() >= deadline {
+                log::error!(
+                    "Native voice recognizer did not stop within {:?}; detaching it",
+                    STT_WORKER_SHUTDOWN_TIMEOUT
+                );
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        if worker.join().is_err() {
+            log::error!("Native voice recognizer worker panicked during shutdown");
+        }
     }
 }
 
@@ -333,10 +826,8 @@ fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
             .owner
             .as_ref()
             .map(|owner| owner.window_label.clone()),
+        microphone_muted: state.microphone_is_muted(),
         revision: runtime.revision,
-        native_microphone_mute_control: runtime.native_microphone_mute_control,
-        native_microphone_muted: runtime.session_id.is_some()
-            && state.input_muted.load(Ordering::Acquire),
     }
 }
 
@@ -346,6 +837,39 @@ pub fn get_native_voice_conversation_status(
     state: State<'_, NativeVoiceState>,
 ) -> NativeVoiceStatus {
     status(&app, &state)
+}
+
+#[tauri::command]
+pub fn block_native_voice_conversation_starts(
+    state: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    session_id: String,
+    renderer_id: String,
+    renderer_epoch: u64,
+) -> Result<String, String> {
+    let session_id = session_id.trim().to_string();
+    if session_id.is_empty() || session_id.len() > 256 {
+        return Err("session id must be between 1 and 256 bytes".to_string());
+    }
+    let window_label = webview_window.label().to_string();
+    capture.with_active_renderer(&window_label, &renderer_id, renderer_epoch, || {
+        state.block_starts(
+            session_id,
+            window_label.clone(),
+            renderer_id.clone(),
+            renderer_epoch,
+        )
+    })
+}
+
+#[tauri::command]
+pub fn release_native_voice_conversation_start_block(
+    state: State<'_, NativeVoiceState>,
+    session_id: String,
+    token: String,
+) -> Result<(), String> {
+    state.release_start_block(&session_id, &token)
 }
 
 #[tauri::command]
@@ -467,15 +991,20 @@ pub async fn start_native_voice_conversation(
             return Err(error);
         }
     };
-    let (revision, lifecycle_id, runtime_mute_control) = {
+    let lifecycle_guard = state.stop_serial.lock().await;
+    let install_result = (|| -> Result<(u64, String), String> {
+        let start_blocks = state
+            .start_blocks
+            .lock()
+            .map_err(|_| "native voice start block lock was poisoned".to_string())?;
+        if start_blocks.contains_key(&session_id) {
+            return Err("Voice cannot start while this chat is being archived.".to_string());
+        }
         let mut runtime = state
             .runtime
             .lock()
             .map_err(|_| "native voice state lock was poisoned".to_string())?;
         if runtime.session_id.is_some() {
-            if microphone_claimed {
-                capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
-            }
             return Err("A native voice conversation is already active.".to_string());
         }
         runtime.revision = runtime.revision.wrapping_add(1);
@@ -485,26 +1014,50 @@ pub async fn start_native_voice_conversation(
             window_label: window_label.clone(),
         });
         runtime.pipeline = Some(pipeline);
+        runtime.controls_ready = false;
+        // Voice always starts from its owning session, where the in-session
+        // controls are already available. The owner renderer reveals the
+        // floating controls when that session stops being foreground.
+        runtime.controls_suppressed = true;
+        runtime.controls_visibility_generation = 0;
+        state.microphone_muted.store(false, Ordering::SeqCst);
         let runtime_revision = runtime.revision;
+        let mute_app = app.clone();
         let mute_window = webview_window.clone();
         let mute_session_id = session_id.clone();
         runtime.native_microphone_mute_control =
             native_input_mute::start(&state.input_muted, &state.input_mute_epoch, move |muted| {
-                let _ = mute_window.emit(
-                    EVENT_NAME,
-                    NativeVoiceEvent::InputMute {
-                        session_id: mute_session_id.clone(),
-                        muted,
-                        revision: runtime_revision,
-                    },
-                );
+                let event = NativeVoiceEvent::MicrophoneMute {
+                    session_id: mute_session_id.clone(),
+                    muted,
+                    revision: runtime_revision,
+                };
+                let _ = mute_window.emit(EVENT_NAME, event.clone());
+                super::voice_buddy::emit(&mute_app, event);
             });
-        (
+        Ok((
             runtime.revision,
             runtime.lifecycle_id.clone().unwrap_or_default(),
-            runtime.native_microphone_mute_control,
-        )
+        ))
+    })();
+    let (revision, lifecycle_id) = match install_result {
+        Ok(lifecycle) => lifecycle,
+        Err(error) => {
+            drop(lifecycle_guard);
+            if microphone_claimed {
+                capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
+            }
+            return Err(error);
+        }
     };
+    if let Err(error) = super::voice_buddy::install(&app) {
+        drop(lifecycle_guard);
+        state.stop_active(&app, &capture).await?;
+        return Err(format!(
+            "Could not show the floating voice controls: {error}"
+        ));
+    }
+    drop(lifecycle_guard);
     let _ = webview_window.emit(
         EVENT_NAME,
         NativeVoiceEvent::Startup {
@@ -512,7 +1065,15 @@ pub async fn start_native_voice_conversation(
             owner_window_label: window_label.clone(),
             line: "Native Parakeet voice conversation is on".to_string(),
             revision,
-            native_microphone_mute_control: runtime_mute_control,
+        },
+    );
+    super::voice_buddy::emit(
+        &app,
+        NativeVoiceEvent::Startup {
+            session_id: session_id.clone(),
+            owner_window_label: window_label.clone(),
+            line: "Native Parakeet voice conversation is on".to_string(),
+            revision,
         },
     );
 
@@ -520,6 +1081,7 @@ pub async fn start_native_voice_conversation(
     let event_window = webview_window.clone();
     let runtime = Arc::clone(&state.runtime);
     let pending = Arc::clone(&state.pending);
+    let event_state = state.inner().clone();
     let input_muted = Arc::clone(&state.input_muted);
     tauri::async_runtime::spawn(async move {
         while let Some(event) = events.recv().await {
@@ -532,18 +1094,17 @@ pub async fn start_native_voice_conversation(
             }
             match event {
                 SttMessage::Speaking(speaking) => {
-                    let _ = event_window.emit(
-                        EVENT_NAME,
-                        NativeVoiceEvent::Activity {
-                            session_id: session_id.clone(),
-                            activity: if speaking {
-                                "user-speaking"
-                            } else {
-                                "user-idle"
-                            },
-                            revision,
+                    let event = NativeVoiceEvent::Activity {
+                        session_id: session_id.clone(),
+                        activity: if speaking {
+                            "user-speaking"
+                        } else {
+                            "user-idle"
                         },
-                    );
+                        revision,
+                    };
+                    let _ = event_window.emit(EVENT_NAME, event.clone());
+                    super::voice_buddy::emit(&event_app, event);
                 }
                 SttMessage::Final { text, delivered } => {
                     let transcript = PendingTranscript {
@@ -554,9 +1115,21 @@ pub async fn start_native_voice_conversation(
                         revision,
                         delivery_attempts: 0,
                     };
-                    let evicted = pending.lock().ok().and_then(|mut queue| {
-                        enqueue_pending_transcript(&mut queue, transcript.clone())
-                    });
+                    let Ok((accepted, evicted)) = enqueue_transcript_if_active(
+                        &runtime,
+                        &pending,
+                        &session_id,
+                        revision,
+                        transcript.clone(),
+                    ) else {
+                        break;
+                    };
+                    if !accepted {
+                        if let Some(delivered) = delivered {
+                            let _ = delivered.send(());
+                        }
+                        break;
+                    }
                     if evicted.is_some() {
                         let _ = event_window.emit(
                             EVENT_NAME,
@@ -584,6 +1157,7 @@ pub async fn start_native_voice_conversation(
                     }
                 }
                 SttMessage::Failed(message) => {
+                    let _stop_guard = event_state.stop_serial.lock().await;
                     let pipeline = {
                         let Ok(mut current) = runtime.lock() else {
                             break;
@@ -604,18 +1178,29 @@ pub async fn start_native_voice_conversation(
                     if let Some(pipeline) = pipeline {
                         shutdown_pipeline(pipeline).await;
                     }
+                    event_state.microphone_muted.store(false, Ordering::SeqCst);
                     event_app
                         .state::<VoiceCaptureState>()
                         .release_owner(&window_label, &owner_id);
-                    let _ = event_window.emit(
-                        EVENT_NAME,
-                        NativeVoiceEvent::Error {
-                            session_id: Some(session_id.clone()),
-                            message,
-                            revision: revision.wrapping_add(1),
-                            terminal: true,
-                        },
+                    let terminal_event = NativeVoiceEvent::Error {
+                        session_id: Some(session_id.clone()),
+                        message,
+                        revision: revision.wrapping_add(1),
+                        terminal: true,
+                    };
+                    let _ = event_window.emit(EVENT_NAME, terminal_event.clone());
+                    super::voice_buddy::emit(&event_app, terminal_event);
+                    let shutdown_event = NativeVoiceEvent::CleanShutdown {
+                        session_id: session_id.clone(),
+                        revision: revision.wrapping_add(1),
+                    };
+                    let _ = event_window.emit(EVENT_NAME, shutdown_event.clone());
+                    super::voice_buddy::dismiss_after_terminal_event(
+                        &event_app,
+                        revision,
+                        shutdown_event,
                     );
+                    super::voice_buddy::restore_hidden_owner(&event_app, &window_label);
                     break;
                 }
             }
@@ -625,6 +1210,61 @@ pub async fn start_native_voice_conversation(
 }
 
 #[tauri::command]
+pub fn set_native_voice_microphone_muted(
+    app: AppHandle,
+    state: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    request: MicrophoneMuteRequest,
+) -> Result<NativeVoiceStatus, String> {
+    let apply = || {
+        state.set_microphone_muted(
+            &app,
+            webview_window.label(),
+            &request.session_id,
+            request.expected_revision,
+            request.muted,
+        )
+    };
+    if webview_window.label() == super::voice_buddy::WINDOW_LABEL {
+        apply()?;
+    } else {
+        capture.with_active_renderer(
+            webview_window.label(),
+            &request.renderer_id,
+            request.renderer_epoch,
+            apply,
+        )?;
+    }
+    Ok(status(&app, &state))
+}
+
+#[tauri::command]
+pub fn set_native_voice_assistant_speaking(
+    app: AppHandle,
+    state: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    request: AssistantSpeakingRequest,
+) -> Result<(), String> {
+    capture.with_active_renderer(
+        webview_window.label(),
+        &request.renderer_id,
+        request.renderer_epoch,
+        || {
+            state.set_assistant_speaking(
+                &app,
+                webview_window.label(),
+                &request.session_id,
+                request.expected_revision,
+                request.speaking,
+            )
+        },
+    )
+}
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects four guards beside the exact lifecycle payload.
 pub async fn stop_native_voice_conversation(
     app: AppHandle,
     state: State<'_, NativeVoiceState>,
@@ -632,59 +1272,14 @@ pub async fn stop_native_voice_conversation(
     webview_window: WebviewWindow,
     renderer_id: String,
     renderer_epoch: u64,
+    session_id: String,
+    expected_revision: u64,
 ) -> Result<NativeVoiceStatus, String> {
     capture.activate_renderer(webview_window.label(), &renderer_id, renderer_epoch)?;
-    let (session_id, revision, pipeline, owner) = {
-        let mut runtime = state
-            .runtime
-            .lock()
-            .map_err(|_| "native voice state lock was poisoned".to_string())?;
-        let owner = runtime.owner.clone();
-        let session_id = runtime.session_id.clone();
-        let owner_id = session_id.as_deref().map(native_owner_id);
-        let revision = runtime.revision;
-        (
-            session_id,
-            revision,
-            runtime.pipeline.take(),
-            owner.zip(owner_id),
-        )
-    };
-    // Keep the lifecycle current while the worker flushes its final buffered
-    // utterance into the durable pending queue.
-    if let Some(pipeline) = pipeline {
-        shutdown_pipeline(pipeline).await;
-    }
-    let revision = {
-        let mut runtime = state
-            .runtime
-            .lock()
-            .map_err(|_| "native voice state lock was poisoned".to_string())?;
-        if runtime.revision == revision && runtime.session_id == session_id {
-            native_input_mute::stop(&state.input_muted);
-            runtime.native_microphone_mute_control = false;
-            runtime.session_id = None;
-            runtime.lifecycle_id = None;
-            runtime.owner = None;
-            runtime.revision = runtime.revision.wrapping_add(1);
-        }
-        runtime.revision
-    };
-    if let Some((owner, owner_id)) = owner.as_ref() {
-        capture.release_owner(&owner.window_label, owner_id);
-    }
-    if let Some(session_id) = session_id {
-        let target = owner
-            .as_ref()
-            .and_then(|(owner, _)| app.get_webview_window(&owner.window_label))
-            .unwrap_or(webview_window);
-        let _ = target.emit(
-            EVENT_NAME,
-            NativeVoiceEvent::CleanShutdown {
-                session_id,
-                revision,
-            },
-        );
+    if state.owner_matches_lifecycle(webview_window.label(), &session_id, expected_revision)? {
+        state
+            .stop_active_for_lifecycle(&app, &capture, &session_id, expected_revision)
+            .await?;
     }
     Ok(status(&app, &state))
 }
@@ -694,11 +1289,160 @@ fn native_owner_id(session_id: &str) -> String {
 }
 
 impl NativeVoiceState {
+    pub async fn stop_active(
+        &self,
+        app: &AppHandle,
+        capture: &VoiceCaptureState,
+    ) -> Result<(), String> {
+        self.stop_active_inner(app, capture, None).await.map(|_| ())
+    }
+
+    pub async fn stop_active_for_lifecycle(
+        &self,
+        app: &AppHandle,
+        capture: &VoiceCaptureState,
+        expected_session_id: &str,
+        expected_revision: u64,
+    ) -> Result<bool, String> {
+        self.stop_active_inner(
+            app,
+            capture,
+            Some((expected_session_id, expected_revision, None)),
+        )
+        .await
+    }
+
+    pub async fn stop_active_if_lifecycle(
+        &self,
+        app: &AppHandle,
+        capture: &VoiceCaptureState,
+        expected_session_id: &str,
+        expected_revision: u64,
+        failure_message: &str,
+    ) -> Result<bool, String> {
+        self.stop_active_inner(
+            app,
+            capture,
+            Some((
+                expected_session_id,
+                expected_revision,
+                Some(failure_message),
+            )),
+        )
+        .await
+    }
+
+    async fn stop_active_inner(
+        &self,
+        app: &AppHandle,
+        capture: &VoiceCaptureState,
+        expected_lifecycle: Option<(&str, u64, Option<&str>)>,
+    ) -> Result<bool, String> {
+        let _stop_guard = self.stop_serial.lock().await;
+        let failure_message = expected_lifecycle.and_then(|(_, _, message)| message);
+        let completion = self
+            .stop_lifecycle_locked(
+                expected_lifecycle.map(|(session_id, revision, _)| (session_id, revision)),
+            )
+            .await?;
+        let Some(StopCompletion {
+            session_id,
+            controls_revision,
+            next_revision,
+            owner,
+            owner_id,
+        }) = completion
+        else {
+            return Ok(false);
+        };
+        if let Some(failure_message) = failure_message {
+            let failure_event = NativeVoiceEvent::Error {
+                session_id: Some(session_id.clone()),
+                message: failure_message.to_string(),
+                revision: next_revision,
+                terminal: true,
+            };
+            if let Some(target) = app.get_webview_window(&owner.window_label) {
+                let _ = target.emit(EVENT_NAME, failure_event.clone());
+            }
+            super::voice_buddy::emit(app, failure_event);
+        }
+        self.microphone_muted.store(false, Ordering::SeqCst);
+        capture.release_owner(&owner.window_label, &owner_id);
+        let shutdown_event = NativeVoiceEvent::CleanShutdown {
+            session_id,
+            revision: next_revision,
+        };
+        if let Some(target) = app.get_webview_window(&owner.window_label) {
+            let _ = target.emit(EVENT_NAME, shutdown_event.clone());
+        }
+        super::voice_buddy::dismiss_after_terminal_event(app, controls_revision, shutdown_event);
+        super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
+        Ok(true)
+    }
+
+    #[cfg(test)]
+    async fn stop_lifecycle(
+        &self,
+        expected_lifecycle: Option<(&str, u64)>,
+    ) -> Result<Option<StopCompletion>, String> {
+        let _stop_guard = self.stop_serial.lock().await;
+        self.stop_lifecycle_locked(expected_lifecycle).await
+    }
+
+    async fn stop_lifecycle_locked(
+        &self,
+        expected_lifecycle: Option<(&str, u64)>,
+    ) -> Result<Option<StopCompletion>, String> {
+        let Some((session_id, revision, pipeline, owner)) =
+            self.take_stop_snapshot(expected_lifecycle)?
+        else {
+            return Ok(None);
+        };
+        // Keep the lifecycle current through the bounded shutdown window so a
+        // cooperative worker can flush its final utterance durably. A worker
+        // that misses the deadline is detached; its revision-bound late events
+        // are discarded rather than leaking into a replacement lifecycle.
+        if let Some(pipeline) = pipeline {
+            shutdown_pipeline(pipeline).await;
+        }
+        let (stopped, next_revision) = {
+            let mut runtime = self
+                .runtime
+                .lock()
+                .map_err(|_| "native voice state lock was poisoned".to_string())?;
+            let stopped = runtime.revision == revision && runtime.session_id == session_id;
+            if stopped {
+                native_input_mute::stop(&self.input_muted);
+                runtime.native_microphone_mute_control = false;
+                runtime.session_id = None;
+                runtime.lifecycle_id = None;
+                runtime.owner = None;
+                runtime.revision = runtime.revision.wrapping_add(1);
+            }
+            (stopped, runtime.revision)
+        };
+        if !stopped {
+            return Ok(None);
+        }
+        let (Some(session_id), Some((owner, owner_id))) = (session_id, owner) else {
+            return Ok(None);
+        };
+        Ok(Some(StopCompletion {
+            session_id,
+            controls_revision: revision,
+            next_revision,
+            owner,
+            owner_id,
+        }))
+    }
+
     pub async fn stop_for_model_removal(
         &self,
         app: &AppHandle,
         capture: &VoiceCaptureState,
     ) -> Result<(), String> {
+        let _stop_guard = self.stop_serial.lock().await;
         let (session_id, revision, pipeline, owner) = {
             let mut runtime = self
                 .runtime
@@ -729,51 +1473,64 @@ impl NativeVoiceState {
             }
             runtime.revision
         };
+        self.microphone_muted.store(false, Ordering::SeqCst);
         if let (Some(owner), Some(session_id)) = (owner, session_id) {
             capture.release_owner(&owner.window_label, &native_owner_id(&session_id));
+            let shutdown_event = NativeVoiceEvent::CleanShutdown {
+                session_id,
+                revision: next_revision,
+            };
             if let Some(window) = app.get_webview_window(&owner.window_label) {
-                let _ = window.emit(
-                    EVENT_NAME,
-                    NativeVoiceEvent::CleanShutdown {
-                        session_id,
-                        revision: next_revision,
-                    },
-                );
+                let _ = window.emit(EVENT_NAME, shutdown_event.clone());
             }
+            super::voice_buddy::dismiss_after_terminal_event(app, revision, shutdown_event);
+            super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
+        } else {
+            super::voice_buddy::dismiss_stale_after_terminal(app, next_revision);
         }
         Ok(())
     }
 
-    pub fn stop_for_window_destroyed(&self, window_label: &str) -> bool {
+    pub fn stop_for_window_destroyed(
+        &self,
+        window_label: &str,
+    ) -> Option<WindowDestroyedVoiceStop> {
+        self.release_start_blocks_for_window(window_label);
         let (session_id, revision, pipeline) = {
             let Ok(mut runtime) = self.runtime.lock() else {
-                return false;
+                return None;
             };
             if runtime
                 .owner
                 .as_ref()
                 .is_none_or(|owner| owner.window_label != window_label)
             {
-                return false;
+                return None;
             }
             let pipeline = runtime.pipeline.take();
             if let Some(pipeline) = pipeline.as_ref() {
                 pipeline.signal_shutdown();
             }
             native_input_mute::stop(&self.input_muted);
+            self.microphone_muted.store(false, Ordering::SeqCst);
             runtime.native_microphone_mute_control = false;
             (runtime.session_id.clone(), runtime.revision, pipeline)
         };
         if pipeline.is_none() {
+            let mut stopped = false;
             if let Ok(mut runtime) = self.runtime.lock() {
                 if runtime.revision == revision && runtime.session_id == session_id {
                     runtime.session_id = None;
                     runtime.lifecycle_id = None;
                     runtime.owner = None;
                     runtime.revision = runtime.revision.wrapping_add(1);
+                    stopped = true;
                 }
             }
-            return true;
+            return stopped.then_some(WindowDestroyedVoiceStop {
+                controls_revision: revision,
+                terminal_revision: revision.wrapping_add(1),
+            });
         }
         let runtime = Arc::clone(&self.runtime);
         tauri::async_runtime::spawn(async move {
@@ -787,7 +1544,10 @@ impl NativeVoiceState {
                 }
             }
         });
-        true
+        Some(WindowDestroyedVoiceStop {
+            controls_revision: revision,
+            terminal_revision: revision.wrapping_add(1),
+        })
     }
 
     pub fn stop_for_app_exit(&self) {
@@ -807,6 +1567,7 @@ impl NativeVoiceState {
             )
         };
         drop(pipeline);
+        self.microphone_muted.store(false, Ordering::SeqCst);
         if let Ok(mut runtime) = self.runtime.lock() {
             if runtime.revision == revision && runtime.session_id == session_id {
                 runtime.session_id = None;
@@ -818,37 +1579,8 @@ impl NativeVoiceState {
     }
 }
 
-#[tauri::command]
-pub fn set_native_voice_input_muted(
-    state: State<'_, NativeVoiceState>,
-    webview_window: WebviewWindow,
-    session_id: String,
-    revision: u64,
-    muted: bool,
-) -> Result<(), String> {
-    let runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "native voice state lock was poisoned".to_string())?;
-    if !owns_native_mute_control(&runtime, webview_window.label(), &session_id, revision) {
-        return Err("Native microphone mute is unavailable for this conversation.".to_string());
-    }
-    native_input_mute::set_muted(&state.input_muted, &state.input_mute_epoch, muted)
-}
-
-fn owns_native_mute_control(
-    runtime: &Runtime,
-    window_label: &str,
-    session_id: &str,
-    revision: u64,
-) -> bool {
-    runtime.native_microphone_mute_control
-        && runtime.session_id.as_deref() == Some(session_id)
-        && runtime.revision == revision
-        && runtime
-            .owner
-            .as_ref()
-            .is_some_and(|owner| owner.window_label == window_label)
+fn software_microphone_mute(native_microphone_mute_control: bool, muted: bool) -> bool {
+    !native_microphone_mute_control && muted
 }
 
 #[tauri::command]
@@ -879,7 +1611,7 @@ fn push_audio_for_window(
     {
         return Err("Only the owning window may send native voice audio.".to_string());
     }
-    if state.capture_is_suppressed() {
+    if state.capture_is_suppressed() || state.microphone_is_muted() {
         return Ok(());
     }
     if let Some(pipeline) = runtime.pipeline.as_ref() {
@@ -899,6 +1631,29 @@ fn enqueue_pending_transcript(
     evicted
 }
 
+fn enqueue_transcript_if_active(
+    runtime: &Mutex<Runtime>,
+    pending: &Mutex<VecDeque<PendingTranscript>>,
+    expected_session_id: &str,
+    expected_revision: u64,
+    transcript: PendingTranscript,
+) -> Result<(bool, Option<PendingTranscript>), String> {
+    let runtime = runtime
+        .lock()
+        .map_err(|_| "native voice state lock was poisoned".to_string())?;
+    if runtime.session_id.as_deref() != Some(expected_session_id)
+        || runtime.revision != expected_revision
+    {
+        return Ok((false, None));
+    }
+    let mut pending = pending
+        .lock()
+        .map_err(|_| "pending transcript lock was poisoned".to_string())?;
+    let evicted = enqueue_pending_transcript(&mut pending, transcript);
+    Ok((true, evicted))
+}
+
+#[allow(clippy::too_many_arguments)] // Worker boundary keeps channel and mute lifecycle inputs explicit.
 fn stt_worker(
     model_dir: PathBuf,
     audio_rx: Receiver<AudioBatch>,
@@ -907,6 +1662,7 @@ fn stt_worker(
     discard_on_shutdown: Arc<AtomicBool>,
     input_muted: Arc<AtomicBool>,
     input_mute_epoch: Arc<AtomicU64>,
+    shutdown_mute_epoch: Arc<AtomicU64>,
 ) {
     use rubato::{Fft, FixedSync, Resampler};
     use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig};
@@ -952,11 +1708,8 @@ fn stt_worker(
             Err(mpsc::RecvTimeoutError::Timeout) => None,
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        let shutting_down = shutdown.load(Ordering::Acquire);
-        if shutting_down && (discard_on_shutdown.load(Ordering::Acquire) || batch.is_none()) {
-            break;
-        }
-        let current_mute_epoch = input_mute_epoch.load(Ordering::Acquire);
+        let (shutting_down, current_mute_epoch) =
+            sample_effective_mute_epoch(&input_mute_epoch, &shutdown, &shutdown_mute_epoch);
         if current_mute_epoch != observed_mute_epoch {
             observed_mute_epoch = current_mute_epoch;
             if clear_buffered_audio(
@@ -968,6 +1721,9 @@ fn stt_worker(
             ) {
                 let _ = event_tx.blocking_send(SttMessage::Speaking(false));
             }
+        }
+        if shutting_down && (discard_on_shutdown.load(Ordering::Acquire) || batch.is_none()) {
+            break;
         }
         if !shutting_down && input_muted.load(Ordering::Acquire) {
             continue;
@@ -1008,6 +1764,8 @@ fn stt_worker(
                             &event_tx,
                             None,
                             &input_mute_epoch,
+                            &shutdown,
+                            &shutdown_mute_epoch,
                             observed_mute_epoch,
                         );
                         speech.clear();
@@ -1024,6 +1782,8 @@ fn stt_worker(
                             &event_tx,
                             None,
                             &input_mute_epoch,
+                            &shutdown,
+                            &shutdown_mute_epoch,
                             observed_mute_epoch,
                         );
                         speech.clear();
@@ -1043,9 +1803,25 @@ fn stt_worker(
             &event_tx,
             Some(delivered_tx),
             &input_mute_epoch,
+            &shutdown,
+            &shutdown_mute_epoch,
             observed_mute_epoch,
         );
         let _ = delivered_rx.recv_timeout(Duration::from_secs(5));
+    }
+}
+
+fn sample_effective_mute_epoch(
+    input_mute_epoch: &AtomicU64,
+    shutdown: &AtomicBool,
+    shutdown_mute_epoch: &AtomicU64,
+) -> (bool, u64) {
+    let live_mute_epoch = input_mute_epoch.load(Ordering::Acquire);
+    let shutting_down = shutdown.load(Ordering::Acquire);
+    if shutting_down {
+        (true, shutdown_mute_epoch.load(Ordering::Acquire))
+    } else {
+        (false, live_mute_epoch)
     }
 }
 
@@ -1075,12 +1851,15 @@ fn resample(resampler: &mut rubato::Fft<f32>, samples: &[f32]) -> Vec<f32> {
         .unwrap_or_default()
 }
 
+#[allow(clippy::too_many_arguments)] // Recognition needs both live and shutdown mute clocks.
 fn flush_speech(
     speech: &[f32],
     recognizer: &sherpa_onnx::OfflineRecognizer,
     event_tx: &tokio_mpsc::Sender<SttMessage>,
     delivered: Option<SyncSender<()>>,
     input_mute_epoch: &AtomicU64,
+    shutdown: &AtomicBool,
+    shutdown_mute_epoch: &AtomicU64,
     expected_mute_epoch: u64,
 ) {
     if speech.is_empty() {
@@ -1093,7 +1872,9 @@ fn flush_speech(
         .get_result()
         .map(|result| result.text.trim().to_string())
         .unwrap_or_default();
-    if input_mute_epoch.load(Ordering::Acquire) != expected_mute_epoch {
+    if sample_effective_mute_epoch(input_mute_epoch, shutdown, shutdown_mute_epoch).1
+        != expected_mute_epoch
+    {
         if let Some(delivered) = delivered {
             let _ = delivered.send(());
         }
@@ -1126,21 +1907,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn native_mute_control_is_bound_to_window_session_and_revision() {
-        let runtime = Runtime {
-            session_id: Some("session-1".to_string()),
-            revision: 4,
-            owner: Some(RuntimeOwner {
-                window_label: "main".to_string(),
-            }),
-            native_microphone_mute_control: true,
-            ..Runtime::default()
-        };
-
-        assert!(owns_native_mute_control(&runtime, "main", "session-1", 4));
-        assert!(!owns_native_mute_control(&runtime, "other", "session-1", 4));
-        assert!(!owns_native_mute_control(&runtime, "main", "session-2", 4));
-        assert!(!owns_native_mute_control(&runtime, "main", "session-1", 5));
+    fn native_mute_control_does_not_latch_the_software_fallback() {
+        assert!(!software_microphone_mute(true, true));
+        assert!(software_microphone_mute(false, true));
+        assert!(!software_microphone_mute(false, false));
     }
 
     #[test]
@@ -1162,8 +1932,280 @@ mod tests {
     }
 
     #[test]
+    fn assistant_activity_is_bound_to_the_exact_voice_lifecycle() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.revision = 7;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+        }
+
+        assert_eq!(
+            state
+                .assistant_activity_target("main", "session-1", 7)
+                .expect("current activity target"),
+            Some(("main".to_string(), 7)),
+        );
+        assert_eq!(
+            state
+                .assistant_activity_target("main", "session-1", 6)
+                .expect("stale activity is ignored"),
+            None,
+        );
+        assert!(state
+            .assistant_activity_target("session:other", "session-1", 7)
+            .is_err());
+
+        state.runtime.lock().expect("lock native runtime").revision = 8;
+        assert_eq!(
+            state
+                .assistant_activity_target("main", "session-1", 7)
+                .expect("prior lifecycle activity is ignored after restart"),
+            None,
+        );
+    }
+
+    #[test]
+    fn stale_controls_watchdog_cannot_take_a_restarted_voice_lifecycle() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-b".to_string());
+            runtime.revision = 8;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+        }
+
+        assert!(state
+            .take_stop_snapshot(Some(("session-a", 7)))
+            .expect("stale watchdog check")
+            .is_none());
+        assert_eq!(
+            state.active_session_lifecycle_target(),
+            Some(("session-b".to_string(), "main".to_string(), 8)),
+        );
+    }
+
+    #[tokio::test]
+    async fn concurrent_stops_flush_one_final_transcript_once() {
+        let state = NativeVoiceState::default();
+        let (audio_tx, _audio_rx) = mpsc::sync_channel(1);
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let worker_shutdown = Arc::clone(&shutdown);
+        let pending = Arc::clone(&state.pending);
+        let worker = thread::spawn(move || {
+            while !worker_shutdown.load(Ordering::Acquire) {
+                thread::yield_now();
+            }
+            pending
+                .lock()
+                .expect("lock pending transcripts")
+                .push_back(PendingTranscript {
+                    session_id: "session-1".to_string(),
+                    lifecycle_id: "lifecycle-1".to_string(),
+                    id: "final-1".to_string(),
+                    text: "final words".to_string(),
+                    revision: 4,
+                    delivery_attempts: 0,
+                });
+        });
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.lifecycle_id = Some("lifecycle-1".to_string());
+            runtime.revision = 4;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+            runtime.pipeline = Some(SttPipeline {
+                audio_tx,
+                audio_seen: AtomicBool::new(false),
+                shutdown,
+                discard_on_shutdown: Arc::new(AtomicBool::new(false)),
+                input_muted: Arc::new(AtomicBool::new(false)),
+                input_mute_epoch: Arc::new(AtomicU64::new(0)),
+                shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
+                thread: Some(worker),
+            });
+        }
+
+        let first_state = state.clone();
+        let second_state = state.clone();
+        let first = tokio::spawn(async move {
+            first_state
+                .stop_lifecycle(Some(("session-1", 4)))
+                .await
+                .expect("first stop")
+        });
+        let second = tokio::spawn(async move {
+            second_state
+                .stop_lifecycle(Some(("session-1", 4)))
+                .await
+                .expect("second stop")
+        });
+        let (first, second) = tokio::join!(first, second);
+        let completions = [first.expect("join first"), second.expect("join second")];
+
+        assert_eq!(
+            completions.iter().filter(|result| result.is_some()).count(),
+            1
+        );
+        let pending = state.pending.lock().expect("lock pending transcripts");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(
+            pending.front().map(|item| item.id.as_str()),
+            Some("final-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn non_cooperative_worker_cannot_block_stop_or_replacement_lifecycle() {
+        let state = NativeVoiceState::default();
+        let (audio_tx, _audio_rx) = mpsc::sync_channel(1);
+        let worker_release = Arc::new(AtomicBool::new(false));
+        let release = Arc::clone(&worker_release);
+        let worker = thread::spawn(move || {
+            while !release.load(Ordering::Acquire) {
+                thread::sleep(Duration::from_millis(5));
+            }
+        });
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.lifecycle_id = Some("lifecycle-1".to_string());
+            runtime.revision = 4;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+            runtime.pipeline = Some(SttPipeline {
+                audio_tx,
+                audio_seen: AtomicBool::new(false),
+                shutdown: Arc::new(AtomicBool::new(false)),
+                discard_on_shutdown: Arc::new(AtomicBool::new(false)),
+                input_muted: Arc::new(AtomicBool::new(false)),
+                input_mute_epoch: Arc::new(AtomicU64::new(0)),
+                shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
+                thread: Some(worker),
+            });
+        }
+
+        let completion = tokio::time::timeout(
+            Duration::from_millis(500),
+            state.stop_lifecycle(Some(("session-1", 4))),
+        )
+        .await
+        .expect("stop is bounded")
+        .expect("stop succeeds");
+        assert!(completion.is_some());
+
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            assert!(runtime.session_id.is_none());
+            runtime.session_id = Some("session-2".to_string());
+            runtime.lifecycle_id = Some("lifecycle-2".to_string());
+            runtime.revision = 6;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+        }
+        assert_eq!(
+            state.active_session_lifecycle_target(),
+            Some(("session-2".to_string(), "main".to_string(), 6))
+        );
+        assert!(state
+            .take_stop_snapshot(Some(("session-1", 4)))
+            .expect("late stale lifecycle is ignored")
+            .is_none());
+        let (accepted, evicted) = enqueue_transcript_if_active(
+            &state.runtime,
+            &state.pending,
+            "session-1",
+            4,
+            PendingTranscript {
+                session_id: "session-1".to_string(),
+                lifecycle_id: "lifecycle-1".to_string(),
+                id: "late-final".to_string(),
+                text: "late words".to_string(),
+                revision: 4,
+                delivery_attempts: 0,
+            },
+        )
+        .expect("late transcript lifecycle check");
+        assert!(!accepted);
+        assert!(evicted.is_none());
+        assert!(state.pending.lock().expect("lock pending queue").is_empty());
+
+        worker_release.store(true, Ordering::Release);
+    }
+
+    #[test]
+    fn microphone_mute_is_authorized_and_lifecycle_bound() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-b".to_string());
+            runtime.revision = 8;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+        }
+
+        assert_eq!(
+            state
+                .set_microphone_muted_target("main", "session-a", 7, true)
+                .expect("stale mute is ignored"),
+            None,
+        );
+        assert!(!state.microphone_is_muted());
+        assert!(state
+            .set_microphone_muted_target("other", "session-b", 8, true)
+            .is_err());
+        assert!(!state.microphone_is_muted());
+        assert_eq!(
+            state
+                .set_microphone_muted_target(
+                    super::super::voice_buddy::WINDOW_LABEL,
+                    "session-b",
+                    8,
+                    true,
+                )
+                .expect("floating controls can mute"),
+            Some("main".to_string()),
+        );
+        assert!(state.microphone_is_muted());
+    }
+
+    #[test]
+    fn owner_stop_authorization_is_lifecycle_bound() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-b".to_string());
+            runtime.revision = 8;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+        }
+
+        assert!(!state
+            .owner_matches_lifecycle("main", "session-a", 7)
+            .expect("stale owner stop is ignored"));
+        assert!(state
+            .owner_matches_lifecycle("other", "session-b", 8)
+            .is_err());
+        assert!(state
+            .owner_matches_lifecycle("main", "session-b", 8)
+            .expect("owner can stop current lifecycle"));
+    }
+
+    #[test]
     fn window_destroy_stops_only_its_owned_voice_lifecycle() {
         let state = NativeVoiceState::default();
+        state.microphone_muted.store(true, Ordering::SeqCst);
         {
             let mut runtime = state.runtime.lock().expect("lock native runtime");
             runtime.session_id = Some("session-1".to_string());
@@ -1173,7 +2215,7 @@ mod tests {
             });
         }
 
-        assert!(!state.stop_for_window_destroyed("other-window"));
+        assert!(state.stop_for_window_destroyed("other-window").is_none());
         assert_eq!(
             state
                 .runtime
@@ -1184,10 +2226,119 @@ mod tests {
             Some("session-1")
         );
 
-        assert!(state.stop_for_window_destroyed("session-window"));
+        assert_eq!(
+            state.stop_for_window_destroyed("session-window"),
+            Some(WindowDestroyedVoiceStop {
+                controls_revision: 0,
+                terminal_revision: 1,
+            })
+        );
         let runtime = state.runtime.lock().expect("lock native runtime");
         assert!(runtime.session_id.is_none());
         assert!(runtime.owner.is_none());
+        assert!(!state.microphone_muted.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn floating_controls_follow_only_the_exact_owner_lifecycle() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.revision = 4;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+            runtime.controls_suppressed = true;
+        }
+
+        assert_eq!(
+            state
+                .controls_visibility_target("session-1", 4)
+                .expect("read control visibility"),
+            Some(ControlsVisibilityTarget {
+                suppressed: true,
+                generation: 0,
+            }),
+        );
+        assert_eq!(
+            state
+                .acknowledge_controls_visibility("session-1", 4, 0)
+                .expect("acknowledge controls visibility"),
+            ControlsVisibilityAcknowledgement::Ready,
+        );
+        assert!(state.controls_ready_for("session-1", 4));
+        assert_eq!(
+            state
+                .acknowledge_controls_visibility("session-1", 3, 0)
+                .expect("stale readiness is ignored"),
+            ControlsVisibilityAcknowledgement::Inactive,
+        );
+        assert_eq!(
+            state
+                .set_controls_suppressed("main", "session-1", 4, false)
+                .expect("owner reveals controls"),
+            Some((true, true)),
+        );
+        state.rollback_controls_suppression("session-1", 4, false, true);
+        assert_eq!(
+            state
+                .controls_visibility_target("session-1", 4)
+                .expect("failed visibility is rolled back"),
+            Some(ControlsVisibilityTarget {
+                suppressed: true,
+                generation: 2,
+            }),
+        );
+        assert_eq!(
+            state
+                .set_controls_suppressed("main", "session-1", 3, true)
+                .expect("stale lifecycle is ignored"),
+            None,
+        );
+        assert!(state
+            .set_controls_suppressed("other-window", "session-1", 4, true)
+            .is_err());
+    }
+
+    #[test]
+    fn floating_controls_remain_ready_while_visibility_converges() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.revision = 4;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+            runtime.controls_suppressed = true;
+        }
+
+        let mut target = state
+            .controls_visibility_target("session-1", 4)
+            .expect("read initial visibility")
+            .expect("active lifecycle");
+        for _ in 0..4 {
+            state
+                .set_controls_suppressed("main", "session-1", 4, !target.suppressed)
+                .expect("change visibility");
+            target = match state
+                .acknowledge_controls_visibility("session-1", 4, target.generation)
+                .expect("acknowledge superseded visibility")
+            {
+                ControlsVisibilityAcknowledgement::Superseded(next_target) => next_target,
+                acknowledgement => panic!("expected superseded target, got {acknowledgement:?}"),
+            };
+            assert!(state.controls_ready_for("session-1", 4));
+        }
+
+        assert_eq!(
+            state
+                .acknowledge_controls_visibility("session-1", 4, target.generation)
+                .expect("acknowledge newest visibility"),
+            ControlsVisibilityAcknowledgement::Ready,
+        );
+        assert!(state.controls_ready_for("session-1", 4));
     }
 
     #[test]
@@ -1199,6 +2350,7 @@ mod tests {
             discard_on_shutdown: Arc::new(AtomicBool::new(false)),
             input_muted: Arc::new(AtomicBool::new(false)),
             input_mute_epoch: Arc::new(AtomicU64::new(0)),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
@@ -1215,6 +2367,7 @@ mod tests {
             discard_on_shutdown: Arc::new(AtomicBool::new(false)),
             input_muted: Arc::new(AtomicBool::new(false)),
             input_mute_epoch: Arc::new(AtomicU64::new(0)),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
@@ -1237,6 +2390,7 @@ mod tests {
             discard_on_shutdown: Arc::new(AtomicBool::new(false)),
             input_muted: Arc::clone(&input_muted),
             input_mute_epoch: Arc::clone(&input_mute_epoch),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
@@ -1264,6 +2418,7 @@ mod tests {
             discard_on_shutdown: Arc::new(AtomicBool::new(false)),
             input_muted: Arc::new(AtomicBool::new(false)),
             input_mute_epoch: Arc::clone(&input_mute_epoch),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
@@ -1308,6 +2463,7 @@ mod tests {
             discard_on_shutdown: Arc::clone(&discard_on_shutdown),
             input_muted: Arc::clone(&input_muted),
             input_mute_epoch: Arc::new(AtomicU64::new(1)),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
@@ -1322,21 +2478,42 @@ mod tests {
     fn unmuted_shutdown_keeps_final_utterance_after_later_mute_event() {
         let (sender, _receiver) = mpsc::sync_channel(1);
         let input_muted = Arc::new(AtomicBool::new(false));
+        let input_mute_epoch = Arc::new(AtomicU64::new(0));
         let discard_on_shutdown = Arc::new(AtomicBool::new(false));
         let mut pipeline = SttPipeline {
             audio_tx: sender,
             shutdown: Arc::new(AtomicBool::new(false)),
             discard_on_shutdown: Arc::clone(&discard_on_shutdown),
             input_muted: Arc::clone(&input_muted),
-            input_mute_epoch: Arc::new(AtomicU64::new(0)),
+            input_mute_epoch: Arc::clone(&input_mute_epoch),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
 
         pipeline.begin_shutdown();
         input_muted.store(true, Ordering::Release);
+        input_mute_epoch.fetch_add(1, Ordering::AcqRel);
+        pipeline.signal_shutdown();
 
         assert!(!discard_on_shutdown.load(Ordering::Acquire));
+        assert_eq!(pipeline.shutdown_mute_epoch.load(Ordering::Acquire), 0);
+        assert_eq!(
+            sample_effective_mute_epoch(
+                &input_mute_epoch,
+                &AtomicBool::new(false),
+                &pipeline.shutdown_mute_epoch,
+            ),
+            (false, 1),
+        );
+        assert_eq!(
+            sample_effective_mute_epoch(
+                &input_mute_epoch,
+                &pipeline.shutdown,
+                &pipeline.shutdown_mute_epoch,
+            ),
+            (true, 0),
+        );
     }
 
     #[test]
@@ -1354,6 +2531,7 @@ mod tests {
                 discard_on_shutdown: Arc::new(AtomicBool::new(false)),
                 input_muted: Arc::new(AtomicBool::new(false)),
                 input_mute_epoch: Arc::new(AtomicU64::new(0)),
+                shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
                 audio_seen: AtomicBool::new(false),
                 thread: None,
             });
@@ -1361,6 +2539,16 @@ mod tests {
 
         assert!(push_audio_for_window(&state, "other-window", vec![0; 4]).is_err());
         assert!(receiver.try_recv().is_err());
+        state.microphone_muted.store(true, Ordering::SeqCst);
+        push_audio_for_window(&state, "owner-window", vec![0; 4])
+            .expect("muted owner audio is ignored");
+        assert!(receiver.try_recv().is_err());
+        state.microphone_muted.store(false, Ordering::SeqCst);
+        state.input_muted.store(true, Ordering::SeqCst);
+        push_audio_for_window(&state, "owner-window", vec![0; 4])
+            .expect("native-muted owner audio is ignored");
+        assert!(receiver.try_recv().is_err());
+        state.input_muted.store(false, Ordering::SeqCst);
         push_audio_for_window(&state, "owner-window", vec![0; 4]).expect("owner can send audio");
         assert_eq!(
             receiver.try_recv().expect("owner audio queued").bytes,
@@ -1371,6 +2559,7 @@ mod tests {
     #[tokio::test]
     async fn window_destroy_schedules_blocked_worker_join_off_callback() {
         let state = NativeVoiceState::default();
+        state.microphone_muted.store(true, Ordering::SeqCst);
         let (sender, _receiver) = mpsc::sync_channel(1);
         let shutdown = Arc::new(AtomicBool::new(false));
         let worker = thread::spawn(|| thread::sleep(Duration::from_millis(250)));
@@ -1386,15 +2575,23 @@ mod tests {
                 discard_on_shutdown: Arc::new(AtomicBool::new(false)),
                 input_muted: Arc::new(AtomicBool::new(false)),
                 input_mute_epoch: Arc::new(AtomicU64::new(0)),
+                shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
                 audio_seen: AtomicBool::new(false),
                 thread: Some(worker),
             });
         }
 
         let started = std::time::Instant::now();
-        assert!(state.stop_for_window_destroyed("owner-window"));
+        assert_eq!(
+            state.stop_for_window_destroyed("owner-window"),
+            Some(WindowDestroyedVoiceStop {
+                controls_revision: 0,
+                terminal_revision: 1,
+            })
+        );
         assert!(started.elapsed() < Duration::from_millis(50));
         assert!(shutdown.load(Ordering::Acquire));
+        assert!(!state.microphone_muted.load(Ordering::SeqCst));
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(state
             .runtime
@@ -1402,6 +2599,57 @@ mod tests {
             .expect("lock native runtime")
             .session_id
             .is_none());
+    }
+
+    #[test]
+    fn archive_start_blocks_are_process_wide_and_window_scoped() {
+        let state = NativeVoiceState::default();
+        let shared_state = state.clone();
+        let first_token = state
+            .block_starts(
+                "session-1".to_string(),
+                "main".to_string(),
+                "renderer-1".to_string(),
+                1,
+            )
+            .expect("block starts from main");
+        let second_token = shared_state
+            .block_starts(
+                "session-1".to_string(),
+                "session-window".to_string(),
+                "renderer-2".to_string(),
+                1,
+            )
+            .expect("block starts from session window");
+
+        assert!(shared_state.starts_blocked("session-1"));
+        state
+            .release_start_block("session-1", &first_token)
+            .expect("release main block");
+        assert!(shared_state.starts_blocked("session-1"));
+
+        shared_state.release_start_blocks_for_window("session-window");
+        assert!(!state.starts_blocked("session-1"));
+        state
+            .release_start_block("session-1", &second_token)
+            .expect("stale release is harmless");
+    }
+
+    #[test]
+    fn renderer_replacement_clears_abandoned_archive_start_blocks() {
+        let state = NativeVoiceState::default();
+        state
+            .block_starts(
+                "session-1".to_string(),
+                "main".to_string(),
+                "renderer-1".to_string(),
+                1,
+            )
+            .expect("block starts");
+
+        state.release_start_blocks_for_replaced_renderer("main", "renderer-2", 2);
+
+        assert!(!state.starts_blocked("session-1"));
     }
 
     #[test]
@@ -1465,6 +2713,15 @@ mod tests {
                 "text": "hello",
                 "revision": 2,
                 "deliveryAttempts": 0,
+            }),
+        );
+
+        assert_eq!(
+            serde_json::to_value(NativeVoiceEvent::ControlsDismissed { revision: 3 })
+                .expect("serialize controls-dismissed event"),
+            serde_json::json!({
+                "type": "controlsDismissed",
+                "revision": 3,
             }),
         );
     }

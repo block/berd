@@ -30,6 +30,14 @@ const mocks = vi.hoisted(() => ({
   toastError: vi.fn(),
 }));
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
+}
+
 vi.mock("sonner", () => ({
   toast: Object.assign(mocks.toast, {
     custom: (...args: unknown[]) => mocks.toastCustom(...args),
@@ -160,7 +168,13 @@ describe("useCompletionNotifications", () => {
       value: {},
     });
 
-    mocks.invoke.mockResolvedValue(undefined);
+    mocks.invoke.mockImplementation((command: string) =>
+      Promise.resolve(
+        command === "should_suppress_completion_notification"
+          ? false
+          : undefined,
+      ),
+    );
     mocks.listen.mockResolvedValue(vi.fn());
     mocks.onAction.mockResolvedValue({ unregister: vi.fn() });
     mocks.audioPlay.mockResolvedValue(undefined);
@@ -331,6 +345,152 @@ describe("useCompletionNotifications", () => {
     ).toBe(1);
     expect(mocks.toastCustom).not.toHaveBeenCalled();
     expect(mocks.toastError).not.toHaveBeenCalled();
+  });
+
+  it("suppresses notifications for the active voice session", async () => {
+    let focusChanged: ((event: { payload: boolean }) => void) | null = null;
+    mocks.invoke.mockImplementation((command: string) =>
+      Promise.resolve(
+        command === "should_suppress_completion_notification"
+          ? true
+          : undefined,
+      ),
+    );
+    mocks.getCurrentWindow.mockReturnValue({
+      onFocusChanged: vi.fn((handler) => {
+        focusChanged = handler;
+        return Promise.resolve(vi.fn());
+      }),
+      unminimize: vi.fn().mockResolvedValue(undefined),
+      show: vi.fn().mockResolvedValue(undefined),
+      setFocus: vi.fn().mockResolvedValue(undefined),
+    });
+
+    renderHook(() => useCompletionNotifications(vi.fn()));
+    await waitFor(() => expect(focusChanged).toBeTruthy());
+
+    useChatStore
+      .getState()
+      .setMessages("voice-session", [makeMsg("completed")]);
+    act(() => {
+      focusChanged?.({ payload: true });
+      useChatStore.getState().setChatState("voice-session", "streaming");
+      useChatStore.getState().setChatState("voice-session", "idle");
+    });
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        "should_suppress_completion_notification",
+        { sessionId: "voice-session" },
+      ),
+    );
+    expect(mocks.toast).not.toHaveBeenCalled();
+    expect(mocks.audioPlay).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      "show_completion_notification",
+      expect.anything(),
+    );
+  });
+
+  it("does not notify after the completed session becomes actively viewed", async () => {
+    let focusChanged: ((event: { payload: boolean }) => void) | null = null;
+    const suppression = deferred<boolean>();
+    mocks.invoke.mockImplementation((command: string) =>
+      command === "should_suppress_completion_notification"
+        ? suppression.promise
+        : Promise.resolve(undefined),
+    );
+    mocks.getCurrentWindow.mockReturnValue({
+      onFocusChanged: vi.fn((handler) => {
+        focusChanged = handler;
+        return Promise.resolve(vi.fn());
+      }),
+      unminimize: vi.fn().mockResolvedValue(undefined),
+      show: vi.fn().mockResolvedValue(undefined),
+      setFocus: vi.fn().mockResolvedValue(undefined),
+    });
+
+    renderHook(() => useCompletionNotifications(vi.fn()));
+    await waitFor(() => expect(focusChanged).toBeTruthy());
+    useChatStore
+      .getState()
+      .setMessages("session-focus", [makeMsg("completed")]);
+    act(() => {
+      focusChanged?.({ payload: false });
+      useChatStore.getState().setChatState("session-focus", "streaming");
+      useChatStore.getState().setChatState("session-focus", "idle");
+    });
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        "should_suppress_completion_notification",
+        { sessionId: "session-focus" },
+      ),
+    );
+
+    act(() => {
+      useChatStore.setState({
+        activeSessionId: "session-focus",
+        isViewingActiveSession: true,
+      });
+      focusChanged?.({ payload: true });
+      suppression.resolve(false);
+    });
+
+    await Promise.resolve();
+    expect(mocks.toast).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      "show_completion_notification",
+      expect.anything(),
+    );
+  });
+
+  it("uses desktop delivery when the window backgrounds during suppression", async () => {
+    let focusChanged: ((event: { payload: boolean }) => void) | null = null;
+    const suppression = deferred<boolean>();
+    mocks.invoke.mockImplementation((command: string) =>
+      command === "should_suppress_completion_notification"
+        ? suppression.promise
+        : Promise.resolve(undefined),
+    );
+    mocks.getCurrentWindow.mockReturnValue({
+      onFocusChanged: vi.fn((handler) => {
+        focusChanged = handler;
+        return Promise.resolve(vi.fn());
+      }),
+      unminimize: vi.fn().mockResolvedValue(undefined),
+      show: vi.fn().mockResolvedValue(undefined),
+      setFocus: vi.fn().mockResolvedValue(undefined),
+    });
+
+    renderHook(() => useCompletionNotifications(vi.fn()));
+    await waitFor(() => expect(focusChanged).toBeTruthy());
+    useChatStore
+      .getState()
+      .setMessages("session-background", [makeMsg("completed")]);
+    act(() => {
+      focusChanged?.({ payload: true });
+      useChatStore.getState().setChatState("session-background", "streaming");
+      useChatStore.getState().setChatState("session-background", "idle");
+    });
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        "should_suppress_completion_notification",
+        { sessionId: "session-background" },
+      ),
+    );
+
+    act(() => {
+      focusChanged?.({ payload: false });
+      suppression.resolve(false);
+    });
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        "show_completion_notification",
+        expect.objectContaining({ sessionId: "session-background" }),
+      ),
+    );
+    expect(mocks.toast).not.toHaveBeenCalled();
   });
 
   it("opens notification settings and retires the discover moment from Change sound", async () => {
