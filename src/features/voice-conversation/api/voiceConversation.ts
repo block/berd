@@ -110,7 +110,13 @@ export async function setVoiceConversationMicrophoneMuted(
         observationVersion === microphoneMuteObservationVersion
       ) {
         microphoneMuted = nextStatus.microphoneMuted;
-        await reconcileVoiceConversationMicrophone(nextStatus);
+        if (
+          nextStatus.sessionId !== status.sessionId ||
+          nextStatus.revision !== status.revision ||
+          nextStatus.microphoneMuted !== muted
+        ) {
+          await reconcileVoiceConversationMicrophone(nextStatus);
+        }
       }
       return nextStatus;
     });
