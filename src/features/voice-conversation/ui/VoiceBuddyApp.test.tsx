@@ -341,8 +341,10 @@ describe("VoiceBuddyApp", () => {
     mocks.show.mockRejectedValueOnce(new Error("show ipc"));
     render(<VoiceBuddyApp />);
 
-    expect(await screen.findByRole("status")).toHaveTextContent(
-      "toolbar.voiceConversation.buddy.errors.show",
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "toolbar.voiceConversation.buddy.errors.show",
+      ),
     );
     expect(screen.queryByText("show ipc")).not.toBeInTheDocument();
   });
