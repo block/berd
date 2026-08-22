@@ -27,3 +27,27 @@ export async function refreshVoiceSetupReadiness(
   ]);
   return isVoiceSetupReady(pocket, siri, backend);
 }
+
+export interface VoiceSetupSelection {
+  backend: VoiceOutputBackend;
+  siriLanguage: string;
+}
+
+export async function refreshStableVoiceSetupReadiness(
+  getSelection: () => VoiceSetupSelection,
+): Promise<boolean> {
+  for (;;) {
+    const selection = getSelection();
+    const ready = await refreshVoiceSetupReadiness(
+      selection.backend,
+      selection.siriLanguage,
+    );
+    const current = getSelection();
+    if (
+      current.backend === selection.backend &&
+      current.siriLanguage === selection.siriLanguage
+    ) {
+      return ready;
+    }
+  }
+}

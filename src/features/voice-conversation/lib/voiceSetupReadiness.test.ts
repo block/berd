@@ -3,6 +3,7 @@ import type { PocketVoiceStatus } from "../api/pocketVoice";
 import type { SiriVoiceStatus } from "../api/siriVoice";
 import {
   isVoiceSetupReady,
+  refreshStableVoiceSetupReadiness,
   refreshVoiceSetupReadiness,
 } from "./voiceSetupReadiness";
 
@@ -74,6 +75,29 @@ describe("voice setup readiness", () => {
       true,
     );
     expect(mockGetPocketVoiceStatus).toHaveBeenCalledOnce();
+    expect(mockGetSiriVoiceStatus).toHaveBeenCalledWith("en-AU");
+  });
+
+  it("rechecks readiness when the selected backend changes during refresh", async () => {
+    let resolvePocket!: (status: PocketVoiceStatus) => void;
+    const firstPocket = new Promise<PocketVoiceStatus>((resolve) => {
+      resolvePocket = resolve;
+    });
+    mockGetPocketVoiceStatus
+      .mockReturnValueOnce(firstPocket)
+      .mockResolvedValueOnce(pocket);
+    mockGetSiriVoiceStatus.mockResolvedValue(siri);
+    let selection: {
+      backend: "pocket" | "siri";
+      siriLanguage: string;
+    } = { backend: "pocket", siriLanguage: "en-US" };
+
+    const readiness = refreshStableVoiceSetupReadiness(() => selection);
+    selection = { backend: "siri", siriLanguage: "en-AU" };
+    resolvePocket({ ...pocket, pocketInstalled: false });
+
+    await expect(readiness).resolves.toBe(true);
+    expect(mockGetPocketVoiceStatus).toHaveBeenCalledTimes(2);
     expect(mockGetSiriVoiceStatus).toHaveBeenCalledWith("en-AU");
   });
 });

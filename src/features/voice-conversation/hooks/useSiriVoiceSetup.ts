@@ -91,6 +91,7 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     null,
   );
   const languageRef = useRef(language);
+  const statusRequestGenerationRef = useRef(0);
   const initialSelectedLocaleAppliedRef = useRef(false);
   const languageSelectedByUserRef = useRef(false);
   languageRef.current = language;
@@ -101,17 +102,27 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
   }, []);
 
   const refresh = useCallback(async (prefix: string) => {
+    const generation = ++statusRequestGenerationRef.current;
     try {
       const next = await getSiriVoiceStatus(prefix, { coalesce: true });
-      if (canonicalLocale(languageRef.current) === canonicalLocale(prefix)) {
+      if (
+        statusRequestGenerationRef.current === generation &&
+        canonicalLocale(languageRef.current) === canonicalLocale(prefix)
+      ) {
         setStatus(next);
         setError(null);
         setStatusError(null);
       }
       return next;
     } catch (nextError) {
-      setStatusError(String(nextError));
-      throw nextError;
+      if (
+        statusRequestGenerationRef.current === generation &&
+        canonicalLocale(languageRef.current) === canonicalLocale(prefix)
+      ) {
+        setError(String(nextError));
+        setStatusError(String(nextError));
+      }
+      return null;
     }
   }, []);
 
@@ -122,15 +133,18 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
       return;
     }
     let active = true;
+    const generation = ++statusRequestGenerationRef.current;
     setLoading(true);
     setError(null);
     setStatusError(null);
     void getSiriVoiceStatus(language, { coalesce: true })
       .then((next) => {
-        if (active) setStatus(next);
+        if (active && statusRequestGenerationRef.current === generation) {
+          setStatus(next);
+        }
       })
       .catch((nextError) => {
-        if (active) {
+        if (active && statusRequestGenerationRef.current === generation) {
           setError(String(nextError));
           setStatusError(String(nextError));
         }
@@ -140,15 +154,16 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
       });
     return () => {
       active = false;
+      if (statusRequestGenerationRef.current === generation) {
+        statusRequestGenerationRef.current += 1;
+      }
     };
   }, [enabled, language]);
 
   useEffect(() => {
     if (!enabled || !window.__TAURI_INTERNALS__) return;
     const handleSettingsChanged = () => {
-      void refresh(language).catch((nextError) => {
-        setError(String(nextError));
-      });
+      void refresh(language);
     };
     window.addEventListener(SIRI_VOICE_SETTINGS_CHANGED, handleSettingsChanged);
     return () => {
@@ -191,9 +206,7 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
   useEffect(() => {
     if (!enabled || !window.__TAURI_INTERNALS__) return;
     const handleFocus = () => {
-      void refresh(language).catch((nextError) => {
-        setError(String(nextError));
-      });
+      void refresh(language);
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);

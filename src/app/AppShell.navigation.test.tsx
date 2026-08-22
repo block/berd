@@ -132,7 +132,7 @@ vi.mock("@/features/settings/ui/settingsSections", async (importOriginal) => {
 
 vi.mock("@/features/voice-conversation/lib/voiceSetupReadiness", () => ({
   isVoiceSetupReady: () => mockVoiceSetupReadiness.ready,
-  refreshVoiceSetupReadiness: () =>
+  refreshStableVoiceSetupReadiness: () =>
     mockVoiceSetupReadiness.refreshPromise ??
     Promise.resolve(mockVoiceSetupReadiness.authoritativeReady),
 }));

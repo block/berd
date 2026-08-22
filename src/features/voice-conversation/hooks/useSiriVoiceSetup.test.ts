@@ -1,10 +1,52 @@
-import { describe, expect, it } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SiriVoiceStatus } from "../api/siriVoice";
 import {
   availableLocales,
   canonicalLocale,
   chooseAvailableLocale,
   initialSelectedVoiceLocale,
+  useSiriVoiceSetup,
 } from "./useSiriVoiceSetup";
+
+const mockGetSiriVoiceStatus = vi.hoisted(() => vi.fn());
+
+vi.mock("../api/siriVoice", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/siriVoice")>()),
+  getSiriVoiceStatus: mockGetSiriVoiceStatus,
+}));
+
+const originalTauriInternals = window.__TAURI_INTERNALS__;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
+
+function status(language: string, name: string): SiriVoiceStatus {
+  return {
+    supported: true,
+    availableLanguages: [language],
+    selectedVoice: { name, language },
+    selectedVoiceInstalled: true,
+    playbackSpeed: 1,
+    voices: [{ name, language, sizeBytes: 1, installed: true }],
+  };
+}
+
+beforeEach(() => {
+  mockGetSiriVoiceStatus.mockReset();
+  window.__TAURI_INTERNALS__ = {} as typeof window.__TAURI_INTERNALS__;
+});
+
+afterEach(() => {
+  window.__TAURI_INTERNALS__ = originalTauriInternals;
+});
 
 describe("Siri voice locales", () => {
   it("preserves exact regional variants", () => {
@@ -33,5 +75,36 @@ describe("Siri voice locales", () => {
         language: "en_AU",
       }),
     ).toBe("en-AU");
+  });
+
+  it("ignores an old-language failure after the current language succeeds", async () => {
+    const oldRequest = deferred<SiriVoiceStatus>();
+    const currentRequest = deferred<SiriVoiceStatus>();
+    mockGetSiriVoiceStatus.mockImplementation((language: string) =>
+      language === "en-AU" ? currentRequest.promise : oldRequest.promise,
+    );
+    const { result } = renderHook(() => useSiriVoiceSetup(true));
+
+    await waitFor(() => expect(mockGetSiriVoiceStatus).toHaveBeenCalled());
+    act(() => result.current.setLanguage("en-AU"));
+    await waitFor(() =>
+      expect(mockGetSiriVoiceStatus).toHaveBeenCalledWith("en-AU", {
+        coalesce: true,
+      }),
+    );
+
+    currentRequest.resolve(status("en-AU", "Catherine"));
+    await waitFor(() =>
+      expect(result.current.status?.selectedVoice?.name).toBe("Catherine"),
+    );
+
+    oldRequest.reject(new Error("Old catalog failed"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.status?.selectedVoice?.name).toBe("Catherine");
+    expect(result.current.error).toBeNull();
+    expect(result.current.statusError).toBeNull();
   });
 });
