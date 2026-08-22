@@ -379,7 +379,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_stop_restores_only_a_hidden_non_macos_owner() {
+    fn hidden_owner_restoration_policy_is_platform_specific() {
         assert!(!should_restore_owner(true));
         assert_eq!(should_restore_owner(false), cfg!(not(target_os = "macos")),);
     }
