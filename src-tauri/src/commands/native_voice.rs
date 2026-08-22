@@ -1876,6 +1876,9 @@ mod tests {
                 audio_tx,
                 audio_seen: AtomicBool::new(false),
                 shutdown,
+                discard_on_shutdown: Arc::new(AtomicBool::new(false)),
+                input_muted: Arc::new(AtomicBool::new(false)),
+                input_mute_epoch: Arc::new(AtomicU64::new(0)),
                 thread: Some(worker),
             });
         }
