@@ -1697,6 +1697,7 @@ fn resample(resampler: &mut rubato::Fft<f32>, samples: &[f32]) -> Vec<f32> {
         .unwrap_or_default()
 }
 
+#[allow(clippy::too_many_arguments)] // Recognition needs both live and shutdown mute clocks.
 fn flush_speech(
     speech: &[f32],
     recognizer: &sherpa_onnx::OfflineRecognizer,
