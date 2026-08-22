@@ -651,7 +651,7 @@
           "hostWithOauthFallback": "Add your host details to use this provider.",
           "singleApiKey": "Add your API key to use this provider."
         },
-        "hostWithOauthFallbackTerminal": "Leave **access token** blank, save your host URL, then run `goose configure` in your terminal to sign in.",
+        "hostWithOauthFallbackNative": "Leave **access token** blank to sign in through Berd after you save, or enter a token to connect directly.",
         "nativeConnectDescription": "Sign in with your existing account.",
         "pending": {
           "cloudCredentials": "Configure your cloud credentials in your terminal before using this provider.",

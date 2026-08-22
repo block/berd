@@ -55,7 +55,7 @@ describe("provider setup catalog API", () => {
       docsUrl: "https://docs.anthropic.com/en/docs/claude-code",
       group: "default",
       showOnlyWhenInstalled: false,
-      aliases: ["claude-acp", "claude_code", "claude"],
+      aliases: ["claude-acp", "claude_code", "claude-code", "claude"],
       supportsInstall: true,
       supportsAuth: true,
       supportsAuthStatus: true,
@@ -154,7 +154,7 @@ describe("selectSetupCatalogModelProviders", () => {
     ).toEqual(["openai", "databricks_v2", "anthropic", "ollama"]);
   });
 
-  it("selects only the editable Databricks host field", () => {
+  it("selects the Databricks setup fields when an editable host is available", () => {
     expect(
       selectDatabricksHostConfigProvider([
         {
@@ -175,6 +175,6 @@ describe("selectSetupCatalogModelProviders", () => {
           ],
         },
       ])?.fields?.map((field) => field.key),
-    ).toEqual(["DATABRICKS_HOST"]);
+    ).toEqual(["DATABRICKS_HOST", "DATABRICKS_TOKEN"]);
   });
 });

@@ -330,7 +330,7 @@ export function ModelProviderRow({
     panelRef.current?.focus({ preventScroll: true });
   });
 
-  function runNativeConnect() {
+  async function runNativeConnect() {
     if (!provider.nativeConnectQuery) {
       return;
     }
@@ -340,13 +340,22 @@ export function ModelProviderRow({
     setError("");
     setShowSavedState(false);
 
-    // Kick off the backend-owned `goose configure` sign-in; the store mirrors
-    // its progress and the success effect runs the post-success refresh. The
-    // operation keeps running (and is observable) even if this row unmounts or
-    // the window reloads.
-    void startSetup(provider.id, {
-      providerLabel: provider.nativeConnectQuery,
-    });
+    try {
+      // Kick off the backend-owned Berd sign-in; the store mirrors its progress
+      // and the success effect runs the post-success refresh. The operation
+      // keeps running (and is observable) even if this row unmounts or the
+      // window reloads.
+      await startSetup(provider.id, {
+        providerLabel: provider.nativeConnectQuery,
+      });
+    } catch (nextError) {
+      setOperation(provider.id, {
+        phase: "idle",
+        status: "failed",
+        output: setupOutputLines,
+        error: formatAcpErrorMessage(nextError, "Couldn't start sign-in"),
+      });
+    }
   }
 
   function handleExpandedChange(nextExpanded: boolean) {
@@ -438,24 +447,39 @@ export function ModelProviderRow({
       return nextValue !== (currentValue.value ?? "");
     });
 
-    if (fieldsToSave.length === 0) {
-      setError("");
-      return;
-    }
+    const shouldStartNativeAuthentication =
+      provider.setupMethod === "host_with_oauth_fallback" &&
+      supportsNativeConnect &&
+      !fields.some(
+        (field) =>
+          field.secret && (draftValues[field.key]?.trim() ?? "").length > 0,
+      );
 
     setError("");
     try {
-      await onSaveFields(
-        fieldsToSave.map((field) => ({
-          key: field.key,
-          value: draftValues[field.key]?.trim() ?? "",
-          isSecret: field.secret,
-        })),
-      );
-      fieldsToSave.forEach((field) => {
-        dirtyDraftKeys.current.delete(field.key);
-      });
-      void loadConfig();
+      if (fieldsToSave.length > 0) {
+        await onSaveFields(
+          fieldsToSave.map((field) => ({
+            key: field.key,
+            value: draftValues[field.key]?.trim() ?? "",
+            isSecret: field.secret,
+          })),
+        );
+        fieldsToSave.forEach((field) => {
+          dirtyDraftKeys.current.delete(field.key);
+        });
+        void loadConfig();
+      }
+
+      if (shouldStartNativeAuthentication) {
+        await runNativeConnect();
+        return;
+      }
+
+      if (fieldsToSave.length === 0) {
+        return;
+      }
+
       onProviderConnected?.(provider.id);
       setShowSavedState(false);
     } catch (nextError) {
@@ -602,6 +626,10 @@ export function ModelProviderRow({
           error={error}
           setupMethod={provider.setupMethod}
           setupMessage={setupMessage}
+          authenticating={authenticating}
+          setupOutputLines={setupOutputLines}
+          setupOutputRef={outputRef}
+          setupError={setupError}
           onDraftChange={handleDraftChange}
           onSaveSetup={() => void handleSaveSetup()}
         />

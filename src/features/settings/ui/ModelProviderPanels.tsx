@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Spinner } from "@/shared/ui/spinner";
+import { ProviderSetupOutput } from "@/features/settings/ui/ProviderSetupOutput";
 import type {
   ProviderField,
   ProviderFieldValue,
@@ -240,6 +241,10 @@ interface SetupFieldsPanelProps {
   error: string;
   setupMethod: ProviderSetupMethod;
   setupMessage: string | null;
+  authenticating: boolean;
+  setupOutputLines: string[];
+  setupOutputRef: RefObject<HTMLDivElement | null>;
+  setupError: string;
   onDraftChange: (key: string, value: string) => void;
   onSaveSetup: () => void;
 }
@@ -256,23 +261,30 @@ export function SetupFieldsPanel({
   error,
   setupMethod,
   setupMessage,
+  authenticating,
+  setupOutputLines,
+  setupOutputRef,
+  setupError,
   onDraftChange,
   onSaveSetup,
 }: SetupFieldsPanelProps) {
   const { t } = useTranslation(["settings", "common"]);
   const showInlineSave = fields.length === 1;
+  const busy = saving || authenticating;
   const saveButton = (
     <Button
       type="button"
-      feedbackState={saving ? "loading" : showSavedState ? "success" : "idle"}
-      loadingLabel={t("providers.saving")}
+      feedbackState={busy ? "loading" : showSavedState ? "success" : "idle"}
+      loadingLabel={
+        authenticating ? t("providers.waitingForSignIn") : t("providers.saving")
+      }
       successLabel={t("providers.saved")}
       loadingVisual="text"
       loadingDelayMs={250}
       preserveWidth
       size="sm"
       onClick={() => onSaveSetup()}
-      disabled={saving || showSavedState}
+      disabled={busy || showSavedState}
       className="h-8"
     >
       {t("common:actions.save")}
@@ -311,7 +323,7 @@ export function SetupFieldsPanel({
                 onChange={(event) =>
                   onDraftChange(field.key, event.target.value)
                 }
-                disabled={saving}
+                disabled={busy}
                 className="h-8 flex-1 text-sm"
               />
               {showInlineSave ? saveButton : null}
@@ -325,13 +337,29 @@ export function SetupFieldsPanel({
       ) : null}
       {setupMethod === "host_with_oauth_fallback"
         ? renderInlineCodeMessage(
-            t("providers.models.setup.hostWithOauthFallbackTerminal"),
+            t("providers.models.setup.hostWithOauthFallbackNative"),
           )
         : null}
       {setupMethod === "cloud_credentials" && setupMessage
         ? renderSetupMessage(setupMessage)
         : null}
       <ModelRefreshMessage syncing={modelSyncing} warning={modelWarning} />
+      {authenticating ? (
+        <p
+          role="status"
+          className="flex items-center gap-2 text-sm text-muted-foreground"
+        >
+          <Spinner className="size-3.5 text-primary" />
+          <span>{t("providers.waitingForSignIn")}</span>
+        </p>
+      ) : null}
+      <ProviderSetupOutput
+        lines={setupOutputLines.map((text, index) => ({ id: index, text }))}
+        scrollRef={setupOutputRef}
+      />
+      {setupError ? (
+        <p className="text-sm text-destructive">{setupError}</p>
+      ) : null}
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
   );
