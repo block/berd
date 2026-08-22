@@ -47,7 +47,7 @@ export function VoiceBuddyApp() {
   } | null>(null);
   const latestLifecycleObservation = useRef<Extract<
     VoiceConversationEvent,
-    { type: "startup" | "cleanShutdown" }
+    { type: "startup" | "cleanShutdown" | "controlsDismissed" }
   > | null>(null);
 
   useLayoutEffect(() => {
@@ -79,6 +79,7 @@ export function VoiceBuddyApp() {
         event.type === "microphoneMute" ||
         event.type === "startup" ||
         event.type === "cleanShutdown" ||
+        event.type === "controlsDismissed" ||
         (event.type === "error" && event.terminal)
       ) {
         microphoneMuteGeneration.current += 1;
@@ -90,7 +91,11 @@ export function VoiceBuddyApp() {
           muted: event.muted,
         };
       }
-      if (event.type === "startup" || event.type === "cleanShutdown") {
+      if (
+        event.type === "startup" ||
+        event.type === "cleanShutdown" ||
+        event.type === "controlsDismissed"
+      ) {
         const observation = latestLifecycleObservation.current;
         if (!observation || event.revision >= observation.revision) {
           latestLifecycleObservation.current = event;
@@ -105,7 +110,11 @@ export function VoiceBuddyApp() {
         ) {
           return current;
         }
-        if (event.type === "startup" || event.type === "cleanShutdown") {
+        if (
+          event.type === "startup" ||
+          event.type === "cleanShutdown" ||
+          event.type === "controlsDismissed"
+        ) {
           return {
             userSpeaking: false,
             assistantSpeaking: false,
@@ -166,6 +175,7 @@ export function VoiceBuddyApp() {
             case "activity":
               return { ...current, revision: event.revision };
             case "cleanShutdown":
+            case "controlsDismissed":
               return {
                 ...current,
                 lifecycle: "stopped",

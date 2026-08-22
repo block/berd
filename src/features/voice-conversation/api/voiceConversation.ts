@@ -222,6 +222,10 @@ export type VoiceConversationEvent =
       revision: number;
     }
   | {
+      type: "controlsDismissed";
+      revision: number;
+    }
+  | {
       type: "error";
       sessionId?: string | null;
       message: string;

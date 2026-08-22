@@ -7,7 +7,7 @@ use tauri::{
 };
 
 use super::{
-    native_voice::{ControlsVisibilityAcknowledgement, NativeVoiceState},
+    native_voice::{ControlsVisibilityAcknowledgement, NativeVoiceEvent, NativeVoiceState},
     voice_capture::VoiceCaptureState,
 };
 
@@ -234,15 +234,8 @@ pub fn dismiss_after_terminal_event<T: Clone + Serialize>(app: &AppHandle, paylo
     );
 }
 
-pub fn dismiss_after_terminal(app: &AppHandle) {
-    let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
-        return;
-    };
-    reconcile_terminal_controls(
-        || {},
-        || window.destroy().map_err(|error| error.to_string()),
-        || window.hide().map_err(|error| error.to_string()),
-    );
+pub fn dismiss_after_terminal(app: &AppHandle, revision: u64) {
+    dismiss_after_terminal_event(app, NativeVoiceEvent::ControlsDismissed { revision });
 }
 
 pub fn emit<T: Clone + Serialize>(app: &AppHandle, payload: T) {

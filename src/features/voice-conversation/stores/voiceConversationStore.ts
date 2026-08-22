@@ -310,6 +310,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             microphoneMuteIntent += 1;
           } else if (
             event.type === "cleanShutdown" ||
+            event.type === "controlsDismissed" ||
             (event.type === "error" && event.terminal)
           ) {
             microphoneMuteIntent += 1;
@@ -393,7 +394,8 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   uiState: activityUiState(nextState),
                 };
               }
-              case "cleanShutdown": {
+              case "cleanShutdown":
+              case "controlsDismissed": {
                 const preservesTerminalError =
                   state.uiState === "error" &&
                   state.status.lifecycle === "stopped" &&
@@ -447,6 +449,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             event.type === "startup" ||
             event.type === "microphoneMute" ||
             event.type === "cleanShutdown" ||
+            event.type === "controlsDismissed" ||
             (event.type === "error" && event.terminal)
           ) {
             void reconcileVoiceConversationMicrophone(get().status).catch(

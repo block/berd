@@ -352,6 +352,27 @@ describe("VoiceBuddyApp", () => {
     );
   });
 
+  it("disables surviving controls when terminal cleanup has no session payload", async () => {
+    render(<VoiceBuddyApp />);
+    await waitFor(() => expect(voiceEventListener).toBeDefined());
+
+    act(() => {
+      voiceEventListener?.({
+        type: "controlsDismissed",
+        revision: 4,
+      });
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: "toolbar.voiceConversation.buddy.openSession",
+      }),
+    ).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "toolbar.voiceConversation.buddy.stopped",
+    );
+  });
+
   it("reports an owner-opening failure", async () => {
     const user = userEvent.setup();
     mocks.openSession.mockRejectedValueOnce(new Error("owner unavailable"));

@@ -365,7 +365,7 @@ function ensureVoiceEventDeliveryInitialized() {
   if (deliveryInitialized) return;
   deliveryInitialized = true;
   subscribeToVoiceConversationEvents(async (event) => {
-    if (event.type === "cleanShutdown") {
+    if (event.type === "cleanShutdown" || event.type === "controlsDismissed") {
       return;
     }
     if (event.type === "error") {

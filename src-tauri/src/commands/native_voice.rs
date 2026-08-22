@@ -96,7 +96,7 @@ pub struct TranscriptRejection {
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
-enum NativeVoiceEvent {
+pub(crate) enum NativeVoiceEvent {
     Startup {
         session_id: String,
         owner_window_label: String,
@@ -123,6 +123,9 @@ enum NativeVoiceEvent {
     },
     CleanShutdown {
         session_id: String,
+        revision: u64,
+    },
+    ControlsDismissed {
         revision: u64,
     },
     Error {
@@ -1470,23 +1473,23 @@ impl NativeVoiceState {
             super::voice_buddy::dismiss_after_terminal_event(app, shutdown_event);
             super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
         } else {
-            super::voice_buddy::dismiss_after_terminal(app);
+            super::voice_buddy::dismiss_after_terminal(app, next_revision);
         }
         Ok(())
     }
 
-    pub fn stop_for_window_destroyed(&self, window_label: &str) -> bool {
+    pub fn stop_for_window_destroyed(&self, window_label: &str) -> Option<u64> {
         self.release_start_blocks_for_window(window_label);
         let (session_id, revision, pipeline) = {
             let Ok(mut runtime) = self.runtime.lock() else {
-                return false;
+                return None;
             };
             if runtime
                 .owner
                 .as_ref()
                 .is_none_or(|owner| owner.window_label != window_label)
             {
-                return false;
+                return None;
             }
             let pipeline = runtime.pipeline.take();
             if let Some(pipeline) = pipeline.as_ref() {
@@ -1506,7 +1509,7 @@ impl NativeVoiceState {
                     runtime.revision = runtime.revision.wrapping_add(1);
                 }
             }
-            return true;
+            return Some(revision.wrapping_add(1));
         }
         let runtime = Arc::clone(&self.runtime);
         tauri::async_runtime::spawn(async move {
@@ -1520,7 +1523,7 @@ impl NativeVoiceState {
                 }
             }
         });
-        true
+        Some(revision.wrapping_add(1))
     }
 
     pub fn stop_for_app_exit(&self) {
@@ -2188,7 +2191,7 @@ mod tests {
             });
         }
 
-        assert!(!state.stop_for_window_destroyed("other-window"));
+        assert!(state.stop_for_window_destroyed("other-window").is_none());
         assert_eq!(
             state
                 .runtime
@@ -2199,7 +2202,7 @@ mod tests {
             Some("session-1")
         );
 
-        assert!(state.stop_for_window_destroyed("session-window"));
+        assert_eq!(state.stop_for_window_destroyed("session-window"), Some(1));
         let runtime = state.runtime.lock().expect("lock native runtime");
         assert!(runtime.session_id.is_none());
         assert!(runtime.owner.is_none());
@@ -2549,7 +2552,7 @@ mod tests {
         }
 
         let started = std::time::Instant::now();
-        assert!(state.stop_for_window_destroyed("owner-window"));
+        assert_eq!(state.stop_for_window_destroyed("owner-window"), Some(1));
         assert!(started.elapsed() < Duration::from_millis(50));
         assert!(shutdown.load(Ordering::Acquire));
         assert!(!state.microphone_muted.load(Ordering::SeqCst));
@@ -2674,6 +2677,15 @@ mod tests {
                 "text": "hello",
                 "revision": 2,
                 "deliveryAttempts": 0,
+            }),
+        );
+
+        assert_eq!(
+            serde_json::to_value(NativeVoiceEvent::ControlsDismissed { revision: 3 })
+                .expect("serialize controls-dismissed event"),
+            serde_json::json!({
+                "type": "controlsDismissed",
+                "revision": 3,
             }),
         );
     }
