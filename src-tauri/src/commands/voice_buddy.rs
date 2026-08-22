@@ -207,13 +207,6 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-pub fn remove(app: &AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
-        window.destroy().map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
 fn reconcile_terminal_controls(
     emit_terminal: impl FnOnce(),
     destroy: impl FnOnce() -> Result<(), String>,
@@ -236,6 +229,17 @@ pub fn dismiss_after_terminal_event<T: Clone + Serialize>(app: &AppHandle, paylo
         || {
             let _ = window.emit(super::native_voice::EVENT_NAME, payload);
         },
+        || window.destroy().map_err(|error| error.to_string()),
+        || window.hide().map_err(|error| error.to_string()),
+    );
+}
+
+pub fn dismiss_after_terminal(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
+        return;
+    };
+    reconcile_terminal_controls(
+        || {},
         || window.destroy().map_err(|error| error.to_string()),
         || window.hide().map_err(|error| error.to_string()),
     );
@@ -416,7 +420,7 @@ mod tests {
     }
 
     #[test]
-    fn completed_stop_stays_successful_when_controls_require_hide_fallback() {
+    fn terminal_controls_emit_before_destroy_and_hide_on_failure() {
         let emitted = std::cell::Cell::new(false);
         let hidden = std::cell::Cell::new(false);
 

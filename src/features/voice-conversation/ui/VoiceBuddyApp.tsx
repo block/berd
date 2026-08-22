@@ -45,6 +45,10 @@ export function VoiceBuddyApp() {
     revision: number;
     muted: boolean;
   } | null>(null);
+  const latestLifecycleObservation = useRef<Extract<
+    VoiceConversationEvent,
+    { type: "startup" | "cleanShutdown" }
+  > | null>(null);
 
   useLayoutEffect(() => {
     if (!initialized || !status?.sessionId) return;
@@ -85,6 +89,12 @@ export function VoiceBuddyApp() {
           revision: event.revision,
           muted: event.muted,
         };
+      }
+      if (event.type === "startup" || event.type === "cleanShutdown") {
+        const observation = latestLifecycleObservation.current;
+        if (!observation || event.revision >= observation.revision) {
+          latestLifecycleObservation.current = event;
+        }
       }
       setActivity((current) => {
         if (event.revision < current.revision) return current;
@@ -200,18 +210,47 @@ export function VoiceBuddyApp() {
               statusRef.current = current;
               return current;
             }
+            const lifecycleObservation = latestLifecycleObservation.current;
+            let hydratedStatus = nextStatus;
+            if (
+              lifecycleObservation &&
+              lifecycleObservation.revision >= nextStatus.revision
+            ) {
+              hydratedStatus =
+                lifecycleObservation.type === "startup"
+                  ? {
+                      ...nextStatus,
+                      lifecycle: "running",
+                      sessionId: lifecycleObservation.sessionId,
+                      ownerWindowLabel: lifecycleObservation.ownerWindowLabel,
+                      microphoneMuted: false,
+                      revision: lifecycleObservation.revision,
+                    }
+                  : {
+                      ...nextStatus,
+                      lifecycle: "stopped",
+                      sessionId: null,
+                      ownerWindowLabel: null,
+                      microphoneMuted: false,
+                      revision: lifecycleObservation.revision,
+                    };
+            }
             const observation = latestMuteObservation.current;
             const shouldPreserveObservedMute =
+              hydratedStatus.lifecycle === "running" &&
               microphoneMuteGeneration.current !== muteGeneration &&
-              observation?.sessionId === nextStatus.sessionId &&
-              observation.revision >= nextStatus.revision;
-            const hydratedStatus = shouldPreserveObservedMute
+              observation?.sessionId === hydratedStatus.sessionId &&
+              observation.revision >= hydratedStatus.revision;
+            hydratedStatus = shouldPreserveObservedMute
               ? {
-                  ...nextStatus,
+                  ...hydratedStatus,
                   microphoneMuted: observation.muted,
-                  revision: Math.max(nextStatus.revision, observation.revision),
+                  revision: Math.max(
+                    hydratedStatus.revision,
+                    observation.revision,
+                  ),
                 }
-              : nextStatus;
+              : hydratedStatus;
             statusRef.current = hydratedStatus;
             return hydratedStatus;
           });

@@ -1469,8 +1469,8 @@ impl NativeVoiceState {
             }
             super::voice_buddy::dismiss_after_terminal_event(app, shutdown_event);
             super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
-        } else if let Err(error) = super::voice_buddy::remove(app) {
-            log::error!("Failed to remove floating voice controls: {error}");
+        } else {
+            super::voice_buddy::dismiss_after_terminal(app);
         }
         Ok(())
     }
