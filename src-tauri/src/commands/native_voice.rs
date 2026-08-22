@@ -690,6 +690,7 @@ pub fn get_native_voice_conversation_status(
 #[tauri::command]
 pub fn block_native_voice_conversation_starts(
     state: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
     webview_window: WebviewWindow,
     session_id: String,
     renderer_id: String,
@@ -699,12 +700,10 @@ pub fn block_native_voice_conversation_starts(
     if session_id.is_empty() || session_id.len() > 256 {
         return Err("session id must be between 1 and 256 bytes".to_string());
     }
-    state.block_starts(
-        session_id,
-        webview_window.label().to_string(),
-        renderer_id,
-        renderer_epoch,
-    )
+    let window_label = webview_window.label().to_string();
+    capture.with_active_renderer(&window_label, &renderer_id, renderer_epoch, || {
+        state.block_starts(session_id, window_label, renderer_id, renderer_epoch)
+    })
 }
 
 #[tauri::command]
