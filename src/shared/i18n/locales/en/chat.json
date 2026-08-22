@@ -365,6 +365,7 @@
     "modelSwitchError": "Could not switch to {{model}}. This chat is still using {{fallbackModel}}.",
     "modelSwitchErrorWithoutFallback": "Could not switch to {{model}}.",
     "archiveError": "Failed to archive chat",
+    "voiceStopBeforeArchiveError": "Couldn't stop voice, so the chat wasn't archived",
     "gitInspectionError": "Couldn't inspect the worktrees or branches. The chat wasn't archived.",
     "gitCleanupError": "Chat archived, but Git cleanup couldn't finish",
     "moveError": "Failed to move chat",
@@ -546,8 +547,27 @@
     "voiceInputAutoSubmitHint": "Say \"submit\" to send",
     "voiceConversation": {
       "start": "Start voice conversation",
+      "hangUp": "Hang up",
       "muteMicrophone": "Mute microphone",
       "unmuteMicrophone": "Unmute microphone",
+      "buddy": {
+        "title": "Voice conversation",
+        "openSession": "Open voice session",
+        "hangUp": "Hang up",
+        "listening": "Listening…",
+        "muted": "Microphone muted",
+        "stopped": "Voice conversation ended",
+        "userSpeaking": "Speech detected",
+        "assistantSpeaking": "Berd is speaking",
+        "errors": {
+          "initialize": "Voice controls could not start. Open the voice session to try again.",
+          "show": "Voice controls could not appear. Open the voice session to continue.",
+          "open": "The voice session could not be opened. Try again.",
+          "mute": "The microphone setting could not be changed. Try again.",
+          "stop": "The voice conversation could not be ended. Try again.",
+          "conversation": "The voice conversation stopped because of an error. Open the session to try again."
+        }
+      },
       "states": {
         "off": "Start voice conversation",
         "starting": "Starting voice conversation…",

@@ -9,6 +9,7 @@ export type CommandFailureReason =
   | "focus_failed"
   | "workspace_cleanup_failed"
   | "timed_out"
+  | "voice_stop_failed"
   | "backend_archive_failed";
 export type CommandOutcome =
   | {

@@ -31,6 +31,8 @@ const COMPOSER_ACTION_FEEDBACK_RECIPE = {
     "bg-info text-info-foreground hover:bg-info/90 hover:text-info-foreground active:bg-info/90 active:text-info-foreground",
   error:
     "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive/90 active:text-destructive-foreground",
+  destructive:
+    "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive/90 active:text-destructive-foreground",
 } as const;
 
 export type ComposerActionVisualState =

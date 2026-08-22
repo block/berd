@@ -23,9 +23,9 @@ use services::{bundled_agents, bundled_skills, distro_bundle::DistroBundleState}
 use std::path::PathBuf;
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
-use tauri::{Manager, RunEvent};
 #[cfg(target_os = "macos")]
-use tauri::{WebviewWindow, WindowEvent};
+use tauri::WebviewWindow;
+use tauri::{Manager, RunEvent, WindowEvent};
 use tauri_plugin_window_state::StateFlags;
 
 #[cfg(target_os = "macos")]
@@ -376,6 +376,8 @@ pub fn run() {
             // Surface WKWebView renderer memory and detect silent OOM reaps.
             services::renderer_monitor::start(app.handle().clone());
 
+            attach_main_window_lifecycle(app);
+
             // Build a custom macOS application menu so that the app submenu,
             // "About" item, and "Quit" item use the product name "Berd"
             // instead of the Cargo binary name.
@@ -383,7 +385,6 @@ pub fn run() {
             {
                 set_dev_dock_icon();
                 refresh_traffic_light_position_on_window_changes(app);
-                attach_main_window_lifecycle(app);
 
                 let app_menu = SubmenuBuilder::new(app, "Berd")
                     .about_with_text(
@@ -640,13 +641,21 @@ pub fn run() {
             commands::siri_voice::finish_siri_voice_stream,
             commands::siri_voice::stop_siri_voice,
             commands::native_voice::get_native_voice_conversation_status,
+            commands::native_voice::block_native_voice_conversation_starts,
+            commands::native_voice::release_native_voice_conversation_start_block,
+            commands::native_voice::set_native_voice_microphone_muted,
+            commands::native_voice::set_native_voice_assistant_speaking,
             commands::native_voice::drain_native_voice_conversation_transcripts,
             commands::native_voice::acknowledge_native_voice_conversation_transcript,
             commands::native_voice::reject_native_voice_conversation_transcript,
             commands::native_voice::start_native_voice_conversation,
             commands::native_voice::stop_native_voice_conversation,
             commands::native_voice::push_native_voice_audio,
-            commands::native_voice::set_native_voice_input_muted,
+            commands::voice_buddy::open_voice_conversation_session,
+            commands::voice_buddy::show_voice_conversation_controls,
+            commands::voice_buddy::set_voice_conversation_controls_suppressed,
+            commands::voice_buddy::stop_voice_conversation_from_buddy,
+            commands::notifications::should_suppress_completion_notification,
             commands::voice_capture::register_voice_renderer_instance,
             commands::window_session::get_session_window_support,
             commands::window_session::open_session_window,
@@ -711,7 +720,6 @@ fn refresh_traffic_light_position_on_window_changes(app: &tauri::App) {
     }
 }
 
-#[cfg(target_os = "macos")]
 fn attach_main_window_lifecycle(app: &tauri::App) {
     let Some(main) = app.get_webview_window("main") else {
         return;
@@ -719,13 +727,45 @@ fn attach_main_window_lifecycle(app: &tauri::App) {
 
     let app_handle = app.handle().clone();
     main.on_window_event(move |event| {
+        if matches!(event, WindowEvent::Destroyed) {
+            commands::native_voice::handle_voice_owner_window_destroyed(&app_handle, "main");
+            return;
+        }
         if let WindowEvent::CloseRequested { api, .. } = event {
             let has_secondary_window = app_handle
                 .webview_windows()
                 .keys()
-                .any(|label| label != "main");
+                .any(|label| label != "main" && label != commands::voice_buddy::WINDOW_LABEL);
+            let active_voice_owner_window_label = app_handle
+                .state::<commands::native_voice::NativeVoiceState>()
+                .active_session_lifecycle_target()
+                .map(|(_, owner_window_label, _)| owner_window_label);
+            let controls_match_active_voice =
+                commands::voice_buddy::matches_active_lifecycle(&app_handle);
+            let preserve_for_voice = commands::voice_buddy::should_preserve_main_for_voice(
+                active_voice_owner_window_label.as_deref(),
+                controls_match_active_voice,
+            );
+            let stale_controls_cleanup_failed = if !preserve_for_voice {
+                commands::voice_buddy::destroy_stale_for_main_close(&app_handle)
+                    .inspect_err(|error| {
+                        log::error!("Failed to remove stale voice controls on main close: {error}");
+                    })
+                    .is_err()
+            } else {
+                false
+            };
 
-            if has_secondary_window {
+            if stale_controls_cleanup_failed && !cfg!(target_os = "macos") {
+                app_handle.exit(0);
+                return;
+            }
+
+            let should_preserve = preserve_for_voice
+                || (cfg!(target_os = "macos")
+                    && (has_secondary_window || stale_controls_cleanup_failed));
+
+            if should_preserve {
                 api.prevent_close();
                 if let Some(main) = app_handle.get_webview_window("main") {
                     let _ = main.hide();

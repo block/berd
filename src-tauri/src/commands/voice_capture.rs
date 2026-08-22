@@ -93,6 +93,31 @@ impl CaptureState {
 }
 
 impl VoiceCaptureState {
+    #[cfg(test)]
+    pub(crate) fn register_renderer_for_test(&self, window_label: &str, renderer_id: &str) -> u64 {
+        self.state
+            .lock()
+            .expect("capture lock")
+            .register_renderer(window_label.to_string(), renderer_id.to_string())
+            .expect("register renderer")
+    }
+
+    pub(crate) fn with_active_renderer<T>(
+        &self,
+        window_label: &str,
+        renderer_id: &str,
+        renderer_epoch: u64,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        validate_id("renderer", renderer_id)?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Voice capture state lock was poisoned".to_string())?;
+        state.activate_renderer(window_label, renderer_id, renderer_epoch)?;
+        operation()
+    }
+
     pub fn activate_renderer(
         &self,
         window_label: &str,
@@ -190,15 +215,20 @@ impl VoiceCaptureState {
 #[tauri::command]
 pub fn register_voice_renderer_instance(
     state: State<'_, VoiceCaptureState>,
+    native_voice: State<'_, super::native_voice::NativeVoiceState>,
     webview_window: WebviewWindow,
     renderer_id: String,
 ) -> Result<u64, String> {
     validate_id("renderer", &renderer_id)?;
-    state
+    let window_label = webview_window.label().to_string();
+    let mut capture_state = state
         .state
         .lock()
-        .map_err(|_| "Voice capture state lock was poisoned".to_string())?
-        .register_renderer(webview_window.label().to_string(), renderer_id)
+        .map_err(|_| "Voice capture state lock was poisoned".to_string())?;
+    let epoch = capture_state.register_renderer(window_label.clone(), renderer_id.clone())?;
+    native_voice.release_start_blocks_for_replaced_renderer(&window_label, &renderer_id, epoch);
+    drop(capture_state);
+    Ok(epoch)
 }
 
 fn validate_id(label: &str, value: &str) -> Result<(), String> {
@@ -334,5 +364,37 @@ mod tests {
                 "dictation-reloaded".into(),
             )
             .expect("replacement renderer reclaims microphone"));
+    }
+
+    #[test]
+    fn replaced_renderer_cannot_run_a_late_voice_operation() {
+        let capture = VoiceCaptureState::default();
+        let first_epoch = capture
+            .state
+            .lock()
+            .expect("capture lock")
+            .register_renderer("main".into(), "renderer-1".into())
+            .expect("register first renderer");
+        capture
+            .activate_renderer("main", "renderer-1", first_epoch)
+            .expect("activate first renderer");
+        let second_epoch = capture
+            .state
+            .lock()
+            .expect("capture lock")
+            .register_renderer("main".into(), "renderer-2".into())
+            .expect("register replacement renderer");
+        capture
+            .activate_renderer("main", "renderer-2", second_epoch)
+            .expect("activate replacement renderer");
+        let operation_ran = std::cell::Cell::new(false);
+
+        assert!(capture
+            .with_active_renderer("main", "renderer-1", first_epoch, || {
+                operation_ran.set(true);
+                Ok(())
+            })
+            .is_err());
+        assert!(!operation_ran.get());
     }
 }

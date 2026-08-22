@@ -29,6 +29,14 @@ import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import {
+  useVoiceConversationStore,
+  VOICE_CONVERSATION_OFF_STATUS,
+} from "@/features/voice-conversation/stores/voiceConversationStore";
+import {
+  blockNativeVoiceConversationStarts,
+  releaseNativeVoiceConversationStartBlock,
+} from "@/features/voice-conversation/api/voiceConversation";
 import { dispatchOnboarding } from "@/features/onboarding/model";
 import {
   resetHomeWidgetStoreForTests,
@@ -53,6 +61,21 @@ import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStor
 import { gooseServeSelectionFromExecutionTarget } from "@/features/chat/lib/gooseServeExecutionTarget";
 import { ASSISTIVE_UX_STORAGE_KEY } from "@/shared/assistive-ux/registry";
 
+vi.mock(
+  "@/features/voice-conversation/api/voiceConversation",
+  async (importOriginal) => ({
+    ...(await importOriginal<
+      typeof import("@/features/voice-conversation/api/voiceConversation")
+    >()),
+    blockNativeVoiceConversationStarts: vi
+      .fn()
+      .mockResolvedValue("archive-token"),
+    releaseNativeVoiceConversationStartBlock: vi
+      .fn()
+      .mockResolvedValue(undefined),
+  }),
+);
+
 import {
   DEFAULT_RUNTIME_CONFIG,
   type RuntimeConfig,
@@ -60,7 +83,6 @@ import {
 import {
   AppShell,
   shouldStopVoiceConversationOnExperimentChange,
-  shouldStopVoiceConversationOnSessionChange,
 } from "./AppShell";
 import type { NavigationPanesViewProps } from "@/app/views/NavigationPanesView";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
@@ -88,6 +110,7 @@ const gitMocks = vi.hoisted(() => ({
   removeWorktree: vi.fn(),
 }));
 const mockIsExternalAgentReady = vi.hoisted(() => vi.fn());
+const originalStopVoiceConversation = useVoiceConversationStore.getState().stop;
 const mockAgentStatus = vi.hoisted(() => ({
   readyAgentIds: new Set<string>(["goose"]),
 }));
@@ -872,46 +895,6 @@ describe("AppShell global navigation", () => {
     ).toBe(false);
   });
 
-  it("stops voice only when navigation leaves its bound chat", () => {
-    const base = {
-      previousSessionId: "session-1",
-      boundSessionId: "session-1",
-      lifecycle: "running",
-    };
-
-    expect(
-      shouldStopVoiceConversationOnSessionChange({
-        ...base,
-        nextSessionId: "session-2",
-      }),
-    ).toBe(true);
-    expect(
-      shouldStopVoiceConversationOnSessionChange({
-        ...base,
-        nextSessionId: null,
-      }),
-    ).toBe(true);
-    expect(
-      shouldStopVoiceConversationOnSessionChange({
-        ...base,
-        nextSessionId: "session-1",
-      }),
-    ).toBe(false);
-    expect(
-      shouldStopVoiceConversationOnSessionChange({
-        ...base,
-        nextSessionId: "session-2",
-        boundSessionId: "session-elsewhere",
-      }),
-    ).toBe(false);
-    expect(
-      shouldStopVoiceConversationOnSessionChange({
-        ...base,
-        nextSessionId: "session-2",
-        lifecycle: "stopped",
-      }),
-    ).toBe(false);
-  });
   afterEach(cleanup);
 
   beforeEach(() => {
@@ -934,6 +917,17 @@ describe("AppShell global navigation", () => {
     mockSessionWindowSupport.supported = false;
     mockFocusSessionWindow.mockReset();
     useSessionWindowStore.getState().setSnapshot([]);
+    useVoiceConversationStore.setState({
+      status: VOICE_CONVERSATION_OFF_STATUS,
+      microphoneMuted: false,
+      stop: originalStopVoiceConversation,
+    });
+    vi.mocked(blockNativeVoiceConversationStarts)
+      .mockReset()
+      .mockResolvedValue("archive-token");
+    vi.mocked(releaseNativeVoiceConversationStartBlock)
+      .mockReset()
+      .mockResolvedValue(undefined);
     mockListExtensions.mockReset();
     mockListExtensions.mockResolvedValue([]);
     mockAcpCreateSession.mockReset();
@@ -2544,6 +2538,320 @@ describe("AppShell global navigation", () => {
     expect(gitMocks.removeWorktree).not.toHaveBeenCalled();
   });
 
+  it("releases a late voice-start lease without archiving after the deadline", async () => {
+    vi.useFakeTimers();
+    const lease = deferred<string>();
+    vi.mocked(blockNativeVoiceConversationStarts).mockReturnValueOnce(
+      lease.promise,
+    );
+    useChatSessionStore.setState({
+      sessions: [makeManagedWorktreeSession("stalled-voice-lease")],
+    });
+    renderAppShell();
+
+    const outcome = getAppNavigationController().archiveSession(
+      "session-1",
+      "reject",
+      Date.now() + 4_000,
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(outcome).resolves.toEqual({
+      ok: false,
+      reason: "timed_out",
+    });
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+
+    lease.resolve("late-archive-token");
+    await vi.waitFor(() =>
+      expect(releaseNativeVoiceConversationStartBlock).toHaveBeenCalledWith(
+        "session-1",
+        "late-archive-token",
+      ),
+    );
+    vi.useRealTimers();
+  });
+
+  it.each([
+    "reject",
+    "discard",
+  ] as const)("does not use the %s archive policy on a background voice session", async (cleanupPolicy) => {
+    const stopVoiceConversation = vi.fn().mockResolvedValue(undefined);
+    useChatSessionStore.setState({
+      sessions: [makeManagedWorktreeSession("background-voice")],
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      stop: stopVoiceConversation,
+    });
+    renderAppShell();
+
+    const outcome = await getAppNavigationController().archiveSession(
+      "session-1",
+      cleanupPolicy,
+    );
+
+    expect(outcome).toEqual({
+      ok: false,
+      reason: "target_session_running",
+    });
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    expect(stopVoiceConversation).not.toHaveBeenCalled();
+  });
+
+  it("stops active voice before confirmed archival", async () => {
+    const stoppedStatus = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 2,
+    };
+    const stopRequest = deferred<typeof stoppedStatus>();
+    const stopVoiceConversation = vi.fn(async () => {
+      const status = await stopRequest.promise;
+      useVoiceConversationStore.setState({ status });
+      return status;
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Voice archive",
+          executionTarget: { harnessId: "goose" },
+          workingDir: "~/voice-archive",
+          createdAt: "2026-08-21T00:00:00.000Z",
+          updatedAt: "2026-08-21T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      stop: stopVoiceConversation as never,
+    });
+    renderAppShell();
+
+    const outcome = getAppNavigationController().archiveSession(
+      "session-1",
+      "confirm",
+    );
+    await waitFor(() => expect(stopVoiceConversation).toHaveBeenCalledOnce());
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+
+    stopRequest.resolve(stoppedStatus);
+    await expect(outcome).resolves.toEqual({ ok: true });
+    expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    expect(stopVoiceConversation.mock.invocationCallOrder[0]).toBeLessThan(
+      mockAcpArchiveSession.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("keeps the session unarchived when voice restarts during shutdown", async () => {
+    const replacementStatus = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running" as const,
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      microphoneMuted: false,
+      revision: 2,
+    };
+    const stopVoiceConversation = vi.fn(async () => {
+      useVoiceConversationStore.setState({ status: replacementStatus });
+      return replacementStatus;
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Voice archive",
+          executionTarget: { harnessId: "goose" },
+          workingDir: "~/voice-archive",
+          createdAt: "2026-08-21T00:00:00.000Z",
+          updatedAt: "2026-08-21T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    useVoiceConversationStore.setState({
+      status: { ...replacementStatus, revision: 1 },
+      stop: stopVoiceConversation,
+    });
+    renderAppShell();
+
+    await expect(
+      getAppNavigationController().archiveSession("session-1", "confirm"),
+    ).resolves.toEqual({ ok: false, reason: "voice_stop_failed" });
+
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    expect(mockToastError).toHaveBeenCalledWith(
+      "Couldn't stop voice, so the chat wasn't archived",
+      { description: "Voice is still active for this chat." },
+    );
+  });
+
+  it("rechecks the archive deadline after a delayed voice stop", async () => {
+    vi.useFakeTimers();
+    const stoppedStatus = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 2,
+    };
+    const stopRequest = deferred<typeof stoppedStatus>();
+    const stopVoiceConversation = vi.fn(async () => {
+      const status = await stopRequest.promise;
+      useVoiceConversationStore.setState({ status });
+      return status;
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Voice archive deadline",
+          executionTarget: { harnessId: "goose" },
+          workingDir: "~/voice-archive-deadline",
+          createdAt: "2026-08-21T00:00:00.000Z",
+          updatedAt: "2026-08-21T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        ...stoppedStatus,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        revision: 1,
+      },
+      stop: stopVoiceConversation as never,
+    });
+    renderAppShell();
+
+    const outcome = getAppNavigationController().archiveSession(
+      "session-1",
+      "confirm",
+      Date.now() + 5_000,
+    );
+    await vi.waitFor(
+      () => expect(stopVoiceConversation).toHaveBeenCalledOnce(),
+      {
+        timeout: 500,
+      },
+    );
+    await vi.advanceTimersByTimeAsync(2_000);
+    stopRequest.resolve(stoppedStatus);
+
+    await expect(outcome).resolves.toEqual({
+      ok: false,
+      reason: "timed_out",
+    });
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("keeps the session unarchived when voice cannot stop", async () => {
+    const stopError = new Error("microphone shutdown failed");
+    const stopVoiceConversation = vi.fn().mockRejectedValue(stopError);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Voice archive",
+          executionTarget: { harnessId: "goose" },
+          workingDir: "~/voice-archive",
+          createdAt: "2026-08-21T00:00:00.000Z",
+          updatedAt: "2026-08-21T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      stop: stopVoiceConversation,
+    });
+    renderAppShell();
+
+    await expect(
+      getAppNavigationController().archiveSession("session-1", "confirm"),
+    ).resolves.toEqual({ ok: false, reason: "voice_stop_failed" });
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    expect(mockToastError).toHaveBeenCalledWith(
+      "Couldn't stop voice, so the chat wasn't archived",
+      { description: "microphone shutdown failed" },
+    );
+  });
+
+  it("rechecks background voice immediately before auto-archive", async () => {
+    const inspection = deferred<GitState>();
+    mockPathExists.mockResolvedValue(true);
+    gitMocks.getGitState.mockReturnValue(inspection.promise);
+    useChatSessionStore.setState({
+      sessions: [makeManagedWorktreeSession("voice-starts-during-inspection")],
+    });
+    renderAppShell();
+
+    const outcome = getAppNavigationController().archiveSession(
+      "session-1",
+      "reject",
+    );
+    await waitFor(() => {
+      expect(gitMocks.getGitState).toHaveBeenCalled();
+    });
+
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+    });
+    inspection.resolve(
+      managedWorktreeGitState("voice-starts-during-inspection"),
+    );
+
+    await expect(outcome).resolves.toEqual({
+      ok: false,
+      reason: "target_session_running",
+    });
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+  });
+
   it("rechecks running state before noninteractive archival", async () => {
     const inspection = deferred<GitState>();
     mockPathExists.mockResolvedValue(true);
@@ -2576,6 +2884,19 @@ describe("AppShell global navigation", () => {
 
   it("archives the active session with Cmd+E", async () => {
     const user = userEvent.setup();
+    const stopVoiceConversation = vi.fn(async () => {
+      const status = {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "stopped" as const,
+        sessionId: null,
+        ownerWindowLabel: null,
+        microphoneMuted: false,
+        revision: 2,
+      };
+      useVoiceConversationStore.setState({ status });
+      return status;
+    });
     const session: ChatSession = {
       id: "session-1",
       title: "Active chat",
@@ -2588,6 +2909,18 @@ describe("AppShell global navigation", () => {
     useChatSessionStore.setState({
       sessions: [session],
       activeSessionId: null,
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      stop: stopVoiceConversation,
     });
 
     renderAppShell();
@@ -2603,6 +2936,7 @@ describe("AppShell global navigation", () => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("home");
     });
     expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    expect(stopVoiceConversation).toHaveBeenCalledOnce();
     expect(useChatSessionStore.getState().activeSessionId).toBeNull();
     expect(
       useChatSessionStore.getState().getSession("session-1")?.archivedAt,
@@ -5546,6 +5880,7 @@ describe("AppShell global navigation", () => {
 
   it("cycles sessions with Ctrl+Tab and Ctrl+Shift+Tab", async () => {
     const user = userEvent.setup();
+    const stopVoiceConversation = vi.fn();
     const sessionBase = {
       executionTarget: { harnessId: "goose" },
       workingDir: "~/goose artifacts",
@@ -5568,6 +5903,18 @@ describe("AppShell global navigation", () => {
         },
       ] as ChatSession[],
       activeSessionId: null,
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 1,
+      },
+      stop: stopVoiceConversation,
     });
 
     renderAppShell();
@@ -5601,5 +5948,6 @@ describe("AppShell global navigation", () => {
     expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
       "session-1",
     );
+    expect(stopVoiceConversation).not.toHaveBeenCalled();
   });
 });

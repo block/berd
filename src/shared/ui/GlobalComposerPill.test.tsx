@@ -537,6 +537,10 @@ describe("GlobalComposerPill", () => {
     const button = screen.getByRole("button", {
       name: "Start voice conversation",
     });
+    expect(button.querySelector(".tabler-icon-phone")).toBeInTheDocument();
+    expect(
+      button.querySelector(".tabler-icon-headphones"),
+    ).not.toBeInTheDocument();
     await user.click(button);
     await user.click(button);
 

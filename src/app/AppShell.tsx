@@ -223,7 +223,11 @@ import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/desi
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { OnboardingFlow } from "@/features/onboarding/ui/OnboardingFlow";
 import { useOnboardingState } from "@/features/onboarding/model";
-import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
+import {
+  blockVoiceConversationStarts,
+  useVoiceConversationStore,
+} from "@/features/voice-conversation/stores/voiceConversationStore";
+import { listenToVoiceConversationOpenSession } from "@/features/voice-conversation/api/voiceConversation";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
 import { PocketVoiceSetupDialog } from "@/features/voice-conversation/ui/PocketVoiceSetupDialog";
@@ -360,27 +364,35 @@ function getSessionArchiveInterruptionReason(
     : null;
 }
 
+async function acquireVoiceStartBlockBeforeDeadline(
+  sessionId: string,
+  deadlineMs?: number,
+): Promise<(() => Promise<void>) | null> {
+  const acquisition = blockVoiceConversationStarts(sessionId);
+  if (deadlineMs == null) return acquisition;
+
+  const remainingMs = deadlineMs - MUTATION_DEADLINE_MARGIN_MS - Date.now();
+  if (remainingMs <= 0) {
+    void acquisition.then((release) => release()).catch(() => undefined);
+    return null;
+  }
+
+  let timeoutId: number | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timeoutId = window.setTimeout(() => resolve(null), remainingMs);
+  });
+  const release = await Promise.race([acquisition, timeout]);
+  if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+  if (!release) {
+    void acquisition
+      .then((lateRelease) => lateRelease())
+      .catch(() => undefined);
+  }
+  return release;
+}
+
 type GlobalComposerPlacement = "docked" | "centered" | "handoff";
 
-export function shouldStopVoiceConversationOnSessionChange({
-  previousSessionId,
-  nextSessionId,
-  boundSessionId,
-  lifecycle,
-}: {
-  previousSessionId: string | null;
-  nextSessionId: string | null;
-  boundSessionId: string | null;
-  lifecycle: string;
-}): boolean {
-  return (
-    previousSessionId !== null &&
-    previousSessionId !== nextSessionId &&
-    boundSessionId === previousSessionId &&
-    lifecycle !== "stopped" &&
-    lifecycle !== "unavailable"
-  );
-}
 const current = (id: string, label: string): TopBarBreadcrumb => ({
   id,
   label,
@@ -764,18 +776,7 @@ export function AppShell({
     ) {
       voice.clearRequestedStart(previousSessionId);
     }
-    if (
-      !shouldStopVoiceConversationOnSessionChange({
-        previousSessionId,
-        nextSessionId: activeSessionId,
-        boundSessionId: voice.status.sessionId,
-        lifecycle: voice.status.lifecycle,
-      })
-    ) {
-      return;
-    }
-    void stopVoiceConversation().catch(() => undefined);
-  }, [activeSessionId, stopVoiceConversation]);
+  }, [activeSessionId]);
   const sidebarIsResizing = isResizing;
   const sidebarDockedPanelOuterWidth = sidebarPanelOuterWidth;
   const sidebarDockedOuterWidth = sidebarCollapsed ? 0 : sidebarPanelOuterWidth;
@@ -3618,6 +3619,19 @@ export function AppShell({
         if (!session || session.id !== sessionId) {
           return { ok: false as const, reason: "session_not_found" as const };
         }
+        await useVoiceConversationStore.getState().init();
+        const voiceBeforeArchive = useVoiceConversationStore.getState().status;
+        if (
+          cleanupPolicy !== "confirm" &&
+          voiceBeforeArchive.sessionId === sessionId &&
+          voiceBeforeArchive.lifecycle !== "stopped" &&
+          voiceBeforeArchive.lifecycle !== "unavailable"
+        ) {
+          return {
+            ok: false as const,
+            reason: "target_session_running" as const,
+          };
+        }
 
         let plans: InspectedSessionWorkspaceCleanupPlan[] = [];
         if (hasSessionWorkspaceCleanupTargets(session)) {
@@ -3692,87 +3706,150 @@ export function AppShell({
             reason: "blocked_unsaved_changes" as const,
           };
         }
-
+        const releaseVoiceStartBlock =
+          await acquireVoiceStartBlockBeforeDeadline(sessionId, deadlineMs);
+        if (!releaseVoiceStartBlock) {
+          return { ok: false as const, reason: "timed_out" as const };
+        }
         try {
-          await useChatSessionStore
-            .getState()
-            .archiveSession(sessionId, fallbackSession);
-          const homeWidgetState = useHomeWidgetStore.getState();
-          const pinnedWidget = homeWidgetState.instances.find(
-            (instance) =>
-              instance.type === "chatPin" &&
-              instance.state?.sessionId === sessionId,
+          const postLeaseInterruption = getSessionArchiveInterruptionReason(
+            sessionId,
+            cleanupPolicy,
+            deadlineMs,
           );
-          if (pinnedWidget) {
-            homeWidgetState.removeWidget(pinnedWidget.id);
+          if (postLeaseInterruption) {
+            return { ok: false as const, reason: postLeaseInterruption };
           }
-        } catch (error) {
-          if (cleanupPolicy === "confirm") {
-            toast.error(
-              formatAcpErrorMessage(
-                error,
-                t("chat:notifications.archiveError"),
-              ),
+          await useVoiceConversationStore.getState().init();
+          const voiceBeforeMutation =
+            useVoiceConversationStore.getState().status;
+          const targetOwnsVoice =
+            voiceBeforeMutation.sessionId === sessionId &&
+            voiceBeforeMutation.lifecycle !== "stopped" &&
+            voiceBeforeMutation.lifecycle !== "unavailable";
+          if (cleanupPolicy !== "confirm" && targetOwnsVoice) {
+            return {
+              ok: false as const,
+              reason: "target_session_running" as const,
+            };
+          }
+          if (targetOwnsVoice) {
+            try {
+              const stoppedStatus = await useVoiceConversationStore
+                .getState()
+                .stop();
+              const currentStatus = useVoiceConversationStore.getState().status;
+              const targetStillOwnsVoice = [stoppedStatus, currentStatus].some(
+                (status) =>
+                  status.sessionId === sessionId &&
+                  status.lifecycle !== "stopped" &&
+                  status.lifecycle !== "unavailable",
+              );
+              if (targetStillOwnsVoice) {
+                throw new Error("Voice is still active for this chat.");
+              }
+            } catch (error) {
+              console.error("Failed to stop voice before archiving:", error);
+              toast.error(t("chat:notifications.voiceStopBeforeArchiveError"), {
+                description: formatAcpErrorMessage(error),
+              });
+              return {
+                ok: false as const,
+                reason: "voice_stop_failed" as const,
+              };
+            }
+          }
+
+          const preMutationInterruption = getSessionArchiveInterruptionReason(
+            sessionId,
+            cleanupPolicy,
+            deadlineMs,
+          );
+          if (preMutationInterruption) {
+            return { ok: false as const, reason: preMutationInterruption };
+          }
+          try {
+            await useChatSessionStore
+              .getState()
+              .archiveSession(sessionId, fallbackSession);
+            const homeWidgetState = useHomeWidgetStore.getState();
+            const pinnedWidget = homeWidgetState.instances.find(
+              (instance) =>
+                instance.type === "chatPin" &&
+                instance.state?.sessionId === sessionId,
+            );
+            if (pinnedWidget) {
+              homeWidgetState.removeWidget(pinnedWidget.id);
+            }
+          } catch (error) {
+            if (cleanupPolicy === "confirm") {
+              toast.error(
+                formatAcpErrorMessage(
+                  error,
+                  t("chat:notifications.archiveError"),
+                ),
+              );
+            }
+            return {
+              ok: false as const,
+              reason:
+                error instanceof SessionNotFoundError
+                  ? ("session_not_found" as const)
+                  : ("backend_archive_failed" as const),
+            };
+          }
+          let cleanupFailureReason:
+            | "target_session_running"
+            | "workspace_cleanup_failed"
+            | "timed_out"
+            | null = null;
+          try {
+            await cleanupSessionWorkspaces(plans, {
+              getInterruptionReason: () =>
+                getSessionArchiveInterruptionReason(
+                  sessionId,
+                  cleanupPolicy,
+                  deadlineMs,
+                ),
+            });
+          } catch (error) {
+            cleanupFailureReason =
+              error instanceof SessionWorkspaceCleanupInterruptedError
+                ? error.reason
+                : "workspace_cleanup_failed";
+            console.error(
+              "Failed to clean up archived session Git resources:",
+              error,
+            );
+            if (cleanupPolicy === "confirm") {
+              toast.error(
+                formatAcpErrorMessage(
+                  error,
+                  t("chat:notifications.gitCleanupError"),
+                ),
+              );
+            }
+          }
+
+          const wasActiveSession =
+            useChatSessionStore.getState().activeSessionId === sessionId;
+          cleanupChatSession(sessionId);
+          if (useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
+            releaseSession(sessionId).catch((error: unknown) =>
+              console.error("Failed to release session window:", error),
             );
           }
-          return {
-            ok: false as const,
-            reason:
-              error instanceof SessionNotFoundError
-                ? ("session_not_found" as const)
-                : ("backend_archive_failed" as const),
-          };
-        }
-
-        let cleanupFailureReason:
-          | "target_session_running"
-          | "workspace_cleanup_failed"
-          | "timed_out"
-          | null = null;
-        try {
-          await cleanupSessionWorkspaces(plans, {
-            getInterruptionReason: () =>
-              getSessionArchiveInterruptionReason(
-                sessionId,
-                cleanupPolicy,
-                deadlineMs,
-              ),
-          });
-        } catch (error) {
-          cleanupFailureReason =
-            error instanceof SessionWorkspaceCleanupInterruptedError
-              ? error.reason
-              : "workspace_cleanup_failed";
-          console.error(
-            "Failed to clean up archived session Git resources:",
-            error,
-          );
-          if (cleanupPolicy === "confirm") {
-            toast.error(
-              formatAcpErrorMessage(
-                error,
-                t("chat:notifications.gitCleanupError"),
-              ),
-            );
+          if (wasActiveSession) {
+            setActiveSession(null);
+            setActiveView("home");
           }
-        }
 
-        const wasActiveSession =
-          useChatSessionStore.getState().activeSessionId === sessionId;
-        cleanupChatSession(sessionId);
-        if (useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
-          releaseSession(sessionId).catch((error: unknown) =>
-            console.error("Failed to release session window:", error),
-          );
+          return cleanupFailureReason
+            ? { ok: true as const, cleanupIncomplete: cleanupFailureReason }
+            : { ok: true as const };
+        } finally {
+          await releaseVoiceStartBlock();
         }
-        if (wasActiveSession) {
-          setActiveSession(null);
-          setActiveView("home");
-        }
-
-        return cleanupFailureReason
-          ? { ok: true as const, cleanupIncomplete: cleanupFailureReason }
-          : { ok: true as const };
       } finally {
         releaseArchiveQueue();
       }
@@ -3894,6 +3971,31 @@ export function AppShell({
     },
     [activeView, guardAppNavigation, isMultiWindowEnabled, selectSessionDirect],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void listenToVoiceConversationOpenSession((sessionId) => {
+      const voice = useVoiceConversationStore.getState().status;
+      if (voice.lifecycle === "running" && voice.sessionId === sessionId) {
+        handleSelectSession(sessionId);
+      }
+    })
+      .then((cleanup) => {
+        if (cancelled) cleanup();
+        else unlisten = cleanup;
+      })
+      .catch((error) => {
+        console.error(
+          "Failed to listen for voice session open requests:",
+          error,
+        );
+      });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [handleSelectSession]);
 
   const handleSelectSearchResult = useCallback(
     (sessionId: string, messageId?: string, query?: string) => {

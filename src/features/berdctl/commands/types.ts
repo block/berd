@@ -80,6 +80,7 @@ export const COMMAND_ERROR_CODES = [
   "blocked_unsaved_changes",
   "backend_read_failed",
   "backend_archive_failed",
+  "voice_stop_failed",
   "cleanup_requires_discard",
   "git_inspection_failed",
   "workspace_cleanup_failed",

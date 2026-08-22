@@ -10,8 +10,8 @@ import {
 } from "react";
 import {
   IconArrowUp,
-  IconHeadphones,
   IconMicrophone,
+  IconPhone,
   IconPlus,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
@@ -1550,7 +1550,7 @@ export function GlobalComposerPill({
                   : t("globalPill.voiceConversationRequiresGoose")
               }
             >
-              <IconHeadphones aria-hidden="true" />
+              <IconPhone aria-hidden="true" />
             </ComposerActionButton>
           ) : null}
           {(dictation.isEnabled || dictation.isRecording) && (
