@@ -222,27 +222,35 @@ export function useCompletionNotifications(
                 ? session.title
                 : "";
             const body = getNotificationBody(outcome, title);
-            const windowFocused = windowFocusedRef.current;
-
             void shouldSuppressCompletionNotification(sessionId).then(
               (suppress) => {
                 if (suppress) return;
+                const currentPrefs = getNotificationPrefs();
+                if (!currentPrefs.enabled) return;
+                const windowFocused = windowFocusedRef.current;
+                if (
+                  windowFocused &&
+                  isSessionActivelyViewed(useChatStore.getState(), sessionId)
+                ) {
+                  return;
+                }
                 if (!windowFocused) {
-                  if (!prefs.desktop) return;
+                  if (!currentPrefs.desktop) return;
                   import("@tauri-apps/api/core").then(({ invoke }) => {
                     void invoke("show_completion_notification", {
                       body,
                       sessionId,
                       sound:
-                        getNotificationSoundResource(prefs.desktopSound) ??
-                        null,
+                        getNotificationSoundResource(
+                          currentPrefs.desktopSound,
+                        ) ?? null,
                     });
                   });
                   return;
                 }
 
-                if (!prefs.inApp) return;
-                playNotificationSound(prefs.inAppSound);
+                if (!currentPrefs.inApp) return;
+                playNotificationSound(currentPrefs.inAppSound);
                 const shouldShowChangeSound = shouldShowAssistiveMoment(
                   ASSISTIVE_UX_RULES.notificationsChangeSound.id,
                 );
