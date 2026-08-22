@@ -243,6 +243,45 @@ describe("voice conversation store lifecycle ordering", () => {
     });
   });
 
+  it("preserves a mute event that advances to the recovering lifecycle", async () => {
+    const store = await loadStore();
+    const running = {
+      ...status("running", 2, "session-1"),
+      microphoneMuted: true,
+    };
+    store.setState({
+      status: status("running", 1, "session-1"),
+      microphoneMuted: false,
+      uiState: "listening",
+    });
+    const recovery = deferred<VoiceConversationStatus>();
+    const reconciliation = deferred<void>();
+    mocks.getStatus.mockReturnValueOnce(recovery.promise);
+    mocks.reconcileMicrophone.mockReturnValueOnce(reconciliation.promise);
+
+    const recovering = store.getState().init();
+    recovery.resolve(running);
+    await vi.waitFor(() =>
+      expect(mocks.reconcileMicrophone).toHaveBeenLastCalledWith(running),
+    );
+    emit({
+      type: "microphoneMute",
+      sessionId: "session-1",
+      muted: false,
+      revision: 2,
+    });
+    reconciliation.resolve();
+    await recovering;
+
+    expect(store.getState().status).toMatchObject({
+      lifecycle: "running",
+      sessionId: "session-1",
+      revision: 2,
+      microphoneMuted: false,
+    });
+    expect(store.getState().microphoneMuted).toBe(false);
+  });
+
   it("does not recover over a pending microphone mute request", async () => {
     const store = await loadStore();
     const running = status("running", 2, "session-1");

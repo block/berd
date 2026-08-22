@@ -238,23 +238,21 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           const muteRequestWasPending = pendingMicrophoneMuteRequests > 0;
           const status = await getVoiceConversationStatus();
           const currentStatus = get().status;
-          const sameRunningLifecycle = isSameRunningLifecycle(
-            currentStatus,
-            status,
-          );
-          const shouldPreserveCurrentMute = () =>
-            sameRunningLifecycle &&
+          const shouldPreserveCurrentMute = (
+            observedStatus: VoiceConversationStatus,
+          ) =>
+            isSameRunningLifecycle(observedStatus, status) &&
             (muteRequestWasPending ||
               pendingMicrophoneMuteRequests > 0 ||
               muteStateVersion !== microphoneMuteStateVersion);
-          const preserveCurrentMute = shouldPreserveCurrentMute();
+          const preserveCurrentMute = shouldPreserveCurrentMute(currentStatus);
           await reconcileVoiceConversationMicrophone(
             preserveCurrentMute
               ? { ...status, microphoneMuted: get().microphoneMuted }
               : status,
           );
           set((state) => {
-            const microphoneMuted = shouldPreserveCurrentMute()
+            const microphoneMuted = shouldPreserveCurrentMute(state.status)
               ? state.microphoneMuted
               : status.microphoneMuted;
             if (

@@ -208,6 +208,67 @@ describe("VoiceBuddyApp", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("keeps a mute event that arrives during initial hydration", async () => {
+    let resolveStatus!: (status: typeof runningStatus) => void;
+    mocks.getStatus.mockReturnValueOnce(
+      new Promise<typeof runningStatus>((resolve) => {
+        resolveStatus = resolve;
+      }),
+    );
+    render(<VoiceBuddyApp />);
+    await waitFor(() => expect(voiceEventListener).toBeDefined());
+
+    act(() => {
+      voiceEventListener?.({
+        type: "microphoneMute",
+        sessionId: "session-a",
+        muted: true,
+        revision: 3,
+      });
+      resolveStatus(runningStatus);
+    });
+
+    expect(
+      await screen.findByRole("button", {
+        name: "toolbar.voiceConversation.unmuteMicrophone",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("does not let an older event invalidate a current mute response", async () => {
+    const user = userEvent.setup();
+    let resolveMute!: (status: typeof runningStatus) => void;
+    mocks.setMuted.mockReturnValueOnce(
+      new Promise<typeof runningStatus>((resolve) => {
+        resolveMute = resolve;
+      }),
+    );
+    render(<VoiceBuddyApp />);
+    await waitFor(() => expect(voiceEventListener).toBeDefined());
+    await waitFor(() => expect(mocks.getStatus).toHaveBeenCalledOnce());
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "toolbar.voiceConversation.muteMicrophone",
+      }),
+    );
+    act(() => {
+      voiceEventListener?.({
+        type: "microphoneMute",
+        sessionId: "session-a",
+        muted: false,
+        revision: 2,
+      });
+      resolveMute({ ...runningStatus, microphoneMuted: true });
+    });
+
+    expect(
+      await screen.findByRole("button", {
+        name: "toolbar.voiceConversation.unmuteMicrophone",
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("hangs up the voice conversation", async () => {
     const user = userEvent.setup();
     render(<VoiceBuddyApp />);

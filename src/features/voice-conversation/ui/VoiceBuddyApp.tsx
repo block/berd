@@ -30,6 +30,12 @@ export function VoiceBuddyApp() {
   });
   const [initialized, setInitialized] = useState(false);
   const microphoneMuteGeneration = useRef(0);
+  const statusRef = useRef<VoiceConversationStatus | null>(null);
+  const latestMuteObservation = useRef<{
+    sessionId: string;
+    revision: number;
+    muted: boolean;
+  } | null>(null);
 
   useLayoutEffect(() => {
     if (!initialized || !status?.sessionId) return;
@@ -45,6 +51,17 @@ export function VoiceBuddyApp() {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     const onEvent = (event: VoiceConversationEvent) => {
+      const observedStatus = statusRef.current;
+      if (observedStatus && event.revision < observedStatus.revision) return;
+      if (
+        observedStatus?.sessionId &&
+        event.type !== "startup" &&
+        "sessionId" in event &&
+        event.sessionId &&
+        event.sessionId !== observedStatus.sessionId
+      ) {
+        return;
+      }
       if (
         event.type === "microphoneMute" ||
         event.type === "startup" ||
@@ -52,6 +69,13 @@ export function VoiceBuddyApp() {
         (event.type === "error" && event.terminal)
       ) {
         microphoneMuteGeneration.current += 1;
+      }
+      if (event.type === "microphoneMute") {
+        latestMuteObservation.current = {
+          sessionId: event.sessionId,
+          revision: event.revision,
+          muted: event.muted,
+        };
       }
       setActivity((current) => {
         if (event.revision < current.revision) return current;
@@ -103,39 +127,43 @@ export function VoiceBuddyApp() {
       });
       setStatus((current) => {
         if (!current || event.revision < current.revision) return current;
-        switch (event.type) {
-          case "startup":
-            return {
-              ...current,
-              lifecycle: "running",
-              sessionId: event.sessionId,
-              ownerWindowLabel: event.ownerWindowLabel,
-              microphoneMuted: false,
-              revision: event.revision,
-            };
-          case "microphoneMute":
-            return {
-              ...current,
-              microphoneMuted: event.muted,
-              revision: event.revision,
-            };
-          case "activity":
-            return { ...current, revision: event.revision };
-          case "cleanShutdown":
-            return {
-              ...current,
-              lifecycle: "stopped",
-              sessionId: null,
-              ownerWindowLabel: null,
-              microphoneMuted: false,
-              revision: event.revision,
-            };
-          case "error":
-            if (event.terminal) setError(event.message);
-            return { ...current, revision: event.revision };
-          default:
-            return { ...current, revision: event.revision };
-        }
+        const nextStatus = ((): VoiceConversationStatus => {
+          switch (event.type) {
+            case "startup":
+              return {
+                ...current,
+                lifecycle: "running",
+                sessionId: event.sessionId,
+                ownerWindowLabel: event.ownerWindowLabel,
+                microphoneMuted: false,
+                revision: event.revision,
+              };
+            case "microphoneMute":
+              return {
+                ...current,
+                microphoneMuted: event.muted,
+                revision: event.revision,
+              };
+            case "activity":
+              return { ...current, revision: event.revision };
+            case "cleanShutdown":
+              return {
+                ...current,
+                lifecycle: "stopped",
+                sessionId: null,
+                ownerWindowLabel: null,
+                microphoneMuted: false,
+                revision: event.revision,
+              };
+            case "error":
+              if (event.terminal) setError(event.message);
+              return { ...current, revision: event.revision };
+            default:
+              return { ...current, revision: event.revision };
+          }
+        })();
+        statusRef.current = nextStatus;
+        return nextStatus;
       });
     };
 
@@ -149,13 +177,29 @@ export function VoiceBuddyApp() {
       }
 
       try {
+        const muteGeneration = microphoneMuteGeneration.current;
         const nextStatus = await getVoiceConversationStatus();
         if (!cancelled) {
-          setStatus((current) =>
-            current && current.revision > nextStatus.revision
-              ? current
-              : nextStatus,
-          );
+          setStatus((current) => {
+            if (current && current.revision > nextStatus.revision) {
+              statusRef.current = current;
+              return current;
+            }
+            const observation = latestMuteObservation.current;
+            const shouldPreserveObservedMute =
+              microphoneMuteGeneration.current !== muteGeneration &&
+              observation?.sessionId === nextStatus.sessionId &&
+              observation.revision >= nextStatus.revision;
+            const hydratedStatus = shouldPreserveObservedMute
+              ? {
+                  ...nextStatus,
+                  microphoneMuted: observation.muted,
+                  revision: Math.max(nextStatus.revision, observation.revision),
+                }
+              : nextStatus;
+            statusRef.current = hydratedStatus;
+            return hydratedStatus;
+          });
           setActivity((current) =>
             current.revision >= nextStatus.revision
               ? current
@@ -209,11 +253,14 @@ export function VoiceBuddyApp() {
         status,
       );
       if (generation !== microphoneMuteGeneration.current) return;
-      setStatus((current) =>
-        current && current.revision > nextStatus.revision
-          ? current
-          : nextStatus,
-      );
+      setStatus((current) => {
+        const acceptedStatus =
+          current && current.revision > nextStatus.revision
+            ? current
+            : nextStatus;
+        statusRef.current = acceptedStatus;
+        return acceptedStatus;
+      });
     });
   };
 

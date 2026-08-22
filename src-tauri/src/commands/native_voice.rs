@@ -690,11 +690,14 @@ impl SttPipeline {
     }
 
     fn signal_shutdown(&self) {
-        self.latch_muted_shutdown();
+        if self.shutdown.load(Ordering::Acquire) {
+            return;
+        }
         self.shutdown_mute_epoch.store(
             self.input_mute_epoch.load(Ordering::Acquire),
             Ordering::Release,
         );
+        self.latch_muted_shutdown();
         self.shutdown.store(true, Ordering::Release);
     }
 
@@ -1497,6 +1500,7 @@ fn enqueue_pending_transcript(
     evicted
 }
 
+#[allow(clippy::too_many_arguments)] // Worker boundary keeps channel and mute lifecycle inputs explicit.
 fn stt_worker(
     model_dir: PathBuf,
     audio_rx: Receiver<AudioBatch>,
@@ -1607,7 +1611,9 @@ fn stt_worker(
                             &recognizer,
                             &event_tx,
                             None,
-                            input_mute_epoch.load(Ordering::Acquire),
+                            &input_mute_epoch,
+                            &shutdown,
+                            &shutdown_mute_epoch,
                             observed_mute_epoch,
                         );
                         speech.clear();
@@ -1623,7 +1629,9 @@ fn stt_worker(
                             &recognizer,
                             &event_tx,
                             None,
-                            input_mute_epoch.load(Ordering::Acquire),
+                            &input_mute_epoch,
+                            &shutdown,
+                            &shutdown_mute_epoch,
                             observed_mute_epoch,
                         );
                         speech.clear();
@@ -1642,7 +1650,9 @@ fn stt_worker(
             &recognizer,
             &event_tx,
             Some(delivered_tx),
-            shutdown_mute_epoch.load(Ordering::Acquire),
+            &input_mute_epoch,
+            &shutdown,
+            &shutdown_mute_epoch,
             observed_mute_epoch,
         );
         let _ = delivered_rx.recv_timeout(Duration::from_secs(5));
@@ -1692,7 +1702,9 @@ fn flush_speech(
     recognizer: &sherpa_onnx::OfflineRecognizer,
     event_tx: &tokio_mpsc::Sender<SttMessage>,
     delivered: Option<SyncSender<()>>,
-    current_mute_epoch: u64,
+    input_mute_epoch: &AtomicU64,
+    shutdown: &AtomicBool,
+    shutdown_mute_epoch: &AtomicU64,
     expected_mute_epoch: u64,
 ) {
     if speech.is_empty() {
@@ -1705,7 +1717,12 @@ fn flush_speech(
         .get_result()
         .map(|result| result.text.trim().to_string())
         .unwrap_or_default();
-    if current_mute_epoch != expected_mute_epoch {
+    if effective_mute_epoch(
+        shutdown.load(Ordering::Acquire),
+        input_mute_epoch,
+        shutdown_mute_epoch,
+    ) != expected_mute_epoch
+    {
         if let Some(delivered) = delivered {
             let _ = delivered.send(());
         }
@@ -2191,8 +2208,14 @@ mod tests {
         pipeline.begin_shutdown();
         input_muted.store(true, Ordering::Release);
         input_mute_epoch.fetch_add(1, Ordering::AcqRel);
+        pipeline.signal_shutdown();
 
         assert!(!discard_on_shutdown.load(Ordering::Acquire));
+        assert_eq!(pipeline.shutdown_mute_epoch.load(Ordering::Acquire), 0);
+        assert_eq!(
+            effective_mute_epoch(false, &input_mute_epoch, &pipeline.shutdown_mute_epoch),
+            1,
+        );
         assert_eq!(
             effective_mute_epoch(true, &input_mute_epoch, &pipeline.shutdown_mute_epoch),
             0,
