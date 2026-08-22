@@ -237,6 +237,18 @@ fn should_destroy_stale_candidate(
     candidate_url.is_some_and(|url| !active_controls_match(active_revision, Some(url)))
 }
 
+fn verify_stale_candidate_removed(
+    candidate_url: &str,
+    current_url: Option<&str>,
+    destroy_result: Result<(), String>,
+) -> Result<(), String> {
+    if current_url != Some(candidate_url) {
+        return Ok(());
+    }
+    destroy_result?;
+    Err("Stale floating voice controls remained after removal.".to_string())
+}
+
 pub fn matches_active_lifecycle(app: &AppHandle) -> bool {
     let controls_url = app
         .get_webview_window(WINDOW_LABEL)
@@ -270,17 +282,17 @@ pub fn destroy_stale_for_main_close(app: &AppHandle) -> Result<(), String> {
     if !should_destroy_stale_candidate(Some(candidate_url.as_str()), active_revision) {
         return Ok(());
     }
-    window
+    let destroy_result = window
         .destroy()
-        .map_err(|error| format!("Could not remove stale floating voice controls: {error}"))?;
-    let candidate_remains = app
+        .map_err(|error| format!("Could not remove stale floating voice controls: {error}"));
+    let current_url = app
         .get_webview_window(WINDOW_LABEL)
-        .and_then(|current| current.url().ok())
-        .is_some_and(|current_url| current_url == candidate_url);
-    if candidate_remains {
-        return Err("Stale floating voice controls remained after removal.".to_string());
-    }
-    Ok(())
+        .and_then(|current| current.url().ok());
+    verify_stale_candidate_removed(
+        candidate_url.as_str(),
+        current_url.as_ref().map(|url| url.as_str()),
+        destroy_result,
+    )
 }
 
 fn reconcile_terminal_controls(
@@ -533,6 +545,18 @@ mod tests {
             Some(&controls_url(3)),
             Some(4),
         ));
+        assert!(verify_stale_candidate_removed(
+            &controls_url(3),
+            Some(&controls_url(4)),
+            Err("old handle is gone".to_string()),
+        )
+        .is_ok());
+        assert!(verify_stale_candidate_removed(
+            &controls_url(3),
+            Some(&controls_url(3)),
+            Err("old handle is stuck".to_string()),
+        )
+        .is_err());
     }
 
     #[test]

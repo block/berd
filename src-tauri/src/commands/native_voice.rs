@@ -957,7 +957,7 @@ pub async fn start_native_voice_conversation(
     }
     let window_label = webview_window.label().to_string();
     let owner_id = native_owner_id(&session_id);
-    let microphone_claimed = capture.claim_microphone(
+    let mut microphone_claimed = capture.claim_microphone(
         window_label.clone(),
         renderer_id.clone(),
         renderer_epoch,
@@ -986,6 +986,23 @@ pub async fn start_native_voice_conversation(
         }
     };
     let lifecycle_guard = state.stop_serial.lock().await;
+    match refresh_microphone_claim(
+        capture.inner(),
+        &window_label,
+        &renderer_id,
+        renderer_epoch,
+        &owner_id,
+        &mut microphone_claimed,
+    ) {
+        Ok(()) => {}
+        Err(error) => {
+            drop(lifecycle_guard);
+            if microphone_claimed {
+                capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
+            }
+            return Err(error);
+        }
+    }
     let install_result = (|| -> Result<(u64, String), String> {
         let start_blocks = state
             .start_blocks
@@ -1300,6 +1317,24 @@ pub async fn stop_native_voice_conversation(
 
 fn native_owner_id(session_id: &str) -> String {
     format!("native-voice:{session_id}")
+}
+
+fn refresh_microphone_claim(
+    capture: &VoiceCaptureState,
+    window_label: &str,
+    renderer_id: &str,
+    renderer_epoch: u64,
+    owner_id: &str,
+    microphone_claimed: &mut bool,
+) -> Result<(), String> {
+    let claimed_after_wait = capture.claim_microphone(
+        window_label.to_string(),
+        renderer_id.to_string(),
+        renderer_epoch,
+        owner_id.to_string(),
+    )?;
+    *microphone_claimed |= claimed_after_wait;
+    Ok(())
 }
 
 impl NativeVoiceState {
@@ -2780,6 +2815,53 @@ mod tests {
 
         assert_eq!(completion.next_revision, 5);
         assert!(cleanup_ran.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn queued_start_reclaims_microphone_after_destroyed_owner_cleanup() {
+        let capture = VoiceCaptureState::default();
+        let first_epoch = capture.register_renderer_for_test("owner-window", "renderer-a");
+        let owner_id = native_owner_id("session-a");
+        assert!(capture
+            .claim_microphone(
+                "owner-window".to_string(),
+                "renderer-a".to_string(),
+                first_epoch,
+                owner_id.clone(),
+            )
+            .expect("initial lifecycle claims microphone"));
+
+        let second_epoch = capture.register_renderer_for_test("owner-window", "renderer-b");
+        let mut replacement_claimed = capture
+            .claim_microphone(
+                "owner-window".to_string(),
+                "renderer-b".to_string(),
+                second_epoch,
+                owner_id.clone(),
+            )
+            .expect("replacement renderer inherits the native claim");
+        assert!(!replacement_claimed);
+        assert!(capture.release_owner("owner-window", &owner_id));
+
+        refresh_microphone_claim(
+            &capture,
+            "owner-window",
+            "renderer-b",
+            second_epoch,
+            &owner_id,
+            &mut replacement_claimed,
+        )
+        .expect("queued replacement reclaims after serialized cleanup");
+
+        assert!(replacement_claimed);
+        assert!(!capture
+            .claim_microphone(
+                "owner-window".to_string(),
+                "renderer-b".to_string(),
+                second_epoch,
+                owner_id,
+            )
+            .expect("replacement keeps the microphone claim"));
     }
 
     #[test]

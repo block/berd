@@ -93,6 +93,15 @@ impl CaptureState {
 }
 
 impl VoiceCaptureState {
+    #[cfg(test)]
+    pub(crate) fn register_renderer_for_test(&self, window_label: &str, renderer_id: &str) -> u64 {
+        self.state
+            .lock()
+            .expect("capture lock")
+            .register_renderer(window_label.to_string(), renderer_id.to_string())
+            .expect("register renderer")
+    }
+
     pub(crate) fn with_active_renderer<T>(
         &self,
         window_label: &str,
