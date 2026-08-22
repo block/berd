@@ -201,11 +201,6 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
                 .await
             {
                 log::error!("Failed to stop voice after controls readiness timeout: {error}");
-                if let Err(remove_error) = remove(&fallback_app) {
-                    log::error!(
-                        "Failed to remove floating voice controls after readiness timeout: {remove_error}"
-                    );
-                }
             }
         }
     });

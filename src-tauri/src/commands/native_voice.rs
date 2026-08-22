@@ -778,19 +778,19 @@ async fn shutdown_pipeline(mut pipeline: SttPipeline) {
     let worker = pipeline.begin_shutdown();
     drop(pipeline);
     if let Some(worker) = worker {
-        let join = tauri::async_runtime::spawn_blocking(move || worker.join());
-        match tokio::time::timeout(STT_WORKER_SHUTDOWN_TIMEOUT, join).await {
-            Ok(Ok(Ok(()))) => {}
-            Ok(Ok(Err(_))) => {
-                log::error!("Native voice recognizer worker panicked during shutdown")
+        let deadline = tokio::time::Instant::now() + STT_WORKER_SHUTDOWN_TIMEOUT;
+        while !worker.is_finished() {
+            if tokio::time::Instant::now() >= deadline {
+                log::error!(
+                    "Native voice recognizer did not stop within {:?}; detaching it",
+                    STT_WORKER_SHUTDOWN_TIMEOUT
+                );
+                return;
             }
-            Ok(Err(error)) => {
-                log::error!("Native voice recognizer shutdown task failed: {error}")
-            }
-            Err(_) => log::error!(
-                "Native voice recognizer did not stop within {:?}; detaching it",
-                STT_WORKER_SHUTDOWN_TIMEOUT
-            ),
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        if worker.join().is_err() {
+            log::error!("Native voice recognizer worker panicked during shutdown");
         }
     }
 }
@@ -1105,9 +1105,21 @@ pub async fn start_native_voice_conversation(
                         revision,
                         delivery_attempts: 0,
                     };
-                    let evicted = pending.lock().ok().and_then(|mut queue| {
-                        enqueue_pending_transcript(&mut queue, transcript.clone())
-                    });
+                    let Ok((accepted, evicted)) = enqueue_transcript_if_active(
+                        &runtime,
+                        &pending,
+                        &session_id,
+                        revision,
+                        transcript.clone(),
+                    ) else {
+                        break;
+                    };
+                    if !accepted {
+                        if let Some(delivered) = delivered {
+                            let _ = delivered.send(());
+                        }
+                        break;
+                    }
                     if evicted.is_some() {
                         let _ = event_window.emit(
                             EVENT_NAME,
@@ -1374,8 +1386,10 @@ impl NativeVoiceState {
         else {
             return Ok(None);
         };
-        // Keep the lifecycle current while the worker flushes its final buffered
-        // utterance into the durable pending queue.
+        // Keep the lifecycle current through the bounded shutdown window so a
+        // cooperative worker can flush its final utterance durably. A worker
+        // that misses the deadline is detached; its revision-bound late events
+        // are discarded rather than leaking into a replacement lifecycle.
         if let Some(pipeline) = pipeline {
             shutdown_pipeline(pipeline).await;
         }
@@ -1591,6 +1605,28 @@ fn enqueue_pending_transcript(
         .flatten();
     queue.push_back(transcript);
     evicted
+}
+
+fn enqueue_transcript_if_active(
+    runtime: &Mutex<Runtime>,
+    pending: &Mutex<VecDeque<PendingTranscript>>,
+    expected_session_id: &str,
+    expected_revision: u64,
+    transcript: PendingTranscript,
+) -> Result<(bool, Option<PendingTranscript>), String> {
+    let runtime = runtime
+        .lock()
+        .map_err(|_| "native voice state lock was poisoned".to_string())?;
+    if runtime.session_id.as_deref() != Some(expected_session_id)
+        || runtime.revision != expected_revision
+    {
+        return Ok((false, None));
+    }
+    let mut pending = pending
+        .lock()
+        .map_err(|_| "pending transcript lock was poisoned".to_string())?;
+    let evicted = enqueue_pending_transcript(&mut pending, transcript);
+    Ok((true, evicted))
 }
 
 #[allow(clippy::too_many_arguments)] // Worker boundary keeps channel and mute lifecycle inputs explicit.
@@ -2060,6 +2096,24 @@ mod tests {
             .take_stop_snapshot(Some(("session-1", 4)))
             .expect("late stale lifecycle is ignored")
             .is_none());
+        let (accepted, evicted) = enqueue_transcript_if_active(
+            &state.runtime,
+            &state.pending,
+            "session-1",
+            4,
+            PendingTranscript {
+                session_id: "session-1".to_string(),
+                lifecycle_id: "lifecycle-1".to_string(),
+                id: "late-final".to_string(),
+                text: "late words".to_string(),
+                revision: 4,
+                delivery_attempts: 0,
+            },
+        )
+        .expect("late transcript lifecycle check");
+        assert!(!accepted);
+        assert!(evicted.is_none());
+        assert!(state.pending.lock().expect("lock pending queue").is_empty());
 
         worker_release.store(true, Ordering::Release);
     }
