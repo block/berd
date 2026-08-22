@@ -364,6 +364,33 @@ function getSessionArchiveInterruptionReason(
     : null;
 }
 
+async function acquireVoiceStartBlockBeforeDeadline(
+  sessionId: string,
+  deadlineMs?: number,
+): Promise<(() => Promise<void>) | null> {
+  const acquisition = blockVoiceConversationStarts(sessionId);
+  if (deadlineMs == null) return acquisition;
+
+  const remainingMs = deadlineMs - MUTATION_DEADLINE_MARGIN_MS - Date.now();
+  if (remainingMs <= 0) {
+    void acquisition.then((release) => release()).catch(() => undefined);
+    return null;
+  }
+
+  let timeoutId: number | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timeoutId = window.setTimeout(() => resolve(null), remainingMs);
+  });
+  const release = await Promise.race([acquisition, timeout]);
+  if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+  if (!release) {
+    void acquisition
+      .then((lateRelease) => lateRelease())
+      .catch(() => undefined);
+  }
+  return release;
+}
+
 type GlobalComposerPlacement = "docked" | "centered" | "handoff";
 
 const current = (id: string, label: string): TopBarBreadcrumb => ({
@@ -3680,8 +3707,19 @@ export function AppShell({
           };
         }
         const releaseVoiceStartBlock =
-          await blockVoiceConversationStarts(sessionId);
+          await acquireVoiceStartBlockBeforeDeadline(sessionId, deadlineMs);
+        if (!releaseVoiceStartBlock) {
+          return { ok: false as const, reason: "timed_out" as const };
+        }
         try {
+          const postLeaseInterruption = getSessionArchiveInterruptionReason(
+            sessionId,
+            cleanupPolicy,
+            deadlineMs,
+          );
+          if (postLeaseInterruption) {
+            return { ok: false as const, reason: postLeaseInterruption };
+          }
           await useVoiceConversationStore.getState().init();
           const voiceBeforeMutation =
             useVoiceConversationStore.getState().status;
@@ -3722,6 +3760,14 @@ export function AppShell({
             }
           }
 
+          const preMutationInterruption = getSessionArchiveInterruptionReason(
+            sessionId,
+            cleanupPolicy,
+            deadlineMs,
+          );
+          if (preMutationInterruption) {
+            return { ok: false as const, reason: preMutationInterruption };
+          }
           try {
             await useChatSessionStore
               .getState()

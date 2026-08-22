@@ -33,6 +33,10 @@ import {
   useVoiceConversationStore,
   VOICE_CONVERSATION_OFF_STATUS,
 } from "@/features/voice-conversation/stores/voiceConversationStore";
+import {
+  blockNativeVoiceConversationStarts,
+  releaseNativeVoiceConversationStartBlock,
+} from "@/features/voice-conversation/api/voiceConversation";
 import { dispatchOnboarding } from "@/features/onboarding/model";
 import {
   resetHomeWidgetStoreForTests,
@@ -918,6 +922,12 @@ describe("AppShell global navigation", () => {
       microphoneMuted: false,
       stop: originalStopVoiceConversation,
     });
+    vi.mocked(blockNativeVoiceConversationStarts)
+      .mockReset()
+      .mockResolvedValue("archive-token");
+    vi.mocked(releaseNativeVoiceConversationStartBlock)
+      .mockReset()
+      .mockResolvedValue(undefined);
     mockListExtensions.mockReset();
     mockListExtensions.mockResolvedValue([]);
     mockAcpCreateSession.mockReset();
@@ -2528,6 +2538,40 @@ describe("AppShell global navigation", () => {
     expect(gitMocks.removeWorktree).not.toHaveBeenCalled();
   });
 
+  it("releases a late voice-start lease without archiving after the deadline", async () => {
+    vi.useFakeTimers();
+    const lease = deferred<string>();
+    vi.mocked(blockNativeVoiceConversationStarts).mockReturnValueOnce(
+      lease.promise,
+    );
+    useChatSessionStore.setState({
+      sessions: [makeManagedWorktreeSession("stalled-voice-lease")],
+    });
+    renderAppShell();
+
+    const outcome = getAppNavigationController().archiveSession(
+      "session-1",
+      "reject",
+      Date.now() + 4_000,
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(outcome).resolves.toEqual({
+      ok: false,
+      reason: "timed_out",
+    });
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+
+    lease.resolve("late-archive-token");
+    await vi.waitFor(() =>
+      expect(releaseNativeVoiceConversationStartBlock).toHaveBeenCalledWith(
+        "session-1",
+        "late-archive-token",
+      ),
+    );
+    vi.useRealTimers();
+  });
+
   it.each([
     "reject",
     "discard",
@@ -2663,6 +2707,70 @@ describe("AppShell global navigation", () => {
       "Couldn't stop voice, so the chat wasn't archived",
       { description: "Voice is still active for this chat." },
     );
+  });
+
+  it("rechecks the archive deadline after a delayed voice stop", async () => {
+    vi.useFakeTimers();
+    const stoppedStatus = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 2,
+    };
+    const stopRequest = deferred<typeof stoppedStatus>();
+    const stopVoiceConversation = vi.fn(async () => {
+      const status = await stopRequest.promise;
+      useVoiceConversationStore.setState({ status });
+      return status;
+    });
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Voice archive deadline",
+          executionTarget: { harnessId: "goose" },
+          workingDir: "~/voice-archive-deadline",
+          createdAt: "2026-08-21T00:00:00.000Z",
+          updatedAt: "2026-08-21T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        ...stoppedStatus,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        revision: 1,
+      },
+      stop: stopVoiceConversation as never,
+    });
+    renderAppShell();
+
+    const outcome = getAppNavigationController().archiveSession(
+      "session-1",
+      "confirm",
+      Date.now() + 5_000,
+    );
+    await vi.waitFor(
+      () => expect(stopVoiceConversation).toHaveBeenCalledOnce(),
+      {
+        timeout: 500,
+      },
+    );
+    await vi.advanceTimersByTimeAsync(2_000);
+    stopRequest.resolve(stoppedStatus);
+
+    await expect(outcome).resolves.toEqual({
+      ok: false,
+      reason: "timed_out",
+    });
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it("keeps the session unarchived when voice cannot stop", async () => {
