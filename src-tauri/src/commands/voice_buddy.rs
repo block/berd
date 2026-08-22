@@ -224,6 +224,26 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn active_controls_match(active_revision: Option<u64>, controls_url: Option<&str>) -> bool {
+    active_revision.is_some_and(|revision| {
+        controls_url.is_some_and(|url| controls_window_matches_revision(url, revision))
+    })
+}
+
+pub fn matches_active_lifecycle(app: &AppHandle) -> bool {
+    let active_revision = app
+        .state::<NativeVoiceState>()
+        .active_session_lifecycle_target()
+        .map(|(_, _, revision)| revision);
+    let controls_url = app
+        .get_webview_window(WINDOW_LABEL)
+        .and_then(|window| window.url().ok());
+    active_controls_match(
+        active_revision,
+        controls_url.as_ref().map(|url| url.as_str()),
+    )
+}
+
 fn reconcile_terminal_controls(
     emit_terminal: impl FnOnce(),
     destroy: impl FnOnce() -> Result<(), String>,
@@ -267,16 +287,6 @@ pub fn dismiss_after_terminal_event<T: Clone + Serialize>(
             } else {
                 Ok(())
             }
-        },
-    );
-}
-
-pub fn dismiss_after_terminal(app: &AppHandle, controls_revision: u64, terminal_revision: u64) {
-    dismiss_after_terminal_event(
-        app,
-        controls_revision,
-        NativeVoiceEvent::ControlsDismissed {
-            revision: terminal_revision,
         },
     );
 }
@@ -465,6 +475,15 @@ mod tests {
         assert!(require_controls_window(WINDOW_LABEL).is_ok());
         assert!(require_controls_window("main").is_err());
         assert!(require_controls_window("session:other").is_err());
+    }
+
+    #[test]
+    fn stale_controls_do_not_match_an_inactive_or_replacement_lifecycle() {
+        let controls = controls_url(4);
+        assert!(active_controls_match(Some(4), Some(&controls)));
+        assert!(!active_controls_match(None, Some(&controls)));
+        assert!(!active_controls_match(Some(6), Some(&controls)));
+        assert!(!active_controls_match(Some(4), None));
     }
 
     #[test]
