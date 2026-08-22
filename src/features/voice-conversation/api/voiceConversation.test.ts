@@ -394,6 +394,45 @@ describe("voice conversation API", () => {
     );
   });
 
+  it("serializes rapid mute changes so the final state wins", async () => {
+    const status = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running",
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      microphoneMuted: false,
+      revision: 3,
+    } as const;
+    let resolveFirst!: (value: unknown) => void;
+    const firstResponse = new Promise<unknown>((resolve) => {
+      resolveFirst = resolve;
+    });
+    mocks.invoke
+      .mockReturnValueOnce(firstResponse)
+      .mockResolvedValueOnce(status);
+
+    const mute = setVoiceConversationMicrophoneMuted(true, status);
+    const unmute = setVoiceConversationMicrophoneMuted(false, status);
+
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledOnce());
+    resolveFirst({ ...status, microphoneMuted: true });
+    await expect(mute).resolves.toMatchObject({ microphoneMuted: true });
+    await expect(unmute).resolves.toMatchObject({ microphoneMuted: false });
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      [
+        "set_native_voice_microphone_muted",
+        { sessionId: "session-1", expectedRevision: 3, muted: true },
+      ],
+      [
+        "set_native_voice_microphone_muted",
+        { sessionId: "session-1", expectedRevision: 3, muted: false },
+      ],
+    ]);
+    expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(false);
+  });
+
   it("restores the previous mute state when initial capture fails", async () => {
     const status = {
       available: true,

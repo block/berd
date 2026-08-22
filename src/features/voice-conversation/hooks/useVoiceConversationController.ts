@@ -379,7 +379,6 @@ function ensureVoiceEventDeliveryInitialized() {
       return;
     }
     if (event.type === "activity") return;
-    if (event.type === "inputMute") return;
     if (event.type !== "user" || !event.text.trim()) return;
     if (
       hasDeliveredVoiceTranscript(
