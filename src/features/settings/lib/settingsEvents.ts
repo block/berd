@@ -6,9 +6,14 @@ export interface AgentBuilderProviderSetupReturnTarget {
   providerId: string;
 }
 
+export interface VoiceSetupReturnTarget {
+  type: "voice-setup";
+  sessionId: string;
+}
+
 export interface OpenSettingsEventDetail {
   section?: string;
-  returnTarget?: AgentBuilderProviderSetupReturnTarget;
+  returnTarget?: AgentBuilderProviderSetupReturnTarget | VoiceSetupReturnTarget;
 }
 
 export function requestOpenSettings(

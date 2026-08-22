@@ -1,151 +1,24 @@
-import { Download, Headphones, Play, Trash2 } from "lucide-react";
+import { Download, Play, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/shared/ui/button";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
-import { cn } from "@/shared/lib/cn";
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/dialog";
 import { Progress } from "@/shared/ui/progress";
 import { RadioGroup, RadioGroupItem } from "@/shared/ui/radio-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/shared/ui/select";
-import { getPlatform } from "@/shared/lib/platform";
 import type { VoiceModelKind } from "../api/pocketVoice";
 import type { PocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
-import type { SiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
-import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
-import { isVoiceSetupReady } from "../lib/voiceSetupReadiness";
-import { SiriVoiceSettings } from "./SiriVoiceSettings";
 
 function formatBytes(bytes: number): string {
   return `${(bytes / 1_000_000).toFixed(1)} MB`;
 }
 
-export function PocketVoiceSetupDialog({
-  open,
-  onOpenChange,
-  onUseSelected,
-  setup,
-  siriSetup,
-  backend = "pocket",
-  onBackendChange,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onUseSelected?: () => void;
-  setup: PocketVoiceSetup;
-  siriSetup?: SiriVoiceSetup;
-  backend?: VoiceOutputBackend;
-  onBackendChange?: (backend: VoiceOutputBackend) => void;
-}) {
-  const { t } = useTranslation("settings");
-  const { status } = setup;
-  const siriSupported = getPlatform() === "mac";
-  const ready = isVoiceSetupReady(status, siriSetup?.status ?? null, backend);
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent size="md">
-        <DialogHeader>
-          <DialogTitle>{t("voice.title")}</DialogTitle>
-          <DialogDescription>{t("voice.description")}</DialogDescription>
-        </DialogHeader>
-        <DialogBody>
-          <section className="space-y-2 pb-5">
-            <h2 className="text-sm font-medium">{t("voice.speechInput")}</h2>
-            <PocketVoiceSetupContent
-              setup={setup}
-              models={["parakeet"]}
-              showPocketVoiceControls={false}
-            />
-          </section>
-          <section className="space-y-2">
-            <h2 className="text-sm font-medium">{t("voice.speechOutput")}</h2>
-            {siriSupported && siriSetup && onBackendChange ? (
-              <div className="space-y-2 pb-4">
-                <label className="text-sm font-medium" htmlFor="voice-backend">
-                  {t("voice.outputBackend")}
-                </label>
-                <Select
-                  value={backend}
-                  onValueChange={(value) =>
-                    onBackendChange(value as VoiceOutputBackend)
-                  }
-                >
-                  <SelectTrigger id="voice-backend" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="pocket">
-                      {t("voice.backendPocket")}
-                    </SelectItem>
-                    <SelectItem value="siri">
-                      {t("voice.backendSiri")}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : null}
-            {backend === "siri" && siriSetup ? (
-              <SiriVoiceSettings setup={siriSetup} />
-            ) : (
-              <PocketVoiceSetupContent setup={setup} models={["pocket"]} />
-            )}
-          </section>
-        </DialogBody>
-        <DialogFooter>
-          {ready ? (
-            <Button
-              type="button"
-              data-testid="pocket-use-selected"
-              onClick={() => {
-                if (onUseSelected) {
-                  onUseSelected();
-                  return;
-                }
-                onOpenChange(false);
-              }}
-            >
-              <Headphones className="size-4" />
-              {t("voice.useSelected")}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-            >
-              {t("voice.notNow")}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 export function PocketVoiceSetupContent({
   setup,
-  presentation = "dialog",
   models: visibleModels,
   showPocketVoiceControls = true,
 }: {
   setup: PocketVoiceSetup;
-  presentation?: "dialog" | "settings";
   models?: VoiceModelKind[];
   showPocketVoiceControls?: boolean;
 }) {
@@ -162,7 +35,6 @@ export function PocketVoiceSetupContent({
   const pocketInstalled = status?.pocketInstalled ?? status?.installed ?? false;
   const parakeetInstalled =
     status?.parakeetInstalled ?? status?.installed ?? false;
-  const isSettingsPresentation = presentation === "settings";
   const models = [
     {
       model: "pocket" as const,
@@ -195,16 +67,8 @@ export function PocketVoiceSetupContent({
   ].filter(({ model }) => !visibleModels || visibleModels.includes(model));
 
   return (
-    <div
-      className={cn("space-y-4", isSettingsPresentation && "overflow-hidden")}
-    >
-      <div
-        className={cn(
-          isSettingsPresentation
-            ? "divide-y divide-border"
-            : "space-y-2 rounded-md border border-border p-4",
-        )}
-      >
+    <div className="space-y-4 overflow-hidden">
+      <div className="divide-y divide-border">
         {models.map(
           ({
             model,
@@ -219,10 +83,6 @@ export function PocketVoiceSetupContent({
             <SettingsRow
               key={model}
               data-testid={`voice-model-${model}`}
-              className={cn(
-                !isSettingsPresentation &&
-                  "border-b border-border last:border-b-0 last:pb-0 first:pt-0",
-              )}
               label={label}
               description={
                 installed
@@ -307,7 +167,7 @@ export function PocketVoiceSetupContent({
       </div>
 
       {error || (showPocketVoiceControls && status && pocketInstalled) ? (
-        <div className={cn("space-y-4", isSettingsPresentation && "px-4 pb-4")}>
+        <div className="space-y-4 px-4 pb-4">
           {error ? (
             <p className="text-sm text-destructive" role="alert">
               {error}

@@ -1,16 +1,35 @@
 import { screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import type { PocketVoiceStatus } from "../api/pocketVoice";
 import type { PocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
+import type { SiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
+import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
 import { VoiceSettings } from "./VoiceSettings";
 
 const setupState = vi.hoisted(() => ({
   current: null as PocketVoiceSetup | null,
 }));
+const siriSetupState = vi.hoisted(() => ({
+  current: null as SiriVoiceSetup | null,
+}));
+const outputState = vi.hoisted(() => ({
+  backend: "pocket" as VoiceOutputBackend,
+}));
 
 vi.mock("../hooks/usePocketVoiceSetup", () => ({
   usePocketVoiceSetup: () => setupState.current,
+}));
+vi.mock("../hooks/useSiriVoiceSetup", () => ({
+  useSiriVoiceSetup: () => siriSetupState.current,
+  voiceKey: (voice: { name: string; language: string }) =>
+    `${voice.name.toLowerCase()}|${voice.language.toLowerCase()}`,
+}));
+vi.mock("../lib/voiceOutputPreference", () => ({
+  useVoiceOutputPreference: () => ({
+    backend: outputState.backend,
+    setBackend: vi.fn(),
+  }),
 }));
 
 function setup(status: PocketVoiceStatus): PocketVoiceSetup {
@@ -28,7 +47,124 @@ function setup(status: PocketVoiceStatus): PocketVoiceSetup {
   };
 }
 
+function pocketStatus(
+  overrides: Partial<PocketVoiceStatus> = {},
+): PocketVoiceStatus {
+  return {
+    statusRevision: 0,
+    installed: false,
+    pocketInstalled: false,
+    parakeetInstalled: false,
+    pocketSizeBytes: null,
+    parakeetSizeBytes: null,
+    pocketDownloadBytes: 0,
+    parakeetDownloadBytes: 104_337_827,
+    downloading: false,
+    activeModel: null,
+    pocketAttemptId: null,
+    parakeetAttemptId: null,
+    pocketProgress: null,
+    parakeetProgress: null,
+    pocketError: null,
+    parakeetError: null,
+    removing: null,
+    removalQueued: false,
+    downloadedBytes: 0,
+    totalBytes: 0,
+    error: null,
+    selectedVoice: "mary",
+    playbackSpeed: 1,
+    voices: [],
+    ...overrides,
+  };
+}
+
+function siriSetup(): SiriVoiceSetup {
+  return {
+    status: {
+      supported: true,
+      availableLanguages: ["en-US"],
+      selectedVoice: { name: "Nora", language: "en-US" },
+      selectedVoiceInstalled: true,
+      playbackSpeed: 1,
+      voices: [
+        {
+          name: "Nora",
+          language: "en-US",
+          sizeBytes: 0,
+          installed: true,
+        },
+      ],
+    },
+    language: "en-US",
+    languages: ["en-US"],
+    loading: false,
+    error: null,
+    statusError: null,
+    downloadingVoiceKey: null,
+    previewingVoiceKey: null,
+    setLanguage: vi.fn(),
+    setPlaybackSpeed: vi.fn(),
+    downloadVoice: vi.fn(),
+    previewVoice: vi.fn(),
+    selectVoice: vi.fn(),
+  };
+}
+
 describe("VoiceSettings", () => {
+  beforeEach(() => {
+    outputState.backend = "pocket";
+    siriSetupState.current = siriSetup();
+  });
+
+  it("uses one accessible speech output heading for the backend picker", () => {
+    setupState.current = setup({
+      statusRevision: 0,
+      installed: false,
+      pocketInstalled: false,
+      parakeetInstalled: false,
+      pocketSizeBytes: null,
+      parakeetSizeBytes: null,
+      pocketDownloadBytes: 0,
+      parakeetDownloadBytes: 0,
+      downloading: false,
+      activeModel: null,
+      pocketAttemptId: null,
+      parakeetAttemptId: null,
+      pocketProgress: null,
+      parakeetProgress: null,
+      pocketError: null,
+      parakeetError: null,
+      removing: null,
+      removalQueued: false,
+      downloadedBytes: 0,
+      totalBytes: 0,
+      error: null,
+      selectedVoice: "mary",
+      playbackSpeed: 1,
+      voices: [],
+    });
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByRole("heading", { name: "Speech output" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Speech engine")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Speech output" }),
+    ).toHaveAccessibleDescription(
+      "Choose how Berd speaks assistant responses.",
+    );
+    const outputPicker = screen.getByRole("combobox", {
+      name: "Speech output",
+    });
+    expect(outputPicker).toHaveClass("w-full", "sm:w-auto");
+    expect(
+      screen.getByRole("heading", { name: "Speech output" }).parentElement
+        ?.parentElement,
+    ).toHaveClass("flex-col", "sm:flex-row");
+  });
+
   it("keeps the Voice settings page open while Parakeet completes in place", () => {
     const missing: PocketVoiceStatus = {
       statusRevision: 4,
@@ -99,5 +235,132 @@ describe("VoiceSettings", () => {
     expect(screen.getByText(/173.8 MB on disk/)).toBeInTheDocument();
     expect(screen.getByText(/131.7 MB on disk/)).toBeInTheDocument();
     expect(screen.queryByText("Preparing model")).not.toBeInTheDocument();
+  });
+
+  it("explains when missing speech input blocks Voice Conversation", () => {
+    outputState.backend = "siri";
+    siriSetupState.current = siriSetup();
+    setupState.current = setup({
+      statusRevision: 0,
+      installed: false,
+      pocketInstalled: false,
+      parakeetInstalled: false,
+      pocketSizeBytes: null,
+      parakeetSizeBytes: null,
+      pocketDownloadBytes: 0,
+      parakeetDownloadBytes: 104_337_827,
+      downloading: false,
+      activeModel: null,
+      pocketAttemptId: null,
+      parakeetAttemptId: null,
+      pocketProgress: null,
+      parakeetProgress: null,
+      pocketError: null,
+      parakeetError: null,
+      removing: null,
+      removalQueued: false,
+      downloadedBytes: 0,
+      totalBytes: 0,
+      error: null,
+      selectedVoice: "mary",
+      playbackSpeed: 1,
+      voices: [],
+    });
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Voice Conversation isn't ready",
+    );
+    expect(
+      screen.getByText(
+        "Parakeet STT is not installed. Download it below to use Voice Conversation.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("does not diagnose a Siri load failure as a missing selection", () => {
+    outputState.backend = "siri";
+    const staleSiriSetup = siriSetup();
+    siriSetupState.current = {
+      ...staleSiriSetup,
+      status: staleSiriSetup.status
+        ? {
+            ...staleSiriSetup.status,
+            selectedVoice: null,
+            selectedVoiceInstalled: false,
+          }
+        : null,
+      error: "Siri voice catalog unavailable",
+      statusError: "Siri voice catalog unavailable",
+    };
+    setupState.current = setup(
+      pocketStatus({
+        installed: true,
+        parakeetInstalled: true,
+        parakeetSizeBytes: 131_662_414,
+        parakeetDownloadBytes: 0,
+      }),
+    );
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByText("Siri voice catalog unavailable"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/No installed Siri voice is selected/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps readiness guidance visible for a Siri action error", () => {
+    outputState.backend = "siri";
+    const current = siriSetup();
+    siriSetupState.current = {
+      ...current,
+      status: current.status
+        ? {
+            ...current.status,
+            selectedVoice: null,
+            selectedVoiceInstalled: false,
+          }
+        : null,
+      error: "Preview failed",
+      statusError: null,
+    };
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(screen.getByText("Preview failed")).toBeInTheDocument();
+    expect(
+      screen.getByText(/No installed Siri voice is selected/),
+    ).toBeInTheDocument();
+  });
+
+  it("still explains missing speech input while Siri status is unavailable", () => {
+    outputState.backend = "siri";
+    siriSetupState.current = {
+      ...siriSetup(),
+      status: null,
+      error: "Siri voice catalog unavailable",
+      statusError: "Siri voice catalog unavailable",
+    };
+    setupState.current = setup(
+      pocketStatus({
+        installed: false,
+        parakeetInstalled: false,
+      }),
+    );
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByText(
+        "Parakeet STT is not installed. Download it below to use Voice Conversation.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/No installed Siri voice is selected/),
+    ).not.toBeInTheDocument();
   });
 });

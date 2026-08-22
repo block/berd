@@ -3,14 +3,14 @@ import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
-import { PocketVoiceSetupDialog } from "./PocketVoiceSetupDialog";
+import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
 import type { PocketVoiceStatus } from "../api/pocketVoice";
 
 if (!HTMLElement.prototype.hasPointerCapture) {
   HTMLElement.prototype.hasPointerCapture = () => false;
 }
 
-describe("PocketVoiceSetupDialog", () => {
+describe("PocketVoiceSetupContent", () => {
   const baseStatus: PocketVoiceStatus = {
     statusRevision: 0,
     installed: false,
@@ -41,9 +41,9 @@ describe("PocketVoiceSetupDialog", () => {
   const setup = (
     status: PocketVoiceStatus,
     overrides: Partial<
-      ComponentProps<typeof PocketVoiceSetupDialog>["setup"]
+      ComponentProps<typeof PocketVoiceSetupContent>["setup"]
     > = {},
-  ): ComponentProps<typeof PocketVoiceSetupDialog>["setup"] => ({
+  ): ComponentProps<typeof PocketVoiceSetupContent>["setup"] => ({
     status,
     loading: false,
     error: null,
@@ -57,108 +57,10 @@ describe("PocketVoiceSetupDialog", () => {
     ...overrides,
   });
 
-  it("puts speech input before speech output", () => {
-    renderWithProviders(
-      <PocketVoiceSetupDialog
-        open
-        onOpenChange={vi.fn()}
-        setup={setup(baseStatus)}
-      />,
-    );
-
-    expect(
-      screen.getByRole("heading", { name: "Voice conversation" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Install speech recognition and choose how Berd speaks during Voice Conversation.",
-      ),
-    ).toBeInTheDocument();
-    const input = screen.getByRole("heading", { name: "Speech input" });
-    const output = screen.getByRole("heading", { name: "Speech output" });
-    expect(
-      input.compareDocumentPosition(output) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-  });
-
-  it("hands an installed setup back to the initiating voice action exactly once", async () => {
-    const onUseSelected = vi.fn();
-    const onOpenChange = vi.fn();
-    renderWithProviders(
-      <PocketVoiceSetupDialog
-        open
-        onOpenChange={onOpenChange}
-        onUseSelected={onUseSelected}
-        setup={setup({
-          ...baseStatus,
-          installed: true,
-          pocketInstalled: true,
-          parakeetInstalled: true,
-          pocketSizeBytes: 173_782_737,
-          parakeetSizeBytes: 131_662_414,
-        })}
-      />,
-    );
-
-    await userEvent.click(
-      screen.getByRole("button", { name: "Use selected voice" }),
-    );
-    expect(onUseSelected).toHaveBeenCalledTimes(1);
-    expect(onOpenChange).not.toHaveBeenCalled();
-  });
-
-  it("accepts an installed Siri voice without requiring Pocket TTS", async () => {
-    const onUseSelected = vi.fn();
-    renderWithProviders(
-      <PocketVoiceSetupDialog
-        open
-        onOpenChange={vi.fn()}
-        onUseSelected={onUseSelected}
-        backend="siri"
-        onBackendChange={vi.fn()}
-        setup={setup({
-          ...baseStatus,
-          parakeetInstalled: true,
-          parakeetSizeBytes: 131_662_414,
-        })}
-        siriSetup={{
-          status: {
-            supported: true,
-            availableLanguages: ["en-US"],
-            selectedVoice: { name: "Aaron", language: "en-US" },
-            selectedVoiceInstalled: true,
-            playbackSpeed: 1,
-            voices: [],
-          },
-          language: "en-US",
-          languages: ["en-US"],
-          loading: false,
-          error: null,
-          downloadingVoiceKey: null,
-          previewingVoiceKey: null,
-          setLanguage: vi.fn(),
-          setPlaybackSpeed: vi.fn(),
-          downloadVoice: vi.fn(),
-          previewVoice: vi.fn(),
-          selectVoice: vi.fn(),
-        }}
-      />,
-    );
-
-    await userEvent.click(
-      screen.getByRole("button", { name: "Use selected voice" }),
-    );
-    expect(onUseSelected).toHaveBeenCalledTimes(1);
-  });
-
   it("keeps both missing model actions independently clickable", async () => {
     const installModel = vi.fn().mockResolvedValue(undefined);
     renderWithProviders(
-      <PocketVoiceSetupDialog
-        open
-        onOpenChange={vi.fn()}
-        setup={setup(baseStatus, { installModel })}
-      />,
+      <PocketVoiceSetupContent setup={setup(baseStatus, { installModel })} />,
     );
 
     expect(screen.getByText(/173.8 MB download/)).toBeInTheDocument();
@@ -174,9 +76,7 @@ describe("PocketVoiceSetupDialog", () => {
 
   it("keeps one model's progress inline without a combined progress bar", () => {
     renderWithProviders(
-      <PocketVoiceSetupDialog
-        open
-        onOpenChange={vi.fn()}
+      <PocketVoiceSetupContent
         setup={setup({
           ...baseStatus,
           downloading: true,
@@ -201,9 +101,7 @@ describe("PocketVoiceSetupDialog", () => {
   it("keeps an installed model removal actionable while the other model downloads", async () => {
     const removeModel = vi.fn().mockResolvedValue(undefined);
     renderWithProviders(
-      <PocketVoiceSetupDialog
-        open
-        onOpenChange={vi.fn()}
+      <PocketVoiceSetupContent
         setup={setup(
           {
             ...baseStatus,
@@ -232,9 +130,7 @@ describe("PocketVoiceSetupDialog", () => {
 
   it("shows a rapid second model click as queued with independent progress", () => {
     renderWithProviders(
-      <PocketVoiceSetupDialog
-        open
-        onOpenChange={vi.fn()}
+      <PocketVoiceSetupContent
         setup={setup({
           ...baseStatus,
           downloading: true,
@@ -260,20 +156,13 @@ describe("PocketVoiceSetupDialog", () => {
     expect(screen.getByText("0.0 MB of 131.7 MB")).toBeInTheDocument();
   });
 
-  it("keeps the open setup surface mounted when installation completes", () => {
-    const onOpenChange = vi.fn();
+  it("keeps the setup content mounted when installation completes", () => {
     const view = renderWithProviders(
-      <PocketVoiceSetupDialog
-        open
-        onOpenChange={onOpenChange}
-        setup={setup(baseStatus)}
-      />,
+      <PocketVoiceSetupContent setup={setup(baseStatus)} />,
     );
 
     view.rerender(
-      <PocketVoiceSetupDialog
-        open
-        onOpenChange={onOpenChange}
+      <PocketVoiceSetupContent
         setup={setup({
           ...baseStatus,
           installed: true,
@@ -286,19 +175,13 @@ describe("PocketVoiceSetupDialog", () => {
     );
 
     expect(screen.getByText("Pocket TTS")).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Voice conversation" }),
-    ).toBeInTheDocument();
     expect(screen.getByText("Parakeet STT")).toBeInTheDocument();
     expect(screen.getByText(/131.7 MB on disk/)).toBeInTheDocument();
-    expect(onOpenChange).not.toHaveBeenCalled();
   });
 
   it("shows partial-cache disk usage and inline retry without hiding the other model", () => {
     renderWithProviders(
-      <PocketVoiceSetupDialog
-        open
-        onOpenChange={vi.fn()}
+      <PocketVoiceSetupContent
         setup={setup({
           ...baseStatus,
           pocketInstalled: true,
@@ -337,9 +220,7 @@ describe("PocketVoiceSetupDialog", () => {
       name,
     }));
     renderWithProviders(
-      <PocketVoiceSetupDialog
-        open
-        onOpenChange={vi.fn()}
+      <PocketVoiceSetupContent
         setup={setup(
           {
             ...baseStatus,
@@ -371,9 +252,7 @@ describe("PocketVoiceSetupDialog", () => {
   it("confirms independent model removal", async () => {
     const removeModel = vi.fn().mockResolvedValue(undefined);
     renderWithProviders(
-      <PocketVoiceSetupDialog
-        open
-        onOpenChange={vi.fn()}
+      <PocketVoiceSetupContent
         setup={setup(
           {
             ...baseStatus,
