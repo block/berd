@@ -81,10 +81,12 @@ export async function setVoiceConversationMicrophoneMuted(
   const operation = microphoneMuteQueue
     .catch(() => undefined)
     .then(async () => {
-      await reconcileVoiceConversationMicrophone({
-        ...status,
-        microphoneMuted: muted,
-      });
+      if (!activeMicrophone) {
+        await reconcileVoiceConversationMicrophone({
+          ...status,
+          microphoneMuted: muted,
+        });
+      }
       const nextStatus = await invoke<VoiceConversationStatus>(
         "set_native_voice_microphone_muted",
         {
@@ -96,7 +98,13 @@ export async function setVoiceConversationMicrophoneMuted(
       if (intent === microphoneMuteIntent) {
         microphoneMuted = nextStatus.microphoneMuted;
       }
-      await reconcileVoiceConversationMicrophone(nextStatus);
+      if (
+        nextStatus.sessionId !== status.sessionId ||
+        nextStatus.revision !== status.revision ||
+        nextStatus.microphoneMuted !== muted
+      ) {
+        await reconcileVoiceConversationMicrophone(nextStatus);
+      }
       return nextStatus;
     });
   microphoneMuteQueue = operation.then(
