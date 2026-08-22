@@ -670,4 +670,43 @@ describe("voice conversation store lifecycle ordering", () => {
       error: "Voice process crashed",
     });
   });
+
+  it("preserves a terminal failure across same-revision clean shutdown", async () => {
+    const store = await loadStore();
+    store.setState({
+      status: status("running", 2, "session-1"),
+      uiState: "listening",
+    });
+
+    emit({
+      type: "error",
+      sessionId: "session-1",
+      message: "Voice controls could not open",
+      revision: 3,
+      terminal: true,
+    });
+    emit({ type: "cleanShutdown", sessionId: "session-1", revision: 3 });
+
+    expect(store.getState()).toMatchObject({
+      status: status("stopped", 3),
+      uiState: "error",
+      error: "Voice controls could not open",
+    });
+  });
+
+  it("keeps ordinary clean shutdown error-free", async () => {
+    const store = await loadStore();
+    store.setState({
+      status: status("running", 2, "session-1"),
+      uiState: "listening",
+    });
+
+    emit({ type: "cleanShutdown", sessionId: "session-1", revision: 3 });
+
+    expect(store.getState()).toMatchObject({
+      status: status("stopped", 3),
+      uiState: "off",
+      error: null,
+    });
+  });
 });

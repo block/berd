@@ -393,7 +393,12 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   uiState: activityUiState(nextState),
                 };
               }
-              case "cleanShutdown":
+              case "cleanShutdown": {
+                const preservesTerminalError =
+                  state.uiState === "error" &&
+                  state.status.lifecycle === "stopped" &&
+                  state.status.revision === event.revision &&
+                  state.error !== null;
                 return {
                   ...state,
                   status: {
@@ -404,13 +409,14 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                     microphoneMuted: false,
                     revision: event.revision,
                   },
-                  uiState: "off",
+                  uiState: preservesTerminalError ? "error" : "off",
                   userSpeaking: false,
                   assistantSpeaking: false,
                   microphoneMuted: false,
                   activityFallbackState: "listening",
-                  error: null,
+                  error: preservesTerminalError ? state.error : null,
                 };
+              }
               case "error":
                 return {
                   ...state,
