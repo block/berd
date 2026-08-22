@@ -59,34 +59,21 @@ pub fn restore_hidden_owner(app: &AppHandle, owner_window_label: &str) {
     let _ = (app, owner_window_label);
 }
 
-fn open_session_target(
-    app: &AppHandle,
-    session_id: &str,
-    owner_window_label: &str,
-) -> Result<(), String> {
-    let window = app
-        .get_webview_window(owner_window_label)
-        .ok_or_else(|| "The voice session window is no longer available.".to_string())?;
-    focus_window(&window);
-    if owner_window_label == "main" {
-        window
-            .emit(
-                OPEN_SESSION_EVENT,
-                OpenSessionPayload {
-                    session_id: session_id.to_string(),
-                },
-            )
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
 pub fn open_active_session(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<NativeVoiceState>();
     let Some((session_id, owner_window_label)) = state.active_session_target() else {
         return Ok(());
     };
-    open_session_target(app, &session_id, &owner_window_label)
+    let window = app
+        .get_webview_window(&owner_window_label)
+        .ok_or_else(|| "The voice session window is no longer available.".to_string())?;
+    focus_window(&window);
+    if owner_window_label == "main" {
+        window
+            .emit(OPEN_SESSION_EVENT, OpenSessionPayload { session_id })
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 fn position_near_bottom_right(app: &AppHandle, window: &WebviewWindow) {
@@ -238,9 +225,10 @@ pub fn open_voice_conversation_session(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn show_voice_conversation_controls(
+pub async fn show_voice_conversation_controls(
     window: WebviewWindow,
     state: tauri::State<'_, NativeVoiceState>,
+    capture: tauri::State<'_, VoiceCaptureState>,
     session_id: String,
     expected_revision: u64,
 ) -> Result<(), String> {
@@ -272,16 +260,23 @@ pub fn show_voice_conversation_controls(
                     expected_revision,
                 ))
             {
-                open_session_target(
-                    window.app_handle(),
-                    &session_id,
-                    &owner_window_label,
-                )
-                .map_err(|recovery_error| {
-                    format!(
-                            "The floating voice controls could not be prepared ({error}), and the voice session could not be restored: {recovery_error}"
+                let stopped = state
+                    .stop_active_if_lifecycle(
+                        window.app_handle(),
+                        capture.inner(),
+                        &session_id,
+                        expected_revision,
+                        "Voice controls could not open, so the voice conversation was stopped.",
+                    )
+                    .await
+                    .map_err(|stop_error| {
+                        format!(
+                            "The floating voice controls could not be prepared ({error}), and the voice conversation could not be stopped: {stop_error}"
                         )
-                })?;
+                    })?;
+                if stopped {
+                    restore_hidden_owner(window.app_handle(), &owner_window_label);
+                }
             }
             return Err(error.to_string());
         }
