@@ -238,12 +238,19 @@ pub fn show_voice_conversation_controls(
         return Ok(());
     };
     loop {
-        if target.suppressed {
+        let apply_result = if target.suppressed {
             window.hide()
         } else {
             window.show()
+        };
+        if let Err(error) = apply_result {
+            open_active_session(window.app_handle()).map_err(|recovery_error| {
+                format!(
+                    "The floating voice controls could not be prepared ({error}), and the voice session could not be restored: {recovery_error}"
+                )
+            })?;
+            return Err(error.to_string());
         }
-        .map_err(|error| error.to_string())?;
         match state.acknowledge_controls_visibility(
             &session_id,
             expected_revision,
