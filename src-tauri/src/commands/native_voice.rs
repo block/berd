@@ -1390,6 +1390,7 @@ impl NativeVoiceState {
                 pipeline.signal_shutdown();
             }
             native_input_mute::stop(&self.input_muted);
+            self.microphone_muted.store(false, Ordering::SeqCst);
             runtime.native_microphone_mute_control = false;
             (runtime.session_id.clone(), runtime.revision, pipeline)
         };
@@ -1972,6 +1973,7 @@ mod tests {
     #[test]
     fn window_destroy_stops_only_its_owned_voice_lifecycle() {
         let state = NativeVoiceState::default();
+        state.microphone_muted.store(true, Ordering::SeqCst);
         {
             let mut runtime = state.runtime.lock().expect("lock native runtime");
             runtime.session_id = Some("session-1".to_string());
@@ -1996,6 +1998,7 @@ mod tests {
         let runtime = state.runtime.lock().expect("lock native runtime");
         assert!(runtime.session_id.is_none());
         assert!(runtime.owner.is_none());
+        assert!(!state.microphone_muted.load(Ordering::SeqCst));
     }
 
     #[test]
@@ -2272,6 +2275,7 @@ mod tests {
     #[tokio::test]
     async fn window_destroy_schedules_blocked_worker_join_off_callback() {
         let state = NativeVoiceState::default();
+        state.microphone_muted.store(true, Ordering::SeqCst);
         let (sender, _receiver) = mpsc::sync_channel(1);
         let shutdown = Arc::new(AtomicBool::new(false));
         let worker = thread::spawn(|| thread::sleep(Duration::from_millis(250)));
@@ -2297,6 +2301,7 @@ mod tests {
         assert!(state.stop_for_window_destroyed("owner-window"));
         assert!(started.elapsed() < Duration::from_millis(50));
         assert!(shutdown.load(Ordering::Acquire));
+        assert!(!state.microphone_muted.load(Ordering::SeqCst));
         tokio::time::sleep(Duration::from_millis(300)).await;
         assert!(state
             .runtime

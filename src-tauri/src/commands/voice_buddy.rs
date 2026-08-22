@@ -244,57 +244,62 @@ pub fn show_voice_conversation_controls(
 pub fn set_voice_conversation_controls_suppressed(
     window: WebviewWindow,
     state: tauri::State<'_, NativeVoiceState>,
+    capture: tauri::State<'_, VoiceCaptureState>,
     session_id: String,
     expected_revision: u64,
     suppressed: bool,
+    renderer_id: String,
+    renderer_epoch: u64,
 ) -> Result<(), String> {
-    let Some((should_show, previous_suppression)) = state.set_controls_suppressed(
-        window.label(),
-        &session_id,
-        expected_revision,
-        suppressed,
-    )?
-    else {
-        return Ok(());
-    };
-    let Some(controls) = window.app_handle().get_webview_window(WINDOW_LABEL) else {
-        state.rollback_controls_suppression(
+    capture.with_active_renderer(window.label(), &renderer_id, renderer_epoch, || {
+        let Some((should_show, previous_suppression)) = state.set_controls_suppressed(
+            window.label(),
             &session_id,
             expected_revision,
             suppressed,
-            previous_suppression,
-        );
-        if should_show {
-            open_active_session(window.app_handle()).map_err(|recovery_error| {
-                format!(
-                    "The floating voice controls are no longer available, and the voice session could not be restored: {recovery_error}"
-                )
-            })?;
+        )?
+        else {
+            return Ok(());
+        };
+        let Some(controls) = window.app_handle().get_webview_window(WINDOW_LABEL) else {
+            state.rollback_controls_suppression(
+                &session_id,
+                expected_revision,
+                suppressed,
+                previous_suppression,
+            );
+            if should_show {
+                open_active_session(window.app_handle()).map_err(|recovery_error| {
+                    format!(
+                        "The floating voice controls are no longer available, and the voice session could not be restored: {recovery_error}"
+                    )
+                })?;
+            }
+            return Err("The floating voice controls are no longer available.".to_string());
+        };
+        let result = if should_show {
+            controls.show()
+        } else {
+            controls.hide()
+        };
+        if let Err(error) = result {
+            state.rollback_controls_suppression(
+                &session_id,
+                expected_revision,
+                suppressed,
+                previous_suppression,
+            );
+            if should_show {
+                open_active_session(window.app_handle()).map_err(|recovery_error| {
+                    format!(
+                        "The floating voice controls could not be shown ({error}), and the voice session could not be restored: {recovery_error}"
+                    )
+                })?;
+            }
+            return Err(error.to_string());
         }
-        return Err("The floating voice controls are no longer available.".to_string());
-    };
-    let result = if should_show {
-        controls.show()
-    } else {
-        controls.hide()
-    };
-    if let Err(error) = result {
-        state.rollback_controls_suppression(
-            &session_id,
-            expected_revision,
-            suppressed,
-            previous_suppression,
-        );
-        if should_show {
-            open_active_session(window.app_handle()).map_err(|recovery_error| {
-                format!(
-                    "The floating voice controls could not be shown ({error}), and the voice session could not be restored: {recovery_error}"
-                )
-            })?;
-        }
-        return Err(error.to_string());
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 #[tauri::command]
