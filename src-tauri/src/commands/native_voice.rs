@@ -131,6 +131,8 @@ struct RuntimeOwner {
 struct VoiceStartBlock {
     token: String,
     window_label: String,
+    renderer_id: String,
+    renderer_epoch: u64,
 }
 
 type StopSnapshot = (
@@ -174,7 +176,13 @@ impl Drop for CaptureSuppressionGuard {
 }
 
 impl NativeVoiceState {
-    fn block_starts(&self, session_id: String, window_label: String) -> Result<String, String> {
+    fn block_starts(
+        &self,
+        session_id: String,
+        window_label: String,
+        renderer_id: String,
+        renderer_epoch: u64,
+    ) -> Result<String, String> {
         let token = uuid::Uuid::new_v4().to_string();
         self.start_blocks
             .lock()
@@ -184,6 +192,8 @@ impl NativeVoiceState {
             .push(VoiceStartBlock {
                 token: token.clone(),
                 window_label,
+                renderer_id,
+                renderer_epoch,
             });
         Ok(token)
     }
@@ -209,6 +219,24 @@ impl NativeVoiceState {
         };
         blocks.retain(|_, session_blocks| {
             session_blocks.retain(|block| block.window_label != window_label);
+            !session_blocks.is_empty()
+        });
+    }
+
+    pub(crate) fn release_start_blocks_for_replaced_renderer(
+        &self,
+        window_label: &str,
+        renderer_id: &str,
+        renderer_epoch: u64,
+    ) {
+        let Ok(mut blocks) = self.start_blocks.lock() else {
+            return;
+        };
+        blocks.retain(|_, session_blocks| {
+            session_blocks.retain(|block| {
+                block.window_label != window_label
+                    || (block.renderer_id == renderer_id && block.renderer_epoch == renderer_epoch)
+            });
             !session_blocks.is_empty()
         });
     }
@@ -664,12 +692,19 @@ pub fn block_native_voice_conversation_starts(
     state: State<'_, NativeVoiceState>,
     webview_window: WebviewWindow,
     session_id: String,
+    renderer_id: String,
+    renderer_epoch: u64,
 ) -> Result<String, String> {
     let session_id = session_id.trim().to_string();
     if session_id.is_empty() || session_id.len() > 256 {
         return Err("session id must be between 1 and 256 bytes".to_string());
     }
-    state.block_starts(session_id, webview_window.label().to_string())
+    state.block_starts(
+        session_id,
+        webview_window.label().to_string(),
+        renderer_id,
+        renderer_epoch,
+    )
 }
 
 #[tauri::command]
@@ -1881,10 +1916,20 @@ mod tests {
         let state = NativeVoiceState::default();
         let shared_state = state.clone();
         let first_token = state
-            .block_starts("session-1".to_string(), "main".to_string())
+            .block_starts(
+                "session-1".to_string(),
+                "main".to_string(),
+                "renderer-1".to_string(),
+                1,
+            )
             .expect("block starts from main");
         let second_token = shared_state
-            .block_starts("session-1".to_string(), "session-window".to_string())
+            .block_starts(
+                "session-1".to_string(),
+                "session-window".to_string(),
+                "renderer-2".to_string(),
+                1,
+            )
             .expect("block starts from session window");
 
         assert!(shared_state.starts_blocked("session-1"));
@@ -1898,6 +1943,23 @@ mod tests {
         state
             .release_start_block("session-1", &second_token)
             .expect("stale release is harmless");
+    }
+
+    #[test]
+    fn renderer_replacement_clears_abandoned_archive_start_blocks() {
+        let state = NativeVoiceState::default();
+        state
+            .block_starts(
+                "session-1".to_string(),
+                "main".to_string(),
+                "renderer-1".to_string(),
+                1,
+            )
+            .expect("block starts");
+
+        state.release_start_blocks_for_replaced_renderer("main", "renderer-2", 2);
+
+        assert!(!state.starts_blocked("session-1"));
     }
 
     #[test]

@@ -83,13 +83,29 @@ export async function blockVoiceConversationStarts(
   voiceStartBlocks.set(sessionId, (voiceStartBlocks.get(sessionId) ?? 0) + 1);
   await voiceStartsInFlight.get(sessionId)?.catch(() => undefined);
   let released = false;
-  return async () => {
-    if (released) return;
+  let releaseStarted = false;
+  const finishRelease = () => {
     released = true;
     const remaining = (voiceStartBlocks.get(sessionId) ?? 1) - 1;
     if (remaining === 0) voiceStartBlocks.delete(sessionId);
     else voiceStartBlocks.set(sessionId, remaining);
-    await releaseNativeVoiceConversationStartBlock(sessionId, nativeToken);
+  };
+  const retryRelease = () => {
+    window.setTimeout(() => {
+      void releaseNativeVoiceConversationStartBlock(sessionId, nativeToken)
+        .then(finishRelease)
+        .catch(retryRelease);
+    }, 1_000);
+  };
+  return async () => {
+    if (released || releaseStarted) return;
+    releaseStarted = true;
+    try {
+      await releaseNativeVoiceConversationStartBlock(sessionId, nativeToken);
+      finishRelease();
+    } catch {
+      retryRelease();
+    }
   };
 }
 

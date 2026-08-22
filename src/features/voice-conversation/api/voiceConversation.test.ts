@@ -146,7 +146,11 @@ describe("voice conversation API", () => {
     expect(mocks.invoke).toHaveBeenNthCalledWith(
       1,
       "block_native_voice_conversation_starts",
-      { sessionId: "session-1" },
+      {
+        sessionId: "session-1",
+        rendererId: "renderer-test",
+        rendererEpoch: 7,
+      },
     );
     expect(mocks.invoke).toHaveBeenNthCalledWith(
       2,

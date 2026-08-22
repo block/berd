@@ -190,15 +190,19 @@ impl VoiceCaptureState {
 #[tauri::command]
 pub fn register_voice_renderer_instance(
     state: State<'_, VoiceCaptureState>,
+    native_voice: State<'_, super::native_voice::NativeVoiceState>,
     webview_window: WebviewWindow,
     renderer_id: String,
 ) -> Result<u64, String> {
     validate_id("renderer", &renderer_id)?;
-    state
+    let window_label = webview_window.label().to_string();
+    let epoch = state
         .state
         .lock()
         .map_err(|_| "Voice capture state lock was poisoned".to_string())?
-        .register_renderer(webview_window.label().to_string(), renderer_id)
+        .register_renderer(window_label.clone(), renderer_id.clone())?;
+    native_voice.release_start_blocks_for_replaced_renderer(&window_label, &renderer_id, epoch);
+    Ok(epoch)
 }
 
 fn validate_id(label: &str, value: &str) -> Result<(), String> {

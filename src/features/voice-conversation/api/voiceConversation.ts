@@ -194,11 +194,14 @@ export function getVoiceConversationStatus(): Promise<VoiceConversationStatus> {
   );
 }
 
-export function blockNativeVoiceConversationStarts(
+export async function blockNativeVoiceConversationStarts(
   sessionId: string,
 ): Promise<string> {
+  const { rendererId, rendererEpoch } = await getRendererInstance();
   return invoke<string>("block_native_voice_conversation_starts", {
     sessionId,
+    rendererId,
+    rendererEpoch,
   });
 }
 

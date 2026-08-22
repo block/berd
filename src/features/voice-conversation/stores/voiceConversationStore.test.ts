@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   VoiceConversationEvent,
@@ -85,6 +85,8 @@ describe("voice conversation store lifecycle ordering", () => {
       }));
   });
 
+  afterEach(() => vi.useRealTimers());
+
   async function loadStore() {
     const { useVoiceConversationStore } = await import(
       "./voiceConversationStore"
@@ -169,6 +171,28 @@ describe("voice conversation store lifecycle ordering", () => {
 
     expect(leaseGranted).toBe(true);
     await release();
+  });
+
+  it("retries native archive lease release before unblocking starts", async () => {
+    vi.useFakeTimers();
+    mocks.releaseStartBlock
+      .mockRejectedValueOnce(new Error("bridge unavailable"))
+      .mockResolvedValueOnce(undefined);
+    const { blockVoiceConversationStarts, useVoiceConversationStore } =
+      await import("./voiceConversationStore");
+    const release = await blockVoiceConversationStarts("session-1");
+
+    await release();
+    await expect(
+      useVoiceConversationStore.getState().start("session-1"),
+    ).rejects.toThrow("being archived");
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    mocks.start.mockResolvedValue(status("running", 1, "session-1"));
+    await expect(
+      useVoiceConversationStore.getState().start("session-1"),
+    ).resolves.toMatchObject({ lifecycle: "running", sessionId: "session-1" });
+    expect(mocks.releaseStartBlock).toHaveBeenCalledTimes(2);
   });
 
   it("reconciles browser capture with the process-wide native lifecycle", async () => {
