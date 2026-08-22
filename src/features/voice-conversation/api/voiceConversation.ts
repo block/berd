@@ -76,6 +76,7 @@ export async function setVoiceConversationMicrophoneMuted(
 ): Promise<VoiceConversationStatus> {
   const intent = ++microphoneMuteIntent;
   const previous = microphoneMuted;
+  const appliedOptimistically = activeMicrophone !== null;
   microphoneMuted = muted;
   activeMicrophone?.setMuted(muted);
   const operation = microphoneMuteQueue
@@ -86,6 +87,9 @@ export async function setVoiceConversationMicrophoneMuted(
           ...status,
           microphoneMuted: muted,
         });
+      }
+      if (!appliedOptimistically) {
+        activeMicrophone?.setMuted(muted);
       }
       const nextStatus = await invoke<VoiceConversationStatus>(
         "set_native_voice_microphone_muted",
