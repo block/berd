@@ -1495,33 +1495,44 @@ impl NativeVoiceState {
         Ok(())
     }
 
+    pub fn capture_destroyed_owner_lifecycle(&self, window_label: &str) -> Option<(String, u64)> {
+        self.release_start_blocks_for_window(window_label);
+        let runtime = self.runtime.lock().ok()?;
+        if runtime
+            .owner
+            .as_ref()
+            .is_none_or(|owner| owner.window_label != window_label)
+        {
+            return None;
+        }
+        runtime
+            .session_id
+            .clone()
+            .map(|session_id| (session_id, runtime.revision))
+    }
+
     async fn stop_destroyed_owner_lifecycle(
         &self,
         window_label: &str,
+        expected_session_id: &str,
+        expected_revision: u64,
     ) -> Result<Option<StopCompletion>, String> {
         let _stop_guard = self.stop_serial.lock().await;
-        let expected_lifecycle = {
+        let owner_matches = {
             let runtime = self
                 .runtime
                 .lock()
                 .map_err(|_| "native voice state lock was poisoned".to_string())?;
-            if runtime
+            runtime
                 .owner
                 .as_ref()
-                .is_none_or(|owner| owner.window_label != window_label)
-            {
-                return Ok(None);
-            }
-            runtime
-                .session_id
-                .clone()
-                .map(|session_id| (session_id, runtime.revision))
+                .is_some_and(|owner| owner.window_label == window_label)
         };
-        let Some((session_id, revision)) = expected_lifecycle else {
+        if !owner_matches {
             return Ok(None);
-        };
+        }
         let completion = self
-            .stop_lifecycle_locked(Some((&session_id, revision)))
+            .stop_lifecycle_locked(Some((expected_session_id, expected_revision)))
             .await?;
         if completion.is_some() {
             self.microphone_muted.store(false, Ordering::SeqCst);
@@ -1534,9 +1545,13 @@ impl NativeVoiceState {
         app: &AppHandle,
         capture: &VoiceCaptureState,
         window_label: &str,
+        expected_session_id: &str,
+        expected_revision: u64,
     ) -> Result<bool, String> {
-        self.release_start_blocks_for_window(window_label);
-        let Some(completion) = self.stop_destroyed_owner_lifecycle(window_label).await? else {
+        let Some(completion) = self
+            .stop_destroyed_owner_lifecycle(window_label, expected_session_id, expected_revision)
+            .await?
+        else {
             return Ok(false);
         };
         capture.release_owner(&completion.owner.window_label, &completion.owner_id);
@@ -2217,9 +2232,7 @@ mod tests {
         }
 
         assert!(state
-            .stop_destroyed_owner_lifecycle("other-window")
-            .await
-            .expect("check unrelated owner")
+            .capture_destroyed_owner_lifecycle("other-window")
             .is_none());
         assert_eq!(
             state
@@ -2232,7 +2245,7 @@ mod tests {
         );
 
         let completion = state
-            .stop_destroyed_owner_lifecycle("session-window")
+            .stop_destroyed_owner_lifecycle("session-window", "session-1", 0)
             .await
             .expect("stop destroyed owner")
             .expect("owned lifecycle stops");
@@ -2587,7 +2600,7 @@ mod tests {
         }
 
         let completion = state
-            .stop_destroyed_owner_lifecycle("owner-window")
+            .stop_destroyed_owner_lifecycle("owner-window", "session-1", 0)
             .await
             .expect("stop destroyed owner")
             .expect("owned lifecycle stops");
@@ -2620,7 +2633,7 @@ mod tests {
         let close_state = state.clone();
         let close = tokio::spawn(async move {
             close_state
-                .stop_destroyed_owner_lifecycle("owner-window")
+                .stop_destroyed_owner_lifecycle("owner-window", "session-a", 4)
                 .await
                 .expect("stop destroyed owner")
         });
@@ -2630,27 +2643,24 @@ mod tests {
             Some(("session-a".to_string(), "owner-window".to_string(), 4,))
         );
 
-        drop(startup_guard);
-        let completion = close.await.expect("join owner close").expect("stopped A");
-        assert_eq!(completion.controls_revision, 4);
-        assert_eq!(completion.next_revision, 5);
-
         {
             let mut runtime = state.runtime.lock().expect("lock native runtime");
             runtime.session_id = Some("session-b".to_string());
             runtime.lifecycle_id = Some("lifecycle-b".to_string());
             runtime.revision = 6;
             runtime.owner = Some(RuntimeOwner {
-                window_label: "main".to_string(),
+                window_label: "owner-window".to_string(),
             });
         }
+        drop(startup_guard);
+        assert!(close.await.expect("join owner close").is_none());
         assert!(state
             .take_stop_snapshot(Some(("session-a", 4)))
             .expect("stale A cleanup is rejected")
             .is_none());
         assert_eq!(
             state.active_session_lifecycle_target(),
-            Some(("session-b".to_string(), "main".to_string(), 6))
+            Some(("session-b".to_string(), "owner-window".to_string(), 6,))
         );
     }
 

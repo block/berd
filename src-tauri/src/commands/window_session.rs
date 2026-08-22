@@ -680,32 +680,39 @@ pub fn open_session_window(
             app_for_close
                 .state::<crate::commands::voice_capture::VoiceCaptureState>()
                 .release_window(&label_for_close);
+            let destroyed_native_lifecycle = app_for_close
+                .state::<crate::commands::native_voice::NativeVoiceState>()
+                .capture_destroyed_owner_lifecycle(&label_for_close);
             let app_for_native_close = app_for_close.clone();
             let label_for_native_close = label_for_close.clone();
-            tauri::async_runtime::spawn(async move {
-                let native_voice =
-                    app_for_native_close.state::<crate::commands::native_voice::NativeVoiceState>();
-                let capture = app_for_native_close
-                    .state::<crate::commands::voice_capture::VoiceCaptureState>();
-                match native_voice
-                    .stop_for_window_destroyed(
-                        &app_for_native_close,
-                        capture.inner(),
-                        &label_for_native_close,
-                    )
-                    .await
-                {
-                    Ok(true) => {
-                        app_for_native_close
-                            .state::<crate::commands::pocket_voice::PocketVoiceState>()
-                            .stop_for_window_destroyed();
+            if let Some((session_id, revision)) = destroyed_native_lifecycle {
+                tauri::async_runtime::spawn(async move {
+                    let native_voice = app_for_native_close
+                        .state::<crate::commands::native_voice::NativeVoiceState>();
+                    let capture = app_for_native_close
+                        .state::<crate::commands::voice_capture::VoiceCaptureState>();
+                    match native_voice
+                        .stop_for_window_destroyed(
+                            &app_for_native_close,
+                            capture.inner(),
+                            &label_for_native_close,
+                            &session_id,
+                            revision,
+                        )
+                        .await
+                    {
+                        Ok(true) => {
+                            app_for_native_close
+                                .state::<crate::commands::pocket_voice::PocketVoiceState>()
+                                .stop_for_window_destroyed();
+                        }
+                        Ok(false) => {}
+                        Err(error) => {
+                            log::error!("Failed to stop voice for destroyed owner window: {error}");
+                        }
                     }
-                    Ok(false) => {}
-                    Err(error) => {
-                        log::error!("Failed to stop voice for destroyed owner window: {error}");
-                    }
-                }
-            });
+                });
+            }
             app_for_close
                 .state::<crate::commands::siri_voice::SiriVoiceState>()
                 .stop_for_window_destroyed(&label_for_close);
