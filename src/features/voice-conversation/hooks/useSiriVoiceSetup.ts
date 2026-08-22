@@ -154,9 +154,7 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
       });
     return () => {
       active = false;
-      if (statusRequestGenerationRef.current === generation) {
-        statusRequestGenerationRef.current += 1;
-      }
+      statusRequestGenerationRef.current += 1;
     };
   }, [enabled, language]);
 

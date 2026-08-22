@@ -31,6 +31,7 @@ export async function refreshVoiceSetupReadiness(
 export interface VoiceSetupSelection {
   backend: VoiceOutputBackend;
   siriLanguage: string;
+  revision: number;
 }
 
 export async function refreshStableVoiceSetupReadiness(
@@ -45,7 +46,8 @@ export async function refreshStableVoiceSetupReadiness(
     const current = getSelection();
     if (
       current.backend === selection.backend &&
-      current.siriLanguage === selection.siriLanguage
+      current.siriLanguage === selection.siriLanguage &&
+      current.revision === selection.revision
     ) {
       return ready;
     }

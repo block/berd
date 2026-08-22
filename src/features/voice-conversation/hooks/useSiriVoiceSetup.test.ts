@@ -107,4 +107,32 @@ describe("Siri voice locales", () => {
     expect(result.current.error).toBeNull();
     expect(result.current.statusError).toBeNull();
   });
+
+  it("ignores a refresh failure after Siri setup is disabled", async () => {
+    const focusRefresh = deferred<SiriVoiceStatus>();
+    mockGetSiriVoiceStatus
+      .mockResolvedValueOnce(status("en-US", "Aaron"))
+      .mockReturnValueOnce(focusRefresh.promise);
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useSiriVoiceSetup(enabled),
+      { initialProps: { enabled: true } },
+    );
+    await waitFor(() =>
+      expect(result.current.status?.selectedVoice?.name).toBe("Aaron"),
+    );
+
+    act(() => window.dispatchEvent(new Event("focus")));
+    await waitFor(() =>
+      expect(mockGetSiriVoiceStatus).toHaveBeenCalledTimes(2),
+    );
+    rerender({ enabled: false });
+    await waitFor(() => expect(result.current.status).toBeNull());
+
+    focusRefresh.reject(new Error("Stale focus refresh failed"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.error).toBeNull();
+    expect(result.current.statusError).toBeNull();
+  });
 });

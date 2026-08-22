@@ -716,13 +716,26 @@ export function AppShell({
     capabilities.voiceConversation,
   );
   const globalVoiceOutput = useVoiceOutputPreference();
-  const globalVoiceOutputBackendRef = useRef(globalVoiceOutput.backend);
-  globalVoiceOutputBackendRef.current = globalVoiceOutput.backend;
   const globalSiriVoiceSetup = useSiriVoiceSetup(
     capabilities.voiceConversation && globalVoiceOutput.backend === "siri",
   );
-  const globalSiriVoiceLanguageRef = useRef(globalSiriVoiceSetup.language);
-  globalSiriVoiceLanguageRef.current = globalSiriVoiceSetup.language;
+  const globalVoiceSetupSelectionRef = useRef({
+    backend: globalVoiceOutput.backend,
+    siriLanguage: globalSiriVoiceSetup.language,
+    revision: 0,
+  });
+  if (
+    globalVoiceSetupSelectionRef.current.backend !==
+      globalVoiceOutput.backend ||
+    globalVoiceSetupSelectionRef.current.siriLanguage !==
+      globalSiriVoiceSetup.language
+  ) {
+    globalVoiceSetupSelectionRef.current = {
+      backend: globalVoiceOutput.backend,
+      siriLanguage: globalSiriVoiceSetup.language,
+      revision: globalVoiceSetupSelectionRef.current.revision + 1,
+    };
+  }
   const globalVoiceReady = isVoiceSetupReady(
     globalPocketVoiceSetup.status,
     globalSiriVoiceSetup.status,
@@ -3476,10 +3489,9 @@ export function AppShell({
 
     voiceSettingsReturnInFlightRef.current = target.sessionId;
     const returnGeneration = ++voiceSettingsReturnGenerationRef.current;
-    void refreshStableVoiceSetupReadiness(() => ({
-      backend: globalVoiceOutputBackendRef.current,
-      siriLanguage: globalSiriVoiceLanguageRef.current,
-    }))
+    void refreshStableVoiceSetupReadiness(
+      () => globalVoiceSetupSelectionRef.current,
+    )
       .then((ready) => {
         if (
           !ready &&
