@@ -56,6 +56,8 @@ function libraryWith(
   }
   return {
     catalog,
+    userAvatarIds: [],
+    userAvatarMediaById: {},
     cachedAvatarMediaById,
     loading: false,
     cacheChecking: false,
@@ -150,7 +152,7 @@ describe("AvatarCollectionOverlay", () => {
     fireEvent.click(overlay().getByRole("button", { name: /^select$/i }));
     expect(onSelectAvatar).not.toHaveBeenCalled();
     finishExitAnimation();
-    expect(onSelectAvatar).toHaveBeenCalledWith("g-1");
+    expect(onSelectAvatar).toHaveBeenCalledWith("app-avatar:g-1");
   });
 
   it("toggles the highlight off when the same avatar is clicked again", () => {

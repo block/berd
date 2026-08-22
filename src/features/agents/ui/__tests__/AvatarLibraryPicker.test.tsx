@@ -9,6 +9,8 @@ function libraryWithError(
 ): AvatarLibraryState {
   return {
     catalog: null,
+    userAvatarIds: [],
+    userAvatarMediaById: {},
     cachedAvatarMediaById: {},
     loading: false,
     cacheChecking: false,
@@ -57,6 +59,8 @@ function libraryWithMediaError(): AvatarLibraryState {
         },
       ],
     },
+    userAvatarIds: [],
+    userAvatarMediaById: {},
     cachedAvatarMediaById: {},
     loading: false,
     cacheChecking: false,
@@ -69,12 +73,12 @@ function libraryWithMediaError(): AvatarLibraryState {
   };
 }
 
-function picker(library: AvatarLibraryState) {
+function picker(library: AvatarLibraryState, onSelectAvatar = vi.fn()) {
   return (
     <AvatarLibraryPicker
       library={library}
       selectedAvatarRef={null}
-      onSelectAvatar={vi.fn()}
+      onSelectAvatar={onSelectAvatar}
       onPreviewError={vi.fn()}
     />
   );
@@ -100,6 +104,51 @@ describe("AvatarLibraryPicker", () => {
     expect(
       screen.queryByText(/Custom URLs still work/i),
     ).not.toBeInTheDocument();
+  });
+
+  it("leaves the Gloopies collection unchanged when the user has none", () => {
+    renderWithProviders(picker(libraryWithMediaError()));
+
+    expect(
+      screen.getByRole("button", { name: /Gloopies/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Custom gloopie" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("prepends and selects a reusable custom gloopie in Gloopies", () => {
+    const library = libraryWithMediaError();
+    library.userAvatarIds = ["gloopie-custom"];
+    library.userAvatarMediaById["gloopie-custom"] = {
+      src: "asset://gloopie-custom.webm",
+      mediaType: "video",
+      alphaMode: "stacked",
+      posterSrc: "asset://gloopie-custom.poster.png",
+    };
+    const onSelectAvatar = vi.fn();
+    renderWithProviders(picker(library, onSelectAvatar));
+
+    const collectionButton = screen.getByRole("button", { name: "Gloopies" });
+    expect(collectionButton.querySelector("video")).toHaveAttribute(
+      "src",
+      "asset://gloopie-custom.webm",
+    );
+
+    fireEvent.click(collectionButton);
+    const avatarButtons = screen
+      .getAllByRole("button")
+      .filter((button) =>
+        ["Custom gloopie", "Gloopie One"].includes(
+          button.getAttribute("aria-label") ?? "",
+        ),
+      );
+    expect(
+      avatarButtons.map((button) => button.getAttribute("aria-label")),
+    ).toEqual(["Custom gloopie", "Gloopie One"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Custom gloopie" }));
+    expect(onSelectAvatar).toHaveBeenCalledWith("user-avatar:gloopie-custom");
   });
 
   it("shows missing-media feedback with a manual retry", () => {

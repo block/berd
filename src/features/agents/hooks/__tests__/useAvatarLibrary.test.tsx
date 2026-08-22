@@ -5,7 +5,8 @@ import type {
   CachedAvatarCollection,
 } from "@/shared/avatars/catalog";
 
-const listeners: Array<() => void> = [];
+const cacheWarmedListeners: Array<() => void> = [];
+const userLibraryChangedListeners: Array<() => void> = [];
 vi.mock("@/shared/api/avatars", async () => {
   const actual = await vi.importActual<typeof import("@/shared/api/avatars")>(
     "@/shared/api/avatars",
@@ -15,7 +16,11 @@ vi.mock("@/shared/api/avatars", async () => {
     getAvatarLibrarySnapshot: vi.fn(),
     refreshAvatarCache: vi.fn(),
     listenAvatarCacheWarmed: vi.fn(async (handler: () => void) => {
-      listeners.push(handler);
+      cacheWarmedListeners.push(handler);
+      return vi.fn();
+    }),
+    listenUserAvatarLibraryChanged: vi.fn(async (handler: () => void) => {
+      userLibraryChangedListeners.push(handler);
       return vi.fn();
     }),
     cachedAssetToMedia: (asset: { path: string; mimeType: string }) => ({
@@ -29,6 +34,7 @@ vi.mock("@/shared/api/avatars", async () => {
 
 import {
   getAvatarLibrarySnapshot,
+  listenUserAvatarLibraryChanged,
   refreshAvatarCache,
 } from "@/shared/api/avatars";
 import { useAvatarLibrary } from "../useAvatarLibrary";
@@ -73,7 +79,8 @@ function cachedCollection(path: string): CachedAvatarCollection {
 
 describe("useAvatarLibrary", () => {
   beforeEach(() => {
-    listeners.length = 0;
+    cacheWarmedListeners.length = 0;
+    userLibraryChangedListeners.length = 0;
     vi.clearAllMocks();
     vi.mocked(getAvatarLibrarySnapshot).mockResolvedValue({
       catalog,
@@ -95,7 +102,7 @@ describe("useAvatarLibrary", () => {
   });
 
   it("keeps missing first-run media in progress while the initial refresh runs", async () => {
-    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValueOnce({
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValue({
       catalog,
       cachedCollections: [],
       mediaRefreshing: true,
@@ -109,7 +116,7 @@ describe("useAvatarLibrary", () => {
   });
 
   it("surfaces missing media after a failed refresh and retries", async () => {
-    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValueOnce({
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValue({
       catalog,
       cachedCollections: [],
       mediaRefreshing: false,
@@ -119,6 +126,12 @@ describe("useAvatarLibrary", () => {
     const { result } = renderHook(() => useAvatarLibrary(true));
 
     await waitFor(() => expect(result.current.mediaError).toBe(true));
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValue({
+      catalog,
+      cachedCollections: [cachedCollection("/cache/a-1.webm")],
+      mediaRefreshing: false,
+      mediaRefreshCompleted: true,
+    });
     act(() => result.current.retryMedia());
 
     await waitFor(() => expect(refreshAvatarCache).toHaveBeenCalledOnce());
@@ -126,7 +139,7 @@ describe("useAvatarLibrary", () => {
   });
 
   it("surfaces an incomplete poster fallback after a failed refresh", async () => {
-    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValueOnce({
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValue({
       catalog,
       cachedCollections: [
         {
@@ -151,7 +164,7 @@ describe("useAvatarLibrary", () => {
   });
 
   it("surfaces a failed manual media refresh", async () => {
-    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValueOnce({
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValue({
       catalog,
       cachedCollections: [],
       mediaRefreshing: false,
@@ -182,12 +195,93 @@ describe("useAvatarLibrary", () => {
       mediaRefreshing: false,
       mediaRefreshCompleted: true,
     });
-    act(() => listeners[0]?.());
+    act(() => cacheWarmedListeners[0]?.());
 
     await waitFor(() =>
       expect(result.current.cachedAvatarMediaById["a-1"].media.src).toBe(
         "/cache/refreshed.webm",
       ),
     );
+  });
+
+  it("reconciles after delayed listener registration", async () => {
+    let finishRegistration!: () => void;
+    vi.mocked(listenUserAvatarLibraryChanged).mockImplementationOnce(
+      async (handler: () => void) => {
+        userLibraryChangedListeners.push(handler);
+        await new Promise<void>((resolve) => {
+          finishRegistration = resolve;
+        });
+        return () => {};
+      },
+    );
+    const { result } = renderHook(() => useAvatarLibrary(true));
+    await waitFor(() => expect(result.current.catalog).toEqual(catalog));
+
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValue({
+      catalog,
+      cachedCollections: [
+        cachedCollection("/cache/a-1.webm"),
+        {
+          catalogVersion: "user-generated",
+          collectionId: "generated-gloopies",
+          assets: [
+            {
+              id: "gloopie-during-registration",
+              path: "/user-avatars/gloopie-during-registration.mp4",
+              mimeType: "video/mp4",
+              alphaMode: "stacked",
+            },
+          ],
+          failedAssetIds: [],
+        },
+      ],
+      mediaRefreshing: false,
+      mediaRefreshCompleted: true,
+    });
+    act(() => finishRegistration());
+
+    await waitFor(() =>
+      expect(result.current.userAvatarIds).toEqual([
+        "gloopie-during-registration",
+      ]),
+    );
+  });
+
+  it("adds a newly created gloopie after the user library change event", async () => {
+    const { result } = renderHook(() => useAvatarLibrary(true));
+    await waitFor(() => expect(result.current.catalog).toEqual(catalog));
+
+    vi.mocked(getAvatarLibrarySnapshot).mockResolvedValue({
+      catalog,
+      cachedCollections: [
+        cachedCollection("/cache/a-1.webm"),
+        {
+          catalogVersion: "user-generated",
+          collectionId: "generated-gloopies",
+          assets: [
+            {
+              id: "gloopie-new",
+              path: "/user-avatars/gloopie-new.mp4",
+              mimeType: "video/mp4",
+              alphaMode: "stacked",
+            },
+          ],
+          failedAssetIds: [],
+        },
+      ],
+      mediaRefreshing: false,
+      mediaRefreshCompleted: true,
+    });
+    act(() => userLibraryChangedListeners[0]?.());
+
+    await waitFor(() =>
+      expect(result.current.userAvatarIds).toEqual(["gloopie-new"]),
+    );
+    expect(result.current.userAvatarMediaById["gloopie-new"]).toMatchObject({
+      src: "/user-avatars/gloopie-new.mp4",
+      mediaType: "video",
+    });
+    expect(result.current.cachedAvatarMediaById["gloopie-new"]).toBeUndefined();
   });
 });

@@ -22,6 +22,7 @@ const USER_AVATAR_REF_PREFIX: &str = "user-avatar:";
 const USER_AVATAR_CATALOG_VERSION: &str = "user-generated";
 const USER_AVATAR_COLLECTION_ID: &str = "generated-gloopies";
 const AVATAR_CACHE_WARMED_EVENT: &str = "berd:avatar-cache-warmed";
+const USER_AVATAR_LIBRARY_CHANGED_EVENT: &str = "berd:user-avatar-library-changed";
 const LATEST_PATH: &str = "latest.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const AVATAR_REFRESH_INTERVAL: Duration = Duration::from_secs(12 * 60 * 60);
@@ -361,7 +362,14 @@ pub async fn get_avatar_library_snapshot(
 
     // Reading cached collections only inspects atomically-placed files, so it
     // does not need the catalog lock.
-    let cached_collections = cached_collections_for_catalog(&paths, &catalog)?;
+    let mut cached_collections = cached_collections_for_catalog(&paths, &catalog)?;
+    // User-generated gloopies are local library citizens: they ride the same
+    // snapshot so the picker and the collection gallery see one source of
+    // truth, stamped with the user catalog version instead of the published
+    // catalog's version.
+    if let Some(user_collection) = user_avatar_cached_collection(&app) {
+        cached_collections.push(user_collection);
+    }
     let (media_refreshing, media_refresh_completed, media_error_code) =
         avatar_refresh_status().lock().unwrap().snapshot();
     Ok(AvatarLibrarySnapshot {
@@ -1695,7 +1703,11 @@ pub(crate) fn write_user_avatar_with_poster(
 ) -> Result<String, String> {
     let id = format!("gloopie-{}", Uuid::new_v4());
     let paths = user_avatar_paths(app)?;
-    write_user_avatar_at(&paths, &id, bytes, mime_type, alpha_mode, poster)
+    let avatar_ref = write_user_avatar_at(&paths, &id, bytes, mime_type, alpha_mode, poster)?;
+    if let Err(error) = app.emit(USER_AVATAR_LIBRARY_CHANGED_EVENT, ()) {
+        log::warn!("Failed to emit user avatar library change event: {error}");
+    }
+    Ok(avatar_ref)
 }
 
 fn write_user_avatar_at(
@@ -1769,6 +1781,75 @@ fn rollback_user_avatar_files(paths: &[&Path]) {
             );
         }
     }
+}
+
+/// Enumerates every user-generated gloopie on this machine as a cached
+/// collection, so the avatar library snapshot can surface them alongside the
+/// bundled catalog. Enumeration is best-effort: a corrupt or half-written
+/// manifest skips that avatar instead of hiding the whole collection. A
+/// machine with no gloopies yields an empty collection; browsing surfaces omit
+/// it entirely.
+fn user_avatar_cached_collection(app: &AppHandle) -> Option<CachedAvatarCollection> {
+    let paths = user_avatar_paths(app).ok()?;
+    user_avatar_cached_collection_at(&paths)
+}
+
+fn user_avatar_cached_collection_at(paths: &UserAvatarPaths) -> Option<CachedAvatarCollection> {
+    let mut manifests: Vec<UserAvatarManifest> = Vec::new();
+    if paths.meta.exists() {
+        let entries = fs::read_dir(&paths.meta).ok()?;
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let Some(avatar_id) = file_name
+                .to_str()
+                .and_then(|name| name.strip_suffix(".json"))
+            else {
+                continue;
+            };
+            let Ok(manifest) = read_user_avatar_manifest(paths, avatar_id) else {
+                log::warn!("Skipping unreadable user avatar manifest: {avatar_id}");
+                continue;
+            };
+            let Ok(media_path) = user_avatar_media_path(paths, &manifest) else {
+                continue;
+            };
+            if media_path.exists() {
+                manifests.push(manifest);
+            }
+        }
+    }
+    // Newest first, so the collection reads as a timeline of what the user
+    // made most recently; the id tiebreak keeps the order deterministic.
+    manifests.sort_by(|left, right| {
+        right
+            .created_at_ms
+            .cmp(&left.created_at_ms)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    let assets = manifests
+        .into_iter()
+        .map(|manifest| CachedAvatarAsset {
+            path: paths
+                .media
+                .join(&manifest.path)
+                .to_string_lossy()
+                .into_owned(),
+            poster_path: manifest
+                .poster_path
+                .as_deref()
+                .map(|poster| paths.media.join(poster).to_string_lossy().into_owned()),
+            id: manifest.id,
+            mime_type: manifest.mime_type,
+            alpha_mode: manifest.alpha_mode,
+        })
+        .collect();
+    Some(CachedAvatarCollection {
+        catalog_version: USER_AVATAR_CATALOG_VERSION.to_string(),
+        collection_id: USER_AVATAR_COLLECTION_ID.to_string(),
+        assets,
+        failed_asset_ids: Vec::new(),
+        error_code: None,
+    })
 }
 
 fn cached_user_avatar_for_id(
@@ -2651,6 +2732,78 @@ mod tests {
                 .unwrap_err()
                 .contains("5 MB or smaller")
         );
+    }
+
+    #[test]
+    fn user_avatar_collection_lists_gloopies_newest_first_and_skips_broken_entries() {
+        let (_dir, paths) = temp_user_avatar_paths();
+
+        // Older avatar.
+        seed_user_avatar(&paths, "gloopie-old");
+        // Newer avatar with a poster and stacked alpha.
+        let newer_media = paths.media.join("gloopie-new.webm");
+        fs::write(&newer_media, b"webm-bytes").unwrap();
+        let poster = paths.media.join("gloopie-new.poster.png");
+        fs::write(&poster, b"poster").unwrap();
+        let manifest = UserAvatarManifest {
+            id: "gloopie-new".to_string(),
+            path: "gloopie-new.webm".to_string(),
+            mime_type: "video/webm".to_string(),
+            alpha_mode: Some("stacked".to_string()),
+            poster_path: Some("gloopie-new.poster.png".to_string()),
+            byte_size: 10,
+            created_at_ms: 5,
+        };
+        fs::write(
+            paths.meta.join("gloopie-new.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        // Manifest without media on disk: excluded.
+        let manifest = UserAvatarManifest {
+            id: "gloopie-missing".to_string(),
+            path: "gloopie-missing.png".to_string(),
+            mime_type: "image/png".to_string(),
+            alpha_mode: None,
+            poster_path: None,
+            byte_size: 1,
+            created_at_ms: 9,
+        };
+        fs::write(
+            paths.meta.join("gloopie-missing.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        // Corrupt manifest: skipped, does not fail the collection.
+        fs::write(paths.meta.join("gloopie-corrupt.json"), b"not json").unwrap();
+
+        let collection = user_avatar_cached_collection_at(&paths).unwrap();
+
+        assert_eq!(collection.collection_id, USER_AVATAR_COLLECTION_ID);
+        assert_eq!(collection.catalog_version, USER_AVATAR_CATALOG_VERSION);
+        assert!(collection.failed_asset_ids.is_empty());
+        let ids: Vec<&str> = collection
+            .assets
+            .iter()
+            .map(|asset| asset.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["gloopie-new", "gloopie-old"]);
+        let newest = &collection.assets[0];
+        assert_eq!(newest.mime_type, "video/webm");
+        assert_eq!(newest.alpha_mode.as_deref(), Some("stacked"));
+        assert!(newest
+            .poster_path
+            .as_deref()
+            .unwrap()
+            .ends_with("gloopie-new.poster.png"));
+    }
+
+    #[test]
+    fn user_avatar_collection_is_empty_when_no_gloopies_exist() {
+        let (_dir, paths) = temp_user_avatar_paths();
+        let collection = user_avatar_cached_collection_at(&paths).unwrap();
+        assert!(collection.assets.is_empty());
+        assert!(collection.failed_asset_ids.is_empty());
     }
 
     #[test]

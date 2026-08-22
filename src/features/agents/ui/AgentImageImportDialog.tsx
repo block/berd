@@ -16,10 +16,7 @@ import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
 import { Textarea } from "@/shared/ui/textarea";
 import type { SnapshotV1 } from "@/features/agents/agent-snapshot";
-import {
-  deleteUserAvatar,
-  importUserAvatarDataUrl,
-} from "@/shared/api/avatars";
+import { importUserAvatarDataUrl } from "@/shared/api/avatars";
 import { decodeAvatarAnimation } from "@/features/agents/agent-snapshot";
 import { isSafePngAvatarDataUrl } from "@/shared/lib/avatarUrl";
 import { snapshotToCreatePersonaRequest } from "@/features/agents/agent-snapshot";
@@ -219,12 +216,9 @@ export function AgentImageImportDialog({
             snapshotToCreatePersonaRequest(snapshot).avatar,
         });
       } catch {
-        if (importedAnimationAvatar) {
-          void deleteUserAvatar(importedAnimationAvatar).catch(() => {
-            // Agent creation is the primary error; cleanup is best effort.
-          });
-        }
-        // The parent owns user-facing error reporting; keep this click handler
+        // The imported gloopie is now a durable library asset, independent of
+        // whether this agent can be created. The parent owns user-facing error
+        // reporting; keep this click handler
         // settled so a failed create does not become an unhandled rejection.
       }
     } finally {

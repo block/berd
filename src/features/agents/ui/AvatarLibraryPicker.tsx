@@ -1,25 +1,22 @@
 import { ArrowLeft, Check, RefreshCw } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  avatarRef,
-  getAvatarCatalogEntry,
-  mediaTypeFromMimeType,
-} from "@/shared/avatars/catalog";
-import type {
-  AvatarCatalogEntry,
-  AvatarCollection,
-} from "@/shared/avatars/catalog";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Spinner } from "@/shared/ui/spinner";
 import type { AvatarLibraryState } from "@/features/agents/hooks/useAvatarLibrary";
+import {
+  buildAvatarDisplayCollections,
+  type AvatarDisplayCollection,
+  type AvatarDisplayEntry,
+} from "@/features/agents/lib/avatarLibraryView";
 
 interface AvatarLibraryPickerProps {
   library: AvatarLibraryState;
   selectedAvatarRef: string | null;
-  onSelectAvatar: (avatarId: string) => void;
+  /** Receives the full persisted ref (`app-avatar:<id>` or `user-avatar:<id>`). */
+  onSelectAvatar: (avatarRef: string) => void;
   onPreviewError: () => void;
   disabled?: boolean;
   /**
@@ -70,7 +67,10 @@ export function AvatarLibraryPicker({
     [isControlled, onSelectCollection],
   );
 
-  const avatarCollections = library.catalog?.collections ?? [];
+  const avatarCollections = useMemo(
+    () => buildAvatarDisplayCollections(library),
+    [library],
+  );
   const selectedCollection = avatarCollections.find(
     (collection) => collection.id === selectedCollectionId,
   );
@@ -78,27 +78,21 @@ export function AvatarLibraryPicker({
     library.errorCode === "networkAccess"
       ? t("editor.avatarCatalogNetworkAccess")
       : t("editor.avatarCatalogUnavailable");
-  const catalogVersion = library.catalog?.catalogVersion;
-  const { cachedAvatarMediaById } = library;
+
+  const collectionLabel = useCallback(
+    (collection: AvatarDisplayCollection) => collection.label ?? collection.id,
+    [],
+  );
 
   const renderAvatarTile = useCallback(
-    (entry: AvatarCatalogEntry) => {
-      const ref = avatarRef(entry.id);
-      const selected = selectedAvatarRef === ref;
-      const cachedMedia = getCachedAvatarMedia(
-        cachedAvatarMediaById,
-        catalogVersion,
-        entry.id,
-      );
-      const fallbackVariant = entry.variants.webm ?? entry.variants.hevc;
-      const fallbackMediaType = fallbackVariant
-        ? mediaTypeFromMimeType(fallbackVariant.mimeType)
-        : "image";
-      const selectable = Boolean(cachedMedia) && !disabled;
+    (entry: AvatarDisplayEntry) => {
+      const selected = selectedAvatarRef === entry.ref;
+      const label = entry.label ?? t("editor.userGloopieLabel");
+      const selectable = Boolean(entry.media) && !disabled;
 
       return (
         <button
-          key={entry.id}
+          key={entry.ref}
           type="button"
           className={cn(
             "relative flex aspect-square min-h-24 items-center justify-center overflow-hidden rounded-sm bg-popover p-2",
@@ -108,15 +102,15 @@ export function AvatarLibraryPicker({
               "cursor-not-allowed opacity-60 hover:border-border/80",
             selected && "border-ring ring-2 ring-ring/25",
           )}
-          aria-label={entry.label}
+          aria-label={label}
           aria-pressed={selected}
           aria-disabled={!selectable}
           disabled={!selectable}
-          onClick={() => onSelectAvatar(entry.id)}
+          onClick={() => onSelectAvatar(entry.ref)}
         >
-          {cachedMedia ? (
+          {entry.media ? (
             <AvatarMedia
-              media={cachedMedia}
+              media={entry.media}
               alt=""
               lazy
               loadingStrategy="visible-video"
@@ -127,10 +121,11 @@ export function AvatarLibraryPicker({
             <span
               className={cn(
                 "text-center text-xs text-muted-foreground",
-                fallbackMediaType === "video" && "italic",
+                (entry.fallbackMediaType === "video" || entry.isUserAvatar) &&
+                  "italic",
               )}
             >
-              {entry.label}
+              {label}
             </span>
           )}
           {selected ? (
@@ -141,30 +136,17 @@ export function AvatarLibraryPicker({
         </button>
       );
     },
-    [
-      cachedAvatarMediaById,
-      catalogVersion,
-      disabled,
-      onPreviewError,
-      onSelectAvatar,
-      selectedAvatarRef,
-    ],
+    [disabled, onPreviewError, onSelectAvatar, selectedAvatarRef, t],
   );
 
   const renderCollectionButton = useCallback(
-    (collection: AvatarCollection) => {
-      const cover = getAvatarCatalogEntry(
-        library.catalog,
-        collection.coverAvatarId,
-      );
+    (collection: AvatarDisplayCollection) => {
+      const cover = collection.cover;
       if (!cover) {
         return null;
       }
-      const cachedCoverMedia = getCachedAvatarMedia(
-        cachedAvatarMediaById,
-        catalogVersion,
-        cover.id,
-      );
+      const label = collectionLabel(collection);
+      const coverReady = Boolean(cover.media);
 
       return (
         <button
@@ -180,25 +162,21 @@ export function AvatarLibraryPicker({
           onClick={() => setSelectedCollectionId(collection.id)}
         >
           <span className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/40">
-            {cachedCoverMedia ? (
+            {cover.media ? (
               <AvatarMedia
-                media={cachedCoverMedia}
+                media={cover.media}
                 alt=""
                 loadingStrategy="visible-video"
                 className="h-full w-full object-contain p-1"
                 onError={onPreviewError}
               />
             ) : (
-              <span className="text-xs text-muted-foreground">
-                {collection.label}
-              </span>
+              <span className="text-xs text-muted-foreground">{label}</span>
             )}
           </span>
           <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-            <span className="truncate text-base text-foreground">
-              {collection.label}
-            </span>
-            {cachedCoverMedia ? (
+            <span className="truncate text-base text-foreground">{label}</span>
+            {coverReady ? (
               <Check className="size-4 shrink-0 text-muted-foreground" />
             ) : library.mediaError ? (
               <RefreshCw className="size-4 shrink-0 text-muted-foreground" />
@@ -210,10 +188,9 @@ export function AvatarLibraryPicker({
       );
     },
     [
-      cachedAvatarMediaById,
-      catalogVersion,
+      collectionLabel,
       disabled,
-      library,
+      library.mediaError,
       onPreviewError,
       setSelectedCollectionId,
     ],
@@ -232,6 +209,8 @@ export function AvatarLibraryPicker({
       </span>
     </div>
   );
+
+  const hasCollections = avatarCollections.length > 0;
 
   return (
     <div
@@ -282,20 +261,17 @@ export function AvatarLibraryPicker({
                 <ArrowLeft className="size-3.5" />
               </Button>
               <p className="text-xs text-foreground">
-                {selectedCollection.label}
+                {collectionLabel(selectedCollection)}
               </p>
             </div>
           )}
           <div className="grid min-h-0 flex-1 grid-cols-3 gap-2 overflow-y-auto pr-1">
-            {selectedCollection.avatarIds.map((avatarId) => {
-              const entry = getAvatarCatalogEntry(library.catalog, avatarId);
-              return entry ? renderAvatarTile(entry) : null;
-            })}
+            {selectedCollection.entries.map((entry) => renderAvatarTile(entry))}
           </div>
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          {library.loading && avatarCollections.length === 0
+          {library.loading && !hasCollections
             ? [0, 1, 2].map(renderCollectionSkeleton)
             : avatarCollections.map(renderCollectionButton)}
         </div>

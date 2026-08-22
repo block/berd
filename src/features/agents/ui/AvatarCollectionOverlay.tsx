@@ -12,11 +12,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import type {
-  AvatarCatalogEntry,
-  AvatarCollection,
-} from "@/shared/avatars/catalog";
-import { getAvatarCatalogEntry } from "@/shared/avatars/catalog";
 import { cn } from "@/shared/lib/cn";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Button } from "@/shared/ui/button";
@@ -28,7 +23,11 @@ import {
   type ScatterItemLayout,
 } from "@/features/agents/lib/avatarScatter";
 import { useAvatarScatterPan } from "@/features/agents/hooks/useAvatarScatterPan";
-import { getCachedAvatarMedia } from "@/features/agents/ui/AvatarLibraryPicker";
+import {
+  buildAvatarDisplayCollections,
+  type AvatarDisplayCollection,
+  type AvatarDisplayEntry,
+} from "@/features/agents/lib/avatarLibraryView";
 
 /** Exit animation length; keep in sync with .avatar-overlay-exit. */
 const OVERLAY_EXIT_MS = 260;
@@ -114,7 +113,9 @@ function rowItemStyle(index: number): CSSProperties {
 const WORDMARK_CLASS =
   "avatar-collection-wordmark text-center font-light leading-[0.96] tracking-[-0.05em] text-foreground/90 text-[clamp(3.25rem,8vw,9.5rem)]";
 
-/** Presentation order for public avatar collections. */
+/**
+ * Presentation order for avatar collections.
+ */
 const COLLECTION_DISPLAY_ORDER = ["gloopies", "pollies", "fuzzies"];
 
 function collectionRank(id: string): number {
@@ -137,7 +138,8 @@ interface AvatarCollectionOverlayProps {
   library: AvatarLibraryState;
   /** Collection to open with; null starts at the collections level. */
   initialCollectionId?: string | null;
-  onSelectAvatar: (avatarId: string) => void;
+  /** Receives the full persisted ref (`app-avatar:<id>` or `user-avatar:<id>`). */
+  onSelectAvatar: (avatarRef: string) => void;
   onClose: () => void;
 }
 
@@ -175,8 +177,8 @@ export function AvatarCollectionOverlay({
   const [collectionId, setCollectionId] = useState<string | null>(
     initialCollectionId,
   );
-  const [pendingAvatarId, setPendingAvatarId] = useState<string | null>(null);
-  const [hoveredAvatarId, setHoveredAvatarId] = useState<string | null>(null);
+  const [pendingAvatarRef, setPendingAvatarRef] = useState<string | null>(null);
+  const [hoveredAvatarRef, setHoveredAvatarRef] = useState<string | null>(null);
   const [closing, setClosing] = useState(false);
   // Where the funnel exit collapses to (viewport px); null = plain fade.
   const [exitTarget, setExitTarget] = useState<{
@@ -206,10 +208,10 @@ export function AvatarCollectionOverlay({
 
   const collections = useMemo(
     () =>
-      [...(library.catalog?.collections ?? [])].sort(
+      buildAvatarDisplayCollections(library).sort(
         (a, b) => collectionRank(a.id) - collectionRank(b.id),
       ),
-    [library.catalog],
+    [library],
   );
   // A single-collection catalog skips the collections level entirely — the
   // takeover opens straight onto that collection and back closes rather than
@@ -219,7 +221,10 @@ export function AvatarCollectionOverlay({
   const collection =
     collections.find((entry) => entry.id === effectiveCollectionId) ?? null;
   const hasCollectionsLevel = collections.length > 1;
-  const catalogVersion = library.catalog?.catalogVersion;
+  const collectionDisplayLabel = useCallback(
+    (entry: AvatarDisplayCollection) => entry.label ?? entry.id,
+    [],
+  );
 
   useEffect(
     () => () => {
@@ -264,7 +269,7 @@ export function AvatarCollectionOverlay({
       return;
     }
     if (collection && hasCollectionsLevel) {
-      setPendingAvatarId(null);
+      setPendingAvatarRef(null);
       setCollectionId(null);
       return;
     }
@@ -325,7 +330,7 @@ export function AvatarCollectionOverlay({
     // runs straight across the wordmark like the reference (the wordmark
     // renders *behind* the avatars; hover brings a tile further forward).
     return buildCollectionLayout(
-      collection.avatarIds,
+      collection.entries.map((entry) => entry.ref),
       tileSize.width + panMargin * 2,
       tileSize.height + panMargin * 2,
       {
@@ -382,7 +387,7 @@ export function AvatarCollectionOverlay({
         // highlight — everything fades back up. Deliberately not a dismiss:
         // mis-clicking near an avatar must not throw the user out of the
         // picker.
-        setPendingAvatarId(null);
+        setPendingAvatarRef(null);
         return;
       }
       // On the collections level, empty-canvas clicks light-dismiss the
@@ -393,34 +398,44 @@ export function AvatarCollectionOverlay({
   );
 
   const onConfirmSelect = useCallback(() => {
-    if (!pendingAvatarId || closing) {
+    if (!pendingAvatarRef || closing) {
       return;
     }
-    const avatarId = pendingAvatarId;
+    const pendingRef = collection?.entries.find(
+      (entry) => entry.ref === pendingAvatarRef,
+    )?.ref;
+    if (!pendingRef) {
+      return;
+    }
     // The chosen avatar lands on the rail's preview; funnel toward it.
-    closeWithAnimation(() => onSelectAvatar(avatarId), "funnel");
-  }, [closing, closeWithAnimation, onSelectAvatar, pendingAvatarId]);
+    closeWithAnimation(() => onSelectAvatar(pendingRef), "funnel");
+  }, [
+    closing,
+    closeWithAnimation,
+    collection,
+    onSelectAvatar,
+    pendingAvatarRef,
+  ]);
 
   const hoverHandlers = useCallback(
-    (id: string) => ({
-      onPointerEnter: () => setHoveredAvatarId(id),
+    (avatarRef: string) => ({
+      onPointerEnter: () => setHoveredAvatarRef(avatarRef),
       onPointerLeave: () =>
-        setHoveredAvatarId((current) => (current === id ? null : current)),
+        setHoveredAvatarRef((current) =>
+          current === avatarRef ? null : current,
+        ),
     }),
     [],
   );
 
   const renderAvatarItem = useCallback(
-    (entry: AvatarCatalogEntry, item: ScatterItemLayout) => {
-      const pending = pendingAvatarId === entry.id;
+    (entry: AvatarDisplayEntry, item: ScatterItemLayout) => {
+      const pending = pendingAvatarRef === entry.ref;
       // Highlighting an avatar fades everything else back instead of drawing
       // a ring; the highlighted one stays at full strength (and animates).
-      const dimmed = pendingAvatarId !== null && !pending;
-      const cachedMedia = getCachedAvatarMedia(
-        library.cachedAvatarMediaById,
-        catalogVersion,
-        entry.id,
-      );
+      const dimmed = pendingAvatarRef !== null && !pending;
+      const cachedMedia = entry.media;
+      const label = entry.label ?? t("editor.userGloopieLabel");
       return (
         <div
           className={cn(
@@ -432,10 +447,10 @@ export function AvatarCollectionOverlay({
             pending && "z-10",
             // Hold the entrance (paused at opacity 0) until the media has
             // painted, so tiles never pop in empty and fill in later.
-            cachedMedia && !readyIds.has(entry.id) && "avatar-scatter-waiting",
+            cachedMedia && !readyIds.has(entry.ref) && "avatar-scatter-waiting",
           )}
           style={scatterItemStyle(item)}
-          ref={registerTileNode(entry.id)}
+          ref={registerTileNode(entry.ref)}
         >
           <button
             type="button"
@@ -446,13 +461,13 @@ export function AvatarCollectionOverlay({
               dimmed && "opacity-25 hover:opacity-60",
               !cachedMedia && "cursor-default",
             )}
-            aria-label={entry.label}
+            aria-label={label}
             aria-pressed={pending}
             disabled={!cachedMedia || closing}
-            {...hoverHandlers(entry.id)}
+            {...hoverHandlers(entry.ref)}
             onClick={() =>
-              setPendingAvatarId((current) =>
-                current === entry.id ? null : entry.id,
+              setPendingAvatarRef((current) =>
+                current === entry.ref ? null : entry.ref,
               )
             }
           >
@@ -468,14 +483,14 @@ export function AvatarCollectionOverlay({
                 loadingStrategy="eager"
                 // Calm by default: only the hovered or highlighted avatar
                 // plays; everything else sits on its first frame.
-                paused={hoveredAvatarId !== entry.id && !pending}
+                paused={hoveredAvatarRef !== entry.ref && !pending}
                 className="avatar-scatter-media h-full w-full object-contain"
                 onError={() => {}}
-                onReady={() => markReady(entry.id)}
+                onReady={() => markReady(entry.ref)}
               />
             ) : (
               <span className="max-w-full truncate px-2 text-xs text-muted-foreground">
-                {entry.label}
+                {label}
               </span>
             )}
           </button>
@@ -499,14 +514,12 @@ export function AvatarCollectionOverlay({
       );
     },
     [
-      catalogVersion,
       closing,
-      hoveredAvatarId,
+      hoveredAvatarRef,
       hoverHandlers,
-      library.cachedAvatarMediaById,
       markReady,
       onConfirmSelect,
-      pendingAvatarId,
+      pendingAvatarRef,
       readyIds,
       registerTileNode,
       t,
@@ -514,15 +527,9 @@ export function AvatarCollectionOverlay({
   );
 
   const renderCollectionRowItem = useCallback(
-    (entry: AvatarCollection, index: number) => {
-      const cover = getAvatarCatalogEntry(library.catalog, entry.coverAvatarId);
-      const cachedMedia = cover
-        ? getCachedAvatarMedia(
-            library.cachedAvatarMediaById,
-            catalogVersion,
-            cover.id,
-          )
-        : undefined;
+    (entry: AvatarDisplayCollection, index: number) => {
+      const cachedMedia = entry.cover?.media;
+      const label = collectionDisplayLabel(entry);
       return (
         <button
           key={entry.id}
@@ -533,7 +540,7 @@ export function AvatarCollectionOverlay({
           )}
           style={rowItemStyle(index)}
           aria-label={t("collectionPage.openCollection", {
-            label: entry.label,
+            label,
           })}
           disabled={closing}
           onClick={() => setCollectionId(entry.id)}
@@ -562,23 +569,17 @@ export function AvatarCollectionOverlay({
               <Spinner className="size-5 text-muted-foreground" />
             )}
           </span>
-          <span className={COLLECTION_CARD_LABEL_CLASS}>{entry.label}</span>
+          <span className={COLLECTION_CARD_LABEL_CLASS}>{label}</span>
         </button>
       );
     },
-    [
-      catalogVersion,
-      closing,
-      library.cachedAvatarMediaById,
-      library.catalog,
-      markReady,
-      readyIds,
-      t,
-    ],
+    [closing, collectionDisplayLabel, markReady, readyIds, t],
   );
 
   const heading = collection
-    ? t("collectionPage.collectionHeading", { label: collection.label })
+    ? t("collectionPage.collectionHeading", {
+        label: collectionDisplayLabel(collection),
+      })
     : t("collectionPage.collectionsHeading");
 
   const backLabel =
@@ -655,7 +656,9 @@ export function AvatarCollectionOverlay({
               }}
             >
               {layout.map((item) => {
-                const entry = getAvatarCatalogEntry(library.catalog, item.id);
+                const entry = collection.entries.find(
+                  (candidate) => candidate.ref === item.id,
+                );
                 return entry ? (
                   <div key={item.id} className="contents">
                     {renderAvatarItem(entry, item)}
