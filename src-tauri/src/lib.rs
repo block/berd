@@ -732,8 +732,34 @@ fn attach_main_window_lifecycle(app: &tauri::App) {
                 .webview_windows()
                 .keys()
                 .any(|label| label != "main" && label != commands::voice_buddy::WINDOW_LABEL);
-            let should_preserve = commands::voice_buddy::matches_active_lifecycle(&app_handle)
-                || (cfg!(target_os = "macos") && has_secondary_window);
+            let active_voice_owner_window_label = app_handle
+                .state::<commands::native_voice::NativeVoiceState>()
+                .active_session_lifecycle_target()
+                .map(|(_, owner_window_label, _)| owner_window_label);
+            let controls_match_active_voice =
+                commands::voice_buddy::matches_active_lifecycle(&app_handle);
+            let preserve_for_voice = commands::voice_buddy::should_preserve_main_for_voice(
+                active_voice_owner_window_label.as_deref(),
+                controls_match_active_voice,
+            );
+            let stale_controls_cleanup_failed = if !preserve_for_voice {
+                commands::voice_buddy::destroy_stale_for_main_close(&app_handle)
+                    .inspect_err(|error| {
+                        log::error!("Failed to remove stale voice controls on main close: {error}");
+                    })
+                    .is_err()
+            } else {
+                false
+            };
+
+            if stale_controls_cleanup_failed && !cfg!(target_os = "macos") {
+                app_handle.exit(0);
+                return;
+            }
+
+            let should_preserve = preserve_for_voice
+                || (cfg!(target_os = "macos")
+                    && (has_secondary_window || stale_controls_cleanup_failed));
 
             if should_preserve {
                 api.prevent_close();

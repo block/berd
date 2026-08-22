@@ -244,6 +244,29 @@ pub fn matches_active_lifecycle(app: &AppHandle) -> bool {
     )
 }
 
+pub fn should_preserve_main_for_voice(
+    active_owner_window_label: Option<&str>,
+    controls_match_active_voice: bool,
+) -> bool {
+    active_owner_window_label == Some("main") || controls_match_active_voice
+}
+
+pub fn destroy_stale_for_main_close(app: &AppHandle) -> Result<(), String> {
+    if matches_active_lifecycle(app) {
+        return Ok(());
+    }
+    let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
+        return Ok(());
+    };
+    window
+        .destroy()
+        .map_err(|error| format!("Could not remove stale floating voice controls: {error}"))?;
+    if app.get_webview_window(WINDOW_LABEL).is_some() {
+        return Err("Stale floating voice controls remained after removal.".to_string());
+    }
+    Ok(())
+}
+
 fn reconcile_terminal_controls(
     emit_terminal: impl FnOnce(),
     destroy: impl FnOnce() -> Result<(), String>,
@@ -484,6 +507,14 @@ mod tests {
         assert!(!active_controls_match(None, Some(&controls)));
         assert!(!active_controls_match(Some(6), Some(&controls)));
         assert!(!active_controls_match(Some(4), None));
+    }
+
+    #[test]
+    fn main_is_preserved_during_owner_startup_without_controls() {
+        assert!(should_preserve_main_for_voice(Some("main"), false));
+        assert!(should_preserve_main_for_voice(Some("session:1"), true));
+        assert!(!should_preserve_main_for_voice(Some("session:1"), false));
+        assert!(!should_preserve_main_for_voice(None, false));
     }
 
     #[test]
