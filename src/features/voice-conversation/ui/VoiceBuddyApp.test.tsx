@@ -290,6 +290,38 @@ describe("VoiceBuddyApp", () => {
     expect(mocks.stop).toHaveBeenCalledWith(runningStatus);
   });
 
+  it("disables surviving controls after terminal shutdown", async () => {
+    render(<VoiceBuddyApp />);
+    await waitFor(() => expect(voiceEventListener).toBeDefined());
+
+    act(() => {
+      voiceEventListener?.({
+        type: "cleanShutdown",
+        sessionId: "session-a",
+        revision: 4,
+      });
+    });
+
+    expect(
+      screen.getByRole("button", {
+        name: "toolbar.voiceConversation.buddy.openSession",
+      }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", {
+        name: "toolbar.voiceConversation.muteMicrophone",
+      }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", {
+        name: "toolbar.voiceConversation.buddy.hangUp",
+      }),
+    ).toBeDisabled();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "toolbar.voiceConversation.buddy.stopped",
+    );
+  });
+
   it("reports an owner-opening failure", async () => {
     const user = userEvent.setup();
     mocks.openSession.mockRejectedValueOnce(new Error("owner unavailable"));

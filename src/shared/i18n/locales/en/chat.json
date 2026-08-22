@@ -556,6 +556,7 @@
         "hangUp": "Hang up",
         "listening": "Listening…",
         "muted": "Microphone muted",
+        "stopped": "Voice conversation ended",
         "userSpeaking": "Speech detected",
         "assistantSpeaking": "Berd is speaking",
         "errors": {

@@ -214,6 +214,33 @@ pub fn remove(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn reconcile_terminal_controls(
+    emit_terminal: impl FnOnce(),
+    destroy: impl FnOnce() -> Result<(), String>,
+    hide: impl FnOnce() -> Result<(), String>,
+) {
+    emit_terminal();
+    if let Err(error) = destroy() {
+        log::error!("Failed to remove stopped floating voice controls: {error}");
+        if let Err(hide_error) = hide() {
+            log::error!("Failed to hide stopped floating voice controls: {hide_error}");
+        }
+    }
+}
+
+pub fn dismiss_after_terminal_event<T: Clone + Serialize>(app: &AppHandle, payload: T) {
+    let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
+        return;
+    };
+    reconcile_terminal_controls(
+        || {
+            let _ = window.emit(super::native_voice::EVENT_NAME, payload);
+        },
+        || window.destroy().map_err(|error| error.to_string()),
+        || window.hide().map_err(|error| error.to_string()),
+    );
+}
+
 pub fn emit<T: Clone + Serialize>(app: &AppHandle, payload: T) {
     if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
         let _ = window.emit(super::native_voice::EVENT_NAME, payload);
@@ -386,5 +413,23 @@ mod tests {
     fn hidden_owner_restoration_policy_is_platform_specific() {
         assert!(!should_restore_owner(true));
         assert_eq!(should_restore_owner(false), cfg!(not(target_os = "macos")),);
+    }
+
+    #[test]
+    fn completed_stop_stays_successful_when_controls_require_hide_fallback() {
+        let emitted = std::cell::Cell::new(false);
+        let hidden = std::cell::Cell::new(false);
+
+        reconcile_terminal_controls(
+            || emitted.set(true),
+            || Err("destroy failed".to_string()),
+            || {
+                hidden.set(true);
+                Ok(())
+            },
+        );
+
+        assert!(emitted.get());
+        assert!(hidden.get());
     }
 }

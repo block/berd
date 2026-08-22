@@ -1169,22 +1169,24 @@ pub async fn start_native_voice_conversation(
                         shutdown_pipeline(pipeline).await;
                     }
                     event_state.microphone_muted.store(false, Ordering::SeqCst);
-                    super::voice_buddy::restore_hidden_owner(&event_app, &window_label);
-                    if let Err(error) = super::voice_buddy::remove(&event_app) {
-                        log::error!("Failed to remove floating voice controls: {error}");
-                    }
                     event_app
                         .state::<VoiceCaptureState>()
                         .release_owner(&window_label, &owner_id);
-                    let _ = event_window.emit(
-                        EVENT_NAME,
-                        NativeVoiceEvent::Error {
-                            session_id: Some(session_id.clone()),
-                            message,
-                            revision: revision.wrapping_add(1),
-                            terminal: true,
-                        },
-                    );
+                    let terminal_event = NativeVoiceEvent::Error {
+                        session_id: Some(session_id.clone()),
+                        message,
+                        revision: revision.wrapping_add(1),
+                        terminal: true,
+                    };
+                    let _ = event_window.emit(EVENT_NAME, terminal_event.clone());
+                    super::voice_buddy::emit(&event_app, terminal_event);
+                    let shutdown_event = NativeVoiceEvent::CleanShutdown {
+                        session_id: session_id.clone(),
+                        revision: revision.wrapping_add(1),
+                    };
+                    let _ = event_window.emit(EVENT_NAME, shutdown_event.clone());
+                    super::voice_buddy::dismiss_after_terminal_event(&event_app, shutdown_event);
+                    super::voice_buddy::restore_hidden_owner(&event_app, &window_label);
                     break;
                 }
             }
@@ -1339,32 +1341,28 @@ impl NativeVoiceState {
             return Ok(false);
         };
         if let Some(failure_message) = failure_message {
+            let failure_event = NativeVoiceEvent::Error {
+                session_id: Some(session_id.clone()),
+                message: failure_message.to_string(),
+                revision: next_revision,
+                terminal: true,
+            };
             if let Some(target) = app.get_webview_window(&owner.window_label) {
-                let _ = target.emit(
-                    EVENT_NAME,
-                    NativeVoiceEvent::Error {
-                        session_id: Some(session_id.clone()),
-                        message: failure_message.to_string(),
-                        revision: next_revision,
-                        terminal: true,
-                    },
-                );
+                let _ = target.emit(EVENT_NAME, failure_event.clone());
             }
+            super::voice_buddy::emit(app, failure_event);
         }
         self.microphone_muted.store(false, Ordering::SeqCst);
-        let controls_removal = super::voice_buddy::remove(app);
         capture.release_owner(&owner.window_label, &owner_id);
+        let shutdown_event = NativeVoiceEvent::CleanShutdown {
+            session_id,
+            revision: next_revision,
+        };
         if let Some(target) = app.get_webview_window(&owner.window_label) {
-            let _ = target.emit(
-                EVENT_NAME,
-                NativeVoiceEvent::CleanShutdown {
-                    session_id,
-                    revision: next_revision,
-                },
-            );
+            let _ = target.emit(EVENT_NAME, shutdown_event.clone());
         }
+        super::voice_buddy::dismiss_after_terminal_event(app, shutdown_event);
         super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
-        controls_removal?;
         Ok(true)
     }
 
@@ -1460,21 +1458,20 @@ impl NativeVoiceState {
             runtime.revision
         };
         self.microphone_muted.store(false, Ordering::SeqCst);
-        let controls_removal = super::voice_buddy::remove(app);
         if let (Some(owner), Some(session_id)) = (owner, session_id) {
             capture.release_owner(&owner.window_label, &native_owner_id(&session_id));
+            let shutdown_event = NativeVoiceEvent::CleanShutdown {
+                session_id,
+                revision: next_revision,
+            };
             if let Some(window) = app.get_webview_window(&owner.window_label) {
-                let _ = window.emit(
-                    EVENT_NAME,
-                    NativeVoiceEvent::CleanShutdown {
-                        session_id,
-                        revision: next_revision,
-                    },
-                );
+                let _ = window.emit(EVENT_NAME, shutdown_event.clone());
             }
+            super::voice_buddy::dismiss_after_terminal_event(app, shutdown_event);
             super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
+        } else if let Err(error) = super::voice_buddy::remove(app) {
+            log::error!("Failed to remove floating voice controls: {error}");
         }
-        controls_removal?;
         Ok(())
     }
 

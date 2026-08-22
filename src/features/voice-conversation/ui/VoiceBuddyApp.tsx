@@ -243,12 +243,16 @@ export function VoiceBuddyApp() {
   }, []);
 
   const microphoneMuted = status?.microphoneMuted ?? false;
+  const controlsActive =
+    status?.lifecycle === "running" && status.sessionId !== null;
   const errorLabel = error
     ? t(`toolbar.voiceConversation.buddy.errors.${error}`)
     : null;
-  const activityLabel = microphoneMuted
-    ? t("toolbar.voiceConversation.buddy.muted")
-    : t("toolbar.voiceConversation.buddy.listening");
+  const activityLabel = !controlsActive
+    ? t("toolbar.voiceConversation.buddy.stopped")
+    : microphoneMuted
+      ? t("toolbar.voiceConversation.buddy.muted")
+      : t("toolbar.voiceConversation.buddy.listening");
 
   const run = async (
     action: "open" | "mute" | "stop",
@@ -315,7 +319,7 @@ export function VoiceBuddyApp() {
               : undefined
           }
           title={t("toolbar.voiceConversation.buddy.openSession")}
-          disabled={!status || busyAction !== null}
+          disabled={!controlsActive || busyAction !== null}
           onClick={() => void run("open", "open", openVoiceConversationSession)}
         >
           <BerdIcon aria-hidden="true" />
@@ -339,7 +343,7 @@ export function VoiceBuddyApp() {
               ? t("toolbar.voiceConversation.unmuteMicrophone")
               : t("toolbar.voiceConversation.muteMicrophone")
           }
-          disabled={!status || busyAction !== null}
+          disabled={!controlsActive || busyAction !== null}
           onClick={toggleMute}
         >
           {microphoneMuted ? <MicOff /> : <Mic />}
@@ -351,7 +355,7 @@ export function VoiceBuddyApp() {
           destructive
           aria-label={t("toolbar.voiceConversation.buddy.hangUp")}
           title={t("toolbar.voiceConversation.buddy.hangUp")}
-          disabled={!status || busyAction !== null}
+          disabled={!controlsActive || busyAction !== null}
           onClick={() => {
             if (status) {
               void run("stop", "stop", () =>

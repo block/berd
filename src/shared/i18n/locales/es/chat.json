@@ -553,6 +553,7 @@
         "hangUp": "Colgar",
         "listening": "Escuchando…",
         "muted": "Micrófono silenciado",
+        "stopped": "La conversación de voz terminó",
         "userSpeaking": "Voz detectada",
         "assistantSpeaking": "Berd está hablando",
         "errors": {
