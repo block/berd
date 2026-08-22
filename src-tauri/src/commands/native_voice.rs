@@ -1331,9 +1331,7 @@ impl NativeVoiceState {
                 },
             );
         }
-        if failure_message.is_some() {
-            super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
-        }
+        super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
         Ok(true)
     }
 
@@ -1439,6 +1437,7 @@ impl NativeVoiceState {
                     },
                 );
             }
+            super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
         }
         Ok(())
     }

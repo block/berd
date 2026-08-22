@@ -46,17 +46,17 @@ fn require_controls_window(window_label: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn should_restore_owner(owner_visible: bool) -> bool {
+    cfg!(not(target_os = "macos")) && !owner_visible
+}
+
 pub fn restore_hidden_owner(app: &AppHandle, owner_window_label: &str) {
-    #[cfg(not(target_os = "macos"))]
     if let Some(owner) = app
         .get_webview_window(owner_window_label)
-        .filter(|owner| !owner.is_visible().unwrap_or(false))
+        .filter(|owner| should_restore_owner(owner.is_visible().unwrap_or(false)))
     {
         focus_window(&owner);
     }
-
-    #[cfg(target_os = "macos")]
-    let _ = (app, owner_window_label);
 }
 
 pub fn open_active_session(app: &AppHandle) -> Result<(), String> {
@@ -361,28 +361,9 @@ pub async fn stop_voice_conversation_from_buddy(
     expected_revision: u64,
 ) -> Result<(), String> {
     require_controls_window(window.label())?;
-    #[cfg(not(target_os = "macos"))]
-    let hidden_owner = state
-        .active_session_lifecycle_target()
-        .filter(|(active_session_id, _, revision)| {
-            active_session_id == &session_id && *revision == expected_revision
-        })
-        .and_then(|(_, owner_window_label, _)| app.get_webview_window(&owner_window_label))
-        .filter(|owner| !owner.is_visible().unwrap_or(false));
-
-    let stopped = state
+    state
         .stop_active_for_lifecycle(&app, capture.inner(), &session_id, expected_revision)
         .await?;
-
-    #[cfg(target_os = "macos")]
-    let _ = stopped;
-
-    #[cfg(not(target_os = "macos"))]
-    if stopped {
-        if let Some(owner) = hidden_owner {
-            focus_window(&owner);
-        }
-    }
     Ok(())
 }
 
@@ -395,5 +376,11 @@ mod tests {
         assert!(require_controls_window(WINDOW_LABEL).is_ok());
         assert!(require_controls_window("main").is_err());
         assert!(require_controls_window("session:other").is_err());
+    }
+
+    #[test]
+    fn terminal_stop_restores_only_a_hidden_non_macos_owner() {
+        assert!(!should_restore_owner(true));
+        assert_eq!(should_restore_owner(false), cfg!(not(target_os = "macos")),);
     }
 }
