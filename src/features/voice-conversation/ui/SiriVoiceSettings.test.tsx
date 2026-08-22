@@ -98,7 +98,7 @@ describe("SiriVoiceSettings", () => {
     ).toBeInTheDocument();
   });
 
-  it("gives each voice action a voice-specific accessible name", () => {
+  it("selects installed voices from a compact, accessible row", async () => {
     const status = setup().status;
     expect(status).not.toBeNull();
     if (!status) return;
@@ -132,6 +132,15 @@ describe("SiriVoiceSettings", () => {
     expect(
       screen.getByRole("button", { name: "Download Quinn" }),
     ).toBeInTheDocument();
+    expect(screen.getByText("Using 0.0 MB")).toBeInTheDocument();
+    expect(screen.getByText("310.5 MB")).toBeInTheDocument();
+    expect(screen.queryByText("Use voice")).not.toBeInTheDocument();
+    expect(screen.queryByText("Download model")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Use Aaron" }));
+    expect(value.selectVoice).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Aaron", installed: true }),
+    );
   });
 
   it("exposes preview and download progress in accessible names", () => {

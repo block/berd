@@ -1,7 +1,9 @@
+import { CircleAlert } from "lucide-react";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
 import { getPlatform } from "@/shared/lib/platform";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
+import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import {
   Select,
   SelectContent,
@@ -16,6 +18,23 @@ import { useVoiceOutputPreference } from "../lib/voiceOutputPreference";
 import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
 import { SiriVoiceSettings } from "./SiriVoiceSettings";
 
+function readinessDescriptionKey(
+  inputReady: boolean,
+  outputReady: boolean,
+  backend: VoiceOutputBackend,
+): string | null {
+  if (inputReady && outputReady) return null;
+  if (!inputReady && !outputReady) {
+    return backend === "siri"
+      ? "voice.notReadyInputAndSiriOutput"
+      : "voice.notReadyInputAndPocketOutput";
+  }
+  if (!inputReady) return "voice.notReadyInput";
+  return backend === "siri"
+    ? "voice.notReadySiriOutput"
+    : "voice.notReadyPocketOutput";
+}
+
 export function VoiceSettings() {
   const { t } = useTranslation("settings");
   const setup = usePocketVoiceSetup();
@@ -24,6 +43,23 @@ export function VoiceSettings() {
   const siriSupported = getPlatform() === "mac";
   const outputHeadingId = useId();
   const outputDescriptionId = useId();
+  const inputReady = setup.status?.parakeetInstalled ?? false;
+  const outputReady =
+    output.backend === "siri"
+      ? Boolean(
+          siriSetup.status?.supported &&
+            siriSetup.status.selectedVoice &&
+            siriSetup.status.selectedVoiceInstalled,
+        )
+      : (setup.status?.pocketInstalled ?? false);
+  const readinessLoaded =
+    setup.status !== null &&
+    (output.backend === "pocket" ||
+      siriSetup.status !== null ||
+      siriSetup.error !== null);
+  const readinessKey = readinessLoaded
+    ? readinessDescriptionKey(inputReady, outputReady, output.backend)
+    : null;
 
   return (
     <SettingsPage
@@ -31,6 +67,13 @@ export function VoiceSettings() {
       description={t("voice.settingsDescription")}
       contentClassName="space-y-6"
     >
+      {readinessKey ? (
+        <Alert variant="destructive">
+          <CircleAlert />
+          <AlertTitle>{t("voice.notReadyTitle")}</AlertTitle>
+          <AlertDescription>{t(readinessKey)}</AlertDescription>
+        </Alert>
+      ) : null}
       <section className="space-y-2 overflow-hidden">
         <h2 className="text-sm font-medium">{t("voice.speechInput")}</h2>
         <PocketVoiceSetupContent
