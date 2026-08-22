@@ -315,6 +315,7 @@ function ensureVoiceEventDeliveryInitialized() {
       return;
     }
     if (event.type === "activity") return;
+    if (event.type === "inputMute") return;
     if (event.type !== "user" || !event.text.trim()) return;
     if (
       hasDeliveredVoiceTranscript(
@@ -744,11 +745,13 @@ export function useVoiceConversationController({
   const toggleMicrophoneMute = useCallback(async () => {
     if (status.lifecycle !== "running") return;
     try {
-      await setMicrophoneMuted(!microphoneMuted);
+      await setMicrophoneMuted(
+        !useVoiceConversationStore.getState().microphoneMuted,
+      );
     } catch (muteError) {
       addErrorNotification(status.sessionId, errorText(muteError));
     }
-  }, [microphoneMuted, setMicrophoneMuted, status.lifecycle, status.sessionId]);
+  }, [setMicrophoneMuted, status.lifecycle, status.sessionId]);
 
   return useMemo(
     () => ({

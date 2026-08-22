@@ -21,6 +21,9 @@ exclude = ["plugins/app-test-driver"]
 tauri-build = { version = "2", features = [] }
 cc = "1"
 
+[target.'cfg(target_os = "macos")'.build-dependencies]
+swift-rs = { version = "1.0.7", features = ["build"] }
+
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
@@ -109,6 +112,7 @@ windows-sys = { version = "0.59", features = [
 block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSImage", "NSMenu", "NSMenuItem", "NSAlert", "NSButton", "NSControl", "NSCell", "NSResponder", "NSView"] }
+objc2-avf-audio = { version = "0.3.2", features = ["AVAudioApplication", "block2"] }
 objc2-foundation = { version = "0.3.2", features = ["NSDictionary", "NSError", "NSFileManager", "NSObject", "NSProcessInfo", "NSString", "NSURL"] }
 objc2-user-notifications = "0.3.2"
 rodio = { version = "0.22", default-features = false, features = ["playback"] }
