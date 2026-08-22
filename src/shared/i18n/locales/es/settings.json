@@ -910,7 +910,6 @@
     "siriLoading": "Cargando voces de Siri…",
     "siriNoVoices": "No hay voces de Siri disponibles para este idioma.",
     "siriUnsupported": "Las voces de Siri solo están disponibles en macOS.",
-    "siriUsingSize": "Usando {{size}}",
     "speechInput": "Entrada de voz",
     "speechOutput": "Salida de voz",
     "selectedVoice": "Voz seleccionada: {{voice}}",

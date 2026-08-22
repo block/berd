@@ -132,7 +132,7 @@ describe("SiriVoiceSettings", () => {
     expect(
       screen.getByRole("button", { name: "Download Quinn" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Using 0.0 MB")).toBeInTheDocument();
+    expect(screen.getByText("Installed · 0.0 MB on disk")).toBeInTheDocument();
     expect(screen.getByText("310.5 MB")).toBeInTheDocument();
     expect(screen.queryByText("Use voice")).not.toBeInTheDocument();
     expect(screen.queryByText("Download model")).not.toBeInTheDocument();

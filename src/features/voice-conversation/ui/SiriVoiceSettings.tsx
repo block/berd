@@ -158,7 +158,7 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
                       </span>
                       <span className="block text-xs text-muted-foreground">
                         {voice.installed
-                          ? t("voice.siriUsingSize", {
+                          ? t("voice.modelInstalledSize", {
                               size: formatBytes(voice.sizeBytes),
                             })
                           : formatBytes(voice.sizeBytes)}
@@ -253,5 +253,3 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
     </div>
   );
 }
-
-export { groupVoicesByLocale, localeLabel };

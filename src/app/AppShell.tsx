@@ -889,6 +889,8 @@ export function AppShell({
   ] = useState<AgentBuilderProviderSetupReturnTarget | null>(null);
   const [voiceSettingsReturnTarget, setVoiceSettingsReturnTarget] =
     useState<VoiceSetupReturnTarget | null>(null);
+  const voiceSettingsReturnTargetRef = useRef(voiceSettingsReturnTarget);
+  voiceSettingsReturnTargetRef.current = voiceSettingsReturnTarget;
   const [homeSessionId, setHomeSessionId] = useState<string | null>(() =>
     loadStoredHomeSessionId(),
   );
@@ -3448,6 +3450,7 @@ export function AppShell({
     }
 
     const session = useChatSessionStore.getState().getSession(target.sessionId);
+    voiceSettingsReturnTargetRef.current = null;
     setVoiceSettingsReturnTarget(null);
     if (!session || session.archivedAt) {
       useVoiceConversationStore
@@ -3493,14 +3496,18 @@ export function AppShell({
   ]);
 
   useEffect(() => {
-    if (activeView === "settings" || !voiceSettingsReturnTarget) {
+    if (
+      !voiceSettingsReturnTarget ||
+      (activeView === "settings" && activeSettingsSection === "voice")
+    ) {
       return;
     }
     useVoiceConversationStore
       .getState()
       .clearRequestedStart(voiceSettingsReturnTarget.sessionId);
+    voiceSettingsReturnTargetRef.current = null;
     setVoiceSettingsReturnTarget(null);
-  }, [activeView, voiceSettingsReturnTarget]);
+  }, [activeSettingsSection, activeView, voiceSettingsReturnTarget]);
 
   const openSettings = useCallback(
     (section: SectionId = DEFAULT_SETTINGS_SECTION) => {
@@ -3579,11 +3586,21 @@ export function AppShell({
           ? detail.returnTarget
           : null,
       );
-      setVoiceSettingsReturnTarget(
+      const currentVoiceTarget = voiceSettingsReturnTargetRef.current;
+      const nextVoiceTarget =
         detail?.returnTarget?.type === "voice-setup"
           ? detail.returnTarget
-          : null,
-      );
+          : null;
+      if (
+        currentVoiceTarget &&
+        currentVoiceTarget.sessionId !== nextVoiceTarget?.sessionId
+      ) {
+        useVoiceConversationStore
+          .getState()
+          .clearRequestedStart(currentVoiceTarget.sessionId);
+      }
+      voiceSettingsReturnTargetRef.current = nextVoiceTarget;
+      setVoiceSettingsReturnTarget(nextVoiceTarget);
       openSettings(resolveSettingsSection(section ?? null));
     };
 

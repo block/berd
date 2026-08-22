@@ -47,6 +47,38 @@ function setup(status: PocketVoiceStatus): PocketVoiceSetup {
   };
 }
 
+function pocketStatus(
+  overrides: Partial<PocketVoiceStatus> = {},
+): PocketVoiceStatus {
+  return {
+    statusRevision: 0,
+    installed: false,
+    pocketInstalled: false,
+    parakeetInstalled: false,
+    pocketSizeBytes: null,
+    parakeetSizeBytes: null,
+    pocketDownloadBytes: 0,
+    parakeetDownloadBytes: 104_337_827,
+    downloading: false,
+    activeModel: null,
+    pocketAttemptId: null,
+    parakeetAttemptId: null,
+    pocketProgress: null,
+    parakeetProgress: null,
+    pocketError: null,
+    parakeetError: null,
+    removing: null,
+    removalQueued: false,
+    downloadedBytes: 0,
+    totalBytes: 0,
+    error: null,
+    selectedVoice: "mary",
+    playbackSpeed: 1,
+    voices: [],
+    ...overrides,
+  };
+}
+
 function siriSetup(): SiriVoiceSetup {
   return {
     status: {
@@ -231,8 +263,69 @@ describe("VoiceSettings", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Voice Conversation isn't ready",
     );
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Parakeet STT is not installed. Download it below to use Voice Conversation.",
+    expect(
+      screen.getByText(
+        "Parakeet STT is not installed. Download it below to use Voice Conversation.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("does not diagnose a Siri load failure as a missing selection", () => {
+    outputState.backend = "siri";
+    const staleSiriSetup = siriSetup();
+    siriSetupState.current = {
+      ...staleSiriSetup,
+      status: staleSiriSetup.status
+        ? {
+            ...staleSiriSetup.status,
+            selectedVoice: null,
+            selectedVoiceInstalled: false,
+          }
+        : null,
+      error: "Siri voice catalog unavailable",
+    };
+    setupState.current = setup(
+      pocketStatus({
+        installed: true,
+        parakeetInstalled: true,
+        parakeetSizeBytes: 131_662_414,
+        parakeetDownloadBytes: 0,
+      }),
     );
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByText("Siri voice catalog unavailable"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/No installed Siri voice is selected/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("still explains missing speech input while Siri status is unavailable", () => {
+    outputState.backend = "siri";
+    siriSetupState.current = {
+      ...siriSetup(),
+      status: null,
+      error: "Siri voice catalog unavailable",
+    };
+    setupState.current = setup(
+      pocketStatus({
+        installed: false,
+        parakeetInstalled: false,
+      }),
+    );
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByText(
+        "Parakeet STT is not installed. Download it below to use Voice Conversation.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/No installed Siri voice is selected/),
+    ).not.toBeInTheDocument();
   });
 });

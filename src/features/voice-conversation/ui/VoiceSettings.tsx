@@ -52,14 +52,16 @@ export function VoiceSettings() {
             siriSetup.status.selectedVoiceInstalled,
         )
       : (setup.status?.pocketInstalled ?? false);
-  const readinessLoaded =
-    setup.status !== null &&
-    (output.backend === "pocket" ||
-      siriSetup.status !== null ||
-      siriSetup.error !== null);
-  const readinessKey = readinessLoaded
-    ? readinessDescriptionKey(inputReady, outputReady, output.backend)
-    : null;
+  const siriOutputLoaded =
+    siriSetup.status !== null && siriSetup.error === null;
+  const readinessKey =
+    setup.status === null
+      ? null
+      : !inputReady && output.backend === "siri" && !siriOutputLoaded
+        ? "voice.notReadyInput"
+        : output.backend === "siri" && !siriOutputLoaded
+          ? null
+          : readinessDescriptionKey(inputReady, outputReady, output.backend);
 
   return (
     <SettingsPage
@@ -78,7 +80,6 @@ export function VoiceSettings() {
         <h2 className="text-sm font-medium">{t("voice.speechInput")}</h2>
         <PocketVoiceSetupContent
           setup={setup}
-          presentation="settings"
           models={["parakeet"]}
           showPocketVoiceControls={false}
         />
@@ -123,11 +124,7 @@ export function VoiceSettings() {
         {output.backend === "siri" ? (
           <SiriVoiceSettings setup={siriSetup} />
         ) : (
-          <PocketVoiceSetupContent
-            setup={setup}
-            presentation="settings"
-            models={["pocket"]}
-          />
+          <PocketVoiceSetupContent setup={setup} models={["pocket"]} />
         )}
       </section>
     </SettingsPage>
