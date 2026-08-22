@@ -769,11 +769,29 @@ impl Drop for SttPipeline {
     }
 }
 
+#[cfg(not(test))]
+const STT_WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const STT_WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
+
 async fn shutdown_pipeline(mut pipeline: SttPipeline) {
     let worker = pipeline.begin_shutdown();
     drop(pipeline);
     if let Some(worker) = worker {
-        let _ = tauri::async_runtime::spawn_blocking(move || worker.join()).await;
+        let join = tauri::async_runtime::spawn_blocking(move || worker.join());
+        match tokio::time::timeout(STT_WORKER_SHUTDOWN_TIMEOUT, join).await {
+            Ok(Ok(Ok(()))) => {}
+            Ok(Ok(Err(_))) => {
+                log::error!("Native voice recognizer worker panicked during shutdown")
+            }
+            Ok(Err(error)) => {
+                log::error!("Native voice recognizer shutdown task failed: {error}")
+            }
+            Err(_) => log::error!(
+                "Native voice recognizer did not stop within {:?}; detaching it",
+                STT_WORKER_SHUTDOWN_TIMEOUT
+            ),
+        }
     }
 }
 
@@ -1140,7 +1158,9 @@ pub async fn start_native_voice_conversation(
                     }
                     event_state.microphone_muted.store(false, Ordering::SeqCst);
                     super::voice_buddy::restore_hidden_owner(&event_app, &window_label);
-                    super::voice_buddy::remove(&event_app);
+                    if let Err(error) = super::voice_buddy::remove(&event_app) {
+                        log::error!("Failed to remove floating voice controls: {error}");
+                    }
                     event_app
                         .state::<VoiceCaptureState>()
                         .release_owner(&window_label, &owner_id);
@@ -1320,7 +1340,7 @@ impl NativeVoiceState {
             }
         }
         self.microphone_muted.store(false, Ordering::SeqCst);
-        super::voice_buddy::remove(app);
+        let controls_removal = super::voice_buddy::remove(app);
         capture.release_owner(&owner.window_label, &owner_id);
         if let Some(target) = app.get_webview_window(&owner.window_label) {
             let _ = target.emit(
@@ -1332,6 +1352,7 @@ impl NativeVoiceState {
             );
         }
         super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
+        controls_removal?;
         Ok(true)
     }
 
@@ -1425,7 +1446,7 @@ impl NativeVoiceState {
             runtime.revision
         };
         self.microphone_muted.store(false, Ordering::SeqCst);
-        super::voice_buddy::remove(app);
+        let controls_removal = super::voice_buddy::remove(app);
         if let (Some(owner), Some(session_id)) = (owner, session_id) {
             capture.release_owner(&owner.window_label, &native_owner_id(&session_id));
             if let Some(window) = app.get_webview_window(&owner.window_label) {
@@ -1439,6 +1460,7 @@ impl NativeVoiceState {
             }
             super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
         }
+        controls_removal?;
         Ok(())
     }
 
@@ -1978,6 +2000,68 @@ mod tests {
             pending.front().map(|item| item.id.as_str()),
             Some("final-1")
         );
+    }
+
+    #[tokio::test]
+    async fn non_cooperative_worker_cannot_block_stop_or_replacement_lifecycle() {
+        let state = NativeVoiceState::default();
+        let (audio_tx, _audio_rx) = mpsc::sync_channel(1);
+        let worker_release = Arc::new(AtomicBool::new(false));
+        let release = Arc::clone(&worker_release);
+        let worker = thread::spawn(move || {
+            while !release.load(Ordering::Acquire) {
+                thread::sleep(Duration::from_millis(5));
+            }
+        });
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.lifecycle_id = Some("lifecycle-1".to_string());
+            runtime.revision = 4;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+            runtime.pipeline = Some(SttPipeline {
+                audio_tx,
+                audio_seen: AtomicBool::new(false),
+                shutdown: Arc::new(AtomicBool::new(false)),
+                discard_on_shutdown: Arc::new(AtomicBool::new(false)),
+                input_muted: Arc::new(AtomicBool::new(false)),
+                input_mute_epoch: Arc::new(AtomicU64::new(0)),
+                shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
+                thread: Some(worker),
+            });
+        }
+
+        let completion = tokio::time::timeout(
+            Duration::from_millis(500),
+            state.stop_lifecycle(Some(("session-1", 4))),
+        )
+        .await
+        .expect("stop is bounded")
+        .expect("stop succeeds");
+        assert!(completion.is_some());
+
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            assert!(runtime.session_id.is_none());
+            runtime.session_id = Some("session-2".to_string());
+            runtime.lifecycle_id = Some("lifecycle-2".to_string());
+            runtime.revision = 6;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+        }
+        assert_eq!(
+            state.active_session_lifecycle_target(),
+            Some(("session-2".to_string(), "main".to_string(), 6))
+        );
+        assert!(state
+            .take_stop_snapshot(Some(("session-1", 4)))
+            .expect("late stale lifecycle is ignored")
+            .is_none());
+
+        worker_release.store(true, Ordering::Release);
     }
 
     #[test]

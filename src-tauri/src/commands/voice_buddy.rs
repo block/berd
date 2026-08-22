@@ -138,8 +138,12 @@ fn make_macos_transparent(window: &WebviewWindow) -> Result<(), String> {
 
 pub fn install(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
-        let _ = window.show();
-        return Ok(());
+        window
+            .destroy()
+            .map_err(|error| format!("Could not replace stale floating voice controls: {error}"))?;
+        if app.get_webview_window(WINDOW_LABEL).is_some() {
+            return Err("Stale floating voice controls could not be replaced.".to_string());
+        }
     }
     let (session_id, owner_window_label, revision) = app
         .state::<NativeVoiceState>()
@@ -197,17 +201,22 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
                 .await
             {
                 log::error!("Failed to stop voice after controls readiness timeout: {error}");
-                remove(&fallback_app);
+                if let Err(remove_error) = remove(&fallback_app) {
+                    log::error!(
+                        "Failed to remove floating voice controls after readiness timeout: {remove_error}"
+                    );
+                }
             }
         }
     });
     Ok(())
 }
 
-pub fn remove(app: &AppHandle) {
+pub fn remove(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
-        let _ = window.destroy();
+        window.destroy().map_err(|error| error.to_string())?;
     }
+    Ok(())
 }
 
 pub fn emit<T: Clone + Serialize>(app: &AppHandle, payload: T) {

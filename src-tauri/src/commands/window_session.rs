@@ -684,7 +684,9 @@ pub fn open_session_window(
                 .state::<crate::commands::native_voice::NativeVoiceState>()
                 .stop_for_window_destroyed(&label_for_close);
             if stopped_native_voice {
-                crate::commands::voice_buddy::remove(&app_for_close);
+                if let Err(error) = crate::commands::voice_buddy::remove(&app_for_close) {
+                    log::error!("Failed to remove floating voice controls: {error}");
+                }
                 app_for_close
                     .state::<crate::commands::pocket_voice::PocketVoiceState>()
                     .stop_for_window_destroyed();
