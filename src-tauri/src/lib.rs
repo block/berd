@@ -727,6 +727,10 @@ fn attach_main_window_lifecycle(app: &tauri::App) {
 
     let app_handle = app.handle().clone();
     main.on_window_event(move |event| {
+        if matches!(event, WindowEvent::Destroyed) {
+            commands::native_voice::handle_voice_owner_window_destroyed(&app_handle, "main");
+            return;
+        }
         if let WindowEvent::CloseRequested { api, .. } = event {
             let has_secondary_window = app_handle
                 .webview_windows()

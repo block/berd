@@ -1061,6 +1061,16 @@ pub async fn start_native_voice_conversation(
             "Could not show the floating voice controls: {error}"
         ));
     }
+    if app.get_webview_window(&window_label).is_none()
+        || state.active_session_lifecycle_target()
+            != Some((session_id.clone(), window_label.clone(), revision))
+    {
+        drop(lifecycle_guard);
+        state
+            .stop_active_for_lifecycle(&app, capture.inner(), &session_id, revision)
+            .await?;
+        return Err("The voice conversation owner closed during startup.".to_string());
+    }
     drop(lifecycle_guard);
     let _ = webview_window.emit(
         EVENT_NAME,
@@ -1593,6 +1603,44 @@ impl NativeVoiceState {
             }
         }
     }
+}
+
+pub fn handle_voice_owner_window_destroyed(app: &AppHandle, window_label: &str) {
+    app.state::<VoiceCaptureState>()
+        .release_window(window_label);
+    let destroyed_lifecycle = app
+        .state::<NativeVoiceState>()
+        .capture_destroyed_owner_lifecycle(window_label);
+    let app_for_native_close = app.clone();
+    let label_for_native_close = window_label.to_string();
+    if let Some((session_id, revision)) = destroyed_lifecycle {
+        tauri::async_runtime::spawn(async move {
+            let native_voice = app_for_native_close.state::<NativeVoiceState>();
+            let capture = app_for_native_close.state::<VoiceCaptureState>();
+            match native_voice
+                .stop_for_window_destroyed(
+                    &app_for_native_close,
+                    capture.inner(),
+                    &label_for_native_close,
+                    &session_id,
+                    revision,
+                )
+                .await
+            {
+                Ok(true) => {
+                    app_for_native_close
+                        .state::<super::pocket_voice::PocketVoiceState>()
+                        .stop_for_window_destroyed();
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    log::error!("Failed to stop voice for destroyed owner window: {error}");
+                }
+            }
+        });
+    }
+    app.state::<super::siri_voice::SiriVoiceState>()
+        .stop_for_window_destroyed(window_label);
 }
 
 fn software_microphone_mute(native_microphone_mute_control: bool, muted: bool) -> bool {
