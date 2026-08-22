@@ -185,9 +185,6 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
             {
                 return;
             }
-            if let Some(owner) = fallback_app.get_webview_window(&owner_window_label) {
-                focus_window(&owner);
-            }
             let capture = fallback_app.state::<VoiceCaptureState>();
             if let Err(error) = state
                 .stop_active_if_lifecycle(
@@ -260,7 +257,7 @@ pub async fn show_voice_conversation_controls(
                     expected_revision,
                 ))
             {
-                let stopped = state
+                state
                     .stop_active_if_lifecycle(
                         window.app_handle(),
                         capture.inner(),
@@ -274,9 +271,6 @@ pub async fn show_voice_conversation_controls(
                             "The floating voice controls could not be prepared ({error}), and the voice conversation could not be stopped: {stop_error}"
                         )
                     })?;
-                if stopped {
-                    restore_hidden_owner(window.app_handle(), &owner_window_label);
-                }
             }
             return Err(error.to_string());
         }

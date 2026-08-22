@@ -1291,6 +1291,7 @@ impl NativeVoiceState {
         expected_lifecycle: Option<(&str, u64, Option<&str>)>,
     ) -> Result<bool, String> {
         let _stop_guard = self.stop_serial.lock().await;
+        let failure_message = expected_lifecycle.and_then(|(_, _, message)| message);
         let completion = self
             .stop_lifecycle_locked(
                 expected_lifecycle.map(|(session_id, revision, _)| (session_id, revision)),
@@ -1305,7 +1306,7 @@ impl NativeVoiceState {
         else {
             return Ok(false);
         };
-        if let Some((_, _, Some(failure_message))) = expected_lifecycle {
+        if let Some(failure_message) = failure_message {
             if let Some(target) = app.get_webview_window(&owner.window_label) {
                 let _ = target.emit(
                     EVENT_NAME,
@@ -1329,6 +1330,9 @@ impl NativeVoiceState {
                     revision: next_revision,
                 },
             );
+        }
+        if failure_message.is_some() {
+            super::voice_buddy::restore_hidden_owner(app, &owner.window_label);
         }
         Ok(true)
     }
