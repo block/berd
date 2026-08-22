@@ -641,6 +641,8 @@ pub fn run() {
             commands::siri_voice::finish_siri_voice_stream,
             commands::siri_voice::stop_siri_voice,
             commands::native_voice::get_native_voice_conversation_status,
+            commands::native_voice::block_native_voice_conversation_starts,
+            commands::native_voice::release_native_voice_conversation_start_block,
             commands::native_voice::set_native_voice_microphone_muted,
             commands::native_voice::set_native_voice_assistant_speaking,
             commands::native_voice::drain_native_voice_conversation_transcripts,
