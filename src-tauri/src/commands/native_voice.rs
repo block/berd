@@ -702,7 +702,12 @@ pub fn block_native_voice_conversation_starts(
     }
     let window_label = webview_window.label().to_string();
     capture.with_active_renderer(&window_label, &renderer_id, renderer_epoch, || {
-        state.block_starts(session_id, window_label, renderer_id, renderer_epoch)
+        state.block_starts(
+            session_id,
+            window_label.clone(),
+            renderer_id.clone(),
+            renderer_epoch,
+        )
     })
 }
 
