@@ -246,7 +246,15 @@ describe("voice conversation API", () => {
       ],
       [
         "set_native_voice_assistant_speaking",
-        { sessionId: "session-1", expectedRevision: 3, speaking: true },
+        {
+          request: {
+            sessionId: "session-1",
+            expectedRevision: 3,
+            speaking: true,
+            rendererId: "renderer-test",
+            rendererEpoch: 7,
+          },
+        },
       ],
       [
         "stop_voice_conversation_from_buddy",
@@ -384,7 +392,8 @@ describe("voice conversation API", () => {
     mocks.invoke.mockImplementation((_command, payload) =>
       Promise.resolve({
         ...status,
-        microphoneMuted: (payload as { muted: boolean }).muted,
+        microphoneMuted: (payload as { request: { muted: boolean } }).request
+          .muted,
       }),
     );
     await reconcileVoiceConversationMicrophone(status);
@@ -406,11 +415,27 @@ describe("voice conversation API", () => {
     expect(mocks.invoke.mock.calls).toEqual([
       [
         "set_native_voice_microphone_muted",
-        { sessionId: "session-1", expectedRevision: 3, muted: true },
+        {
+          request: {
+            sessionId: "session-1",
+            expectedRevision: 3,
+            muted: true,
+            rendererId: "renderer-test",
+            rendererEpoch: 7,
+          },
+        },
       ],
       [
         "set_native_voice_microphone_muted",
-        { sessionId: "session-1", expectedRevision: 3, muted: false },
+        {
+          request: {
+            sessionId: "session-1",
+            expectedRevision: 3,
+            muted: false,
+            rendererId: "renderer-test",
+            rendererEpoch: 7,
+          },
+        },
       ],
     ]);
     expect(mocks.setMicrophoneMuted.mock.invocationCallOrder[1]).toBeLessThan(
@@ -447,11 +472,27 @@ describe("voice conversation API", () => {
     expect(mocks.invoke.mock.calls).toEqual([
       [
         "set_native_voice_microphone_muted",
-        { sessionId: "session-1", expectedRevision: 3, muted: true },
+        {
+          request: {
+            sessionId: "session-1",
+            expectedRevision: 3,
+            muted: true,
+            rendererId: "renderer-test",
+            rendererEpoch: 7,
+          },
+        },
       ],
       [
         "set_native_voice_microphone_muted",
-        { sessionId: "session-1", expectedRevision: 3, muted: false },
+        {
+          request: {
+            sessionId: "session-1",
+            expectedRevision: 3,
+            muted: false,
+            rendererId: "renderer-test",
+            rendererEpoch: 7,
+          },
+        },
       ],
     ]);
     expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(false);

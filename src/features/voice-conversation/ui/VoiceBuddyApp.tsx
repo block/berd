@@ -308,10 +308,11 @@ export function VoiceBuddyApp() {
           variant="subtle"
           size="icon-sm"
           activity={activity.assistantSpeaking}
-          aria-label={
+          aria-label={t("toolbar.voiceConversation.buddy.openSession")}
+          aria-describedby={
             activity.assistantSpeaking
-              ? t("toolbar.voiceConversation.buddy.assistantSpeaking")
-              : t("toolbar.voiceConversation.buddy.openSession")
+              ? "voice-buddy-assistant-speaking"
+              : undefined
           }
           title={t("toolbar.voiceConversation.buddy.openSession")}
           disabled={!status || busyAction !== null}
@@ -325,11 +326,14 @@ export function VoiceBuddyApp() {
           size="icon-sm"
           activity={activity.userSpeaking && !microphoneMuted}
           aria-label={
+            microphoneMuted
+              ? t("toolbar.voiceConversation.unmuteMicrophone")
+              : t("toolbar.voiceConversation.muteMicrophone")
+          }
+          aria-describedby={
             activity.userSpeaking && !microphoneMuted
-              ? t("toolbar.voiceConversation.buddy.userSpeaking")
-              : microphoneMuted
-                ? t("toolbar.voiceConversation.unmuteMicrophone")
-                : t("toolbar.voiceConversation.muteMicrophone")
+              ? "voice-buddy-user-speaking"
+              : undefined
           }
           title={
             microphoneMuted
@@ -360,6 +364,16 @@ export function VoiceBuddyApp() {
           <PhoneOff />
         </Button>
       </div>
+      {activity.assistantSpeaking ? (
+        <span id="voice-buddy-assistant-speaking" className="sr-only">
+          {t("toolbar.voiceConversation.buddy.assistantSpeaking")}
+        </span>
+      ) : null}
+      {activity.userSpeaking && !microphoneMuted ? (
+        <span id="voice-buddy-user-speaking" className="sr-only">
+          {t("toolbar.voiceConversation.buddy.userSpeaking")}
+        </span>
+      ) : null}
       <p className="sr-only" role="status" aria-live="polite">
         {errorLabel ?? activityLabel}
       </p>

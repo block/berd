@@ -68,8 +68,11 @@ describe("VoiceBuddyApp", () => {
       });
     });
     const muteButton = screen.getByRole("button", {
-      name: "toolbar.voiceConversation.buddy.userSpeaking",
+      name: "toolbar.voiceConversation.muteMicrophone",
     });
+    expect(muteButton).toHaveAccessibleDescription(
+      "toolbar.voiceConversation.buddy.userSpeaking",
+    );
     expect(muteButton).toHaveClass(
       "bg-primary/15",
       "ring-2",
@@ -85,8 +88,11 @@ describe("VoiceBuddyApp", () => {
       });
     });
     const openButton = screen.getByRole("button", {
-      name: "toolbar.voiceConversation.buddy.assistantSpeaking",
+      name: "toolbar.voiceConversation.buddy.openSession",
     });
+    expect(openButton).toHaveAccessibleDescription(
+      "toolbar.voiceConversation.buddy.assistantSpeaking",
+    );
     expect(openButton).toHaveClass(
       "bg-primary/15",
       "ring-2",
@@ -112,6 +118,7 @@ describe("VoiceBuddyApp", () => {
       });
     });
     expect(muteButton).not.toHaveClass("bg-primary/15", "ring-2");
+    expect(muteButton).not.toHaveAttribute("aria-describedby");
     expect(screen.getByRole("status")).toHaveTextContent(
       "toolbar.voiceConversation.buddy.listening",
     );

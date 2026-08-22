@@ -97,12 +97,17 @@ export async function setVoiceConversationMicrophoneMuted(
       if (!appliedOptimistically) {
         activeMicrophone?.setMuted(microphoneMuted);
       }
+      const { rendererId, rendererEpoch } = await getRendererInstance();
       const nextStatus = await invoke<VoiceConversationStatus>(
         "set_native_voice_microphone_muted",
         {
-          sessionId: status.sessionId,
-          expectedRevision: status.revision,
-          muted,
+          request: {
+            sessionId: status.sessionId,
+            expectedRevision: status.revision,
+            muted,
+            rendererId,
+            rendererEpoch,
+          },
         },
       );
       if (
@@ -293,15 +298,20 @@ export function setVoiceConversationControlsSuppressed(
   return operation;
 }
 
-export function setVoiceConversationAssistantSpeaking(
+export async function setVoiceConversationAssistantSpeaking(
   sessionId: string,
   expectedRevision: number,
   speaking: boolean,
 ): Promise<void> {
+  const { rendererId, rendererEpoch } = await getRendererInstance();
   return invoke("set_native_voice_assistant_speaking", {
-    sessionId,
-    expectedRevision,
-    speaking,
+    request: {
+      sessionId,
+      expectedRevision,
+      speaking,
+      rendererId,
+      rendererEpoch,
+    },
   });
 }
 

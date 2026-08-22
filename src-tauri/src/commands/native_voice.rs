@@ -12,7 +12,7 @@ use std::{
     time::Duration,
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tokio::sync::mpsc as tokio_mpsc;
 
@@ -31,6 +31,26 @@ const VAD_THRESHOLD: f32 = 0.5;
 // Keep ordinary pauses between words inside one offline recognition request.
 // At 16 kHz with 256-sample frames this is 1.2 seconds.
 const SILENCE_FLUSH_FRAMES: usize = 75;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MicrophoneMuteRequest {
+    session_id: String,
+    expected_revision: u64,
+    muted: bool,
+    renderer_id: String,
+    renderer_epoch: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantSpeakingRequest {
+    session_id: String,
+    expected_revision: u64,
+    speaking: bool,
+    renderer_id: String,
+    renderer_epoch: u64,
+}
 
 #[derive(Clone, Copy, Debug, Default, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -1115,18 +1135,29 @@ pub async fn start_native_voice_conversation(
 pub fn set_native_voice_microphone_muted(
     app: AppHandle,
     state: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
     webview_window: WebviewWindow,
-    session_id: String,
-    expected_revision: u64,
-    muted: bool,
+    request: MicrophoneMuteRequest,
 ) -> Result<NativeVoiceStatus, String> {
-    state.set_microphone_muted(
-        &app,
-        webview_window.label(),
-        &session_id,
-        expected_revision,
-        muted,
-    )?;
+    let apply = || {
+        state.set_microphone_muted(
+            &app,
+            webview_window.label(),
+            &request.session_id,
+            request.expected_revision,
+            request.muted,
+        )
+    };
+    if webview_window.label() == super::voice_buddy::WINDOW_LABEL {
+        apply()?;
+    } else {
+        capture.with_active_renderer(
+            webview_window.label(),
+            &request.renderer_id,
+            request.renderer_epoch,
+            apply,
+        )?;
+    }
     Ok(status(&app, &state))
 }
 
@@ -1134,17 +1165,23 @@ pub fn set_native_voice_microphone_muted(
 pub fn set_native_voice_assistant_speaking(
     app: AppHandle,
     state: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
     webview_window: WebviewWindow,
-    session_id: String,
-    expected_revision: u64,
-    speaking: bool,
+    request: AssistantSpeakingRequest,
 ) -> Result<(), String> {
-    state.set_assistant_speaking(
-        &app,
+    capture.with_active_renderer(
         webview_window.label(),
-        &session_id,
-        expected_revision,
-        speaking,
+        &request.renderer_id,
+        request.renderer_epoch,
+        || {
+            state.set_assistant_speaking(
+                &app,
+                webview_window.label(),
+                &request.session_id,
+                request.expected_revision,
+                request.speaking,
+            )
+        },
     )
 }
 
