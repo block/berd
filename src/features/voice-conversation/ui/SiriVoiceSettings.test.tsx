@@ -35,6 +35,7 @@ function setup(overrides: Partial<SiriVoiceSetup> = {}): SiriVoiceSetup {
     languages: ["en-AU", "en-IN", "en-IE", "en-US"],
     loading: false,
     error: null,
+    statusError: null,
     downloadingVoiceKey: null,
     previewingVoiceKey: null,
     setLanguage: vi.fn(),
@@ -107,6 +108,18 @@ describe("SiriVoiceSettings", () => {
           sizeBytes: 1,
           installed: true,
         },
+        {
+          name: "Nza",
+          language: "en-US",
+          sizeBytes: 1,
+          installed: true,
+        },
+        {
+          name: "Ña",
+          language: "en-US",
+          sizeBytes: 1,
+          installed: true,
+        },
       ];
       const status = setup().status;
       expect(status).not.toBeNull();
@@ -135,6 +148,12 @@ describe("SiriVoiceSettings", () => {
           .getAllByRole("heading", { level: 3 })
           .map((heading) => heading.textContent),
       ).toEqual(expected);
+      expect(
+        screen
+          .getByText("Nza")
+          .compareDocumentPosition(screen.getByText("Ña")) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBeTruthy();
 
       await userEvent.click(screen.getByRole("combobox", { name: "Idioma" }));
       expect(

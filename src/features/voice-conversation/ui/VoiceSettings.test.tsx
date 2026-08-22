@@ -100,6 +100,7 @@ function siriSetup(): SiriVoiceSetup {
     languages: ["en-US"],
     loading: false,
     error: null,
+    statusError: null,
     downloadingVoiceKey: null,
     previewingVoiceKey: null,
     setLanguage: vi.fn(),
@@ -291,6 +292,7 @@ describe("VoiceSettings", () => {
           }
         : null,
       error: "Siri voice catalog unavailable",
+      statusError: "Siri voice catalog unavailable",
     };
     setupState.current = setup(
       pocketStatus({
@@ -311,12 +313,37 @@ describe("VoiceSettings", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("keeps readiness guidance visible for a Siri action error", () => {
+    outputState.backend = "siri";
+    const current = siriSetup();
+    siriSetupState.current = {
+      ...current,
+      status: current.status
+        ? {
+            ...current.status,
+            selectedVoice: null,
+            selectedVoiceInstalled: false,
+          }
+        : null,
+      error: "Preview failed",
+      statusError: null,
+    };
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(screen.getByText("Preview failed")).toBeInTheDocument();
+    expect(
+      screen.getByText(/No installed Siri voice is selected/),
+    ).toBeInTheDocument();
+  });
+
   it("still explains missing speech input while Siri status is unavailable", () => {
     outputState.backend = "siri";
     siriSetupState.current = {
       ...siriSetup(),
       status: null,
       error: "Siri voice catalog unavailable",
+      statusError: "Siri voice catalog unavailable",
     };
     setupState.current = setup(
       pocketStatus({

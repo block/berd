@@ -53,7 +53,7 @@ export function VoiceSettings() {
         )
       : (setup.status?.pocketInstalled ?? false);
   const siriOutputLoaded =
-    siriSetup.status !== null && siriSetup.error === null;
+    siriSetup.status !== null && siriSetup.statusError === null;
   const readinessKey =
     setup.status === null
       ? null

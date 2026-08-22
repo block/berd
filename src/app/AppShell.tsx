@@ -894,6 +894,7 @@ export function AppShell({
     useState<VoiceSetupReturnTarget | null>(null);
   const voiceSettingsReturnTargetRef = useRef(voiceSettingsReturnTarget);
   const voiceSettingsReturnInFlightRef = useRef<string | null>(null);
+  const voiceSettingsReturnGenerationRef = useRef(0);
   voiceSettingsReturnTargetRef.current = voiceSettingsReturnTarget;
   const [homeSessionId, setHomeSessionId] = useState<string | null>(() =>
     loadStoredHomeSessionId(),
@@ -3459,6 +3460,8 @@ export function AppShell({
 
     const session = useChatSessionStore.getState().getSession(target.sessionId);
     if (!session || session.archivedAt) {
+      voiceSettingsReturnGenerationRef.current += 1;
+      voiceSettingsReturnInFlightRef.current = null;
       voiceSettingsReturnTargetRef.current = null;
       setVoiceSettingsReturnTarget(null);
       useVoiceConversationStore
@@ -3468,12 +3471,16 @@ export function AppShell({
     }
 
     voiceSettingsReturnInFlightRef.current = target.sessionId;
+    const returnGeneration = ++voiceSettingsReturnGenerationRef.current;
     void refreshVoiceSetupReadiness(
       globalVoiceOutput.backend,
       globalSiriVoiceSetup.language,
     )
       .then((ready) => {
-        if (!ready) {
+        if (
+          !ready &&
+          voiceSettingsReturnGenerationRef.current === returnGeneration
+        ) {
           useVoiceConversationStore
             .getState()
             .clearRequestedStart(target.sessionId);
@@ -3484,14 +3491,13 @@ export function AppShell({
         // The session controller will consume it only after its live status is ready.
       })
       .finally(() => {
-        if (voiceSettingsReturnInFlightRef.current === target.sessionId) {
-          voiceSettingsReturnInFlightRef.current = null;
-        }
         if (
+          voiceSettingsReturnGenerationRef.current !== returnGeneration ||
           voiceSettingsReturnTargetRef.current?.sessionId !== target.sessionId
         ) {
           return;
         }
+        voiceSettingsReturnInFlightRef.current = null;
         voiceSettingsReturnTargetRef.current = null;
         setVoiceSettingsReturnTarget(null);
 
@@ -3538,6 +3544,8 @@ export function AppShell({
     useVoiceConversationStore
       .getState()
       .clearRequestedStart(voiceSettingsReturnTarget.sessionId);
+    voiceSettingsReturnGenerationRef.current += 1;
+    voiceSettingsReturnInFlightRef.current = null;
     voiceSettingsReturnTargetRef.current = null;
     setVoiceSettingsReturnTarget(null);
   }, [activeSettingsSection, activeView, voiceSettingsReturnTarget]);
@@ -3632,6 +3640,10 @@ export function AppShell({
           useVoiceConversationStore
             .getState()
             .clearRequestedStart(currentVoiceTarget.sessionId);
+        }
+        if (voiceSettingsReturnInFlightRef.current !== null) {
+          voiceSettingsReturnGenerationRef.current += 1;
+          voiceSettingsReturnInFlightRef.current = null;
         }
         voiceSettingsReturnTargetRef.current = nextVoiceTarget;
         setVoiceSettingsReturnTarget(nextVoiceTarget);

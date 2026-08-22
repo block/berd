@@ -64,6 +64,7 @@ export interface SiriVoiceSetup {
   languages: string[];
   loading: boolean;
   error: string | null;
+  statusError: string | null;
   downloadingVoiceKey: string | null;
   previewingVoiceKey: string | null;
   setLanguage: (language: string) => void;
@@ -82,6 +83,7 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
   );
   const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState<string | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [downloadingVoiceKey, setDownloadingVoiceKey] = useState<string | null>(
     null,
   );
@@ -99,12 +101,18 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
   }, []);
 
   const refresh = useCallback(async (prefix: string) => {
-    const next = await getSiriVoiceStatus(prefix, { coalesce: true });
-    if (canonicalLocale(languageRef.current) === canonicalLocale(prefix)) {
-      setStatus(next);
-      setError(null);
+    try {
+      const next = await getSiriVoiceStatus(prefix, { coalesce: true });
+      if (canonicalLocale(languageRef.current) === canonicalLocale(prefix)) {
+        setStatus(next);
+        setError(null);
+        setStatusError(null);
+      }
+      return next;
+    } catch (nextError) {
+      setStatusError(String(nextError));
+      throw nextError;
     }
-    return next;
   }, []);
 
   useEffect(() => {
@@ -116,12 +124,16 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     let active = true;
     setLoading(true);
     setError(null);
+    setStatusError(null);
     void getSiriVoiceStatus(language, { coalesce: true })
       .then((next) => {
         if (active) setStatus(next);
       })
       .catch((nextError) => {
-        if (active) setError(String(nextError));
+        if (active) {
+          setError(String(nextError));
+          setStatusError(String(nextError));
+        }
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -252,6 +264,7 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     languages,
     loading,
     error,
+    statusError,
     downloadingVoiceKey,
     previewingVoiceKey,
     setLanguage: selectLanguage,

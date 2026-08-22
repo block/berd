@@ -4274,15 +4274,11 @@ describe("AppShell global navigation", () => {
     );
   });
 
-  it("lets a replacement Voice target return while the previous readiness refresh is pending", async () => {
+  it("lets a reopened Voice target return while its previous readiness refresh is pending", async () => {
     const user = userEvent.setup();
-    const first = useChatSessionStore.getState().createDraftSession({
-      title: "First voice target",
-      workingDir: "/tmp/first-voice-target",
-    });
-    const second = useChatSessionStore.getState().createDraftSession({
-      title: "Second voice target",
-      workingDir: "/tmp/second-voice-target",
+    const session = useChatSessionStore.getState().createDraftSession({
+      title: "Voice target",
+      workingDir: "/tmp/voice-target",
     });
     const firstRefresh = deferred<boolean>();
     const secondRefresh = deferred<boolean>();
@@ -4301,18 +4297,18 @@ describe("AppShell global navigation", () => {
       );
     };
 
-    act(() => openVoiceSetup(first.id));
+    act(() => openVoiceSetup(session.id));
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
     });
     mockVoiceSetupReadiness.refreshPromise = firstRefresh.promise;
     await user.click(screen.getByRole("button", { name: "Back" }));
 
-    act(() => openVoiceSetup(second.id));
+    act(() => openVoiceSetup(session.id));
     mockVoiceSetupReadiness.refreshPromise = secondRefresh.promise;
     await user.click(screen.getByRole("button", { name: "Back" }));
 
-    firstRefresh.resolve(true);
+    firstRefresh.resolve(false);
     await act(async () => {
       await firstRefresh.promise;
     });
@@ -4322,7 +4318,10 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     });
-    expect(useChatSessionStore.getState().activeSessionId).toBe(second.id);
+    expect(useChatSessionStore.getState().activeSessionId).toBe(session.id);
+    expect(useVoiceConversationStore.getState().requestedStartSessionId).toBe(
+      session.id,
+    );
   });
 
   it("guards Voice setup navigation from a dirty agent draft", async () => {
