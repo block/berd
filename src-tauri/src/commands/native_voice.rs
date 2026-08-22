@@ -426,10 +426,16 @@ impl NativeVoiceState {
                         .to_string(),
                 );
             }
-            if runtime.native_microphone_mute_control {
+            let native_microphone_mute_control = runtime.native_microphone_mute_control;
+            if native_microphone_mute_control {
                 native_input_mute::set_muted(&self.input_muted, &self.input_mute_epoch, muted)?;
             }
-            self.microphone_muted.store(muted, Ordering::SeqCst);
+            // Native input mute is authoritative when installed so a hardware
+            // unmute cannot be masked by a stale renderer fallback latch.
+            self.microphone_muted.store(
+                software_microphone_mute(native_microphone_mute_control, muted),
+                Ordering::SeqCst,
+            );
             owner_window_label
         };
         Ok(Some(owner_window_label))
@@ -1472,6 +1478,10 @@ fn owns_native_mute_control(
             .is_some_and(|owner| owner.window_label == window_label)
 }
 
+fn software_microphone_mute(native_microphone_mute_control: bool, muted: bool) -> bool {
+    !native_microphone_mute_control && muted
+}
+
 #[tauri::command]
 pub fn push_native_voice_audio(
     request: tauri::ipc::Request<'_>,
@@ -1762,6 +1772,13 @@ mod tests {
         assert!(!owns_native_mute_control(&runtime, "other", "session-1", 4));
         assert!(!owns_native_mute_control(&runtime, "main", "session-2", 4));
         assert!(!owns_native_mute_control(&runtime, "main", "session-1", 5));
+    }
+
+    #[test]
+    fn native_mute_control_does_not_latch_the_software_fallback() {
+        assert!(!software_microphone_mute(true, true));
+        assert!(software_microphone_mute(false, true));
+        assert!(!software_microphone_mute(false, false));
     }
 
     #[test]
@@ -2233,6 +2250,11 @@ mod tests {
             .expect("muted owner audio is ignored");
         assert!(receiver.try_recv().is_err());
         state.microphone_muted.store(false, Ordering::SeqCst);
+        state.input_muted.store(true, Ordering::SeqCst);
+        push_audio_for_window(&state, "owner-window", vec![0; 4])
+            .expect("native-muted owner audio is ignored");
+        assert!(receiver.try_recv().is_err());
+        state.input_muted.store(false, Ordering::SeqCst);
         push_audio_for_window(&state, "owner-window", vec![0; 4]).expect("owner can send audio");
         assert_eq!(
             receiver.try_recv().expect("owner audio queued").bytes,
