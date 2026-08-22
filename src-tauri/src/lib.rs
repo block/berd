@@ -731,9 +731,7 @@ fn attach_main_window_lifecycle(app: &tauri::App) {
             let has_secondary_window = app_handle
                 .webview_windows()
                 .keys()
-                .any(|label| {
-                    label != "main" && label != commands::voice_buddy::WINDOW_LABEL
-                });
+                .any(|label| label != "main" && label != commands::voice_buddy::WINDOW_LABEL);
             let should_preserve = commands::voice_buddy::matches_active_lifecycle(&app_handle)
                 || (cfg!(target_os = "macos") && has_secondary_window);
 
