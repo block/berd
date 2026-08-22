@@ -16,10 +16,7 @@ import {
   stopNativeAssistantSpeech,
   takeVoicePlaybackNotices,
 } from "../lib/nativeAssistantSpeech";
-import {
-  openVoiceConversationSession,
-  setVoiceConversationControlsSuppressed,
-} from "../api/voiceConversation";
+import { setVoiceConversationControlsSuppressed } from "../api/voiceConversation";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -68,8 +65,22 @@ export function canBindVoiceSendRoute(options: {
 export function resolveActiveVoiceButtonAction(
   activeSessionId: string | null,
   candidateSessionId: string,
-): "stop" | "open-owner" {
-  return activeSessionId === candidateSessionId ? "stop" : "open-owner";
+): "stop" | "replace" {
+  return activeSessionId === candidateSessionId ? "stop" : "replace";
+}
+
+export async function replaceActiveVoiceConversation(options: {
+  stop: () => Promise<{ lifecycle: string; sessionId: string | null }>;
+  start: () => Promise<void>;
+}): Promise<void> {
+  const stopped = await options.stop();
+  if (
+    stopped.sessionId !== null ||
+    (stopped.lifecycle !== "stopped" && stopped.lifecycle !== "unavailable")
+  ) {
+    throw new Error("The active voice conversation could not be stopped.");
+  }
+  await options.start();
 }
 
 export function shouldSuppressVoiceConversationControls(options: {
@@ -684,6 +695,27 @@ export function useVoiceConversationController({
     });
   }, [sessionId]);
 
+  const startCurrentConversation = useCallback(async () => {
+    // Do not rely on the mount effect racing ahead of the user's first
+    // click. The native recognizer can finalize quickly, so its delivery
+    // subscriber must exist before the microphone lifecycle starts.
+    ensureVoiceEventDeliveryInitialized();
+    activeSendRoute = { sessionId, send: onSend };
+    // Capture the history boundary before native startup can admit a
+    // transcript and produce the first assistant response.
+    startAssistantSpeech();
+    try {
+      await start(sessionId);
+    } catch (startError) {
+      const backendStatus = useVoiceConversationStore.getState().status;
+      if (backendStatus.sessionId !== sessionId) {
+        activeSendRoute = null;
+        stopNativeAssistantSpeech();
+      }
+      addErrorNotification(sessionId, errorText(startError));
+    }
+  }, [onSend, sessionId, start, startAssistantSpeech]);
+
   useEffect(() => {
     if (status.lifecycle !== "running" || status.sessionId !== sessionId)
       return;
@@ -797,12 +829,15 @@ export function useVoiceConversationController({
         const boundSessionId = currentStatus.sessionId;
         if (
           resolveActiveVoiceButtonAction(boundSessionId, sessionId) ===
-          "open-owner"
+          "replace"
         ) {
           try {
-            await openVoiceConversationSession();
-          } catch (openError) {
-            addErrorNotification(boundSessionId, errorText(openError));
+            await replaceActiveVoiceConversation({
+              stop,
+              start: startCurrentConversation,
+            });
+          } catch (replaceError) {
+            addErrorNotification(sessionId, errorText(replaceError));
           }
           return;
         }
@@ -821,35 +856,16 @@ export function useVoiceConversationController({
         return;
       }
 
-      // Do not rely on the mount effect racing ahead of the user's first
-      // click. The native recognizer can finalize quickly, so its delivery
-      // subscriber must exist before the microphone lifecycle starts.
-      ensureVoiceEventDeliveryInitialized();
-      activeSendRoute = { sessionId, send: onSend };
-      // Capture the history boundary before native startup can admit a
-      // transcript and produce the first assistant response.
-      startAssistantSpeech();
-      try {
-        await start(sessionId);
-      } catch (startError) {
-        const backendStatus = useVoiceConversationStore.getState().status;
-        if (backendStatus.sessionId !== sessionId) {
-          activeSendRoute = null;
-          stopNativeAssistantSpeech();
-        }
-        addErrorNotification(sessionId, errorText(startError));
-      }
+      await startCurrentConversation();
     } finally {
       operationInFlight = false;
     }
   }, [
     canToggle,
     onPocketSetupRequired,
-    onSend,
     pocketReady,
     sessionId,
-    start,
-    startAssistantSpeech,
+    startCurrentConversation,
     stop,
   ]);
 

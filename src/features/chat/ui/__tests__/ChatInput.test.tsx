@@ -1173,7 +1173,8 @@ describe("ChatInput", () => {
     expect(button.querySelector(".lucide-phone-off")).toBeInTheDocument();
   });
 
-  it("shows a non-destructive open control outside the owning session", () => {
+  it("shows a new-call control outside the owning session", async () => {
+    const onToggle = vi.fn();
     render(
       <ChatInput
         onSend={vi.fn()}
@@ -1184,15 +1185,19 @@ describe("ChatInput", () => {
           active: true,
           ownsActiveConversation: false,
           microphoneMuted: false,
-          onToggle: vi.fn(),
+          onToggle,
           onMicrophoneMuteToggle: vi.fn(),
         }}
       />,
     );
 
-    const open = screen.getByRole("button", { name: "Open voice session" });
-    expect(open).not.toHaveClass("bg-destructive");
-    expect(open.querySelector(".lucide-phone")).toBeInTheDocument();
+    const start = screen.getByRole("button", {
+      name: "Start voice conversation",
+    });
+    expect(start).not.toHaveClass("bg-destructive");
+    expect(start.querySelector(".lucide-phone")).toBeInTheDocument();
+    await userEvent.click(start);
+    expect(onToggle).toHaveBeenCalledOnce();
     expect(
       screen.queryByRole("button", { name: "Mute microphone" }),
     ).not.toBeInTheDocument();

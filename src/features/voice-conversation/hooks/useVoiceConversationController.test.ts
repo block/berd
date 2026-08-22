@@ -22,6 +22,7 @@ import {
   createVoiceTranscriptDeliveryQueue,
   hasDeliveredVoiceTranscript,
   observeVoiceConversationControlVisibility,
+  replaceActiveVoiceConversation,
   resetVoiceUiWhenRunSettles,
   resolveActiveVoiceButtonAction,
   resolveVoiceRouteMount,
@@ -441,13 +442,61 @@ describe("voice transcript delivery coordination", () => {
     expect(canClaimVoiceSendRoute(null, null, "session-2")).toBe(true);
   });
 
-  it("opens the owner instead of stopping voice from another session", () => {
+  it("replaces the active call when starting from another session", () => {
     expect(resolveActiveVoiceButtonAction("session-1", "session-2")).toBe(
-      "open-owner",
+      "replace",
     );
     expect(resolveActiveVoiceButtonAction("session-1", "session-1")).toBe(
       "stop",
     );
+  });
+
+  it("starts the replacement only after the active call fully stops", async () => {
+    let finishStop:
+      | ((status: { lifecycle: string; sessionId: null }) => void)
+      | undefined;
+    const stop = vi.fn(
+      () =>
+        new Promise<{ lifecycle: string; sessionId: null }>((resolve) => {
+          finishStop = resolve;
+        }),
+    );
+    const start = vi.fn().mockResolvedValue(undefined);
+
+    const replacement = replaceActiveVoiceConversation({ stop, start });
+    await Promise.resolve();
+    expect(start).not.toHaveBeenCalled();
+
+    finishStop?.({ lifecycle: "stopped", sessionId: null });
+    await replacement;
+    expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("does not start a replacement when the active call remains running", async () => {
+    const start = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      replaceActiveVoiceConversation({
+        stop: vi.fn().mockResolvedValue({
+          lifecycle: "running",
+          sessionId: "session-1",
+        }),
+        start,
+      }),
+    ).rejects.toThrow("could not be stopped");
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it("does not start a replacement when stopping the active call fails", async () => {
+    const start = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      replaceActiveVoiceConversation({
+        stop: vi.fn().mockRejectedValue(new Error("stop failed")),
+        start,
+      }),
+    ).rejects.toThrow("stop failed");
+    expect(start).not.toHaveBeenCalled();
   });
 
   it("drains retained transcripts without stealing a stopped session route", () => {
