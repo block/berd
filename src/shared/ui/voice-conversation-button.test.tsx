@@ -7,7 +7,11 @@ import { VoiceConversationButton } from "@/shared/ui/voice-conversation-button";
 describe("VoiceConversationButton", () => {
   it("uses the semantic speaking treatment with reduced-motion protection", () => {
     const { rerender } = render(
-      <VoiceConversationButton speaking aria-label="Mute microphone">
+      <VoiceConversationButton
+        type="button"
+        speaking
+        aria-label="Mute microphone"
+      >
         <Mic />
       </VoiceConversationButton>,
     );
@@ -22,7 +26,11 @@ describe("VoiceConversationButton", () => {
     );
 
     rerender(
-      <VoiceConversationButton disabled aria-label="Mute microphone">
+      <VoiceConversationButton
+        type="button"
+        disabled
+        aria-label="Mute microphone"
+      >
         <Mic />
       </VoiceConversationButton>,
     );

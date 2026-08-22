@@ -3196,6 +3196,7 @@ const chromeButtonEntries: ChromeButtonEntry[] = [
     preview: (
       <div className="flex items-center gap-2">
         <VoiceConversationButton
+          type="button"
           speaking
           size="icon-sm"
           aria-label="Mute microphone while speech is detected"
@@ -3203,6 +3204,7 @@ const chromeButtonEntries: ChromeButtonEntry[] = [
           <Mic aria-hidden="true" />
         </VoiceConversationButton>
         <VoiceConversationButton
+          type="button"
           speaking
           disabled
           size="icon-sm"
