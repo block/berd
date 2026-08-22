@@ -1521,13 +1521,49 @@ impl NativeVoiceState {
             .map(|session_id| (session_id, runtime.revision))
     }
 
+    #[cfg(test)]
     async fn stop_destroyed_owner_lifecycle(
         &self,
         window_label: &str,
         expected_session_id: &str,
         expected_revision: u64,
     ) -> Result<Option<StopCompletion>, String> {
+        self.stop_destroyed_owner_lifecycle_with_cleanup(
+            window_label,
+            expected_session_id,
+            expected_revision,
+            |_| {},
+        )
+        .await
+    }
+
+    async fn stop_destroyed_owner_lifecycle_with_cleanup(
+        &self,
+        window_label: &str,
+        expected_session_id: &str,
+        expected_revision: u64,
+        cleanup: impl FnOnce(&StopCompletion),
+    ) -> Result<Option<StopCompletion>, String> {
         let _stop_guard = self.stop_serial.lock().await;
+        let completion = self
+            .stop_destroyed_owner_lifecycle_locked(
+                window_label,
+                expected_session_id,
+                expected_revision,
+            )
+            .await?;
+        if let Some(completion) = completion.as_ref() {
+            cleanup(completion);
+        }
+        Ok(completion)
+    }
+
+    async fn stop_destroyed_owner_lifecycle_locked(
+        &self,
+        window_label: &str,
+        expected_session_id: &str,
+        expected_revision: u64,
+    ) -> Result<Option<StopCompletion>, String> {
         let owner_matches = {
             let runtime = self
                 .runtime
@@ -1554,17 +1590,25 @@ impl NativeVoiceState {
         &self,
         app: &AppHandle,
         capture: &VoiceCaptureState,
+        pocket_voice: &super::pocket_voice::PocketVoiceState,
         window_label: &str,
         expected_session_id: &str,
         expected_revision: u64,
     ) -> Result<bool, String> {
         let Some(completion) = self
-            .stop_destroyed_owner_lifecycle(window_label, expected_session_id, expected_revision)
+            .stop_destroyed_owner_lifecycle_with_cleanup(
+                window_label,
+                expected_session_id,
+                expected_revision,
+                |completion| {
+                    capture.release_owner(&completion.owner.window_label, &completion.owner_id);
+                    pocket_voice.stop_for_window_destroyed();
+                },
+            )
             .await?
         else {
             return Ok(false);
         };
-        capture.release_owner(&completion.owner.window_label, &completion.owner_id);
         super::voice_buddy::dismiss_after_terminal_event(
             app,
             completion.controls_revision,
@@ -1617,21 +1661,20 @@ pub fn handle_voice_owner_window_destroyed(app: &AppHandle, window_label: &str) 
         tauri::async_runtime::spawn(async move {
             let native_voice = app_for_native_close.state::<NativeVoiceState>();
             let capture = app_for_native_close.state::<VoiceCaptureState>();
+            let pocket_voice =
+                app_for_native_close.state::<super::pocket_voice::PocketVoiceState>();
             match native_voice
                 .stop_for_window_destroyed(
                     &app_for_native_close,
                     capture.inner(),
+                    pocket_voice.inner(),
                     &label_for_native_close,
                     &session_id,
                     revision,
                 )
                 .await
             {
-                Ok(true) => {
-                    app_for_native_close
-                        .state::<super::pocket_voice::PocketVoiceState>()
-                        .stop_for_window_destroyed();
-                }
+                Ok(true) => {}
                 Ok(false) => {}
                 Err(error) => {
                     log::error!("Failed to stop voice for destroyed owner window: {error}");
@@ -2710,6 +2753,33 @@ mod tests {
             state.active_session_lifecycle_target(),
             Some(("session-b".to_string(), "owner-window".to_string(), 6,))
         );
+    }
+
+    #[tokio::test]
+    async fn owner_destroy_keeps_cleanup_inside_start_stop_serialization() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-a".to_string());
+            runtime.lifecycle_id = Some("lifecycle-a".to_string());
+            runtime.revision = 4;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "owner-window".to_string(),
+            });
+        }
+
+        let cleanup_ran = AtomicBool::new(false);
+        let completion = state
+            .stop_destroyed_owner_lifecycle_with_cleanup("owner-window", "session-a", 4, |_| {
+                assert!(state.stop_serial.try_lock().is_err());
+                cleanup_ran.store(true, Ordering::SeqCst);
+            })
+            .await
+            .expect("stop destroyed owner")
+            .expect("owned lifecycle stops");
+
+        assert_eq!(completion.next_revision, 5);
+        assert!(cleanup_ran.load(Ordering::SeqCst));
     }
 
     #[test]

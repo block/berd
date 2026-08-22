@@ -230,14 +230,21 @@ fn active_controls_match(active_revision: Option<u64>, controls_url: Option<&str
     })
 }
 
+fn should_destroy_stale_candidate(
+    candidate_url: Option<&str>,
+    active_revision: Option<u64>,
+) -> bool {
+    candidate_url.is_some_and(|url| !active_controls_match(active_revision, Some(url)))
+}
+
 pub fn matches_active_lifecycle(app: &AppHandle) -> bool {
+    let controls_url = app
+        .get_webview_window(WINDOW_LABEL)
+        .and_then(|window| window.url().ok());
     let active_revision = app
         .state::<NativeVoiceState>()
         .active_session_lifecycle_target()
         .map(|(_, _, revision)| revision);
-    let controls_url = app
-        .get_webview_window(WINDOW_LABEL)
-        .and_then(|window| window.url().ok());
     active_controls_match(
         active_revision,
         controls_url.as_ref().map(|url| url.as_str()),
@@ -252,16 +259,25 @@ pub fn should_preserve_main_for_voice(
 }
 
 pub fn destroy_stale_for_main_close(app: &AppHandle) -> Result<(), String> {
-    if matches_active_lifecycle(app) {
-        return Ok(());
-    }
     let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
         return Ok(());
     };
+    let candidate_url = window.url().map_err(|error| error.to_string())?;
+    let active_revision = app
+        .state::<NativeVoiceState>()
+        .active_session_lifecycle_target()
+        .map(|(_, _, revision)| revision);
+    if !should_destroy_stale_candidate(Some(candidate_url.as_str()), active_revision) {
+        return Ok(());
+    }
     window
         .destroy()
         .map_err(|error| format!("Could not remove stale floating voice controls: {error}"))?;
-    if app.get_webview_window(WINDOW_LABEL).is_some() {
+    let candidate_remains = app
+        .get_webview_window(WINDOW_LABEL)
+        .and_then(|current| current.url().ok())
+        .is_some_and(|current_url| current_url == candidate_url);
+    if candidate_remains {
         return Err("Stale floating voice controls remained after removal.".to_string());
     }
     Ok(())
@@ -507,6 +523,16 @@ mod tests {
         assert!(!active_controls_match(None, Some(&controls)));
         assert!(!active_controls_match(Some(6), Some(&controls)));
         assert!(!active_controls_match(Some(4), None));
+    }
+
+    #[test]
+    fn stale_cleanup_never_targets_controls_created_after_candidate_capture() {
+        assert!(!should_destroy_stale_candidate(None, Some(4)));
+        assert!(!should_destroy_stale_candidate(None, None));
+        assert!(should_destroy_stale_candidate(
+            Some(&controls_url(3)),
+            Some(4),
+        ));
     }
 
     #[test]
