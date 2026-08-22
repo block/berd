@@ -50,8 +50,6 @@ pub struct NativeVoiceStatus {
     owner_window_label: Option<String>,
     microphone_muted: bool,
     revision: u64,
-    native_microphone_mute_control: bool,
-    native_microphone_muted: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -84,7 +82,6 @@ enum NativeVoiceEvent {
         owner_window_label: String,
         line: String,
         revision: u64,
-        native_microphone_mute_control: bool,
     },
     User {
         session_id: String,
@@ -595,6 +592,7 @@ struct SttPipeline {
     discard_on_shutdown: Arc<AtomicBool>,
     input_muted: Arc<AtomicBool>,
     input_mute_epoch: Arc<AtomicU64>,
+    shutdown_mute_epoch: Arc<AtomicU64>,
     thread: Option<thread::JoinHandle<()>>,
 }
 
@@ -613,10 +611,12 @@ impl SttPipeline {
         let (event_tx, event_rx) = tokio_mpsc::channel(64);
         let shutdown = Arc::new(AtomicBool::new(false));
         let discard_on_shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_mute_epoch = Arc::new(AtomicU64::new(0));
         let worker_shutdown = Arc::clone(&shutdown);
         let worker_discard_on_shutdown = Arc::clone(&discard_on_shutdown);
         let worker_input_muted = Arc::clone(&input_muted);
         let worker_input_mute_epoch = Arc::clone(&input_mute_epoch);
+        let worker_shutdown_mute_epoch = Arc::clone(&shutdown_mute_epoch);
         let thread = thread::Builder::new()
             .name("berd-native-stt".into())
             .spawn(move || {
@@ -628,6 +628,7 @@ impl SttPipeline {
                     worker_discard_on_shutdown,
                     worker_input_muted,
                     worker_input_mute_epoch,
+                    worker_shutdown_mute_epoch,
                 )
             })
             .map_err(|error| format!("start native transcription: {error}"))?;
@@ -639,6 +640,7 @@ impl SttPipeline {
                 discard_on_shutdown,
                 input_muted,
                 input_mute_epoch,
+                shutdown_mute_epoch,
                 thread: Some(thread),
             },
             event_rx,
@@ -689,6 +691,10 @@ impl SttPipeline {
 
     fn signal_shutdown(&self) {
         self.latch_muted_shutdown();
+        self.shutdown_mute_epoch.store(
+            self.input_mute_epoch.load(Ordering::Acquire),
+            Ordering::Release,
+        );
         self.shutdown.store(true, Ordering::Release);
     }
 
@@ -742,9 +748,6 @@ fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
             .map(|owner| owner.window_label.clone()),
         microphone_muted: state.microphone_is_muted(),
         revision: runtime.revision,
-        native_microphone_mute_control: runtime.native_microphone_mute_control,
-        native_microphone_muted: runtime.session_id.is_some()
-            && state.input_muted.load(Ordering::Acquire),
     }
 }
 
@@ -909,7 +912,7 @@ pub async fn start_native_voice_conversation(
         }
     };
     let lifecycle_guard = state.stop_serial.lock().await;
-    let install_result = (|| -> Result<(u64, String, bool), String> {
+    let install_result = (|| -> Result<(u64, String), String> {
         let start_blocks = state
             .start_blocks
             .lock()
@@ -954,10 +957,9 @@ pub async fn start_native_voice_conversation(
         Ok((
             runtime.revision,
             runtime.lifecycle_id.clone().unwrap_or_default(),
-            runtime.native_microphone_mute_control,
         ))
     })();
-    let (revision, lifecycle_id, runtime_mute_control) = match install_result {
+    let (revision, lifecycle_id) = match install_result {
         Ok(lifecycle) => lifecycle,
         Err(error) => {
             drop(lifecycle_guard);
@@ -982,7 +984,6 @@ pub async fn start_native_voice_conversation(
             owner_window_label: window_label.clone(),
             line: "Native Parakeet voice conversation is on".to_string(),
             revision,
-            native_microphone_mute_control: runtime_mute_control,
         },
     );
     super::voice_buddy::emit(
@@ -992,7 +993,6 @@ pub async fn start_native_voice_conversation(
             owner_window_label: window_label.clone(),
             line: "Native Parakeet voice conversation is on".to_string(),
             revision,
-            native_microphone_mute_control: runtime_mute_control,
         },
     );
 
@@ -1445,39 +1445,6 @@ impl NativeVoiceState {
     }
 }
 
-#[tauri::command]
-pub fn set_native_voice_input_muted(
-    state: State<'_, NativeVoiceState>,
-    webview_window: WebviewWindow,
-    session_id: String,
-    revision: u64,
-    muted: bool,
-) -> Result<(), String> {
-    let runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| "native voice state lock was poisoned".to_string())?;
-    if !owns_native_mute_control(&runtime, webview_window.label(), &session_id, revision) {
-        return Err("Native microphone mute is unavailable for this conversation.".to_string());
-    }
-    native_input_mute::set_muted(&state.input_muted, &state.input_mute_epoch, muted)
-}
-
-fn owns_native_mute_control(
-    runtime: &Runtime,
-    window_label: &str,
-    session_id: &str,
-    revision: u64,
-) -> bool {
-    runtime.native_microphone_mute_control
-        && runtime.session_id.as_deref() == Some(session_id)
-        && runtime.revision == revision
-        && runtime
-            .owner
-            .as_ref()
-            .is_some_and(|owner| owner.window_label == window_label)
-}
-
 fn software_microphone_mute(native_microphone_mute_control: bool, muted: bool) -> bool {
     !native_microphone_mute_control && muted
 }
@@ -1538,6 +1505,7 @@ fn stt_worker(
     discard_on_shutdown: Arc<AtomicBool>,
     input_muted: Arc<AtomicBool>,
     input_mute_epoch: Arc<AtomicU64>,
+    shutdown_mute_epoch: Arc<AtomicU64>,
 ) {
     use rubato::{Fft, FixedSync, Resampler};
     use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig};
@@ -1584,10 +1552,8 @@ fn stt_worker(
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         };
         let shutting_down = shutdown.load(Ordering::Acquire);
-        if shutting_down && (discard_on_shutdown.load(Ordering::Acquire) || batch.is_none()) {
-            break;
-        }
-        let current_mute_epoch = input_mute_epoch.load(Ordering::Acquire);
+        let current_mute_epoch =
+            effective_mute_epoch(shutting_down, &input_mute_epoch, &shutdown_mute_epoch);
         if current_mute_epoch != observed_mute_epoch {
             observed_mute_epoch = current_mute_epoch;
             if clear_buffered_audio(
@@ -1599,6 +1565,9 @@ fn stt_worker(
             ) {
                 let _ = event_tx.blocking_send(SttMessage::Speaking(false));
             }
+        }
+        if shutting_down && (discard_on_shutdown.load(Ordering::Acquire) || batch.is_none()) {
+            break;
         }
         if !shutting_down && input_muted.load(Ordering::Acquire) {
             continue;
@@ -1638,7 +1607,7 @@ fn stt_worker(
                             &recognizer,
                             &event_tx,
                             None,
-                            &input_mute_epoch,
+                            input_mute_epoch.load(Ordering::Acquire),
                             observed_mute_epoch,
                         );
                         speech.clear();
@@ -1654,7 +1623,7 @@ fn stt_worker(
                             &recognizer,
                             &event_tx,
                             None,
-                            &input_mute_epoch,
+                            input_mute_epoch.load(Ordering::Acquire),
                             observed_mute_epoch,
                         );
                         speech.clear();
@@ -1673,10 +1642,22 @@ fn stt_worker(
             &recognizer,
             &event_tx,
             Some(delivered_tx),
-            &input_mute_epoch,
+            shutdown_mute_epoch.load(Ordering::Acquire),
             observed_mute_epoch,
         );
         let _ = delivered_rx.recv_timeout(Duration::from_secs(5));
+    }
+}
+
+fn effective_mute_epoch(
+    shutting_down: bool,
+    input_mute_epoch: &AtomicU64,
+    shutdown_mute_epoch: &AtomicU64,
+) -> u64 {
+    if shutting_down {
+        shutdown_mute_epoch.load(Ordering::Acquire)
+    } else {
+        input_mute_epoch.load(Ordering::Acquire)
     }
 }
 
@@ -1711,7 +1692,7 @@ fn flush_speech(
     recognizer: &sherpa_onnx::OfflineRecognizer,
     event_tx: &tokio_mpsc::Sender<SttMessage>,
     delivered: Option<SyncSender<()>>,
-    input_mute_epoch: &AtomicU64,
+    current_mute_epoch: u64,
     expected_mute_epoch: u64,
 ) {
     if speech.is_empty() {
@@ -1724,7 +1705,7 @@ fn flush_speech(
         .get_result()
         .map(|result| result.text.trim().to_string())
         .unwrap_or_default();
-    if input_mute_epoch.load(Ordering::Acquire) != expected_mute_epoch {
+    if current_mute_epoch != expected_mute_epoch {
         if let Some(delivered) = delivered {
             let _ = delivered.send(());
         }
@@ -1755,24 +1736,6 @@ fn deliver_recognition_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn native_mute_control_is_bound_to_window_session_and_revision() {
-        let runtime = Runtime {
-            session_id: Some("session-1".to_string()),
-            revision: 4,
-            owner: Some(RuntimeOwner {
-                window_label: "main".to_string(),
-            }),
-            native_microphone_mute_control: true,
-            ..Runtime::default()
-        };
-
-        assert!(owns_native_mute_control(&runtime, "main", "session-1", 4));
-        assert!(!owns_native_mute_control(&runtime, "other", "session-1", 4));
-        assert!(!owns_native_mute_control(&runtime, "main", "session-2", 4));
-        assert!(!owns_native_mute_control(&runtime, "main", "session-1", 5));
-    }
 
     #[test]
     fn native_mute_control_does_not_latch_the_software_fallback() {
@@ -1896,6 +1859,7 @@ mod tests {
                 discard_on_shutdown: Arc::new(AtomicBool::new(false)),
                 input_muted: Arc::new(AtomicBool::new(false)),
                 input_mute_epoch: Arc::new(AtomicU64::new(0)),
+                shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
                 thread: Some(worker),
             });
         }
@@ -2083,6 +2047,7 @@ mod tests {
             discard_on_shutdown: Arc::new(AtomicBool::new(false)),
             input_muted: Arc::new(AtomicBool::new(false)),
             input_mute_epoch: Arc::new(AtomicU64::new(0)),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
@@ -2099,6 +2064,7 @@ mod tests {
             discard_on_shutdown: Arc::new(AtomicBool::new(false)),
             input_muted: Arc::new(AtomicBool::new(false)),
             input_mute_epoch: Arc::new(AtomicU64::new(0)),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
@@ -2121,6 +2087,7 @@ mod tests {
             discard_on_shutdown: Arc::new(AtomicBool::new(false)),
             input_muted: Arc::clone(&input_muted),
             input_mute_epoch: Arc::clone(&input_mute_epoch),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
@@ -2148,6 +2115,7 @@ mod tests {
             discard_on_shutdown: Arc::new(AtomicBool::new(false)),
             input_muted: Arc::new(AtomicBool::new(false)),
             input_mute_epoch: Arc::clone(&input_mute_epoch),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
@@ -2192,6 +2160,7 @@ mod tests {
             discard_on_shutdown: Arc::clone(&discard_on_shutdown),
             input_muted: Arc::clone(&input_muted),
             input_mute_epoch: Arc::new(AtomicU64::new(1)),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
@@ -2206,21 +2175,28 @@ mod tests {
     fn unmuted_shutdown_keeps_final_utterance_after_later_mute_event() {
         let (sender, _receiver) = mpsc::sync_channel(1);
         let input_muted = Arc::new(AtomicBool::new(false));
+        let input_mute_epoch = Arc::new(AtomicU64::new(0));
         let discard_on_shutdown = Arc::new(AtomicBool::new(false));
         let mut pipeline = SttPipeline {
             audio_tx: sender,
             shutdown: Arc::new(AtomicBool::new(false)),
             discard_on_shutdown: Arc::clone(&discard_on_shutdown),
             input_muted: Arc::clone(&input_muted),
-            input_mute_epoch: Arc::new(AtomicU64::new(0)),
+            input_mute_epoch: Arc::clone(&input_mute_epoch),
+            shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
             audio_seen: AtomicBool::new(false),
             thread: None,
         };
 
         pipeline.begin_shutdown();
         input_muted.store(true, Ordering::Release);
+        input_mute_epoch.fetch_add(1, Ordering::AcqRel);
 
         assert!(!discard_on_shutdown.load(Ordering::Acquire));
+        assert_eq!(
+            effective_mute_epoch(true, &input_mute_epoch, &pipeline.shutdown_mute_epoch),
+            0,
+        );
     }
 
     #[test]
@@ -2238,6 +2214,7 @@ mod tests {
                 discard_on_shutdown: Arc::new(AtomicBool::new(false)),
                 input_muted: Arc::new(AtomicBool::new(false)),
                 input_mute_epoch: Arc::new(AtomicU64::new(0)),
+                shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
                 audio_seen: AtomicBool::new(false),
                 thread: None,
             });
@@ -2280,6 +2257,7 @@ mod tests {
                 discard_on_shutdown: Arc::new(AtomicBool::new(false)),
                 input_muted: Arc::new(AtomicBool::new(false)),
                 input_mute_epoch: Arc::new(AtomicU64::new(0)),
+                shutdown_mute_epoch: Arc::new(AtomicU64::new(0)),
                 audio_seen: AtomicBool::new(false),
                 thread: Some(worker),
             });

@@ -433,6 +433,33 @@ describe("voice conversation API", () => {
     expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(false);
   });
 
+  it("keeps a newer native mute event over a stale action response", async () => {
+    const status = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running",
+      sessionId: "session-1",
+      ownerWindowLabel: "main",
+      microphoneMuted: false,
+      revision: 3,
+    } as const;
+    let resolveMute!: (value: unknown) => void;
+    mocks.invoke.mockReturnValueOnce(
+      new Promise<unknown>((resolve) => {
+        resolveMute = resolve;
+      }),
+    );
+    await reconcileVoiceConversationMicrophone(status);
+
+    const muting = setVoiceConversationMicrophoneMuted(true, status);
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledOnce());
+    await reconcileVoiceConversationMicrophone(status);
+    resolveMute({ ...status, microphoneMuted: true });
+    await muting;
+
+    expect(mocks.setMicrophoneMuted).toHaveBeenLastCalledWith(false);
+  });
+
   it("restores the previous mute state when initial capture fails", async () => {
     const status = {
       available: true,

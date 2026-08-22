@@ -204,6 +204,87 @@ describe("voice conversation store lifecycle ordering", () => {
     expect(mocks.reconcileMicrophone).toHaveBeenCalledWith(running);
   });
 
+  it("preserves a mute event that arrives while recovery is pending", async () => {
+    const store = await loadStore();
+    const running = {
+      ...status("running", 2, "session-1"),
+      microphoneMuted: true,
+    };
+    store.setState({
+      status: running,
+      microphoneMuted: true,
+      uiState: "listening",
+    });
+    const recovery = deferred<VoiceConversationStatus>();
+    const reconciliation = deferred<void>();
+    mocks.getStatus.mockReturnValueOnce(recovery.promise);
+    mocks.reconcileMicrophone.mockReturnValueOnce(reconciliation.promise);
+
+    const recovering = store.getState().init();
+    await vi.waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(2));
+    recovery.resolve(running);
+    await vi.waitFor(() =>
+      expect(mocks.reconcileMicrophone).toHaveBeenLastCalledWith(running),
+    );
+    emit({
+      type: "microphoneMute",
+      sessionId: "session-1",
+      muted: false,
+      revision: 2,
+    });
+    reconciliation.resolve();
+    await recovering;
+
+    expect(store.getState().microphoneMuted).toBe(false);
+    expect(store.getState().status.microphoneMuted).toBe(false);
+    expect(mocks.reconcileMicrophone).toHaveBeenLastCalledWith({
+      ...running,
+      microphoneMuted: false,
+    });
+  });
+
+  it("does not recover over a pending microphone mute request", async () => {
+    const store = await loadStore();
+    const running = status("running", 2, "session-1");
+    store.setState({ status: running, uiState: "listening" });
+    const muteRequest = deferred<VoiceConversationStatus>();
+    const recovery = deferred<VoiceConversationStatus>();
+    mocks.setMicrophoneMuted.mockReturnValueOnce(muteRequest.promise);
+    mocks.getStatus.mockReturnValueOnce(recovery.promise);
+
+    const muting = store.getState().setMicrophoneMuted(true);
+    const recovering = store.getState().init();
+    await vi.waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(2));
+    recovery.resolve(running);
+    await recovering;
+
+    expect(store.getState().microphoneMuted).toBe(true);
+    muteRequest.resolve({ ...running, microphoneMuted: true });
+    await muting;
+    expect(store.getState().microphoneMuted).toBe(true);
+  });
+
+  it("does not let a stale UI completion replace a newer mute event", async () => {
+    const store = await loadStore();
+    const running = status("running", 2, "session-1");
+    store.setState({ status: running, uiState: "listening" });
+    const muteRequest = deferred<VoiceConversationStatus>();
+    mocks.setMicrophoneMuted.mockReturnValueOnce(muteRequest.promise);
+
+    const muting = store.getState().setMicrophoneMuted(true);
+    emit({
+      type: "microphoneMute",
+      sessionId: "session-1",
+      muted: false,
+      revision: 2,
+    });
+    muteRequest.resolve({ ...running, microphoneMuted: true });
+    await muting;
+
+    expect(store.getState().microphoneMuted).toBe(false);
+    expect(store.getState().status.microphoneMuted).toBe(false);
+  });
+
   it("refreshes availability when installation changes without a lifecycle revision", async () => {
     mocks.getStatus
       .mockResolvedValueOnce({

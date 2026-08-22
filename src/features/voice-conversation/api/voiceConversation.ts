@@ -14,10 +14,12 @@ let microphoneStart: { generation: number; promise: Promise<void> } | null =
   null;
 let microphoneMuted = false;
 let microphoneMuteIntent = 0;
+let microphoneMuteObservationVersion = 0;
 let microphoneMuteQueue: Promise<void> = Promise.resolve();
 
 function resetMicrophoneMuteState(): void {
   microphoneMuteIntent += 1;
+  microphoneMuteObservationVersion += 1;
   microphoneMuted = false;
 }
 
@@ -59,6 +61,9 @@ export async function reconcileVoiceConversationMicrophone(
 ): Promise<void> {
   if (status.revision < microphoneLifecycleRevision) return;
   microphoneLifecycleRevision = status.revision;
+  if (microphoneMuted !== status.microphoneMuted) {
+    microphoneMuteObservationVersion += 1;
+  }
   microphoneMuted = status.microphoneMuted;
   if (
     status.lifecycle === "running" &&
@@ -75,6 +80,7 @@ export async function setVoiceConversationMicrophoneMuted(
   status: VoiceConversationStatus,
 ): Promise<VoiceConversationStatus> {
   const intent = ++microphoneMuteIntent;
+  const observationVersion = microphoneMuteObservationVersion;
   const previous = microphoneMuted;
   const appliedOptimistically = activeMicrophone !== null;
   microphoneMuted = muted;
@@ -85,11 +91,11 @@ export async function setVoiceConversationMicrophoneMuted(
       if (!activeMicrophone) {
         await reconcileVoiceConversationMicrophone({
           ...status,
-          microphoneMuted: muted,
+          microphoneMuted,
         });
       }
       if (!appliedOptimistically) {
-        activeMicrophone?.setMuted(muted);
+        activeMicrophone?.setMuted(microphoneMuted);
       }
       const nextStatus = await invoke<VoiceConversationStatus>(
         "set_native_voice_microphone_muted",
@@ -99,14 +105,11 @@ export async function setVoiceConversationMicrophoneMuted(
           muted,
         },
       );
-      if (intent === microphoneMuteIntent) {
-        microphoneMuted = nextStatus.microphoneMuted;
-      }
       if (
-        nextStatus.sessionId !== status.sessionId ||
-        nextStatus.revision !== status.revision ||
-        nextStatus.microphoneMuted !== muted
+        intent === microphoneMuteIntent &&
+        observationVersion === microphoneMuteObservationVersion
       ) {
+        microphoneMuted = nextStatus.microphoneMuted;
         await reconcileVoiceConversationMicrophone(nextStatus);
       }
       return nextStatus;
@@ -118,7 +121,10 @@ export async function setVoiceConversationMicrophoneMuted(
   try {
     return await operation;
   } catch (error) {
-    if (intent === microphoneMuteIntent) {
+    if (
+      intent === microphoneMuteIntent &&
+      observationVersion === microphoneMuteObservationVersion
+    ) {
       microphoneMuted = previous;
       activeMicrophone?.setMuted(previous);
     }

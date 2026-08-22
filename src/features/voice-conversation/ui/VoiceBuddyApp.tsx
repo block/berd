@@ -1,5 +1,5 @@
 import { GripVertical, Mic, MicOff, PhoneOff } from "lucide-react";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -29,6 +29,7 @@ export function VoiceBuddyApp() {
     revision: 0,
   });
   const [initialized, setInitialized] = useState(false);
+  const microphoneMuteGeneration = useRef(0);
 
   useLayoutEffect(() => {
     if (!initialized || !status?.sessionId) return;
@@ -44,6 +45,14 @@ export function VoiceBuddyApp() {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     const onEvent = (event: VoiceConversationEvent) => {
+      if (
+        event.type === "microphoneMute" ||
+        event.type === "startup" ||
+        event.type === "cleanShutdown" ||
+        (event.type === "error" && event.terminal)
+      ) {
+        microphoneMuteGeneration.current += 1;
+      }
       setActivity((current) => {
         if (event.revision < current.revision) return current;
         if (
@@ -193,11 +202,13 @@ export function VoiceBuddyApp() {
 
   const toggleMute = () => {
     if (!status) return;
+    const generation = microphoneMuteGeneration.current;
     void run("mute", async () => {
       const nextStatus = await setVoiceConversationMicrophoneMuted(
         !microphoneMuted,
         status,
       );
+      if (generation !== microphoneMuteGeneration.current) return;
       setStatus((current) =>
         current && current.revision > nextStatus.revision
           ? current

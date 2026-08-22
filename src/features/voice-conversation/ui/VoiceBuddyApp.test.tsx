@@ -168,6 +168,46 @@ describe("VoiceBuddyApp", () => {
     expect(mocks.setMuted).toHaveBeenCalledWith(true, runningStatus);
   });
 
+  it("keeps a newer mute event over an equal-revision action response", async () => {
+    const user = userEvent.setup();
+    let resolveMute!: (status: typeof runningStatus) => void;
+    mocks.setMuted.mockReturnValueOnce(
+      new Promise<typeof runningStatus>((resolve) => {
+        resolveMute = resolve;
+      }),
+    );
+    render(<VoiceBuddyApp />);
+    await waitFor(() => expect(voiceEventListener).toBeDefined());
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "toolbar.voiceConversation.muteMicrophone",
+      }),
+    );
+    act(() => {
+      voiceEventListener?.({
+        type: "microphoneMute",
+        sessionId: "session-a",
+        muted: false,
+        revision: 3,
+      });
+      resolveMute({ ...runningStatus, microphoneMuted: true });
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", {
+          name: "toolbar.voiceConversation.muteMicrophone",
+        }),
+      ).toBeEnabled(),
+    );
+    expect(
+      screen.queryByRole("button", {
+        name: "toolbar.voiceConversation.unmuteMicrophone",
+      }),
+    ).not.toBeInTheDocument();
+  });
+
   it("hangs up the voice conversation", async () => {
     const user = userEvent.setup();
     render(<VoiceBuddyApp />);

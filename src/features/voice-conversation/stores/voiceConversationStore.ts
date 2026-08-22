@@ -59,6 +59,9 @@ interface VoiceConversationStore {
 
 let initialized = false;
 let stopInFlight: Promise<VoiceConversationStatus> | null = null;
+let microphoneMuteIntent = 0;
+let microphoneMuteStateVersion = 0;
+let pendingMicrophoneMuteRequests = 0;
 const voiceStartBlocks = new Map<string, number>();
 const voiceStartsInFlight = new Map<string, Promise<VoiceConversationStatus>>();
 const eventSubscribers = new Set<
@@ -196,6 +199,18 @@ function shouldApplyResponseRevision(
   return revision > current.revision;
 }
 
+function isSameRunningLifecycle(
+  current: VoiceConversationStatus,
+  next: VoiceConversationStatus,
+) {
+  return (
+    current.lifecycle === "running" &&
+    next.lifecycle === "running" &&
+    current.sessionId === next.sessionId &&
+    current.revision === next.revision
+  );
+}
+
 export const useVoiceConversationStore = create<VoiceConversationStore>(
   (set, get) => ({
     status: VOICE_CONVERSATION_OFF_STATUS,
@@ -219,9 +234,29 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
     init: async () => {
       if (initialized) {
         try {
+          const muteStateVersion = microphoneMuteStateVersion;
+          const muteRequestWasPending = pendingMicrophoneMuteRequests > 0;
           const status = await getVoiceConversationStatus();
-          await reconcileVoiceConversationMicrophone(status);
+          const currentStatus = get().status;
+          const sameRunningLifecycle = isSameRunningLifecycle(
+            currentStatus,
+            status,
+          );
+          const shouldPreserveCurrentMute = () =>
+            sameRunningLifecycle &&
+            (muteRequestWasPending ||
+              pendingMicrophoneMuteRequests > 0 ||
+              muteStateVersion !== microphoneMuteStateVersion);
+          const preserveCurrentMute = shouldPreserveCurrentMute();
+          await reconcileVoiceConversationMicrophone(
+            preserveCurrentMute
+              ? { ...status, microphoneMuted: get().microphoneMuted }
+              : status,
+          );
           set((state) => {
+            const microphoneMuted = shouldPreserveCurrentMute()
+              ? state.microphoneMuted
+              : status.microphoneMuted;
             if (
               shouldApplyResponseRevision(state.status, status.revision) ||
               (!state.hydrated &&
@@ -229,12 +264,12 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                 state.uiState === "off")
             ) {
               return {
-                status,
+                status: { ...status, microphoneMuted },
                 uiState:
                   state.uiState === "error"
                     ? state.uiState
                     : uiStateForStatus(status),
-                microphoneMuted: status.microphoneMuted,
+                microphoneMuted,
                 hydrated: true,
               };
             }
@@ -244,9 +279,9 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   ...state.status,
                   available: status.available,
                   unavailableReason: status.unavailableReason,
-                  microphoneMuted: status.microphoneMuted,
+                  microphoneMuted,
                 },
-                microphoneMuted: status.microphoneMuted,
+                microphoneMuted,
                 hydrated: true,
               };
             }
@@ -269,6 +304,19 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       try {
         await listenToVoiceConversation((event) => {
           if (!shouldApplyEventRevision(get().status, event.revision)) return;
+
+          if (event.type === "microphoneMute") {
+            microphoneMuteIntent += 1;
+            microphoneMuteStateVersion += 1;
+          } else if (event.type === "startup") {
+            microphoneMuteIntent += 1;
+          } else if (
+            event.type === "cleanShutdown" ||
+            (event.type === "error" && event.terminal)
+          ) {
+            microphoneMuteIntent += 1;
+            microphoneMuteStateVersion += 1;
+          }
 
           set((state) => {
             switch (event.type) {
@@ -472,6 +520,8 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           new Error("Voice cannot start while this chat is being archived."),
         );
       }
+      microphoneMuteIntent += 1;
+      microphoneMuteStateVersion += 1;
       set({ uiState: "starting", microphoneMuted: false, error: null });
       const request = (async () => {
         try {
@@ -524,6 +574,8 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
 
     stop: () => {
       if (stopInFlight) return stopInFlight;
+      microphoneMuteIntent += 1;
+      microphoneMuteStateVersion += 1;
       const activeStatus = get().status;
       set({
         uiState: "stopping",
@@ -602,6 +654,21 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
     setMicrophoneMuted: async (microphoneMuted) => {
       const current = get();
       if (current.status.lifecycle !== "running") return;
+      const intent = ++microphoneMuteIntent;
+      microphoneMuteStateVersion += 1;
+      pendingMicrophoneMuteRequests += 1;
+      set((state) => {
+        const nextState = {
+          ...state,
+          microphoneMuted,
+          userSpeaking: microphoneMuted ? false : state.userSpeaking,
+        };
+        return {
+          microphoneMuted,
+          userSpeaking: nextState.userSpeaking,
+          uiState: activityUiState(nextState),
+        };
+      });
       let status: VoiceConversationStatus;
       try {
         status = await setVoiceConversationMicrophoneMuted(
@@ -609,12 +676,18 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           current.status,
         );
       } catch (error) {
-        set({
-          uiState: "error",
-          error: error instanceof Error ? error.message : String(error),
-        });
+        if (intent === microphoneMuteIntent) {
+          set({
+            microphoneMuted: current.microphoneMuted,
+            uiState: "error",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
         throw error;
+      } finally {
+        pendingMicrophoneMuteRequests -= 1;
       }
+      if (intent !== microphoneMuteIntent) return;
       set((state) => {
         if (status.revision < state.status.revision) {
           return state;
