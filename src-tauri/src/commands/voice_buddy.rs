@@ -59,21 +59,34 @@ pub fn restore_hidden_owner(app: &AppHandle, owner_window_label: &str) {
     let _ = (app, owner_window_label);
 }
 
+fn open_session_target(
+    app: &AppHandle,
+    session_id: &str,
+    owner_window_label: &str,
+) -> Result<(), String> {
+    let window = app
+        .get_webview_window(owner_window_label)
+        .ok_or_else(|| "The voice session window is no longer available.".to_string())?;
+    focus_window(&window);
+    if owner_window_label == "main" {
+        window
+            .emit(
+                OPEN_SESSION_EVENT,
+                OpenSessionPayload {
+                    session_id: session_id.to_string(),
+                },
+            )
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 pub fn open_active_session(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<NativeVoiceState>();
     let Some((session_id, owner_window_label)) = state.active_session_target() else {
         return Ok(());
     };
-    let window = app
-        .get_webview_window(&owner_window_label)
-        .ok_or_else(|| "The voice session window is no longer available.".to_string())?;
-    focus_window(&window);
-    if owner_window_label == "main" {
-        window
-            .emit(OPEN_SESSION_EVENT, OpenSessionPayload { session_id })
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
+    open_session_target(app, &session_id, &owner_window_label)
 }
 
 fn position_near_bottom_right(app: &AppHandle, window: &WebviewWindow) {
@@ -234,6 +247,14 @@ pub fn show_voice_conversation_controls(
     if window.label() != WINDOW_LABEL {
         return Err("Only the floating voice controls can show this window.".to_string());
     }
+    let Some((active_session_id, owner_window_label, active_revision)) =
+        state.active_session_lifecycle_target()
+    else {
+        return Ok(());
+    };
+    if active_session_id != session_id || active_revision != expected_revision {
+        return Ok(());
+    }
     let Some(mut target) = state.controls_visibility_target(&session_id, expected_revision)? else {
         return Ok(());
     };
@@ -244,11 +265,24 @@ pub fn show_voice_conversation_controls(
             window.show()
         };
         if let Err(error) = apply_result {
-            open_active_session(window.app_handle()).map_err(|recovery_error| {
-                format!(
-                    "The floating voice controls could not be prepared ({error}), and the voice session could not be restored: {recovery_error}"
+            if state.active_session_lifecycle_target()
+                == Some((
+                    session_id.clone(),
+                    owner_window_label.clone(),
+                    expected_revision,
+                ))
+            {
+                open_session_target(
+                    window.app_handle(),
+                    &session_id,
+                    &owner_window_label,
                 )
-            })?;
+                .map_err(|recovery_error| {
+                    format!(
+                            "The floating voice controls could not be prepared ({error}), and the voice session could not be restored: {recovery_error}"
+                        )
+                })?;
+            }
             return Err(error.to_string());
         }
         match state.acknowledge_controls_visibility(
