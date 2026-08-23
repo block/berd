@@ -12,6 +12,7 @@ import {
   setVoiceConversationMicrophoneMuted,
   startVoiceConversation,
   stopVoiceConversation,
+  stopVoiceConversationForReplacement,
   type PendingVoiceTranscript,
   type VoiceConversationEvent,
   type VoiceConversationStatus,
@@ -52,6 +53,9 @@ interface VoiceConversationStore {
   clearRequestedStart: (sessionId: string) => void;
   start: (sessionId: string) => Promise<VoiceConversationStatus>;
   stop: () => Promise<VoiceConversationStatus>;
+  stopForReplacement: (
+    status: VoiceConversationStatus,
+  ) => Promise<VoiceConversationStatus>;
   setMicrophoneMuted: (muted: boolean) => Promise<void>;
   setUiState: (state: VoiceConversationUiState, error?: string) => void;
   drainPendingTranscripts: (sessionId: string) => Promise<void>;
@@ -630,6 +634,49 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       };
       void request.then(clearStopRequest, clearStopRequest);
       return request;
+    },
+
+    stopForReplacement: async (activeStatus) => {
+      microphoneMuteIntent += 1;
+      microphoneMuteStateVersion += 1;
+      set({
+        uiState: "stopping",
+        microphoneMuted: false,
+        error: null,
+        requestedStartSessionId: null,
+      });
+      try {
+        const status = await stopVoiceConversationForReplacement(activeStatus);
+        set((state) =>
+          shouldApplyResponseRevision(state.status, status.revision) ||
+          (status.revision === state.status.revision &&
+            (status.lifecycle === "stopped" ||
+              status.lifecycle === "unavailable"))
+            ? {
+                status,
+                uiState: uiStateForStatus(status),
+                microphoneMuted: status.microphoneMuted,
+                error: null,
+              }
+            : state,
+        );
+        await reconcileVoiceConversationMicrophone(get().status);
+        return status;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        try {
+          const status = await getVoiceConversationStatus();
+          set((state) =>
+            status.revision >= state.status.revision
+              ? { status, uiState: "error", error: message }
+              : state,
+          );
+          await reconcileVoiceConversationMicrophone(get().status);
+        } catch {
+          set({ uiState: "error", error: message });
+        }
+        throw error;
+      }
     },
 
     setUiState: (uiState, error) =>

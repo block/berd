@@ -17,10 +17,7 @@ import {
   stopNativeAssistantSpeech,
   takeVoicePlaybackNotices,
 } from "../lib/nativeAssistantSpeech";
-import {
-  setVoiceConversationControlsSuppressed,
-  stopVoiceConversationForReplacement,
-} from "../api/voiceConversation";
+import { setVoiceConversationControlsSuppressed } from "../api/voiceConversation";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -594,6 +591,9 @@ export function useVoiceConversationController({
   const init = useVoiceConversationStore((state) => state.init);
   const start = useVoiceConversationStore((state) => state.start);
   const stop = useVoiceConversationStore((state) => state.stop);
+  const stopForReplacement = useVoiceConversationStore(
+    (state) => state.stopForReplacement,
+  );
   const microphoneMuted = useVoiceConversationStore(
     (state) => state.microphoneMuted,
   );
@@ -868,7 +868,7 @@ export function useVoiceConversationController({
           }
           try {
             const replaced = await replaceActiveVoiceConversation({
-              stop: () => stopVoiceConversationForReplacement(currentStatus),
+              stop: () => stopForReplacement(currentStatus),
               start: startCurrentConversation,
             });
             if (!replaced) {
@@ -912,6 +912,7 @@ export function useVoiceConversationController({
     sessionId,
     startCurrentConversation,
     stop,
+    stopForReplacement,
     t,
   ]);
 

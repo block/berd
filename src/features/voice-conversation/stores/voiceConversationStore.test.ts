@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   setMicrophoneMuted: vi.fn(),
   start: vi.fn(),
   stop: vi.fn(),
+  stopForReplacement: vi.fn(),
 }));
 
 vi.mock("../api/voiceConversation", () => ({
@@ -31,6 +32,7 @@ vi.mock("../api/voiceConversation", () => ({
   setVoiceConversationMicrophoneMuted: mocks.setMicrophoneMuted,
   startVoiceConversation: mocks.start,
   stopVoiceConversation: mocks.stop,
+  stopVoiceConversationForReplacement: mocks.stopForReplacement,
 }));
 
 function status(
@@ -68,6 +70,7 @@ describe("voice conversation store lifecycle ordering", () => {
     mocks.getStatus.mockReset().mockResolvedValue(status("stopped", 0));
     mocks.start.mockReset();
     mocks.stop.mockReset();
+    mocks.stopForReplacement.mockReset();
     mocks.listen.mockReset().mockImplementation(async (callback) => {
       emit = callback;
       return vi.fn();
@@ -416,6 +419,25 @@ describe("voice conversation store lifecycle ordering", () => {
       uiState: "off",
       error: null,
     });
+  });
+
+  it("adopts the winner when a concurrent replacement already changed lifecycles", async () => {
+    const store = await loadStore();
+    const active = status("running", 2, "session-a");
+    const winner = status("running", 4, "session-b");
+    store.setState({ status: active, uiState: "listening" });
+    mocks.stopForReplacement.mockResolvedValue(winner);
+
+    await expect(store.getState().stopForReplacement(active)).resolves.toEqual(
+      winner,
+    );
+
+    expect(store.getState()).toMatchObject({
+      status: winner,
+      uiState: "listening",
+      error: null,
+    });
+    expect(mocks.stopForReplacement).toHaveBeenCalledWith(active);
   });
 
   it("does not reconcile a delayed terminal event from an older lifecycle", async () => {
