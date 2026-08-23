@@ -18,6 +18,11 @@ let microphoneMuteObservationVersion = 0;
 let microphoneMuteQueue: Promise<void> = Promise.resolve();
 let foregroundSessionGeneration = 0;
 let foregroundSessionId: string | null = null;
+let foregroundSessionClaim: {
+  generation: number;
+  sessionId: string | null;
+  acknowledgement: Promise<void>;
+} | null = null;
 
 function resetMicrophoneMuteState(): void {
   microphoneMuteIntent += 1;
@@ -245,25 +250,34 @@ export function getVoiceConversationStatus(): Promise<VoiceConversationStatus> {
   );
 }
 
-export async function setVoiceConversationForegroundSession(
+export function setVoiceConversationForegroundSession(
   sessionId: string | null,
 ): Promise<void> {
   const generation = ++foregroundSessionGeneration;
   foregroundSessionId = sessionId;
-  const { rendererId, rendererEpoch } = await getRendererInstance();
-  await invoke("set_voice_renderer_foreground_session", {
-    request: {
-      rendererId,
-      rendererEpoch,
-      generation,
-      sessionId,
-    },
-  });
+  const acknowledgement = getRendererInstance().then(
+    ({ rendererId, rendererEpoch }) =>
+      invoke<void>("set_voice_renderer_foreground_session", {
+        request: {
+          rendererId,
+          rendererEpoch,
+          generation,
+          sessionId,
+        },
+      }),
+  );
+  foregroundSessionClaim = {
+    generation,
+    sessionId,
+    acknowledgement,
+  };
+  return acknowledgement;
 }
 
 export function resetVoiceConversationForegroundSessionForTest(): void {
   foregroundSessionGeneration = 0;
   foregroundSessionId = null;
+  foregroundSessionClaim = null;
 }
 
 export async function blockNativeVoiceConversationStarts(
@@ -448,7 +462,18 @@ export async function stopVoiceConversationForReplacement(
   status: VoiceConversationStatus,
   targetSessionId: string,
 ): Promise<VoiceConversationStatus> {
-  if (foregroundSessionId !== targetSessionId) {
+  const targetClaim = foregroundSessionClaim;
+  if (
+    foregroundSessionId !== targetSessionId ||
+    targetClaim?.sessionId !== targetSessionId
+  ) {
+    throw new Error("The target session is no longer in the foreground.");
+  }
+  await targetClaim.acknowledgement;
+  if (
+    foregroundSessionClaim !== targetClaim ||
+    foregroundSessionId !== targetSessionId
+  ) {
     throw new Error("The target session is no longer in the foreground.");
   }
   resetMicrophoneMuteState();

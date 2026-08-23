@@ -21,6 +21,14 @@ vi.mock("../lib/nativeMicrophone", () => ({
   startNativeMicrophone: mocks.startMicrophone,
 }));
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 import {
   acknowledgeVoiceConversationTranscript,
   blockNativeVoiceConversationStarts,
@@ -427,6 +435,49 @@ describe("voice conversation API", () => {
     );
   });
 
+  it("waits for the target foreground claim before requesting replacement", async () => {
+    const activeStatus = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running" as const,
+      sessionId: "session-1",
+      ownerWindowLabel: "session-window-a",
+      microphoneMuted: false,
+      revision: 3,
+    };
+    const stoppedStatus = {
+      ...activeStatus,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      revision: 4,
+    };
+    const claim = deferred<void>();
+    mocks.invoke
+      .mockReturnValueOnce(claim.promise)
+      .mockResolvedValueOnce(stoppedStatus);
+
+    const publish = setVoiceConversationForegroundSession("session-b");
+    const replacement = stopVoiceConversationForReplacement(
+      activeStatus,
+      "session-b",
+    );
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(1));
+    expect(mocks.invoke).toHaveBeenLastCalledWith(
+      "set_voice_renderer_foreground_session",
+      expect.anything(),
+    );
+
+    claim.resolve();
+    await publish;
+    await expect(replacement).resolves.toEqual(stoppedStatus);
+    expect(mocks.invoke).toHaveBeenNthCalledWith(
+      2,
+      "stop_native_voice_conversation_for_replacement",
+      expect.objectContaining({ targetSessionId: "session-b" }),
+    );
+  });
+
   it("rejects a replacement after foreground navigation changes", async () => {
     const activeStatus = {
       available: true,
@@ -437,15 +488,25 @@ describe("voice conversation API", () => {
       microphoneMuted: false,
       revision: 3,
     };
-    mocks.invoke.mockResolvedValue(undefined);
-    await setVoiceConversationForegroundSession("session-b");
+    const sessionBClaim = deferred<void>();
+    mocks.invoke
+      .mockReturnValueOnce(sessionBClaim.promise)
+      .mockResolvedValueOnce(undefined);
+    const publishSessionB = setVoiceConversationForegroundSession("session-b");
+    const replacement = stopVoiceConversationForReplacement(
+      activeStatus,
+      "session-b",
+    );
     await setVoiceConversationForegroundSession("session-c");
-    mocks.invoke.mockClear();
+    sessionBClaim.resolve();
+    await publishSessionB;
 
-    await expect(
-      stopVoiceConversationForReplacement(activeStatus, "session-b"),
-    ).rejects.toThrow("no longer in the foreground");
-    expect(mocks.invoke).not.toHaveBeenCalled();
+    await expect(replacement).rejects.toThrow("no longer in the foreground");
+    expect(mocks.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.invoke).not.toHaveBeenCalledWith(
+      "stop_native_voice_conversation_for_replacement",
+      expect.anything(),
+    );
   });
 
   it("reattaches browser capture when a reloaded renderer finds a running session", async () => {
