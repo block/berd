@@ -53,7 +53,13 @@ import {
   trackAgentEditCompleted,
 } from "@/features/agents/lib/agentTelemetry";
 import { runAgentViewTransition } from "@/features/agents/lib/agentViewTransitions";
-import { deleteDraftAgentSession } from "@/features/agents/lib/agentBuilderSession";
+import {
+  deleteDraftAgentSession,
+  fileStem,
+  isEmptyPlaceholderDraft,
+} from "@/features/agents/lib/agentBuilderSession";
+import { discardAgentBuilderSource } from "@/features/agents/lib/agentBuilderSourceLifecycle";
+import type { GalleryDraft } from "@/features/agents/ui/PersonaGallery";
 import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
 import { isSafePngAvatarDataUrl } from "@/shared/lib/avatarUrl";
 import {
@@ -158,16 +164,32 @@ export function AgentsView({
     [storedPersonas],
   );
   const sessions = useChatSessionStore((state) => state.sessions);
-  const agentDraftSessions = useMemo(
+  const draftSources = useAgentStore((state) => state.draftSources);
+  const removeDraftSource = useAgentStore((state) => state.removeDraftSource);
+  // Draft cards come from the files on disk, like every other card in the
+  // gallery. An untouched "New agent" placeholder isn't something the user
+  // made yet, so it earns no card. The builder chat, when one is still open,
+  // is secondary — it lets "Continue editing" land back in the same thread.
+  const agentDrafts = useMemo<GalleryDraft[]>(
     () =>
-      sessions.filter(
-        (session) =>
-          session.intent === "build-agent" &&
-          session.targetAgentDraftSaved === true &&
-          !session.archivedAt &&
-          Boolean(session.targetAgentPath),
-      ),
-    [sessions],
+      draftSources
+        .filter((source) => !isEmptyPlaceholderDraft(source))
+        .map((source) => {
+          const builderSessionId = source.properties?.builderSessionId;
+          const session = sessions.find(
+            (candidate) =>
+              candidate.intent === "build-agent" &&
+              !candidate.archivedAt &&
+              (candidate.targetAgentPath === source.path ||
+                candidate.id === builderSessionId),
+          );
+          return {
+            source,
+            sessionId: session?.id ?? null,
+            sessionTitle: session?.title ?? null,
+          };
+        }),
+    [draftSources, sessions],
   );
   const shouldReduceMotion = useReducedMotion();
   // Four or fewer agents fit in a single screen, so we float the grid in the
@@ -257,29 +279,34 @@ export function AgentsView({
   }, [onStartAgentBuilderSession]);
 
   const handleContinueDraft = useCallback(
-    (sessionId: string) => {
-      const session = useChatSessionStore.getState().getSession(sessionId);
-      if (!session?.targetAgentPath) {
-        return;
-      }
-
+    (draft: GalleryDraft) => {
+      // Starting by path reopens the live builder chat when there is one and
+      // otherwise opens a fresh builder on the same file.
       onStartAgentBuilderSession?.({
-        path: session.targetAgentPath,
-        slug: session.targetAgentSlug ?? undefined,
+        path: draft.source.path,
+        slug: fileStem(draft.source.path) || undefined,
       });
     },
     [onStartAgentBuilderSession],
   );
 
   const handleDeleteDraft = useCallback(
-    (sessionId: string) => {
-      void deleteDraftAgentSession(sessionId, {
-        closeSession: onDeleteDraftSession,
-      }).catch((error) => {
-        toast.error(formatAgentError(error, t("view.deleteFailed")));
-      });
+    (draft: GalleryDraft) => {
+      const { sessionId, source } = draft;
+      const deletion = sessionId
+        ? deleteDraftAgentSession(sessionId, {
+            closeSession: onDeleteDraftSession,
+          })
+        : discardAgentBuilderSource(source.path);
+      void deletion
+        .then(() => {
+          removeDraftSource(source.path);
+        })
+        .catch((error) => {
+          toast.error(formatAgentError(error, t("view.deleteFailed")));
+        });
     },
-    [onDeleteDraftSession, t],
+    [onDeleteDraftSession, removeDraftSource, t],
   );
 
   useEffect(() => {
@@ -669,7 +696,7 @@ export function AgentsView({
       >
         <PersonaGallery
           personas={personas}
-          draftSessions={agentDraftSessions}
+          drafts={agentDrafts}
           onSelectPersona={handleSelectPersona}
           onStartChatPersona={handleStartChat}
           onEditPersona={handleEditPersona}

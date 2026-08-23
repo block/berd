@@ -4350,8 +4350,27 @@ describe("AppShell global navigation", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("returns to agent builder mode after going back then forward", async () => {
+  it("discards an untouched agent draft when navigating back, without prompting", async () => {
     const user = userEvent.setup();
+    // The placeholder really exists on disk: the backend lists it and it
+    // reads back unchanged.
+    const placeholder = {
+      type: "agent",
+      path: "/Users/test/.agents/agents/untitled-agent-created-session.md",
+      name: "Untitled agent created-sess",
+      description: "Draft",
+      content: "Draft in progress.",
+      global: true,
+      writable: true,
+      properties: { draft: true, builderSessionId: "created-session" },
+    };
+    mockListPersonaSources.mockResolvedValue([placeholder]);
+    mockReadAgentSourceFile.mockResolvedValue(placeholder);
+    // Once deleted, the file is no longer listed or readable.
+    mockDeletePersonaSource.mockImplementation(async () => {
+      mockListPersonaSources.mockResolvedValue([]);
+      mockReadAgentSourceFile.mockRejectedValue(new Error("not found"));
+    });
     renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
@@ -4359,29 +4378,28 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     });
-    await waitFor(() => {
-      expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
-        id: "created-session",
-        intent: "build-agent",
-      });
-    });
+    await waitForCreatedAgentBuilderTarget();
 
+    // Nothing was typed or edited, so leaving is silent: no "save this
+    // draft?" prompt, and the placeholder file and its builder state are
+    // gone rather than lingering as an untitled draft.
     await user.click(screen.getByRole("button", { name: "Back" }));
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
     });
-
-    await user.click(screen.getByRole("button", { name: "Forward" }));
+    expect(
+      screen.queryByText("Save this agent draft?"),
+    ).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+      expect(mockDeletePersonaSource).toHaveBeenCalledWith(
+        "/Users/test/.agents/agents/untitled-agent-created-session.md",
+      );
     });
     await waitFor(() => {
-      expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
-        id: "created-session",
-        intent: "build-agent",
-        targetAgentPath:
-          "/Users/test/.agents/agents/untitled-agent-created-session.md",
-      });
+      const session = useChatSessionStore
+        .getState()
+        .getSession("created-session");
+      expect(session?.intent ?? null).toBeNull();
     });
   });
 

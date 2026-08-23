@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Persona, Agent } from "@/shared/types/agents";
 import type { AcpProvider } from "@/shared/api/acp";
+import type { AgentSourceEntry } from "@/shared/api/agents";
 import { canEditPersona } from "@/features/agents/lib/personaPresentation";
 
 const PROVIDER_STORAGE_KEY = "goose:defaultProvider";
@@ -36,6 +37,8 @@ interface AgentStoreState {
   // Personas
   personas: Persona[];
   personasLoading: boolean;
+  // Builder drafts as listed on disk; the gallery's draft cards come from here.
+  draftSources: AgentSourceEntry[];
 
   // Agents
   agents: Agent[];
@@ -62,6 +65,8 @@ interface AgentStoreActions {
   updatePersona: (id: string, updates: Partial<Persona>) => void;
   removePersona: (id: string) => void;
   setPersonasLoading: (loading: boolean) => void;
+  setDraftSources: (drafts: AgentSourceEntry[]) => void;
+  removeDraftSource: (path: string) => void;
 
   // Agent CRUD
   setAgents: (agents: Agent[]) => void;
@@ -96,6 +101,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   // State
   personas: [],
   personasLoading: false,
+  draftSources: [],
   agents: [],
   agentsLoading: false,
   providers: [],
@@ -125,6 +131,13 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     })),
 
   setPersonasLoading: (personasLoading) => set({ personasLoading }),
+
+  setDraftSources: (draftSources) => set({ draftSources }),
+
+  removeDraftSource: (path) =>
+    set((state) => ({
+      draftSources: state.draftSources.filter((draft) => draft.path !== path),
+    })),
 
   // Agent CRUD
   setAgents: (agents) => set({ agents }),

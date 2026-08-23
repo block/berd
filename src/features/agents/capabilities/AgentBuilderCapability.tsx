@@ -17,7 +17,7 @@ import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import {
   agentSourceToPersona,
-  listPersonas,
+  listAgentGallery,
   type AgentSourceEntry,
 } from "@/shared/api/agents";
 
@@ -52,8 +52,10 @@ export function AgentBuilderCapability({
   const patchSession = useChatSessionStore((state) => state.patchSession);
 
   const refreshPersonas = useCallback(async () => {
-    const personas = await listPersonas();
-    useAgentStore.getState().setPersonas(personas);
+    const { personas, drafts } = await listAgentGallery();
+    const agentStore = useAgentStore.getState();
+    agentStore.setPersonas(personas);
+    agentStore.setDraftSources(drafts);
   }, []);
 
   const completeBuilder = useCallback(
@@ -72,6 +74,13 @@ export function AgentBuilderCapability({
         agentStore.updatePersona(promotedPersona.id, promotedPersona);
       } else {
         agentStore.addPersona(promotedPersona);
+      }
+      // The draft just became this agent; drop its card without waiting for
+      // the disk refresh so the gallery never shows both at once.
+      for (const draft of agentStore.draftSources) {
+        if (draft.properties?.builderSessionId === session.id) {
+          agentStore.removeDraftSource(draft.path);
+        }
       }
 
       onDraftPromoted?.(source);

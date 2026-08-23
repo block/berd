@@ -17,6 +17,7 @@ export function usePersonas() {
   const personas = useAgentStore(selectPersonas);
   const personasLoading = useAgentStore(selectPersonasLoading);
   const setPersonas = useAgentStore((s) => s.setPersonas);
+  const setDraftSources = useAgentStore((s) => s.setDraftSources);
   const addPersona = useAgentStore((s) => s.addPersona);
   const updatePersonaInStore = useAgentStore((s) => s.updatePersona);
   const removePersona = useAgentStore((s) => s.removePersona);
@@ -28,7 +29,7 @@ export function usePersonas() {
 
   const replacePersonasFromApi = useCallback(
     async (
-      fetchPersonas: () => Promise<Persona[]>,
+      fetchGallery: () => Promise<api.AgentGalleryListing>,
       options: { showLoading: boolean; errorMessage: string },
     ) => {
       if (listRequestInFlightRef.current) {
@@ -42,12 +43,13 @@ export function usePersonas() {
       }
 
       try {
-        const personas = await fetchPersonas();
+        const { personas, drafts } = await fetchGallery();
         if (
           mutationVersionAtStart === mutationVersionRef.current &&
           mutationsInFlightRef.current === 0
         ) {
           setPersonas(personas);
+          setDraftSources(drafts);
         }
       } catch (error) {
         console.error(options.errorMessage, error);
@@ -58,7 +60,7 @@ export function usePersonas() {
         }
       }
     },
-    [setPersonas, setPersonasLoading],
+    [setDraftSources, setPersonas, setPersonasLoading],
   );
 
   const trackMutation = useCallback(async <T>(mutation: () => Promise<T>) => {
@@ -73,14 +75,14 @@ export function usePersonas() {
   }, []);
 
   const loadPersonas = useCallback(async () => {
-    await replacePersonasFromApi(api.listPersonas, {
+    await replacePersonasFromApi(api.listAgentGallery, {
       showLoading: true,
       errorMessage: "Failed to load personas:",
     });
   }, [replacePersonasFromApi]);
 
   const refreshFromDisk = useCallback(async () => {
-    await replacePersonasFromApi(api.refreshPersonas, {
+    await replacePersonasFromApi(api.refreshAgentGallery, {
       showLoading: false,
       errorMessage: "Failed to refresh personas from disk:",
     });

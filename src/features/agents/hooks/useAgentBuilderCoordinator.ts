@@ -6,7 +6,7 @@ import type { AgentBuilderLeaveDraftDialogProps } from "../ui/AgentBuilderLeaveD
 import {
   discardDraftAgentSession,
   hasAgentBuilderSessionUserContent,
-  isDraftAgentBuilderSession,
+  isDiscardableAgentBuilderSession,
   reconcileAgentBuilderSessions,
   resolveAgentBuilderSessionId,
   saveDraftAgentSession,
@@ -131,7 +131,23 @@ export function useAgentBuilderCoordinator({
           session.id,
         );
         if (!hasUserContent) {
+          // Nothing was made here. An untouched "New agent" draft leaves no
+          // trace — no prompt, no file, no empty chat. Editing an existing
+          // agent without changes just navigates away.
+          const discardable = await isDiscardableAgentBuilderSession(
+            session.id,
+          );
+          // Navigate first so the empty chat is no longer the active session
+          // when it closes; closing the active chat would redirect home and
+          // stomp on where the user was actually going.
           next();
+          if (discardable) {
+            await discardDraftAgentSession(session.id, { closeSession }).catch(
+              (error) => {
+                console.error("Failed to discard empty agent draft:", error);
+              },
+            );
+          }
           return;
         }
 
@@ -143,7 +159,7 @@ export function useAgentBuilderCoordinator({
 
       return false;
     },
-    [promptForNavigation],
+    [closeSession, promptForNavigation],
   );
 
   const start = useCallback(
@@ -182,9 +198,11 @@ export function useAgentBuilderCoordinator({
         }
 
         void (async () => {
-          const isDraft = await isDraftAgentBuilderSession(session.id);
+          const isDiscardable = await isDiscardableAgentBuilderSession(
+            session.id,
+          );
           if (
-            isDraft &&
+            isDiscardable &&
             !(await hasAgentBuilderSessionUserContent(session.id))
           ) {
             await discardDraftAgentSession(session.id, { closeSession }).catch(

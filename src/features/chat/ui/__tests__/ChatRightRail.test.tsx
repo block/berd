@@ -15,7 +15,13 @@ const mocks = vi.hoisted(() => ({
   addPersona: vi.fn(),
   updatePersona: vi.fn(),
   personas: [] as Array<{ id: string }>,
-  listPersonas: vi.fn(),
+  draftSources: [] as Array<{
+    path: string;
+    properties?: { builderSessionId?: string };
+  }>,
+  setDraftSources: vi.fn(),
+  removeDraftSource: vi.fn(),
+  listAgentGallery: vi.fn(),
   recoverDraftAgent: vi.fn(),
   setAgentBuilderSessionLocalEdits: vi.fn(),
   setAgentBuilderSessionSaveHandler: vi.fn(),
@@ -123,6 +129,9 @@ vi.mock("@/features/agents/stores/agentStore", () => ({
       setPersonas: mocks.setPersonas,
       addPersona: mocks.addPersona,
       updatePersona: mocks.updatePersona,
+      draftSources: mocks.draftSources,
+      setDraftSources: mocks.setDraftSources,
+      removeDraftSource: mocks.removeDraftSource,
     }),
   },
 }));
@@ -141,7 +150,7 @@ vi.mock("@/shared/api/agents", () => ({
     isBuiltin: false,
     writable: true,
   }),
-  listPersonas: () => mocks.listPersonas(),
+  listAgentGallery: () => mocks.listAgentGallery(),
 }));
 
 vi.mock("../../hooks/useGitStateAutoRefresh", () => ({
@@ -192,8 +201,11 @@ describe("ChatRightRail", () => {
     mocks.setPersonas.mockReset();
     mocks.addPersona.mockReset();
     mocks.updatePersona.mockReset();
-    mocks.listPersonas.mockReset();
-    mocks.listPersonas.mockResolvedValue([]);
+    mocks.listAgentGallery.mockReset();
+    mocks.listAgentGallery.mockResolvedValue({ personas: [], drafts: [] });
+    mocks.setDraftSources.mockReset();
+    mocks.removeDraftSource.mockReset();
+    mocks.draftSources = [];
     mocks.recoverDraftAgent.mockReset();
     mocks.recoverDraftAgent.mockResolvedValue({
       path: "/Users/x/.agents/agents/recovered.md",
@@ -713,7 +725,10 @@ describe("ChatRightRail", () => {
   it("refreshes agents, closes the capability, and opens the saved agent when a draft is promoted", async () => {
     const personas = [{ id: "/path", displayName: "Snark" }];
     const onAgentBuilderCompleted = vi.fn();
-    mocks.listPersonas.mockResolvedValue(personas);
+    mocks.listAgentGallery.mockResolvedValue({ personas, drafts: [] });
+    mocks.draftSources = [
+      { path: "/draft-path", properties: { builderSessionId: "s1" } },
+    ];
 
     render(
       <ChatRightRail
@@ -737,14 +752,18 @@ describe("ChatRightRail", () => {
       expect.objectContaining({ id: "/path" }),
     );
     expect(onAgentBuilderCompleted).toHaveBeenCalledWith("/path");
+    // The promoted draft's card leaves the gallery immediately, then the
+    // disk refresh replaces both lists.
+    expect(mocks.removeDraftSource).toHaveBeenCalledWith("/draft-path");
     await waitFor(() => {
       expect(mocks.setPersonas).toHaveBeenCalledWith(personas);
     });
+    expect(mocks.setDraftSources).toHaveBeenCalledWith([]);
   });
 
   it("opens the promoted agent even when refreshing agents fails", async () => {
     const onAgentBuilderCompleted = vi.fn();
-    mocks.listPersonas.mockRejectedValue(new Error("refresh unavailable"));
+    mocks.listAgentGallery.mockRejectedValue(new Error("refresh unavailable"));
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => undefined);

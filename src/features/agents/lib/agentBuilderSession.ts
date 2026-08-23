@@ -517,6 +517,19 @@ export async function isDraftAgentBuilderSession(
   return source?.properties?.draft === true;
 }
 
+/**
+ * True when leaving this builder session with no user content should simply
+ * discard it: it is a draft, or the agent file it pointed at no longer exists
+ * (moved or removed outside the app). Editing an existing, present agent is
+ * never discardable.
+ */
+export async function isDiscardableAgentBuilderSession(
+  sessionId: string,
+): Promise<boolean> {
+  const source = await findCurrentBuilderSource(sessionId);
+  return source === undefined || source.properties?.draft === true;
+}
+
 export async function reconcileAgentBuilderSessions(): Promise<void> {
   const allSources = await listAgentBuilderSources();
   const draftSources = allSources.filter(

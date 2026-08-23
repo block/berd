@@ -11,13 +11,12 @@ import { AgentImportSecondaryButton } from "@/shared/ui/agent-import-secondary-b
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Badge } from "@/shared/ui/badge";
 import { Skeleton } from "@/shared/ui/skeleton";
-import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { Persona } from "@/shared/types/agents";
+import type { AgentSourceEntry } from "@/shared/api/agents";
 import { PersonaCard } from "@/features/agents/ui/PersonaCard";
 import { useArtifacts } from "@/shared/hooks/useArtifacts";
 import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import { useFileImportZone } from "@/shared/hooks/useFileImportZone";
-import { usePersonaSource } from "@/features/agents/hooks/usePersonaSource";
 import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
 import {
   isPlaceholderAgentName,
@@ -35,9 +34,20 @@ function galleryCardDelay(index: number): string {
   return `${Math.min(index, MAX_STAGGERED_CARDS) * GALLERY_CARD_STAGGER_MS}ms`;
 }
 
+/**
+ * A builder draft as the gallery shows it: the file on disk, plus the live
+ * builder chat it belongs to when one is still open. The file is the source
+ * of truth — no file, no card.
+ */
+export interface GalleryDraft {
+  source: AgentSourceEntry;
+  sessionId: string | null;
+  sessionTitle: string | null;
+}
+
 interface PersonaGalleryProps {
   personas: Persona[];
-  draftSessions?: ChatSession[];
+  drafts?: GalleryDraft[];
   activePersonaId?: string;
   onSelectPersona: (persona: Persona) => void;
   onStartChatPersona?: (persona: Persona) => void;
@@ -50,8 +60,8 @@ interface PersonaGalleryProps {
 
   onCreatePersona: () => void;
   onImportAgentImage?: () => void;
-  onContinueDraft?: (sessionId: string) => void;
-  onDeleteDraft?: (sessionId: string) => void;
+  onContinueDraft?: (draft: GalleryDraft) => void;
+  onDeleteDraft?: (draft: GalleryDraft) => void;
   onImportFile?: (fileBytes: Uint8Array, fileName: string) => void;
   validateImportFile?: (
     file: Pick<File, "name" | "type" | "size">,
@@ -62,11 +72,11 @@ interface PersonaGalleryProps {
   isLoading?: boolean;
 }
 
-function draftTitle(session: ChatSession, sourceName?: string): string {
-  const name = sourceName?.trim();
+function draftTitle(draft: GalleryDraft): string {
+  const name = draft.source.name.trim();
   if (name && !isPlaceholderAgentName(name)) return name;
 
-  const title = session.title.trim();
+  const title = draft.sessionTitle?.trim() ?? "";
   return title.length > 0 ? title : "Untitled agent draft";
 }
 
@@ -81,25 +91,23 @@ function draftAvatar(sourceAvatar: unknown): string | null {
 }
 
 function PersonaDraftCard({
-  session,
+  draft,
   onContinue,
   onDelete,
 }: {
-  session: ChatSession;
-  onContinue?: (sessionId: string) => void;
-  onDelete?: (sessionId: string) => void;
+  draft: GalleryDraft;
+  onContinue?: (draft: GalleryDraft) => void;
+  onDelete?: (draft: GalleryDraft) => void;
 }) {
   const { t } = useTranslation("agents");
   const [readyAnimatedAvatarSrc, setReadyAnimatedAvatarSrc] = useState<
     string | null
   >(null);
-  const { data } = usePersonaSource(session.targetAgentPath ?? null, {
-    builderSessionId: session.id,
-  });
-  const title = draftTitle(session, data?.name);
+  const { source } = draft;
+  const title = draftTitle(draft);
   const description =
-    draftDescription(data?.content) ?? t("gallery.draftDescription");
-  const avatar = draftAvatar(data?.properties?.avatar);
+    draftDescription(source.content) ?? t("gallery.draftDescription");
+  const avatar = draftAvatar(source.properties?.avatar);
   const avatarMedia = useAvatarMedia(avatar);
   const staticAvatarSrc =
     avatarMedia?.posterSrc ??
@@ -107,9 +115,7 @@ function PersonaDraftCard({
   const animatedAvatarReady =
     avatarMedia?.mediaType === "video" &&
     readyAnimatedAvatarSrc === avatarMedia.src;
-  const fallbackIconSrc = resolveAgentIcon(
-    session.targetAgentPath ?? session.id,
-  );
+  const fallbackIconSrc = resolveAgentIcon(source.path);
 
   const hoverActionsOverlay = (
     <div
@@ -122,7 +128,7 @@ function PersonaDraftCard({
       <AgentTileButton
         type="button"
         size="sm"
-        onClick={() => onContinue?.(session.id)}
+        onClick={() => onContinue?.(draft)}
         aria-label={t("gallery.continueDraftAria", { name: title })}
         className="pointer-events-auto"
       >
@@ -133,7 +139,7 @@ function PersonaDraftCard({
         variant="subtle"
         size="sm"
         destructive
-        onClick={() => onDelete?.(session.id)}
+        onClick={() => onDelete?.(draft)}
         aria-label={t("gallery.deleteDraftAria", { name: title })}
         className="pointer-events-auto"
       >
@@ -216,7 +222,7 @@ function SkeletonCard() {
 
 export function PersonaGallery({
   personas,
-  draftSessions = [],
+  drafts = [],
   activePersonaId,
   onSelectPersona,
   onStartChatPersona,
@@ -306,7 +312,7 @@ export function PersonaGallery({
     );
   }
 
-  if (personas.length === 0 && draftSessions.length === 0) {
+  if (personas.length === 0 && drafts.length === 0) {
     return (
       <div
         {...dropHandlers}
@@ -473,16 +479,16 @@ export function PersonaGallery({
           />
         </div>
       ))}
-      {draftSessions.map((session, index) => (
+      {drafts.map((draft, index) => (
         <div
-          key={`draft:${session.id}`}
+          key={`draft:${draft.source.path}`}
           className="agents-gallery-card-enter"
           style={{
             animationDelay: galleryCardDelay(sorted.length + index + 1),
           }}
         >
           <PersonaDraftCard
-            session={session}
+            draft={draft}
             onContinue={onContinueDraft}
             onDelete={onDeleteDraft}
           />

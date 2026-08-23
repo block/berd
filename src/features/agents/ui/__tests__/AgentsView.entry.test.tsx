@@ -19,6 +19,7 @@ import { importPersonas } from "@/shared/api/agents";
 import { useAvatarLibrary } from "@/features/agents/hooks/useAvatarLibrary";
 import type { AvatarLibraryState } from "@/features/agents/hooks/useAvatarLibrary";
 import type { CreatePersonaRequest } from "@/shared/types/agents";
+import { placeholderAgentName } from "@/features/agents/lib/agentBuilderIdentity";
 import { AgentsView } from "../AgentsView";
 
 const mockCreatePersona = vi.hoisted(() => vi.fn());
@@ -27,7 +28,7 @@ const mockTrackAgentCreateCompleted = vi.hoisted(() => vi.fn());
 const mockTrackAgentEditCompleted = vi.hoisted(() => vi.fn());
 
 const mockDraftSource = vi.hoisted(() => ({
-  type: "agent",
+  type: "agent" as const,
   path: "/Users/x/.agents/agents/draft-session.md",
   name: "New agent",
   description: "Draft",
@@ -291,6 +292,7 @@ describe("AgentsView entry points", () => {
     useAgentStore.setState({
       personas: [],
       personasLoading: false,
+      draftSources: [],
       providers: [],
     });
     useChatSessionStore.setState({
@@ -718,10 +720,13 @@ describe("AgentsView entry points", () => {
     expect(onStartAgentBuilderSession).toHaveBeenCalledWith({});
   });
 
-  it("shows draft sessions at the end of the gallery and continues or deletes them", async () => {
+  it("shows drafts from disk at the end of the gallery and continues or deletes them", async () => {
     const onStartAgentBuilderSession = vi.fn();
     const onDeleteDraftSession = vi.fn();
-    useAgentStore.setState({ personas: [persona] });
+    useAgentStore.setState({
+      personas: [persona],
+      draftSources: [mockDraftSource],
+    });
     useChatSessionStore.setState({
       sessions: [
         {
@@ -734,7 +739,6 @@ describe("AgentsView entry points", () => {
           targetAgentPath: "/Users/x/.agents/agents/draft-session.md",
           targetAgentSlug: "draft-session",
           targetAgentDraftState: null,
-          targetAgentDraftSaved: true,
         },
       ],
     });
@@ -763,7 +767,60 @@ describe("AgentsView entry points", () => {
       screen.getByRole("button", { name: "gallery.deleteDraftAria" }),
     );
 
-    expect(onDeleteDraftSession).toHaveBeenCalledWith("draft-session");
+    await waitFor(() => {
+      expect(onDeleteDraftSession).toHaveBeenCalledWith("draft-session");
+    });
+    expect(useAgentStore.getState().draftSources).toEqual([]);
+  });
+
+  it("shows a draft whose builder chat is gone and deletes its file directly", async () => {
+    const onDeleteDraftSession = vi.fn();
+    const { deletePersonaSource } = await import("@/shared/api/agents");
+    useAgentStore.setState({
+      personas: [persona],
+      draftSources: [mockDraftSource],
+    });
+    useChatSessionStore.setState({ sessions: [] });
+
+    render(<AgentsView onDeleteDraftSession={onDeleteDraftSession} />);
+
+    expect(screen.getByText("gallery.draft")).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: "gallery.deleteDraftAria" }),
+    );
+
+    await waitFor(() => {
+      expect(deletePersonaSource).toHaveBeenCalledWith(mockDraftSource.path);
+    });
+    expect(onDeleteDraftSession).not.toHaveBeenCalled();
+    expect(useAgentStore.getState().draftSources).toEqual([]);
+  });
+
+  it("does not show a card for an untouched New agent placeholder", () => {
+    useAgentStore.setState({
+      personas: [persona],
+      draftSources: [
+        {
+          ...mockDraftSource,
+          path: "/Users/x/.agents/agents/untitled-agent-1.md",
+          name: placeholderAgentName("draft-session"),
+          properties: {
+            draft: true,
+            builderSessionId: "draft-session",
+            provider: "claude-acp",
+            modelProviderId: "claude-acp",
+            model: "claude-sonnet-5",
+            avatar: "app-avatar:gloopies-1",
+          },
+        },
+      ],
+    });
+
+    render(<AgentsView />);
+
+    expect(screen.queryByText("gallery.draft")).not.toBeInTheDocument();
   });
 
   it("returns from the detail page to the agents gallery", () => {

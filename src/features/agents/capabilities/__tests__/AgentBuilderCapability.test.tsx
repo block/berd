@@ -15,7 +15,7 @@ const apiMocks = vi.hoisted(() => ({
   listPersonaSources: vi.fn(),
   readAgentSourceFile: vi.fn(),
   updatePersonaSource: vi.fn(),
-  listPersonas: vi.fn(),
+  listAgentGallery: vi.fn(),
   hasRealAgentDescription: (description: string | null | undefined) => {
     const normalized = description?.trim().toLowerCase();
     return Boolean(
@@ -103,7 +103,7 @@ describe("AgentBuilderCapability keep-save telemetry", () => {
     apiMocks.listPersonaSources.mockReset();
     apiMocks.readAgentSourceFile.mockReset();
     apiMocks.updatePersonaSource.mockReset();
-    apiMocks.listPersonas.mockReset();
+    apiMocks.listAgentGallery.mockReset();
     apiMocks.listPersonaSources.mockResolvedValue([existingAgentSource]);
     apiMocks.readAgentSourceFile.mockImplementation(
       async (_path: string, fallback?: AgentSourceEntry) =>
@@ -121,7 +121,7 @@ describe("AgentBuilderCapability keep-save telemetry", () => {
         },
       }),
     );
-    apiMocks.listPersonas.mockResolvedValue([]);
+    apiMocks.listAgentGallery.mockResolvedValue({ personas: [], drafts: [] });
     resetAgentBuilderSourceLifecycleForTests();
     useAgentStore.setState({
       personas: [],

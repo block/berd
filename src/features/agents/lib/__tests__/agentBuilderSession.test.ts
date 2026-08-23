@@ -102,6 +102,7 @@ import {
   deleteDraftAgentSession,
   discardDraftAgentSession,
   hasAgentBuilderSessionUserContent,
+  isDiscardableAgentBuilderSession,
   isEmptyDraftAgentSession,
   promoteDraft,
   recoverDraftAgent,
@@ -581,6 +582,27 @@ describe("agentBuilderSession", () => {
     );
   });
 
+  it("deleteDraftAgentSession clears a draft whose file was removed outside the app", async () => {
+    // Creating the draft caches it locally; then the file is moved away so
+    // the backend stops listing it and reads fail.
+    mocks.createPersonaSource.mockResolvedValue(draftSource);
+    await startAgentBuilderSession({}, deps);
+    await flushDraftPreparation();
+    mocks.listPersonaSources.mockResolvedValue([]);
+    mocks.readAgentSourceFile.mockRejectedValue(
+      new Error("Failed to read agent source file"),
+    );
+
+    await deleteDraftAgentSession("sess-1", { closeSession });
+
+    expect(mocks.deletePersonaSource).not.toHaveBeenCalled();
+    expect(closeSession).toHaveBeenCalledWith("sess-1");
+    expect(mocks.patchSession).toHaveBeenCalledWith(
+      "sess-1",
+      expect.objectContaining({ intent: null, targetAgentPath: null }),
+    );
+  });
+
   it("discardDraftAgentSession deletes the draft and clears builder mode", async () => {
     addBuilderSession();
     mocks.deletePersonaSource.mockResolvedValue(undefined);
@@ -737,6 +759,54 @@ describe("agentBuilderSession", () => {
 
     await expect(hasAgentBuilderSessionUserContent("sess-1")).resolves.toBe(
       false,
+    );
+  });
+
+  it("does not treat the seeded model provider as user content", async () => {
+    // "New agent" records the stored model preference as provider +
+    // modelProviderId + model. None of that is something the user typed.
+    addBuilderSession();
+    const seededDraft = {
+      ...draftSource,
+      properties: {
+        draft: true,
+        builderSessionId: "sess-1",
+        provider: "claude-acp",
+        modelProviderId: "claude-acp",
+        model: "claude-sonnet-5",
+        avatar: "user-avatar:gloopie-1",
+      },
+    };
+    mocks.listPersonaSources.mockResolvedValue([seededDraft]);
+    mocks.readAgentSourceFile.mockResolvedValue(seededDraft);
+
+    await expect(hasAgentBuilderSessionUserContent("sess-1")).resolves.toBe(
+      false,
+    );
+  });
+
+  it("isDiscardableAgentBuilderSession is true for drafts and missing files, false for existing agents", async () => {
+    addBuilderSession();
+    mocks.listPersonaSources.mockResolvedValue([draftSource]);
+    await expect(isDiscardableAgentBuilderSession("sess-1")).resolves.toBe(
+      true,
+    );
+
+    const existingAgent = {
+      ...draftSource,
+      name: "Spar",
+      properties: { draft: false },
+    };
+    mocks.listPersonaSources.mockResolvedValue([existingAgent]);
+    mocks.readAgentSourceFile.mockResolvedValue(existingAgent);
+    await expect(isDiscardableAgentBuilderSession("sess-1")).resolves.toBe(
+      false,
+    );
+
+    mocks.listPersonaSources.mockResolvedValue([]);
+    mocks.readAgentSourceFile.mockRejectedValue(new Error("missing"));
+    await expect(isDiscardableAgentBuilderSession("sess-1")).resolves.toBe(
+      true,
     );
   });
 

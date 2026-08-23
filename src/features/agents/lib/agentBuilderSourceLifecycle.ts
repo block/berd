@@ -133,7 +133,9 @@ export async function findAgentBuilderSource(
   sessionId: string,
   path: string,
 ): Promise<AgentSourceEntry | undefined> {
-  const sources = await listAgentBuilderSources();
+  const backendSources = await listPersonaSources();
+  const backendPaths = new Set(backendSources.map((source) => source.path));
+  const sources = mergeLocalDraftSources(backendSources);
   const foundByPath = sources.find((source) => source.path === path);
   const sessionMatches = sources.filter(
     (source) => source.properties?.builderSessionId === sessionId,
@@ -143,12 +145,12 @@ export async function findAgentBuilderSource(
   );
 
   if (foundByPath && !isEmptyPlaceholderDraft(foundByPath)) {
-    return readListedDraftFresh(foundByPath);
+    return readListedDraftFresh(foundByPath, backendPaths);
   }
 
   const listedSource = movedNonPlaceholder ?? foundByPath ?? sessionMatches[0];
   if (listedSource) {
-    return readListedDraftFresh(listedSource);
+    return readListedDraftFresh(listedSource, backendPaths);
   }
 
   try {
@@ -262,7 +264,8 @@ function isBuilderDraftProperties(
 
 async function readListedDraftFresh(
   source: AgentSourceEntry,
-): Promise<AgentSourceEntry> {
+  backendPaths: ReadonlySet<string>,
+): Promise<AgentSourceEntry | undefined> {
   if (source.properties?.draft !== true) {
     return source;
   }
@@ -270,6 +273,14 @@ async function readListedDraftFresh(
   try {
     return await readAgentSourceFile(source.path, source);
   } catch {
+    // A draft the backend still lists may be temporarily unreadable; keep the
+    // listed copy. A draft only the local cache remembers has no file behind
+    // it anymore (moved or removed outside the app), so forget it rather than
+    // hand back a stale entry that later delete/save calls will trip over.
+    if (!backendPaths.has(source.path)) {
+      localDraftSourcesByPath.delete(source.path);
+      return undefined;
+    }
     return source;
   }
 }
