@@ -292,6 +292,21 @@ export function resetVoiceConversationForegroundSessionForTest(): void {
   foregroundSessionClaim = null;
 }
 
+function renewForegroundSessionClaim(
+  failedClaim: NonNullable<typeof foregroundSessionClaim>,
+  targetSessionId: string,
+): void {
+  if (
+    foregroundSessionClaim !== failedClaim ||
+    foregroundSessionId !== targetSessionId
+  ) {
+    return;
+  }
+  void setVoiceConversationForegroundSession(targetSessionId).catch(
+    () => undefined,
+  );
+}
+
 async function awaitForegroundSessionClaim(
   targetSessionId: string,
 ): Promise<void> {
@@ -323,6 +338,7 @@ async function awaitForegroundSessionClaim(
       if (timeoutId !== undefined) clearTimeout(timeoutId);
     });
     if (outcome.type === "timed-out") {
+      renewForegroundSessionClaim(targetClaim, targetSessionId);
       throw new Error("Foreground voice session confirmation timed out.");
     }
     if (outcome.type === "failed") {
@@ -334,6 +350,7 @@ async function awaitForegroundSessionClaim(
         targetClaim = latestClaim;
         continue;
       }
+      renewForegroundSessionClaim(targetClaim, targetSessionId);
       throw outcome.error;
     }
     const latestClaim = foregroundSessionClaim;

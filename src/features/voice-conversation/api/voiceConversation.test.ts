@@ -550,7 +550,7 @@ describe("voice conversation API", () => {
     );
   });
 
-  it("times out a foreground claim without stopping the active call", async () => {
+  it("renews a timed-out foreground claim for the next replacement", async () => {
     vi.useFakeTimers();
     try {
       const activeStatus = {
@@ -563,7 +563,17 @@ describe("voice conversation API", () => {
         revision: 3,
       };
       const claim = deferred<void>();
-      mocks.invoke.mockReturnValueOnce(claim.promise);
+      const stoppedStatus = {
+        ...activeStatus,
+        lifecycle: "stopped" as const,
+        sessionId: null,
+        ownerWindowLabel: null,
+        revision: 4,
+      };
+      mocks.invoke
+        .mockReturnValueOnce(claim.promise)
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(stoppedStatus);
       void setVoiceConversationForegroundSession("session-b");
 
       const replacement = stopVoiceConversationForReplacement(
@@ -576,10 +586,19 @@ describe("voice conversation API", () => {
       await vi.advanceTimersByTimeAsync(FOREGROUND_SESSION_CLAIM_TIMEOUT_MS);
 
       await rejection;
-      expect(mocks.invoke).toHaveBeenCalledOnce();
+      expect(mocks.invoke).toHaveBeenCalledTimes(2);
       expect(mocks.invoke).not.toHaveBeenCalledWith(
         "stop_native_voice_conversation_for_replacement",
         expect.anything(),
+      );
+
+      await expect(
+        stopVoiceConversationForReplacement(activeStatus, "session-b"),
+      ).resolves.toEqual(stoppedStatus);
+      expect(mocks.invoke).toHaveBeenNthCalledWith(
+        3,
+        "stop_native_voice_conversation_for_replacement",
+        expect.objectContaining({ targetSessionId: "session-b" }),
       );
     } finally {
       vi.useRealTimers();
@@ -617,7 +636,7 @@ describe("voice conversation API", () => {
       await vi.advanceTimersByTimeAsync(1);
 
       await rejection;
-      expect(mocks.invoke).toHaveBeenCalledTimes(2);
+      expect(mocks.invoke).toHaveBeenCalledTimes(3);
       expect(mocks.invoke).not.toHaveBeenCalledWith(
         "stop_native_voice_conversation_for_replacement",
         expect.anything(),
