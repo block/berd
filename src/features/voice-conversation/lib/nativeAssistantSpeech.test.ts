@@ -485,6 +485,7 @@ describe("native assistant speech stream", () => {
 
     useVoiceConversationStore.setState({ userSpeaking: true });
     await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    emit("interrupted");
     expect(
       useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
     ).toMatchObject({ speech: { status: "interrupted" } });
@@ -512,7 +513,7 @@ describe("native assistant speech stream", () => {
         segments: [
           {
             text: "One. Two. Three.",
-            playedFrames: 600,
+            playedFrames: 300,
             totalFrames: 1_000,
           },
         ],
@@ -521,6 +522,23 @@ describe("native assistant speech stream", () => {
 
     useVoiceConversationStore.setState({ userSpeaking: true });
     await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({ speech: { status: "speaking" } });
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        segments: [
+          {
+            text: "One. Two. Three.",
+            playedFrames: 600,
+            totalFrames: 1_000,
+          },
+        ],
+      },
+    });
 
     expect(
       useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
@@ -553,5 +571,41 @@ describe("native assistant speech stream", () => {
       });
     });
     expect(mocks.append).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds spoken and unspoken excerpts in the model delivery notice", async () => {
+    const text = `${"spoken ".repeat(100)}${"unspoken ".repeat(100)}`;
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [assistant([{ type: "text", text }])]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    emit("started");
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        segments: [{ text, playedFrames: 1_000, totalFrames: 2_000 }],
+      },
+    });
+
+    const notice = takeVoicePlaybackNotices("session-1") ?? "";
+    const estimate = JSON.parse(
+      notice.match(/Delivery estimate: (\{.*\})/)?.[1] ?? "{}",
+    ) as {
+      spokenText: string;
+      unspokenText: string;
+      spokenTextTruncated: boolean;
+      unspokenTextTruncated: boolean;
+    };
+    expect(estimate.spokenText.length).toBeLessThanOrEqual(250);
+    expect(estimate.unspokenText.length).toBeLessThanOrEqual(250);
+    expect(estimate.spokenTextTruncated).toBe(true);
+    expect(estimate.unspokenTextTruncated).toBe(true);
   });
 });

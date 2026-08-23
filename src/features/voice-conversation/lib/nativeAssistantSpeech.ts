@@ -40,6 +40,7 @@ type ActiveUtterance = {
   targetSpans: SpeechTargetSpan[];
   text: string;
   finishing: boolean;
+  interruptionRequested: boolean;
   latestDelivery: VoiceDeliveryProgress | null;
   status: SpeechStatus | null;
   onFailure: SpeechFailureHandler;
@@ -67,6 +68,25 @@ let stopActiveVoice: () => Promise<boolean> = stopPocketVoice;
 let activityReportQueue = Promise.resolve();
 const pendingNotices = new Map<string, string[]>();
 const recordedNoticeKeys = new Set<string>();
+const DELIVERY_NOTICE_TEXT_LIMIT = 250;
+
+function boundedDeliveryText(
+  text: string,
+  side: "start" | "end",
+): { text: string; truncated: boolean } {
+  if (text.length <= DELIVERY_NOTICE_TEXT_LIMIT) {
+    return { text, truncated: false };
+  }
+  return side === "start"
+    ? {
+        text: `${text.slice(0, DELIVERY_NOTICE_TEXT_LIMIT - 1)}…`,
+        truncated: true,
+      }
+    : {
+        text: `…${text.slice(-(DELIVERY_NOTICE_TEXT_LIMIT - 1))}`,
+        truncated: true,
+      };
+}
 
 function reportAssistantActivity(
   sessionId: string,
@@ -109,15 +129,20 @@ function recordPlaybackNotice(
       : status === "notSpoken"
         ? "TTS delivery was blocked because the user was speaking; the assistant reply was not spoken."
         : "Native TTS could not deliver the assistant reply.";
-  const estimateLine = estimate
-    ? `\nDelivery estimate: ${JSON.stringify({
-        spokenText: estimate.spokenText,
-        unspokenText: estimate.unspokenText,
-        cutoff: estimate.cutoff,
-        confidence: estimate.confidence,
-        estimated: true,
-      })}`
-    : "";
+  const estimateLine = (() => {
+    if (!estimate) return "";
+    const spoken = boundedDeliveryText(estimate.spokenText, "end");
+    const unspoken = boundedDeliveryText(estimate.unspokenText, "start");
+    return `\nDelivery estimate: ${JSON.stringify({
+      spokenText: spoken.text,
+      unspokenText: unspoken.text,
+      spokenTextTruncated: spoken.truncated,
+      unspokenTextTruncated: unspoken.truncated,
+      cutoff: estimate.cutoff,
+      confidence: estimate.confidence,
+      estimated: true,
+    })}`;
+  })();
   const notice =
     `[voice: tts-delivery-failed]\n${outcome}\nOriginal text: ${excerpt}${estimateLine}\n` +
     "This is TTS delivery state, not live user voice input. Do not respond to this control message or repeat the reply unless re-delivery is still appropriate.";
@@ -403,11 +428,15 @@ function handleStreamEvent(
   }
 }
 
-function interruptActiveUtterance(): boolean {
+function interruptActiveUtterance(awaitTerminalDelivery = false): boolean {
   const utterance = activeUtterance;
   commandEpoch += 1;
-  activeUtterance = null;
-  if (utterance) {
+  if (utterance && !utterance.interruptionRequested) {
+    utterance.interruptionRequested = true;
+    if (awaitTerminalDelivery) utterance.onInterrupted();
+  }
+  if (utterance && !awaitTerminalDelivery) {
+    activeUtterance = null;
     const estimate = estimateSpeechDelivery(
       utterance.text,
       utterance.latestDelivery,
@@ -545,6 +574,7 @@ export function startNativeAssistantSpeech(
       targetSpans: [],
       text: "",
       finishing: false,
+      interruptionRequested: false,
       latestDelivery: null,
       status: null,
       onFailure,
@@ -722,7 +752,7 @@ export function startNativeAssistantSpeech(
     const becameUserSpeaking = voice.userSpeaking && !wasUserSpeaking;
     wasUserSpeaking = voice.userSpeaking;
     if (!becameUserSpeaking || activeGeneration !== generation) return;
-    interruptActiveUtterance();
+    interruptActiveUtterance(true);
   });
   queueMicrotask(inspect);
 }

@@ -736,6 +736,37 @@ describe("MessageBubble", () => {
     expect(block?.querySelector("del")).not.toHaveTextContent("One. Two");
   });
 
+  it("preserves provider-error presentation after interrupted delivery", () => {
+    const rawError =
+      "Ran into this error: thinking blocks in the latest assistant message cannot be modified";
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text: rawError,
+            speech: {
+              status: "interrupted",
+              spokenText: "Ran into this error:",
+              unspokenText:
+                " thinking blocks in the latest assistant message cannot be modified",
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const block = container.querySelector(
+      '[data-voice-speech-status="interrupted"]',
+    );
+    expect(block).toHaveTextContent(
+      "This chat can't continue with a Claude model",
+    );
+    expect(block?.querySelector("del")).toBeNull();
+    expect(block).not.toHaveTextContent(rawError);
+  });
+
   it("renders multiple content blocks", () => {
     const msg = assistantMessage([
       { type: "text", text: "first block" },

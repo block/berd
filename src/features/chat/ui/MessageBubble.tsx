@@ -533,6 +533,7 @@ function renderContentBlock(
       const displayText = providerErrorNotice ?? tc.text;
       const speechStatus = tc.speech?.status;
       const speechDisplayText =
+        providerErrorNotice === null &&
         speechStatus === "interrupted" &&
         tc.speech?.spokenText !== undefined &&
         tc.speech.unspokenText !== undefined
