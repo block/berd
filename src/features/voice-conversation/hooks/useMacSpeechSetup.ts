@@ -77,7 +77,18 @@ export function useMacSpeechSetup(enabled = true): MacSpeechSetup {
       generationRef.current += 1;
       setStatus(next);
     } catch (nextError) {
-      setError(String(nextError));
+      const message = String(nextError);
+      setStatus((current) =>
+        current?.installing
+          ? {
+              ...current,
+              installing: false,
+              progress: null,
+              error: message,
+            }
+          : current,
+      );
+      setError(message);
     }
   }, []);
 
