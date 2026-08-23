@@ -493,4 +493,65 @@ describe("native assistant speech stream", () => {
     );
     expect(takeVoicePlaybackNotices("session-1")).toBeNull();
   });
+
+  it("uses playback progress to report and decorate only the unspoken suffix", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "One. Two. Three." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    emit("started");
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+    mocks.streamHandler?.({
+      streamId,
+      state: "progress",
+      error: null,
+      delivery: {
+        segments: [
+          {
+            text: "One. Two. Three.",
+            playedFrames: 600,
+            totalFrames: 1_000,
+          },
+        ],
+      },
+    });
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({
+      speech: {
+        status: "interrupted",
+        spokenText: "One. Two",
+        unspokenText: ". Three.",
+        confidence: "medium",
+      },
+    });
+    const notice = takeVoicePlaybackNotices("session-1");
+    expect(notice).toContain('"spokenText":"One. Two"');
+    expect(notice).toContain('"unspokenText":". Three."');
+    expect(notice).toContain('"confidence":"medium"');
+
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", " Four.");
+    await vi.waitFor(() => {
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({
+        speech: {
+          status: "interrupted",
+          spokenText: "One. Two",
+          unspokenText: ". Three. Four.",
+        },
+      });
+    });
+    expect(mocks.append).toHaveBeenCalledTimes(1);
+  });
 });

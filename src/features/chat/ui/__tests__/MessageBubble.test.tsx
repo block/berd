@@ -708,9 +708,32 @@ describe("MessageBubble", () => {
     expect(screen.getAllByText("One visible assistant response.")).toHaveLength(
       1,
     );
-    if (status === "interrupted") {
-      expect(block).toHaveClass("line-through");
-    }
+  });
+
+  it("strikes only the estimated unspoken suffix after barge-in", () => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text: "One. Two. Three.",
+            speech: {
+              status: "interrupted",
+              spokenText: "One. Two",
+              unspokenText: ". Three.",
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const block = container.querySelector(
+      '[data-voice-speech-status="interrupted"]',
+    );
+    expect(block).toHaveTextContent("One. Two. Three.");
+    expect(block?.querySelector("del")).toHaveTextContent(". Three.");
+    expect(block?.querySelector("del")).not.toHaveTextContent("One. Two");
   });
 
   it("renders multiple content blocks", () => {

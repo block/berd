@@ -36,8 +36,19 @@ export interface PocketVoiceStatus {
 
 export interface PocketVoiceStreamEvent {
   streamId: string;
-  state: "started" | "completed" | "interrupted" | "failed";
+  state: "started" | "progress" | "completed" | "interrupted" | "failed";
   error: string | null;
+  delivery?: VoiceDeliveryProgress | null;
+}
+
+export interface VoiceDeliverySegment {
+  text: string;
+  playedFrames: number;
+  totalFrames: number;
+}
+
+export interface VoiceDeliveryProgress {
+  segments: VoiceDeliverySegment[];
 }
 
 export type VoiceModelKind = "pocket" | "parakeet";

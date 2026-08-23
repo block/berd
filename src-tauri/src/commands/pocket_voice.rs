@@ -12,7 +12,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
-#[cfg(target_os = "macos")]
+#[cfg(any(test, target_os = "macos"))]
 use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
 use berd_voice::{load_text_to_speech, load_voice_style, PocketTts, VoiceStyle};
@@ -42,6 +42,10 @@ const DOWNLOAD_READ_TIMEOUT: Duration = Duration::from_secs(30);
 const DOWNLOAD_TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 #[cfg(target_os = "macos")]
 const STREAMING_EMIT_FRAMES: usize = 12;
+#[cfg(target_os = "macos")]
+const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+#[cfg(any(test, target_os = "macos"))]
+const PLAYBACK_LATENCY_SAFETY_FRAMES: u64 = SAMPLE_RATE as u64 / 10;
 const PARAKEET_ARCHIVE: Artifact = Artifact {
     filename: "parakeet.tar.bz2",
     size: 104_337_827,
@@ -158,6 +162,7 @@ enum PocketStreamCommand {
 #[serde(rename_all = "camelCase")]
 enum PocketStreamEventState {
     Started,
+    Progress,
     Completed,
     Interrupted,
     Failed,
@@ -170,6 +175,84 @@ struct PocketStreamEvent {
     stream_id: String,
     state: PocketStreamEventState,
     error: Option<String>,
+    delivery: Option<VoiceDeliveryProgress>,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VoiceDeliverySegment {
+    text: String,
+    played_frames: u64,
+    total_frames: u64,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+#[derive(Clone, Debug, Serialize)]
+struct VoiceDeliveryProgress {
+    segments: Vec<VoiceDeliverySegment>,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+#[derive(Debug, Default)]
+struct PlaybackDeliveryLedger {
+    segments: Vec<(String, u64)>,
+    pieces: Vec<u64>,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+impl PlaybackDeliveryLedger {
+    fn begin_segment(&mut self, text: String) {
+        self.segments.push((text, 0));
+    }
+
+    fn append_frames(&mut self, frames: usize) {
+        let frames = frames as u64;
+        if frames == 0 {
+            return;
+        }
+        if let Some((_, total)) = self.segments.last_mut() {
+            *total = total.saturating_add(frames);
+            self.pieces.push(frames);
+        }
+    }
+
+    fn snapshot(&self, queued_pieces: usize, current_piece_frames: u64) -> VoiceDeliveryProgress {
+        let completed_pieces = self.pieces.len().saturating_sub(queued_pieces);
+        let completed_frames = self
+            .pieces
+            .iter()
+            .take(completed_pieces)
+            .copied()
+            .sum::<u64>();
+        let current_total = self.pieces.get(completed_pieces).copied().unwrap_or(0);
+        let consumed_frames = completed_frames
+            .saturating_add(current_piece_frames.min(current_total))
+            .saturating_sub(PLAYBACK_LATENCY_SAFETY_FRAMES);
+        let mut segment_start = 0_u64;
+        let segments = self
+            .segments
+            .iter()
+            .map(|(text, total_frames)| {
+                let played_frames = consumed_frames
+                    .saturating_sub(segment_start)
+                    .min(*total_frames);
+                segment_start = segment_start.saturating_add(*total_frames);
+                VoiceDeliverySegment {
+                    text: text.clone(),
+                    played_frames,
+                    total_frames: *total_frames,
+                }
+            })
+            .collect();
+        VoiceDeliveryProgress { segments }
+    }
+}
+
+#[cfg(target_os = "macos")]
+struct PocketStreamOutcome {
+    state: PocketStreamEventState,
+    delivery: Option<VoiceDeliveryProgress>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -755,19 +838,15 @@ pub fn start_pocket_voice_stream(
                 speed,
                 receiver,
             );
-            let (event_state, error) = match result {
-                Ok(PocketStreamEventState::Completed) => (PocketStreamEventState::Completed, None),
-                Ok(PocketStreamEventState::Interrupted) => {
-                    (PocketStreamEventState::Interrupted, None)
-                }
-                Ok(other) => (other, None),
+            let (event_state, error, delivery) = match result {
+                Ok(outcome) => (outcome.state, None, outcome.delivery),
                 Err(error) if !active.load(Ordering::SeqCst) => {
                     log::debug!("Pocket voice stream stopped after error: {error}");
-                    (PocketStreamEventState::Interrupted, None)
+                    (PocketStreamEventState::Interrupted, None, None)
                 }
-                Err(error) => (PocketStreamEventState::Failed, Some(error)),
+                Err(error) => (PocketStreamEventState::Failed, Some(error), None),
             };
-            emit_pocket_stream_event(&app, &stream_id, event_state, error);
+            emit_pocket_stream_event(&app, &stream_id, event_state, error, delivery);
             finish_playback(&playback, &playback_active);
         });
         Ok(())
@@ -1812,6 +1891,7 @@ fn emit_pocket_stream_event(
     stream_id: &str,
     state: PocketStreamEventState,
     error: Option<String>,
+    delivery: Option<VoiceDeliveryProgress>,
 ) {
     let _ = app.emit(
         POCKET_STREAM_EVENT,
@@ -1819,6 +1899,7 @@ fn emit_pocket_stream_event(
             stream_id: stream_id.to_string(),
             state,
             error,
+            delivery,
         },
     );
 }
@@ -1834,7 +1915,7 @@ fn run_pocket_voice_stream(
     active: Arc<AtomicBool>,
     speed: f32,
     receiver: mpsc::Receiver<PocketStreamCommand>,
-) -> Result<PocketStreamEventState, String> {
+) -> Result<PocketStreamOutcome, String> {
     use std::num::NonZero;
 
     use rodio::cpal::traits::HostTrait;
@@ -1880,13 +1961,19 @@ fn run_pocket_voice_stream(
     let mut pending = String::new();
     let mut first_chunk_pending = true;
     let mut playback_started = false;
+    let mut delivery_ledger = PlaybackDeliveryLedger::default();
+    let mut last_progress_emit = Instant::now();
 
     loop {
         if !active.load(Ordering::SeqCst) {
+            let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
             player.stop();
-            return Ok(PocketStreamEventState::Interrupted);
+            return Ok(PocketStreamOutcome {
+                state: PocketStreamEventState::Interrupted,
+                delivery: Some(delivery),
+            });
         }
-        match receiver.recv() {
+        match receiver.recv_timeout(Duration::from_millis(20)) {
             Ok(PocketStreamCommand::Append(text)) => {
                 pending.push_str(&text);
                 if !synthesize_pocket_stream_ready(
@@ -1902,9 +1989,14 @@ fn run_pocket_voice_stream(
                     &mut pending,
                     &mut first_chunk_pending,
                     &mut playback_started,
+                    &mut delivery_ledger,
+                    &mut last_progress_emit,
                     false,
                 )? {
-                    return Ok(PocketStreamEventState::Interrupted);
+                    return Ok(PocketStreamOutcome {
+                        state: PocketStreamEventState::Interrupted,
+                        delivery: Some(pocket_delivery_snapshot(&delivery_ledger, &player)),
+                    });
                 }
             }
             Ok(PocketStreamCommand::Flush) => {
@@ -1921,12 +2013,18 @@ fn run_pocket_voice_stream(
                     &mut pending,
                     &mut first_chunk_pending,
                     &mut playback_started,
+                    &mut delivery_ledger,
+                    &mut last_progress_emit,
                     true,
                 )? {
-                    return Ok(PocketStreamEventState::Interrupted);
+                    return Ok(PocketStreamOutcome {
+                        state: PocketStreamEventState::Interrupted,
+                        delivery: Some(pocket_delivery_snapshot(&delivery_ledger, &player)),
+                    });
                 }
                 let tail = speed_processor.drain_and_reset()?;
                 if !tail.is_empty() {
+                    delivery_ledger.append_frames(tail.len());
                     player.append(SamplesBuffer::new(channels, rate, tail));
                     if !playback_started {
                         playback_started = true;
@@ -1934,6 +2032,7 @@ fn run_pocket_voice_stream(
                             app,
                             stream_id,
                             PocketStreamEventState::Started,
+                            None,
                             None,
                         );
                         println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
@@ -1957,12 +2056,18 @@ fn run_pocket_voice_stream(
                     &mut pending,
                     &mut first_chunk_pending,
                     &mut playback_started,
+                    &mut delivery_ledger,
+                    &mut last_progress_emit,
                     true,
                 )? {
-                    return Ok(PocketStreamEventState::Interrupted);
+                    return Ok(PocketStreamOutcome {
+                        state: PocketStreamEventState::Interrupted,
+                        delivery: Some(pocket_delivery_snapshot(&delivery_ledger, &player)),
+                    });
                 }
                 let tail = speed_processor.finish()?;
                 if !tail.is_empty() {
+                    delivery_ledger.append_frames(tail.len());
                     player.append(SamplesBuffer::new(channels, rate, tail));
                     if !playback_started {
                         emit_pocket_stream_event(
@@ -1970,25 +2075,65 @@ fn run_pocket_voice_stream(
                             stream_id,
                             PocketStreamEventState::Started,
                             None,
+                            None,
                         );
                     }
                 }
                 while !player.empty() {
                     if !active.load(Ordering::SeqCst) {
+                        let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
                         player.stop();
-                        return Ok(PocketStreamEventState::Interrupted);
+                        return Ok(PocketStreamOutcome {
+                            state: PocketStreamEventState::Interrupted,
+                            delivery: Some(delivery),
+                        });
                     }
                     std::thread::sleep(Duration::from_millis(10));
                 }
-                return Ok(PocketStreamEventState::Completed);
+                return Ok(PocketStreamOutcome {
+                    state: PocketStreamEventState::Completed,
+                    delivery: None,
+                });
             }
-            Ok(PocketStreamCommand::Stop) | Err(_) => {
+            Ok(PocketStreamCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
                 active.store(false, Ordering::SeqCst);
                 player.stop();
-                return Ok(PocketStreamEventState::Interrupted);
+                return Ok(PocketStreamOutcome {
+                    state: PocketStreamEventState::Interrupted,
+                    delivery: Some(delivery),
+                });
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if playback_started
+                    && last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL
+                {
+                    emit_pocket_stream_event(
+                        app,
+                        stream_id,
+                        PocketStreamEventState::Progress,
+                        None,
+                        Some(pocket_delivery_snapshot(&delivery_ledger, &player)),
+                    );
+                    last_progress_emit = Instant::now();
+                }
             }
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn pocket_delivery_snapshot(
+    ledger: &PlaybackDeliveryLedger,
+    player: &Player,
+) -> VoiceDeliveryProgress {
+    // Read the queue depth first. If the player advances to the next source
+    // before get_pos(), pairing the newer (smaller) position with the older
+    // (larger) queue depth can only undercount delivery.
+    let queued_pieces = player.len();
+    let current_piece_frames =
+        (player.get_pos().as_secs_f64() * f64::from(SAMPLE_RATE)).round() as u64;
+    ledger.snapshot(queued_pieces, current_piece_frames)
 }
 
 #[cfg(target_os = "macos")]
@@ -2006,6 +2151,8 @@ fn synthesize_pocket_stream_ready(
     pending: &mut String,
     first_chunk_pending: &mut bool,
     playback_started: &mut bool,
+    delivery_ledger: &mut PlaybackDeliveryLedger,
+    last_progress_emit: &mut Instant,
     flush: bool,
 ) -> Result<bool, String> {
     let split = engine.take_streaming_text_chunks(pending, *first_chunk_pending, flush)?;
@@ -2016,12 +2163,11 @@ fn synthesize_pocket_stream_ready(
             player.stop();
             return Ok(false);
         }
+        let text = text.trim().to_string();
+        delivery_ledger.begin_segment(text.clone());
         let mut callback_error = None;
-        let completed = engine.synth_chunk_streaming(
-            text.trim(),
-            style,
-            STREAMING_EMIT_FRAMES,
-            &mut |samples| {
+        let completed =
+            engine.synth_chunk_streaming(&text, style, STREAMING_EMIT_FRAMES, &mut |samples| {
                 if !active.load(Ordering::SeqCst) {
                     return false;
                 }
@@ -2038,19 +2184,35 @@ fn synthesize_pocket_stream_ready(
                 if delta.is_empty() {
                     return true;
                 }
+                delivery_ledger.append_frames(delta.len());
                 player.append(SamplesBuffer::new(channels, rate, delta));
                 if !*playback_started {
                     *playback_started = true;
-                    emit_pocket_stream_event(app, stream_id, PocketStreamEventState::Started, None);
+                    emit_pocket_stream_event(
+                        app,
+                        stream_id,
+                        PocketStreamEventState::Started,
+                        None,
+                        None,
+                    );
                     println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
                     if let Err(error) = std::io::stdout().flush() {
                         callback_error = Some(format!("signal Pocket playback start: {error}"));
                         return false;
                     }
                 }
+                if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
+                    emit_pocket_stream_event(
+                        app,
+                        stream_id,
+                        PocketStreamEventState::Progress,
+                        None,
+                        Some(pocket_delivery_snapshot(delivery_ledger, player)),
+                    );
+                    *last_progress_emit = Instant::now();
+                }
                 true
-            },
-        )?;
+            })?;
         if let Some(error) = callback_error {
             player.stop();
             return Err(error);
@@ -2212,6 +2374,24 @@ fn synthesize_and_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playback_ledger_maps_consumed_frames_to_text_segments_conservatively() {
+        let mut ledger = PlaybackDeliveryLedger::default();
+        ledger.begin_segment("First sentence.".to_string());
+        ledger.append_frames(4_800);
+        ledger.begin_segment("Second sentence.".to_string());
+        ledger.append_frames(4_800);
+
+        // One source has completed and the next is 50 ms in. The 100 ms
+        // output-latency allowance leaves 3,600 safely delivered frames in
+        // the first segment and none in the second.
+        let progress = ledger.snapshot(1, 1_200);
+        assert_eq!(progress.segments[0].played_frames, 3_600);
+        assert_eq!(progress.segments[0].total_frames, 4_800);
+        assert_eq!(progress.segments[1].played_frames, 0);
+        assert_eq!(progress.segments[1].total_frames, 4_800);
+    }
 
     #[test]
     fn window_destroy_cancels_active_pocket_playback() {

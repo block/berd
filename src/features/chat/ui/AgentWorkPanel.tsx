@@ -307,6 +307,15 @@ function AgentWorkItemRow({
 
   if (item.kind === "progress") {
     const speechStatus = item.content.speech?.status;
+    const speechDisplayText =
+      speechStatus === "interrupted" &&
+      item.content.speech?.spokenText !== undefined &&
+      item.content.speech.unspokenText !== undefined
+        ? `${item.content.speech.spokenText}<del>${item.content.speech.unspokenText
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")}</del>`
+        : item.content.text;
     const speechLabel = speechStatus
       ? {
           speaking: t("message.voiceSpeechSpeakingLabel"),
@@ -324,7 +333,7 @@ function AgentWorkItemRow({
           className={cn(
             "min-w-0 flex-1 pb-2 text-sm leading-relaxed",
             usePrimaryText ? "text-foreground" : "text-muted-foreground",
-            speechStatus === "interrupted" && "line-through opacity-70",
+            speechStatus === "interrupted" && "opacity-80",
           )}
         >
           {speechStatus && speechLabel ? (
@@ -333,7 +342,7 @@ function AgentWorkItemRow({
               label={speechLabel}
             />
           ) : null}
-          <MessageResponse mode="static">{item.content.text}</MessageResponse>
+          <MessageResponse mode="static">{speechDisplayText}</MessageResponse>
         </div>
       </div>
     );

@@ -1,4 +1,5 @@
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import type { VoiceSpeechState } from "@/shared/types/messages";
 import {
   appendPocketVoiceStream,
   finishPocketVoiceStream,
@@ -6,6 +7,7 @@ import {
   listenToPocketVoiceStream,
   startPocketVoiceStream,
   stopPocketVoice,
+  type VoiceDeliveryProgress,
   type PocketVoiceStreamEvent,
 } from "../api/pocketVoice";
 import {
@@ -23,15 +25,25 @@ import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
 type SpeechFailureHandler = (text: string, error: unknown) => void;
 type SpeechTarget = { messageId: string; textOrdinal: number };
+type SpeechTargetSpan = SpeechTarget & { start: number; end: number };
+type SpeechDeliveryEstimate = {
+  cutoff: number;
+  spokenText: string;
+  unspokenText: string;
+  confidence: "low" | "medium";
+};
 type ActiveUtterance = {
   id: string;
   sessionId: string;
   voiceRevision: number;
   targets: SpeechTarget[];
+  targetSpans: SpeechTargetSpan[];
   text: string;
   finishing: boolean;
+  latestDelivery: VoiceDeliveryProgress | null;
   status: SpeechStatus | null;
   onFailure: SpeechFailureHandler;
+  onInterrupted: () => void;
   onTerminal: () => void;
 };
 type SpeechStatus =
@@ -85,6 +97,7 @@ function recordPlaybackNotice(
   key: string,
   text: string,
   status: "interrupted" | "notSpoken" | "failed",
+  estimate?: SpeechDeliveryEstimate,
 ) {
   const noticeKey = `${sessionId}\0${key}\0${status}`;
   if (recordedNoticeKeys.has(noticeKey)) return;
@@ -96,8 +109,17 @@ function recordPlaybackNotice(
       : status === "notSpoken"
         ? "TTS delivery was blocked because the user was speaking; the assistant reply was not spoken."
         : "Native TTS could not deliver the assistant reply.";
+  const estimateLine = estimate
+    ? `\nDelivery estimate: ${JSON.stringify({
+        spokenText: estimate.spokenText,
+        unspokenText: estimate.unspokenText,
+        cutoff: estimate.cutoff,
+        confidence: estimate.confidence,
+        estimated: true,
+      })}`
+    : "";
   const notice =
-    `[voice: tts-delivery-failed]\n${outcome}\nOriginal text: ${excerpt}\n` +
+    `[voice: tts-delivery-failed]\n${outcome}\nOriginal text: ${excerpt}${estimateLine}\n` +
     "This is TTS delivery state, not live user voice input. Do not respond to this control message or repeat the reply unless re-delivery is still appropriate.";
   pendingNotices.set(sessionId, [
     ...(pendingNotices.get(sessionId) ?? []),
@@ -115,10 +137,131 @@ function targetKey(target: SpeechTarget): string {
   return `${target.messageId}\0text:${target.textOrdinal}`;
 }
 
-function setTargetStatus(
+function completedWordCutoff(text: string, playedRatio: number): number {
+  const approximateCutoff = Math.floor(
+    text.length * Math.max(0, Math.min(1, playedRatio)),
+  );
+  if (approximateCutoff >= text.length) return text.length;
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
+  let cutoff = 0;
+  for (const part of segmenter.segment(text)) {
+    const end = part.index + part.segment.length;
+    if (end > approximateCutoff) break;
+    if (part.isWordLike) cutoff = end;
+  }
+  return cutoff;
+}
+
+function estimateSpeechDelivery(
+  text: string,
+  delivery: VoiceDeliveryProgress | null,
+): SpeechDeliveryEstimate {
+  if (!delivery?.segments.length) {
+    return {
+      cutoff: 0,
+      spokenText: "",
+      unspokenText: text,
+      confidence: "low",
+    };
+  }
+
+  let searchFrom = 0;
+  let cutoff = 0;
+  let matchedSegment = false;
+  for (const segment of delivery.segments) {
+    const segmentStart = text.indexOf(segment.text, searchFrom);
+    if (segmentStart === -1) continue;
+    matchedSegment = true;
+    const totalFrames = Math.max(0, segment.totalFrames);
+    const playedFrames = Math.max(
+      0,
+      Math.min(totalFrames, segment.playedFrames),
+    );
+    if (totalFrames === 0 || playedFrames === 0) break;
+    if (playedFrames >= totalFrames) {
+      cutoff = segmentStart + segment.text.length;
+      searchFrom = cutoff;
+      continue;
+    }
+    cutoff =
+      segmentStart +
+      completedWordCutoff(segment.text, playedFrames / totalFrames);
+    break;
+  }
+
+  return {
+    cutoff,
+    spokenText: text.slice(0, cutoff),
+    unspokenText: text.slice(cutoff),
+    confidence: matchedSegment ? "medium" : "low",
+  };
+}
+
+function targetText(sessionId: string, target: SpeechTarget): string {
+  const message =
+    useChatStore
+      .getState()
+      .messagesBySession[sessionId]?.find(
+        (candidate) => candidate.id === target.messageId,
+      ) ?? null;
+  if (!message) return "";
+  let textOrdinal = 0;
+  for (const content of message.content) {
+    if (content.type !== "text") continue;
+    if (textOrdinal === target.textOrdinal) return content.text;
+    textOrdinal += 1;
+  }
+  return "";
+}
+
+function applyInterruptionEstimate(
+  utterance: ActiveUtterance,
+  estimate: SpeechDeliveryEstimate,
+) {
+  const firstTargetKey = utterance.targets[0]
+    ? targetKey(utterance.targets[0])
+    : null;
+  for (const target of utterance.targets) {
+    const spans = utterance.targetSpans.filter(
+      (span) => targetKey(span) === targetKey(target),
+    );
+    const start = spans.at(0)?.start ?? 0;
+    const end = spans.at(-1)?.end ?? start;
+    const text = targetText(utterance.sessionId, target);
+    if (estimate.cutoff >= end && end > start) {
+      setTargetSpeech(utterance.sessionId, target, { status: "spoken" });
+      continue;
+    }
+    if (estimate.cutoff <= start) {
+      if (targetKey(target) === firstTargetKey) {
+        setTargetSpeech(utterance.sessionId, target, {
+          status: "interrupted",
+          spokenText: "",
+          unspokenText: text,
+          confidence: estimate.confidence,
+        });
+        continue;
+      }
+      setTargetSpeech(utterance.sessionId, target, { status: "notSpoken" });
+      continue;
+    }
+    const localCutoff = Math.max(
+      0,
+      Math.min(text.length, estimate.cutoff - start),
+    );
+    setTargetSpeech(utterance.sessionId, target, {
+      status: "interrupted",
+      spokenText: text.slice(0, localCutoff),
+      unspokenText: text.slice(localCutoff),
+      confidence: estimate.confidence,
+    });
+  }
+}
+
+function setTargetSpeech(
   sessionId: string,
   target: SpeechTarget,
-  status: SpeechStatus,
+  speech: VoiceSpeechState,
 ) {
   useChatStore
     .getState()
@@ -130,7 +273,7 @@ function setTargetStatus(
           if (content.type !== "text") return content;
           const matches = textOrdinal === target.textOrdinal;
           textOrdinal += 1;
-          return matches ? { ...content, speech: { status } } : content;
+          return matches ? { ...content, speech } : content;
         }),
       };
     });
@@ -139,7 +282,7 @@ function setTargetStatus(
 function setUtteranceStatus(utterance: ActiveUtterance, status: SpeechStatus) {
   utterance.status = status;
   for (const target of utterance.targets) {
-    setTargetStatus(utterance.sessionId, target, status);
+    setTargetSpeech(utterance.sessionId, target, { status });
   }
 }
 
@@ -188,6 +331,9 @@ function handleStreamEvent(
   const voice = useVoiceConversationStore.getState();
 
   switch (event.state) {
+    case "progress":
+      utterance.latestDelivery = event.delivery ?? null;
+      break;
     case "started":
       setUtteranceStatus(utterance, "speaking");
       voice.setUiState("agent-speaking");
@@ -208,13 +354,20 @@ function handleStreamEvent(
       );
       utterance.onTerminal();
       break;
-    case "interrupted":
-      setUtteranceStatus(utterance, "interrupted");
+    case "interrupted": {
+      utterance.latestDelivery = event.delivery ?? utterance.latestDelivery;
+      const estimate = estimateSpeechDelivery(
+        utterance.text,
+        utterance.latestDelivery,
+      );
+      applyInterruptionEstimate(utterance, estimate);
+      utterance.onInterrupted();
       recordPlaybackNotice(
         utterance.sessionId,
         utterance.id,
         utterance.text,
         "interrupted",
+        estimate,
       );
       voice.setUiState("listening");
       activeUtterance = null;
@@ -225,6 +378,7 @@ function handleStreamEvent(
       );
       utterance.onTerminal();
       break;
+    }
     case "failed":
       setUtteranceStatus(utterance, "failed");
       recordPlaybackNotice(
@@ -254,12 +408,18 @@ function interruptActiveUtterance(): boolean {
   commandEpoch += 1;
   activeUtterance = null;
   if (utterance) {
-    setUtteranceStatus(utterance, "interrupted");
+    const estimate = estimateSpeechDelivery(
+      utterance.text,
+      utterance.latestDelivery,
+    );
+    applyInterruptionEstimate(utterance, estimate);
+    utterance.onInterrupted();
     recordPlaybackNotice(
       utterance.sessionId,
       utterance.id,
       utterance.text,
       "interrupted",
+      estimate,
     );
     reportAssistantActivity(
       utterance.sessionId,
@@ -338,6 +498,7 @@ export function startNativeAssistantSpeech(
   const toolCountByMessage = new Map<string, number>();
   const consumedTextBySlot = new Map<string, string>();
   const completedMessages = new Set<string>();
+  const interruptedMessages = new Set<string>();
   for (const message of initialMessages) {
     toolCountByMessage.set(
       message.id,
@@ -367,7 +528,9 @@ export function startNativeAssistantSpeech(
       ) {
         activeUtterance.targets.push(target);
         if (activeUtterance.status) {
-          setTargetStatus(sessionId, target, activeUtterance.status);
+          setTargetSpeech(sessionId, target, {
+            status: activeUtterance.status,
+          });
         }
       }
       return activeUtterance;
@@ -379,10 +542,17 @@ export function startNativeAssistantSpeech(
         activeSpeechRevision ??
         useVoiceConversationStore.getState().status.revision,
       targets: [target],
+      targetSpans: [],
       text: "",
       finishing: false,
+      latestDelivery: null,
       status: null,
       onFailure,
+      onInterrupted: () => {
+        for (const utteranceTarget of utterance.targets) {
+          interruptedMessages.add(utteranceTarget.messageId);
+        }
+      },
       onTerminal: () => queueMicrotask(inspect),
     };
     activeUtterance = utterance;
@@ -444,15 +614,47 @@ export function startNativeAssistantSpeech(
         consumedTextBySlot.set(slot, content.text);
         if (!delta) continue;
 
+        if (interruptedMessages.has(message.id)) {
+          const currentSpeech = content.speech;
+          if (
+            currentSpeech?.status === "interrupted" &&
+            currentSpeech.spokenText !== undefined
+          ) {
+            setTargetSpeech(sessionId, target, {
+              ...currentSpeech,
+              unspokenText: content.text.slice(currentSpeech.spokenText.length),
+            });
+          } else {
+            setTargetSpeech(sessionId, target, { status: "notSpoken" });
+          }
+          recordPlaybackNotice(sessionId, slot, content.text, "notSpoken");
+          continue;
+        }
+
         if (voice.userSpeaking) {
-          setTargetStatus(sessionId, target, "notSpoken");
+          setTargetSpeech(sessionId, target, { status: "notSpoken" });
           recordPlaybackNotice(sessionId, slot, content.text, "notSpoken");
           continue;
         }
 
         const utterance = ensureUtterance(target);
         if (utterance.finishing) continue;
+        const spanStart = utterance.text.length;
         utterance.text += delta;
+        const previousSpan = utterance.targetSpans.at(-1);
+        if (
+          previousSpan &&
+          targetKey(previousSpan) === targetKey(target) &&
+          previousSpan.end === spanStart
+        ) {
+          previousSpan.end = utterance.text.length;
+        } else {
+          utterance.targetSpans.push({
+            ...target,
+            start: spanStart,
+            end: utterance.text.length,
+          });
+        }
         queueStreamCommand(
           utterance,
           () => streamBackend.append(utterance.id, delta),

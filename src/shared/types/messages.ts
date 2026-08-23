@@ -30,6 +30,11 @@ export type VoiceSpeechStatus =
 
 export interface VoiceSpeechState {
   status: VoiceSpeechStatus;
+  /** Ephemeral playback estimate; never serialized into ACP history. */
+  spokenText?: string;
+  /** Ephemeral playback estimate; never serialized into ACP history. */
+  unspokenText?: string;
+  confidence?: "low" | "medium";
 }
 
 /** ACP TextContent with discriminator and local voice playback state. */

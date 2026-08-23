@@ -26,7 +26,6 @@ import type { Message } from "@/shared/types/messages";
 import type { GitState } from "@/shared/types/git";
 import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
-import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";

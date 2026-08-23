@@ -56,6 +56,7 @@ enum SiriStreamCommand {
 #[serde(rename_all = "camelCase")]
 enum SiriStreamEventState {
     Started,
+    Progress,
     Completed,
     Interrupted,
     Failed,
@@ -68,12 +69,36 @@ struct SiriStreamEvent {
     stream_id: String,
     state: SiriStreamEventState,
     error: Option<String>,
+    delivery: Option<VoiceDeliveryProgress>,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VoiceDeliverySegment {
+    text: String,
+    played_frames: u64,
+    total_frames: u64,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct VoiceDeliveryProgress {
+    segments: Vec<VoiceDeliverySegment>,
+}
+
+#[cfg(target_os = "macos")]
+struct SiriStreamOutcome {
+    state: SiriStreamEventState,
+    delivery: Option<VoiceDeliveryProgress>,
 }
 
 #[cfg(target_os = "macos")]
 const SIRI_STREAM_EVENT: &str = "siri-voice:stream-event";
 #[cfg(target_os = "macos")]
 const SIRI_STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
+#[cfg(target_os = "macos")]
+const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
 static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
@@ -221,6 +246,7 @@ unsafe extern "C" {
     fn berd_siri_tts_stream_finish(stream: *mut std::ffi::c_void);
     fn berd_siri_tts_stream_is_finished(stream: *mut std::ffi::c_void) -> bool;
     fn berd_siri_tts_stream_progress(stream: *mut std::ffi::c_void) -> u64;
+    fn berd_siri_tts_stream_copy_delivery_json(stream: *mut std::ffi::c_void) -> *mut c_char;
     fn berd_siri_tts_stream_copy_error(stream: *mut std::ffi::c_void) -> *mut c_char;
     fn berd_siri_tts_stream_cancel(stream: *mut std::ffi::c_void);
     fn berd_siri_tts_stream_release(stream: *mut std::ffi::c_void);
@@ -336,6 +362,7 @@ unsafe extern "C" fn siri_playback_started(context: *mut std::ffi::c_void) {
             stream_id: context.stream_id.clone(),
             state: SiriStreamEventState::Started,
             error: None,
+            delivery: None,
         },
     );
 }
@@ -346,6 +373,7 @@ fn emit_stream_event(
     stream_id: &str,
     state: SiriStreamEventState,
     error: Option<String>,
+    delivery: Option<VoiceDeliveryProgress>,
 ) {
     let _ = app.emit(
         SIRI_STREAM_EVENT,
@@ -353,6 +381,7 @@ fn emit_stream_event(
             stream_id: stream_id.to_string(),
             state,
             error,
+            delivery,
         },
     );
 }
@@ -555,6 +584,12 @@ fn enqueue_native_stream(stream: *mut std::ffi::c_void, text: &str) -> Result<()
 }
 
 #[cfg(target_os = "macos")]
+fn siri_delivery_progress(stream: *mut std::ffi::c_void) -> Option<VoiceDeliveryProgress> {
+    let json = take_bridge_string(unsafe { berd_siri_tts_stream_copy_delivery_json(stream) })?;
+    serde_json::from_str(&json).ok()
+}
+
+#[cfg(target_os = "macos")]
 #[allow(clippy::too_many_arguments)]
 fn run_siri_stream(
     app: AppHandle,
@@ -563,7 +598,7 @@ fn run_siri_stream(
     speed: f32,
     active: Arc<AtomicBool>,
     receiver: mpsc::Receiver<SiriStreamCommand>,
-) -> Result<SiriStreamEventState, String> {
+) -> Result<SiriStreamOutcome, String> {
     let language = CString::new(selection.language)
         .map_err(|_| "Siri voice language cannot contain NUL bytes".to_string())?;
     let name = CString::new(selection.name)
@@ -597,15 +632,27 @@ fn run_siri_stream(
         let mut first_chunk_pending = true;
         let mut finishing = false;
         let mut watchdog: Option<SiriStreamWatchdog> = None;
+        let mut last_progress_emit = Instant::now();
+        let mut last_delivery_json = String::new();
         loop {
             if !active.load(Ordering::SeqCst) {
+                let delivery = siri_delivery_progress(stream);
                 unsafe { berd_siri_tts_stream_cancel(stream) };
-                return Ok(SiriStreamEventState::Interrupted);
+                return Ok(SiriStreamOutcome {
+                    state: SiriStreamEventState::Interrupted,
+                    delivery,
+                });
             }
             if finishing && unsafe { berd_siri_tts_stream_is_finished(stream) } {
                 let native_error =
                     take_bridge_string(unsafe { berd_siri_tts_stream_copy_error(stream) });
-                return native_error.map_or(Ok(SiriStreamEventState::Completed), Err);
+                return native_error.map_or(
+                    Ok(SiriStreamOutcome {
+                        state: SiriStreamEventState::Completed,
+                        delivery: None,
+                    }),
+                    Err,
+                );
             }
             if let Some(watchdog) = watchdog.as_mut() {
                 let progress = unsafe { berd_siri_tts_stream_progress(stream) };
@@ -613,6 +660,22 @@ fn run_siri_stream(
                     unsafe { berd_siri_tts_stream_cancel(stream) };
                     return Err("Siri synthesis stopped making progress".to_string());
                 }
+            }
+            if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
+                if let Some(delivery) = siri_delivery_progress(stream) {
+                    let delivery_json = serde_json::to_string(&delivery).unwrap_or_default();
+                    if delivery_json != last_delivery_json {
+                        emit_stream_event(
+                            &app,
+                            &stream_id,
+                            SiriStreamEventState::Progress,
+                            None,
+                            Some(delivery),
+                        );
+                        last_delivery_json = delivery_json;
+                    }
+                }
+                last_progress_emit = Instant::now();
             }
 
             let command = match receiver.recv_timeout(Duration::from_millis(10)) {
@@ -664,9 +727,13 @@ fn run_siri_stream(
                     ));
                 }
                 SiriStreamCommand::Stop => {
+                    let delivery = siri_delivery_progress(stream);
                     active.store(false, Ordering::SeqCst);
                     unsafe { berd_siri_tts_stream_cancel(stream) };
-                    return Ok(SiriStreamEventState::Interrupted);
+                    return Ok(SiriStreamOutcome {
+                        state: SiriStreamEventState::Interrupted,
+                        delivery,
+                    });
                 }
                 _ => {}
             }
@@ -734,14 +801,14 @@ pub fn start_siri_voice_stream(
                 active.clone(),
                 receiver,
             );
-            let (event_state, error) = match result {
-                Ok(state) => (state, None),
+            let (event_state, error, delivery) = match result {
+                Ok(outcome) => (outcome.state, None, outcome.delivery),
                 Err(_error) if !active.load(Ordering::SeqCst) => {
-                    (SiriStreamEventState::Interrupted, None)
+                    (SiriStreamEventState::Interrupted, None, None)
                 }
-                Err(error) => (SiriStreamEventState::Failed, Some(error)),
+                Err(error) => (SiriStreamEventState::Failed, Some(error), None),
             };
-            emit_stream_event(&app, &stream_id, event_state, error);
+            emit_stream_event(&app, &stream_id, event_state, error, delivery);
             finish_playback(&playback_state, &playback_active);
         });
         Ok(())
