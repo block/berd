@@ -430,12 +430,14 @@ function handleStreamEvent(
 
 function interruptActiveUtterance(awaitTerminalDelivery = false): boolean {
   const utterance = activeUtterance;
+  const terminalEventExpected =
+    awaitTerminalDelivery && utterance?.status === "speaking";
   commandEpoch += 1;
   if (utterance && !utterance.interruptionRequested) {
     utterance.interruptionRequested = true;
-    if (awaitTerminalDelivery) utterance.onInterrupted();
+    if (terminalEventExpected) utterance.onInterrupted();
   }
-  if (utterance && !awaitTerminalDelivery) {
+  if (utterance && !terminalEventExpected) {
     activeUtterance = null;
     const estimate = estimateSpeechDelivery(
       utterance.text,

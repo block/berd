@@ -495,6 +495,31 @@ describe("native assistant speech stream", () => {
     expect(takeVoicePlaybackNotices("session-1")).toBeNull();
   });
 
+  it("finalizes an interruption before native playback starts", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Queued reply." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({
+      speech: {
+        status: "interrupted",
+        spokenText: "",
+        unspokenText: "Queued reply.",
+        confidence: "low",
+      },
+    });
+    expect(takeVoicePlaybackNotices("session-1")).toContain('"spokenText":""');
+  });
+
   it("uses playback progress to report and decorate only the unspoken suffix", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
