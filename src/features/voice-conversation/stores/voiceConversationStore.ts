@@ -49,6 +49,7 @@ interface VoiceConversationStore {
   error: string | null;
   hydrated: boolean;
   requestedStartSessionId: string | null;
+  latestFinalizedTranscriptKey: string | null;
   init: () => Promise<void>;
   refreshStatus: () => Promise<VoiceConversationStatus>;
   requestStart: (sessionId: string) => void;
@@ -66,6 +67,10 @@ interface VoiceConversationStore {
   setMicrophoneMuted: (muted: boolean) => Promise<void>;
   setUiState: (state: VoiceConversationUiState, error?: string) => void;
   drainPendingTranscripts: (sessionId: string) => Promise<void>;
+}
+
+function finalizedTranscriptKey(event: PendingVoiceTranscript): string {
+  return `${event.sessionId}\0${event.lifecycleId}\0${event.revision}\0${event.id}`;
 }
 
 let initialized = false;
@@ -233,6 +238,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
     error: null,
     hydrated: false,
     requestedStartSessionId: null,
+    latestFinalizedTranscriptKey: null,
 
     requestStart: (sessionId) => set({ requestedStartSessionId: sessionId }),
     clearRequestedStart: (sessionId) =>
@@ -343,6 +349,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   },
                   uiState: "listening",
                   microphoneMuted: false,
+                  latestFinalizedTranscriptKey: null,
                   error: null,
                 };
               case "microphoneMute": {
@@ -366,6 +373,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
               case "user":
                 return {
                   ...state,
+                  latestFinalizedTranscriptKey: finalizedTranscriptKey(event),
                   status: {
                     ...state.status,
                     lifecycle: "running",
@@ -427,6 +435,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   assistantSpeaking: false,
                   microphoneMuted: false,
                   activityFallbackState: "listening",
+                  latestFinalizedTranscriptKey: null,
                   error: preservesTerminalError ? state.error : null,
                 };
               }
@@ -451,6 +460,9 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   microphoneMuted: event.terminal
                     ? false
                     : state.microphoneMuted,
+                  latestFinalizedTranscriptKey: event.terminal
+                    ? null
+                    : state.latestFinalizedTranscriptKey,
                   error: event.message,
                 };
             }

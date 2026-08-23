@@ -135,6 +135,90 @@ describe("voice conversation store lifecycle ordering", () => {
     await Promise.all([first, second]);
   });
 
+  it("records finalized STT before transcript delivery settles", async () => {
+    const delivery = deferred<void>();
+    const module = await import("./voiceConversationStore");
+    const unsubscribe = module.subscribeToVoiceConversationEvents(
+      () => delivery.promise,
+    );
+    await module.useVoiceConversationStore.getState().init();
+
+    emit({
+      type: "user",
+      sessionId: "session-1",
+      lifecycleId: "lifecycle-1",
+      id: "utterance-1",
+      text: "Hello",
+      revision: 1,
+      deliveryAttempts: 0,
+    });
+
+    expect(
+      module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
+    ).toBe(["session-1", "lifecycle-1", "1", "utterance-1"].join("\0"));
+    expect(mocks.acknowledge).not.toHaveBeenCalled();
+    expect(mocks.reject).not.toHaveBeenCalled();
+
+    delivery.resolve();
+    await vi.waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledOnce());
+    unsubscribe();
+  });
+
+  it("retains finalized STT when transcript delivery rejects", async () => {
+    const module = await import("./voiceConversationStore");
+    const unsubscribe = module.subscribeToVoiceConversationEvents(() =>
+      Promise.reject(new Error("chat unavailable")),
+    );
+    await module.useVoiceConversationStore.getState().init();
+
+    emit({
+      type: "user",
+      sessionId: "session-1",
+      lifecycleId: "lifecycle-1",
+      id: "utterance-2",
+      text: "Hello again",
+      revision: 1,
+      deliveryAttempts: 0,
+    });
+
+    expect(
+      module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
+    ).toBe(["session-1", "lifecycle-1", "1", "utterance-2"].join("\0"));
+    await vi.waitFor(() => expect(mocks.reject).toHaveBeenCalledOnce());
+    expect(mocks.acknowledge).not.toHaveBeenCalled();
+    expect(
+      module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
+    ).toContain("utterance-2");
+    unsubscribe();
+  });
+
+  it("clears finalized STT at lifecycle boundaries", async () => {
+    const store = await loadStore();
+    emit({
+      type: "user",
+      sessionId: "session-1",
+      lifecycleId: "lifecycle-1",
+      id: "utterance-1",
+      text: "Hello",
+      revision: 1,
+      deliveryAttempts: 0,
+    });
+    expect(store.getState().latestFinalizedTranscriptKey).not.toBeNull();
+
+    emit({
+      type: "startup",
+      sessionId: "session-2",
+      ownerWindowLabel: "main",
+      line: "started",
+      revision: 2,
+    });
+    expect(store.getState().latestFinalizedTranscriptKey).toBeNull();
+
+    store.setState({ latestFinalizedTranscriptKey: "stale" });
+    emit({ type: "cleanShutdown", sessionId: "session-2", revision: 3 });
+    expect(store.getState().latestFinalizedTranscriptKey).toBeNull();
+  });
+
   it("blocks new starts until an archive transition releases its lease", async () => {
     const { blockVoiceConversationStarts, useVoiceConversationStore } =
       await import("./voiceConversationStore");
