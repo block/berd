@@ -245,6 +245,7 @@ export type VoiceConversationEvent =
 export const VOICE_CONVERSATION_EVENT = "voice-conversation:event";
 export const VOICE_CONVERSATION_OPEN_SESSION_EVENT =
   "voice-conversation:open-session";
+export const FOREGROUND_SESSION_CLAIM_TIMEOUT_MS = 3_000;
 
 export function getVoiceConversationStatus(): Promise<VoiceConversationStatus> {
   return invoke<VoiceConversationStatus>(
@@ -303,13 +304,25 @@ async function awaitForegroundSessionClaim(
   }
 
   while (targetClaim) {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const outcome = await Promise.race([
       targetClaim.acknowledgement.then(
         () => ({ type: "acknowledged" as const }),
         (error: unknown) => ({ type: "failed" as const, error }),
       ),
       targetClaim.superseded.then(() => ({ type: "superseded" as const })),
-    ]);
+      new Promise<{ type: "timed-out" }>((resolve) => {
+        timeoutId = setTimeout(
+          () => resolve({ type: "timed-out" }),
+          FOREGROUND_SESSION_CLAIM_TIMEOUT_MS,
+        );
+      }),
+    ]).finally(() => {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    });
+    if (outcome.type === "timed-out") {
+      throw new Error("Foreground voice session confirmation timed out.");
+    }
     if (outcome.type === "failed") {
       const latestClaim = foregroundSessionClaim;
       if (

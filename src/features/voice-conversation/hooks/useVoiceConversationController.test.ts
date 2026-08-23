@@ -533,6 +533,51 @@ describe("voice transcript delivery coordination", () => {
     expect(start).toHaveBeenCalledWith("session-b");
   });
 
+  it("accepts a later toggle after a replacement attempt times out", async () => {
+    const active = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "session-window-a",
+      microphoneMuted: false,
+      revision: 2,
+    };
+    const refreshStatus = vi.fn().mockResolvedValue(active);
+    const stopForReplacement = vi
+      .fn()
+      .mockRejectedValue(new Error("Foreground claim timed out"));
+    useVoiceConversationStore.setState({
+      status: active,
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus,
+      stopForReplacement,
+      start: vi.fn(),
+    });
+    const { result } = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-b",
+        onSend: vi.fn().mockResolvedValue(true),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.onToggle();
+    });
+    await act(async () => {
+      await result.current.onToggle();
+    });
+
+    expect(refreshStatus).toHaveBeenCalledTimes(2);
+    expect(stopForReplacement).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps an ineligible foreign session from controlling the active call", () => {
     expect(
       canReplaceActiveVoiceConversation({

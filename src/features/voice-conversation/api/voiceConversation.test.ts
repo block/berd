@@ -33,6 +33,7 @@ import {
   acknowledgeVoiceConversationTranscript,
   blockNativeVoiceConversationStarts,
   drainVoiceConversationTranscripts,
+  FOREGROUND_SESSION_CLAIM_TIMEOUT_MS,
   getVoiceConversationStatus,
   listenToVoiceConversation,
   openVoiceConversationSession,
@@ -547,6 +548,42 @@ describe("voice conversation API", () => {
       "stop_native_voice_conversation_for_replacement",
       expect.anything(),
     );
+  });
+
+  it("times out a foreground claim without stopping the active call", async () => {
+    vi.useFakeTimers();
+    try {
+      const activeStatus = {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running" as const,
+        sessionId: "session-1",
+        ownerWindowLabel: "session-window-a",
+        microphoneMuted: false,
+        revision: 3,
+      };
+      const claim = deferred<void>();
+      mocks.invoke.mockReturnValueOnce(claim.promise);
+      void setVoiceConversationForegroundSession("session-b");
+
+      const replacement = stopVoiceConversationForReplacement(
+        activeStatus,
+        "session-b",
+      );
+      const rejection = expect(replacement).rejects.toThrow(
+        "Foreground voice session confirmation timed out.",
+      );
+      await vi.advanceTimersByTimeAsync(FOREGROUND_SESSION_CLAIM_TIMEOUT_MS);
+
+      await rejection;
+      expect(mocks.invoke).toHaveBeenCalledOnce();
+      expect(mocks.invoke).not.toHaveBeenCalledWith(
+        "stop_native_voice_conversation_for_replacement",
+        expect.anything(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("reattaches browser capture when a reloaded renderer finds a running session", async () => {
