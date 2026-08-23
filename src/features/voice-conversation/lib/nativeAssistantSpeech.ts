@@ -776,7 +776,13 @@ export function startNativeAssistantSpeech(
   let precedingTranscriptKey: string | null = null;
   for (const message of initialMessages) {
     if (message.role === "user") {
-      precedingTranscriptKey = voiceTranscriptKeyForMessage(sessionId, message);
+      const voiceTranscriptKey = voiceTranscriptKeyForMessage(
+        sessionId,
+        message,
+      );
+      if (voiceTranscriptKey !== null) {
+        precedingTranscriptKey = voiceTranscriptKey;
+      }
     } else if (message.role === "assistant") {
       causalTranscriptKeyByMessage.set(message.id, precedingTranscriptKey);
     }
@@ -798,6 +804,15 @@ export function startNativeAssistantSpeech(
       textOrdinal += 1;
     }
   }
+  if (
+    initialVoice.latestFinalizedTranscriptKey === null &&
+    precedingTranscriptKey !== null &&
+    precedingTranscriptKey !== MALFORMED_VOICE_TRANSCRIPT_KEY
+  ) {
+    useVoiceConversationStore.setState({
+      latestFinalizedTranscriptKey: precedingTranscriptKey,
+    });
+  }
 
   let heldSpeech: HeldSpeech | null = null;
   let heldReleaseReady = false;
@@ -812,7 +827,13 @@ export function startNativeAssistantSpeech(
     let causalTranscriptKey: string | null = null;
     for (const message of messages ?? []) {
       if (message.role === "user") {
-        causalTranscriptKey = voiceTranscriptKeyForMessage(sessionId, message);
+        const voiceTranscriptKey = voiceTranscriptKeyForMessage(
+          sessionId,
+          message,
+        );
+        if (voiceTranscriptKey !== null) {
+          causalTranscriptKey = voiceTranscriptKey;
+        }
       } else if (
         message.role === "assistant" &&
         !causalTranscriptKeyByMessage.has(message.id)

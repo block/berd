@@ -935,8 +935,19 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           count: pendingTranscripts.length,
         });
       }
+      let recoveredCursor: string | null = null;
       for (const transcript of pendingTranscripts) {
-        observeFinalizedTranscript(transcript);
+        const key = finalizedTranscriptKey(transcript);
+        const current =
+          useVoiceConversationStore.getState().latestFinalizedTranscriptKey;
+        if (
+          current === null ||
+          current === key ||
+          (recoveredCursor !== null && current === recoveredCursor)
+        ) {
+          observeFinalizedTranscript(transcript);
+          recoveredCursor = key;
+        }
         if (!(await deliverTranscriptOnce(transcript))) {
           throw new Error("Voice transcript delivery was rejected.");
         }

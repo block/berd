@@ -1764,6 +1764,57 @@ describe("native assistant speech stream", () => {
     ).toMatchObject({ speech: { status: "notSpoken" } });
   });
 
+  it("speaks a typed turn after finalized voice input", async () => {
+    finalizeVoiceTranscript("voice-k1");
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore.getState().setMessages("session-1", [
+      voiceUser("voice-k1"),
+      {
+        id: "typed-user",
+        role: "user",
+        created: 2,
+        content: [{ type: "text", text: "Typed follow-up" }],
+      },
+      assistant(
+        [{ type: "text", text: "Typed-turn reply." }],
+        "completed",
+        "assistant-typed",
+      ),
+    ]);
+
+    await vi.waitFor(() =>
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "Typed-turn reply.",
+      ),
+    );
+  });
+
+  it("hydrates causal ownership from an existing voice transcript", async () => {
+    useChatStore.getState().setMessages("session-1", [voiceUser("voice-k1")]);
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        voiceUser("voice-k1"),
+        assistant(
+          [{ type: "text", text: "Recovered-turn reply." }],
+          "completed",
+          "assistant-recovered",
+        ),
+      ]);
+
+    await vi.waitFor(() =>
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "Recovered-turn reply.",
+      ),
+    );
+    expect(
+      useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
+    ).toBe(["session-1", "lifecycle-1", "1", "voice-k1"].join("\0"));
+  });
+
   it("plays each completed reply held during user speech in its own stream", async () => {
     useVoiceConversationStore.setState({ userSpeaking: true });
     startNativeAssistantSpeech("session-1", vi.fn());

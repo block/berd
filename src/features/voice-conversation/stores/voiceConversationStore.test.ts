@@ -264,6 +264,41 @@ describe("voice conversation store lifecycle ordering", () => {
     ).toBe(newerKey);
   });
 
+  it("does not let an unseen retained transcript roll back a live key", async () => {
+    const module = await import("./voiceConversationStore");
+    module.subscribeToVoiceConversationEvents(() => Promise.resolve());
+    await module.useVoiceConversationStore.getState().init();
+    emit({
+      type: "user",
+      sessionId: "session-1",
+      lifecycleId: "lifecycle-1",
+      id: "live-k1",
+      text: "Live",
+      revision: 1,
+      deliveryAttempts: 0,
+    });
+    await vi.waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledOnce());
+    const liveKey = ["session-1", "lifecycle-1", "1", "live-k1"].join("\0");
+
+    mocks.drain.mockResolvedValueOnce([
+      {
+        sessionId: "session-1",
+        lifecycleId: "lifecycle-1",
+        id: "unseen-retained-k0",
+        text: "Retained",
+        revision: 1,
+        deliveryAttempts: 1,
+      },
+    ]);
+    await module.useVoiceConversationStore
+      .getState()
+      .drainPendingTranscripts("session-1");
+
+    expect(
+      module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
+    ).toBe(liveKey);
+  });
+
   it("clears finalized STT at lifecycle boundaries", async () => {
     const store = await loadStore();
     emit({
