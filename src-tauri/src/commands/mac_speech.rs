@@ -274,6 +274,7 @@ pub fn status() -> Result<MacSpeechStatus, String> {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn terminal_install_failure(
     current_status: Result<MacSpeechStatus, String>,
     error: String,
