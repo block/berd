@@ -337,6 +337,34 @@ describe("voice conversation store lifecycle ordering", () => {
     ).toBe(["session-1", "lifecycle-1", "1", "retry-k1"].join("\0"));
   });
 
+  it("does not rewind for a retained duplicate found in chat after reload", async () => {
+    const module = await import("./voiceConversationStore");
+    module.subscribeToVoiceConversationEvents(() => Promise.resolve());
+    await module.useVoiceConversationStore.getState().init();
+    const currentKey = ["session-1", "lifecycle-1", "1", "live-k1"].join("\0");
+    module.useVoiceConversationStore.setState({
+      latestFinalizedTranscriptKey: currentKey,
+    });
+    mocks.drain.mockResolvedValueOnce([
+      {
+        sessionId: "session-1",
+        lifecycleId: "lifecycle-1",
+        id: "retained-k0",
+        text: "Already in chat",
+        revision: 1,
+        deliveryAttempts: 1,
+      },
+    ]);
+
+    await module.useVoiceConversationStore
+      .getState()
+      .drainPendingTranscripts("session-1", () => true);
+
+    expect(
+      module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
+    ).toBe(currentKey);
+  });
+
   it("clears finalized STT at lifecycle boundaries", async () => {
     const store = await loadStore();
     emit({

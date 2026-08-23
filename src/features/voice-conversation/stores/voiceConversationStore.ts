@@ -66,7 +66,10 @@ interface VoiceConversationStore {
   ) => Promise<VoiceConversationStatus>;
   setMicrophoneMuted: (muted: boolean) => Promise<void>;
   setUiState: (state: VoiceConversationUiState, error?: string) => void;
-  drainPendingTranscripts: (sessionId: string) => Promise<void>;
+  drainPendingTranscripts: (
+    sessionId: string,
+    transcriptAlreadyInChat?: (transcript: PendingVoiceTranscript) => boolean,
+  ) => Promise<void>;
 }
 
 function finalizedTranscriptKey(event: PendingVoiceTranscript): string {
@@ -930,7 +933,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       });
     },
 
-    drainPendingTranscripts: async (sessionId) => {
+    drainPendingTranscripts: async (sessionId, transcriptAlreadyInChat) => {
       const pendingTranscripts =
         await drainVoiceConversationTranscripts(sessionId);
       if (pendingTranscripts.length > 0) {
@@ -942,9 +945,9 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
         const key = finalizedTranscriptKey(transcript);
         const current =
           useVoiceConversationStore.getState().latestFinalizedTranscriptKey;
-        const alreadyDelivered = deliveredTranscripts.has(
-          transcriptKey(transcript),
-        );
+        const alreadyDelivered =
+          deliveredTranscripts.has(transcriptKey(transcript)) ||
+          transcriptAlreadyInChat?.(transcript) === true;
         if (!alreadyDelivered || current === null || current === key) {
           observeFinalizedTranscript(transcript);
         }
