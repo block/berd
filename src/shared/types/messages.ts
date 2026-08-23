@@ -91,6 +91,25 @@ export type ChatAttachmentDraft =
   | ChatFileAttachmentDraft
   | ChatDirectoryAttachmentDraft;
 
+// ── Composer staged items ──────────────────────────────────────────────
+
+/** Lightweight provenance for the rendered message a quote came from. */
+export interface StagedQuoteSource {
+  messageId: string;
+  role: Extract<MessageRole, "user" | "assistant">;
+}
+
+export interface StagedQuoteItem {
+  id: string;
+  kind: "quote";
+  excerpt: string;
+  source: StagedQuoteSource;
+}
+
+/** Structured composer content staged alongside, rather than pasted into,
+ * the typed draft. More kinds can join this union without becoming files. */
+export type StagedItem = StagedQuoteItem;
+
 // ── Renderer-only content block types ─────────────────────────────────
 //
 // These types have no ACP equivalent. They are synthesized by the
@@ -256,6 +275,8 @@ export interface MessageMetadata {
   voiceConversationRevision?: number;
   attachments?: MessageAttachment[];
   chips?: MessageChip[];
+  /** Immutable local snapshot of composer staged items submitted with this turn. */
+  stagedItems?: StagedItem[];
   personaId?: string;
   personaName?: string;
   providerId?: string;

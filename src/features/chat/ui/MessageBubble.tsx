@@ -39,6 +39,10 @@ import { resolveImageContentSrc } from "./resolveImageContentSrc";
 import { McpAppView } from "./McpAppView";
 import { useArtifactLinkHandler } from "@/features/chat/hooks/useArtifactLinkHandler";
 import { detectProviderErrorNotice } from "@/features/chat/lib/providerErrorNotice";
+import {
+  quoteMessageAttributes,
+  quoteSurfaceAttributes,
+} from "@/features/chat/lib/transcriptQuoteSelection";
 import type { CustomRenderer } from "streamdown";
 import { RUNNABLE_SHELL_LANGUAGES } from "@/shared/lib/runnableShellCommand";
 import type {
@@ -58,6 +62,7 @@ import { Button } from "@/shared/ui/button";
 import { LinkifiedText } from "@/shared/ui/LinkifiedText";
 import { MessageBubbleActions } from "./MessageBubbleActions";
 import { MessageMetadataChip } from "./MessageMetadataChip";
+import { MessageStagedQuotes } from "./MessageStagedQuotes";
 import {
   couldOverflowUserMessagePreview,
   UserMessageClamp,
@@ -360,6 +365,7 @@ interface ContentSection {
   key: string;
   type: "single" | "toolChain";
   items: MessageContent[] | ToolChainItem[];
+  contentBlockIndex?: number;
 }
 
 function filterUserVisibleContent(content: MessageContent[]): MessageContent[] {
@@ -448,6 +454,7 @@ function groupContentSections(content: MessageContent[]): ContentSection[] {
       key: `${block.type}-${"id" in block ? String(block.id) : index}`,
       type: "single",
       items: [block],
+      contentBlockIndex: index,
     });
   }
 
@@ -820,7 +827,11 @@ export const MessageBubble = memo(function MessageBubble({
     : textContent;
   if (role === "system") {
     return (
-      <div className="flex justify-center px-4 py-2" {...rowRootAttributes}>
+      <div
+        className="flex justify-center px-4 py-2"
+        {...quoteMessageAttributes(actionMessageId, role)}
+        {...rowRootAttributes}
+      >
         <div className="w-full max-w-md text-center text-xs text-muted-foreground">
           {content.map((c, i) =>
             renderContentBlock(c, i, {
@@ -918,6 +929,7 @@ export const MessageBubble = memo(function MessageBubble({
       )}
       data-role={isUser ? "user-message" : "assistant-message"}
       data-message-fragment-role={fragmentRole}
+      {...quoteMessageAttributes(actionMessageId, role)}
       {...rowRootAttributes}
     >
       {showPersonaGutterAvatar && showLeadingAssistantChrome ? (
@@ -1009,6 +1021,9 @@ export const MessageBubble = memo(function MessageBubble({
               ) : null}
             </div>
           ) : null}
+          {isUser && message.metadata?.stagedItems ? (
+            <MessageStagedQuotes items={message.metadata.stagedItems} />
+          ) : null}
           {isUser && messageChips.length > 0 && (
             <div className="mb-1.5 flex flex-wrap gap-1.5">
               {messageChips.map((chip) => (
@@ -1036,21 +1051,27 @@ export const MessageBubble = memo(function MessageBubble({
             const block = section.items[0] as MessageContent;
             if (isUser && block.type === "text") {
               if (!block.text.trim()) return null;
-              return couldOverflowUserMessagePreview(block.text) ? (
-                <UserMessageClamp
+              return (
+                <div
                   key={`${message.id}-${section.key}`}
-                  text={block.text}
-                  stateKey={section.key}
-                />
-              ) : (
-                <LinkifiedText
-                  key={`${message.id}-${section.key}`}
-                  text={block.text}
-                />
+                  {...quoteSurfaceAttributes()}
+                >
+                  {couldOverflowUserMessagePreview(block.text) ? (
+                    <UserMessageClamp
+                      text={block.text}
+                      stateKey={section.key}
+                    />
+                  ) : (
+                    <LinkifiedText text={block.text} />
+                  )}
+                </div>
               );
             }
             return (
-              <div key={`${message.id}-${section.key}`}>
+              <div
+                key={`${message.id}-${section.key}`}
+                {...(block.type === "text" ? quoteSurfaceAttributes() : {})}
+              >
                 {renderContentBlock(
                   block,
                   sectionIdx,

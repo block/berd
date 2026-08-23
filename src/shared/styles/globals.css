@@ -442,8 +442,12 @@
      colors. Each tone gets a bg + fg pair. Light values; dark block redefines. */
   --chip-file-bg: var(--color-gray-200);
   --chip-file-fg: var(--color-gray-700);
-  --chip-chat-bg: color-mix(in oklab, var(--color-indigo-200) 18%, transparent);
-  --chip-chat-fg: var(--color-indigo-700);
+  --chip-chat-bg: color-mix(in oklab, var(--color-indigo-200) 14%, transparent);
+  --chip-chat-fg: color-mix(
+    in oklab,
+    var(--color-indigo-700) 88%,
+    var(--foreground)
+  );
   --chip-project-bg: color-mix(
     in oklab,
     var(--color-orange-200) 20%,
@@ -833,8 +837,12 @@
   /* Composer chip tones — dark variants */
   --chip-file-bg: var(--color-gray-700);
   --chip-file-fg: var(--color-gray-200);
-  --chip-chat-bg: color-mix(in oklab, var(--color-indigo-100) 10%, transparent);
-  --chip-chat-fg: var(--color-indigo-100);
+  --chip-chat-bg: color-mix(in oklab, var(--color-indigo-100) 8%, transparent);
+  --chip-chat-fg: color-mix(
+    in oklab,
+    var(--color-indigo-100) 88%,
+    var(--foreground)
+  );
   --chip-project-bg: color-mix(
     in oklab,
     var(--color-orange-100) 10%,

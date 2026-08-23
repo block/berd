@@ -1761,7 +1761,12 @@ export const designSystemComponentManifest = [
       "hover-card-trigger",
     ],
     cva: [],
-    tokenClasses: ["bg-popover", "text-popover-foreground"],
+    tokenClasses: [
+      "bg-popover",
+      "bg-popover-inverse",
+      "text-popover-foreground",
+      "text-popover-inverse-foreground",
+    ],
     stateClasses: [
       "data-[side=bottom]:slide-in-from-top-2",
       "data-[side=left]:slide-in-from-right-2",
@@ -1949,7 +1954,7 @@ export const designSystemComponentManifest = [
     name: "Jump To Latest Button",
     source: "src/shared/ui/jump-to-latest-button.tsx",
     description:
-      'Chrome button for the floating "return to newest content" pill that\nappears over scrollable streams (the chat transcript\'s jump-to-latest\ncontrol).\n\nComposes Button. Base semantic variant: `primary`.\n\nExtra styling on top of primary:\n- fill/label swap primary tokens -> the responding-pill surface tokens\n  (`--surface-chat-responding-pill-bg` / `-fg`)\n- carries the chat shadow so it floats over the transcript\n- `select-none` so rapid clicks never select the label\n- hover dims the pill to 90% opacity instead of shifting color\n\nUse for floating "snap back to the live edge" affordances over streams\nor feeds. For ordinary main actions, use `Button variant="primary"`.\n\nIntent: the recipe owns every interactive state so the pill can never\ndrift when the base variant changes. The base `primary` contributes role,\ngeometry, focus behavior, and icon sizing, not colors. No flag props are\nused or accepted.',
+      'Chrome button for floating action pills overlaid on the chat transcript.\n\nDocumented consumers (restyle one, restyle all — that is the point):\n- the "jump to latest" back-to-live-edge control\n- the "quote in message" selection affordance\n\nComposes Button. Base semantic variant: `primary`.\n\nExtra styling on top of primary:\n- fill/label swap primary tokens -> the responding-pill surface tokens\n  (`--surface-chat-responding-pill-bg` / `-fg`)\n- carries the chat shadow so it floats over the transcript\n- `select-none` so rapid clicks never select the label\n- hover dims the pill to 90% opacity instead of shifting color\n\nUse for floating action pills over streams, feeds, or transcript\ncontent. For ordinary main actions, use `Button variant="primary"`.\n\nIntent: the recipe owns every interactive state so the pill can never\ndrift when the base variant changes. The base `primary` contributes role,\ngeometry, focus behavior, and icon sizing, not colors. No flag props are\nused or accepted.',
     exports: ["JumpToLatestButton", "JumpToLatestButtonProps"],
     slots: [],
     cva: [],

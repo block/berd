@@ -13,6 +13,23 @@
     "view": "Ver adjunto {{index}}",
     "viewFullSize": "Ver adjunto {{name}} en tamaño completo"
   },
+  "quotes": {
+    "quoteInMessage": "Citar en el mensaje",
+    "quoteAdded": "Cita añadida al mensaje",
+    "persistenceWarning": "Esta cita está disponible ahora, pero no se pudo guardar y no sobrevivirá al volver a abrir Berd.",
+    "remove": "Quitar cita",
+    "source": {
+      "agentResponse": "Respuesta del agente",
+      "yourMessage": "Tu mensaje",
+      "systemMessage": "Mensaje del sistema",
+      "multipleMessages_one": "1 mensaje",
+      "multipleMessages_other": "{{count}} mensajes"
+    },
+    "extent": {
+      "words_one": "1 palabra",
+      "words_other": "{{count}} palabras"
+    }
+  },
   "agentToolsTip": {
     "connect": "Conectar",
     "connected": "{{tool}} está conectado",

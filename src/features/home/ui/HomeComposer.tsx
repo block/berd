@@ -37,6 +37,9 @@ export function HomeComposer({
 
   return (
     <ChatInput
+      // Home has no transcript to quote from; make the policy explicit
+      // rather than relying on staged items never arriving.
+      controls={{ quotes: false }}
       composerActions={{
         onSend: controller.handleSend,
         onSteerQueuedMessage: controller.steerQueuedMessage,

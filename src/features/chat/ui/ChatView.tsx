@@ -584,6 +584,10 @@ export function ChatView({
     | "streaming"
     | "waiting"
     | "compacting";
+  // The single quote-capability decision for this view: it governs both the
+  // transcript's quote affordance and the composer's staged-quote handling.
+  // Do not add a second, independently drifting switch.
+  const quotesEnabled = !isReadOnly;
   const chatInputControls = useMemo<ChatInputControls | undefined>(() => {
     if (isReadOnly) {
       return {
@@ -592,6 +596,7 @@ export function ChatView({
         autoFocus: false,
         fileMentions: false,
         projectPicker: false,
+        quotes: quotesEnabled,
         skills: false,
         voice: false,
       };
@@ -605,7 +610,12 @@ export function ChatView({
     }
 
     return undefined;
-  }, [composerHandoffActive, controller.skillsEnabled, isReadOnly]);
+  }, [
+    composerHandoffActive,
+    controller.skillsEnabled,
+    isReadOnly,
+    quotesEnabled,
+  ]);
   const shouldStageTranscript = shouldStageInitialTranscript(
     controller.messages,
     controller.isLoadingHistory,
@@ -845,6 +855,9 @@ export function ChatView({
           onAttachmentDragOverChange={setConversationAttachmentDragOver}
           initialValue={controller.draftValue}
           initialAttachments={controller.draftAttachments}
+          stagedItems={controller.stagedItems}
+          onStagedItemsChange={controller.handleStagedItemsChange}
+          onRemoveStagedItem={controller.handleRemoveStagedItem}
           onDraftChange={controller.handleDraftChange}
           onDraftAttachmentsChange={controller.handleDraftAttachmentsChange}
           selectedSkills={controller.selectedSkills}
@@ -935,6 +948,7 @@ export function ChatView({
     <VirtualMessageTimelineGate
       sessionId={timelineSessionId}
       messages={timelineMessages}
+      quoteEnabled={quotesEnabled}
       streamingMessageId={controller.streamingMessageId}
       scrollTargetMessageId={controller.scrollTarget?.messageId ?? null}
       scrollTargetQuery={controller.scrollTarget?.query ?? null}

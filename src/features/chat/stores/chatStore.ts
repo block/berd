@@ -1,9 +1,12 @@
 import { create, type StateCreator } from "zustand";
+import { toast } from "sonner";
+import { i18n } from "@/shared/i18n";
 import { subscribeWithSelector } from "zustand/middleware";
 import type {
   ChatAttachmentDraft,
   Message,
   MessageContent,
+  StagedItem,
 } from "@/shared/types/messages";
 import { completeAssistantMessage } from "@/features/chat/lib/messageCompletion";
 import { clearReplayBuffer } from "../hooks/replayBuffer";
@@ -18,7 +21,12 @@ import {
   INITIAL_TOKEN_STATE,
 } from "@/shared/types/chat";
 import type { ChatSkillDraft } from "../types";
-import { loadCachedDrafts, persistDrafts } from "./draftPersistence";
+import {
+  loadCachedDrafts,
+  loadCachedStagedItems,
+  persistDrafts,
+  persistStagedItems,
+} from "./draftPersistence";
 import {
   loadCachedMessageQueues,
   persistMessageQueues,
@@ -32,6 +40,16 @@ import {
   type AdmittedQueuedMessagePayload,
   type QueuedMessagePayload,
 } from "../lib/admittedSend";
+
+function persistStagedItemsWithWarning(
+  sessionId: string,
+  itemsBySession: Record<string, StagedItem[]>,
+): void {
+  if (persistStagedItems(itemsBySession)) return;
+  toast.warning(i18n.t("chat:quotes.persistenceWarning"), {
+    id: `staged-items-persistence:${sessionId}`,
+  });
+}
 
 const MESSAGE_SESSION_CACHE_LIMIT = 10;
 
@@ -400,6 +418,7 @@ interface ChatStoreState {
   nonEmptyDraftSessionIds: Set<string>;
   skillDraftsBySession: Record<string, ChatSkillDraft[]>;
   draftAttachmentsBySession: Record<string, ChatAttachmentDraft[]>;
+  stagedItemsBySession: Record<string, StagedItem[]>;
   activeSessionId: string | null;
   recentMessageSessionIds: string[];
   isViewingActiveSession: boolean;
@@ -522,6 +541,10 @@ interface ChatStoreActions {
     attachments: ChatAttachmentDraft[],
   ) => void;
   clearDraftAttachments: (sessionId: string) => void;
+  setStagedItems: (sessionId: string, items: StagedItem[]) => void;
+  addStagedItem: (sessionId: string, item: StagedItem) => void;
+  removeStagedItem: (sessionId: string, itemId: string) => void;
+  clearStagedItems: (sessionId: string) => void;
   setSessionLoading: (sessionId: string, loading: boolean) => void;
   setScrollTargetMessage: (
     sessionId: string,
@@ -536,6 +559,7 @@ interface ChatStoreActions {
 export type ChatStore = ChatStoreState & ChatStoreActions;
 
 const cachedDrafts = loadCachedDrafts();
+const cachedStagedItems = loadCachedStagedItems();
 const cachedMessageQueues = loadCachedMessageQueues();
 
 const createChatStore: StateCreator<
@@ -551,6 +575,7 @@ const createChatStore: StateCreator<
   nonEmptyDraftSessionIds: buildNonEmptyDraftSessionIds(cachedDrafts),
   skillDraftsBySession: {},
   draftAttachmentsBySession: {},
+  stagedItemsBySession: cachedStagedItems,
   activeSessionId: null,
   recentMessageSessionIds: [],
   isViewingActiveSession: false,
@@ -1760,6 +1785,37 @@ const createChatStore: StateCreator<
       return { draftAttachmentsBySession: rest };
     }),
 
+  setStagedItems: (sessionId, items) => {
+    set((state) => {
+      if (items.length === 0) {
+        const { [sessionId]: _, ...rest } = state.stagedItemsBySession;
+        return { stagedItemsBySession: rest };
+      }
+      return {
+        stagedItemsBySession: {
+          ...state.stagedItemsBySession,
+          [sessionId]: items,
+        },
+      };
+    });
+    persistStagedItemsWithWarning(sessionId, get().stagedItemsBySession);
+  },
+
+  addStagedItem: (sessionId, item) => {
+    const items = get().stagedItemsBySession[sessionId] ?? [];
+    get().setStagedItems(sessionId, [...items, item]);
+  },
+
+  removeStagedItem: (sessionId, itemId) => {
+    const items = get().stagedItemsBySession[sessionId] ?? [];
+    get().setStagedItems(
+      sessionId,
+      items.filter((item) => item.id !== itemId),
+    );
+  },
+
+  clearStagedItems: (sessionId) => get().setStagedItems(sessionId, []),
+
   // Session loading (replay)
   setSessionLoading: (sessionId, loading) =>
     set((state) => {
@@ -1816,6 +1872,8 @@ const createChatStore: StateCreator<
         [draftSessionId]: draftAttachments,
         ...remainingDraftAttachments
       } = state.draftAttachmentsBySession;
+      const { [draftSessionId]: stagedItems, ...remainingStagedItems } =
+        state.stagedItemsBySession;
       const { [draftSessionId]: scrollTarget, ...remainingTargets } =
         state.scrollTargetMessageBySession;
       const loadingSessionIds = new Set(state.loadingSessionIds);
@@ -1851,6 +1909,9 @@ const createChatStore: StateCreator<
               [backendSessionId]: draftAttachments,
             }
           : remainingDraftAttachments,
+        stagedItemsBySession: stagedItems
+          ? { ...remainingStagedItems, [backendSessionId]: stagedItems }
+          : remainingStagedItems,
         scrollTargetMessageBySession: scrollTarget
           ? { ...remainingTargets, [backendSessionId]: scrollTarget }
           : remainingTargets,
@@ -1871,6 +1932,7 @@ const createChatStore: StateCreator<
       backendSessionId,
     ]);
     persistDrafts(get().draftsBySession);
+    persistStagedItemsWithWarning(backendSessionId, get().stagedItemsBySession);
     persistUnreadStateIfChanged(
       previousSessionStateById,
       get().sessionStateById,
@@ -1899,6 +1961,9 @@ const createChatStore: StateCreator<
         ...remainingDraftAttachments
       } = state.draftAttachmentsBySession;
       void removedDraftAttachments;
+      const { [sessionId]: removedStagedItems, ...remainingStagedItems } =
+        state.stagedItemsBySession;
+      void removedStagedItems;
       const { [sessionId]: removedTarget, ...remainingTargets } =
         state.scrollTargetMessageBySession;
       void removedTarget;
@@ -1910,6 +1975,7 @@ const createChatStore: StateCreator<
         nonEmptyDraftSessionIds,
         skillDraftsBySession: remainingSkillDrafts,
         draftAttachmentsBySession: remainingDraftAttachments,
+        stagedItemsBySession: remainingStagedItems,
         scrollTargetMessageBySession: remainingTargets,
         activeSessionId:
           state.activeSessionId === sessionId ? null : state.activeSessionId,
@@ -1925,6 +1991,7 @@ const createChatStore: StateCreator<
     });
     persistMessageQueues(get().queuedMessageBySession, [sessionId]);
     persistDrafts(get().draftsBySession);
+    persistStagedItemsWithWarning(sessionId, get().stagedItemsBySession);
     persistUnreadStateIfChanged(
       previousSessionStateById,
       get().sessionStateById,

@@ -64,6 +64,7 @@ import { MessageTimelineScrollContainer } from "./MessageTimelineScrollContainer
 import { TranscriptSearchSkip } from "./TranscriptSearchSkip";
 import { useVirtualTranscriptSearch } from "./useVirtualTranscriptSearch";
 import { VirtualTranscriptRow } from "./VirtualTranscriptRow";
+import { TranscriptQuoteAffordance } from "./TranscriptQuoteAffordance";
 import {
   easeOutCubic,
   JUMP_TO_LATEST_SCROLL_MS,
@@ -229,6 +230,7 @@ interface VirtualMessageTimelineProps extends MessageTimelineBubbleCallbacks {
   loadedTranscript?: LoadedTranscriptState;
   sessionId: string;
   messages: Message[];
+  quoteEnabled?: boolean;
   streamingMessageId?: string | null;
   scrollTargetMessageId?: string | null;
   scrollTargetQuery?: string | null;
@@ -980,6 +982,7 @@ function VirtualMessageTimelineSession({
   loadedTranscript,
   sessionId,
   messages,
+  quoteEnabled = true,
   streamingMessageId,
   scrollTargetMessageId,
   scrollTargetQuery,
@@ -3999,6 +4002,14 @@ function VirtualMessageTimelineSession({
           className,
         )}
       >
+        {quoteEnabled ? (
+          <TranscriptQuoteAffordance
+            key={sessionId}
+            messages={messages}
+            rootRef={containerRef}
+            sessionId={sessionId}
+          />
+        ) : null}
         {hasFooter ? (
           <div
             aria-hidden="true"

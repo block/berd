@@ -1,4 +1,5 @@
 import { parseSkillInstructionPrompt } from "@/features/skills/lib/skillChatPrompt";
+import { parseStagedQuoteDispatchPrompt } from "@/features/chat/lib/stagedQuoteSend";
 import {
   ensureReplayBuffer,
   getBufferedMessage,
@@ -11,6 +12,10 @@ import type {
 } from "@/shared/types/messages";
 
 const pendingReplayChips = new Map<string, Map<string, MessageChip[]>>();
+const pendingReplayStagedItems = new Map<
+  string,
+  Map<string, NonNullable<MessageMetadata["stagedItems"]>>
+>();
 
 export function getPendingReplayChips(sessionId: string, messageId: string) {
   const byMessage = pendingReplayChips.get(sessionId);
@@ -55,6 +60,11 @@ export function handleReplayUserMessageChunk(
   const existing = getBufferedMessage(sessionId, messageId);
 
   if (content.type === "text" && isAssistantOnly(content.annotations)) {
+    const stagedItems = parseStagedQuoteDispatchPrompt(content.text);
+    if (stagedItems) {
+      attachReplayStagedItems(sessionId, messageId, existing, stagedItems);
+      return;
+    }
     const chips = skillInstructionToChips(content.text);
     if (chips.length > 0) {
       attachReplayChips(sessionId, messageId, existing, chips);
@@ -64,6 +74,7 @@ export function handleReplayUserMessageChunk(
 
   const contentBlock = makeContentBlock(content);
   const chips = getPendingReplayChips(sessionId, messageId);
+  const stagedItems = pendingReplayStagedItems.get(sessionId)?.get(messageId);
   if (!existing) {
     buffer.push({
       id: messageId,
@@ -75,6 +86,7 @@ export function handleReplayUserMessageChunk(
         agentVisible: true,
         ...metadata,
         ...(chips.length > 0 ? { chips } : {}),
+        ...(stagedItems?.length ? { stagedItems } : {}),
       },
     });
   } else {
@@ -91,10 +103,34 @@ export function handleReplayUserMessageChunk(
     attachReplayChips(sessionId, messageId, existing, chips);
   }
   clearPendingReplayChips(sessionId, messageId);
+  clearPendingReplayStagedItems(sessionId, messageId);
 }
 
 export function clearSkillReplayChips(): void {
   pendingReplayChips.clear();
+  pendingReplayStagedItems.clear();
+}
+
+function attachReplayStagedItems(
+  sessionId: string,
+  messageId: string,
+  existing: ReturnType<typeof getBufferedMessage>,
+  stagedItems: NonNullable<MessageMetadata["stagedItems"]>,
+) {
+  if (existing) {
+    existing.metadata = { ...existing.metadata, stagedItems };
+    return;
+  }
+  const byMessage = pendingReplayStagedItems.get(sessionId) ?? new Map();
+  byMessage.set(messageId, stagedItems);
+  pendingReplayStagedItems.set(sessionId, byMessage);
+}
+
+function clearPendingReplayStagedItems(sessionId: string, messageId: string) {
+  const byMessage = pendingReplayStagedItems.get(sessionId);
+  if (!byMessage) return;
+  byMessage.delete(messageId);
+  if (byMessage.size === 0) pendingReplayStagedItems.delete(sessionId);
 }
 
 function isAssistantOnly(ann?: TextContent["annotations"]) {

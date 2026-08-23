@@ -167,6 +167,8 @@ export function useChat(
       const sid = sessionId.slice(0, 8);
       const hasAttachments = (attachments?.length ?? 0) > 0;
       const hasAssistantPrompt = Boolean(sendOptions?.assistantPrompt?.trim());
+      // A quote is context for the user's message, not a standalone message.
+      // The composer enforces the same quote-plus-text policy.
       const currentChatState = useChatStore
         .getState()
         .getSessionRuntime(sessionId).chatState;
