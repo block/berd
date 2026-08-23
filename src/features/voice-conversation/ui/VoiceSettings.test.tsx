@@ -415,6 +415,47 @@ describe("VoiceSettings", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("identifies native macOS input while Siri status is unresolved", () => {
+    inputState.backend = "macos";
+    outputState.backend = "siri";
+    siriSetupState.current = {
+      ...siriSetup(),
+      status: null,
+      error: null,
+      statusError: null,
+      loading: true,
+    };
+    macSpeechSetupState.current = {
+      status: {
+        supported: true,
+        unavailableReason: null,
+        locale: "en-US",
+        localeSupported: true,
+        modelInstalled: false,
+        installing: false,
+        progress: null,
+        error: null,
+        revision: 1,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      install: vi.fn(),
+    };
+    setupState.current = setup(pocketStatus());
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByText(
+        "Apple's on-device dictation model is not installed. Download it below to use Voice Conversation.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Parakeet STT is not installed/),
+    ).not.toBeInTheDocument();
+  });
+
   it("offers the on-device dictation download for native macOS input", () => {
     inputState.backend = "macos";
     setupState.current = setup(pocketStatus({ pocketInstalled: true }));

@@ -87,7 +87,9 @@ export function VoiceSettings() {
   const readinessKey = !pocketStatusLoaded
     ? null
     : !inputReady && output.backend === "siri" && !siriOutputLoaded
-      ? "voice.notReadyInput"
+      ? input.backend === "macos"
+        ? "voice.notReadyMacInput"
+        : "voice.notReadyInput"
       : output.backend === "siri" && !siriOutputLoaded
         ? null
         : input.backend === null

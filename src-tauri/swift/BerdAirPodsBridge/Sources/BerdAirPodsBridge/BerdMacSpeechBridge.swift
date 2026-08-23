@@ -126,8 +126,18 @@ private func resolve(_ requested: Locale) async -> Locale? {
 }
 
 @available(macOS 26.0, *)
+private func speechTranscriber(for locale: Locale) -> SpeechTranscriber {
+    SpeechTranscriber(
+        locale: locale,
+        transcriptionOptions: [],
+        reportingOptions: [.volatileResults],
+        attributeOptions: [.audioTimeRange]
+    )
+}
+
+@available(macOS 26.0, *)
 private func assetModules(for locale: Locale) -> [any SpeechModule] {
-    [DictationTranscriber(locale: locale, preset: .progressiveLongDictation)]
+    [speechTranscriber(for: locale)]
 }
 
 @available(macOS 26.0, *)
@@ -151,12 +161,7 @@ private func status(for requested: Locale) async -> SpeechStatus {
             sampleRate: nil
         )
     }
-    let transcriber = SpeechTranscriber(
-        locale: locale,
-        transcriptionOptions: [],
-        reportingOptions: [.volatileResults],
-        attributeOptions: [.audioTimeRange]
-    )
+    let transcriber = speechTranscriber(for: locale)
     let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
     let inventory = await AssetInventory.status(forModules: assetModules(for: locale))
     return SpeechStatus(
@@ -165,7 +170,7 @@ private func status(for requested: Locale) async -> SpeechStatus {
         locale: locale.identifier(.bcp47),
         localeSupported: true,
         modelStatus: describe(inventory),
-        ready: format != nil,
+        ready: inventory == .installed && format != nil,
         sampleRate: format?.sampleRate
     )
 }
@@ -238,12 +243,10 @@ private final class SpeechSession: @unchecked Sendable {
         guard let locale = await resolve(requestedLocale) else {
             throw BridgeError.unsupportedLocale(requestedLocale.identifier(.bcp47))
         }
-        let transcriber = SpeechTranscriber(
-            locale: locale,
-            transcriptionOptions: [],
-            reportingOptions: [.volatileResults],
-            attributeOptions: [.audioTimeRange]
-        )
+        let transcriber = speechTranscriber(for: locale)
+        guard await AssetInventory.status(forModules: [transcriber]) == .installed else {
+            throw BridgeError.modelUnavailable(locale.identifier(.bcp47))
+        }
         guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
             throw BridgeError.modelUnavailable(locale.identifier(.bcp47))
         }

@@ -274,6 +274,25 @@ pub fn status() -> Result<MacSpeechStatus, String> {
     }
 }
 
+fn terminal_install_failure(
+    current_status: Result<MacSpeechStatus, String>,
+    error: String,
+) -> MacSpeechStatus {
+    let mut next = current_status.unwrap_or_else(|_| unsupported_status());
+    next.installing = false;
+    next.progress = None;
+    next.error = Some(error);
+    next.revision = STATUS_REVISION.fetch_add(1, Ordering::AcqRel) + 1;
+    next
+}
+
+#[cfg(target_os = "macos")]
+fn emit_terminal_install_failure(app: &AppHandle, error: String) -> String {
+    let next = terminal_install_failure(status(), error.clone());
+    let _ = app.emit(STATUS_EVENT, next);
+    error
+}
+
 #[tauri::command]
 pub fn get_mac_speech_status() -> Result<MacSpeechStatus, String> {
     status()
@@ -308,17 +327,28 @@ pub async fn install_mac_speech_model(app: AppHandle) -> Result<MacSpeechStatus,
         // Raw pointers are intentionally not `Send`; move the address across
         // the blocking-task boundary and reconstruct it only on that thread.
         let context_address = context as usize;
-        let result = tauri::async_runtime::spawn_blocking(move || {
+        let result = match tauri::async_runtime::spawn_blocking(move || {
             let context = context_address as *mut ProgressContext;
             let result = bridge::install(progress, context.cast());
             unsafe { drop(Box::from_raw(context)) };
             result
         })
         .await
-        .map_err(|error| format!("install macOS speech model task failed: {error}"))?;
-        result?;
-        STATUS_REVISION.fetch_add(1, Ordering::AcqRel);
-        let next = status()?;
+        {
+            Ok(result) => result,
+            Err(error) => {
+                let error = format!("install macOS speech model task failed: {error}");
+                return Err(emit_terminal_install_failure(&app, error));
+            }
+        };
+        if let Err(error) = result {
+            return Err(emit_terminal_install_failure(&app, error));
+        }
+        let mut next = match status() {
+            Ok(next) => next,
+            Err(error) => return Err(emit_terminal_install_failure(&app, error)),
+        };
+        next.revision = STATUS_REVISION.fetch_add(1, Ordering::AcqRel) + 1;
         let _ = app.emit(STATUS_EVENT, next.clone());
         Ok(next)
     }
@@ -348,5 +378,29 @@ mod tests {
             status.unavailable_reason.as_deref(),
             Some("Requires macOS 26 or later."),
         );
+    }
+
+    #[test]
+    fn install_failure_is_terminal_and_retryable() {
+        let before = STATUS_REVISION.load(Ordering::Acquire);
+        let status = terminal_install_failure(
+            Ok(MacSpeechStatus {
+                supported: true,
+                unavailable_reason: None,
+                locale: "en-US".to_string(),
+                locale_supported: true,
+                model_installed: false,
+                installing: true,
+                progress: Some(0.5),
+                error: None,
+                revision: before,
+            }),
+            "download failed".to_string(),
+        );
+
+        assert!(!status.installing);
+        assert_eq!(status.progress, None);
+        assert_eq!(status.error.as_deref(), Some("download failed"));
+        assert!(status.revision > before);
     }
 }
