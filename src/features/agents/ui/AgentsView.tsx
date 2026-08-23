@@ -166,6 +166,7 @@ export function AgentsView({
   const sessions = useChatSessionStore((state) => state.sessions);
   const draftSources = useAgentStore((state) => state.draftSources);
   const removeDraftSource = useAgentStore((state) => state.removeDraftSource);
+  const mutateGallery = useAgentStore((state) => state.mutateGallery);
   // Draft cards come from the files on disk, like every other card in the
   // gallery. An untouched "New agent" placeholder isn't something the user
   // made yet, so it earns no card. The builder chat, when one is still open,
@@ -293,20 +294,22 @@ export function AgentsView({
   const handleDeleteDraft = useCallback(
     (draft: GalleryDraft) => {
       const { sessionId, source } = draft;
-      const deletion = sessionId
-        ? deleteDraftAgentSession(sessionId, {
+      // Run as a gallery mutation so a disk refresh that started before the
+      // delete cannot land afterwards and put the card back.
+      void mutateGallery(async () => {
+        if (sessionId) {
+          await deleteDraftAgentSession(sessionId, {
             closeSession: onDeleteDraftSession,
-          })
-        : discardAgentBuilderSource(source.path);
-      void deletion
-        .then(() => {
-          removeDraftSource(source.path);
-        })
-        .catch((error) => {
-          toast.error(formatAgentError(error, t("view.deleteFailed")));
-        });
+          });
+        } else {
+          await discardAgentBuilderSource(source.path);
+        }
+        removeDraftSource(source.path);
+      }).catch((error) => {
+        toast.error(formatAgentError(error, t("view.deleteFailed")));
+      });
     },
-    [onDeleteDraftSession, removeDraftSource, t],
+    [mutateGallery, onDeleteDraftSession, removeDraftSource, t],
   );
 
   useEffect(() => {

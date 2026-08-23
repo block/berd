@@ -1,7 +1,10 @@
 import { create } from "zustand";
 import type { Persona, Agent } from "@/shared/types/agents";
 import type { AcpProvider } from "@/shared/api/acp";
-import type { AgentSourceEntry } from "@/shared/api/agents";
+import type {
+  AgentGalleryListing,
+  AgentSourceEntry,
+} from "@/shared/api/agents";
 import { canEditPersona } from "@/features/agents/lib/personaPresentation";
 
 const PROVIDER_STORAGE_KEY = "goose:defaultProvider";
@@ -39,6 +42,11 @@ interface AgentStoreState {
   personasLoading: boolean;
   // Builder drafts as listed on disk; the gallery's draft cards come from here.
   draftSources: AgentSourceEntry[];
+  // Gallery fence. A disk snapshot is only applied if no gallery mutation
+  // started or finished while it was in flight, so a slow refresh can never
+  // resurrect something the user just deleted or promoted.
+  galleryRevision: number;
+  galleryMutationsInFlight: number;
 
   // Agents
   agents: Agent[];
@@ -67,6 +75,12 @@ interface AgentStoreActions {
   setPersonasLoading: (loading: boolean) => void;
   setDraftSources: (drafts: AgentSourceEntry[]) => void;
   removeDraftSource: (path: string) => void;
+  // Every writer of the gallery goes through one of these two. Direct
+  // setPersonas/setDraftSources calls from a disk listing bypass the fence.
+  refreshGallery: (
+    fetchGallery: () => Promise<AgentGalleryListing>,
+  ) => Promise<boolean>;
+  mutateGallery: <T>(work: () => Promise<T> | T) => Promise<T>;
 
   // Agent CRUD
   setAgents: (agents: Agent[]) => void;
@@ -102,6 +116,8 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   personas: [],
   personasLoading: false,
   draftSources: [],
+  galleryRevision: 0,
+  galleryMutationsInFlight: 0,
   agents: [],
   agentsLoading: false,
   providers: [],
@@ -138,6 +154,32 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     set((state) => ({
       draftSources: state.draftSources.filter((draft) => draft.path !== path),
     })),
+
+  refreshGallery: async (fetchGallery) => {
+    const revisionAtStart = get().galleryRevision;
+    const { personas, drafts } = await fetchGallery();
+    const { galleryRevision, galleryMutationsInFlight } = get();
+    if (revisionAtStart !== galleryRevision || galleryMutationsInFlight !== 0) {
+      return false;
+    }
+    set({ personas, draftSources: drafts });
+    return true;
+  },
+
+  mutateGallery: async (work) => {
+    set((state) => ({
+      galleryRevision: state.galleryRevision + 1,
+      galleryMutationsInFlight: state.galleryMutationsInFlight + 1,
+    }));
+    try {
+      return await work();
+    } finally {
+      set((state) => ({
+        galleryRevision: state.galleryRevision + 1,
+        galleryMutationsInFlight: state.galleryMutationsInFlight - 1,
+      }));
+    }
+  },
 
   // Agent CRUD
   setAgents: (agents) => set({ agents }),

@@ -523,11 +523,49 @@ export async function isDraftAgentBuilderSession(
  * (moved or removed outside the app). Editing an existing, present agent is
  * never discardable.
  */
-export async function isDiscardableAgentBuilderSession(
+export type UntouchedDraftDiscardOutcome =
+  | "discarded"
+  | "kept"
+  | "nothing-to-discard";
+
+/**
+ * Discards the session's draft only if it is still untouched at the moment of
+ * deletion. The user-content check is the last thing that runs before the
+ * file goes, so anything typed while earlier lookups were in flight keeps the
+ * draft ("kept") instead of being silently thrown away. Editing an existing
+ * agent is never discardable; with no content it reports "nothing-to-discard"
+ * so callers can navigate freely.
+ *
+ * `onBeforeDiscard` runs once the decision is final and before the chat
+ * closes — callers navigate there, because closing the active chat redirects
+ * home and would stomp on where the user was going.
+ */
+export async function discardUntouchedDraftAgentSession(
   sessionId: string,
-): Promise<boolean> {
+  deps: CloseSessionDeps & { onBeforeDiscard?: () => void } = {},
+): Promise<UntouchedDraftDiscardOutcome> {
   const source = await findCurrentBuilderSource(sessionId);
-  return source === undefined || source.properties?.draft === true;
+  const isDraft = source === undefined || source.properties?.draft === true;
+
+  if (await hasAgentBuilderSessionUserContent(sessionId)) {
+    return "kept";
+  }
+  if (!isDraft) {
+    return "nothing-to-discard";
+  }
+
+  deps.onBeforeDiscard?.();
+  try {
+    if (source) {
+      await discardAgentBuilderSource(source.path);
+    }
+  } catch (error) {
+    console.warn("Failed to delete agent builder draft during discard:", error);
+  } finally {
+    clearBuilderSessionState(sessionId);
+    await deps.closeSession?.(sessionId);
+  }
+  return "discarded";
 }
 
 export async function reconcileAgentBuilderSessions(): Promise<void> {

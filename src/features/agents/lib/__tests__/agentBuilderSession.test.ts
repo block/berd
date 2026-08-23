@@ -101,8 +101,8 @@ vi.mock("@/features/runtime-config/defaults", () => ({
 import {
   deleteDraftAgentSession,
   discardDraftAgentSession,
+  discardUntouchedDraftAgentSession,
   hasAgentBuilderSessionUserContent,
-  isDiscardableAgentBuilderSession,
   isEmptyDraftAgentSession,
   promoteDraft,
   recoverDraftAgent,
@@ -785,29 +785,84 @@ describe("agentBuilderSession", () => {
     );
   });
 
-  it("isDiscardableAgentBuilderSession is true for drafts and missing files, false for existing agents", async () => {
-    addBuilderSession();
-    mocks.listPersonaSources.mockResolvedValue([draftSource]);
-    await expect(isDiscardableAgentBuilderSession("sess-1")).resolves.toBe(
-      true,
-    );
+  describe("discardUntouchedDraftAgentSession", () => {
+    it("discards an untouched draft, navigating before the chat closes", async () => {
+      addBuilderSession();
+      mocks.listPersonaSources.mockResolvedValue([draftSource]);
+      mocks.readAgentSourceFile.mockResolvedValue(draftSource);
+      mocks.deletePersonaSource.mockResolvedValue(undefined);
+      const order: string[] = [];
+      const onBeforeDiscard = vi.fn(() => order.push("navigate"));
+      const close = vi.fn(async () => {
+        order.push("close");
+      });
 
-    const existingAgent = {
-      ...draftSource,
-      name: "Spar",
-      properties: { draft: false },
-    };
-    mocks.listPersonaSources.mockResolvedValue([existingAgent]);
-    mocks.readAgentSourceFile.mockResolvedValue(existingAgent);
-    await expect(isDiscardableAgentBuilderSession("sess-1")).resolves.toBe(
-      false,
-    );
+      await expect(
+        discardUntouchedDraftAgentSession("sess-1", {
+          closeSession: close,
+          onBeforeDiscard,
+        }),
+      ).resolves.toBe("discarded");
 
-    mocks.listPersonaSources.mockResolvedValue([]);
-    mocks.readAgentSourceFile.mockRejectedValue(new Error("missing"));
-    await expect(isDiscardableAgentBuilderSession("sess-1")).resolves.toBe(
-      true,
-    );
+      expect(mocks.deletePersonaSource).toHaveBeenCalledWith(draftSource.path);
+      expect(close).toHaveBeenCalledWith("sess-1");
+      expect(order).toEqual(["navigate", "close"]);
+    });
+
+    it("keeps the draft when the user types while the lookup is in flight", async () => {
+      addBuilderSession();
+      let releaseLookup: (sources: (typeof draftSource)[]) => void = () => {};
+      mocks.listPersonaSources.mockImplementation(
+        () =>
+          new Promise<(typeof draftSource)[]>((resolve) => {
+            releaseLookup = resolve;
+          }),
+      );
+      mocks.readAgentSourceFile.mockResolvedValue(draftSource);
+      const onBeforeDiscard = vi.fn();
+
+      const pending = discardUntouchedDraftAgentSession("sess-1", {
+        closeSession,
+        onBeforeDiscard,
+      });
+      // The decision has not been made yet; the user starts typing.
+      chatState.draftsBySession = { "sess-1": "make it a code reviewer" };
+      releaseLookup([draftSource]);
+
+      await expect(pending).resolves.toBe("kept");
+      expect(mocks.deletePersonaSource).not.toHaveBeenCalled();
+      expect(onBeforeDiscard).not.toHaveBeenCalled();
+      expect(closeSession).not.toHaveBeenCalled();
+    });
+
+    it("reports nothing to discard when editing an existing agent without changes", async () => {
+      addBuilderSession();
+      const existingAgent = {
+        ...draftSource,
+        name: "Spar",
+        properties: { draft: false },
+      };
+      mocks.listPersonaSources.mockResolvedValue([existingAgent]);
+      mocks.readAgentSourceFile.mockResolvedValue(existingAgent);
+
+      await expect(
+        discardUntouchedDraftAgentSession("sess-1", { closeSession }),
+      ).resolves.toBe("nothing-to-discard");
+      expect(mocks.deletePersonaSource).not.toHaveBeenCalled();
+      expect(closeSession).not.toHaveBeenCalled();
+    });
+
+    it("closes the empty chat when the draft file is already gone", async () => {
+      addBuilderSession();
+      mocks.listPersonaSources.mockResolvedValue([]);
+      mocks.readAgentSourceFile.mockRejectedValue(new Error("missing"));
+
+      await expect(
+        discardUntouchedDraftAgentSession("sess-1", { closeSession }),
+      ).resolves.toBe("discarded");
+      expect(mocks.deletePersonaSource).not.toHaveBeenCalled();
+      expect(closeSession).toHaveBeenCalledWith("sess-1");
+    });
   });
 
   it("treats unsaved local edits as agent builder user content", async () => {

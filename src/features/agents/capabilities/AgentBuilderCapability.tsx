@@ -51,46 +51,44 @@ export function AgentBuilderCapability({
   const { t } = useTranslation("agents");
   const patchSession = useChatSessionStore((state) => state.patchSession);
 
-  const refreshPersonas = useCallback(async () => {
-    const { personas, drafts } = await listAgentGallery();
-    const agentStore = useAgentStore.getState();
-    agentStore.setPersonas(personas);
-    agentStore.setDraftSources(drafts);
-  }, []);
-
   const completeBuilder = useCallback(
     (source: AgentSourceEntry, refreshErrorMessage: string) => {
       clearBuilderSessionState(session.id);
 
       // Promotion is the durable source of truth. Seed the store immediately
       // so the destination profile exists even if the follow-up disk refresh
-      // fails or has not observed the promoted source yet.
+      // fails or has not observed the promoted source yet. Running the writes
+      // as a gallery mutation fences out any disk refresh that started before
+      // the promotion and would otherwise repaint the draft card.
       const promotedPersona = agentSourceToPersona(source);
       const agentStore = useAgentStore.getState();
-      const existingPersona = agentStore.personas.find(
-        (persona) => persona.id === promotedPersona.id,
-      );
-      if (existingPersona) {
-        agentStore.updatePersona(promotedPersona.id, promotedPersona);
-      } else {
-        agentStore.addPersona(promotedPersona);
-      }
-      // The draft just became this agent; drop its card without waiting for
-      // the disk refresh so the gallery never shows both at once.
-      for (const draft of agentStore.draftSources) {
-        if (draft.properties?.builderSessionId === session.id) {
-          agentStore.removeDraftSource(draft.path);
+      void agentStore.mutateGallery(() => {
+        const current = useAgentStore.getState();
+        const existingPersona = current.personas.find(
+          (persona) => persona.id === promotedPersona.id,
+        );
+        if (existingPersona) {
+          current.updatePersona(promotedPersona.id, promotedPersona);
+        } else {
+          current.addPersona(promotedPersona);
         }
-      }
+        // The draft just became this agent; drop its card without waiting
+        // for the disk refresh so the gallery never shows both at once.
+        for (const draft of current.draftSources) {
+          if (draft.properties?.builderSessionId === session.id) {
+            current.removeDraftSource(draft.path);
+          }
+        }
+      });
 
       onDraftPromoted?.(source);
       onAgentBuilderCompleted?.(promotedPersona.id);
 
-      void refreshPersonas().catch((error) => {
+      void agentStore.refreshGallery(listAgentGallery).catch((error) => {
         console.error(refreshErrorMessage, error);
       });
     },
-    [onAgentBuilderCompleted, onDraftPromoted, refreshPersonas, session.id],
+    [onAgentBuilderCompleted, onDraftPromoted, session.id],
   );
 
   const handleDraftPromoted = useCallback(

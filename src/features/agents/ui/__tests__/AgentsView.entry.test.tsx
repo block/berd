@@ -293,6 +293,8 @@ describe("AgentsView entry points", () => {
       personas: [],
       personasLoading: false,
       draftSources: [],
+      galleryRevision: 0,
+      galleryMutationsInFlight: 0,
       providers: [],
     });
     useChatSessionStore.setState({
@@ -796,6 +798,46 @@ describe("AgentsView entry points", () => {
     });
     expect(onDeleteDraftSession).not.toHaveBeenCalled();
     expect(useAgentStore.getState().draftSources).toEqual([]);
+  });
+
+  it("does not let a disk refresh that started before Delete put the card back", async () => {
+    const { deletePersonaSource } = await import("@/shared/api/agents");
+    useAgentStore.setState({
+      personas: [persona],
+      draftSources: [mockDraftSource],
+    });
+    useChatSessionStore.setState({ sessions: [] });
+
+    // A focus/interval refresh photographs the folder with the draft still in
+    // it, but the answer is slow to come back.
+    let resolveRefresh: (listing: {
+      personas: (typeof persona)[];
+      drafts: (typeof mockDraftSource)[];
+    }) => void = () => {};
+    const staleRefresh = useAgentStore.getState().refreshGallery(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+
+    render(<AgentsView onDeleteDraftSession={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: "gallery.deleteDraftAria" }),
+    );
+    await waitFor(() => {
+      expect(deletePersonaSource).toHaveBeenCalledWith(mockDraftSource.path);
+    });
+    await waitFor(() => {
+      expect(screen.queryByText("gallery.draft")).not.toBeInTheDocument();
+    });
+
+    // The old photo arrives after the delete. It must be ignored.
+    resolveRefresh({ personas: [persona], drafts: [mockDraftSource] });
+    await expect(staleRefresh).resolves.toBe(false);
+    expect(useAgentStore.getState().draftSources).toEqual([]);
+    expect(screen.queryByText("gallery.draft")).not.toBeInTheDocument();
   });
 
   it("does not show a card for an untouched New agent placeholder", () => {

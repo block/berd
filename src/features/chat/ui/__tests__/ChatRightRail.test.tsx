@@ -132,6 +132,20 @@ vi.mock("@/features/agents/stores/agentStore", () => ({
       draftSources: mocks.draftSources,
       setDraftSources: mocks.setDraftSources,
       removeDraftSource: mocks.removeDraftSource,
+      // Mirror the real store's fence shape: mutations run their work
+      // synchronously up to the first await; refreshes apply the listing.
+      mutateGallery: async <T,>(work: () => Promise<T> | T) => work(),
+      refreshGallery: async (
+        fetchGallery: () => Promise<{
+          personas: Array<{ id: string }>;
+          drafts: Array<{ path: string }>;
+        }>,
+      ) => {
+        const { personas, drafts } = await fetchGallery();
+        mocks.setPersonas(personas);
+        mocks.setDraftSources(drafts);
+        return true;
+      },
     }),
   },
 }));
