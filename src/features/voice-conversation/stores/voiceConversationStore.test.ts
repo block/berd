@@ -192,6 +192,78 @@ describe("voice conversation store lifecycle ordering", () => {
     unsubscribe();
   });
 
+  it("records a recovered transcript before its subscriber settles", async () => {
+    const delivery = deferred<void>();
+    const transcript = {
+      sessionId: "session-1",
+      lifecycleId: "lifecycle-1",
+      id: "recovered-k1",
+      text: "Recovered",
+      revision: 1,
+      deliveryAttempts: 1,
+    };
+    mocks.drain.mockResolvedValueOnce([transcript]);
+    const module = await import("./voiceConversationStore");
+    module.subscribeToVoiceConversationEvents(() => delivery.promise);
+    await module.useVoiceConversationStore.getState().init();
+
+    const draining = module.useVoiceConversationStore
+      .getState()
+      .drainPendingTranscripts("session-1");
+    await vi.waitFor(() => {
+      expect(
+        module.useVoiceConversationStore.getState()
+          .latestFinalizedTranscriptKey,
+      ).toBe(["session-1", "lifecycle-1", "1", "recovered-k1"].join("\0"));
+    });
+    expect(mocks.acknowledge).not.toHaveBeenCalled();
+
+    delivery.resolve();
+    await draining;
+  });
+
+  it("does not let an old retained transcript roll back a newer key", async () => {
+    mocks.acknowledge
+      .mockRejectedValueOnce(new Error("ack unavailable"))
+      .mockResolvedValue(undefined);
+    const module = await import("./voiceConversationStore");
+    module.subscribeToVoiceConversationEvents(() => Promise.resolve());
+    await module.useVoiceConversationStore.getState().init();
+    const oldTranscript = {
+      type: "user" as const,
+      sessionId: "session-1",
+      lifecycleId: "lifecycle-1",
+      id: "old-k0",
+      text: "Old",
+      revision: 1,
+      deliveryAttempts: 0,
+    };
+    emit(oldTranscript);
+    await vi.waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledOnce());
+
+    emit({
+      ...oldTranscript,
+      id: "new-k1",
+      text: "New",
+    });
+    await vi.waitFor(() => expect(mocks.acknowledge).toHaveBeenCalledTimes(2));
+    const newerKey = ["session-1", "lifecycle-1", "1", "new-k1"].join("\0");
+    expect(
+      module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
+    ).toBe(newerKey);
+
+    mocks.drain.mockResolvedValueOnce([
+      { ...oldTranscript, deliveryAttempts: 1 },
+    ]);
+    await module.useVoiceConversationStore
+      .getState()
+      .drainPendingTranscripts("session-1");
+
+    expect(
+      module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
+    ).toBe(newerKey);
+  });
+
   it("clears finalized STT at lifecycle boundaries", async () => {
     const store = await loadStore();
     emit({

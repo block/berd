@@ -87,6 +87,20 @@ const transcriptDeliveries = new Map<string, Promise<boolean>>();
 const deliveredTranscripts = new Set<string>();
 const deliveredTranscriptOrder: string[] = [];
 const MAX_DELIVERED_TRANSCRIPT_KEYS = 256;
+const observedFinalizedTranscripts = new Set<string>();
+const observedFinalizedTranscriptOrder: string[] = [];
+
+function observeFinalizedTranscript(transcript: PendingVoiceTranscript): void {
+  const key = finalizedTranscriptKey(transcript);
+  if (observedFinalizedTranscripts.has(key)) return;
+  observedFinalizedTranscripts.add(key);
+  observedFinalizedTranscriptOrder.push(key);
+  if (observedFinalizedTranscriptOrder.length > MAX_DELIVERED_TRANSCRIPT_KEYS) {
+    const expired = observedFinalizedTranscriptOrder.shift();
+    if (expired) observedFinalizedTranscripts.delete(expired);
+  }
+  useVoiceConversationStore.setState({ latestFinalizedTranscriptKey: key });
+}
 
 export function subscribeToVoiceConversationEvents(
   subscriber: (event: VoiceConversationEvent) => void | Promise<void>,
@@ -320,6 +334,8 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
         await listenToVoiceConversation((event) => {
           if (!shouldApplyEventRevision(get().status, event.revision)) return;
 
+          if (event.type === "user") observeFinalizedTranscript(event);
+
           if (event.type === "microphoneMute") {
             microphoneMuteIntent += 1;
             microphoneMuteStateVersion += 1;
@@ -373,7 +389,6 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
               case "user":
                 return {
                   ...state,
-                  latestFinalizedTranscriptKey: finalizedTranscriptKey(event),
                   status: {
                     ...state.status,
                     lifecycle: "running",
@@ -921,6 +936,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
         });
       }
       for (const transcript of pendingTranscripts) {
+        observeFinalizedTranscript(transcript);
         if (!(await deliverTranscriptOnce(transcript))) {
           throw new Error("Voice transcript delivery was rejected.");
         }
