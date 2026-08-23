@@ -92,12 +92,15 @@ const observedFinalizedTranscriptOrder: string[] = [];
 
 function observeFinalizedTranscript(transcript: PendingVoiceTranscript): void {
   const key = finalizedTranscriptKey(transcript);
-  if (observedFinalizedTranscripts.has(key)) return;
-  observedFinalizedTranscripts.add(key);
-  observedFinalizedTranscriptOrder.push(key);
-  if (observedFinalizedTranscriptOrder.length > MAX_DELIVERED_TRANSCRIPT_KEYS) {
-    const expired = observedFinalizedTranscriptOrder.shift();
-    if (expired) observedFinalizedTranscripts.delete(expired);
+  if (!observedFinalizedTranscripts.has(key)) {
+    observedFinalizedTranscripts.add(key);
+    observedFinalizedTranscriptOrder.push(key);
+    if (
+      observedFinalizedTranscriptOrder.length > MAX_DELIVERED_TRANSCRIPT_KEYS
+    ) {
+      const expired = observedFinalizedTranscriptOrder.shift();
+      if (expired) observedFinalizedTranscripts.delete(expired);
+    }
   }
   useVoiceConversationStore.setState({ latestFinalizedTranscriptKey: key });
 }
@@ -935,18 +938,15 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           count: pendingTranscripts.length,
         });
       }
-      let recoveredCursor: string | null = null;
       for (const transcript of pendingTranscripts) {
         const key = finalizedTranscriptKey(transcript);
         const current =
           useVoiceConversationStore.getState().latestFinalizedTranscriptKey;
-        if (
-          current === null ||
-          current === key ||
-          (recoveredCursor !== null && current === recoveredCursor)
-        ) {
+        const alreadyDelivered = deliveredTranscripts.has(
+          transcriptKey(transcript),
+        );
+        if (!alreadyDelivered || current === null || current === key) {
           observeFinalizedTranscript(transcript);
-          recoveredCursor = key;
         }
         if (!(await deliverTranscriptOnce(transcript))) {
           throw new Error("Voice transcript delivery was rejected.");
