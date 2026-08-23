@@ -19,7 +19,11 @@ let package = Package(
         .target(
             name: "BerdAirPodsBridge",
             dependencies: ["BerdObjCExceptionCatch"],
-            linkerSettings: [.linkedFramework("AVFAudio")]
+            linkerSettings: [
+                .linkedFramework("AVFAudio"),
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("Speech"),
+            ]
         )
     ]
 )
