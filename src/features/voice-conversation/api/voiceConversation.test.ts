@@ -586,6 +586,47 @@ describe("voice conversation API", () => {
     }
   });
 
+  it("keeps one timeout deadline across same-session claims", async () => {
+    vi.useFakeTimers();
+    try {
+      const activeStatus = {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running" as const,
+        sessionId: "session-1",
+        ownerWindowLabel: "session-window-a",
+        microphoneMuted: false,
+        revision: 3,
+      };
+      mocks.invoke
+        .mockReturnValueOnce(deferred<void>().promise)
+        .mockReturnValueOnce(deferred<void>().promise);
+      void setVoiceConversationForegroundSession("session-b");
+      const replacement = stopVoiceConversationForReplacement(
+        activeStatus,
+        "session-b",
+      );
+      const rejection = expect(replacement).rejects.toThrow(
+        "Foreground voice session confirmation timed out.",
+      );
+
+      await vi.advanceTimersByTimeAsync(
+        FOREGROUND_SESSION_CLAIM_TIMEOUT_MS - 1,
+      );
+      void setVoiceConversationForegroundSession("session-b");
+      await vi.advanceTimersByTimeAsync(1);
+
+      await rejection;
+      expect(mocks.invoke).toHaveBeenCalledTimes(2);
+      expect(mocks.invoke).not.toHaveBeenCalledWith(
+        "stop_native_voice_conversation_for_replacement",
+        expect.anything(),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reattaches browser capture when a reloaded renderer finds a running session", async () => {
     const status = {
       available: true,

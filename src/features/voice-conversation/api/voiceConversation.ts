@@ -302,6 +302,8 @@ async function awaitForegroundSessionClaim(
   ) {
     throw new Error("The target session is no longer in the foreground.");
   }
+  const acknowledgementDeadline =
+    Date.now() + FOREGROUND_SESSION_CLAIM_TIMEOUT_MS;
 
   while (targetClaim) {
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -314,7 +316,7 @@ async function awaitForegroundSessionClaim(
       new Promise<{ type: "timed-out" }>((resolve) => {
         timeoutId = setTimeout(
           () => resolve({ type: "timed-out" }),
-          FOREGROUND_SESSION_CLAIM_TIMEOUT_MS,
+          Math.max(0, acknowledgementDeadline - Date.now()),
         );
       }),
     ]).finally(() => {
