@@ -1321,17 +1321,45 @@ pub async fn stop_native_voice_conversation_for_replacement(
     app: AppHandle,
     state: State<'_, NativeVoiceState>,
     capture: State<'_, VoiceCaptureState>,
+    window_sessions: State<'_, super::window_session::WindowSessionRegistry>,
     webview_window: WebviewWindow,
     renderer_id: String,
     renderer_epoch: u64,
     session_id: String,
     expected_revision: u64,
+    target_session_id: String,
 ) -> Result<NativeVoiceStatus, String> {
     capture.activate_renderer(webview_window.label(), &renderer_id, renderer_epoch)?;
+    let target_session_id = target_session_id.trim();
+    if target_session_id.is_empty() || target_session_id.len() > 256 {
+        return Err("target session id must be between 1 and 256 bytes".to_string());
+    }
+    let target_owner = window_sessions.label_for(target_session_id);
+    if !replacement_caller_matches_target(webview_window.label(), target_owner.as_deref()) {
+        return Err("Only the target session window can replace a voice conversation.".to_string());
+    }
+    if !webview_window
+        .is_focused()
+        .map_err(|error| format!("Could not confirm the target session window focus: {error}"))?
+    {
+        return Err(
+            "Only the focused target session can replace a voice conversation.".to_string(),
+        );
+    }
     state
         .stop_active_for_lifecycle(&app, &capture, &session_id, expected_revision)
         .await?;
     Ok(status(&app, &state))
+}
+
+fn replacement_caller_matches_target(
+    caller_window_label: &str,
+    target_owner: Option<&str>,
+) -> bool {
+    match target_owner {
+        Some(owner_window_label) => owner_window_label == caller_window_label,
+        None => caller_window_label == "main",
+    }
 }
 
 fn native_owner_id(session_id: &str) -> String {
@@ -2072,6 +2100,24 @@ mod tests {
         assert!(!software_microphone_mute(true, true));
         assert!(software_microphone_mute(false, true));
         assert!(!software_microphone_mute(false, false));
+    }
+
+    #[test]
+    fn replacement_stop_requires_the_target_session_window() {
+        assert!(replacement_caller_matches_target("main", None));
+        assert!(!replacement_caller_matches_target(
+            "main",
+            Some("session:target"),
+        ));
+        assert!(replacement_caller_matches_target(
+            "session:target",
+            Some("session:target"),
+        ));
+        assert!(!replacement_caller_matches_target(
+            "session:other",
+            Some("session:target"),
+        ));
+        assert!(!replacement_caller_matches_target("voice-buddy", None));
     }
 
     #[test]

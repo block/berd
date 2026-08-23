@@ -364,7 +364,7 @@ describe("voice conversation API", () => {
     mocks.invoke.mockResolvedValueOnce(stoppedStatus);
 
     await expect(
-      stopVoiceConversationForReplacement(activeStatus),
+      stopVoiceConversationForReplacement(activeStatus, "session-2"),
     ).resolves.toEqual(stoppedStatus);
     expect(mocks.invoke).toHaveBeenCalledWith(
       "stop_native_voice_conversation_for_replacement",
@@ -373,6 +373,7 @@ describe("voice conversation API", () => {
         rendererEpoch: 7,
         sessionId: "session-1",
         expectedRevision: 3,
+        targetSessionId: "session-2",
       },
     );
   });

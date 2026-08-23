@@ -589,6 +589,9 @@ export function useVoiceConversationController({
   const error = useVoiceConversationStore((state) => state.error);
   const hydrated = useVoiceConversationStore((state) => state.hydrated);
   const init = useVoiceConversationStore((state) => state.init);
+  const refreshStatus = useVoiceConversationStore(
+    (state) => state.refreshStatus,
+  );
   const start = useVoiceConversationStore((state) => state.start);
   const stop = useVoiceConversationStore((state) => state.stop);
   const stopForReplacement = useVoiceConversationStore(
@@ -840,7 +843,14 @@ export function useVoiceConversationController({
     if (operationInFlight) return;
     operationInFlight = true;
     try {
-      const currentStatus = useVoiceConversationStore.getState().status;
+      const currentStatus = await refreshStatus().catch(() => {
+        addErrorNotification(
+          sessionId,
+          t("toolbar.voiceConversation.buddy.errors.initialize"),
+        );
+        return null;
+      });
+      if (!currentStatus) return;
       const currentlyActive =
         currentStatus.sessionId !== null &&
         currentStatus.lifecycle !== "stopped" &&
@@ -868,7 +878,7 @@ export function useVoiceConversationController({
           }
           try {
             const replaced = await replaceActiveVoiceConversation({
-              stop: () => stopForReplacement(currentStatus),
+              stop: () => stopForReplacement(currentStatus, sessionId),
               start: startCurrentConversation,
             });
             if (!replaced) {
@@ -909,6 +919,7 @@ export function useVoiceConversationController({
     hydrated,
     onPocketSetupRequired,
     pocketReady,
+    refreshStatus,
     sessionId,
     startCurrentConversation,
     stop,

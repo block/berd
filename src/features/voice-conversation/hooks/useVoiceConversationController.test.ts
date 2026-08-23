@@ -374,6 +374,11 @@ describe("voice transcript delivery coordination", () => {
 
   it("starts a first-run request after Pocket installation refreshes availability", async () => {
     const init = vi.fn().mockResolvedValue(undefined);
+    const refreshStatus = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(useVoiceConversationStore.getState().status),
+      );
     const start = vi.fn().mockResolvedValue({
       available: true,
       unavailableReason: null,
@@ -395,6 +400,7 @@ describe("voice transcript delivery coordination", () => {
       },
       hydrated: true,
       init,
+      refreshStatus,
       start,
       requestedStartSessionId: "session-1",
     });

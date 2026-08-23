@@ -49,12 +49,14 @@ interface VoiceConversationStore {
   hydrated: boolean;
   requestedStartSessionId: string | null;
   init: () => Promise<void>;
+  refreshStatus: () => Promise<VoiceConversationStatus>;
   requestStart: (sessionId: string) => void;
   clearRequestedStart: (sessionId: string) => void;
   start: (sessionId: string) => Promise<VoiceConversationStatus>;
   stop: () => Promise<VoiceConversationStatus>;
   stopForReplacement: (
     status: VoiceConversationStatus,
+    targetSessionId: string,
   ) => Promise<VoiceConversationStatus>;
   setMicrophoneMuted: (muted: boolean) => Promise<void>;
   setUiState: (state: VoiceConversationUiState, error?: string) => void;
@@ -525,6 +527,44 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       }
     },
 
+    refreshStatus: async () => {
+      const muteStateVersion = microphoneMuteStateVersion;
+      const muteRequestWasPending = pendingMicrophoneMuteRequests > 0;
+      const status = await getVoiceConversationStatus();
+      const shouldPreserveCurrentMute = (
+        observedStatus: VoiceConversationStatus,
+      ) =>
+        isSameRunningLifecycle(observedStatus, status) &&
+        (muteRequestWasPending ||
+          pendingMicrophoneMuteRequests > 0 ||
+          muteStateVersion !== microphoneMuteStateVersion);
+      const preserveCurrentMute = shouldPreserveCurrentMute(get().status);
+      await reconcileVoiceConversationMicrophone(
+        preserveCurrentMute
+          ? { ...status, microphoneMuted: get().microphoneMuted }
+          : status,
+      );
+      set((state) => {
+        if (
+          !shouldApplyResponseRevision(state.status, status.revision) &&
+          status.revision !== state.status.revision
+        ) {
+          return state;
+        }
+        const microphoneMuted = shouldPreserveCurrentMute(state.status)
+          ? state.microphoneMuted
+          : status.microphoneMuted;
+        return {
+          status: { ...status, microphoneMuted },
+          uiState: uiStateForStatus(status),
+          microphoneMuted,
+          hydrated: true,
+          error: null,
+        };
+      });
+      return status;
+    },
+
     start: (sessionId) => {
       if (voiceStartBlocks.has(sessionId)) {
         return Promise.reject(
@@ -636,7 +676,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       return request;
     },
 
-    stopForReplacement: async (activeStatus) => {
+    stopForReplacement: async (activeStatus, targetSessionId) => {
       microphoneMuteIntent += 1;
       microphoneMuteStateVersion += 1;
       set({
@@ -646,7 +686,10 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
         requestedStartSessionId: null,
       });
       try {
-        const status = await stopVoiceConversationForReplacement(activeStatus);
+        const status = await stopVoiceConversationForReplacement(
+          activeStatus,
+          targetSessionId,
+        );
         set((state) =>
           shouldApplyResponseRevision(state.status, status.revision) ||
           (status.revision === state.status.revision &&

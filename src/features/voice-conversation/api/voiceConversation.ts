@@ -423,6 +423,7 @@ export async function stopVoiceConversation(
 
 export async function stopVoiceConversationForReplacement(
   status: VoiceConversationStatus,
+  targetSessionId: string,
 ): Promise<VoiceConversationStatus> {
   resetMicrophoneMuteState();
   const { rendererId, rendererEpoch } = await getRendererInstance();
@@ -433,6 +434,7 @@ export async function stopVoiceConversationForReplacement(
       rendererEpoch,
       sessionId: status.sessionId,
       expectedRevision: status.revision,
+      targetSessionId,
     },
   );
   await reconcileVoiceConversationMicrophone(nextStatus);

@@ -428,16 +428,35 @@ describe("voice conversation store lifecycle ordering", () => {
     store.setState({ status: active, uiState: "listening" });
     mocks.stopForReplacement.mockResolvedValue(winner);
 
-    await expect(store.getState().stopForReplacement(active)).resolves.toEqual(
-      winner,
-    );
+    await expect(
+      store.getState().stopForReplacement(active, "session-c"),
+    ).resolves.toEqual(winner);
 
     expect(store.getState()).toMatchObject({
       status: winner,
       uiState: "listening",
       error: null,
     });
-    expect(mocks.stopForReplacement).toHaveBeenCalledWith(active);
+    expect(mocks.stopForReplacement).toHaveBeenCalledWith(active, "session-c");
+  });
+
+  it("refreshes a stale foreign renderer before choosing a call action", async () => {
+    const store = await loadStore();
+    store.setState({
+      status: status("stopped", 1),
+      uiState: "off",
+      hydrated: true,
+    });
+    const active = status("running", 2, "session-a");
+    mocks.getStatus.mockResolvedValue(active);
+
+    await expect(store.getState().refreshStatus()).resolves.toEqual(active);
+
+    expect(store.getState()).toMatchObject({
+      status: active,
+      uiState: "listening",
+      error: null,
+    });
   });
 
   it("does not reconcile a delayed terminal event from an older lifecycle", async () => {
