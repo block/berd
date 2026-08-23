@@ -40,6 +40,7 @@ type ActiveUtterance = {
   targetSpans: SpeechTargetSpan[];
   text: string;
   finishing: boolean;
+  nativeStreamStarted: boolean;
   interruptionRequested: boolean;
   latestDelivery: VoiceDeliveryProgress | null;
   status: SpeechStatus | null;
@@ -431,7 +432,7 @@ function handleStreamEvent(
 function interruptActiveUtterance(awaitTerminalDelivery = false): boolean {
   const utterance = activeUtterance;
   const terminalEventExpected =
-    awaitTerminalDelivery && utterance?.status === "speaking";
+    awaitTerminalDelivery && utterance?.nativeStreamStarted === true;
   commandEpoch += 1;
   if (utterance && !utterance.interruptionRequested) {
     utterance.interruptionRequested = true;
@@ -576,6 +577,7 @@ export function startNativeAssistantSpeech(
       targetSpans: [],
       text: "",
       finishing: false,
+      nativeStreamStarted: false,
       interruptionRequested: false,
       latestDelivery: null,
       status: null,
@@ -593,6 +595,7 @@ export function startNativeAssistantSpeech(
       async () => {
         await streamListenerReady;
         await streamBackend.start(utterance.id);
+        utterance.nativeStreamStarted = true;
       },
       onFailure,
     );

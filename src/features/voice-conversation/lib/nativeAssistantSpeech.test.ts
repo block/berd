@@ -496,13 +496,20 @@ describe("native assistant speech stream", () => {
   });
 
   it("finalizes an interruption before native playback starts", async () => {
+    let resolveStart: (() => void) | undefined;
+    mocks.start.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
       .getState()
       .setMessages("session-1", [
         assistant([{ type: "text", text: "Queued reply." }]),
       ]);
-    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalled());
 
     useVoiceConversationStore.setState({ userSpeaking: true });
     await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
@@ -518,6 +525,38 @@ describe("native assistant speech stream", () => {
       },
     });
     expect(takeVoicePlaybackNotices("session-1")).toContain('"spokenText":""');
+    resolveStart?.();
+  });
+
+  it("waits for terminal delivery once the native stream exists", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Native reply." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).not.toHaveProperty("speech");
+
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        segments: [
+          { text: "Native reply.", playedFrames: 400, totalFrames: 1_000 },
+        ],
+      },
+    });
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({ speech: { status: "interrupted" } });
   });
 
   it("uses playback progress to report and decorate only the unspoken suffix", async () => {
