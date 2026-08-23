@@ -36,6 +36,14 @@ import {
   waitForVoiceDeliveryOpportunity,
 } from "./useVoiceConversationController";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe("voice transcript delivery coordination", () => {
   it("suppresses floating controls only for the focused owner session", () => {
     const base = {
@@ -457,6 +465,72 @@ describe("voice transcript delivery coordination", () => {
     expect(resolveActiveVoiceButtonAction("session-1", "session-1")).toBe(
       "stop",
     );
+  });
+
+  it("refreshes stale status before handing a foreign call to this session", async () => {
+    const active = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "session-window-a",
+      microphoneMuted: false,
+      revision: 2,
+    };
+    const stopped = {
+      ...active,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      revision: 3,
+    };
+    const stopRequest = deferred<typeof stopped>();
+    const refreshStatus = vi.fn().mockResolvedValue(active);
+    const stopForReplacement = vi.fn().mockReturnValue(stopRequest.promise);
+    const start = vi.fn().mockResolvedValue({
+      ...active,
+      sessionId: "session-b",
+      ownerWindowLabel: "session-window-b",
+      revision: 4,
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        ...stopped,
+        revision: 1,
+      },
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus,
+      stopForReplacement,
+      start,
+    });
+    const { result } = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-b",
+        onSend: vi.fn().mockResolvedValue(true),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+
+    let handoff: Promise<void> | undefined;
+    act(() => {
+      handoff = Promise.resolve(result.current.onToggle());
+    });
+    await vi.waitFor(() => expect(refreshStatus).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(stopForReplacement).toHaveBeenCalledWith(active, "session-b"),
+    );
+    expect(start).not.toHaveBeenCalled();
+
+    await act(async () => {
+      stopRequest.resolve(stopped);
+      await handoff;
+    });
+    expect(start).toHaveBeenCalledWith("session-b");
   });
 
   it("keeps an ineligible foreign session from controlling the active call", () => {
