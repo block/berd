@@ -2,6 +2,7 @@
 
 use std::{collections::HashMap, sync::Mutex};
 
+use serde::Deserialize;
 use tauri::{State, WebviewWindow};
 
 const MAX_ID_LEN: usize = 256;
@@ -14,11 +15,29 @@ struct MicrophoneOwner {
     owner_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ForegroundSessionClaim {
+    renderer_id: String,
+    renderer_epoch: u64,
+    generation: u64,
+    session_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForegroundSessionRequest {
+    renderer_id: String,
+    renderer_epoch: u64,
+    generation: u64,
+    session_id: Option<String>,
+}
+
 #[derive(Default)]
 struct CaptureState {
     renderer_epoch: u64,
     pending_renderers: HashMap<String, (String, u64)>,
     current_renderers: HashMap<String, (String, u64)>,
+    foreground_sessions: HashMap<String, ForegroundSessionClaim>,
     microphone_owner: Option<MicrophoneOwner>,
 }
 
@@ -67,10 +86,18 @@ impl CaptureState {
             _ => return Err("Voice renderer instance is not registered".to_string()),
         }
 
-        self.current_renderers.insert(
-            window_label.to_string(),
-            (renderer_id.to_string(), renderer_epoch),
-        );
+        let replaced_renderer = self
+            .current_renderers
+            .insert(
+                window_label.to_string(),
+                (renderer_id.to_string(), renderer_epoch),
+            )
+            .is_some_and(|(active_renderer, active_epoch)| {
+                active_renderer != renderer_id || active_epoch != renderer_epoch
+            });
+        if replaced_renderer {
+            self.foreground_sessions.remove(window_label);
+        }
         if self
             .microphone_owner
             .as_ref()
@@ -129,6 +156,70 @@ impl VoiceCaptureState {
             .lock()
             .map_err(|_| "Voice capture state lock was poisoned".to_string())?
             .activate_renderer(window_label, renderer_id, renderer_epoch)
+    }
+
+    pub fn set_foreground_session(
+        &self,
+        window_label: &str,
+        renderer_id: &str,
+        renderer_epoch: u64,
+        generation: u64,
+        session_id: Option<&str>,
+    ) -> Result<(), String> {
+        validate_id("renderer", renderer_id)?;
+        if let Some(session_id) = session_id {
+            validate_id("session", session_id)?;
+        }
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Voice capture state lock was poisoned".to_string())?;
+        state.activate_renderer(window_label, renderer_id, renderer_epoch)?;
+        if state
+            .foreground_sessions
+            .get(window_label)
+            .is_some_and(|claim| {
+                claim.renderer_id == renderer_id
+                    && claim.renderer_epoch == renderer_epoch
+                    && claim.generation >= generation
+            })
+        {
+            return Ok(());
+        }
+        state.foreground_sessions.insert(
+            window_label.to_string(),
+            ForegroundSessionClaim {
+                renderer_id: renderer_id.to_string(),
+                renderer_epoch,
+                generation,
+                session_id: session_id.map(ToString::to_string),
+            },
+        );
+        Ok(())
+    }
+
+    pub fn foreground_session_matches(
+        &self,
+        window_label: &str,
+        renderer_id: &str,
+        renderer_epoch: u64,
+        session_id: &str,
+    ) -> Result<bool, String> {
+        validate_id("renderer", renderer_id)?;
+        validate_id("session", session_id)?;
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| "Voice capture state lock was poisoned".to_string())?;
+        state.activate_renderer(window_label, renderer_id, renderer_epoch)?;
+        Ok(state
+            .foreground_sessions
+            .get(window_label)
+            .is_some_and(|claim| {
+                claim.renderer_id == renderer_id
+                    && claim.renderer_epoch == renderer_epoch
+                    && claim.session_id.as_deref() == Some(session_id)
+            }))
     }
 
     pub fn claim_microphone(
@@ -209,7 +300,23 @@ impl VoiceCaptureState {
         }
         state.current_renderers.remove(window_label);
         state.pending_renderers.remove(window_label);
+        state.foreground_sessions.remove(window_label);
     }
+}
+
+#[tauri::command]
+pub fn set_voice_renderer_foreground_session(
+    state: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    request: ForegroundSessionRequest,
+) -> Result<(), String> {
+    state.set_foreground_session(
+        webview_window.label(),
+        &request.renderer_id,
+        request.renderer_epoch,
+        request.generation,
+        request.session_id.as_deref(),
+    )
 }
 
 #[tauri::command]
@@ -396,5 +503,43 @@ mod tests {
             })
             .is_err());
         assert!(!operation_ran.get());
+    }
+
+    #[test]
+    fn foreground_session_claim_rejects_a_stale_navigation_target() {
+        let capture = VoiceCaptureState::default();
+        let epoch = capture.register_renderer_for_test("main", "renderer-1");
+        capture
+            .set_foreground_session("main", "renderer-1", epoch, 1, Some("session-b"))
+            .expect("claim session B");
+        assert!(capture
+            .foreground_session_matches("main", "renderer-1", epoch, "session-b")
+            .expect("authorize session B"));
+
+        capture
+            .set_foreground_session("main", "renderer-1", epoch, 2, Some("session-c"))
+            .expect("navigate to session C");
+        assert!(!capture
+            .foreground_session_matches("main", "renderer-1", epoch, "session-b")
+            .expect("reject stale session B"));
+        assert!(capture
+            .foreground_session_matches("main", "renderer-1", epoch, "session-c")
+            .expect("authorize session C"));
+    }
+
+    #[test]
+    fn foreground_session_claim_ignores_out_of_order_updates() {
+        let capture = VoiceCaptureState::default();
+        let epoch = capture.register_renderer_for_test("main", "renderer-1");
+        capture
+            .set_foreground_session("main", "renderer-1", epoch, 2, Some("session-c"))
+            .expect("claim newest session");
+        capture
+            .set_foreground_session("main", "renderer-1", epoch, 1, Some("session-b"))
+            .expect("ignore stale claim");
+
+        assert!(capture
+            .foreground_session_matches("main", "renderer-1", epoch, "session-c")
+            .expect("retain newest session"));
     }
 }

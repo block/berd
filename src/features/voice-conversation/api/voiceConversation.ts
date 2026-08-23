@@ -16,6 +16,8 @@ let microphoneMuted = false;
 let microphoneMuteIntent = 0;
 let microphoneMuteObservationVersion = 0;
 let microphoneMuteQueue: Promise<void> = Promise.resolve();
+let foregroundSessionGeneration = 0;
+let foregroundSessionId: string | null = null;
 
 function resetMicrophoneMuteState(): void {
   microphoneMuteIntent += 1;
@@ -243,6 +245,27 @@ export function getVoiceConversationStatus(): Promise<VoiceConversationStatus> {
   );
 }
 
+export async function setVoiceConversationForegroundSession(
+  sessionId: string | null,
+): Promise<void> {
+  const generation = ++foregroundSessionGeneration;
+  foregroundSessionId = sessionId;
+  const { rendererId, rendererEpoch } = await getRendererInstance();
+  await invoke("set_voice_renderer_foreground_session", {
+    request: {
+      rendererId,
+      rendererEpoch,
+      generation,
+      sessionId,
+    },
+  });
+}
+
+export function resetVoiceConversationForegroundSessionForTest(): void {
+  foregroundSessionGeneration = 0;
+  foregroundSessionId = null;
+}
+
 export async function blockNativeVoiceConversationStarts(
   sessionId: string,
 ): Promise<string> {
@@ -425,6 +448,9 @@ export async function stopVoiceConversationForReplacement(
   status: VoiceConversationStatus,
   targetSessionId: string,
 ): Promise<VoiceConversationStatus> {
+  if (foregroundSessionId !== targetSessionId) {
+    throw new Error("The target session is no longer in the foreground.");
+  }
   resetMicrophoneMuteState();
   const { rendererId, rendererEpoch } = await getRendererInstance();
   const nextStatus = await invoke<VoiceConversationStatus>(

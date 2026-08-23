@@ -30,8 +30,10 @@ import {
   openVoiceConversationSession,
   reconcileVoiceConversationMicrophone,
   releaseNativeVoiceConversationStartBlock,
+  resetVoiceConversationForegroundSessionForTest,
   setVoiceConversationAssistantSpeaking,
   setVoiceConversationControlsSuppressed,
+  setVoiceConversationForegroundSession,
   setVoiceConversationMicrophoneMuted,
   startVoiceConversation,
   showVoiceConversationControls,
@@ -44,6 +46,7 @@ import {
 describe("voice conversation API", () => {
   beforeEach(() => {
     stopActiveMicrophoneForTest();
+    resetVoiceConversationForegroundSessionForTest();
     mocks.invoke.mockReset();
     mocks.listen.mockReset();
     mocks.startMicrophone.mockReset().mockResolvedValue({
@@ -158,6 +161,50 @@ describe("voice conversation API", () => {
       "release_native_voice_conversation_start_block",
       { sessionId: "session-1", token: "archive-token" },
     );
+  });
+
+  it("publishes ordered foreground-session claims for native authorization", async () => {
+    mocks.invoke.mockResolvedValue(undefined);
+
+    await setVoiceConversationForegroundSession("session-b");
+    await setVoiceConversationForegroundSession("session-c");
+    await setVoiceConversationForegroundSession(null);
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      [
+        "set_voice_renderer_foreground_session",
+        {
+          request: {
+            rendererId: "renderer-test",
+            rendererEpoch: 7,
+            generation: 1,
+            sessionId: "session-b",
+          },
+        },
+      ],
+      [
+        "set_voice_renderer_foreground_session",
+        {
+          request: {
+            rendererId: "renderer-test",
+            rendererEpoch: 7,
+            generation: 2,
+            sessionId: "session-c",
+          },
+        },
+      ],
+      [
+        "set_voice_renderer_foreground_session",
+        {
+          request: {
+            rendererId: "renderer-test",
+            rendererEpoch: 7,
+            generation: 3,
+            sessionId: null,
+          },
+        },
+      ],
+    ]);
   });
 
   it("serializes floating-control visibility updates", async () => {
@@ -361,7 +408,9 @@ describe("voice conversation API", () => {
       ownerWindowLabel: null,
       revision: 4,
     };
-    mocks.invoke.mockResolvedValueOnce(stoppedStatus);
+    mocks.invoke.mockResolvedValueOnce(undefined);
+    await setVoiceConversationForegroundSession("session-2");
+    mocks.invoke.mockReset().mockResolvedValueOnce(stoppedStatus);
 
     await expect(
       stopVoiceConversationForReplacement(activeStatus, "session-2"),
@@ -376,6 +425,27 @@ describe("voice conversation API", () => {
         targetSessionId: "session-2",
       },
     );
+  });
+
+  it("rejects a replacement after foreground navigation changes", async () => {
+    const activeStatus = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running" as const,
+      sessionId: "session-1",
+      ownerWindowLabel: "session-window-a",
+      microphoneMuted: false,
+      revision: 3,
+    };
+    mocks.invoke.mockResolvedValue(undefined);
+    await setVoiceConversationForegroundSession("session-b");
+    await setVoiceConversationForegroundSession("session-c");
+    mocks.invoke.mockClear();
+
+    await expect(
+      stopVoiceConversationForReplacement(activeStatus, "session-b"),
+    ).rejects.toThrow("no longer in the foreground");
+    expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
   it("reattaches browser capture when a reloaded renderer finds a running session", async () => {

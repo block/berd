@@ -1329,13 +1329,22 @@ pub async fn stop_native_voice_conversation_for_replacement(
     expected_revision: u64,
     target_session_id: String,
 ) -> Result<NativeVoiceStatus, String> {
-    capture.activate_renderer(webview_window.label(), &renderer_id, renderer_epoch)?;
     let target_session_id = target_session_id.trim();
     if target_session_id.is_empty() || target_session_id.len() > 256 {
         return Err("target session id must be between 1 and 256 bytes".to_string());
     }
     let target_owner = window_sessions.label_for(target_session_id);
-    if !replacement_caller_matches_target(webview_window.label(), target_owner.as_deref()) {
+    let owns_foreground_session = capture.foreground_session_matches(
+        webview_window.label(),
+        &renderer_id,
+        renderer_epoch,
+        target_session_id,
+    )?;
+    if !replacement_caller_matches_target(
+        webview_window.label(),
+        target_owner.as_deref(),
+        owns_foreground_session,
+    ) {
         return Err("Only the target session window can replace a voice conversation.".to_string());
     }
     if !webview_window
@@ -1355,7 +1364,11 @@ pub async fn stop_native_voice_conversation_for_replacement(
 fn replacement_caller_matches_target(
     caller_window_label: &str,
     target_owner: Option<&str>,
+    owns_foreground_session: bool,
 ) -> bool {
+    if !owns_foreground_session {
+        return false;
+    }
     match target_owner {
         Some(owner_window_label) => owner_window_label == caller_window_label,
         None => caller_window_label == "main",
@@ -2104,20 +2117,28 @@ mod tests {
 
     #[test]
     fn replacement_stop_requires_the_target_session_window() {
-        assert!(replacement_caller_matches_target("main", None));
+        assert!(replacement_caller_matches_target("main", None, true));
+        assert!(!replacement_caller_matches_target("main", None, false));
         assert!(!replacement_caller_matches_target(
             "main",
             Some("session:target"),
+            true,
         ));
         assert!(replacement_caller_matches_target(
             "session:target",
             Some("session:target"),
+            true,
         ));
         assert!(!replacement_caller_matches_target(
             "session:other",
             Some("session:target"),
+            true,
         ));
-        assert!(!replacement_caller_matches_target("voice-buddy", None));
+        assert!(!replacement_caller_matches_target(
+            "voice-buddy",
+            None,
+            true,
+        ));
     }
 
     #[test]

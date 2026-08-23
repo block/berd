@@ -658,6 +658,7 @@ pub fn run() {
             commands::voice_buddy::stop_voice_conversation_from_buddy,
             commands::notifications::should_suppress_completion_notification,
             commands::voice_capture::register_voice_renderer_instance,
+            commands::voice_capture::set_voice_renderer_foreground_session,
             commands::window_session::get_session_window_support,
             commands::window_session::open_session_window,
             commands::window_session::release_session,
