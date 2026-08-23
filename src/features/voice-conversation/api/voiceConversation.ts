@@ -280,6 +280,43 @@ export function resetVoiceConversationForegroundSessionForTest(): void {
   foregroundSessionClaim = null;
 }
 
+async function awaitForegroundSessionClaim(
+  targetSessionId: string,
+): Promise<void> {
+  let targetClaim = foregroundSessionClaim;
+  if (
+    foregroundSessionId !== targetSessionId ||
+    targetClaim?.sessionId !== targetSessionId
+  ) {
+    throw new Error("The target session is no longer in the foreground.");
+  }
+
+  while (targetClaim) {
+    try {
+      await targetClaim.acknowledgement;
+    } catch (error) {
+      const latestClaim = foregroundSessionClaim;
+      if (
+        latestClaim !== targetClaim &&
+        latestClaim?.sessionId === targetSessionId
+      ) {
+        targetClaim = latestClaim;
+        continue;
+      }
+      throw error;
+    }
+    const latestClaim = foregroundSessionClaim;
+    if (
+      foregroundSessionId !== targetSessionId ||
+      latestClaim?.sessionId !== targetSessionId
+    ) {
+      throw new Error("The target session is no longer in the foreground.");
+    }
+    if (latestClaim === targetClaim) return;
+    targetClaim = latestClaim;
+  }
+}
+
 export async function blockNativeVoiceConversationStarts(
   sessionId: string,
 ): Promise<string> {
@@ -462,20 +499,7 @@ export async function stopVoiceConversationForReplacement(
   status: VoiceConversationStatus,
   targetSessionId: string,
 ): Promise<VoiceConversationStatus> {
-  const targetClaim = foregroundSessionClaim;
-  if (
-    foregroundSessionId !== targetSessionId ||
-    targetClaim?.sessionId !== targetSessionId
-  ) {
-    throw new Error("The target session is no longer in the foreground.");
-  }
-  await targetClaim.acknowledgement;
-  if (
-    foregroundSessionClaim !== targetClaim ||
-    foregroundSessionId !== targetSessionId
-  ) {
-    throw new Error("The target session is no longer in the foreground.");
-  }
+  await awaitForegroundSessionClaim(targetSessionId);
   resetMicrophoneMuteState();
   const { rendererId, rendererEpoch } = await getRendererInstance();
   const nextStatus = await invoke<VoiceConversationStatus>(

@@ -478,6 +478,50 @@ describe("voice conversation API", () => {
     );
   });
 
+  it("follows a newer claim for the same foreground session", async () => {
+    const activeStatus = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running" as const,
+      sessionId: "session-1",
+      ownerWindowLabel: "session-window-a",
+      microphoneMuted: false,
+      revision: 3,
+    };
+    const stoppedStatus = {
+      ...activeStatus,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      revision: 4,
+    };
+    const firstClaim = deferred<void>();
+    const secondClaim = deferred<void>();
+    mocks.invoke
+      .mockReturnValueOnce(firstClaim.promise)
+      .mockReturnValueOnce(secondClaim.promise)
+      .mockResolvedValueOnce(stoppedStatus);
+
+    const publishFirst = setVoiceConversationForegroundSession("session-b");
+    const replacement = stopVoiceConversationForReplacement(
+      activeStatus,
+      "session-b",
+    );
+    const publishSecond = setVoiceConversationForegroundSession("session-b");
+    firstClaim.resolve();
+    await publishFirst;
+    await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(2));
+
+    secondClaim.resolve();
+    await publishSecond;
+    await expect(replacement).resolves.toEqual(stoppedStatus);
+    expect(mocks.invoke).toHaveBeenNthCalledWith(
+      3,
+      "stop_native_voice_conversation_for_replacement",
+      expect.objectContaining({ targetSessionId: "session-b" }),
+    );
+  });
+
   it("rejects a replacement after foreground navigation changes", async () => {
     const activeStatus = {
       available: true,
