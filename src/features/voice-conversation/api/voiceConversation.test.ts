@@ -502,14 +502,12 @@ describe("voice conversation API", () => {
       .mockReturnValueOnce(secondClaim.promise)
       .mockResolvedValueOnce(stoppedStatus);
 
-    const publishFirst = setVoiceConversationForegroundSession("session-b");
+    void setVoiceConversationForegroundSession("session-b");
     const replacement = stopVoiceConversationForReplacement(
       activeStatus,
       "session-b",
     );
     const publishSecond = setVoiceConversationForegroundSession("session-b");
-    firstClaim.resolve();
-    await publishFirst;
     await vi.waitFor(() => expect(mocks.invoke).toHaveBeenCalledTimes(2));
 
     secondClaim.resolve();
@@ -536,14 +534,12 @@ describe("voice conversation API", () => {
     mocks.invoke
       .mockReturnValueOnce(sessionBClaim.promise)
       .mockResolvedValueOnce(undefined);
-    const publishSessionB = setVoiceConversationForegroundSession("session-b");
+    void setVoiceConversationForegroundSession("session-b");
     const replacement = stopVoiceConversationForReplacement(
       activeStatus,
       "session-b",
     );
     await setVoiceConversationForegroundSession("session-c");
-    sessionBClaim.resolve();
-    await publishSessionB;
 
     await expect(replacement).rejects.toThrow("no longer in the foreground");
     expect(mocks.invoke).toHaveBeenCalledTimes(2);

@@ -22,6 +22,8 @@ let foregroundSessionClaim: {
   generation: number;
   sessionId: string | null;
   acknowledgement: Promise<void>;
+  superseded: Promise<void>;
+  supersede: () => void;
 } | null = null;
 
 function resetMicrophoneMuteState(): void {
@@ -266,15 +268,24 @@ export function setVoiceConversationForegroundSession(
         },
       }),
   );
+  let supersede!: () => void;
+  const superseded = new Promise<void>((resolve) => {
+    supersede = resolve;
+  });
+  const previousClaim = foregroundSessionClaim;
   foregroundSessionClaim = {
     generation,
     sessionId,
     acknowledgement,
+    superseded,
+    supersede,
   };
+  previousClaim?.supersede();
   return acknowledgement;
 }
 
 export function resetVoiceConversationForegroundSessionForTest(): void {
+  foregroundSessionClaim?.supersede();
   foregroundSessionGeneration = 0;
   foregroundSessionId = null;
   foregroundSessionClaim = null;
@@ -292,9 +303,14 @@ async function awaitForegroundSessionClaim(
   }
 
   while (targetClaim) {
-    try {
-      await targetClaim.acknowledgement;
-    } catch (error) {
+    const outcome = await Promise.race([
+      targetClaim.acknowledgement.then(
+        () => ({ type: "acknowledged" as const }),
+        (error: unknown) => ({ type: "failed" as const, error }),
+      ),
+      targetClaim.superseded.then(() => ({ type: "superseded" as const })),
+    ]);
+    if (outcome.type === "failed") {
       const latestClaim = foregroundSessionClaim;
       if (
         latestClaim !== targetClaim &&
@@ -303,7 +319,7 @@ async function awaitForegroundSessionClaim(
         targetClaim = latestClaim;
         continue;
       }
-      throw error;
+      throw outcome.error;
     }
     const latestClaim = foregroundSessionClaim;
     if (
@@ -312,7 +328,7 @@ async function awaitForegroundSessionClaim(
     ) {
       throw new Error("The target session is no longer in the foreground.");
     }
-    if (latestClaim === targetClaim) return;
+    if (outcome.type === "acknowledged" && latestClaim === targetClaim) return;
     targetClaim = latestClaim;
   }
 }
