@@ -650,6 +650,7 @@ pub fn run() {
             commands::native_voice::reject_native_voice_conversation_transcript,
             commands::native_voice::start_native_voice_conversation,
             commands::native_voice::stop_native_voice_conversation,
+            commands::native_voice::stop_native_voice_conversation_for_replacement,
             commands::native_voice::push_native_voice_audio,
             commands::voice_buddy::open_voice_conversation_session,
             commands::voice_buddy::show_voice_conversation_controls,

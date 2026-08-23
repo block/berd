@@ -421,6 +421,24 @@ export async function stopVoiceConversation(
   return nextStatus;
 }
 
+export async function stopVoiceConversationForReplacement(
+  status: VoiceConversationStatus,
+): Promise<VoiceConversationStatus> {
+  resetMicrophoneMuteState();
+  const { rendererId, rendererEpoch } = await getRendererInstance();
+  const nextStatus = await invoke<VoiceConversationStatus>(
+    "stop_native_voice_conversation_for_replacement",
+    {
+      rendererId,
+      rendererEpoch,
+      sessionId: status.sessionId,
+      expectedRevision: status.revision,
+    },
+  );
+  await reconcileVoiceConversationMicrophone(nextStatus);
+  return nextStatus;
+}
+
 export function listenToVoiceConversation(
   onEvent: (event: VoiceConversationEvent) => void,
 ): Promise<UnlistenFn> {

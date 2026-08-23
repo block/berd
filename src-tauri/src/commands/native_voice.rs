@@ -1315,6 +1315,25 @@ pub async fn stop_native_voice_conversation(
     Ok(status(&app, &state))
 }
 
+#[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects four guards beside the exact lifecycle payload.
+pub async fn stop_native_voice_conversation_for_replacement(
+    app: AppHandle,
+    state: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
+    webview_window: WebviewWindow,
+    renderer_id: String,
+    renderer_epoch: u64,
+    session_id: String,
+    expected_revision: u64,
+) -> Result<NativeVoiceStatus, String> {
+    capture.activate_renderer(webview_window.label(), &renderer_id, renderer_epoch)?;
+    state
+        .stop_active_for_lifecycle(&app, &capture, &session_id, expected_revision)
+        .await?;
+    Ok(status(&app, &state))
+}
+
 fn native_owner_id(session_id: &str) -> String {
     format!("native-voice:{session_id}")
 }

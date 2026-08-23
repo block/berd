@@ -38,6 +38,7 @@ import {
   stopActiveMicrophoneForTest,
   stopVoiceConversationFromBuddy,
   stopVoiceConversation,
+  stopVoiceConversationForReplacement,
 } from "./voiceConversation";
 
 describe("voice conversation API", () => {
@@ -341,6 +342,39 @@ describe("voice conversation API", () => {
 
     expect(mocks.startMicrophone).toHaveBeenCalledOnce();
     expect(mocks.stopMicrophone).not.toHaveBeenCalled();
+  });
+
+  it("requests an exact lifecycle stop when replacing from another window", async () => {
+    const activeStatus = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running" as const,
+      sessionId: "session-1",
+      ownerWindowLabel: "session-window-a",
+      microphoneMuted: false,
+      revision: 3,
+    };
+    const stoppedStatus = {
+      ...activeStatus,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      revision: 4,
+    };
+    mocks.invoke.mockResolvedValueOnce(stoppedStatus);
+
+    await expect(
+      stopVoiceConversationForReplacement(activeStatus),
+    ).resolves.toEqual(stoppedStatus);
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "stop_native_voice_conversation_for_replacement",
+      {
+        rendererId: "renderer-test",
+        rendererEpoch: 7,
+        sessionId: "session-1",
+        expectedRevision: 3,
+      },
+    );
   });
 
   it("reattaches browser capture when a reloaded renderer finds a running session", async () => {

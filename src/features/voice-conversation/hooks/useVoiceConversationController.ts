@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
 
 import type {
   ChatInputSendHandler,
@@ -16,7 +17,10 @@ import {
   stopNativeAssistantSpeech,
   takeVoicePlaybackNotices,
 } from "../lib/nativeAssistantSpeech";
-import { setVoiceConversationControlsSuppressed } from "../api/voiceConversation";
+import {
+  setVoiceConversationControlsSuppressed,
+  stopVoiceConversationForReplacement,
+} from "../api/voiceConversation";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -69,18 +73,38 @@ export function resolveActiveVoiceButtonAction(
   return activeSessionId === candidateSessionId ? "stop" : "replace";
 }
 
+export function canReplaceActiveVoiceConversation(options: {
+  canToggle: boolean;
+  hydrated: boolean;
+  pocketReady: boolean;
+}): boolean {
+  return options.canToggle && options.hydrated && options.pocketReady;
+}
+
+export function shouldShowVoiceConversationControl(options: {
+  activeConversation: boolean;
+  controlEnabled: boolean;
+  voiceEnabled: boolean;
+  isGooseSession: boolean;
+}): boolean {
+  return options.activeConversation
+    ? options.controlEnabled
+    : options.voiceEnabled && options.isGooseSession;
+}
+
 export async function replaceActiveVoiceConversation(options: {
   stop: () => Promise<{ lifecycle: string; sessionId: string | null }>;
   start: () => Promise<void>;
-}): Promise<void> {
+}): Promise<boolean> {
   const stopped = await options.stop();
   if (
     stopped.sessionId !== null ||
     (stopped.lifecycle !== "stopped" && stopped.lifecycle !== "unavailable")
   ) {
-    throw new Error("The active voice conversation could not be stopped.");
+    return false;
   }
   await options.start();
+  return true;
 }
 
 export function shouldSuppressVoiceConversationControls(options: {
@@ -562,6 +586,7 @@ export function useVoiceConversationController({
   readOnly = false,
   disabled = false,
 }: UseVoiceConversationControllerOptions): ChatInputVoiceConversation {
+  const { t } = useTranslation("chat");
   const status = useVoiceConversationStore((state) => state.status);
   const uiState = useVoiceConversationStore((state) => state.uiState);
   const error = useVoiceConversationStore((state) => state.error);
@@ -808,8 +833,8 @@ export function useVoiceConversationController({
   ]);
 
   const isActive = status.sessionId !== null && status.lifecycle !== "stopped";
-  const controlEnabled = enabled && isGooseSession && !readOnly && !disabled;
-  const canToggle = controlEnabled && (!pocketReady || status.available);
+  const sessionEligible = enabled && isGooseSession && !readOnly && !disabled;
+  const canToggle = sessionEligible && (!pocketReady || status.available);
 
   const toggle = useCallback(async () => {
     if (operationInFlight) return;
@@ -827,17 +852,36 @@ export function useVoiceConversationController({
       });
       if (action === "stop") {
         const boundSessionId = currentStatus.sessionId;
-        if (
-          resolveActiveVoiceButtonAction(boundSessionId, sessionId) ===
-          "replace"
-        ) {
+        const activeButtonAction = resolveActiveVoiceButtonAction(
+          boundSessionId,
+          sessionId,
+        );
+        if (activeButtonAction === "replace") {
+          if (
+            !canReplaceActiveVoiceConversation({
+              canToggle,
+              hydrated,
+              pocketReady,
+            })
+          ) {
+            return;
+          }
           try {
-            await replaceActiveVoiceConversation({
-              stop,
+            const replaced = await replaceActiveVoiceConversation({
+              stop: () => stopVoiceConversationForReplacement(currentStatus),
               start: startCurrentConversation,
             });
-          } catch (replaceError) {
-            addErrorNotification(sessionId, errorText(replaceError));
+            if (!replaced) {
+              addErrorNotification(
+                sessionId,
+                t("toolbar.voiceConversation.buddy.errors.stop"),
+              );
+            }
+          } catch {
+            addErrorNotification(
+              sessionId,
+              t("toolbar.voiceConversation.buddy.errors.stop"),
+            );
           }
           return;
         }
@@ -862,11 +906,13 @@ export function useVoiceConversationController({
     }
   }, [
     canToggle,
+    hydrated,
     onPocketSetupRequired,
     pocketReady,
     sessionId,
     startCurrentConversation,
     stop,
+    t,
   ]);
 
   useEffect(() => {
@@ -908,31 +954,46 @@ export function useVoiceConversationController({
     }
   }, [setMicrophoneMuted, status.lifecycle, status.sessionId]);
 
+  const ownsActiveConversation = isActive && status.sessionId === sessionId;
+  const controlEnabled =
+    ownsActiveConversation ||
+    (isActive
+      ? canReplaceActiveVoiceConversation({
+          canToggle,
+          hydrated,
+          pocketReady,
+        })
+      : canToggle && hydrated);
+
   return useMemo(
     () => ({
-      visible: isActive || (enabled && isGooseSession),
+      visible: shouldShowVoiceConversationControl({
+        activeConversation: isActive,
+        controlEnabled,
+        voiceEnabled: enabled,
+        isGooseSession,
+      }),
       state: uiState,
       boundSessionId: status.sessionId,
       active: isActive,
-      ownsActiveConversation: isActive && status.sessionId === sessionId,
+      ownsActiveConversation,
       microphoneMuted,
       error:
         error ??
         (pocketReady && !status.available ? status.unavailableReason : null),
-      disabled: isActive ? false : !canToggle || !hydrated,
+      disabled: !controlEnabled,
       onToggle: toggle,
       onMicrophoneMuteToggle: toggleMicrophoneMute,
     }),
     [
-      canToggle,
+      controlEnabled,
       enabled,
       error,
-      hydrated,
       isActive,
       isGooseSession,
       microphoneMuted,
       pocketReady,
-      sessionId,
+      ownsActiveConversation,
       status,
       toggle,
       toggleMicrophoneMute,

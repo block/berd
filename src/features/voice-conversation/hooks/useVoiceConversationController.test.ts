@@ -17,6 +17,7 @@ vi.mock("../lib/nativeAssistantSpeech", () => ({
 
 import {
   canBindVoiceSendRoute,
+  canReplaceActiveVoiceConversation,
   canClaimVoiceSendRoute,
   beginVoiceControlsVisibilityLease,
   createVoiceTranscriptDeliveryQueue,
@@ -28,6 +29,7 @@ import {
   resolveVoiceRouteMount,
   resolveVoiceToggleAction,
   shouldSuppressVoiceConversationControls,
+  shouldShowVoiceConversationControl,
   shouldStartRequestedVoiceConversation,
   startPendingTranscriptRecovery,
   useVoiceConversationController,
@@ -451,6 +453,46 @@ describe("voice transcript delivery coordination", () => {
     );
   });
 
+  it("keeps an ineligible foreign session from controlling the active call", () => {
+    expect(
+      canReplaceActiveVoiceConversation({
+        canToggle: false,
+        hydrated: true,
+        pocketReady: true,
+      }),
+    ).toBe(false);
+    expect(
+      canReplaceActiveVoiceConversation({
+        canToggle: true,
+        hydrated: false,
+        pocketReady: true,
+      }),
+    ).toBe(false);
+    expect(
+      canReplaceActiveVoiceConversation({
+        canToggle: true,
+        hydrated: true,
+        pocketReady: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowVoiceConversationControl({
+        activeConversation: true,
+        controlEnabled: false,
+        voiceEnabled: true,
+        isGooseSession: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowVoiceConversationControl({
+        activeConversation: true,
+        controlEnabled: true,
+        voiceEnabled: true,
+        isGooseSession: true,
+      }),
+    ).toBe(true);
+  });
+
   it("starts the replacement only after the active call fully stops", async () => {
     let finishStop:
       | ((status: { lifecycle: string; sessionId: null }) => void)
@@ -468,7 +510,7 @@ describe("voice transcript delivery coordination", () => {
     expect(start).not.toHaveBeenCalled();
 
     finishStop?.({ lifecycle: "stopped", sessionId: null });
-    await replacement;
+    await expect(replacement).resolves.toBe(true);
     expect(start).toHaveBeenCalledOnce();
   });
 
@@ -483,7 +525,7 @@ describe("voice transcript delivery coordination", () => {
         }),
         start,
       }),
-    ).rejects.toThrow("could not be stopped");
+    ).resolves.toBe(false);
     expect(start).not.toHaveBeenCalled();
   });
 
