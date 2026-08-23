@@ -28,6 +28,7 @@ pub mod home_widget_media;
 pub mod installation;
 pub mod layout;
 pub mod local_mcp_inventory;
+pub mod mac_speech;
 pub mod message_queues;
 pub mod migration;
 pub mod model_setup;
