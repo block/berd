@@ -80,6 +80,23 @@ private func wait<Value>(
     return try box.take()
 }
 
+private func wait<Value>(
+    until deadline: DispatchTime,
+    _ operation: @escaping @Sendable () async throws -> Value
+) throws -> Value {
+    let semaphore = DispatchSemaphore(value: 0)
+    let box = ResultBox<Value>()
+    Task.detached {
+        do { box.store(.success(try await operation())) }
+        catch { box.store(.failure(error)) }
+        semaphore.signal()
+    }
+    guard semaphore.wait(timeout: deadline) == .success else {
+        throw BridgeError.finishTimedOut
+    }
+    return try box.take()
+}
+
 private func locale(from identifier: UnsafePointer<CChar>?) -> Locale {
     guard let identifier else { return .current }
     let value = String(cString: identifier)
@@ -344,6 +361,7 @@ private final class SpeechSession: @unchecked Sendable {
     }
 
     func finish(timeout: TimeInterval) throws {
+        let deadline = DispatchTime.now() + max(timeout, 0)
         let shouldFinish = try lock.withLock {
             guard !inputFinished else { return false }
             inputFinished = true
@@ -358,12 +376,15 @@ private final class SpeechSession: @unchecked Sendable {
         }
         guard shouldFinish else { return }
         do {
-            try wait { [analyzer] in try await analyzer.finalizeAndFinishThroughEndOfInput() }
+            try wait(until: deadline) {
+                [analyzer] in try await analyzer.finalizeAndFinishThroughEndOfInput()
+            }
         } catch {
             fail(error)
+            cancel()
             throw error
         }
-        guard completion.wait(timeout: .now() + max(timeout, 0)) == .success else {
+        guard completion.wait(timeout: deadline) == .success else {
             cancel()
             throw BridgeError.finishTimedOut
         }
@@ -378,8 +399,8 @@ private final class SpeechSession: @unchecked Sendable {
             }
             return tasks
         }
-        _ = try? wait { [analyzer] in await analyzer.cancelAndFinishNow() }
         currentTasks.forEach { $0.cancel() }
+        Task.detached { [analyzer] in await analyzer.cancelAndFinishNow() }
     }
 
     private func emit(_ event: Int32, text: String? = nil) {
