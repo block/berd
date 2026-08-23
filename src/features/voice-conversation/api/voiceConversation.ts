@@ -509,6 +509,7 @@ export function rejectVoiceConversationTranscript(
 
 export async function startVoiceConversation(
   sessionId: string,
+  inputBackend: "parakeet" | "macos" = "parakeet",
   foregroundGeneration = 0,
 ): Promise<VoiceConversationStatus> {
   resetMicrophoneMuteState();
@@ -517,6 +518,7 @@ export async function startVoiceConversation(
     "start_native_voice_conversation",
     {
       sessionId,
+      inputBackend,
       rendererId,
       rendererEpoch,
       foregroundGeneration,

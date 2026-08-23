@@ -22,6 +22,7 @@ import {
   confirmVoiceConversationForegroundSession,
   setVoiceConversationControlsSuppressed,
 } from "../api/voiceConversation";
+import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -575,6 +576,7 @@ export interface UseVoiceConversationControllerOptions {
   enabled: boolean;
   isGooseSession: boolean;
   pocketReady: boolean;
+  inputBackend?: VoiceInputBackend | null;
   onPocketSetupRequired: () => void;
   readOnly?: boolean;
   disabled?: boolean;
@@ -586,6 +588,7 @@ export function useVoiceConversationController({
   enabled,
   isGooseSession,
   pocketReady,
+  inputBackend = "parakeet",
   onPocketSetupRequired,
   readOnly = false,
   disabled = false,
@@ -740,6 +743,7 @@ export function useVoiceConversationController({
   );
 
   const startCurrentConversation = useCallback(async () => {
+    if (inputBackend === null) return;
     // Do not rely on the mount effect racing ahead of the user's first
     // click. The native recognizer can finalize quickly, so its delivery
     // subscriber must exist before the microphone lifecycle starts.
@@ -751,7 +755,7 @@ export function useVoiceConversationController({
     try {
       const foregroundGeneration =
         await confirmVoiceConversationForegroundSession(sessionId);
-      await start(sessionId, foregroundGeneration);
+      await start(sessionId, inputBackend, foregroundGeneration);
       startAssistantSpeech(assistantSpeechHistory);
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;
@@ -805,7 +809,7 @@ export function useVoiceConversationController({
         addErrorNotification(sessionId, errorText(startError));
       }
     }
-  }, [onSend, sessionId, start, startAssistantSpeech]);
+  }, [inputBackend, onSend, sessionId, start, startAssistantSpeech]);
 
   useEffect(() => {
     if (

@@ -12,24 +12,38 @@ import {
   SelectValue,
 } from "@/shared/ui/select";
 import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
+import { useMacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import { useSiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
+import type { VoiceInputBackend } from "../lib/voiceInputPreference";
+import { useVoiceInputPreference } from "../lib/voiceInputPreference";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
 import { useVoiceOutputPreference } from "../lib/voiceOutputPreference";
 import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
+import { MacSpeechSettings } from "./MacSpeechSettings";
 import { SiriVoiceSettings } from "./SiriVoiceSettings";
 
 function readinessDescriptionKey(
   inputReady: boolean,
   outputReady: boolean,
   backend: VoiceOutputBackend,
+  inputBackend: VoiceInputBackend,
 ): string | null {
   if (inputReady && outputReady) return null;
   if (!inputReady && !outputReady) {
+    if (inputBackend === "macos") {
+      return backend === "siri"
+        ? "voice.notReadyMacInputAndSiriOutput"
+        : "voice.notReadyMacInputAndPocketOutput";
+    }
     return backend === "siri"
       ? "voice.notReadyInputAndSiriOutput"
       : "voice.notReadyInputAndPocketOutput";
   }
-  if (!inputReady) return "voice.notReadyInput";
+  if (!inputReady) {
+    return inputBackend === "macos"
+      ? "voice.notReadyMacInput"
+      : "voice.notReadyInput";
+  }
   return backend === "siri"
     ? "voice.notReadySiriOutput"
     : "voice.notReadyPocketOutput";
@@ -38,12 +52,25 @@ function readinessDescriptionKey(
 export function VoiceSettings() {
   const { t } = useTranslation("settings");
   const setup = usePocketVoiceSetup();
+  const macSpeechSetup = useMacSpeechSetup();
+  const input = useVoiceInputPreference(
+    macSpeechSetup.status?.supported ?? (macSpeechSetup.loading ? null : false),
+  );
   const output = useVoiceOutputPreference();
   const siriSetup = useSiriVoiceSetup(output.backend === "siri");
   const siriSupported = getPlatform() === "mac";
+  const inputHeadingId = useId();
+  const inputDescriptionId = useId();
   const outputHeadingId = useId();
   const outputDescriptionId = useId();
-  const inputReady = setup.status?.parakeetInstalled ?? false;
+  const inputReady =
+    input.backend === "macos"
+      ? Boolean(
+          macSpeechSetup.status?.supported &&
+            macSpeechSetup.status.localeSupported &&
+            macSpeechSetup.status.modelInstalled,
+        )
+      : (setup.status?.parakeetInstalled ?? false);
   const outputReady =
     output.backend === "siri"
       ? Boolean(
@@ -54,14 +81,23 @@ export function VoiceSettings() {
       : (setup.status?.pocketInstalled ?? false);
   const siriOutputLoaded =
     siriSetup.status !== null && siriSetup.statusError === null;
-  const readinessKey =
-    setup.status === null
-      ? null
-      : !inputReady && output.backend === "siri" && !siriOutputLoaded
-        ? "voice.notReadyInput"
-        : output.backend === "siri" && !siriOutputLoaded
+  const pocketStatusLoaded =
+    (input.backend !== "parakeet" && output.backend !== "pocket") ||
+    setup.status !== null;
+  const readinessKey = !pocketStatusLoaded
+    ? null
+    : !inputReady && output.backend === "siri" && !siriOutputLoaded
+      ? "voice.notReadyInput"
+      : output.backend === "siri" && !siriOutputLoaded
+        ? null
+        : input.backend === null
           ? null
-          : readinessDescriptionKey(inputReady, outputReady, output.backend);
+          : readinessDescriptionKey(
+              inputReady,
+              outputReady,
+              output.backend,
+              input.backend,
+            );
 
   return (
     <SettingsPage
@@ -77,12 +113,55 @@ export function VoiceSettings() {
         </Alert>
       ) : null}
       <section className="space-y-2 overflow-hidden">
-        <h2 className="text-sm font-medium">{t("voice.speechInput")}</h2>
-        <PocketVoiceSetupContent
-          setup={setup}
-          models={["parakeet"]}
-          showPocketVoiceControls={false}
-        />
+        <div className="flex min-w-0 flex-col gap-4 py-4 pr-4 sm:flex-row sm:items-center">
+          <div className="min-w-0 flex-1">
+            <h2 id={inputHeadingId} className="text-sm font-medium">
+              {t("voice.speechInput")}
+            </h2>
+            <p
+              id={inputDescriptionId}
+              className="mt-0.5 text-xs text-muted-foreground"
+            >
+              {t("voice.inputBackendDescription")}
+            </p>
+          </div>
+          <div className="w-full min-w-0 sm:w-auto sm:shrink-0">
+            <Select
+              value={input.backend ?? undefined}
+              disabled={input.backend === null}
+              onValueChange={(value) =>
+                input.setBackend(value as VoiceInputBackend)
+              }
+            >
+              <SelectTrigger
+                className="w-full sm:w-auto"
+                aria-labelledby={inputHeadingId}
+                aria-describedby={inputDescriptionId}
+              >
+                <SelectValue placeholder={t("voice.macSpeechLoading")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="parakeet">
+                  {t("voice.backendParakeet")}
+                </SelectItem>
+                {macSpeechSetup.status?.supported ? (
+                  <SelectItem value="macos">
+                    {t("voice.backendMacSpeech")}
+                  </SelectItem>
+                ) : null}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        {input.backend === "macos" ? (
+          <MacSpeechSettings setup={macSpeechSetup} />
+        ) : input.backend === "parakeet" ? (
+          <PocketVoiceSetupContent
+            setup={setup}
+            models={["parakeet"]}
+            showPocketVoiceControls={false}
+          />
+        ) : null}
       </section>
       <section className="space-y-2">
         <div className="flex min-w-0 flex-col gap-4 py-4 pr-4 sm:flex-row sm:items-center">

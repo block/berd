@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PocketVoiceStatus } from "../api/pocketVoice";
+import type { MacSpeechStatus } from "../api/macSpeech";
 import type { SiriVoiceStatus } from "../api/siriVoice";
 import {
   isVoiceSetupReady,
@@ -8,10 +9,14 @@ import {
 } from "./voiceSetupReadiness";
 
 const mockGetPocketVoiceStatus = vi.hoisted(() => vi.fn());
+const mockGetMacSpeechStatus = vi.hoisted(() => vi.fn());
 const mockGetSiriVoiceStatus = vi.hoisted(() => vi.fn());
 
 vi.mock("../api/pocketVoice", () => ({
   getPocketVoiceStatus: mockGetPocketVoiceStatus,
+}));
+vi.mock("../api/macSpeech", () => ({
+  getMacSpeechStatus: mockGetMacSpeechStatus,
 }));
 vi.mock("../api/siriVoice", () => ({
   getSiriVoiceStatus: mockGetSiriVoiceStatus,
@@ -29,29 +34,44 @@ const siri = {
   selectedVoiceInstalled: true,
 } as SiriVoiceStatus;
 
+const macSpeech = {
+  supported: true,
+  localeSupported: true,
+  modelInstalled: true,
+} as MacSpeechStatus;
+
 describe("voice setup readiness", () => {
   beforeEach(() => {
     mockGetPocketVoiceStatus.mockReset();
+    mockGetMacSpeechStatus.mockReset();
     mockGetSiriVoiceStatus.mockReset();
   });
 
   it("requires Parakeet and Pocket for the Pocket backend", () => {
-    expect(isVoiceSetupReady(pocket, null, "pocket")).toBe(true);
+    expect(isVoiceSetupReady(pocket, null, null, "parakeet", "pocket")).toBe(
+      true,
+    );
     expect(
       isVoiceSetupReady(
         { ...pocket, parakeetInstalled: false },
         null,
+        null,
+        "parakeet",
         "pocket",
       ),
     ).toBe(false);
   });
 
   it("requires Parakeet and an installed selected Siri voice", () => {
-    expect(isVoiceSetupReady(pocket, siri, "siri")).toBe(true);
+    expect(isVoiceSetupReady(pocket, null, siri, "parakeet", "siri")).toBe(
+      true,
+    );
     expect(
       isVoiceSetupReady(
         pocket,
+        null,
         { ...siri, selectedVoiceInstalled: false },
+        "parakeet",
         "siri",
       ),
     ).toBe(false);
@@ -60,9 +80,9 @@ describe("voice setup readiness", () => {
   it("refreshes Pocket readiness without querying Siri", async () => {
     mockGetPocketVoiceStatus.mockResolvedValue(pocket);
 
-    await expect(refreshVoiceSetupReadiness("pocket", "en-US")).resolves.toBe(
-      true,
-    );
+    await expect(
+      refreshVoiceSetupReadiness("parakeet", "pocket", "en-US"),
+    ).resolves.toBe(true);
     expect(mockGetPocketVoiceStatus).toHaveBeenCalledOnce();
     expect(mockGetSiriVoiceStatus).not.toHaveBeenCalled();
   });
@@ -71,11 +91,24 @@ describe("voice setup readiness", () => {
     mockGetPocketVoiceStatus.mockResolvedValue(pocket);
     mockGetSiriVoiceStatus.mockResolvedValue(siri);
 
-    await expect(refreshVoiceSetupReadiness("siri", "en-AU")).resolves.toBe(
-      true,
-    );
+    await expect(
+      refreshVoiceSetupReadiness("parakeet", "siri", "en-AU"),
+    ).resolves.toBe(true);
     expect(mockGetPocketVoiceStatus).toHaveBeenCalledOnce();
     expect(mockGetSiriVoiceStatus).toHaveBeenCalledWith("en-AU");
+  });
+
+  it("uses native macOS speech readiness instead of Parakeet when selected", async () => {
+    mockGetPocketVoiceStatus.mockResolvedValue({
+      ...pocket,
+      parakeetInstalled: false,
+    });
+    mockGetMacSpeechStatus.mockResolvedValue(macSpeech);
+
+    await expect(
+      refreshVoiceSetupReadiness("macos", "pocket", "en-US"),
+    ).resolves.toBe(true);
+    expect(mockGetMacSpeechStatus).toHaveBeenCalledOnce();
   });
 
   it("rechecks readiness when the selected backend changes during refresh", async () => {
@@ -88,13 +121,24 @@ describe("voice setup readiness", () => {
       .mockResolvedValueOnce(pocket);
     mockGetSiriVoiceStatus.mockResolvedValue(siri);
     let selection: {
-      backend: "pocket" | "siri";
+      inputBackend: "parakeet" | "macos";
+      outputBackend: "pocket" | "siri";
       siriLanguage: string;
       revision: number;
-    } = { backend: "pocket", siriLanguage: "en-US", revision: 0 };
+    } = {
+      inputBackend: "parakeet",
+      outputBackend: "pocket",
+      siriLanguage: "en-US",
+      revision: 0,
+    };
 
     const readiness = refreshStableVoiceSetupReadiness(() => selection);
-    selection = { backend: "siri", siriLanguage: "en-AU", revision: 1 };
+    selection = {
+      inputBackend: "parakeet",
+      outputBackend: "siri",
+      siriLanguage: "en-AU",
+      revision: 1,
+    };
     resolvePocket({ ...pocket, pocketInstalled: false });
 
     await expect(readiness).resolves.toBe(true);
@@ -111,7 +155,8 @@ describe("voice setup readiness", () => {
       .mockReturnValueOnce(firstPocket)
       .mockResolvedValueOnce(pocket);
     let selection = {
-      backend: "pocket" as const,
+      inputBackend: "parakeet" as const,
+      outputBackend: "pocket" as const,
       siriLanguage: "en-US",
       revision: 0,
     };

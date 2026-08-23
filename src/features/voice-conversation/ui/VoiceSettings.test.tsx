@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import type { PocketVoiceStatus } from "../api/pocketVoice";
 import type { PocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
+import type { MacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import type { SiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
+import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
 import { VoiceSettings } from "./VoiceSettings";
 
@@ -13,12 +15,37 @@ const setupState = vi.hoisted(() => ({
 const siriSetupState = vi.hoisted(() => ({
   current: null as SiriVoiceSetup | null,
 }));
+const macSpeechSetupState = vi.hoisted(() => ({
+  current: {
+    status: {
+      supported: false,
+      unavailableReason: "Requires macOS 26 or later.",
+      locale: "",
+      localeSupported: false,
+      modelInstalled: false,
+      installing: false,
+      progress: null,
+      error: null,
+      revision: 0,
+    },
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    install: vi.fn(),
+  } as MacSpeechSetup,
+}));
+const inputState = vi.hoisted(() => ({
+  backend: "parakeet" as VoiceInputBackend,
+}));
 const outputState = vi.hoisted(() => ({
   backend: "pocket" as VoiceOutputBackend,
 }));
 
 vi.mock("../hooks/usePocketVoiceSetup", () => ({
   usePocketVoiceSetup: () => setupState.current,
+}));
+vi.mock("../hooks/useMacSpeechSetup", () => ({
+  useMacSpeechSetup: () => macSpeechSetupState.current,
 }));
 vi.mock("../hooks/useSiriVoiceSetup", () => ({
   useSiriVoiceSetup: () => siriSetupState.current,
@@ -28,6 +55,12 @@ vi.mock("../hooks/useSiriVoiceSetup", () => ({
 vi.mock("../lib/voiceOutputPreference", () => ({
   useVoiceOutputPreference: () => ({
     backend: outputState.backend,
+    setBackend: vi.fn(),
+  }),
+}));
+vi.mock("../lib/voiceInputPreference", () => ({
+  useVoiceInputPreference: () => ({
+    backend: inputState.backend,
     setBackend: vi.fn(),
   }),
 }));
@@ -113,7 +146,25 @@ function siriSetup(): SiriVoiceSetup {
 
 describe("VoiceSettings", () => {
   beforeEach(() => {
+    inputState.backend = "parakeet";
     outputState.backend = "pocket";
+    macSpeechSetupState.current = {
+      status: {
+        supported: false,
+        unavailableReason: "Requires macOS 26 or later.",
+        locale: "en-US",
+        localeSupported: false,
+        modelInstalled: false,
+        installing: false,
+        progress: null,
+        error: null,
+        revision: 0,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      install: vi.fn(),
+    };
     siriSetupState.current = siriSetup();
   });
 
@@ -362,5 +413,40 @@ describe("VoiceSettings", () => {
     expect(
       screen.queryByText(/No installed Siri voice is selected/),
     ).not.toBeInTheDocument();
+  });
+
+  it("offers the on-device dictation download for native macOS input", () => {
+    inputState.backend = "macos";
+    setupState.current = setup(pocketStatus({ pocketInstalled: true }));
+    macSpeechSetupState.current = {
+      status: {
+        supported: true,
+        unavailableReason: null,
+        locale: "en-US",
+        localeSupported: true,
+        modelInstalled: false,
+        installing: false,
+        progress: null,
+        error: null,
+        revision: 1,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      install: vi.fn(),
+    };
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(screen.getByText("On-device dictation")).toBeInTheDocument();
+    expect(screen.getByText("Not installed for en-US")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Apple's on-device dictation model is not installed. Download it below to use Voice Conversation.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Download model" }),
+    ).toBeEnabled();
   });
 });

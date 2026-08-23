@@ -234,7 +234,9 @@ import {
   setVoiceConversationForegroundSession,
 } from "@/features/voice-conversation/api/voiceConversation";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
+import { useMacSpeechSetup } from "@/features/voice-conversation/hooks/useMacSpeechSetup";
 import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
+import { useVoiceInputPreference } from "@/features/voice-conversation/lib/voiceInputPreference";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
 import {
   isVoiceSetupReady,
@@ -730,30 +732,43 @@ export function AppShell({
   const globalPocketVoiceSetup = usePocketVoiceSetup(
     capabilities.voiceConversation,
   );
+  const globalMacSpeechSetup = useMacSpeechSetup(
+    capabilities.voiceConversation,
+  );
+  const globalVoiceInput = useVoiceInputPreference(
+    globalMacSpeechSetup.status?.supported ??
+      (globalMacSpeechSetup.loading ? null : false),
+  );
   const globalVoiceOutput = useVoiceOutputPreference();
   const globalSiriVoiceSetup = useSiriVoiceSetup(
     capabilities.voiceConversation && globalVoiceOutput.backend === "siri",
   );
   const globalVoiceSetupSelectionRef = useRef({
-    backend: globalVoiceOutput.backend,
+    inputBackend: globalVoiceInput.backend,
+    outputBackend: globalVoiceOutput.backend,
     siriLanguage: globalSiriVoiceSetup.language,
     revision: 0,
   });
   if (
-    globalVoiceSetupSelectionRef.current.backend !==
+    globalVoiceSetupSelectionRef.current.inputBackend !==
+      globalVoiceInput.backend ||
+    globalVoiceSetupSelectionRef.current.outputBackend !==
       globalVoiceOutput.backend ||
     globalVoiceSetupSelectionRef.current.siriLanguage !==
       globalSiriVoiceSetup.language
   ) {
     globalVoiceSetupSelectionRef.current = {
-      backend: globalVoiceOutput.backend,
+      inputBackend: globalVoiceInput.backend,
+      outputBackend: globalVoiceOutput.backend,
       siriLanguage: globalSiriVoiceSetup.language,
       revision: globalVoiceSetupSelectionRef.current.revision + 1,
     };
   }
   const globalVoiceReady = isVoiceSetupReady(
     globalPocketVoiceSetup.status,
+    globalMacSpeechSetup.status,
     globalSiriVoiceSetup.status,
+    globalVoiceInput.backend,
     globalVoiceOutput.backend,
   );
   const voiceConversationWasEnabledRef = useRef(capabilities.voiceConversation);

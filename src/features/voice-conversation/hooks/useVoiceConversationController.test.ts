@@ -463,7 +463,9 @@ describe("voice transcript delivery coordination", () => {
       }));
     });
 
-    await waitFor(() => expect(start).toHaveBeenCalledWith("session-1", 1));
+    await waitFor(() =>
+      expect(start).toHaveBeenCalledWith("session-1", "parakeet", 1),
+    );
     expect(
       useVoiceConversationStore.getState().requestedStartSessionId,
     ).toBeNull();
