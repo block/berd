@@ -491,4 +491,31 @@ describe("VoiceSettings", () => {
       screen.getByRole("button", { name: "Download model" }),
     ).toBeEnabled();
   });
+
+  it("hides Apple speech model details when speech recognition is ready", () => {
+    inputState.backend = "macos";
+    setupState.current = setup(pocketStatus({ pocketInstalled: true }));
+    macSpeechSetupState.current = {
+      status: {
+        supported: true,
+        unavailableReason: null,
+        locale: "en-CA",
+        localeSupported: true,
+        modelInstalled: true,
+        installing: false,
+        progress: null,
+        error: null,
+        revision: 1,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      install: vi.fn(),
+    };
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(screen.queryByText("On-device dictation")).not.toBeInTheDocument();
+    expect(screen.queryByText("Installed for en-CA")).not.toBeInTheDocument();
+  });
 });

@@ -18,6 +18,9 @@ export function MacSpeechSettings({ setup }: { setup: MacSpeechSetup }) {
   if (!status?.supported) {
     return null;
   }
+  if (status.modelInstalled) {
+    return null;
+  }
 
   const locale = status.locale ?? t("voice.macSpeechSystemLocale");
   const error = setup.error ?? status.error;
@@ -25,13 +28,9 @@ export function MacSpeechSettings({ setup }: { setup: MacSpeechSetup }) {
     <div className="space-y-3 overflow-hidden">
       <SettingsRow
         label={t("voice.macSpeechModel")}
-        description={
-          status.modelInstalled
-            ? t("voice.macSpeechInstalled", { locale })
-            : t("voice.macSpeechNotInstalled", { locale })
-        }
+        description={t("voice.macSpeechNotInstalled", { locale })}
         action={
-          status.modelInstalled || status.installing ? undefined : (
+          status.installing ? undefined : (
             <Button
               type="button"
               variant="outline"
