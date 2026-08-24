@@ -269,7 +269,7 @@ impl Drop for CaptureSuppressionGuard {
     }
 }
 
-#[must_use = "assistant speech sensitivity ends when the guard is dropped"]
+#[must_use = "assistant speech policy ends when the guard is dropped"]
 #[cfg(any(test, target_os = "macos"))]
 pub(crate) struct AssistantSpeechGuard {
     _capture_suppression: Option<CaptureSuppressionGuard>,
@@ -2907,6 +2907,24 @@ mod tests {
 
         drop(guard);
         assert!(!state.capture_is_suppressed());
+    }
+
+    #[test]
+    fn assistant_speech_policy_can_restart_after_a_silent_gap() {
+        let state = NativeVoiceState::default();
+
+        let first_burst = state.begin_assistant_speech(InterruptionSensitivity::Less, true);
+        assert!(state.capture_is_suppressed());
+        drop(first_burst);
+        assert!(!state.capture_is_suppressed());
+
+        let second_burst = state.begin_assistant_speech(InterruptionSensitivity::More, false);
+        assert!(!state.capture_is_suppressed());
+        assert_eq!(
+            active_vad_threshold(&state.assistant_speaking, &state.assistant_vad_threshold),
+            InterruptionSensitivity::More.vad_threshold()
+        );
+        drop(second_burst);
     }
 
     #[test]

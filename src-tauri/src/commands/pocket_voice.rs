@@ -2217,6 +2217,9 @@ fn run_pocket_voice_stream(
                 });
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
+                if player.empty() {
+                    assistant_speech.take();
+                }
                 if playback_started
                     && last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL
                 {
@@ -2276,17 +2279,20 @@ fn mark_pocket_playback_started(
     playback_started: &mut bool,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
 ) -> Result<(), String> {
-    if *playback_started {
+    if assistant_speech.is_some() {
         return Ok(());
     }
     *assistant_speech =
         Some(native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture));
-    *playback_started = true;
-    emit_pocket_stream_event(app, stream_id, PocketStreamEventState::Started, None, None);
-    println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
-    std::io::stdout()
-        .flush()
-        .map_err(|error| format!("signal Pocket playback start: {error}"))
+    if !*playback_started {
+        *playback_started = true;
+        emit_pocket_stream_event(app, stream_id, PocketStreamEventState::Started, None, None);
+        println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
+        std::io::stdout()
+            .flush()
+            .map_err(|error| format!("signal Pocket playback start: {error}"))?;
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]

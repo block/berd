@@ -47,6 +47,7 @@ void *berd_siri_tts_stream_create(
     const char *voice_name,
     float rate,
     BerdSiriTTSPlaybackStarted playback_started,
+    BerdSiriTTSPlaybackStarted playback_stopped,
     void *context,
     char **error_out
 );

@@ -276,6 +276,7 @@ unsafe extern "C" {
         voice_name: *const c_char,
         rate: f32,
         playback_started: Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
+        playback_stopped: Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
         context: *mut std::ffi::c_void,
         error_out: *mut *mut c_char,
     ) -> *mut std::ffi::c_void;
@@ -390,6 +391,7 @@ struct SiriStreamCallbackContext {
     native_voice: NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
+    playback_started: AtomicBool,
     assistant_speech: Mutex<Option<AssistantSpeechGuard>>,
 }
 
@@ -412,15 +414,32 @@ unsafe extern "C" fn siri_playback_started(context: *mut std::ffi::c_void) {
                 .begin_assistant_speech(context.interruption_sensitivity, context.suppress_capture),
         );
     }
-    let _ = context.app.emit(
-        SIRI_STREAM_EVENT,
-        SiriStreamEvent {
-            stream_id: context.stream_id.clone(),
-            state: SiriStreamEventState::Started,
-            error: None,
-            delivery: None,
-        },
-    );
+    if !context.playback_started.swap(true, Ordering::AcqRel) {
+        let _ = context.app.emit(
+            SIRI_STREAM_EVENT,
+            SiriStreamEvent {
+                stream_id: context.stream_id.clone(),
+                state: SiriStreamEventState::Started,
+                error: None,
+                delivery: None,
+            },
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" fn siri_playback_stopped(context: *mut std::ffi::c_void) {
+    if context.is_null() {
+        return;
+    }
+    // SAFETY: The stream worker owns this boxed context until after the native
+    // player has completed and been released.
+    let context = unsafe { &*(context.cast::<SiriStreamCallbackContext>()) };
+    let Ok(mut assistant_speech) = context.assistant_speech.lock() else {
+        log::error!("Siri assistant speech guard lock was poisoned");
+        return;
+    };
+    assistant_speech.take();
 }
 
 #[cfg(target_os = "macos")]
@@ -668,6 +687,7 @@ fn run_siri_stream(
         native_voice,
         interruption_sensitivity,
         suppress_capture,
+        playback_started: AtomicBool::new(false),
         assistant_speech: Mutex::new(None),
     });
     let callback_context = Box::into_raw(callback_context);
@@ -680,6 +700,7 @@ fn run_siri_stream(
             name.as_ptr(),
             speed,
             Some(siri_playback_started),
+            Some(siri_playback_stopped),
             callback_context.cast(),
             &mut error,
         )
