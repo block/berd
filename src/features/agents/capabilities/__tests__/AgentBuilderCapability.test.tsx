@@ -1,4 +1,4 @@
-import { act, fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 
@@ -24,7 +24,13 @@ const apiMocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/shared/api/agents", () => apiMocks);
+vi.mock("@/shared/api/agents", async (importOriginal) => ({
+  ...apiMocks,
+  // Pure mapper; the real one keeps the promotion path honest.
+  agentSourceToPersona: (
+    await importOriginal<typeof import("@/shared/api/agents")>()
+  ).agentSourceToPersona,
+}));
 
 vi.mock("@/features/agents/lib/agentTelemetry", () => telemetryMocks);
 
@@ -62,6 +68,7 @@ import {
   type ChatSession,
 } from "@/features/chat/stores/chatSessionStore";
 import type { AgentSourceEntry } from "@/shared/api/agents";
+import type { Persona } from "@/shared/types/agents";
 
 const existingAgentSource: AgentSourceEntry = {
   type: "agent",
@@ -126,6 +133,9 @@ describe("AgentBuilderCapability keep-save telemetry", () => {
     useAgentStore.setState({
       personas: [],
       personasLoading: false,
+      draftSources: [],
+      galleryRevision: 0,
+      galleryMutationsInFlight: 0,
       providers: [],
     });
     useChatSessionStore.setState({
@@ -172,5 +182,41 @@ describe("AgentBuilderCapability keep-save telemetry", () => {
     expect(apiMocks.updatePersonaSource).not.toHaveBeenCalled();
     expect(telemetryMocks.trackAgentEditCompleted).not.toHaveBeenCalled();
     expect(telemetryMocks.trackAgentCreateCompleted).not.toHaveBeenCalled();
+  });
+
+  it("applies the disk refresh that follows a save, through the real gallery fence", async () => {
+    // The optimistic store seed runs as a gallery mutation; the follow-up
+    // listing must start after that mutation releases the fence, or the fence
+    // would reject it and the gallery would stay on the optimistic copy.
+    const fromDisk: Persona = {
+      id: existingAgentSource.path,
+      displayName: "Code Reviewer (as listed on disk)",
+      systemPrompt: existingAgentSource.content,
+      isBuiltin: false,
+      writable: true,
+      createdAt: "2026-06-09T00:00:00.000Z",
+      updatedAt: "2026-06-09T00:00:00.000Z",
+    };
+    apiMocks.listAgentGallery.mockResolvedValue({
+      personas: [fromDisk],
+      drafts: [],
+    });
+
+    renderWithProviders(
+      <AgentBuilderCapability
+        session={builderSession}
+        onAgentBuilderCompleted={vi.fn()}
+      />,
+    );
+    await screen.findByLabelText(/agent name/i);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(apiMocks.listAgentGallery).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(useAgentStore.getState().personas).toEqual([fromDisk]);
+    });
+    expect(useAgentStore.getState().galleryMutationsInFlight).toBe(0);
   });
 });

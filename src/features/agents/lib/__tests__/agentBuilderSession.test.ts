@@ -835,6 +835,43 @@ describe("agentBuilderSession", () => {
       expect(closeSession).not.toHaveBeenCalled();
     });
 
+    it("keeps the draft when the user types during the final disk read", async () => {
+      // The source lookup completes, then the content check reads the file.
+      // Typing during that read must still be seen before anything is deleted.
+      addBuilderSession();
+      mocks.listPersonaSources.mockResolvedValue([draftSource]);
+      let releaseRead: (source: typeof draftSource) => void = () => {};
+      let reads = 0;
+      mocks.readAgentSourceFile.mockImplementation(() => {
+        reads += 1;
+        if (reads !== 2) {
+          // The helper's own lookup (read 1) and the content check's final
+          // fresh read (read 3) resolve right away.
+          return Promise.resolve(draftSource);
+        }
+        // The content check's lookup, after its in-memory look: hold it.
+        return new Promise<typeof draftSource>((resolve) => {
+          releaseRead = resolve;
+        });
+      });
+      const onBeforeDiscard = vi.fn();
+
+      const pending = discardUntouchedDraftAgentSession("sess-1", {
+        closeSession,
+        onBeforeDiscard,
+      });
+      await vi.waitFor(() => {
+        expect(reads).toBe(2);
+      });
+      chatState.draftsBySession = { "sess-1": "make it a code reviewer" };
+      releaseRead(draftSource);
+
+      await expect(pending).resolves.toBe("kept");
+      expect(mocks.deletePersonaSource).not.toHaveBeenCalled();
+      expect(onBeforeDiscard).not.toHaveBeenCalled();
+      expect(closeSession).not.toHaveBeenCalled();
+    });
+
     it("reports nothing to discard when editing an existing agent without changes", async () => {
       addBuilderSession();
       const existingAgent = {

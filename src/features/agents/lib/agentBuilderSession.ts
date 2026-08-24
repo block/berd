@@ -458,9 +458,12 @@ export async function isEmptyDraftAgentSession(
   return isEmptyPlaceholderDraft(freshSource);
 }
 
-export async function hasAgentBuilderSessionUserContent(
-  sessionId: string,
-): Promise<boolean> {
+/**
+ * The in-memory half of the user-content check: unsaved rail edits, composer
+ * text, queued messages, sent messages. Synchronous on purpose — callers that
+ * are about to delete something re-run this with no await in between.
+ */
+export function hasLocalAgentBuilderUserContent(sessionId: string): boolean {
   if (localEditSessionIds.has(sessionId)) {
     return true;
   }
@@ -479,19 +482,22 @@ export async function hasAgentBuilderSessionUserContent(
     return true;
   }
 
-  const hasUserMessage = (chatState.messagesBySession[sessionId] ?? []).some(
-    (message) => {
-      if (message.role !== "user" || message.metadata?.userVisible === false) {
-        return false;
-      }
+  return (chatState.messagesBySession[sessionId] ?? []).some((message) => {
+    if (message.role !== "user" || message.metadata?.userVisible === false) {
+      return false;
+    }
 
-      return (
-        getTextContent(message).trim().length > 0 ||
-        (message.metadata?.attachments?.length ?? 0) > 0
-      );
-    },
-  );
-  if (hasUserMessage) {
+    return (
+      getTextContent(message).trim().length > 0 ||
+      (message.metadata?.attachments?.length ?? 0) > 0
+    );
+  });
+}
+
+export async function hasAgentBuilderSessionUserContent(
+  sessionId: string,
+): Promise<boolean> {
+  if (hasLocalAgentBuilderUserContent(sessionId)) {
     return true;
   }
 
@@ -530,9 +536,9 @@ export type UntouchedDraftDiscardOutcome =
 
 /**
  * Discards the session's draft only if it is still untouched at the moment of
- * deletion. The user-content check is the last thing that runs before the
- * file goes, so anything typed while earlier lookups were in flight keeps the
- * draft ("kept") instead of being silently thrown away. Editing an existing
+ * deletion. The last thing before the file goes is a synchronous look at the
+ * in-memory user state, so anything typed while any lookup was in flight
+ * keeps the draft ("kept") instead of being silently thrown away. Editing an existing
  * agent is never discardable; with no content it reports "nothing-to-discard"
  * so callers can navigate freely.
  *
@@ -548,6 +554,12 @@ export async function discardUntouchedDraftAgentSession(
   const isDraft = source === undefined || source.properties?.draft === true;
 
   if (await hasAgentBuilderSessionUserContent(sessionId)) {
+    return "kept";
+  }
+  // The check above awaited a disk read after its in-memory look. Anything
+  // typed during that read is invisible to it, so look once more — with no
+  // await between here and the delete.
+  if (hasLocalAgentBuilderUserContent(sessionId)) {
     return "kept";
   }
   if (!isDraft) {

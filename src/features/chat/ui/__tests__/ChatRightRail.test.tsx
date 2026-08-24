@@ -21,6 +21,8 @@ const mocks = vi.hoisted(() => ({
   }>,
   setDraftSources: vi.fn(),
   removeDraftSource: vi.fn(),
+  galleryRevision: 0,
+  galleryMutationsInFlight: 0,
   listAgentGallery: vi.fn(),
   recoverDraftAgent: vi.fn(),
   setAgentBuilderSessionLocalEdits: vi.fn(),
@@ -132,16 +134,33 @@ vi.mock("@/features/agents/stores/agentStore", () => ({
       draftSources: mocks.draftSources,
       setDraftSources: mocks.setDraftSources,
       removeDraftSource: mocks.removeDraftSource,
-      // Mirror the real store's fence shape: mutations run their work
-      // synchronously up to the first await; refreshes apply the listing.
-      mutateGallery: async <T,>(work: () => Promise<T> | T) => work(),
+      // Mirror the real store fence rather than a pass-through: a refresh
+      // that starts while a mutation is in flight, or spans one, is dropped.
+      // That keeps this test able to catch a mis-sequenced refresh.
+      mutateGallery: async <T,>(work: () => Promise<T> | T) => {
+        mocks.galleryRevision += 1;
+        mocks.galleryMutationsInFlight += 1;
+        try {
+          return await work();
+        } finally {
+          mocks.galleryRevision += 1;
+          mocks.galleryMutationsInFlight -= 1;
+        }
+      },
       refreshGallery: async (
         fetchGallery: () => Promise<{
           personas: Array<{ id: string }>;
           drafts: Array<{ path: string }>;
         }>,
       ) => {
+        const revisionAtStart = mocks.galleryRevision;
         const { personas, drafts } = await fetchGallery();
+        if (
+          revisionAtStart !== mocks.galleryRevision ||
+          mocks.galleryMutationsInFlight !== 0
+        ) {
+          return false;
+        }
         mocks.setPersonas(personas);
         mocks.setDraftSources(drafts);
         return true;
@@ -220,6 +239,8 @@ describe("ChatRightRail", () => {
     mocks.setDraftSources.mockReset();
     mocks.removeDraftSource.mockReset();
     mocks.draftSources = [];
+    mocks.galleryRevision = 0;
+    mocks.galleryMutationsInFlight = 0;
     mocks.recoverDraftAgent.mockReset();
     mocks.recoverDraftAgent.mockResolvedValue({
       path: "/Users/x/.agents/agents/recovered.md",

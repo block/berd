@@ -62,7 +62,7 @@ export function AgentBuilderCapability({
       // the promotion and would otherwise repaint the draft card.
       const promotedPersona = agentSourceToPersona(source);
       const agentStore = useAgentStore.getState();
-      void agentStore.mutateGallery(() => {
+      const seeded = agentStore.mutateGallery(() => {
         const current = useAgentStore.getState();
         const existingPersona = current.personas.find(
           (persona) => persona.id === promotedPersona.id,
@@ -84,9 +84,13 @@ export function AgentBuilderCapability({
       onDraftPromoted?.(source);
       onAgentBuilderCompleted?.(promotedPersona.id);
 
-      void agentStore.refreshGallery(listAgentGallery).catch((error) => {
-        console.error(refreshErrorMessage, error);
-      });
+      // The refresh must start after the mutation releases the fence, or the
+      // fence would (correctly) reject it as having begun mid-mutation.
+      void seeded
+        .then(() => agentStore.refreshGallery(listAgentGallery))
+        .catch((error) => {
+          console.error(refreshErrorMessage, error);
+        });
     },
     [onAgentBuilderCompleted, onDraftPromoted, session.id],
   );
