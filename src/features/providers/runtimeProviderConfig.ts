@@ -16,7 +16,6 @@ import type { ProviderCatalogEntry } from "@/shared/types/providers";
 
 const GOOSE_AGENT_PROVIDER_ID = "goose";
 const DATABRICKS_PROVIDER_ID = "databricks_v2";
-const DATABRICKS_HOST_FIELD_KEY = "DATABRICKS_HOST";
 const DEFAULT_MODEL_INVENTORY_MODE: RuntimeModelInventoryMode = "authoritative";
 
 export function defaultModelInventoryModeForLoadResult(
@@ -108,9 +107,7 @@ export function mergeRuntimeProviderCatalog(
     if (databricksCatalogEntry) {
       databricksCatalogEntry.fields = databricks.endpointEnv
         ? undefined
-        : databricksSetupEntry.fields.filter(
-            (field) => field.key === DATABRICKS_HOST_FIELD_KEY,
-          );
+        : databricksSetupEntry.fields;
     }
   }
 
