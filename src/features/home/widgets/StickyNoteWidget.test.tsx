@@ -14,6 +14,8 @@ vi.mock("react-i18next", () => ({
         "widgets.label.fontFamily.options.sans": "Inter",
         "widgets.label.fontFamily.options.serif": "Fraunces",
         "widgets.label.fontFamily.options.mono": "Geist Mono",
+        "widgets.label.fontFamily.options.comic": "Comic Relief",
+        "widgets.label.fontFamily.options.marker": "Permanent Marker",
         "widgets.label.fontSize.label": "Font size in pixels",
         "widgets.label.fontSize.decrease": "Decrease font size",
         "widgets.label.fontSize.increase": "Increase font size",
@@ -233,6 +235,32 @@ describe("StickyNoteWidget", () => {
     fireEvent.click(screen.getByRole("combobox", { name: "Font family" }));
     fireEvent.click(screen.getByRole("option", { name: "Geist Mono" }));
     expect(onUpdateState).toHaveBeenCalledWith({ fontFamily: "mono" });
+  });
+
+  it("previews the nostalgic and handwritten fonts in the family menu", () => {
+    render(
+      <StickyNoteWidget
+        {...baseProps}
+        instance={{
+          ...baseProps.instance,
+          type: "label",
+          state: { text: "Roadmap label" },
+        }}
+      />,
+    );
+
+    fireEvent.doubleClick(getEditor());
+    fireEvent.click(screen.getByRole("combobox", { name: "Font family" }));
+    expect(
+      screen
+        .getByRole("option", { name: "Comic Relief" })
+        .querySelector("[style]"),
+    ).toHaveAttribute("style", "font-family: var(--font-label-comic);");
+    expect(
+      screen
+        .getByRole("option", { name: "Permanent Marker" })
+        .querySelector("[style]"),
+    ).toHaveAttribute("style", "font-family: var(--font-label-marker);");
   });
 
   it("lets pointer-down bubble across a label until edit mode", () => {

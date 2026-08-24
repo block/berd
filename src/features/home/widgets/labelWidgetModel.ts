@@ -7,7 +7,13 @@ export const LABEL_FONT_SIZE_MAX_PX = 72;
 export const LABEL_FONT_SIZE_DEFAULT_PX = 18;
 export const LABEL_FONT_SIZE_LARGE_STEP_PX = 4;
 
-export const LABEL_FONT_FAMILIES = ["sans", "serif", "mono"] as const;
+export const LABEL_FONT_FAMILIES = [
+  "sans",
+  "serif",
+  "mono",
+  "comic",
+  "marker",
+] as const;
 export type LabelFontFamily = (typeof LABEL_FONT_FAMILIES)[number];
 export const LABEL_FONT_FAMILY_DEFAULT: LabelFontFamily = "sans";
 
@@ -28,6 +34,10 @@ export function labelFontFamilyStyle(
       return { fontFamily: "var(--font-label-serif)" };
     case "mono":
       return { fontFamily: "var(--font-mono)" };
+    case "comic":
+      return { fontFamily: "var(--font-label-comic)" };
+    case "marker":
+      return { fontFamily: "var(--font-label-marker)" };
     default:
       return { fontFamily: "var(--font-sans)" };
   }

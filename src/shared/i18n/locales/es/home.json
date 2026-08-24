@@ -354,7 +354,9 @@
         "options": {
           "sans": "Inter",
           "serif": "Fraunces",
-          "mono": "Geist Mono"
+          "mono": "Geist Mono",
+          "comic": "Comic Relief",
+          "marker": "Permanent Marker"
         }
       }
     }
