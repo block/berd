@@ -668,6 +668,64 @@ describe("voice transcript delivery coordination", () => {
     expect(start).toHaveBeenCalledTimes(2);
   });
 
+  it("deduplicates concurrent controls for the same session", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const running = {
+      ...stopped,
+      lifecycle: "running" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      revision: 2,
+    };
+    const startRequest = deferred<typeof running>();
+    const refreshStatus = vi.fn().mockResolvedValue(stopped);
+    const start = vi.fn().mockReturnValue(startRequest.promise);
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus,
+      start,
+    });
+    const options = {
+      sessionId: "session-a",
+      onSend: vi.fn().mockResolvedValue(true),
+      enabled: true,
+      isGooseSession: true,
+      pocketReady: true,
+      onPocketSetupRequired: vi.fn(),
+    };
+    const firstControl = renderHook(() =>
+      useVoiceConversationController(options),
+    );
+    const secondControl = renderHook(() =>
+      useVoiceConversationController(options),
+    );
+
+    let firstToggle!: Promise<void>;
+    act(() => {
+      firstToggle = Promise.resolve(firstControl.result.current.onToggle());
+    });
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    await act(async () => {
+      await secondControl.result.current.onToggle();
+    });
+
+    expect(refreshStatus).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
+    startRequest.resolve(running);
+    await firstToggle;
+  });
+
   it("keeps an ineligible foreign session from controlling the active call", () => {
     expect(
       canReplaceActiveVoiceConversation({
