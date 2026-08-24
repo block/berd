@@ -29,12 +29,19 @@ export function useMacSpeechSetup(enabled = true): MacSpeechSetup {
 
   const refresh = useCallback(async () => {
     const generation = ++generationRef.current;
-    const next = await getMacSpeechStatus();
-    if (generation === generationRef.current) {
-      setStatus((current) => mergeMacSpeechStatus(current, next));
-      setError(null);
+    try {
+      const next = await getMacSpeechStatus();
+      if (generation === generationRef.current) {
+        setStatus((current) => mergeMacSpeechStatus(current, next));
+        setError(null);
+      }
+      return next;
+    } catch (nextError) {
+      if (generation === generationRef.current) {
+        setError(String(nextError));
+      }
+      throw nextError;
     }
-    return next;
   }, []);
 
   useEffect(() => {
@@ -46,9 +53,7 @@ export function useMacSpeechSetup(enabled = true): MacSpeechSetup {
     let unlisten: (() => void) | undefined;
     setLoading(true);
     void refresh()
-      .catch((nextError) => {
-        if (active) setError(String(nextError));
-      })
+      .catch(() => {})
       .finally(() => {
         if (active) setLoading(false);
       });
@@ -71,7 +76,7 @@ export function useMacSpeechSetup(enabled = true): MacSpeechSetup {
   useEffect(() => {
     if (!enabled || !window.__TAURI_INTERNALS__) return;
     const handleFocus = () => {
-      void refresh().catch((nextError) => setError(String(nextError)));
+      void refresh().catch(() => {});
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);

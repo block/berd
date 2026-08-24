@@ -56,6 +56,40 @@ it("keeps terminal status when delayed progress arrives", () => {
   expect(mergeMacSpeechStatus(completed, delayedProgress)).toBe(completed);
 });
 
+it("ignores an old refresh failure after a newer status event", async () => {
+  let rejectRefresh: ((error: Error) => void) | undefined;
+  let emitStatus: ((next: MacSpeechStatus) => void) | undefined;
+  api.getStatus.mockReturnValue(
+    new Promise((_, reject) => {
+      rejectRefresh = reject;
+    }),
+  );
+  api.listen.mockImplementation(async (listener) => {
+    emitStatus = listener;
+    return vi.fn();
+  });
+  const { result } = renderHook(() => useMacSpeechSetup(true));
+  await waitFor(() => expect(emitStatus).toBeDefined());
+
+  act(() => {
+    emitStatus?.(
+      status({
+        modelInstalled: true,
+        installing: false,
+        progress: null,
+        revision: 2,
+      }),
+    );
+  });
+  await act(async () => {
+    rejectRefresh?.(new Error("stale timeout"));
+    await Promise.resolve();
+  });
+
+  expect(result.current.status?.revision).toBe(2);
+  expect(result.current.error).toBeNull();
+});
+
 it("clears optimistic installation state when the command fails", async () => {
   api.getStatus.mockResolvedValue(status());
   api.install.mockRejectedValue(new Error("download failed"));
