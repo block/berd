@@ -59,4 +59,27 @@ describe("voice interruption preference", () => {
       sensitivity: "less",
     });
   });
+
+  it("accepts a newer persisted value after a failed write", () => {
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementationOnce(() => {
+        throw new Error("storage unavailable");
+      });
+
+    setVoiceInterruptionPreference({
+      mode: "preventFeedback",
+      sensitivity: "less",
+    });
+    setItem.mockRestore();
+    window.localStorage.setItem(
+      "goose:voice-interruption-preference",
+      JSON.stringify({ mode: "allowInterruptions", sensitivity: "more" }),
+    );
+
+    expect(getVoiceInterruptionPreference()).toEqual({
+      mode: "allowInterruptions",
+      sensitivity: "more",
+    });
+  });
 });

@@ -18,7 +18,12 @@ const DEFAULT_PREFERENCE: VoiceInterruptionPreference = {
   sensitivity: "balanced",
 };
 const DEFAULT_SNAPSHOT = JSON.stringify(DEFAULT_PREFERENCE);
-let volatilePreference: VoiceInterruptionPreference | undefined;
+let volatilePreference:
+  | {
+      preference: VoiceInterruptionPreference;
+      storageValueBeforeWrite: string | null | undefined;
+    }
+  | undefined;
 
 function normalize(value: unknown): VoiceInterruptionPreference {
   if (!value || typeof value !== "object") return DEFAULT_PREFERENCE;
@@ -44,12 +49,20 @@ export function getDefaultVoiceInterruptionPreference(): VoiceInterruptionPrefer
 
 export function getVoiceInterruptionPreference(): VoiceInterruptionPreference {
   if (typeof window === "undefined") return DEFAULT_PREFERENCE;
-  if (volatilePreference) return volatilePreference;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (volatilePreference) {
+      if (
+        volatilePreference.storageValueBeforeWrite === undefined ||
+        raw === volatilePreference.storageValueBeforeWrite
+      ) {
+        return volatilePreference.preference;
+      }
+      volatilePreference = undefined;
+    }
     return raw ? normalize(JSON.parse(raw)) : DEFAULT_PREFERENCE;
   } catch {
-    return DEFAULT_PREFERENCE;
+    return volatilePreference?.preference ?? DEFAULT_PREFERENCE;
   }
 }
 
@@ -92,12 +105,14 @@ export function setVoiceInterruptionPreference(
 ): void {
   if (typeof window === "undefined") return;
   const value = normalize(preference);
-  volatilePreference = value;
+  let storageValueBeforeWrite: string | null | undefined;
   try {
+    storageValueBeforeWrite = window.localStorage.getItem(STORAGE_KEY);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
     volatilePreference = undefined;
   } catch {
     // Keep the current in-memory renderer usable when storage is unavailable.
+    volatilePreference = { preference: value, storageValueBeforeWrite };
   }
   window.dispatchEvent(new CustomEvent(CHANGED_EVENT, { detail: value }));
 }

@@ -6,9 +6,9 @@ use std::io::Read;
 #[cfg(target_os = "macos")]
 use std::io::Write;
 use std::path::{Path, PathBuf};
-#[cfg(target_os = "macos")]
-use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicU64, AtomicUsize};
 #[cfg(target_os = "macos")]
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -55,8 +55,10 @@ const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 #[cfg(target_os = "macos")]
 struct PocketPlaybackSource<I> {
     input: I,
+    generation: u64,
     pending_audio_sources: Arc<AtomicUsize>,
-    completion_sender: mpsc::Sender<PocketPlaybackEvent>,
+    completed_generation: Arc<AtomicU64>,
+    completion_sender: mpsc::SyncSender<PocketPlaybackEvent>,
     completion_sent: bool,
 }
 
@@ -70,12 +72,16 @@ enum PocketPlaybackEvent {
 impl<I> PocketPlaybackSource<I> {
     fn new(
         input: I,
+        generation: u64,
         pending_audio_sources: Arc<AtomicUsize>,
-        completion_sender: mpsc::Sender<PocketPlaybackEvent>,
+        completed_generation: Arc<AtomicU64>,
+        completion_sender: mpsc::SyncSender<PocketPlaybackEvent>,
     ) -> Self {
         Self {
             input,
+            generation,
             pending_audio_sources,
+            completed_generation,
             completion_sender,
             completion_sent: false,
         }
@@ -89,11 +95,15 @@ impl<I: Source> Iterator for PocketPlaybackSource<I> {
     fn next(&mut self) -> Option<Self::Item> {
         let next = self.input.next();
         if next.is_none() && !self.completion_sent {
-            self.pending_audio_sources.fetch_sub(1, Ordering::AcqRel);
+            let previous = self.pending_audio_sources.fetch_sub(1, Ordering::AcqRel);
             self.completion_sent = true;
-            let _ = self
-                .completion_sender
-                .send(PocketPlaybackEvent::SourceFinished);
+            if previous == 1 {
+                self.completed_generation
+                    .store(self.generation, Ordering::Release);
+                let _ = self
+                    .completion_sender
+                    .try_send(PocketPlaybackEvent::SourceFinished);
+            }
         }
         next
     }
@@ -2125,18 +2135,20 @@ fn run_pocket_voice_stream(
     let mut pending = String::new();
     let mut first_chunk_pending = true;
     let mut playback_started = false;
-    let assistant_speech = Arc::new(Mutex::new(None::<AssistantSpeechGuard>));
+    let assistant_speech = Arc::new(Mutex::new(None::<(u64, AssistantSpeechGuard)>));
     let pending_audio_sources = Arc::new(AtomicUsize::new(0));
-    let (playback_completion_sender, playback_completion_receiver) = mpsc::channel();
+    let completed_generation = Arc::new(AtomicU64::new(0));
+    let (playback_completion_sender, playback_completion_receiver) = mpsc::sync_channel(1);
+    let mut playback_generation = 0_u64;
     let playback_monitor = {
         let assistant_speech = Arc::clone(&assistant_speech);
-        let pending_audio_sources = Arc::clone(&pending_audio_sources);
+        let completed_generation = Arc::clone(&completed_generation);
         std::thread::spawn(move || {
             while let Ok(event) = playback_completion_receiver.recv() {
                 match event {
                     PocketPlaybackEvent::SourceFinished => {
-                        release_pocket_assistant_speech_if_idle(
-                            &pending_audio_sources,
+                        release_completed_pocket_assistant_speech(
+                            completed_generation.load(Ordering::Acquire),
                             &assistant_speech,
                         );
                     }
@@ -2181,7 +2193,9 @@ fn run_pocket_voice_stream(
                     suppress_capture,
                     &assistant_speech,
                     &pending_audio_sources,
+                    &completed_generation,
                     &playback_completion_sender,
+                    &mut playback_generation,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     false,
@@ -2215,7 +2229,9 @@ fn run_pocket_voice_stream(
                     suppress_capture,
                     &assistant_speech,
                     &pending_audio_sources,
+                    &completed_generation,
                     &playback_completion_sender,
+                    &mut playback_generation,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
@@ -2245,7 +2261,9 @@ fn run_pocket_voice_stream(
                         &mut playback_started,
                         &assistant_speech,
                         &pending_audio_sources,
+                        &completed_generation,
                         &playback_completion_sender,
+                        &mut playback_generation,
                     )?;
                     delivery_ledger.append_frames(tail_len);
                 }
@@ -2269,7 +2287,9 @@ fn run_pocket_voice_stream(
                     suppress_capture,
                     &assistant_speech,
                     &pending_audio_sources,
+                    &completed_generation,
                     &playback_completion_sender,
+                    &mut playback_generation,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
@@ -2299,7 +2319,9 @@ fn run_pocket_voice_stream(
                         &mut playback_started,
                         &assistant_speech,
                         &pending_audio_sources,
+                        &completed_generation,
                         &playback_completion_sender,
+                        &mut playback_generation,
                     )?;
                     delivery_ledger.append_frames(tail_len);
                 }
@@ -2388,10 +2410,25 @@ fn capture_before_stop(
 #[cfg(target_os = "macos")]
 fn release_pocket_assistant_speech_if_idle(
     pending_audio_sources: &AtomicUsize,
-    assistant_speech: &Mutex<Option<AssistantSpeechGuard>>,
+    assistant_speech: &Mutex<Option<(u64, AssistantSpeechGuard)>>,
 ) {
     if let Ok(mut assistant_speech) = assistant_speech.lock() {
         if pending_audio_sources.load(Ordering::Acquire) == 0 {
+            assistant_speech.take();
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn release_completed_pocket_assistant_speech(
+    completed_generation: u64,
+    assistant_speech: &Mutex<Option<(u64, AssistantSpeechGuard)>>,
+) {
+    if let Ok(mut assistant_speech) = assistant_speech.lock() {
+        if assistant_speech
+            .as_ref()
+            .is_some_and(|(generation, _)| *generation == completed_generation)
+        {
             assistant_speech.take();
         }
     }
@@ -2405,16 +2442,22 @@ fn mark_pocket_playback_started(
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
     playback_started: &mut bool,
-    assistant_speech: &Mutex<Option<AssistantSpeechGuard>>,
+    generation: u64,
+    assistant_speech: &Mutex<Option<(u64, AssistantSpeechGuard)>>,
 ) -> Result<(), String> {
     let mut assistant_speech = assistant_speech
         .lock()
         .map_err(|_| "Pocket assistant speech guard lock was poisoned".to_string())?;
-    if assistant_speech.is_some() {
+    if assistant_speech
+        .as_ref()
+        .is_some_and(|(active_generation, _)| *active_generation == generation)
+    {
         return Ok(());
     }
-    *assistant_speech =
-        Some(native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture));
+    *assistant_speech = Some((
+        generation,
+        native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture),
+    ));
     if !*playback_started {
         *playback_started = true;
         emit_pocket_stream_event(app, stream_id, PocketStreamEventState::Started, None, None);
@@ -2439,11 +2482,17 @@ fn append_pocket_samples(
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
     playback_started: &mut bool,
-    assistant_speech: &Mutex<Option<AssistantSpeechGuard>>,
+    assistant_speech: &Mutex<Option<(u64, AssistantSpeechGuard)>>,
     pending_audio_sources: &Arc<AtomicUsize>,
-    playback_completion_sender: &mpsc::Sender<PocketPlaybackEvent>,
+    completed_generation: &Arc<AtomicU64>,
+    playback_completion_sender: &mpsc::SyncSender<PocketPlaybackEvent>,
+    playback_generation: &mut u64,
 ) -> Result<(), String> {
-    pending_audio_sources.fetch_add(1, Ordering::AcqRel);
+    let previous_sources = pending_audio_sources.fetch_add(1, Ordering::AcqRel);
+    if previous_sources == 0 {
+        *playback_generation = playback_generation.wrapping_add(1).max(1);
+    }
+    let generation = *playback_generation;
     if let Err(error) = mark_pocket_playback_started(
         app,
         stream_id,
@@ -2451,6 +2500,7 @@ fn append_pocket_samples(
         interruption_sensitivity,
         suppress_capture,
         playback_started,
+        generation,
         assistant_speech,
     ) {
         pending_audio_sources.fetch_sub(1, Ordering::AcqRel);
@@ -2458,7 +2508,9 @@ fn append_pocket_samples(
     }
     player.append(PocketPlaybackSource::new(
         SamplesBuffer::new(channels, rate, samples),
+        generation,
         Arc::clone(pending_audio_sources),
+        Arc::clone(completed_generation),
         playback_completion_sender.clone(),
     ));
     Ok(())
@@ -2482,9 +2534,11 @@ fn synthesize_pocket_stream_ready(
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
-    assistant_speech: &Mutex<Option<AssistantSpeechGuard>>,
+    assistant_speech: &Mutex<Option<(u64, AssistantSpeechGuard)>>,
     pending_audio_sources: &Arc<AtomicUsize>,
-    playback_completion_sender: &mpsc::Sender<PocketPlaybackEvent>,
+    completed_generation: &Arc<AtomicU64>,
+    playback_completion_sender: &mpsc::SyncSender<PocketPlaybackEvent>,
+    playback_generation: &mut u64,
     delivery_ledger: &mut PlaybackDeliveryLedger,
     last_progress_emit: &mut Instant,
     flush: bool,
@@ -2532,7 +2586,9 @@ fn synthesize_pocket_stream_ready(
                     playback_started,
                     assistant_speech,
                     pending_audio_sources,
+                    completed_generation,
                     playback_completion_sender,
+                    playback_generation,
                 ) {
                     callback_error = Some(error);
                     return false;
@@ -3149,9 +3205,10 @@ mod tests {
     #[test]
     fn playback_completion_releases_policy_independently_of_stream_commands() {
         let native_voice = NativeVoiceState::default();
-        let assistant_speech = Mutex::new(Some(
+        let assistant_speech = Mutex::new(Some((
+            1,
             native_voice.begin_assistant_speech(InterruptionSensitivity::Balanced, true),
-        ));
+        )));
         let pending_audio_sources = AtomicUsize::new(1);
 
         release_pocket_assistant_speech_if_idle(&pending_audio_sources, &assistant_speech);
@@ -3159,6 +3216,22 @@ mod tests {
 
         pending_audio_sources.store(0, Ordering::Release);
         release_pocket_assistant_speech_if_idle(&pending_audio_sources, &assistant_speech);
+        assert!(assistant_speech.lock().expect("assistant speech").is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn stale_playback_completion_does_not_release_a_new_burst() {
+        let native_voice = NativeVoiceState::default();
+        let assistant_speech = Mutex::new(Some((
+            2,
+            native_voice.begin_assistant_speech(InterruptionSensitivity::More, false),
+        )));
+
+        release_completed_pocket_assistant_speech(1, &assistant_speech);
+        assert!(assistant_speech.lock().expect("assistant speech").is_some());
+
+        release_completed_pocket_assistant_speech(2, &assistant_speech);
         assert!(assistant_speech.lock().expect("assistant speech").is_none());
     }
 
