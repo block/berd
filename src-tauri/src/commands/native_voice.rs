@@ -1495,7 +1495,7 @@ pub async fn stop_native_voice_conversation_for_replacement(
     state
         .stop_active_inner_locked(&app, &capture, Some((&session_id, expected_revision, None)))
         .await?;
-    Ok(status(&app, &state))
+    Ok(status(&app, &state).await)
 }
 
 fn replacement_caller_matches_target(
