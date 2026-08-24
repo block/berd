@@ -17,7 +17,8 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tokio::sync::mpsc as tokio_mpsc;
 
 use super::{
-    native_input_mute, pocket_voice::parakeet_model_dir, voice_capture::VoiceCaptureState,
+    native_input_mute, pocket_voice::parakeet_model_dir, voice_buddy,
+    voice_capture::VoiceCaptureState,
 };
 
 pub(crate) const EVENT_NAME: &str = "voice-conversation:event";
@@ -1405,6 +1406,44 @@ fn replacement_caller_matches_target(
     }
 }
 
+fn voice_target_window_focus_is_valid(
+    window_label: &str,
+    focused: bool,
+    app_is_active: bool,
+    another_window_is_focused: bool,
+) -> bool {
+    focused || (window_label == "main" && app_is_active && !another_window_is_focused)
+}
+
+#[cfg(target_os = "macos")]
+fn app_is_active_for_main_window_focus_fallback() -> bool {
+    use objc2_app_kit::NSRunningApplication;
+
+    // The non-activating floating controls can leave Berd frontmost while
+    // AppKit reports that none of its ordinary windows are focused.
+    NSRunningApplication::currentApplication().isActive()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn app_is_active_for_main_window_focus_fallback() -> bool {
+    false
+}
+
+fn another_user_window_is_focused(webview_window: &WebviewWindow) -> Result<bool, String> {
+    for (label, window) in webview_window.app_handle().webview_windows() {
+        if label == webview_window.label() || label == voice_buddy::WINDOW_LABEL {
+            continue;
+        }
+        if window
+            .is_focused()
+            .map_err(|error| format!("Could not confirm Berd window focus: {error}"))?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn validate_voice_target_session(
     capture: &VoiceCaptureState,
     window_sessions: &super::window_session::WindowSessionRegistry,
@@ -1429,10 +1468,20 @@ fn validate_voice_target_session(
     ) {
         return Err("The target session is no longer in the foreground.".to_string());
     }
-    if !webview_window
+    let focused = webview_window
         .is_focused()
-        .map_err(|error| format!("Could not confirm the target session window focus: {error}"))?
-    {
+        .map_err(|error| format!("Could not confirm the target session window focus: {error}"))?;
+    let app_is_active = !focused
+        && webview_window.label() == "main"
+        && app_is_active_for_main_window_focus_fallback();
+    let another_window_is_focused =
+        app_is_active && another_user_window_is_focused(webview_window)?;
+    if !voice_target_window_focus_is_valid(
+        webview_window.label(),
+        focused,
+        app_is_active,
+        another_window_is_focused,
+    ) {
         return Err("The target session window is no longer focused.".to_string());
     }
     Ok(())
@@ -2250,6 +2299,34 @@ mod tests {
             "voice-buddy",
             None,
             true,
+        ));
+    }
+
+    #[test]
+    fn replacement_focus_accepts_an_active_app_only_for_the_main_window() {
+        assert!(voice_target_window_focus_is_valid(
+            "main", true, false, false,
+        ));
+        assert!(voice_target_window_focus_is_valid(
+            "main", false, true, false,
+        ));
+        assert!(!voice_target_window_focus_is_valid(
+            "main", false, true, true,
+        ));
+        assert!(!voice_target_window_focus_is_valid(
+            "main", false, false, false,
+        ));
+        assert!(voice_target_window_focus_is_valid(
+            "session:target",
+            true,
+            false,
+            false,
+        ));
+        assert!(!voice_target_window_focus_is_valid(
+            "session:target",
+            false,
+            true,
+            false,
         ));
     }
 
