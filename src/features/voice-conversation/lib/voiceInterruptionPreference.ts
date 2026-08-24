@@ -18,6 +18,7 @@ const DEFAULT_PREFERENCE: VoiceInterruptionPreference = {
   sensitivity: "balanced",
 };
 const DEFAULT_SNAPSHOT = JSON.stringify(DEFAULT_PREFERENCE);
+let volatilePreference: VoiceInterruptionPreference | undefined;
 
 function normalize(value: unknown): VoiceInterruptionPreference {
   if (!value || typeof value !== "object") return DEFAULT_PREFERENCE;
@@ -47,7 +48,7 @@ export function getVoiceInterruptionPreference(): VoiceInterruptionPreference {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     return raw ? normalize(JSON.parse(raw)) : DEFAULT_PREFERENCE;
   } catch {
-    return DEFAULT_PREFERENCE;
+    return volatilePreference ?? DEFAULT_PREFERENCE;
   }
 }
 
@@ -90,6 +91,7 @@ export function setVoiceInterruptionPreference(
 ): void {
   if (typeof window === "undefined") return;
   const value = normalize(preference);
+  volatilePreference = value;
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
   } catch {

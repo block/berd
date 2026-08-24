@@ -6,6 +6,8 @@ use std::io::Read;
 #[cfg(target_os = "macos")]
 use std::io::Write;
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::mpsc;
@@ -20,7 +22,7 @@ use futures_util::StreamExt;
 #[cfg(target_os = "macos")]
 use rodio::buffer::SamplesBuffer;
 #[cfg(target_os = "macos")]
-use rodio::{DeviceTrait, Player};
+use rodio::{source::Done, DeviceTrait, Player};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -2053,7 +2055,20 @@ fn run_pocket_voice_stream(
     let mut pending = String::new();
     let mut first_chunk_pending = true;
     let mut playback_started = false;
-    let mut assistant_speech: Option<AssistantSpeechGuard> = None;
+    let assistant_speech = Arc::new(Mutex::new(None::<AssistantSpeechGuard>));
+    let pending_audio_sources = Arc::new(AtomicUsize::new(0));
+    let playback_monitor_active = Arc::new(AtomicBool::new(true));
+    let playback_monitor = {
+        let assistant_speech = Arc::clone(&assistant_speech);
+        let pending_audio_sources = Arc::clone(&pending_audio_sources);
+        let playback_monitor_active = Arc::clone(&playback_monitor_active);
+        std::thread::spawn(move || {
+            while playback_monitor_active.load(Ordering::Acquire) {
+                release_pocket_assistant_speech_if_idle(&pending_audio_sources, &assistant_speech);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        })
+    };
     let mut delivery_ledger = PlaybackDeliveryLedger::default();
     let mut last_progress_emit = Instant::now();
 
@@ -2066,8 +2081,10 @@ fn run_pocket_voice_stream(
                 delivery: Some(delivery),
             });
         }
-        release_pocket_assistant_speech_if_idle(&player, &mut assistant_speech);
-        match receiver.recv_timeout(Duration::from_millis(20)) {
+        release_pocket_assistant_speech_if_idle(&pending_audio_sources, &assistant_speech);
+        let command = receiver.recv_timeout(Duration::from_millis(20));
+        release_pocket_assistant_speech_if_idle(&pending_audio_sources, &assistant_speech);
+        match command {
             Ok(PocketStreamCommand::Append(text)) => {
                 pending.push_str(&text);
                 if !synthesize_pocket_stream_ready(
@@ -2086,7 +2103,8 @@ fn run_pocket_voice_stream(
                     &native_voice,
                     interruption_sensitivity,
                     suppress_capture,
-                    &mut assistant_speech,
+                    &assistant_speech,
+                    &pending_audio_sources,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     false,
@@ -2118,7 +2136,8 @@ fn run_pocket_voice_stream(
                     &native_voice,
                     interruption_sensitivity,
                     suppress_capture,
-                    &mut assistant_speech,
+                    &assistant_speech,
+                    &pending_audio_sources,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
@@ -2134,18 +2153,22 @@ fn run_pocket_voice_stream(
                 }
                 let tail = speed_processor.drain_and_reset()?;
                 if !tail.is_empty() {
-                    release_pocket_assistant_speech_if_idle(&player, &mut assistant_speech);
-                    mark_pocket_playback_started(
+                    let tail_len = tail.len();
+                    append_pocket_samples(
                         app,
                         stream_id,
+                        &player,
+                        channels,
+                        rate,
+                        tail,
                         &native_voice,
                         interruption_sensitivity,
                         suppress_capture,
                         &mut playback_started,
-                        &mut assistant_speech,
+                        &assistant_speech,
+                        &pending_audio_sources,
                     )?;
-                    delivery_ledger.append_frames(tail.len());
-                    player.append(SamplesBuffer::new(channels, rate, tail));
+                    delivery_ledger.append_frames(tail_len);
                 }
             }
             Ok(PocketStreamCommand::Finish) => {
@@ -2165,7 +2188,8 @@ fn run_pocket_voice_stream(
                     &native_voice,
                     interruption_sensitivity,
                     suppress_capture,
-                    &mut assistant_speech,
+                    &assistant_speech,
+                    &pending_audio_sources,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
@@ -2181,18 +2205,22 @@ fn run_pocket_voice_stream(
                 }
                 let tail = speed_processor.finish()?;
                 if !tail.is_empty() {
-                    release_pocket_assistant_speech_if_idle(&player, &mut assistant_speech);
-                    mark_pocket_playback_started(
+                    let tail_len = tail.len();
+                    append_pocket_samples(
                         app,
                         stream_id,
+                        &player,
+                        channels,
+                        rate,
+                        tail,
                         &native_voice,
                         interruption_sensitivity,
                         suppress_capture,
                         &mut playback_started,
-                        &mut assistant_speech,
+                        &assistant_speech,
+                        &pending_audio_sources,
                     )?;
-                    delivery_ledger.append_frames(tail.len());
-                    player.append(SamplesBuffer::new(channels, rate, tail));
+                    delivery_ledger.append_frames(tail_len);
                 }
                 while !player.empty() {
                     if !active.load(Ordering::SeqCst) {
@@ -2236,13 +2264,20 @@ fn run_pocket_voice_stream(
         }
     })();
 
-    result.map_err(|error| {
+    let result = result.map_err(|error| {
         let delivery = delivery_with_played_audio(capture_before_stop(
             || pocket_delivery_snapshot(&delivery_ledger, &player),
             || player.stop(),
         ));
         PocketStreamFailure { error, delivery }
-    })
+    });
+
+    playback_monitor_active.store(false, Ordering::Release);
+    let _ = playback_monitor.join();
+    if let Ok(mut assistant_speech) = assistant_speech.lock() {
+        assistant_speech.take();
+    }
+    result
 }
 
 #[cfg(target_os = "macos")]
@@ -2271,11 +2306,13 @@ fn capture_before_stop(
 
 #[cfg(target_os = "macos")]
 fn release_pocket_assistant_speech_if_idle(
-    player: &Player,
-    assistant_speech: &mut Option<AssistantSpeechGuard>,
+    pending_audio_sources: &AtomicUsize,
+    assistant_speech: &Mutex<Option<AssistantSpeechGuard>>,
 ) {
-    if player.empty() {
-        assistant_speech.take();
+    if pending_audio_sources.load(Ordering::Acquire) == 0 {
+        if let Ok(mut assistant_speech) = assistant_speech.lock() {
+            assistant_speech.take();
+        }
     }
 }
 
@@ -2287,8 +2324,11 @@ fn mark_pocket_playback_started(
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
     playback_started: &mut bool,
-    assistant_speech: &mut Option<AssistantSpeechGuard>,
+    assistant_speech: &Mutex<Option<AssistantSpeechGuard>>,
 ) -> Result<(), String> {
+    let mut assistant_speech = assistant_speech
+        .lock()
+        .map_err(|_| "Pocket assistant speech guard lock was poisoned".to_string())?;
     if assistant_speech.is_some() {
         return Ok(());
     }
@@ -2302,6 +2342,42 @@ fn mark_pocket_playback_started(
             .flush()
             .map_err(|error| format!("signal Pocket playback start: {error}"))?;
     }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
+fn append_pocket_samples(
+    app: &AppHandle,
+    stream_id: &str,
+    player: &Player,
+    channels: std::num::NonZero<u16>,
+    rate: std::num::NonZero<u32>,
+    samples: Vec<f32>,
+    native_voice: &NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
+    suppress_capture: bool,
+    playback_started: &mut bool,
+    assistant_speech: &Mutex<Option<AssistantSpeechGuard>>,
+    pending_audio_sources: &Arc<AtomicUsize>,
+) -> Result<(), String> {
+    pending_audio_sources.fetch_add(1, Ordering::AcqRel);
+    if let Err(error) = mark_pocket_playback_started(
+        app,
+        stream_id,
+        native_voice,
+        interruption_sensitivity,
+        suppress_capture,
+        playback_started,
+        assistant_speech,
+    ) {
+        pending_audio_sources.fetch_sub(1, Ordering::AcqRel);
+        return Err(error);
+    }
+    player.append(Done::new(
+        SamplesBuffer::new(channels, rate, samples),
+        Arc::clone(pending_audio_sources),
+    ));
     Ok(())
 }
 
@@ -2323,7 +2399,8 @@ fn synthesize_pocket_stream_ready(
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
-    assistant_speech: &mut Option<AssistantSpeechGuard>,
+    assistant_speech: &Mutex<Option<AssistantSpeechGuard>>,
+    pending_audio_sources: &Arc<AtomicUsize>,
     delivery_ledger: &mut PlaybackDeliveryLedger,
     last_progress_emit: &mut Instant,
     flush: bool,
@@ -2357,21 +2434,25 @@ fn synthesize_pocket_stream_ready(
                 if delta.is_empty() {
                     return true;
                 }
-                release_pocket_assistant_speech_if_idle(player, assistant_speech);
-                if let Err(error) = mark_pocket_playback_started(
+                let delta_len = delta.len();
+                if let Err(error) = append_pocket_samples(
                     app,
                     stream_id,
+                    player,
+                    channels,
+                    rate,
+                    delta,
                     native_voice,
                     interruption_sensitivity,
                     suppress_capture,
                     playback_started,
                     assistant_speech,
+                    pending_audio_sources,
                 ) {
                     callback_error = Some(error);
                     return false;
                 }
-                delivery_ledger.append_frames(delta.len());
-                player.append(SamplesBuffer::new(channels, rate, delta));
+                delivery_ledger.append_frames(delta_len);
                 if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
                     emit_pocket_stream_event(
                         app,
@@ -2977,6 +3058,23 @@ mod tests {
             VoiceInterruptionMode::PreventFeedback,
             Some("AirPods Pro"),
         ));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn playback_completion_releases_policy_independently_of_stream_commands() {
+        let native_voice = NativeVoiceState::default();
+        let assistant_speech = Mutex::new(Some(
+            native_voice.begin_assistant_speech(InterruptionSensitivity::Balanced, true),
+        ));
+        let pending_audio_sources = AtomicUsize::new(1);
+
+        release_pocket_assistant_speech_if_idle(&pending_audio_sources, &assistant_speech);
+        assert!(assistant_speech.lock().expect("assistant speech").is_some());
+
+        pending_audio_sources.store(0, Ordering::Release);
+        release_pocket_assistant_speech_if_idle(&pending_audio_sources, &assistant_speech);
+        assert!(assistant_speech.lock().expect("assistant speech").is_none());
     }
 
     #[test]

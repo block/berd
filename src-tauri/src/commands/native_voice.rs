@@ -1,7 +1,7 @@
 //! Native speech recognition for Desktop voice conversations.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{BTreeMap, HashMap, VecDeque},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
@@ -250,7 +250,7 @@ pub struct NativeVoiceState {
     assistant_speaking: Arc<AtomicBool>,
     assistant_vad_threshold: Arc<AtomicU32>,
     assistant_speech_generation: Arc<AtomicU64>,
-    assistant_speech_lock: Arc<Mutex<()>>,
+    assistant_speech_lifetimes: Arc<Mutex<BTreeMap<u64, u32>>>,
 }
 
 #[must_use = "capture suppression ends when the guard is dropped"]
@@ -274,28 +274,24 @@ impl Drop for CaptureSuppressionGuard {
 pub(crate) struct AssistantSpeechGuard {
     _capture_suppression: Option<CaptureSuppressionGuard>,
     assistant_speaking: Arc<AtomicBool>,
-    assistant_speech_generation: Arc<AtomicU64>,
-    assistant_speech_lock: Arc<Mutex<()>>,
+    assistant_vad_threshold: Arc<AtomicU32>,
+    assistant_speech_lifetimes: Arc<Mutex<BTreeMap<u64, u32>>>,
     generation: u64,
 }
 
 #[cfg(any(test, target_os = "macos"))]
 impl Drop for AssistantSpeechGuard {
     fn drop(&mut self) {
-        let _lifecycle = self
-            .assistant_speech_lock
+        let mut lifetimes = self
+            .assistant_speech_lifetimes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if self
-            .assistant_speech_generation
-            .compare_exchange(
-                self.generation,
-                self.generation.wrapping_add(1),
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            )
-            .is_ok()
-        {
+        lifetimes.remove(&self.generation);
+        if let Some((_, threshold)) = lifetimes.last_key_value() {
+            self.assistant_vad_threshold
+                .store(*threshold, Ordering::Release);
+            self.assistant_speaking.store(true, Ordering::Release);
+        } else {
             self.assistant_speaking.store(false, Ordering::Release);
         }
     }
@@ -391,31 +387,34 @@ impl NativeVoiceState {
         sensitivity: InterruptionSensitivity,
         suppress_capture: bool,
     ) -> AssistantSpeechGuard {
-        let _lifecycle = self
-            .assistant_speech_lock
+        let mut lifetimes = self
+            .assistant_speech_lifetimes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        self.assistant_vad_threshold
-            .store(sensitivity.vad_threshold().to_bits(), Ordering::Release);
         let generation = self
             .assistant_speech_generation
             .fetch_add(1, Ordering::AcqRel)
             .wrapping_add(1);
+        let threshold = sensitivity.vad_threshold().to_bits();
+        lifetimes.insert(generation, threshold);
+        self.assistant_vad_threshold
+            .store(threshold, Ordering::Release);
         self.assistant_speaking.store(true, Ordering::Release);
         AssistantSpeechGuard {
             _capture_suppression: suppress_capture.then(|| self.suppress_capture()),
             assistant_speaking: Arc::clone(&self.assistant_speaking),
-            assistant_speech_generation: Arc::clone(&self.assistant_speech_generation),
-            assistant_speech_lock: Arc::clone(&self.assistant_speech_lock),
+            assistant_vad_threshold: Arc::clone(&self.assistant_vad_threshold),
+            assistant_speech_lifetimes: Arc::clone(&self.assistant_speech_lifetimes),
             generation,
         }
     }
 
     fn clear_assistant_speech(&self) {
-        let _lifecycle = self
-            .assistant_speech_lock
+        let mut lifetimes = self
+            .assistant_speech_lifetimes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        lifetimes.clear();
         self.assistant_speech_generation
             .fetch_add(1, Ordering::AcqRel);
         self.assistant_speaking.store(false, Ordering::Release);
@@ -2873,6 +2872,27 @@ mod tests {
         );
 
         drop(newer);
+        assert_eq!(
+            active_vad_threshold(&state.assistant_speaking, &state.assistant_vad_threshold),
+            VAD_THRESHOLD
+        );
+    }
+
+    #[test]
+    fn newer_guard_finishing_first_restores_overlapping_playback_policy() {
+        let state = NativeVoiceState::default();
+        let older = state.begin_assistant_speech(InterruptionSensitivity::Less, true);
+        let newer = state.begin_assistant_speech(InterruptionSensitivity::More, false);
+
+        drop(newer);
+        assert!(state.capture_is_suppressed());
+        assert_eq!(
+            active_vad_threshold(&state.assistant_speaking, &state.assistant_vad_threshold),
+            InterruptionSensitivity::Less.vad_threshold()
+        );
+
+        drop(older);
+        assert!(!state.capture_is_suppressed());
         assert_eq!(
             active_vad_threshold(&state.assistant_speaking, &state.assistant_vad_threshold),
             VAD_THRESHOLD

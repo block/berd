@@ -454,8 +454,8 @@ typedef void (^BerdAudioHandler)(
     }];
     if (!self.playbackStarted) {
         self.playbackStarted = YES;
-        [self.player play];
         if (self.startedCallback) self.startedCallback(self.callbackContext);
+        [self.player play];
     }
 }
 - (void)startNextSynthesis {

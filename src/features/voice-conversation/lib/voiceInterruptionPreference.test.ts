@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getDefaultVoiceInterruptionPreference,
   getVoiceInterruptionPreference,
@@ -7,6 +7,7 @@ import {
 
 describe("voice interruption preference", () => {
   beforeEach(() => window.localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
 
   it("defaults to automatic with balanced sensitivity", () => {
     expect(getDefaultVoiceInterruptionPreference()).toEqual({
@@ -40,6 +41,25 @@ describe("voice interruption preference", () => {
     expect(getVoiceInterruptionPreference()).toEqual({
       mode: "preventFeedback",
       sensitivity: "balanced",
+    });
+  });
+
+  it("keeps the renderer preference usable when storage is unavailable", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+
+    setVoiceInterruptionPreference({
+      mode: "preventFeedback",
+      sensitivity: "less",
+    });
+
+    expect(getVoiceInterruptionPreference()).toEqual({
+      mode: "preventFeedback",
+      sensitivity: "less",
     });
   });
 });
