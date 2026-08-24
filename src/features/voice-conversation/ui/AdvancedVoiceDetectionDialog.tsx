@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select";
+import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import type { VoiceInterruptionSensitivity } from "../lib/voiceInterruptionPreference";
 import { useVoiceInterruptionPreference } from "../lib/voiceInterruptionPreference";
 
@@ -27,7 +28,13 @@ const SENSITIVITIES: VoiceInterruptionSensitivity[] = [
   "more",
 ];
 
-export function AdvancedVoiceDetectionDialog() {
+interface AdvancedVoiceDetectionDialogProps {
+  inputBackend: VoiceInputBackend;
+}
+
+export function AdvancedVoiceDetectionDialog({
+  inputBackend,
+}: AdvancedVoiceDetectionDialogProps) {
   const { t } = useTranslation("settings");
   const interruption = useVoiceInterruptionPreference();
   const speechHeadingId = useId();
@@ -53,44 +60,46 @@ export function AdvancedVoiceDetectionDialog() {
         </DialogHeader>
 
         <div className="space-y-5 py-2">
-          <div className="space-y-2">
-            <div>
-              <h3 id={speechHeadingId} className="text-sm font-medium">
-                {t("voice.advancedDetection.speechSensitivity")}
-              </h3>
-              <p
-                id={speechDescriptionId}
-                className="mt-0.5 text-xs text-muted-foreground"
+          {inputBackend === "parakeet" ? (
+            <div className="space-y-2">
+              <div>
+                <h3 id={speechHeadingId} className="text-sm font-medium">
+                  {t("voice.advancedDetection.speechSensitivity")}
+                </h3>
+                <p
+                  id={speechDescriptionId}
+                  className="mt-0.5 text-xs text-muted-foreground"
+                >
+                  {t("voice.advancedDetection.speechSensitivityDescription")}
+                </p>
+              </div>
+              <Select
+                value={interruption.speechSensitivity}
+                onValueChange={(value) =>
+                  interruption.setSpeechSensitivity(
+                    value as VoiceInterruptionSensitivity,
+                  )
+                }
               >
-                {t("voice.advancedDetection.speechSensitivityDescription")}
-              </p>
+                <SelectTrigger
+                  className="w-full"
+                  aria-labelledby={speechHeadingId}
+                  aria-describedby={speechDescriptionId}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SENSITIVITIES.map((sensitivity) => (
+                    <SelectItem key={sensitivity} value={sensitivity}>
+                      {t(
+                        `voice.advancedDetection.sensitivityOptions.${sensitivity}`,
+                      )}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <Select
-              value={interruption.speechSensitivity}
-              onValueChange={(value) =>
-                interruption.setSpeechSensitivity(
-                  value as VoiceInterruptionSensitivity,
-                )
-              }
-            >
-              <SelectTrigger
-                className="w-full"
-                aria-labelledby={speechHeadingId}
-                aria-describedby={speechDescriptionId}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SENSITIVITIES.map((sensitivity) => (
-                  <SelectItem key={sensitivity} value={sensitivity}>
-                    {t(
-                      `voice.advancedDetection.sensitivityOptions.${sensitivity}`,
-                    )}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          ) : null}
 
           {interruption.mode !== "preventFeedback" ? (
             <div className="space-y-2">
