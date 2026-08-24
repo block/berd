@@ -79,7 +79,7 @@ pub fn restore_hidden_owner(app: &AppHandle, owner_window_label: &str) {
 pub fn open_active_session(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<NativeVoiceState>();
     let Some((session_id, owner_window_label)) = state.active_session_target() else {
-        Ok(())
+        return Ok(());
     };
     let window = app
         .get_webview_window(&owner_window_label)
@@ -174,7 +174,7 @@ fn show_controls_without_activation(window: &WebviewWindow) -> Result<(), String
         if !window.is_visible().map_err(|error| error.to_string())? {
             return Err("The floating voice controls could not be shown.".to_string());
         }
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(not(target_os = "macos"))]
