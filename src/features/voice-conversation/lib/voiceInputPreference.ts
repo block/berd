@@ -5,6 +5,7 @@ export type VoiceInputBackend = "parakeet" | "macos";
 
 const STORAGE_KEY = "goose:voice-input-backend";
 const CHANGED_EVENT = "goose:voice-input-backend-changed";
+let inMemoryBackend: VoiceInputBackend | null = null;
 
 function normalizeStored(value: unknown): VoiceInputBackend | null {
   return value === "parakeet" || value === "macos" ? value : null;
@@ -13,9 +14,11 @@ function normalizeStored(value: unknown): VoiceInputBackend | null {
 export function getStoredVoiceInputBackend(): VoiceInputBackend | null {
   if (typeof window === "undefined") return null;
   try {
-    return normalizeStored(window.localStorage.getItem(STORAGE_KEY));
+    const stored = normalizeStored(window.localStorage.getItem(STORAGE_KEY));
+    if (stored) inMemoryBackend = stored;
+    return stored ?? inMemoryBackend;
   } catch {
-    return null;
+    return inMemoryBackend;
   }
 }
 
@@ -49,7 +52,21 @@ function subscribe(listener: () => void) {
   listeners.add(listener);
   if (!removeWindowListeners) {
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEY || event.key === null) notify();
+      if (event.key === null) {
+        inMemoryBackend = null;
+        notify();
+        return;
+      }
+      if (event.key !== STORAGE_KEY) return;
+      if (event.newValue === null) {
+        inMemoryBackend = null;
+        notify();
+        return;
+      }
+      const backend = normalizeStored(event.newValue);
+      if (!backend) return;
+      inMemoryBackend = backend;
+      notify();
     };
     window.addEventListener(CHANGED_EVENT, notify);
     window.addEventListener("storage", handleStorage);
@@ -69,6 +86,7 @@ function subscribe(listener: () => void) {
 
 export function setVoiceInputBackend(backend: VoiceInputBackend): void {
   if (typeof window === "undefined") return;
+  inMemoryBackend = backend;
   try {
     window.localStorage.setItem(STORAGE_KEY, backend);
   } catch {

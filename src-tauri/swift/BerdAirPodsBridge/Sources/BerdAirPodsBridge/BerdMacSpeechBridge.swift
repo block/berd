@@ -152,19 +152,6 @@ private func describe(_ status: AssetInventory.Status) -> String {
 }
 
 @available(macOS 26.0, *)
-func resolveModelReadiness(
-    compatibleInstalledFormatAvailable: Bool,
-    inventory: AssetInventory.Status
-) -> (status: String, ready: Bool) {
-    // bestAvailableAudioFormat considers installed assets and returns nil when
-    // another download is required. Inventory can lag shared, already-usable assets.
-    if compatibleInstalledFormatAvailable {
-        return ("installed", true)
-    }
-    return (describe(inventory), false)
-}
-
-@available(macOS 26.0, *)
 private func status(for requested: Locale) async -> SpeechStatus {
     guard SpeechTranscriber.isAvailable else {
         return SpeechStatus(
@@ -181,16 +168,13 @@ private func status(for requested: Locale) async -> SpeechStatus {
     let transcriber = speechTranscriber(for: locale)
     let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
     let inventory = await AssetInventory.status(forModules: assetModules(for: locale))
-    let readiness = resolveModelReadiness(
-        compatibleInstalledFormatAvailable: format != nil,
-        inventory: inventory
-    )
+    let ready = format != nil
     return SpeechStatus(
         supported: true,
         locale: locale.identifier(.bcp47),
         localeSupported: true,
-        modelStatus: readiness.status,
-        ready: readiness.ready
+        modelStatus: ready ? "installed" : describe(inventory),
+        ready: ready
     )
 }
 

@@ -25,9 +25,5 @@ let package = Package(
                 .linkedFramework("Speech"),
             ]
         ),
-        .testTarget(
-            name: "BerdAirPodsBridgeTests",
-            dependencies: ["BerdAirPodsBridge"]
-        ),
     ]
 )

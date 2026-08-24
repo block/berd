@@ -1,13 +1,16 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getStoredVoiceInputBackend,
   isMacSpeechAvailable,
   resolveVoiceInputBackend,
   setVoiceInputBackend,
+  useVoiceInputPreference,
 } from "./voiceInputPreference";
 
 describe("voice input preference", () => {
   beforeEach(() => window.localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
 
   it("waits for macOS capability before resolving an automatic default", () => {
     expect(resolveVoiceInputBackend(null, null)).toBeNull();
@@ -38,5 +41,39 @@ describe("voice input preference", () => {
       "parakeet",
     );
     expect(getStoredVoiceInputBackend()).toBe("macos");
+  });
+
+  it("keeps the selected backend when local storage rejects the write", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+    const { result } = renderHook(() => useVoiceInputPreference(true));
+
+    act(() => setVoiceInputBackend("parakeet"));
+
+    expect(getStoredVoiceInputBackend()).toBe("parakeet");
+    expect(result.current.backend).toBe("parakeet");
+  });
+
+  it("synchronizes the fallback from valid cross-window storage events", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
+      throw new Error("storage unavailable");
+    });
+    const { result } = renderHook(() => useVoiceInputPreference(true));
+    act(() => setVoiceInputBackend("macos"));
+    expect(result.current.backend).toBe("macos");
+
+    act(() => {
+      window.localStorage.setItem("goose:voice-input-backend", "parakeet");
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: "goose:voice-input-backend",
+          newValue: "parakeet",
+        }),
+      );
+    });
+
+    expect(getStoredVoiceInputBackend()).toBe("parakeet");
+    expect(result.current.backend).toBe("parakeet");
   });
 });
