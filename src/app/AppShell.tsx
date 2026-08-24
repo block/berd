@@ -241,10 +241,7 @@ import {
   useVoiceInputPreference,
 } from "@/features/voice-conversation/lib/voiceInputPreference";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
-import {
-  isVoiceSetupReady,
-  refreshStableVoiceSetupReadiness,
-} from "@/features/voice-conversation/lib/voiceSetupReadiness";
+import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
@@ -748,27 +745,6 @@ export function AppShell({
   const globalSiriVoiceSetup = useSiriVoiceSetup(
     capabilities.voiceConversation && globalVoiceOutput.backend === "siri",
   );
-  const globalVoiceSetupSelectionRef = useRef({
-    inputBackend: globalVoiceInput.backend,
-    outputBackend: globalVoiceOutput.backend,
-    siriLanguage: globalSiriVoiceSetup.language,
-    revision: 0,
-  });
-  if (
-    globalVoiceSetupSelectionRef.current.inputBackend !==
-      globalVoiceInput.backend ||
-    globalVoiceSetupSelectionRef.current.outputBackend !==
-      globalVoiceOutput.backend ||
-    globalVoiceSetupSelectionRef.current.siriLanguage !==
-      globalSiriVoiceSetup.language
-  ) {
-    globalVoiceSetupSelectionRef.current = {
-      inputBackend: globalVoiceInput.backend,
-      outputBackend: globalVoiceOutput.backend,
-      siriLanguage: globalSiriVoiceSetup.language,
-      revision: globalVoiceSetupSelectionRef.current.revision + 1,
-    };
-  }
   const globalVoiceReady = isVoiceSetupReady(
     globalPocketVoiceSetup.status,
     globalMacSpeechSetup.status,
@@ -908,6 +884,8 @@ export function AppShell({
     useState<GlobalComposerPlacement>("docked");
   const [globalComposerStarterRequest, setGlobalComposerStarterRequest] =
     useState<GlobalComposerStarterRequest | null>(null);
+  const [retainGlobalComposerDraft, setRetainGlobalComposerDraft] =
+    useState(false);
   const globalComposerStarterRequestIdRef = useRef(0);
   const [chatComposerHandoffRequest, setChatComposerHandoffRequest] =
     useState(0);
@@ -942,8 +920,6 @@ export function AppShell({
   const [voiceSettingsReturnTarget, setVoiceSettingsReturnTarget] =
     useState<VoiceSetupReturnTarget | null>(null);
   const voiceSettingsReturnTargetRef = useRef(voiceSettingsReturnTarget);
-  const voiceSettingsReturnInFlightRef = useRef<string | null>(null);
-  const voiceSettingsReturnGenerationRef = useRef(0);
   voiceSettingsReturnTargetRef.current = voiceSettingsReturnTarget;
   const [homeSessionId, setHomeSessionId] = useState<string | null>(() =>
     loadStoredHomeSessionId(),
@@ -3260,6 +3236,19 @@ export function AppShell({
   const handleGlobalVoiceConversationStart = useCallback(
     (payload: GlobalComposerExpandPayload): Promise<boolean> => {
       if (!capabilities.voiceConversation) return Promise.resolve(false);
+      if (!globalVoiceReady) {
+        return new Promise<boolean>((resolve) => {
+          guardAppNavigation(
+            () => {
+              setRetainGlobalComposerDraft(true);
+              requestOpenSettings("voice");
+              resetGlobalComposerTransition();
+              resolve(false);
+            },
+            () => resolve(false),
+          );
+        });
+      }
       const options = payload.options;
       const project = options?.projectId
         ? projects.find((candidate) => candidate.id === options.projectId)
@@ -3315,13 +3304,6 @@ export function AppShell({
         chatState.setSkillDrafts(sessionId, payload.selectedSkills);
         chatState.setDraftAttachments(sessionId, options?.attachments ?? []);
         requestVoiceConversationStart(sessionId);
-        if (!globalVoiceReady) {
-          requestOpenSettings("voice", {
-            returnTarget: { type: "voice-setup", sessionId },
-          });
-          resetGlobalComposerTransition();
-          return true;
-        }
         handleNavigateToSession(sessionId);
         resetGlobalComposerTransition();
         return true;
@@ -3501,14 +3483,8 @@ export function AppShell({
       return false;
     }
 
-    if (voiceSettingsReturnInFlightRef.current === target.sessionId) {
-      return true;
-    }
-
     const session = useChatSessionStore.getState().getSession(target.sessionId);
     if (!session || session.archivedAt) {
-      voiceSettingsReturnGenerationRef.current += 1;
-      voiceSettingsReturnInFlightRef.current = null;
       voiceSettingsReturnTargetRef.current = null;
       setVoiceSettingsReturnTarget(null);
       useVoiceConversationStore
@@ -3517,59 +3493,32 @@ export function AppShell({
       return false;
     }
 
-    voiceSettingsReturnInFlightRef.current = target.sessionId;
-    const returnGeneration = ++voiceSettingsReturnGenerationRef.current;
-    void refreshStableVoiceSetupReadiness(
-      () => globalVoiceSetupSelectionRef.current,
-    )
-      .then((ready) => {
-        if (
-          !ready &&
-          voiceSettingsReturnGenerationRef.current === returnGeneration
-        ) {
-          useVoiceConversationStore
-            .getState()
-            .clearRequestedStart(target.sessionId);
-        }
-      })
-      .catch(() => {
-        // Preserve the requested start when readiness cannot be confirmed.
-        // The session controller will consume it only after its live status is ready.
-      })
-      .finally(() => {
-        if (
-          voiceSettingsReturnGenerationRef.current !== returnGeneration ||
-          voiceSettingsReturnTargetRef.current?.sessionId !== target.sessionId
-        ) {
-          return;
-        }
-        voiceSettingsReturnInFlightRef.current = null;
-        voiceSettingsReturnTargetRef.current = null;
-        setVoiceSettingsReturnTarget(null);
+    useVoiceConversationStore.getState().clearRequestedStart(target.sessionId);
+    voiceSettingsReturnTargetRef.current = null;
+    setVoiceSettingsReturnTarget(null);
 
-        const history = navigationHistoryRef.current;
-        const previousLocation =
-          history.index > 0 ? history.entries[history.index - 1] : null;
-        if (
-          previousLocation?.view === "chat" &&
-          previousLocation.sessionId === target.sessionId
-        ) {
-          history.index -= 1;
-        } else {
-          history.entries.splice(history.index, 0, {
-            view: "chat",
-            sessionId: target.sessionId,
-          });
-        }
-
-        clearSettingsSectionUrl();
-        setActiveSession(target.sessionId);
-        setActiveView("chat");
-        setChatActiveSession(target.sessionId);
-        useChatStore.getState().markSessionRead(target.sessionId);
-        void loadSessionMessagesAndPrepare(target.sessionId);
-        updateNavigationAvailability();
+    const history = navigationHistoryRef.current;
+    const previousLocation =
+      history.index > 0 ? history.entries[history.index - 1] : null;
+    if (
+      previousLocation?.view === "chat" &&
+      previousLocation.sessionId === target.sessionId
+    ) {
+      history.index -= 1;
+    } else {
+      history.entries.splice(history.index, 0, {
+        view: "chat",
+        sessionId: target.sessionId,
       });
+    }
+
+    clearSettingsSectionUrl();
+    setActiveSession(target.sessionId);
+    setActiveView("chat");
+    setChatActiveSession(target.sessionId);
+    useChatStore.getState().markSessionRead(target.sessionId);
+    void loadSessionMessagesAndPrepare(target.sessionId);
+    updateNavigationAvailability();
     return true;
   }, [
     setActiveSession,
@@ -3588,8 +3537,6 @@ export function AppShell({
     useVoiceConversationStore
       .getState()
       .clearRequestedStart(voiceSettingsReturnTarget.sessionId);
-    voiceSettingsReturnGenerationRef.current += 1;
-    voiceSettingsReturnInFlightRef.current = null;
     voiceSettingsReturnTargetRef.current = null;
     setVoiceSettingsReturnTarget(null);
   }, [activeSettingsSection, activeView, voiceSettingsReturnTarget]);
@@ -3685,9 +3632,10 @@ export function AppShell({
             .getState()
             .clearRequestedStart(currentVoiceTarget.sessionId);
         }
-        if (voiceSettingsReturnInFlightRef.current !== null) {
-          voiceSettingsReturnGenerationRef.current += 1;
-          voiceSettingsReturnInFlightRef.current = null;
+        if (nextVoiceTarget) {
+          useVoiceConversationStore
+            .getState()
+            .clearRequestedStart(nextVoiceTarget.sessionId);
         }
         voiceSettingsReturnTargetRef.current = nextVoiceTarget;
         setVoiceSettingsReturnTarget(nextVoiceTarget);
@@ -4620,8 +4568,19 @@ export function AppShell({
   const showGlobalComposer =
     canShowGlobalComposer &&
     (globalComposerPlacement !== "docked" || renderedLocation.view !== "chat");
+  const mountGlobalComposer = showGlobalComposer || retainGlobalComposerDraft;
   const showGlobalComposerShim =
     canShowGlobalComposer && globalComposerPlacement !== "docked";
+
+  useEffect(() => {
+    if (
+      retainGlobalComposerDraft &&
+      showGlobalComposer &&
+      globalComposerPlacement === "centered"
+    ) {
+      setRetainGlobalComposerDraft(false);
+    }
+  }, [globalComposerPlacement, retainGlobalComposerDraft, showGlobalComposer]);
 
   useEffect(() => {
     if (
@@ -5545,8 +5504,9 @@ export function AppShell({
                 onClick={dismissCenteredGlobalComposer}
               />
             ) : null}
-            {showGlobalComposer ? (
+            {mountGlobalComposer ? (
               <GlobalComposerPill
+                hidden={!showGlobalComposer}
                 elevated={renderedLocation.view === "settings"}
                 focusRequest={globalComposerFocusRequest}
                 onSend={handleGlobalCompose}
