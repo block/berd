@@ -145,7 +145,8 @@ function buildAgentWorkTimeline(
       const previous = items[items.length - 1];
       if (
         previous?.kind === "progress" &&
-        previous.content.speech?.status === block.speech?.status
+        previous.content.speech === undefined &&
+        block.speech === undefined
       ) {
         previous.content = {
           ...previous.content,
@@ -340,7 +341,11 @@ function AgentWorkItemRow({
               label={speechLabel}
             />
           ) : null}
-          <MessageResponse mode="static" strikethroughFrom={strikethroughFrom}>
+          <MessageResponse
+            mode="static"
+            strikethroughFrom={strikethroughFrom}
+            strikethroughLabel={t("message.voiceSpeechNotSpokenLabel")}
+          >
             {item.content.text}
           </MessageResponse>
         </div>
