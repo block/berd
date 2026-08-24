@@ -323,6 +323,19 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
     expect(defaultsSave).not.toHaveBeenCalled();
   });
 
+  it("preserves status-based discovery when secrets cannot be listed", async () => {
+    const statuses = [status("lmstudio", true)];
+    mockClientWithStatuses(statuses);
+    const client = await mockGetClient();
+    vi.mocked(client.goose.GooseUnstableProvidersSecretsList).mockRejectedValue(
+      new Error("secure storage unavailable"),
+    );
+
+    await expect(getModelDiscoveryProviderIds(statuses)).resolves.toContain(
+      "lmstudio",
+    );
+  });
+
   it("discovers an aliased OAuth credential when Goose's field status misses it", async () => {
     const statuses = [status("lmstudio", false)];
     mockClientWithStatuses(statuses, [secret("databricks")]);

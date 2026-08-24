@@ -72,9 +72,12 @@ export async function getModelDiscoveryProviderIds(
       .filter((status) => status.isConfigured)
       .map((status) => status.providerId),
   );
-  const credentialedIds = getCredentialedProviderIds(
-    await listProviderSecrets(),
-  );
+  let credentialedIds: ReadonlySet<string> = new Set();
+  try {
+    credentialedIds = getCredentialedProviderIds(await listProviderSecrets());
+  } catch {
+    // Status-based discovery remains useful when secure storage is unavailable.
+  }
   return getModelProviders()
     .filter(
       (provider) =>
