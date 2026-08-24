@@ -153,26 +153,32 @@ fn make_macos_transparent(window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-fn show_controls_without_activation(window: &WebviewWindow) -> tauri::Result<()> {
+fn show_controls_without_activation(window: &WebviewWindow) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         use objc2::msg_send;
         use objc2::runtime::AnyObject;
 
-        return window.with_webview(|platform_webview| unsafe {
-            let webview = platform_webview.inner() as *mut AnyObject;
-            if webview.is_null() {
-                return;
-            }
-            let ns_window: *mut AnyObject = msg_send![&*webview, window];
-            if !ns_window.is_null() {
-                let _: () = msg_send![&*ns_window, orderFrontRegardless];
-            }
-        });
+        window
+            .with_webview(|platform_webview| unsafe {
+                let webview = platform_webview.inner() as *mut AnyObject;
+                if webview.is_null() {
+                    return;
+                }
+                let ns_window: *mut AnyObject = msg_send![&*webview, window];
+                if !ns_window.is_null() {
+                    let _: () = msg_send![&*ns_window, orderFrontRegardless];
+                }
+            })
+            .map_err(|error| error.to_string())?;
+        if !window.is_visible().map_err(|error| error.to_string())? {
+            return Err("The floating voice controls could not be shown.".to_string());
+        }
+        return Ok(());
     }
 
     #[cfg(not(target_os = "macos"))]
-    window.show()
+    window.show().map_err(|error| error.to_string())
 }
 
 pub fn install(app: &AppHandle) -> Result<(), String> {
