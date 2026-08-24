@@ -112,7 +112,6 @@ function reportAssistantActivity(
   sessionId: string,
   expectedRevision: number,
   speaking: boolean,
-  interruptionSensitivity = getVoiceInterruptionPreference().sensitivity,
 ): void {
   activityReportQueue = activityReportQueue
     .catch(() => undefined)
@@ -121,7 +120,6 @@ function reportAssistantActivity(
         sessionId,
         expectedRevision,
         speaking,
-        interruptionSensitivity,
       ),
     )
     .catch((error) => {
@@ -551,7 +549,6 @@ function handleStreamEvent(
         utterance.sessionId,
         utterance.voiceRevision,
         true,
-        utterance.interruptionSensitivity,
       );
       break;
     case "completed":
@@ -823,7 +820,11 @@ export function startNativeAssistantSpeech(
       utterance,
       async () => {
         await streamListenerReady;
-        await streamBackend.start(utterance.id, utterance.interruptionMode);
+        await streamBackend.start(
+          utterance.id,
+          utterance.interruptionMode,
+          utterance.interruptionSensitivity,
+        );
         if (
           utterance.interruptionRequested ||
           activeUtterance?.id !== utterance.id

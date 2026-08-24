@@ -26,8 +26,13 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[cfg(target_os = "macos")]
+use super::native_voice::AssistantSpeechGuard;
+#[cfg(target_os = "macos")]
 use super::pocket_playback_speed_dsp::StreamingSpeedProcessor;
-use super::{native_voice::NativeVoiceState, voice_capture::VoiceCaptureState};
+use super::{
+    native_voice::{InterruptionSensitivity, NativeVoiceState},
+    voice_capture::VoiceCaptureState,
+};
 use tokio::io::AsyncWriteExt;
 
 const CACHE_VERSION: &str = "native-voice-v2";
@@ -489,6 +494,15 @@ pub(crate) fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
     output_device.is_some_and(|name| name.to_lowercase().contains("speaker"))
 }
 
+fn output_device_allows_interruptions(output_device: Option<&str>) -> bool {
+    output_device.is_some_and(|name| {
+        let name = name.to_lowercase();
+        ["airpods", "earbud", "earphone", "headphone", "headset"]
+            .iter()
+            .any(|private_output| name.contains(private_output))
+    })
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum VoiceInterruptionMode {
@@ -503,7 +517,7 @@ pub(crate) fn should_suppress_capture(
     output_device: Option<&str>,
 ) -> bool {
     match mode {
-        VoiceInterruptionMode::Automatic => output_device_uses_speakers(output_device),
+        VoiceInterruptionMode::Automatic => !output_device_allows_interruptions(output_device),
         VoiceInterruptionMode::AllowInterruptions => false,
         VoiceInterruptionMode::PreventFeedback => true,
     }
@@ -844,10 +858,18 @@ pub fn start_pocket_voice_stream(
     native_voice: State<'_, NativeVoiceState>,
     stream_id: String,
     interruption_mode: VoiceInterruptionMode,
+    interruption_sensitivity: InterruptionSensitivity,
 ) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, state, native_voice, stream_id, interruption_mode);
+        let _ = (
+            app,
+            state,
+            native_voice,
+            stream_id,
+            interruption_mode,
+            interruption_sensitivity,
+        );
         Err("Pocket voice playback is currently supported on macOS only".to_string())
     }
 
@@ -893,6 +915,7 @@ pub fn start_pocket_voice_stream(
 
         let playback = state.playback.clone();
         let playback_active = active.clone();
+        let native_voice_state = native_voice.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
             let _capture_suppression = capture_suppression;
             let result = run_pocket_voice_stream(
@@ -904,6 +927,8 @@ pub fn start_pocket_voice_stream(
                 active.clone(),
                 speed,
                 receiver,
+                native_voice_state,
+                interruption_sensitivity,
             );
             let (event_state, error, delivery) = match result {
                 Ok(outcome) => (outcome.state, None, outcome.delivery),
@@ -1986,6 +2011,8 @@ fn run_pocket_voice_stream(
     active: Arc<AtomicBool>,
     speed: f32,
     receiver: mpsc::Receiver<PocketStreamCommand>,
+    native_voice: NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
 ) -> Result<PocketStreamOutcome, PocketStreamFailure> {
     use std::num::NonZero;
 
@@ -2032,6 +2059,7 @@ fn run_pocket_voice_stream(
     let mut pending = String::new();
     let mut first_chunk_pending = true;
     let mut playback_started = false;
+    let mut assistant_speech: Option<AssistantSpeechGuard> = None;
     let mut delivery_ledger = PlaybackDeliveryLedger::default();
     let mut last_progress_emit = Instant::now();
 
@@ -2060,6 +2088,9 @@ fn run_pocket_voice_stream(
                     &mut pending,
                     &mut first_chunk_pending,
                     &mut playback_started,
+                    &native_voice,
+                    interruption_sensitivity,
+                    &mut assistant_speech,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     false,
@@ -2088,6 +2119,9 @@ fn run_pocket_voice_stream(
                     &mut pending,
                     &mut first_chunk_pending,
                     &mut playback_started,
+                    &native_voice,
+                    interruption_sensitivity,
+                    &mut assistant_speech,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
@@ -2103,22 +2137,16 @@ fn run_pocket_voice_stream(
                 }
                 let tail = speed_processor.drain_and_reset()?;
                 if !tail.is_empty() {
+                    mark_pocket_playback_started(
+                        app,
+                        stream_id,
+                        &native_voice,
+                        interruption_sensitivity,
+                        &mut playback_started,
+                        &mut assistant_speech,
+                    )?;
                     delivery_ledger.append_frames(tail.len());
                     player.append(SamplesBuffer::new(channels, rate, tail));
-                    if !playback_started {
-                        playback_started = true;
-                        emit_pocket_stream_event(
-                            app,
-                            stream_id,
-                            PocketStreamEventState::Started,
-                            None,
-                            None,
-                        );
-                        println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
-                        std::io::stdout()
-                            .flush()
-                            .map_err(|error| format!("signal Pocket playback start: {error}"))?;
-                    }
                 }
             }
             Ok(PocketStreamCommand::Finish) => {
@@ -2135,6 +2163,9 @@ fn run_pocket_voice_stream(
                     &mut pending,
                     &mut first_chunk_pending,
                     &mut playback_started,
+                    &native_voice,
+                    interruption_sensitivity,
+                    &mut assistant_speech,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
@@ -2150,17 +2181,16 @@ fn run_pocket_voice_stream(
                 }
                 let tail = speed_processor.finish()?;
                 if !tail.is_empty() {
+                    mark_pocket_playback_started(
+                        app,
+                        stream_id,
+                        &native_voice,
+                        interruption_sensitivity,
+                        &mut playback_started,
+                        &mut assistant_speech,
+                    )?;
                     delivery_ledger.append_frames(tail.len());
                     player.append(SamplesBuffer::new(channels, rate, tail));
-                    if !playback_started {
-                        emit_pocket_stream_event(
-                            app,
-                            stream_id,
-                            PocketStreamEventState::Started,
-                            None,
-                            None,
-                        );
-                    }
                 }
                 while !player.empty() {
                     if !active.load(Ordering::SeqCst) {
@@ -2238,6 +2268,27 @@ fn capture_before_stop(
 }
 
 #[cfg(target_os = "macos")]
+fn mark_pocket_playback_started(
+    app: &AppHandle,
+    stream_id: &str,
+    native_voice: &NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
+    playback_started: &mut bool,
+    assistant_speech: &mut Option<AssistantSpeechGuard>,
+) -> Result<(), String> {
+    if *playback_started {
+        return Ok(());
+    }
+    *assistant_speech = Some(native_voice.begin_assistant_speech(interruption_sensitivity));
+    *playback_started = true;
+    emit_pocket_stream_event(app, stream_id, PocketStreamEventState::Started, None, None);
+    println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
+    std::io::stdout()
+        .flush()
+        .map_err(|error| format!("signal Pocket playback start: {error}"))
+}
+
+#[cfg(target_os = "macos")]
 #[allow(clippy::too_many_arguments)]
 fn synthesize_pocket_stream_ready(
     app: &AppHandle,
@@ -2252,6 +2303,9 @@ fn synthesize_pocket_stream_ready(
     pending: &mut String,
     first_chunk_pending: &mut bool,
     playback_started: &mut bool,
+    native_voice: &NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
+    assistant_speech: &mut Option<AssistantSpeechGuard>,
     delivery_ledger: &mut PlaybackDeliveryLedger,
     last_progress_emit: &mut Instant,
     flush: bool,
@@ -2285,23 +2339,19 @@ fn synthesize_pocket_stream_ready(
                 if delta.is_empty() {
                     return true;
                 }
+                if let Err(error) = mark_pocket_playback_started(
+                    app,
+                    stream_id,
+                    native_voice,
+                    interruption_sensitivity,
+                    playback_started,
+                    assistant_speech,
+                ) {
+                    callback_error = Some(error);
+                    return false;
+                }
                 delivery_ledger.append_frames(delta.len());
                 player.append(SamplesBuffer::new(channels, rate, delta));
-                if !*playback_started {
-                    *playback_started = true;
-                    emit_pocket_stream_event(
-                        app,
-                        stream_id,
-                        PocketStreamEventState::Started,
-                        None,
-                        None,
-                    );
-                    println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
-                    if let Err(error) = std::io::stdout().flush() {
-                        callback_error = Some(format!("signal Pocket playback start: {error}"));
-                        return false;
-                    }
-                }
                 if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
                     emit_pocket_stream_event(
                         app,
@@ -2886,6 +2936,18 @@ mod tests {
         assert!(!should_suppress_capture(
             VoiceInterruptionMode::Automatic,
             Some("AirPods Pro"),
+        ));
+        assert!(!should_suppress_capture(
+            VoiceInterruptionMode::Automatic,
+            Some("USB Headphones"),
+        ));
+        assert!(should_suppress_capture(
+            VoiceInterruptionMode::Automatic,
+            Some("Studio Display Audio"),
+        ));
+        assert!(should_suppress_capture(
+            VoiceInterruptionMode::Automatic,
+            None,
         ));
         assert!(!should_suppress_capture(
             VoiceInterruptionMode::AllowInterruptions,

@@ -18,7 +18,9 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 
-use super::native_voice::NativeVoiceState;
+#[cfg(target_os = "macos")]
+use super::native_voice::AssistantSpeechGuard;
+use super::native_voice::{InterruptionSensitivity, NativeVoiceState};
 use super::pocket_voice::VoiceInterruptionMode;
 #[cfg(target_os = "macos")]
 use super::pocket_voice::{
@@ -385,6 +387,9 @@ fn bridge_error(error: *mut c_char, fallback: &str) -> String {
 struct SiriStreamCallbackContext {
     app: AppHandle,
     stream_id: String,
+    native_voice: NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
+    assistant_speech: Mutex<Option<AssistantSpeechGuard>>,
 }
 
 #[cfg(target_os = "macos")]
@@ -395,6 +400,17 @@ unsafe extern "C" fn siri_playback_started(context: *mut std::ffi::c_void) {
     // SAFETY: The stream worker owns this boxed context until after the native
     // player has completed and been released.
     let context = unsafe { &*(context.cast::<SiriStreamCallbackContext>()) };
+    let Ok(mut assistant_speech) = context.assistant_speech.lock() else {
+        log::error!("Siri assistant speech guard lock was poisoned");
+        return;
+    };
+    if assistant_speech.is_none() {
+        *assistant_speech = Some(
+            context
+                .native_voice
+                .begin_assistant_speech(context.interruption_sensitivity),
+        );
+    }
     let _ = context.app.emit(
         SIRI_STREAM_EVENT,
         SiriStreamEvent {
@@ -637,6 +653,8 @@ fn run_siri_stream(
     speed: f32,
     active: Arc<AtomicBool>,
     receiver: mpsc::Receiver<SiriStreamCommand>,
+    native_voice: NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
 ) -> Result<SiriStreamOutcome, SiriStreamFailure> {
     let language = CString::new(selection.language)
         .map_err(|_| "Siri voice language cannot contain NUL bytes".to_string())?;
@@ -645,6 +663,9 @@ fn run_siri_stream(
     let callback_context = Box::new(SiriStreamCallbackContext {
         app: app.clone(),
         stream_id: stream_id.clone(),
+        native_voice,
+        interruption_sensitivity,
+        assistant_speech: Mutex::new(None),
     });
     let callback_context = Box::into_raw(callback_context);
     let mut error = std::ptr::null_mut();
@@ -802,6 +823,7 @@ pub fn start_siri_voice_stream(
     native_voice: tauri::State<'_, NativeVoiceState>,
     stream_id: String,
     interruption_mode: VoiceInterruptionMode,
+    interruption_sensitivity: InterruptionSensitivity,
 ) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
@@ -812,6 +834,7 @@ pub fn start_siri_voice_stream(
             native_voice,
             stream_id,
             interruption_mode,
+            interruption_sensitivity,
         );
         Err("Siri TTS is only available on macOS".to_string())
     }
@@ -849,6 +872,7 @@ pub fn start_siri_voice_stream(
         }
         let playback_state = state.inner().clone();
         let playback_active = active.clone();
+        let native_voice_state = native_voice.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
             let _capture_suppression = capture_suppression;
             let result = run_siri_stream(
@@ -860,6 +884,8 @@ pub fn start_siri_voice_stream(
                     .clamp(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED),
                 active.clone(),
                 receiver,
+                native_voice_state,
+                interruption_sensitivity,
             );
             let (event_state, error, delivery) = match result {
                 Ok(outcome) => (outcome.state, None, outcome.delivery),

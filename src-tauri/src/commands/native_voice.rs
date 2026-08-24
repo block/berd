@@ -76,7 +76,6 @@ pub struct AssistantSpeakingRequest {
     session_id: String,
     expected_revision: u64,
     speaking: bool,
-    interruption_sensitivity: InterruptionSensitivity,
     renderer_id: String,
     renderer_epoch: u64,
 }
@@ -90,7 +89,8 @@ pub enum InterruptionSensitivity {
 }
 
 impl InterruptionSensitivity {
-    fn vad_threshold(self) -> f32 {
+    #[cfg(any(test, target_os = "macos"))]
+    pub(crate) fn vad_threshold(self) -> f32 {
         match self {
             Self::Less => 0.65,
             Self::Balanced => VAD_THRESHOLD,
@@ -249,6 +249,8 @@ pub struct NativeVoiceState {
     input_mute_epoch: Arc<AtomicU64>,
     assistant_speaking: Arc<AtomicBool>,
     assistant_vad_threshold: Arc<AtomicU32>,
+    assistant_speech_generation: Arc<AtomicU64>,
+    assistant_speech_lock: Arc<Mutex<()>>,
 }
 
 #[must_use = "capture suppression ends when the guard is dropped"]
@@ -264,6 +266,37 @@ impl Drop for CaptureSuppressionGuard {
             "[voice-echo-guard] capture resumed suppression_count={}",
             previous.saturating_sub(1)
         );
+    }
+}
+
+#[must_use = "assistant speech sensitivity ends when the guard is dropped"]
+#[cfg(any(test, target_os = "macos"))]
+pub(crate) struct AssistantSpeechGuard {
+    assistant_speaking: Arc<AtomicBool>,
+    assistant_speech_generation: Arc<AtomicU64>,
+    assistant_speech_lock: Arc<Mutex<()>>,
+    generation: u64,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+impl Drop for AssistantSpeechGuard {
+    fn drop(&mut self) {
+        let _lifecycle = self
+            .assistant_speech_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if self
+            .assistant_speech_generation
+            .compare_exchange(
+                self.generation,
+                self.generation.wrapping_add(1),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+        {
+            self.assistant_speaking.store(false, Ordering::Release);
+        }
     }
 }
 
@@ -349,6 +382,40 @@ impl NativeVoiceState {
         CaptureSuppressionGuard {
             capture_suppressions: Arc::clone(&self.capture_suppressions),
         }
+    }
+
+    #[cfg(any(test, target_os = "macos"))]
+    pub(crate) fn begin_assistant_speech(
+        &self,
+        sensitivity: InterruptionSensitivity,
+    ) -> AssistantSpeechGuard {
+        let _lifecycle = self
+            .assistant_speech_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.assistant_vad_threshold
+            .store(sensitivity.vad_threshold().to_bits(), Ordering::Release);
+        let generation = self
+            .assistant_speech_generation
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1);
+        self.assistant_speaking.store(true, Ordering::Release);
+        AssistantSpeechGuard {
+            assistant_speaking: Arc::clone(&self.assistant_speaking),
+            assistant_speech_generation: Arc::clone(&self.assistant_speech_generation),
+            assistant_speech_lock: Arc::clone(&self.assistant_speech_lock),
+            generation,
+        }
+    }
+
+    fn clear_assistant_speech(&self) {
+        let _lifecycle = self
+            .assistant_speech_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.assistant_speech_generation
+            .fetch_add(1, Ordering::AcqRel);
+        self.assistant_speaking.store(false, Ordering::Release);
     }
 
     fn capture_is_suppressed(&self) -> bool {
@@ -602,20 +669,12 @@ impl NativeVoiceState {
         session_id: &str,
         expected_revision: u64,
         speaking: bool,
-        interruption_sensitivity: InterruptionSensitivity,
     ) -> Result<(), String> {
         let Some((owner_window_label, revision)) =
             self.assistant_activity_target(caller_window_label, session_id, expected_revision)?
         else {
             return Ok(());
         };
-        if speaking {
-            self.assistant_vad_threshold.store(
-                interruption_sensitivity.vad_threshold().to_bits(),
-                Ordering::Release,
-            );
-        }
-        self.assistant_speaking.store(speaking, Ordering::Release);
         let event = NativeVoiceEvent::Activity {
             session_id: session_id.to_string(),
             activity: if speaking {
@@ -651,7 +710,7 @@ impl NativeVoiceState {
         let owner = runtime.owner.clone();
         let session_id = runtime.session_id.clone();
         let owner_id = session_id.as_deref().map(native_owner_id);
-        self.assistant_speaking.store(false, Ordering::Release);
+        self.clear_assistant_speech();
         Ok(Some((
             session_id,
             runtime.revision,
@@ -1214,7 +1273,7 @@ pub async fn start_native_voice_conversation(
         runtime.controls_suppressed = true;
         runtime.controls_visibility_generation = 0;
         state.microphone_muted.store(false, Ordering::SeqCst);
-        state.assistant_speaking.store(false, Ordering::Release);
+        state.clear_assistant_speech();
         let runtime_revision = runtime.revision;
         let mute_app = app.clone();
         let mute_window = webview_window.clone();
@@ -1472,7 +1531,6 @@ pub fn set_native_voice_assistant_speaking(
                 &request.session_id,
                 request.expected_revision,
                 request.speaking,
-                request.interruption_sensitivity,
             )
         },
     )
@@ -2777,20 +2835,45 @@ mod tests {
 
     #[test]
     fn interruption_sensitivity_only_changes_vad_while_assistant_speaks() {
-        let assistant_speaking = AtomicBool::new(false);
-        let threshold = AtomicU32::new(InterruptionSensitivity::More.vad_threshold().to_bits());
+        let state = NativeVoiceState::default();
         assert_eq!(
-            active_vad_threshold(&assistant_speaking, &threshold),
+            active_vad_threshold(&state.assistant_speaking, &state.assistant_vad_threshold),
             VAD_THRESHOLD
         );
 
-        assistant_speaking.store(true, Ordering::Release);
+        {
+            let _guard = state.begin_assistant_speech(InterruptionSensitivity::More);
+            assert_eq!(
+                active_vad_threshold(&state.assistant_speaking, &state.assistant_vad_threshold),
+                InterruptionSensitivity::More.vad_threshold()
+            );
+        }
+
         assert_eq!(
-            active_vad_threshold(&assistant_speaking, &threshold),
-            InterruptionSensitivity::More.vad_threshold()
+            active_vad_threshold(&state.assistant_speaking, &state.assistant_vad_threshold),
+            VAD_THRESHOLD
         );
         assert!(InterruptionSensitivity::Less.vad_threshold() > VAD_THRESHOLD);
         assert!(InterruptionSensitivity::More.vad_threshold() < VAD_THRESHOLD);
+    }
+
+    #[test]
+    fn stale_assistant_speech_guard_does_not_clear_newer_playback() {
+        let state = NativeVoiceState::default();
+        let older = state.begin_assistant_speech(InterruptionSensitivity::Less);
+        let newer = state.begin_assistant_speech(InterruptionSensitivity::More);
+
+        drop(older);
+        assert_eq!(
+            active_vad_threshold(&state.assistant_speaking, &state.assistant_vad_threshold),
+            InterruptionSensitivity::More.vad_threshold()
+        );
+
+        drop(newer);
+        assert_eq!(
+            active_vad_threshold(&state.assistant_speaking, &state.assistant_vad_threshold),
+            VAD_THRESHOLD
+        );
     }
 
     #[test]
