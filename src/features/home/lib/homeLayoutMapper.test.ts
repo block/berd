@@ -142,6 +142,46 @@ describe("homeLayoutMapper", () => {
     });
   });
 
+  it("round-trips an expanded chat presentation and its size memory", () => {
+    const widget: WidgetInstance = {
+      id: "00000000-0000-0000-0000-000000000001",
+      type: "chatPin",
+      x: 24,
+      y: 48,
+      z: 5,
+      width: 480,
+      height: 560,
+      state: {
+        sessionId: "session-1",
+        presentation: "expanded",
+        __sizeByProfile: {
+          "188x80": { width: 188, height: 80 },
+        },
+      },
+    };
+
+    const [item] = homeWidgetsToLayoutItems([widget]);
+
+    expect(item.widgetState).toEqual({
+      presentation: "expanded",
+      __sizeByProfile: {
+        "188x80": { width: 188, height: 80 },
+      },
+    });
+    expect(layoutItemsToHomeWidgets([item])[0]).toMatchObject({
+      type: "chatPin",
+      width: 480,
+      height: 560,
+      state: {
+        sessionId: "session-1",
+        presentation: "expanded",
+        __sizeByProfile: {
+          "188x80": { width: 188, height: 80 },
+        },
+      },
+    });
+  });
+
   it("populates entity state only for non-synthetic targets", () => {
     const widgets = layoutItemsToHomeWidgets([
       layoutItem({ kind: "stickyNote", targetId: "onboarding:build-agent" }),

@@ -70,6 +70,20 @@ describe("useWidgetDragSuppression", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
+  it("suppresses activation after a cancelled pointer sequence", () => {
+    const { result } = renderHook(() => useWidgetDragSuppression());
+
+    act(() => {
+      result.current.frameHandlers.onPointerDownCapture(pointerEvent(10, 10));
+      result.current.frameHandlers.onPointerCancelCapture(pointerEvent(10, 10));
+    });
+
+    expect(result.current.shouldIgnoreActivation()).toBe(true);
+    const event = clickEvent();
+    window.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   it("clears suppression after 600ms", () => {
     const { result } = renderSuppressedHook();
     expect(result.current.shouldIgnoreActivation()).toBe(true);

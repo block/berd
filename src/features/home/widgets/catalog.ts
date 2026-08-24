@@ -230,6 +230,27 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
       minHeight: 72,
       maxHeight: 260,
     },
+    resolveProfile: (instance) =>
+      instance.state?.presentation === "expanded"
+        ? {
+            defaultSize: { width: 480, height: 560 },
+            sizeBounds: {
+              minWidth: 360,
+              maxWidth: 760,
+              minHeight: 360,
+              maxHeight: 840,
+            },
+          }
+        : {
+            defaultSize: { width: 188, height: 80 },
+            sizeBounds: {
+              minWidth: 168,
+              maxWidth: 480,
+              minHeight: 72,
+              maxHeight: 260,
+            },
+          },
+    preservePositionOnProfileChange: true,
     Component: ChatPinWidget,
   },
   {

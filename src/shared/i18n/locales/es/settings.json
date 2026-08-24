@@ -256,6 +256,10 @@
     "voiceConversation": {
       "description": "Prueba conversaciones de voz bidireccionales continuas en chats de Goose.",
       "title": "Conversaciones de voz"
+    },
+    "chatOnCanvas": {
+      "title": "Chat en el lienzo",
+      "description": "Expande los chats fijados en tarjetas de conversación en vivo en Inicio, donde puedes leer y responder."
     }
   },
   "extensions": {

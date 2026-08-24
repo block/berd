@@ -193,6 +193,7 @@ export interface ChatInputControls {
   attachments?: boolean;
   autoFocus?: boolean;
   fileMentions?: boolean;
+  personaPicker?: boolean;
   projectPicker?: boolean;
   skills?: boolean;
   voice?: boolean;

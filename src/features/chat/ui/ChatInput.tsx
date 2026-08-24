@@ -364,6 +364,7 @@ export function ChatInput({
     attachments: controls?.attachments ?? attachmentsEnabled,
     autoFocus: controls?.autoFocus ?? true,
     fileMentions: controls?.fileMentions ?? true,
+    personaPicker: controls?.personaPicker ?? true,
     projectPicker: controls?.projectPicker ?? true,
     skills: controls?.skills ?? true,
     voice: controls?.voice ?? true,
@@ -639,17 +640,24 @@ export function ChatInput({
     : selectedPersonaId;
   const handleEffectivePersonaChange = useCallback(
     (personaId: string | null) => {
+      if (!scopedControls.personaPicker) {
+        return;
+      }
       if (editingQueuedPersona) {
         setEditingQueuedPersona(personaIntentFromComposer(personaId));
         return;
       }
       onPersonaChange?.(personaId);
     },
-    [editingQueuedPersona, onPersonaChange],
+    [editingQueuedPersona, onPersonaChange, scopedControls.personaPicker],
   );
   const activePersona = useMemo(
-    () => personas.find((persona) => persona.id === effectivePersonaId) ?? null,
-    [effectivePersonaId, personas],
+    () =>
+      scopedControls.personaPicker
+        ? (personas.find((persona) => persona.id === effectivePersonaId) ??
+          null)
+        : null,
+    [effectivePersonaId, personas, scopedControls.personaPicker],
   );
   const selectedProject = useMemo(
     () =>
@@ -715,7 +723,7 @@ export function ChatInput({
     handleMentionConfirm,
     skillMentionItems,
   } = useMentionHandlers({
-    personas,
+    personas: scopedControls.personaPicker ? personas : [],
     skillProjectDirs: skillMentionProjectDirs,
     fileMentionProjectDirs,
     skillProviderId,

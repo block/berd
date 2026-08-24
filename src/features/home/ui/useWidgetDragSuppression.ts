@@ -131,7 +131,8 @@ export function useWidgetDragSuppression() {
 
   const handlePointerCancelCapture = useCallback(() => {
     pointerStartRef.current = null;
-  }, []);
+    markDragged();
+  }, [markDragged]);
 
   const handleClickCapture = useCallback((event: React.MouseEvent) => {
     if (!suppressClickRef.current) {

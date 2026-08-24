@@ -1,5 +1,6 @@
 import { Crosshair, LayoutGrid } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { WorkspaceNameRequest } from "@/features/chat/hooks/useChatSessionController";
 import { useTranslation } from "react-i18next";
 import { prefetchProjectArtifactRenderer } from "@/features/projects/artifact/prefetchProjectArtifactRenderer";
 import { OnboardingTourDialog } from "@/features/onboarding/ui/OnboardingTourDialog";
@@ -66,6 +67,7 @@ export interface HomeViewProps {
   onOpenAutomation?: (automationId: string) => void;
   onCreatePersona?: () => void;
   onCreateProject?: () => void;
+  onWorkspaceNameRequest?: (request: WorkspaceNameRequest) => void;
   onOpenSkills?: () => void;
   onOpenAutomations?: () => void;
   onResolveBerdyAgent?: () => Promise<string | null>;
@@ -85,6 +87,7 @@ export function HomeView({
   onOpenAutomation,
   onCreatePersona,
   onCreateProject,
+  onWorkspaceNameRequest,
   onOpenSkills,
   onOpenAutomations,
   onResolveBerdyAgent,
@@ -408,7 +411,6 @@ export function HomeView({
     const sessionIds = pinnedChatSessionIdKey
       ? pinnedChatSessionIdKey.split("\u001f")
       : [];
-
     if (sessionIds.length > 0) {
       onHydratePinnedChatSessions(sessionIds);
     }
@@ -514,6 +516,7 @@ export function HomeView({
           onOpenAutomation={onOpenAutomation}
           onCreatePersona={onCreatePersona}
           onCreateProject={onCreateProject}
+          onWorkspaceNameRequest={onWorkspaceNameRequest}
           onOpenSkills={onOpenSkills}
           onOpenAutomations={onOpenAutomations}
           onStartOnboardingTour={handleStartTour}

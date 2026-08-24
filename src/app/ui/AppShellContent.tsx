@@ -220,6 +220,7 @@ export function AppShellContent({
       onStartProjectChat={onStartProjectChat}
       onCreatePersona={onCreatePersona}
       onCreateProject={onCreateProject}
+      onWorkspaceNameRequest={onWorkspaceNameRequest}
       onOpenAutomation={openHomeAutomation}
       onOpenSkills={() => onNavigateSkills(null)}
       onOpenAutomations={openHomeAutomations}

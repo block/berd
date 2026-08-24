@@ -24,6 +24,10 @@ import {
   isStarterHomeLayoutEligible,
   markStarterHomeLayoutEligible,
 } from "@/features/home/onboarding/starterHomeLayout";
+import {
+  consumeFreshWidgetPlacement,
+  markFreshWidgetPlacement,
+} from "../lib/freshWidgetPlacements";
 
 const HOME_WIDGET_NODE_SELECTOR = `[${HOME_WIDGET_NODE_ATTR}]`;
 
@@ -140,6 +144,47 @@ vi.mock("@/features/chat/stores/chatSessionStore", async (importOriginal) => {
 vi.mock("@/features/chat/stores/chatStore", () => ({
   useChatStore: (selector: (state: unknown) => unknown) =>
     selector({ messagesBySession: mocks.messagesBySession }),
+}));
+
+vi.mock("@/features/experiments/experimentPreferences", () => ({
+  useExperiment: () => ({ enabled: true }),
+}));
+
+vi.mock("../widgets/ChatCanvasCard", () => ({
+  ChatCanvasCard: ({
+    session,
+    isFocused,
+    onFocus,
+    shouldIgnoreActivation = () => false,
+  }: {
+    session: { title: string };
+    isFocused: boolean;
+    onFocus?: () => void;
+    shouldIgnoreActivation?: () => boolean;
+  }) => (
+    <div data-focused={String(isFocused)}>
+      <div data-home-widget-drag-handle="true" />
+      <button
+        type="button"
+        data-focused={String(isFocused)}
+        onClick={() => {
+          if (!shouldIgnoreActivation()) onFocus?.();
+        }}
+      >
+        Focus {session.title}
+      </button>
+      <div
+        data-testid={`transcript-${session.title}`}
+        data-home-canvas-interactive="true"
+        className="overflow-y-auto"
+      />
+      <textarea
+        data-testid={`composer-${session.title}`}
+        data-home-canvas-interactive="true"
+        aria-label={`Compose in ${session.title}`}
+      />
+    </div>
+  ),
 }));
 
 vi.mock("@/features/automations/api/kgooseAutomations", () => ({
@@ -371,6 +416,149 @@ describe("WidgetCanvas", () => {
     setDevicePixelRatio(1);
   });
 
+  it("settles a freshly placed expanded chat like every other widget", () => {
+    const chat = chatWidget({
+      id: "fresh-expanded-chat",
+      state: { sessionId: "session-1", presentation: "expanded" },
+    });
+    markFreshWidgetPlacement(chat.id);
+
+    const { container } = renderCanvas({ instances: [chat] });
+    const frame = container.querySelector(
+      `[data-home-widget-id="${chat.id}"] fieldset`,
+    );
+
+    expect(frame).toHaveClass("animate-widget-settle");
+    consumeFreshWidgetPlacement(chat.id);
+  });
+
+  it("renders composers for multiple expanded chats independently of focus", () => {
+    const first = chatWidget({
+      id: "first-chat",
+      state: { sessionId: "session-1", presentation: "expanded" },
+    });
+    const second = chatWidget({
+      id: "second-chat",
+      state: { sessionId: "session-blank-title", presentation: "expanded" },
+    });
+
+    renderCanvas({ instances: [first, second] });
+
+    expect(screen.getAllByRole("textbox")).toHaveLength(2);
+    expect(screen.getByTestId("composer-First chat")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Focus First chat" }),
+    ).toHaveAttribute("data-focused", "false");
+    expect(screen.getByRole("button", { name: /Focus\s*$/ })).toHaveAttribute(
+      "data-focused",
+      "false",
+    );
+  });
+
+  it("gives sole ephemeral focus to the deliberately clicked expanded chat", async () => {
+    const user = userEvent.setup();
+    const first = chatWidget({
+      id: "first-chat",
+      state: { sessionId: "session-1", presentation: "expanded" },
+    });
+    const second = chatWidget({
+      id: "second-chat",
+      state: { sessionId: "session-blank-title", presentation: "expanded" },
+    });
+    const { rerender } = renderCanvas({ instances: [first, second] });
+
+    const firstCard = screen.getByRole("button", { name: "Focus First chat" });
+    const secondCard = screen.getByRole("button", { name: /Focus\s*$/ });
+    expect(firstCard).toHaveAttribute("data-focused", "false");
+    expect(secondCard).toHaveAttribute("data-focused", "false");
+
+    await user.click(firstCard);
+    expect(firstCard).toHaveAttribute("data-focused", "true");
+    expect(secondCard).toHaveAttribute("data-focused", "false");
+
+    await user.click(secondCard);
+    expect(firstCard).toHaveAttribute("data-focused", "false");
+    expect(secondCard).toHaveAttribute("data-focused", "true");
+
+    rerender(
+      <PickerTestProvider>
+        <WidgetCanvas instances={[first]} mutations={mutationHandlers()} />
+      </PickerTestProvider>,
+    );
+    expect(firstCard).toHaveAttribute("data-focused", "false");
+  });
+
+  it("clears chat focus when the canvas background or another widget takes ownership", async () => {
+    const user = userEvent.setup();
+    const chat = chatWidget({
+      state: { sessionId: "session-1", presentation: "expanded" },
+    });
+    const { container } = renderCanvas({ instances: [chat, agentWidget()] });
+    const chatCard = screen.getByRole("button", { name: "Focus First chat" });
+
+    await user.click(chatCard);
+    expect(chatCard).toHaveAttribute("data-focused", "true");
+
+    await user.pointer({
+      keys: "[MouseLeft]",
+      target: container.firstElementChild as Element,
+      coords: { clientX: 700, clientY: 500 },
+    });
+    expect(chatCard).toHaveAttribute("data-focused", "false");
+
+    await user.click(chatCard);
+    fireEvent.pointerDown(screen.getByRole("button", { name: /agent one/i }), {
+      button: 0,
+      pointerId: 2,
+    });
+    await waitFor(() =>
+      expect(chatCard).toHaveAttribute("data-focused", "false"),
+    );
+  });
+
+  it("requires fresh activation after a focused card is temporarily unavailable and remounts", async () => {
+    const user = userEvent.setup();
+    const chat = chatWidget({
+      state: { sessionId: "session-1", presentation: "expanded" },
+    });
+    const { rerender } = renderCanvas({ instances: [chat] });
+    const card = screen.getByRole("button", { name: "Focus First chat" });
+
+    await user.click(card);
+    expect(card).toHaveAttribute("data-focused", "true");
+
+    const temporarilyUnavailable = {
+      ...chat,
+      state: { ...chat.state, presentation: "collapsed" },
+    };
+    rerender(
+      <PickerTestProvider>
+        <WidgetCanvas
+          instances={[temporarilyUnavailable]}
+          mutations={mutationHandlers()}
+        />
+      </PickerTestProvider>,
+    );
+    expect(
+      screen.queryByRole("button", { name: "Focus First chat" }),
+    ).toBeNull();
+
+    rerender(
+      <PickerTestProvider>
+        <WidgetCanvas instances={[chat]} mutations={mutationHandlers()} />
+      </PickerTestProvider>,
+    );
+    const remountedCard = screen.getByRole("button", {
+      name: "Focus First chat",
+    });
+    await waitFor(() =>
+      expect(remountedCard).toHaveAttribute("data-focused", "false"),
+    );
+
+    await user.click(remountedCard);
+    expect(remountedCard).toHaveAttribute("data-focused", "true");
+  });
+
   it("renders widgets directly at snapped screen positions", () => {
     mocks.homeWidgetState.camera = {
       centerX: -10.25,
@@ -445,6 +633,119 @@ describe("WidgetCanvas", () => {
     expect(widgetContent.style.transformOrigin).toBe("top left");
     expect(widgetContent.style.width).toBe("240px");
     expect(widgetContent.style.height).toBe("240px");
+  });
+
+  it.each([
+    [5_000, "240px", "280px", "scale(0.5)"],
+    [7_500, "360px", "420px", "scale(0.75)"],
+  ])("uses the standard widget transform path for expanded chats at %i zoom bps", (zoomBps, expectedWidth, expectedHeight, expectedTransform) => {
+    mocks.homeWidgetState.camera = { centerX: 0, centerY: 0, zoomBps };
+
+    const { container } = renderCanvas({
+      instances: [
+        chatWidget({
+          width: 480,
+          height: 560,
+          state: { sessionId: "session-1", presentation: "expanded" },
+        }),
+      ],
+    });
+    const widgetNode = container.querySelector(
+      HOME_WIDGET_NODE_SELECTOR,
+    ) as HTMLElement;
+    const widgetContent = widgetNode.firstElementChild as HTMLElement;
+
+    expect(widgetNode.style.width).toBe(expectedWidth);
+    expect(widgetNode.style.height).toBe(expectedHeight);
+    expect(
+      widgetNode.style.getPropertyValue("--canvas-presentation-scale"),
+    ).toBe("");
+    expect(widgetContent.style.width).toBe("480px");
+    expect(widgetContent.style.height).toBe("560px");
+    expect(widgetContent.style.transform).toBe(expectedTransform);
+    expect(widgetContent.style.transformOrigin).toBe("top left");
+  });
+
+  it("keeps expanded chat drag persistence in world coordinates", async () => {
+    const user = userEvent.setup();
+    const moveWidget = vi.fn();
+    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
+    mocks.homeWidgetState.camera = {
+      centerX: 0,
+      centerY: 0,
+      zoomBps: 7_500,
+    };
+    const chat = chatWidget({
+      x: 20,
+      y: 30,
+      width: 480,
+      height: 560,
+      state: { sessionId: "session-1", presentation: "expanded" },
+    });
+    const { container } = renderCanvas({
+      instances: [chat],
+      mutations: { moveWidget },
+    });
+    const canvas = container.firstElementChild as Element;
+    const widgetNode = container.querySelector(
+      HOME_WIDGET_NODE_SELECTOR,
+    ) as HTMLElement;
+    const dragHandle = widgetNode.querySelector(
+      "[data-home-widget-drag-handle='true']",
+    ) as HTMLElement;
+
+    await user.pointer([
+      {
+        keys: "[MouseLeft>]",
+        target: dragHandle,
+        coords: { clientX: 30, clientY: 40 },
+      },
+      { target: canvas, coords: { clientX: 60, clientY: 85 } },
+      {
+        keys: "[/MouseLeft]",
+        target: canvas,
+        coords: { clientX: 60, clientY: 85 },
+      },
+    ]);
+
+    expect(moveWidget).toHaveBeenCalledWith(
+      "chat-widget",
+      60,
+      90,
+      CANVAS_CONSTRAINTS,
+      { bringToFront: true },
+    );
+  });
+
+  it("does not drag an expanded chat from its transcript", async () => {
+    const user = userEvent.setup();
+    const moveWidget = vi.fn();
+    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
+    const chat = chatWidget({
+      state: { sessionId: "session-1", presentation: "expanded" },
+    });
+    const { container } = renderCanvas({
+      instances: [chat],
+      mutations: { moveWidget },
+    });
+    const canvas = container.firstElementChild as Element;
+    const transcript = screen.getByTestId("transcript-First chat");
+
+    await user.pointer([
+      {
+        keys: "[MouseLeft>]",
+        target: transcript,
+        coords: { clientX: 30, clientY: 40 },
+      },
+      { target: canvas, coords: { clientX: 80, clientY: 100 } },
+      {
+        keys: "[/MouseLeft]",
+        target: canvas,
+        coords: { clientX: 80, clientY: 100 },
+      },
+    ]);
+
+    expect(moveWidget).not.toHaveBeenCalled();
   });
 
   it("lays out non-aspect resize previews at preview dimensions so text is not stretched", async () => {
@@ -1167,6 +1468,31 @@ describe("WidgetCanvas", () => {
       centerY: expect.any(Number),
       zoomBps: 10_000,
     });
+  });
+
+  it("leaves interactive transcript and composer wheel gestures to the chat", () => {
+    vi.useFakeTimers();
+    const chat = chatWidget({
+      state: { sessionId: "session-1", presentation: "expanded" },
+    });
+    const { container } = renderCanvas({ instances: [chat] });
+    const canvas = container.firstElementChild as HTMLElement;
+    const transcript = screen.getByTestId("transcript-First chat");
+    const composer = screen.getByTestId("composer-First chat");
+
+    expect(transcript).toHaveClass("overflow-y-auto");
+    fireEvent.wheel(transcript, { deltaY: 30 });
+    transcript.scrollTop = 30;
+    fireEvent.scroll(transcript);
+    fireEvent.wheel(composer, { deltaY: 30 });
+    vi.advanceTimersByTime(150);
+
+    expect(transcript.scrollTop).toBe(30);
+    expect(mocks.saveCamera).not.toHaveBeenCalled();
+
+    fireEvent.wheel(canvas, { deltaY: 30 });
+    vi.advanceTimersByTime(150);
+    expect(mocks.saveCamera).toHaveBeenCalledTimes(1);
   });
 
   it("saves the camera after two-finger wheel pan settles", () => {

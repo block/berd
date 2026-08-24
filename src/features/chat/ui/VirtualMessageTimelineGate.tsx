@@ -8,8 +8,11 @@ import { createLoadedTranscriptState } from "../transcript/virtual/react/useTran
 
 type MessageTimelineProps = ComponentProps<typeof MessageTimeline>;
 
+export type TranscriptRendererPolicy = "auto" | "classic";
+
 interface VirtualMessageTimelineGateProps extends MessageTimelineProps {
   sessionId: string;
+  rendererPolicy?: TranscriptRendererPolicy;
   /** Filled by the virtual timeline with its indexed search backend. The
       classic timeline mounts everything, so the search controller falls back
       to direct DOM matching when this stays null. */
@@ -18,6 +21,7 @@ interface VirtualMessageTimelineGateProps extends MessageTimelineProps {
 
 export function VirtualMessageTimelineGate({
   sessionId,
+  rendererPolicy = "auto",
   searchBackendRef,
   ...timelineProps
 }: VirtualMessageTimelineGateProps) {
@@ -26,10 +30,11 @@ export function VirtualMessageTimelineGate({
   );
 
   const virtualRendererEnabled = virtualRendererExperiment?.enabled ?? false;
+  const useVirtualRenderer =
+    rendererPolicy === "auto" && virtualRendererEnabled;
   const loadedTranscript = useMemo(
-    () =>
-      virtualRendererEnabled ? createLoadedTranscriptState(sessionId) : null,
-    [sessionId, virtualRendererEnabled],
+    () => (useVirtualRenderer ? createLoadedTranscriptState(sessionId) : null),
+    [sessionId, useVirtualRenderer],
   );
 
   if (!loadedTranscript) {

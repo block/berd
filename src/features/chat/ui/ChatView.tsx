@@ -2,23 +2,16 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
 } from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence } from "motion/react";
 import { IconLayoutSidebarLeftCollapse } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { VirtualMessageTimelineGate } from "./VirtualMessageTimelineGate";
 import { ChatSearchBar } from "./ChatSearchBar";
-import { WorkspaceSetupChoice } from "./WorkspaceSetupChoice";
-import { summarizeProjectWorkspaceStartup } from "@/features/projects/lib/projectChatWorkspaces";
-import { ChatInput } from "./ChatInput";
+import { ChatTranscriptSurface } from "./ChatTranscriptSurface";
 import { LoadingBerd } from "./LoadingBerd";
-import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
-import { ConversationEmptyAvatar } from "./ConversationEmptyAvatar";
-import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import { ChatRightRail } from "./ChatRightRail";
 import {
   ARTIFACT_VIEWER_RAIL_ALLOWANCE_PX,
@@ -35,10 +28,11 @@ import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 import { perfLog } from "@/shared/lib/perfLog";
 import { Badge } from "@/shared/ui/badge";
 import { cn } from "@/shared/lib/cn";
+import type { WorkspaceNameRequest } from "../hooks/useChatSessionController";
 import {
-  useChatSessionController,
-  type WorkspaceNameRequest,
-} from "../hooks/useChatSessionController";
+  ConversationComposerCapability,
+  useConversationComposerBinding,
+} from "../capabilities/ConversationComposerCapability";
 import { useResizableAgentBuilderRail } from "../hooks/useResizableAgentBuilderRail";
 import { useWorkspaceRepository } from "@/features/workspaces/workspaceRepository";
 import { useChangeSessionFolder } from "../hooks/useChangeSessionFolder";
@@ -46,7 +40,6 @@ import {
   useChatSessionStore,
   type ChatSession,
 } from "../stores/chatSessionStore";
-import type { ChatInputControls } from "../types";
 import { TerminalCapability } from "@/features/terminal/capabilities/TerminalCapability";
 import { useTerminalController } from "@/features/terminal/hooks/useTerminalController";
 import { TerminalDockPreview } from "@/features/terminal/ui/TerminalDockPreview";
@@ -67,7 +60,6 @@ import {
   isContextPanelVisible,
 } from "@/features/chat/lib/chatCapabilityVisibility";
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
-import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
 import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
 import { useVoiceConversationController } from "@/features/voice-conversation/hooks/useVoiceConversationController";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
@@ -79,20 +71,12 @@ import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import {
   SecurityConfirmationPanel,
-  useHasPendingSecurityConfirmation,
   useRegisterSecurityConfirmationSurface,
 } from "@/features/security/ui/SecurityConfirmationPanel";
 
 const CHAT_RESPONDING_PILL_CLASS =
   "rounded-full bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)] [--shimmer-ink:var(--color-surface-chat-responding-pill-fg)]";
 const CLOSED_RIGHT_RAIL_DOCK_TARGET_WIDTH_PX = 48;
-function shouldStageInitialTranscript(
-  messages: readonly unknown[],
-  isLoadingHistory: boolean,
-): boolean {
-  return messages.length > 0 && !isLoadingHistory;
-}
-
 interface ChatViewProps {
   sessionId: string;
   activeSession?: ChatSession | null;
@@ -132,8 +116,6 @@ export function ChatView({
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   useRegisterSecurityConfirmationSurface(sessionId);
-  const hasPendingSecurityConfirmation =
-    useHasPendingSecurityConfirmation(sessionId);
   const isArtifactViewerOpen = useOpenArtifact(sessionId) !== null;
   const mountStart = useRef(performance.now());
   const terminalRootRef = useRef<HTMLDivElement | null>(null);
@@ -150,12 +132,17 @@ export function ChatView({
     backendRef: transcriptSearchBackendRef,
   });
   const { close: closeSearch } = search;
-  const controller = useChatSessionController({
-    sessionId,
-    readOnly: Boolean(readOnlyStatus),
+  const composerBinding = useConversationComposerBinding({
+    target: {
+      kind: "existingSession",
+      sessionId,
+      sessionSnapshot: activeSession,
+      readOnlyReason: readOnlyStatus,
+    },
     onCreatePersonaRequested: onCreatePersona,
     onWorkspaceNameRequest,
   });
+  const { controller, admissionBlocked, onSend } = composerBinding;
   const activeSessionClientSessionId = activeSession?.clientSessionId ?? null;
 
   useLayoutEffect(() => {
@@ -251,7 +238,7 @@ export function ChatView({
     // Voice delivery only needs to wait for admission. Holding its per-session
     // queue through the full run would prevent later utterances from steering
     // the active run.
-    onSend: controller.handleSend,
+    onSend,
     enabled: capabilities.voiceConversation,
     isGooseSession: controller.selectedProvider === "goose",
     pocketReady: voiceReady,
@@ -263,6 +250,7 @@ export function ChatView({
     },
     readOnly: Boolean(readOnlyStatus),
     disabled:
+      admissionBlocked ||
       controller.projectMetadataPending ||
       controller.isCompactingContext ||
       controller.isLoadingHistory ||
@@ -360,8 +348,6 @@ export function ChatView({
   const agentBuilderGridTemplate = isAgentBuilderChatCollapsed
     ? "0fr 1fr"
     : `${1 - builderFraction}fr ${builderFraction}fr`;
-  const isAgentBuilderTargetFailed =
-    isAgentBuilderOpen && effectiveSession?.targetAgentDraftState === "failed";
   const hasVisibleRightRail =
     isAgentBuilderOpen ||
     Boolean(
@@ -574,56 +560,17 @@ export function ChatView({
   const onTimelineChangeFolder =
     !isReadOnly && changeFolderSessionId ? handleChangeFolder : undefined;
 
-  const showIndicator =
-    controller.chatState === "thinking" ||
-    controller.chatState === "streaming" ||
-    controller.chatState === "waiting" ||
-    controller.chatState === "compacting";
+  const shouldShowLoadingIndicator =
+    !controller.isLoadingHistory &&
+    (controller.chatState === "thinking" ||
+      controller.chatState === "streaming" ||
+      controller.chatState === "waiting" ||
+      controller.chatState === "compacting");
   const loadingChatState = controller.chatState as
     | "thinking"
     | "streaming"
     | "waiting"
     | "compacting";
-  const chatInputControls = useMemo<ChatInputControls | undefined>(() => {
-    if (isReadOnly) {
-      return {
-        agentModelPicker: false,
-        attachments: false,
-        autoFocus: false,
-        fileMentions: false,
-        projectPicker: false,
-        skills: false,
-        voice: false,
-      };
-    }
-
-    if (!controller.skillsEnabled || composerHandoffActive) {
-      return {
-        ...(!controller.skillsEnabled ? { skills: false } : {}),
-        ...(composerHandoffActive ? { autoFocus: false } : {}),
-      };
-    }
-
-    return undefined;
-  }, [composerHandoffActive, controller.skillsEnabled, isReadOnly]);
-  const shouldStageTranscript = shouldStageInitialTranscript(
-    controller.messages,
-    controller.isLoadingHistory,
-  );
-  const [initialTranscriptGate, setInitialTranscriptGate] = useState(() => ({
-    sessionId,
-    pending: shouldStageTranscript,
-  }));
-  const isPreparingInitialTranscript =
-    initialTranscriptGate.sessionId === sessionId
-      ? initialTranscriptGate.pending
-      : shouldStageTranscript;
-  const showTimelineLoading =
-    controller.isLoadingHistory || isPreparingInitialTranscript;
-  const shouldShowLoadingIndicator = showIndicator && !showTimelineLoading;
-  const timelineMessages = isPreparingInitialTranscript
-    ? []
-    : controller.messages;
   const suppressEmptyConversationPlaceholder =
     composerHandoffInProgress || controller.queue.queuedMessage !== null;
   const handleForkFromMessage = useCallback(
@@ -644,44 +591,6 @@ export function ChatView({
     },
     [controller.messages, effectiveSession?.id, isReadOnly, onForkChat],
   );
-
-  // Only gate the first render for a session. Later live updates should stream
-  // into the mounted timeline without showing the skeleton again.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId is the reset signal for the initial transcript gate.
-  useEffect(() => {
-    const pending = shouldStageInitialTranscript(
-      controller.messages,
-      controller.isLoadingHistory,
-    );
-
-    setInitialTranscriptGate((current) =>
-      current.sessionId === sessionId && current.pending === pending
-        ? current
-        : { sessionId, pending },
-    );
-
-    if (!pending) {
-      return;
-    }
-
-    return scheduleAfterNextPaint(() => {
-      setInitialTranscriptGate((current) =>
-        current.sessionId === sessionId && current.pending
-          ? { sessionId, pending: false }
-          : current,
-      );
-    });
-  }, [sessionId]);
-
-  let sendDisabledReason: string | undefined;
-  if (readOnlyStatus) {
-    sendDisabledReason = readOnlyStatus;
-  } else if (effectiveSession?.creationState === "failed") {
-    sendDisabledReason =
-      effectiveSession.creationError ?? t("toolbar.sessionStartFailed");
-  } else if (isAgentBuilderTargetFailed) {
-    sendDisabledReason = t("toolbar.agentBuilderPrepareFailed");
-  }
 
   // The composer is owned by the timeline so it stays mounted across loading,
   // empty, and populated states without losing focus or draft text.
@@ -727,13 +636,6 @@ export function ChatView({
     return null;
   }, [controller.messages]);
 
-  const workspaceSetup = controller.defaultWorkspaceSetup
-    ? controller.defaultWorkspaceSetup
-    : controller.deferredWorkspaceRecord?.state;
-  const deferredWorkspaceStartup = summarizeProjectWorkspaceStartup(
-    workspaceSetup?.desired ?? [],
-  );
-
   const composerFooter = (
     <div className="px-[var(--spacing-app-panel-gutter-inline)] pb-[var(--spacing-app-panel-gutter-inline)]">
       <div
@@ -744,204 +646,50 @@ export function ChatView({
         )}
       >
         <SecurityConfirmationPanel sessionId={sessionId} />
-        <ChatInput
-          className={hasPendingSecurityConfirmation ? "hidden" : undefined}
-          surface="bare"
-          innerBareSurface
-          queuedMessageAccessory={
-            controller.unresolvedDeferredSend ? (
-              <p className="text-xs text-destructive" role="alert">
-                {controller.deferredWorkspaceError}
-              </p>
-            ) : !isReadOnly &&
-              deferredWorkspaceStartup.worktreeCount > 0 &&
-              (workspaceSetup?.status === "choice" ||
-                workspaceSetup?.status === "naming" ||
-                workspaceSetup?.status === "creating") ? (
-              <WorkspaceSetupChoice
-                state={workspaceSetup.status}
-                worktreeCount={deferredWorkspaceStartup.worktreeCount}
-                branchCount={deferredWorkspaceStartup.branchCount}
-                exactCounts={deferredWorkspaceStartup.exact}
-                error={workspaceSetup.error}
-                onCancelName={controller.cancelDeferredWorkspaceName}
-                onCreate={controller.createDeferredWorkspace}
-                onSubmitName={controller.submitDeferredWorkspaceName}
-                onSkip={controller.skipDeferredWorkspace}
-              />
-            ) : null
-          }
-          controls={chatInputControls}
-          skillProjectDirs={controller.skillProjectDirs}
-          fileMentionProjectDirs={controller.fileMentionProjectDirs}
-          skillProviderId={controller.selectedProvider}
-          composerActions={{
-            onSend: controller.handleSend,
-            onSteerMessage: (text, personaId, attachments, options) =>
-              controller.steerDraftMessage(
-                text,
-                personaId ?? undefined,
-                attachments,
-                options,
-              ),
-            canSteerMessage: controller.canSteerMessage,
-            onSteerQueuedMessage: controller.steerQueuedMessage,
-            canSteerQueuedMessage: controller.canSteerQueuedMessage,
-            disabled:
-              isReadOnly ||
-              controller.projectMetadataPending ||
-              controller.isCompactingContext,
-            sendDisabled:
-              isReadOnly ||
-              effectiveSession?.creationState === "failed" ||
-              isAgentBuilderTargetFailed ||
-              controller.workspaceSetupInProgress,
-            sendDisabledReason,
-            queuedMessage: composerHandoffInProgress
-              ? null
-              : (controller.queue.queuedMessage ??
-                controller.deferredWorkspaceRecord?.payload ??
-                null),
-            queuedMessages: composerHandoffInProgress
-              ? []
-              : (
-                  controller.queue.queuedRecords ??
-                  (controller.queue.queuedRecord
-                    ? [controller.queue.queuedRecord]
-                    : [])
-                ).map((record) => ({
-                  recordId: record.recordId,
-                  payload: record.payload,
-                })),
-            onUpdateQueue: controller.queue.update,
-            onEditQueue: controller.queue.beginEditing,
-            onCancelQueueEdit: controller.queue.cancelEditing,
-            onSendQueue:
-              !isReadOnly &&
-              !controller.unresolvedDeferredSend &&
-              (controller.deferredWorkspaceRecord?.state.status === "failed" ||
-                controller.deferredWorkspaceRecord?.state.status === "held") &&
-              effectiveSession?.creationState !== "failed"
-                ? controller.sendDeferredAnyway
-                : undefined,
-            onDismissQueue:
-              composerHandoffInProgress ||
-              isReadOnly ||
-              controller.deferredWorkspaceRecord?.state.status === "creating" ||
-              controller.deferredWorkspaceRecord?.state.status === "naming"
-                ? undefined
-                : controller.queue.dismiss,
-            onStop: isReadOnly ? undefined : controller.stopStreaming,
-            isStreaming:
-              !isReadOnly &&
-              (controller.chatState === "streaming" ||
-                controller.chatState === "thinking"),
-            voiceConversation,
+        <ConversationComposerCapability
+          binding={composerBinding}
+          renderingPolicy={{
+            presentation: {
+              surface: "bare",
+              innerBareSurface: true,
+              providerColumnMode: "gated",
+            },
+            lifecycleConstraints: {
+              handoff: {
+                active: composerHandoffActive,
+                inProgress: composerHandoffInProgress,
+              },
+              voiceConversation,
+            },
           }}
+          onCreateProject={onCreateProject}
           onRecallLastUserMessage={
             isReadOnly ? undefined : handleRecallLastUserMessage
           }
           attachmentDropTargetRef={conversationDropTargetRef}
           onAttachmentDragOverChange={setConversationAttachmentDragOver}
-          initialValue={controller.draftValue}
-          initialAttachments={controller.draftAttachments}
-          onDraftChange={controller.handleDraftChange}
-          onDraftAttachmentsChange={controller.handleDraftAttachmentsChange}
-          selectedSkills={controller.selectedSkills}
-          onSkillsChange={controller.handleSkillsChange}
-          personaPicker={{
-            personas: controller.personas,
-            selectedPersonaId: controller.selectedPersonaId,
-            onPersonaChange: controller.handlePersonaChange,
-          }}
-          agentModelPicker={{
-            providers: controller.pickerAgents,
-            providersLoading: controller.providersLoading,
-            selectedProvider: controller.selectedProvider,
-            onProviderChange: controller.handleProviderChange,
-            currentModelId: controller.currentModelId,
-            currentModelProviderId: controller.currentModelProviderId,
-            currentModel: controller.currentModelName ?? undefined,
-            currentExecutionTarget: controller.currentExecutionTarget,
-            availableModels: controller.availableModels,
-            modelsLoading: controller.modelsLoading,
-            modelStatusMessage: controller.modelStatusMessage,
-            onModelChange: controller.handleModelChange,
-            onPickerOpen: controller.handlePickerOpen,
-            // Switching provider in a live session can recreate it, so keep the
-            // provider column behind an explicit reveal.
-            providerColumnMode: "gated",
-          }}
-          reasoningEffort={{
-            config: controller.reasoningEffort,
-            onChange: controller.handleReasoningEffortChange,
-          }}
-          projectPicker={{
-            selectedProjectId: controller.selectedProjectId,
-            availableProjects: controller.availableProjects,
-            onProjectChange: controller.handleProjectChange,
-            onCreateProject: (options) =>
-              onCreateProject?.({
-                onCreated: (projectId) => {
-                  controller.handleProjectChange(projectId);
-                  options?.onCreated?.(projectId);
-                },
-              }),
-          }}
-          contextUsage={{
-            contextTokens: controller.tokenState.accumulatedTotal,
-            contextLimit: controller.tokenState.contextLimit,
-            accumulatedCost: controller.tokenState.accumulatedCost,
-            isContextUsageReady: controller.isContextUsageReady,
-            onCompactContext: controller.compactConversation,
-            canCompactContext: controller.canCompactContext,
-            isCompactingContext: controller.isCompactingContext,
-            supportsCompactionControls: controller.supportsCompactionControls,
-          }}
         />
       </div>
     </div>
   );
 
-  const conversationPlaceholder = showTimelineLoading ? (
-    <ChatLoadingSkeleton />
-  ) : suppressEmptyConversationPlaceholder ? (
-    <div className="flex w-full flex-1" aria-hidden="true" />
-  ) : (
-    <div className="flex w-full flex-1 flex-col items-center justify-center px-6">
-      <AnimatePresence initial={false}>
-        {controller.selectedPersona ? (
-          <motion.div
-            key="conversation-empty-avatar"
-            className="overflow-hidden"
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            transition={{ duration: 0.25, ease: "easeInOut" }}
-          >
-            <div className="pb-4">
-              <ConversationEmptyAvatar persona={controller.selectedPersona} />
-            </div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
-      <p className="text-sm font-normal text-foreground">
-        {t("emptyState.startAConversation")}
-      </p>
-    </div>
-  );
   const timelineSessionId = effectiveSession?.id ?? sessionId;
   const messageTimeline = (
-    <VirtualMessageTimelineGate
+    <ChatTranscriptSurface
       sessionId={timelineSessionId}
-      messages={timelineMessages}
+      messages={controller.messages}
       streamingMessageId={controller.streamingMessageId}
+      isLoadingHistory={controller.isLoadingHistory}
+      selectedPersona={controller.selectedPersona}
+      sessionCwd={controller.sessionArtifactCwd}
       scrollTargetMessageId={controller.scrollTarget?.messageId ?? null}
       scrollTargetQuery={controller.scrollTarget?.query ?? null}
       onScrollTargetHandled={controller.handleScrollTargetHandled}
       searchContentRef={transcriptSearchRootRef}
       searchBackendRef={transcriptSearchBackendRef}
-      onSendMcpAppMessage={isReadOnly ? undefined : controller.handleSend}
+      onSendMcpAppMessage={
+        composerBinding.admissionBlocked ? undefined : composerBinding.onSend
+      }
       onRunShellCommand={
         !isReadOnly && terminalAvailable ? handleRunShellCommand : undefined
       }
@@ -951,12 +699,12 @@ export function ChatView({
       onForkFromMessage={
         !isReadOnly && onForkChat ? handleForkFromMessage : undefined
       }
-      showPlaceholder={showTimelineLoading}
-      placeholder={conversationPlaceholder}
+      suppressEmptyPlaceholder={suppressEmptyConversationPlaceholder}
       footer={composerFooter}
       footerStatus={footerStatus}
     />
   );
+
   useFocusRegion({
     id: "terminal",
     label: "terminal",
@@ -983,11 +731,7 @@ export function ChatView({
   });
 
   return (
-    <ArtifactPolicyProvider
-      messages={timelineMessages}
-      sessionCwd={controller.sessionArtifactCwd}
-      sessionId={sessionId}
-    >
+    <>
       <ArtifactAutoOpenMount
         sessionId={sessionId}
         isHistoryLoading={controller.isLoadingHistory}
@@ -1169,6 +913,6 @@ export function ChatView({
           onOpenTerminalAtPath={handleOpenTerminalAtPath}
         />
       </div>
-    </ArtifactPolicyProvider>
+    </>
   );
 }

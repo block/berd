@@ -121,7 +121,6 @@ export function useChat(
   const runtime = useChatStore(
     (s) => s.sessionStateById[sessionId] ?? INITIAL_SESSION_CHAT_RUNTIME,
   );
-  const setActiveSession = useChatStore((s) => s.setActiveSession);
   const addMessage = useChatStore((s) => s.addMessage);
   const clearMessages = useChatStore((s) => s.clearMessages);
   const setChatState = useChatStore((s) => s.setChatState);
@@ -196,9 +195,6 @@ export function useChat(
         systemPromptOverride ??
         agent?.systemPrompt;
 
-      // Ensure active session
-      setActiveSession(sessionId);
-
       const abort = new AbortController();
       abortRef.current = abort;
 
@@ -259,7 +255,6 @@ export function useChat(
     },
     [
       sessionId,
-      setActiveSession,
       clearDraft,
       providerOverride,
       systemPromptOverride,
@@ -414,7 +409,6 @@ export function useChat(
       flushBufferedStreamingUpdatesForSession(sessionId, {
         flushSubtitle: true,
       });
-      setActiveSession(sessionId);
       setChatState(sessionId, "compacting");
       setStreamingMessageId(sessionId, null);
       setError(sessionId, null);
@@ -507,7 +501,6 @@ export function useChat(
       options,
       resolvePersonaInfo,
       sessionId,
-      setActiveSession,
       setChatState,
       setStreamingMessageId,
       setError,

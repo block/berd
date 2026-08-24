@@ -1245,13 +1245,11 @@ export function AppShell({
     null,
   );
   const hydratingPinnedSessionIdsRef = useRef<Set<string>>(new Set());
-
   const hydratePinnedChatSessions = useCallback(
     async (sessionIds: string[]) => {
       const uniqueSessionIds = [...new Set(sessionIds)].filter(Boolean);
       const sessionStore = useChatSessionStore.getState();
       const sessionsToLoad: string[] = [];
-
       for (const sessionId of uniqueSessionIds) {
         if (hydratingPinnedSessionIdsRef.current.has(sessionId)) {
           continue;

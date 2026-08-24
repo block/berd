@@ -15,12 +15,14 @@ import {
 } from "@/app/contexts/TopBarActionsContext";
 import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/terminalCwdPreference";
 import type { ChatSession } from "../../stores/chatSessionStore";
+import { useSecurityConfirmationStore } from "@/features/security/stores/securityConfirmationStore";
 import { ChatView } from "../ChatView";
 
 const mocks = vi.hoisted(() => ({
   messageTimelineSpy: vi.fn(),
   chatInputSpy: vi.fn(),
   chatRightRailSpy: vi.fn(),
+  voiceControllerSpy: vi.fn(),
   setRightRailOpen: vi.fn(),
   patchSession: vi.fn(),
   handleSend: vi.fn(() => true),
@@ -93,14 +95,17 @@ vi.mock("react-i18next", () => ({
 vi.mock(
   "@/features/voice-conversation/hooks/useVoiceConversationController",
   () => ({
-    useVoiceConversationController: () => ({
-      lifecycle: "stopped",
-      uiState: "off",
-      microphoneMuted: false,
-      start: vi.fn(),
-      stop: vi.fn(),
-      toggleMicrophone: vi.fn(),
-    }),
+    useVoiceConversationController: (options: unknown) => {
+      mocks.voiceControllerSpy(options);
+      return {
+        lifecycle: "stopped",
+        uiState: "off",
+        microphoneMuted: false,
+        start: vi.fn(),
+        stop: vi.fn(),
+        toggleMicrophone: vi.fn(),
+      };
+    },
   }),
 );
 
@@ -393,6 +398,7 @@ describe("ChatView MCP app messaging", () => {
     mocks.messageTimelineSpy.mockClear();
     mocks.chatInputSpy.mockClear();
     mocks.chatRightRailSpy.mockClear();
+    mocks.voiceControllerSpy.mockClear();
     mocks.setRightRailOpen.mockClear();
     mocks.patchSession.mockClear();
     mocks.handleSend.mockClear();
@@ -407,6 +413,10 @@ describe("ChatView MCP app messaging", () => {
     mocks.activeWorkspaceBySession = {};
     mocks.afterNextPaintCallbacks = [];
     mocks.autoFlushAfterNextPaint = true;
+    useSecurityConfirmationStore.setState({
+      pendingBySessionId: {},
+      mountedSurfaceCountBySessionId: {},
+    });
     window.localStorage.clear();
     mockMatchMedia(false);
     mocks.useChatSessionController.mockReturnValue({
@@ -501,6 +511,30 @@ describe("ChatView MCP app messaging", () => {
     });
   });
 
+  it("keeps full chat automatic and passes the complete transcript", () => {
+    const completeMessages = Array.from({ length: 12 }, (_, index) => ({
+      id: `user-${index + 1}`,
+      role: "user" as const,
+      created: index,
+      content: [{ type: "text" as const, text: `Question ${index + 1}` }],
+      metadata: { userVisible: true },
+    }));
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      messages: completeMessages,
+    });
+
+    render(<ChatView sessionId="session-1" />);
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      messages: typeof completeMessages;
+      rendererPolicy?: string;
+    };
+    expect(timelineProps.messages).toBe(completeMessages);
+    expect(timelineProps.messages).toHaveLength(12);
+    expect(timelineProps.rendererPolicy).toBe("auto");
+  });
+
   it("does not pass fork-from-message in read-only mode", () => {
     render(
       <ChatView
@@ -565,6 +599,67 @@ describe("ChatView MCP app messaging", () => {
       className?: string;
     };
     expect(chatInputProps.className).toBeUndefined();
+  });
+
+  it("blocks and hides composer, queue, MCP, and voice delivery while security confirmation is pending", () => {
+    const sendDeferredAnyway = vi.fn();
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      deferredWorkspaceRecord: {
+        kind: "deferred",
+        recordId: "deferred-1",
+        payload: { text: "queued" },
+        state: { status: "held", desired: [] },
+      },
+      queue: { queuedMessage: { text: "queued" }, dismiss: vi.fn() },
+      sendDeferredAnyway,
+    });
+    useSecurityConfirmationStore.setState({
+      pendingBySessionId: {
+        "session-1": [
+          {
+            request: { sessionId: "session-1" } as never,
+            title: "Security",
+            command: null,
+            alertText: "Alert",
+            resolve: () => undefined,
+            inferredExplanation: { status: "idle" },
+          },
+        ],
+      },
+    });
+
+    render(<ChatView sessionId="session-1" />);
+
+    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+      className?: string;
+      composerActions: {
+        onSend: (text: string) => boolean;
+        onSendQueue?: () => boolean;
+        onSteerMessage?: unknown;
+        onSteerQueuedMessage?: unknown;
+      };
+    };
+    expect(chatInputProps.className).toBe("hidden");
+    expect(chatInputProps.composerActions.onSend("blocked")).toBe(false);
+    expect(chatInputProps.composerActions.onSendQueue).toBeUndefined();
+    expect(chatInputProps.composerActions.onSteerMessage).toBeUndefined();
+    expect(chatInputProps.composerActions.onSteerQueuedMessage).toBeUndefined();
+    expect(mocks.handleSend).not.toHaveBeenCalled();
+    expect(sendDeferredAnyway).not.toHaveBeenCalled();
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      onSendMcpAppMessage?: unknown;
+    };
+    expect(timelineProps.onSendMcpAppMessage).toBeUndefined();
+
+    const voiceOptions = mocks.voiceControllerSpy.mock.calls.at(-1)?.[0] as {
+      onSend: (text: string) => boolean;
+      disabled: boolean;
+    };
+    expect(voiceOptions.disabled).toBe(true);
+    expect(voiceOptions.onSend("blocked voice")).toBe(false);
+    expect(mocks.handleSend).not.toHaveBeenCalled();
   });
 
   it("shows the empty-state placeholder while keeping the composer mounted for a fresh chat", () => {
@@ -1220,6 +1315,53 @@ describe("ChatView MCP app messaging", () => {
     expect(chatInputProps.composerActions?.sendDisabledReason).toBe(
       "toolbar.agentBuilderPrepareFailed",
     );
+  });
+
+  it("blocks ordinary, deferred, and voice delivery when the execution target fails", () => {
+    const sendDeferredAnyway = vi.fn();
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      deferredWorkspaceRecord: {
+        kind: "deferred",
+        recordId: "deferred-1",
+        payload: { text: "queued" },
+        state: { status: "held", desired: [] },
+      },
+      queue: { queuedMessage: { text: "queued" }, dismiss: vi.fn() },
+      sendDeferredAnyway,
+    });
+    const activeSession = {
+      id: "session-1",
+      title: "Build agent",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: "build-agent",
+      targetAgentDraftState: "failed",
+    } satisfies ChatSession;
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+      composerActions: {
+        onSend: (text: string) => boolean;
+        onSendQueue?: () => boolean;
+        disabled?: boolean;
+      };
+    };
+    expect(chatInputProps.composerActions.disabled).toBe(true);
+    expect(chatInputProps.composerActions.onSendQueue).toBeUndefined();
+    expect(chatInputProps.composerActions.onSend("blocked")).toBe(false);
+    expect(mocks.handleSend).not.toHaveBeenCalled();
+    expect(sendDeferredAnyway).not.toHaveBeenCalled();
+
+    const voiceOptions = mocks.voiceControllerSpy.mock.calls.at(-1)?.[0] as {
+      onSend: (text: string) => boolean;
+      disabled: boolean;
+    };
+    expect(voiceOptions.disabled).toBe(true);
+    expect(voiceOptions.onSend("blocked voice")).toBe(false);
+    expect(mocks.handleSend).not.toHaveBeenCalled();
   });
 
   it("keeps the canonical composer enabled when a pending builder is closed", () => {

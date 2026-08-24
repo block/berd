@@ -163,6 +163,9 @@ function trimMessageSessionCache(
   const protectedSessionIds = new Set([
     ...recentMessageSessionIds,
     ...additionalProtectedSessionIds,
+    ...Object.entries(state.mountedTranscriptCountBySession)
+      .filter(([, count]) => count > 0)
+      .map(([sessionId]) => sessionId),
   ]);
   const evictedSessionIds: string[] = [];
   let cachedSessionCount = Object.keys(state.messagesBySession).length;
@@ -402,6 +405,7 @@ interface ChatStoreState {
   draftAttachmentsBySession: Record<string, ChatAttachmentDraft[]>;
   activeSessionId: string | null;
   recentMessageSessionIds: string[];
+  mountedTranscriptCountBySession: Record<string, number>;
   isViewingActiveSession: boolean;
   isConnected: boolean;
   loadingSessionIds: Set<string>;
@@ -411,6 +415,7 @@ interface ChatStoreState {
 interface ChatStoreActions {
   setActiveSession: (sessionId: string) => void;
   setActiveSessionViewing: (isViewing: boolean) => void;
+  retainMountedTranscript: (sessionId: string) => () => void;
   addMessage: (sessionId: string, message: Message) => void;
   updateMessage: (
     sessionId: string,
@@ -553,6 +558,7 @@ const createChatStore: StateCreator<
   draftAttachmentsBySession: {},
   activeSessionId: null,
   recentMessageSessionIds: [],
+  mountedTranscriptCountBySession: {},
   isViewingActiveSession: false,
   isConnected: false,
   loadingSessionIds: new Set<string>(),
@@ -589,6 +595,43 @@ const createChatStore: StateCreator<
 
   setActiveSessionViewing: (isViewingActiveSession) =>
     set({ isViewingActiveSession }),
+
+  retainMountedTranscript: (sessionId) => {
+    set((state) => ({
+      mountedTranscriptCountBySession: {
+        ...state.mountedTranscriptCountBySession,
+        [sessionId]:
+          (state.mountedTranscriptCountBySession[sessionId] ?? 0) + 1,
+      },
+    }));
+
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      let evictedSessionIds: string[] = [];
+      set((state) => {
+        const count = state.mountedTranscriptCountBySession[sessionId] ?? 0;
+        if (count <= 0) return state;
+        const mountedTranscriptCountBySession = {
+          ...state.mountedTranscriptCountBySession,
+        };
+        if (count === 1) delete mountedTranscriptCountBySession[sessionId];
+        else mountedTranscriptCountBySession[sessionId] = count - 1;
+        const nextState = { ...state, mountedTranscriptCountBySession };
+        const trimmedCache = trimMessageSessionCache(
+          nextState,
+          state.recentMessageSessionIds,
+        );
+        evictedSessionIds = trimmedCache.evictedSessionIds;
+        return {
+          mountedTranscriptCountBySession,
+          messagesBySession: trimmedCache.messagesBySession,
+        };
+      });
+      evictedSessionIds.forEach(clearReplayBuffer);
+    };
+  },
 
   // Message management
   addMessage: (sessionId, message) => {
@@ -1902,6 +1945,11 @@ const createChatStore: StateCreator<
       const { [sessionId]: removedTarget, ...remainingTargets } =
         state.scrollTargetMessageBySession;
       void removedTarget;
+      const {
+        [sessionId]: removedMountedTranscriptCount,
+        ...remainingMountedTranscriptCounts
+      } = state.mountedTranscriptCountBySession;
+      void removedMountedTranscriptCount;
       return {
         messagesBySession: rest,
         sessionStateById: remainingSessionState,
@@ -1911,6 +1959,7 @@ const createChatStore: StateCreator<
         skillDraftsBySession: remainingSkillDrafts,
         draftAttachmentsBySession: remainingDraftAttachments,
         scrollTargetMessageBySession: remainingTargets,
+        mountedTranscriptCountBySession: remainingMountedTranscriptCounts,
         activeSessionId:
           state.activeSessionId === sessionId ? null : state.activeSessionId,
         recentMessageSessionIds: removeRecentMessageSessionId(

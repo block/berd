@@ -6,6 +6,7 @@ import {
   AVATAR_COLLECTION_PAGE_EXPERIMENT_ID,
   BERDY_ONBOARDING_EXPERIMENT_ID,
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
+  CHAT_ON_CANVAS_EXPERIMENT_ID,
   EXPERIMENT_DEFINITIONS,
   RELATED_PULL_REQUESTS_EXPERIMENT_ID,
   SKILL_DISCOVERY_EXPERIMENT_ID,
@@ -135,10 +136,22 @@ describe("ExperimentsSettings", () => {
       SKILL_DISCOVERY_EXPERIMENT_ID,
       STARTER_TASKS_EXPERIMENT_ID,
       VOICE_CONVERSATION_EXPERIMENT_ID,
+      CHAT_ON_CANVAS_EXPERIMENT_ID,
       AVATAR_COLLECTION_PAGE_EXPERIMENT_ID,
       BERDY_ONBOARDING_EXPERIMENT_ID,
       RELATED_PULL_REQUESTS_EXPERIMENT_ID,
     ]);
+  });
+
+  it("keeps chat on canvas manual-only and off by default", () => {
+    expect(
+      EXPERIMENT_DEFINITIONS.find(
+        ({ id }) => id === CHAT_ON_CANVAS_EXPERIMENT_ID,
+      ),
+    ).toMatchObject({
+      defaultEnabled: false,
+      manualEnableOnly: true,
+    });
   });
 
   it("groups onboarding experiments and resets all onboarding experiences", async () => {
