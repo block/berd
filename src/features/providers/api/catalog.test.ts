@@ -62,6 +62,29 @@ describe("provider setup catalog API", () => {
     });
   });
 
+  it("retains curated model aliases when mapping the setup catalog", () => {
+    expect(
+      mapProviderSetupCatalogEntryDto({
+        providerId: "databricks_v2",
+        name: "Databricks AI Gateway",
+        category: "model",
+        description: "Databricks models",
+        setupMethod: "host_with_oauth_fallback",
+        group: "additional",
+        showOnlyWhenInstalled: false,
+        aliases: ["databricks_ai_gateway"],
+        supportsInstall: false,
+        supportsAuth: true,
+        supportsAuthStatus: true,
+      }).aliases,
+    ).toEqual([
+      "databricks_v2",
+      "databricks",
+      "databricks-ai-gateway",
+      "databricks_ai_gateway",
+    ]);
+  });
+
   it("requests the setup catalog through ACP", async () => {
     mocks.catalogList.mockResolvedValue({
       providers: [

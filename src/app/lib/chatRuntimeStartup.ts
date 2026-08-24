@@ -26,7 +26,7 @@ import { useAgentSetupStore } from "@/features/providers/stores/agentSetupStore"
 import { useModelSetupStore } from "@/features/providers/stores/modelSetupStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import {
-  getIntentionalConfiguredProviderIds,
+  getModelDiscoveryProviderIds,
   reconcileManagedDefaultProviderSelection,
   saveDefaultProviderSelectionFromConfiguredProvider,
 } from "@/features/providers/defaultProviderConfig";
@@ -298,7 +298,7 @@ async function startChatRuntime(
 
   const refreshProviderModels = async (): Promise<Set<string>> => {
     const runtimeConfigResult = useRuntimeConfigStore.getState().result;
-    const configuredProviderIds = await getIntentionalConfiguredProviderIds(
+    const configuredProviderIds = await getModelDiscoveryProviderIds(
       await checkAllProviderStatus({ coalesce: true }),
     );
     const refreshProviderIds = getModelCacheRefreshProviderIds(
