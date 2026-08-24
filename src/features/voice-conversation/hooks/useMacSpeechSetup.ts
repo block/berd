@@ -14,6 +14,13 @@ export interface MacSpeechSetup {
   install: () => Promise<void>;
 }
 
+export function mergeMacSpeechStatus(
+  current: MacSpeechStatus | null,
+  next: MacSpeechStatus,
+): MacSpeechStatus {
+  return current && next.revision < current.revision ? current : next;
+}
+
 export function useMacSpeechSetup(enabled = true): MacSpeechSetup {
   const [status, setStatus] = useState<MacSpeechStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -24,7 +31,7 @@ export function useMacSpeechSetup(enabled = true): MacSpeechSetup {
     const generation = ++generationRef.current;
     const next = await getMacSpeechStatus();
     if (generation === generationRef.current) {
-      setStatus(next);
+      setStatus((current) => mergeMacSpeechStatus(current, next));
       setError(null);
     }
     return next;
@@ -48,7 +55,7 @@ export function useMacSpeechSetup(enabled = true): MacSpeechSetup {
     void listenToMacSpeechStatus((next) => {
       if (!active) return;
       generationRef.current += 1;
-      setStatus(next);
+      setStatus((current) => mergeMacSpeechStatus(current, next));
       setError(null);
     }).then((nextUnlisten) => {
       if (!active) nextUnlisten();
@@ -75,7 +82,7 @@ export function useMacSpeechSetup(enabled = true): MacSpeechSetup {
     try {
       const next = await installMacSpeechModel();
       generationRef.current += 1;
-      setStatus(next);
+      setStatus((current) => mergeMacSpeechStatus(current, next));
     } catch (nextError) {
       const message = String(nextError);
       setStatus((current) =>

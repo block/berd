@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { MacSpeechStatus } from "../api/macSpeech";
-import { useMacSpeechSetup } from "./useMacSpeechSetup";
+import { mergeMacSpeechStatus, useMacSpeechSetup } from "./useMacSpeechSetup";
 
 const api = vi.hoisted(() => ({
   getStatus: vi.fn(),
@@ -42,6 +42,18 @@ beforeEach(() => {
 
 afterEach(() => {
   window.__TAURI_INTERNALS__ = originalTauriInternals;
+});
+
+it("keeps terminal status when delayed progress arrives", () => {
+  const completed = status({
+    modelInstalled: true,
+    installing: false,
+    progress: null,
+    revision: 3,
+  });
+  const delayedProgress = status({ revision: 2, progress: 0.9 });
+
+  expect(mergeMacSpeechStatus(completed, delayedProgress)).toBe(completed);
 });
 
 it("clears optimistic installation state when the command fails", async () => {
