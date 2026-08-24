@@ -348,6 +348,14 @@
         "decrease": "Reducir tamaño de fuente",
         "increase": "Aumentar tamaño de fuente",
         "unit": "píxeles"
+      },
+      "fontFamily": {
+        "label": "Familia tipográfica",
+        "options": {
+          "sans": "Inter",
+          "serif": "Fraunces",
+          "mono": "Geist Mono"
+        }
       }
     }
   }

@@ -288,7 +288,11 @@ describe("homeLayoutMapper", () => {
         z: 3,
         width: 280,
         height: 56,
-        state: { text: "Weekly automations", fontSizePx: 24 },
+        state: {
+          text: "Weekly automations",
+          fontSizePx: 24,
+          fontFamily: "serif",
+        },
       },
     ]);
 
@@ -299,6 +303,7 @@ describe("homeLayoutMapper", () => {
         variant: "label",
         text: "Weekly automations",
         fontSizePx: 24,
+        fontFamily: "serif",
       },
     });
 
@@ -314,6 +319,7 @@ describe("homeLayoutMapper", () => {
         variant: "label",
         text: "Weekly automations",
         fontSizePx: 24,
+        fontFamily: "serif",
       },
     });
   });

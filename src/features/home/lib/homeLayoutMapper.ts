@@ -7,6 +7,10 @@ import {
   widgetSizeForInstance,
 } from "../widgets/catalog";
 import { clockModeOf } from "../widgets/clockWidgetMode";
+import {
+  LABEL_FONT_FAMILIES,
+  type LabelFontFamily,
+} from "../widgets/labelWidgetModel";
 import type { CanvasBounds, WidgetInstance } from "../widgets/types";
 import { clampToBounds, snapPoint } from "./snapToGrid";
 
@@ -198,6 +202,11 @@ function persistedStickyNoteStateFromItem(
     Number.isFinite(item.widgetState.fontSizePx)
   ) {
     state.fontSizePx = item.widgetState.fontSizePx;
+  }
+  if (
+    LABEL_FONT_FAMILIES.includes(item.widgetState.fontFamily as LabelFontFamily)
+  ) {
+    state.fontFamily = item.widgetState.fontFamily;
   }
   if (isLabel) {
     state.variant = LABEL_WIDGET_VARIANT;
@@ -401,6 +410,13 @@ function widgetStateForLayoutItem(
         Number.isFinite(instance.state.fontSizePx)
       ) {
         state.fontSizePx = instance.state.fontSizePx;
+      }
+      if (
+        LABEL_FONT_FAMILIES.includes(
+          instance.state?.fontFamily as LabelFontFamily,
+        )
+      ) {
+        state.fontFamily = instance.state?.fontFamily;
       }
       if (
         instance.type === "onboardingTour" &&

@@ -348,6 +348,14 @@
         "decrease": "Decrease font size",
         "increase": "Increase font size",
         "unit": "pixels"
+      },
+      "fontFamily": {
+        "label": "Font family",
+        "options": {
+          "sans": "Inter",
+          "serif": "Fraunces",
+          "mono": "Geist Mono"
+        }
       }
     }
   }

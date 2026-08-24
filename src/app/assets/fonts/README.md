@@ -13,6 +13,17 @@ a frozen display-oriented fork that is too tight for body copy.)
 
 Licensed under the SIL Open Font License 1.1 — see `INTER_OFL.txt`.
 
+## Fraunces
+
+`Fraunces[SOFT,WONK,opsz,wght].ttf` and
+`Fraunces-Italic[SOFT,WONK,opsz,wght].ttf` are the variable fonts from the
+Google Fonts repository at https://github.com/google/fonts/tree/main/ofl/fraunces.
+
+Fraunces is an expressive serif option for Home canvas labels. It is
+self-hosted so saved labels render consistently offline.
+
+Licensed under the SIL Open Font License 1.1 — see `FRAUNCES_OFL.txt`.
+
 ## Geist Mono
 
 `GeistMono[wght].ttf` is the variable font (weight axis 100–900) from the

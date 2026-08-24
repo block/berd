@@ -10,6 +10,10 @@ vi.mock("react-i18next", () => ({
         "widgets.stickyNote.label": "Sticky note",
         "widgets.label.label": "Label",
         "widgets.label.placeholder": "Add a heading…",
+        "widgets.label.fontFamily.label": "Font family",
+        "widgets.label.fontFamily.options.sans": "Inter",
+        "widgets.label.fontFamily.options.serif": "Fraunces",
+        "widgets.label.fontFamily.options.mono": "Geist Mono",
         "widgets.label.fontSize.label": "Font size in pixels",
         "widgets.label.fontSize.decrease": "Decrease font size",
         "widgets.label.fontSize.increase": "Increase font size",
@@ -206,6 +210,29 @@ describe("StickyNoteWidget", () => {
     fireEvent.pointerDown(screen.getByTestId("outside"));
     expect(editor).toHaveAttribute("contenteditable", "false");
     expect(input).not.toBeVisible();
+  });
+
+  it("applies and persists the selected label font family", () => {
+    const onUpdateState = vi.fn();
+    render(
+      <StickyNoteWidget
+        {...baseProps}
+        onUpdateState={onUpdateState}
+        instance={{
+          ...baseProps.instance,
+          type: "label",
+          state: { text: "Roadmap label", fontFamily: "serif" },
+        }}
+      />,
+    );
+
+    expect(getEditor()).toHaveStyle({
+      fontFamily: "var(--font-label-serif)",
+    });
+    fireEvent.doubleClick(getEditor());
+    fireEvent.click(screen.getByRole("combobox", { name: "Font family" }));
+    fireEvent.click(screen.getByRole("option", { name: "Geist Mono" }));
+    expect(onUpdateState).toHaveBeenCalledWith({ fontFamily: "mono" });
   });
 
   it("lets pointer-down bubble across a label until edit mode", () => {

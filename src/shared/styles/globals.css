@@ -81,6 +81,27 @@
   font-display: swap;
 }
 
+/* Fraunces — self-hosted variable font (SIL OFL 1.1, see
+   src/app/assets/fonts/FRAUNCES_OFL.txt). Available to canvas labels as an
+   expressive serif while keeping all font rendering offline and deterministic. */
+@font-face {
+  font-family: "Fraunces";
+  src: url("../../app/assets/fonts/Fraunces[SOFT,WONK,opsz,wght].ttf")
+    format("truetype-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Fraunces";
+  src: url("../../app/assets/fonts/Fraunces-Italic[SOFT,WONK,opsz,wght].ttf")
+    format("truetype-variations");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
 /* Geist Mono — self-hosted variable font (SIL OFL 1.1, see
    src/app/assets/fonts/GEIST_MONO_OFL.txt). Backs the --font-mono
    token (code, paths, terminal output) and the digital clock face.
@@ -1151,6 +1172,7 @@
     "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-label-serif: "Fraunces", ui-serif, Georgia, serif;
   --font-terminal-symbols: "NerdFontsSymbols Nerd Font";
   --font-serif: serif;
   --font-display: "Inter", system-ui, sans-serif;

@@ -11,12 +11,23 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { NumberStepper } from "@/shared/ui/number-stepper";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select";
 import type { WidgetRenderProps } from "./types";
 import { StarterTaskList } from "@/features/home/onboarding/StarterTaskList";
 import {
+  LABEL_FONT_FAMILIES,
+  type LabelFontFamily,
   LABEL_FONT_SIZE_LARGE_STEP_PX,
   LABEL_FONT_SIZE_MAX_PX,
   LABEL_FONT_SIZE_MIN_PX,
+  labelFontFamily,
+  labelFontFamilyStyle,
   labelFontSizePx,
 } from "./labelWidgetModel";
 import { useStarterTasks } from "@/features/home/onboarding/StarterTasksContext";
@@ -509,6 +520,7 @@ export function StickyNoteWidget({
     const isLabel = instance.type === "label";
     const fontSize = getEditableFontSize(instance.state);
     const labelFontSize = labelFontSizePx(instance.state);
+    const labelFamily = labelFontFamily(instance.state);
     const textClassName = noteTextClassName(isLabel);
     const mutedTextClassName = noteMutedTextClassName(isLabel);
 
@@ -627,7 +639,14 @@ export function StickyNoteWidget({
               );
               saveEditor();
             }}
-            style={isLabel ? { fontSize: labelFontSize } : undefined}
+            style={
+              isLabel
+                ? {
+                    fontSize: labelFontSize,
+                    ...labelFontFamilyStyle(labelFamily),
+                  }
+                : undefined
+            }
             className={cn(
               "scrollbar-none overscroll-contain relative min-h-0 flex-1 whitespace-pre-wrap break-words border-0 bg-transparent p-0 font-sans caret-foreground outline-none [box-shadow:none] [outline:0]",
               isLabel
@@ -707,17 +726,41 @@ export function StickyNoteWidget({
             </>
           ) : null}
           {isLabel ? (
-            <NumberStepper
-              value={labelFontSize}
-              onValueChange={(value) => onUpdateState({ fontSizePx: value })}
-              min={LABEL_FONT_SIZE_MIN_PX}
-              max={LABEL_FONT_SIZE_MAX_PX}
-              largeStep={LABEL_FONT_SIZE_LARGE_STEP_PX}
-              unit={t("widgets.label.fontSize.unit")}
-              label={t("widgets.label.fontSize.label")}
-              decrementLabel={t("widgets.label.fontSize.decrease")}
-              incrementLabel={t("widgets.label.fontSize.increase")}
-            />
+            <div className="flex items-center gap-1">
+              <Select
+                value={labelFamily}
+                onValueChange={(value: LabelFontFamily) =>
+                  onUpdateState({ fontFamily: value })
+                }
+              >
+                <SelectTrigger
+                  size="sm"
+                  aria-label={t("widgets.label.fontFamily.label")}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper" side="top">
+                  {LABEL_FONT_FAMILIES.map((family) => (
+                    <SelectItem key={family} value={family}>
+                      <span style={labelFontFamilyStyle(family)}>
+                        {t(`widgets.label.fontFamily.options.${family}`)}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <NumberStepper
+                value={labelFontSize}
+                onValueChange={(value) => onUpdateState({ fontSizePx: value })}
+                min={LABEL_FONT_SIZE_MIN_PX}
+                max={LABEL_FONT_SIZE_MAX_PX}
+                largeStep={LABEL_FONT_SIZE_LARGE_STEP_PX}
+                unit={t("widgets.label.fontSize.unit")}
+                label={t("widgets.label.fontSize.label")}
+                decrementLabel={t("widgets.label.fontSize.decrease")}
+                incrementLabel={t("widgets.label.fontSize.increase")}
+              />
+            </div>
           ) : (
             <div className="flex items-center gap-1">
               {EDITABLE_NOTE_FONT_SIZES.map((size) => (
