@@ -903,7 +903,7 @@ describe("native assistant speech stream", () => {
     expect(notice).toContain('"confidence":"medium"');
   });
 
-  it("does not treat generated-but-incomplete audio as fully spoken", async () => {
+  it("uses played audio from incomplete synthesis with low confidence", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
       .getState()
@@ -923,7 +923,7 @@ describe("native assistant speech stream", () => {
         segments: [
           {
             text: "One. Two. Three.",
-            playedFrames: 1_000,
+            playedFrames: 600,
             totalFrames: 1_000,
             synthesisComplete: false,
           },
@@ -934,8 +934,72 @@ describe("native assistant speech stream", () => {
     expect(
       useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
     ).toMatchObject({
-      speech: { status: "interrupted", spokenThrough: 0 },
+      speech: {
+        status: "interrupted",
+        spokenThrough: "One. Two".length,
+        confidence: "low",
+      },
     });
+    const notice = takeVoicePlaybackNotices("session-1") ?? "";
+    expect(notice).toContain('"spokenText":"One. Two"');
+    expect(notice).toContain('"unspokenText":". Three."');
+    expect(notice).toContain('"confidence":"low"');
+  });
+
+  it("sums only each target's interleaved delivered spans", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore.getState().setMessages("session-1", [
+      assistant([
+        { type: "text", text: "Alpha. " },
+        { type: "text", text: "" },
+      ]),
+    ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalledTimes(1));
+    useChatStore.getState().setMessages("session-1", [
+      assistant([
+        { type: "text", text: "Alpha. " },
+        { type: "text", text: "Beta. " },
+      ]),
+    ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalledTimes(2));
+    useChatStore.getState().setMessages("session-1", [
+      assistant([
+        { type: "text", text: "Alpha. Gamma." },
+        { type: "text", text: "Beta. " },
+      ]),
+    ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalledTimes(3));
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        segments: [
+          {
+            text: "Alpha. Beta. Gamma.",
+            playedFrames: 1_800,
+            totalFrames: 1_900,
+            synthesisComplete: true,
+          },
+        ],
+      },
+    });
+
+    const content =
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content;
+    expect(content?.[0]).toMatchObject({
+      speech: { status: "interrupted", spokenThrough: "Alpha. Gamma".length },
+    });
+    expect(content?.[1]).toMatchObject({
+      speech: { status: "spoken", spokenThrough: "Beta. ".length },
+    });
+    const notice = takeVoicePlaybackNotices("session-1") ?? "";
+    expect(notice).toContain('"spokenText":"Alpha. Gamma"');
+    expect(notice).toContain('"unspokenText":"."');
+    expect(notice).not.toContain("Beta.");
   });
 
   it("preserves a fully spoken prefix when text arrives after interruption", async () => {

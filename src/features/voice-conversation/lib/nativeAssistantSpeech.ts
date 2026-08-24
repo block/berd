@@ -197,6 +197,7 @@ function estimateSpeechDelivery(
   let searchFrom = 0;
   let cutoff = 0;
   let matchedSegment = false;
+  let usedIncompleteSegment = false;
   for (const segment of delivery.segments) {
     const segmentStart = text.indexOf(segment.text, searchFrom);
     if (segmentStart === -1) continue;
@@ -207,11 +208,10 @@ function estimateSpeechDelivery(
       Math.min(totalFrames, segment.playedFrames),
     );
     if (totalFrames === 0 || playedFrames === 0) break;
-    if (!segment.synthesisComplete) {
-      break;
-    }
+    usedIncompleteSegment ||= !segment.synthesisComplete;
     if (playedFrames >= totalFrames) {
       cutoff = segmentStart + segment.text.length;
+      if (!segment.synthesisComplete) break;
       searchFrom = cutoff;
       continue;
     }
@@ -225,7 +225,7 @@ function estimateSpeechDelivery(
     cutoff,
     spokenText: text.slice(0, cutoff),
     unspokenText: text.slice(cutoff),
-    confidence: matchedSegment ? "medium" : "low",
+    confidence: matchedSegment && !usedIncompleteSegment ? "medium" : "low",
   };
 }
 
@@ -240,16 +240,23 @@ function applyInterruptionEstimate(
     const spans = utterance.targetSpans.filter(
       (span) => targetKey(span) === targetKey(target),
     );
-    const start = spans.at(0)?.start ?? 0;
-    const end = spans.at(-1)?.end ?? start;
-    if (estimate.cutoff >= end && end > start) {
+    const targetLength = spans.reduce(
+      (length, span) => length + (span.end - span.start),
+      0,
+    );
+    const localCutoff = spans.reduce(
+      (length, span) =>
+        length + Math.max(0, Math.min(span.end, estimate.cutoff) - span.start),
+      0,
+    );
+    if (localCutoff >= targetLength && targetLength > 0) {
       setTargetSpeech(utterance.sessionId, target, {
         status: "spoken",
-        spokenThrough: end - start,
+        spokenThrough: targetLength,
       });
       continue;
     }
-    if (estimate.cutoff <= start) {
+    if (localCutoff === 0) {
       if (targetKey(target) === firstTargetKey) {
         setTargetSpeech(utterance.sessionId, target, {
           status: "interrupted",
@@ -262,10 +269,6 @@ function applyInterruptionEstimate(
       setTargetSpeech(utterance.sessionId, target, { status: "notSpoken" });
       continue;
     }
-    const localCutoff = Math.max(
-      0,
-      Math.min(end - start, estimate.cutoff - start),
-    );
     setTargetSpeech(utterance.sessionId, target, {
       status: "interrupted",
       spokenThrough: localCutoff,
