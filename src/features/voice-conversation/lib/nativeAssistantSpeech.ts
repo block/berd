@@ -541,9 +541,27 @@ function interruptActiveUtterance(
   return utterance !== null;
 }
 
-export function stopNativeAssistantSpeech(): void {
+export function stopNativeAssistantSpeech(awaitTerminalDelivery = false): void {
   generation += 1;
-  const interruptedUtterance = interruptActiveUtterance();
+  const utterance = activeUtterance;
+  const terminalStreamSubscription = stopStreamSubscription;
+  stopStreamSubscription = null;
+  stopSubscription?.();
+  stopSubscription = null;
+  stopVoiceSubscription?.();
+  stopVoiceSubscription = null;
+  const shouldAwaitTerminal =
+    awaitTerminalDelivery && utterance?.nativeStreamStarted === true;
+  if (utterance && shouldAwaitTerminal) {
+    const onTerminal = utterance.onTerminal;
+    utterance.onTerminal = () => {
+      terminalStreamSubscription?.();
+      onTerminal();
+    };
+  } else {
+    terminalStreamSubscription?.();
+  }
+  const interruptedUtterance = interruptActiveUtterance(shouldAwaitTerminal);
   if (
     !interruptedUtterance &&
     activeSpeechSessionId &&
@@ -551,12 +569,6 @@ export function stopNativeAssistantSpeech(): void {
   ) {
     reportAssistantActivity(activeSpeechSessionId, activeSpeechRevision, false);
   }
-  stopSubscription?.();
-  stopSubscription = null;
-  stopVoiceSubscription?.();
-  stopVoiceSubscription = null;
-  stopStreamSubscription?.();
-  stopStreamSubscription = null;
   activeSpeechSessionId = null;
   activeSpeechRevision = null;
 }
@@ -875,7 +887,7 @@ export function startNativeAssistantSpeech(
         (voice.status.sessionId !== null &&
           voice.status.sessionId !== sessionId)
       ) {
-        stopNativeAssistantSpeech();
+        stopNativeAssistantSpeech(true);
       }
       return;
     }

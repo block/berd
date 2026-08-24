@@ -803,10 +803,26 @@ describe("native assistant speech stream", () => {
     useChatStore
       .getState()
       .setMessages("session-1", [
-        assistant([{ type: "text", text: "Goodbye." }]),
+        assistant([{ type: "text", text: "One. Two. Three." }]),
       ]);
     await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
     emit("started");
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+    mocks.streamHandler?.({
+      streamId,
+      state: "progress",
+      error: null,
+      delivery: {
+        segments: [
+          {
+            text: "One. Two. Three.",
+            playedFrames: 200,
+            totalFrames: 1_000,
+            synthesisComplete: true,
+          },
+        ],
+      },
+    });
 
     useVoiceConversationStore.setState((voice) => ({
       status: {
@@ -819,10 +835,64 @@ describe("native assistant speech stream", () => {
       uiState: "off",
     }));
     await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    expect(takeVoicePlaybackNotices("session-1")).toBeNull();
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        segments: [
+          {
+            text: "One. Two. Three.",
+            playedFrames: 600,
+            totalFrames: 1_000,
+            synthesisComplete: true,
+          },
+        ],
+      },
+    });
 
     const notice = takeVoicePlaybackNotices("session-1");
     expect(notice).toContain("because the voice conversation stopped");
     expect(notice).not.toContain("because the user started speaking");
+    expect(notice).toContain('"spokenText":"One. Two"');
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({
+      speech: { status: "interrupted", spokenThrough: "One. Two".length },
+    });
+  });
+
+  it("bounds the terminal delivery wait during hang-up", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Goodbye." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState((voice) => ({
+        status: {
+          ...voice.status,
+          lifecycle: "stopped",
+          sessionId: null,
+          ownerWindowLabel: null,
+          revision: voice.status.revision + 1,
+        },
+        uiState: "off",
+      }));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({
+        speech: { status: "interrupted", spokenThrough: 0 },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses playback progress to report and decorate only the unspoken suffix", async () => {
