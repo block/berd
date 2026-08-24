@@ -48,6 +48,7 @@ const WIDGET_TYPE_TO_KIND: Partial<Record<string, HomeLayoutKind>> = {
   onboardingProjectArtifact: "stickyNote",
   clock: "clock",
   stickyNote: "stickyNote",
+  label: "stickyNote",
   checklist: "checklist",
   photo: "photo",
   agentPin: "persona",
@@ -86,6 +87,7 @@ function syntheticTarget(instanceId: string): string {
 
 const DIGITAL_CLOCK_TARGET_SUFFIX = ":digital";
 const SIZE_BY_PROFILE_STATE_KEY = "__sizeByProfile";
+const LABEL_WIDGET_VARIANT = "label";
 
 function isWidgetSize(
   value: unknown,
@@ -182,11 +184,23 @@ function persistedStickyNoteStateFromItem(
   if (typeof item.widgetState.html === "string") {
     state.html = item.widgetState.html;
   }
-  if (typeof item.widgetState.tone === "string") {
+  const isLabel =
+    item.widgetState.variant === LABEL_WIDGET_VARIANT ||
+    item.widgetState.tone === LABEL_WIDGET_VARIANT;
+  if (typeof item.widgetState.tone === "string" && !isLabel) {
     state.tone = item.widgetState.tone;
   }
   if (typeof item.widgetState.fontSize === "string") {
     state.fontSize = item.widgetState.fontSize;
+  }
+  if (
+    typeof item.widgetState.fontSizePx === "number" &&
+    Number.isFinite(item.widgetState.fontSizePx)
+  ) {
+    state.fontSizePx = item.widgetState.fontSizePx;
+  }
+  if (isLabel) {
+    state.variant = LABEL_WIDGET_VARIANT;
   }
   if (
     item.targetId === "onboarding:tour" &&
@@ -367,6 +381,9 @@ function widgetStateForLayoutItem(
         };
       }
       const state: Record<string, unknown> = {};
+      if (instance.type === "label") {
+        state.variant = LABEL_WIDGET_VARIANT;
+      }
       if (typeof instance.state?.text === "string") {
         state.text = instance.state.text;
       }
@@ -378,6 +395,12 @@ function widgetStateForLayoutItem(
       }
       if (typeof instance.state?.fontSize === "string") {
         state.fontSize = instance.state.fontSize;
+      }
+      if (
+        typeof instance.state?.fontSizePx === "number" &&
+        Number.isFinite(instance.state.fontSizePx)
+      ) {
+        state.fontSizePx = instance.state.fontSizePx;
       }
       if (
         instance.type === "onboardingTour" &&
@@ -490,7 +513,11 @@ export function layoutItemsToHomeWidgets(
         : item.kind === "stickyNote" &&
             item.targetId === "onboarding:starter-project"
           ? "onboardingProjectArtifact"
-          : KIND_TO_WIDGET_TYPE[item.kind];
+          : item.kind === "stickyNote" &&
+              (item.widgetState?.variant === LABEL_WIDGET_VARIANT ||
+                item.widgetState?.tone === LABEL_WIDGET_VARIANT)
+            ? "label"
+            : KIND_TO_WIDGET_TYPE[item.kind];
     const size = HOME_WIDGET_CATALOG_BY_ID[type]?.defaultSize;
     if (!size) {
       return [];

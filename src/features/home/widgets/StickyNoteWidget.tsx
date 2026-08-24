@@ -1,22 +1,24 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   Bold,
   Check,
-  Eye,
   Italic,
-  Pencil,
   Strikethrough,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { NumberStepper } from "@/shared/ui/number-stepper";
 import type { WidgetRenderProps } from "./types";
 import { StarterTaskList } from "@/features/home/onboarding/StarterTaskList";
+import {
+  LABEL_FONT_SIZE_LARGE_STEP_PX,
+  LABEL_FONT_SIZE_MAX_PX,
+  LABEL_FONT_SIZE_MIN_PX,
+  labelFontSizePx,
+} from "./labelWidgetModel";
 import { useStarterTasks } from "@/features/home/onboarding/StarterTasksContext";
 import { STARTER_TASKS_NOTE_ID } from "@/features/home/onboarding/starterTasks";
 
@@ -71,7 +73,6 @@ type StickyNoteTone =
   | "lavender"
   | "peach";
 type StickyNoteFontSize = "small" | "medium" | "large";
-type NoteEditorMode = "edit" | "preview";
 
 const EDIT_SAVE_DELAY_MS = 400;
 const EDITABLE_NOTE_TONES = [
@@ -156,6 +157,14 @@ function toneClassName(tone: StickyNoteTone): string {
   }
 }
 
+function noteTextClassName(isLabel: boolean): string {
+  return isLabel ? "text-foreground" : "text-sticky-note-foreground";
+}
+
+function noteMutedTextClassName(isLabel: boolean): string {
+  return isLabel ? "text-muted-foreground" : "text-sticky-note-muted";
+}
+
 function toneLabelKey(tone: StickyNoteTone): string {
   return `widgets.stickyNote.tones.${tone}`;
 }
@@ -211,125 +220,107 @@ function toolbarButtonClassName(active = false): string {
   );
 }
 
-// Links are rendered as inert styled text — a note lives on the canvas and
-// should not navigate the webview when previewed.
-const noteMarkdownComponents = {
-  a: ({ children }) => (
-    <span className="font-medium underline decoration-current/40">
-      {children}
-    </span>
-  ),
-} satisfies Components;
+type InlineFormat = "bold" | "italic" | "strikeThrough";
 
-const NOTE_MARKDOWN_PROSE = cn(
-  "[&_p]:my-1.5 first:[&_p]:mt-0",
-  "[&_h1]:mb-1 [&_h1]:mt-2 [&_h1]:text-[1.45em] [&_h1]:font-semibold [&_h1]:leading-tight",
-  "[&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-[1.2em] [&_h2]:font-semibold [&_h2]:leading-tight",
-  "[&_h3]:mb-0.5 [&_h3]:mt-2 [&_h3]:text-[1.05em] [&_h3]:font-semibold",
-  "[&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5",
-  "[&_li]:my-0.5 [&_li>ul]:my-0 [&_li>ol]:my-0",
-  "[&_code]:rounded [&_code]:bg-foreground/10 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.9em]",
-  "[&_pre]:my-1.5 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-foreground/10 [&_pre]:p-2 [&_pre>code]:bg-transparent [&_pre>code]:p-0",
-  "[&_blockquote]:my-1.5 [&_blockquote]:border-l-2 [&_blockquote]:border-current/30 [&_blockquote]:pl-3 [&_blockquote]:text-sticky-note-muted",
-  "[&_hr]:my-2 [&_hr]:border-current/20",
-  "[&_a]:decoration-current/40",
-  "[&_table]:my-1.5 [&_table]:w-full [&_th]:border [&_th]:border-current/20 [&_th]:px-1.5 [&_th]:py-0.5 [&_th]:text-left [&_td]:border [&_td]:border-current/20 [&_td]:px-1.5 [&_td]:py-0.5",
-);
+type ToolbarFormatting = Record<InlineFormat, boolean>;
 
-// Decorate one line of markdown for the edit overlay. Markers are
-// always kept; only weight/style/decoration change, which preserves the
-// monospace advance width so the transparent textarea's caret stays aligned.
-function decorateInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  let i = 0;
+const EMPTY_TOOLBAR_FORMATTING: ToolbarFormatting = {
+  bold: false,
+  italic: false,
+  strikeThrough: false,
+};
+
+function appendInlineMarkdown(
+  parent: Node,
+  text: string,
+  ownerDocument: Document,
+): void {
+  let cursor = 0;
   const appendText = (value: string) => {
-    const previous = nodes.at(-1);
-    if (typeof previous === "string") {
-      nodes[nodes.length - 1] = previous + value;
-    } else {
-      nodes.push(value);
-    }
+    if (value) parent.appendChild(ownerDocument.createTextNode(value));
   };
 
-  while (i < text.length) {
-    if (text.startsWith("**", i)) {
-      const end = text.indexOf("**", i + 2);
+  while (cursor < text.length) {
+    const formats = [
+      { marker: "**", tag: "strong" },
+      { marker: "~~", tag: "s" },
+      { marker: "_", tag: "em" },
+      { marker: "*", tag: "em" },
+    ] as const;
+    const format = formats.find(({ marker }) =>
+      text.startsWith(marker, cursor),
+    );
+    if (format) {
+      const end = text.indexOf(format.marker, cursor + format.marker.length);
       if (end !== -1) {
-        nodes.push(
-          <span key={`${keyPrefix}-${i}`} className="font-bold">
-            **{text.slice(i + 2, end)}**
-          </span>,
+        const element = ownerDocument.createElement(format.tag);
+        appendInlineMarkdown(
+          element,
+          text.slice(cursor + format.marker.length, end),
+          ownerDocument,
         );
-        i = end + 2;
+        parent.appendChild(element);
+        cursor = end + format.marker.length;
         continue;
       }
     }
-    if (text.startsWith("~~", i)) {
-      const end = text.indexOf("~~", i + 2);
-      if (end !== -1) {
-        nodes.push(
-          <span key={`${keyPrefix}-${i}`} className="line-through">
-            ~~{text.slice(i + 2, end)}~~
-          </span>,
-        );
-        i = end + 2;
-        continue;
-      }
-    }
-    if (text[i] === "*") {
-      const end = text.indexOf("*", i + 1);
-      if (end !== -1) {
-        nodes.push(
-          <span key={`${keyPrefix}-${i}`} className="italic">
-            *{text.slice(i + 1, end)}*
-          </span>,
-        );
-        i = end + 1;
-        continue;
-      }
-    }
-    if (text[i] === "~") {
-      const end = text.indexOf("~", i + 1);
-      if (end !== -1) {
-        nodes.push(
-          <span key={`${keyPrefix}-${i}`} className="line-through">
-            ~{text.slice(i + 1, end)}~
-          </span>,
-        );
-        i = end + 1;
-        continue;
-      }
-    }
-    appendText(text[i]);
-    i += 1;
+
+    const nextMarker = formats
+      .map(({ marker }) => text.indexOf(marker, cursor + 1))
+      .filter((index) => index !== -1)
+      .sort((left, right) => left - right)[0];
+    const next = nextMarker ?? text.length;
+    appendText(text.slice(cursor, next));
+    cursor = next;
   }
-  return nodes;
 }
 
-function decorateLineMarkdown(line: string, lineIndex: number): ReactNode[] {
-  // H1–H4: a run of 1–4 "#" followed by whitespace. Keep the markers, render
-  // the whole line bold + uppercase at the body size.
-  if (/^#{1,4}\s/.test(line)) {
-    return [
-      <span key={`line-${lineIndex}`} className="font-bold uppercase">
-        {line}
-      </span>,
-    ];
-  }
-  return decorateInlineMarkdown(line, `line-${lineIndex}`);
+function populateEditorFromMarkdown(
+  editor: HTMLElement,
+  markdown: string,
+): void {
+  const fragment = editor.ownerDocument.createDocumentFragment();
+  markdown.split("\n").forEach((line, index) => {
+    if (index > 0)
+      fragment.appendChild(editor.ownerDocument.createElement("br"));
+    appendInlineMarkdown(fragment, line, editor.ownerDocument);
+  });
+  editor.replaceChildren(fragment);
 }
 
-function decorateMarkdownForEditBackdrop(text: string): ReactNode[] {
-  if (text.length === 0) {
-    return [];
-  }
+function serializeEditorNode(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+  if (node.nodeType !== Node.ELEMENT_NODE) return "";
 
-  return text
-    .split("\n")
-    .flatMap((line, index) => [
-      ...(index === 0 ? [] : ["\n"]),
-      ...decorateLineMarkdown(line, index),
-    ]);
+  const element = node as HTMLElement;
+  const children = Array.from(element.childNodes)
+    .map(serializeEditorNode)
+    .join("");
+  switch (element.tagName.toLowerCase()) {
+    case "br":
+      return "\n";
+    case "strong":
+    case "b":
+      return `**${children}**`;
+    case "em":
+    case "i":
+      return `_${children}_`;
+    case "s":
+    case "strike":
+      return `~~${children}~~`;
+    case "div":
+    case "p":
+      return `${children}\n`;
+    default:
+      return children;
+  }
+}
+
+function editorMarkdown(editor: HTMLElement): string {
+  return Array.from(editor.childNodes)
+    .map(serializeEditorNode)
+    .join("")
+    .replace(/\n$/, "");
 }
 
 export function StickyNoteWidget({
@@ -345,20 +336,23 @@ export function StickyNoteWidget({
   const starterTasks = useStarterTasks();
   const noteId = getNoteId(instance.state);
   const editableText = getEditableText(instance.state);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const backdropRef = useRef<HTMLDivElement | null>(null);
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const editorRef = useRef<HTMLDivElement | null>(null);
+  const savedSelectionRef = useRef<Range | null>(null);
   const isFocusedRef = useRef(false);
   const [draft, setDraft] = useState(editableText);
-  const [mode, setMode] = useState<NoteEditorMode>(
-    editableText.trim() ? "preview" : "edit",
+  const [labelEditing, setLabelEditing] = useState(false);
+  const [toolbarFormatting, setToolbarFormatting] = useState<ToolbarFormatting>(
+    EMPTY_TOOLBAR_FORMATTING,
   );
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Adopt external state changes (e.g. layout reload) while the user is not
   // actively typing, so we never clobber an in-progress edit.
   useEffect(() => {
-    if (!isFocusedRef.current) {
+    if (!isFocusedRef.current && editorRef.current) {
       setDraft(editableText);
+      populateEditorFromMarkdown(editorRef.current, editableText);
     }
   }, [editableText]);
 
@@ -370,6 +364,24 @@ export function StickyNoteWidget({
     },
     [],
   );
+
+  useEffect(() => {
+    if (!labelEditing) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node &&
+        !sectionRef.current?.contains(event.target)
+      ) {
+        setLabelEditing(false);
+        editorRef.current?.blur();
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () =>
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+  }, [labelEditing]);
 
   const commitText = (value: string) => {
     if (saveTimeoutRef.current) {
@@ -393,27 +405,46 @@ export function StickyNoteWidget({
     }, EDIT_SAVE_DELAY_MS);
   };
 
-  const handleDraftChange = (value: string) => {
-    setDraft(value);
-    scheduleTextSave(value);
+  const saveEditor = () => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const next = editorMarkdown(editor);
+    setDraft(next);
+    scheduleTextSave(next);
   };
 
-  const wrapSelectionWith = (marker: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) {
-      return;
-    }
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const before = draft.slice(0, start);
-    const selected = draft.slice(start, end);
-    const after = draft.slice(end);
-    const next = `${before}${marker}${selected}${marker}${after}`;
-    handleDraftChange(next);
-    requestAnimationFrame(() => {
-      textarea.focus();
-      textarea.setSelectionRange(start + marker.length, end + marker.length);
+  const syncToolbarFormatting = () => {
+    setToolbarFormatting({
+      bold: document.queryCommandState?.("bold") ?? false,
+      italic: document.queryCommandState?.("italic") ?? false,
+      strikeThrough: document.queryCommandState?.("strikeThrough") ?? false,
     });
+  };
+
+  const saveSelection = () => {
+    const selection = window.getSelection();
+    const editor = editorRef.current;
+    if (
+      selection?.rangeCount &&
+      editor?.contains(selection.anchorNode) &&
+      editor.contains(selection.focusNode)
+    ) {
+      savedSelectionRef.current = selection.getRangeAt(0).cloneRange();
+    }
+    syncToolbarFormatting();
+  };
+
+  const toggleFormat = (format: InlineFormat) => {
+    const selection = window.getSelection();
+    const savedRange = savedSelectionRef.current;
+    if (!selection || !savedRange) return;
+
+    selection.removeAllRanges();
+    selection.addRange(savedRange);
+    document.execCommand?.(format, false, undefined);
+    editorRef.current?.focus();
+    saveEditor();
+    saveSelection();
   };
 
   if (
@@ -475,278 +506,298 @@ export function StickyNoteWidget({
 
   if (!isOnboardingNoteId(noteId)) {
     const tone = getEditableTone(instance.state);
+    const isLabel = instance.type === "label";
     const fontSize = getEditableFontSize(instance.state);
-    const isEmpty = draft.trim().length === 0;
+    const labelFontSize = labelFontSizePx(instance.state);
+    const textClassName = noteTextClassName(isLabel);
+    const mutedTextClassName = noteMutedTextClassName(isLabel);
 
     return (
       <section
-        aria-label={t("widgets.stickyNote.label")}
-        className="group relative h-full w-full overflow-visible text-sticky-note-foreground"
+        ref={sectionRef}
+        aria-label={
+          isLabel ? t("widgets.label.label") : t("widgets.stickyNote.label")
+        }
+        className={cn(
+          "group relative h-full w-full overflow-visible",
+          textClassName,
+        )}
       >
         <div
           className={cn(
-            "flex h-full w-full flex-col overflow-hidden rounded-xs px-5 py-5 shadow-sticky-note",
-            toneClassName(tone),
+            "flex h-full w-full flex-col overflow-hidden rounded-xs",
+            isLabel ? "px-4 py-2" : "px-5 py-5 shadow-sticky-note",
+            isLabel ? "bg-transparent" : toneClassName(tone),
           )}
         >
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label={t("widgets.stickyNote.dismiss")}
-            onPointerDownCapture={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onRemoveWidget?.();
-            }}
-            className="absolute right-2 top-2 z-30 text-sticky-note-muted hover:text-sticky-note-foreground"
-          >
-            <X aria-hidden="true" />
-          </Button>
-          {mode === "edit" ? (
-            <div className="relative min-h-0 flex-1">
-              {/* Backdrop renders the decorated markdown behind the transparent
-                  textarea. Both share font + metrics so the caret aligns. */}
-              <div
-                ref={backdropRef}
-                aria-hidden="true"
-                className={cn(
-                  "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words font-mono text-sticky-note-foreground",
-                  fontSizeBodyClassName(fontSize),
-                )}
-              >
-                {decorateMarkdownForEditBackdrop(draft)}
-              </div>
-              <textarea
-                ref={textareaRef}
-                value={draft}
-                aria-label={t("widgets.stickyNote.editAria")}
-                placeholder={t("widgets.stickyNote.placeholder")}
-                spellCheck={true}
-                draggable={false}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => event.stopPropagation()}
-                onDoubleClick={(event) => event.stopPropagation()}
-                onWheel={(event) => event.stopPropagation()}
-                onScroll={(event) => {
-                  if (backdropRef.current) {
-                    backdropRef.current.scrollTop =
-                      event.currentTarget.scrollTop;
-                  }
-                }}
-                onFocus={() => {
-                  isFocusedRef.current = true;
-                }}
-                onBlur={() => {
-                  isFocusedRef.current = false;
-                  commitText(draft);
-                }}
-                onChange={(event) => handleDraftChange(event.target.value)}
-                className={cn(
-                  "scrollbar-none overscroll-contain absolute inset-0 h-full w-full resize-none cursor-text overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words border-0 bg-transparent p-0 font-mono text-transparent caret-foreground outline-none select-text [box-shadow:none] [outline:0]",
-                  "placeholder:text-sticky-note-muted/75",
-                  "focus:border-0 focus:outline-none focus:ring-0 focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:[box-shadow:none]",
-                  fontSizeBodyClassName(fontSize),
-                )}
-              />
-            </div>
-          ) : (
-            // biome-ignore lint/a11y/noStaticElementInteractions: double-click is a convenience shortcut into edit mode; the toolbar toggle is the primary control.
-            <div
-              role="presentation"
-              onPointerDown={(event) => event.stopPropagation()}
-              onWheel={(event) => event.stopPropagation()}
-              onDoubleClick={(event) => {
+          {!isLabel ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t("widgets.stickyNote.dismiss")}
+              onPointerDownCapture={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.preventDefault();
                 event.stopPropagation();
-                setMode("edit");
+                onRemoveWidget?.();
               }}
               className={cn(
-                "scrollbar-subtle overscroll-contain relative min-h-0 flex-1 cursor-text overflow-x-hidden overflow-y-auto break-words pr-6 text-sticky-note-foreground [scrollbar-gutter:stable]",
-                fontSizeBodyClassName(fontSize),
+                "absolute right-2 top-2 z-30",
+                mutedTextClassName,
+                "hover:text-sticky-note-foreground",
               )}
             >
-              {isEmpty ? (
-                <p className="text-sticky-note-muted/75">
-                  {t("widgets.stickyNote.placeholder")}
-                </p>
-              ) : (
-                <div className={NOTE_MARKDOWN_PROSE}>
-                  <ReactMarkdown
-                    components={noteMarkdownComponents}
-                    remarkPlugins={[remarkGfm, remarkBreaks]}
-                  >
-                    {draft}
-                  </ReactMarkdown>
-                </div>
-              )}
-            </div>
-          )}
+              <X aria-hidden="true" />
+            </Button>
+          ) : null}
+          {/* biome-ignore lint/a11y/useSemanticElements: contentEditable provides native selection and direct rich-text formatting. */}
+          <div
+            ref={editorRef}
+            contentEditable={!isLabel || labelEditing}
+            suppressContentEditableWarning
+            tabIndex={isLabel && !labelEditing ? -1 : 0}
+            role="textbox"
+            aria-label={t("widgets.stickyNote.editAria")}
+            aria-multiline="true"
+            data-empty={draft.trim().length === 0}
+            data-placeholder={t(
+              isLabel
+                ? "widgets.label.placeholder"
+                : "widgets.stickyNote.placeholder",
+            )}
+            spellCheck={true}
+            draggable={false}
+            onPointerDown={(event) => {
+              if (!isLabel || labelEditing) event.stopPropagation();
+            }}
+            onClick={(event) => {
+              if (!isLabel || labelEditing) {
+                event.stopPropagation();
+                saveSelection();
+              }
+            }}
+            onDoubleClick={(event) => {
+              if (!isLabel) {
+                event.stopPropagation();
+                return;
+              }
+              event.stopPropagation();
+              if (labelEditing) {
+                saveSelection();
+                return;
+              }
+              const selection = window.getSelection();
+              const selectedRange =
+                selection?.rangeCount &&
+                editorRef.current?.contains(selection.anchorNode) &&
+                editorRef.current.contains(selection.focusNode)
+                  ? selection.getRangeAt(0).cloneRange()
+                  : null;
+              setLabelEditing(true);
+              requestAnimationFrame(() => {
+                editorRef.current?.focus({ preventScroll: true });
+                if (selection && selectedRange) {
+                  selection.removeAllRanges();
+                  selection.addRange(selectedRange);
+                  savedSelectionRef.current = selectedRange.cloneRange();
+                }
+              });
+            }}
+            onWheel={(event) => event.stopPropagation()}
+            onInput={saveEditor}
+            onKeyUp={saveSelection}
+            onMouseUp={saveSelection}
+            onFocus={() => {
+              isFocusedRef.current = true;
+              syncToolbarFormatting();
+            }}
+            onBlur={() => {
+              isFocusedRef.current = false;
+              commitText(
+                editorRef.current ? editorMarkdown(editorRef.current) : draft,
+              );
+            }}
+            onPaste={(event) => {
+              event.preventDefault();
+              document.execCommand?.(
+                "insertText",
+                false,
+                event.clipboardData.getData("text/plain"),
+              );
+              saveEditor();
+            }}
+            style={isLabel ? { fontSize: labelFontSize } : undefined}
+            className={cn(
+              "scrollbar-none overscroll-contain relative min-h-0 flex-1 whitespace-pre-wrap break-words border-0 bg-transparent p-0 font-sans caret-foreground outline-none [box-shadow:none] [outline:0]",
+              isLabel
+                ? "overflow-hidden"
+                : "overflow-x-hidden overflow-y-auto pr-6",
+              isLabel && !labelEditing
+                ? "cursor-grab select-none active:cursor-grabbing"
+                : "cursor-text select-text",
+              textClassName,
+              isLabel
+                ? "leading-[1.35] before:text-muted-foreground/75"
+                : cn(
+                    "before:text-sticky-note-muted/75",
+                    fontSizeBodyClassName(fontSize),
+                  ),
+              "before:pointer-events-none data-[empty=true]:before:content-[attr(data-placeholder)]",
+              "focus:border-0 focus:outline-none focus:ring-0 focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:[box-shadow:none]",
+            )}
+          />
         </div>
         <div
           role="toolbar"
+          hidden={isLabel && !labelEditing}
           aria-label={t("widgets.stickyNote.toolbar")}
           className={cn(
-            "absolute left-1/2 top-0 z-40 flex w-max max-w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-[calc(100%+0.625rem)] cursor-default items-center gap-0.5 rounded-full border border-border/45 bg-card/45 px-2 py-1 text-foreground opacity-0 shadow-popover backdrop-blur-[2px] transition-opacity duration-150",
-            "group-hover:opacity-100 group-focus-within:opacity-100",
+            "absolute left-1/2 top-0 z-40 flex w-max max-w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-[calc(100%+0.625rem)] cursor-default items-center gap-0.5 rounded-full border border-border/45 bg-card/45 px-2 py-1 text-foreground shadow-popover backdrop-blur-[2px] transition-opacity duration-150",
+            isLabel
+              ? labelEditing
+                ? "opacity-100"
+                : "pointer-events-none opacity-0"
+              : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
           )}
           onPointerDownCapture={(event) => event.stopPropagation()}
           onWheel={(event) => event.stopPropagation()}
         >
-          <div className="flex items-center gap-1">
-            {EDITABLE_NOTE_TONES.map((option) => (
-              <button
-                key={option}
-                type="button"
-                aria-label={t(toneLabelKey(option))}
-                aria-pressed={option === tone}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (option !== tone) {
-                    onUpdateState({ tone: option });
-                  }
-                }}
-                className={cn(
-                  "relative flex size-7 cursor-pointer items-center justify-center rounded-full outline-none transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-ring",
-                )}
-              >
-                <span
-                  aria-hidden="true"
-                  className={cn(
-                    "size-5 rounded-full",
-                    toneClassName(option),
-                    // The neutral swatch is the card color, so it needs an
-                    // outline to read against the translucent toolbar.
-                    option === "neutral" && "border border-border",
-                  )}
-                />
-                {option === tone ? (
-                  <Check
-                    className="absolute size-3 text-sticky-note-foreground"
-                    aria-hidden="true"
-                  />
-                ) : null}
-              </button>
-            ))}
-          </div>
-          <div className="mx-0.5 h-5 w-px bg-border/70" aria-hidden="true" />
-          <div className="flex items-center gap-1">
-            {EDITABLE_NOTE_FONT_SIZES.map((size) => (
-              <button
-                key={size}
-                type="button"
-                aria-label={t(fontSizeLabelKey(size))}
-                aria-pressed={fontSize === size}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (size !== fontSize) {
-                    onUpdateState({ fontSize: size });
-                  }
-                }}
-                className={toolbarButtonClassName(fontSize === size)}
-              >
-                <span
-                  aria-hidden="true"
-                  // text-box trims the glyph's box to its cap-height/baseline
-                  // using the font's own metrics, so the button's flex centering
-                  // lands the "A" dead-center at every size with no magic offset.
-                  className={cn(
-                    "inline-block font-semibold leading-none [text-box:trim-both_cap_alphabetic]",
-                    fontSizeGlyphClassName(size),
-                  )}
-                >
-                  A
-                </span>
-              </button>
-            ))}
-          </div>
-          {mode === "edit" ? (
+          {!isLabel ? (
             <>
+              <div className="flex items-center gap-1">
+                {EDITABLE_NOTE_TONES.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    aria-label={t(toneLabelKey(option))}
+                    aria-pressed={option === tone}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (option !== tone) {
+                        onUpdateState({ tone: option });
+                      }
+                    }}
+                    className={cn(
+                      "relative flex size-7 cursor-pointer items-center justify-center rounded-full outline-none transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-ring",
+                    )}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "size-5 rounded-full",
+                        toneClassName(option),
+                        option === "neutral" && "border border-border",
+                      )}
+                    />
+                    {option === tone ? (
+                      <Check
+                        className="absolute size-3 text-foreground"
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                  </button>
+                ))}
+              </div>
               <div
                 className="mx-0.5 h-5 w-px bg-border/70"
                 aria-hidden="true"
               />
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t("widgets.stickyNote.bold")}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    wrapSelectionWith("**");
-                  }}
-                  className={toolbarButtonClassName()}
-                >
-                  <Bold aria-hidden="true" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t("widgets.stickyNote.italic")}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    wrapSelectionWith("*");
-                  }}
-                  className={toolbarButtonClassName()}
-                >
-                  <Italic aria-hidden="true" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={t("widgets.stickyNote.strikethrough")}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    wrapSelectionWith("~~");
-                  }}
-                  className={toolbarButtonClassName()}
-                >
-                  <Strikethrough aria-hidden="true" />
-                </Button>
-              </div>
             </>
           ) : null}
+          {isLabel ? (
+            <NumberStepper
+              value={labelFontSize}
+              onValueChange={(value) => onUpdateState({ fontSizePx: value })}
+              min={LABEL_FONT_SIZE_MIN_PX}
+              max={LABEL_FONT_SIZE_MAX_PX}
+              largeStep={LABEL_FONT_SIZE_LARGE_STEP_PX}
+              unit={t("widgets.label.fontSize.unit")}
+              label={t("widgets.label.fontSize.label")}
+              decrementLabel={t("widgets.label.fontSize.decrease")}
+              incrementLabel={t("widgets.label.fontSize.increase")}
+            />
+          ) : (
+            <div className="flex items-center gap-1">
+              {EDITABLE_NOTE_FONT_SIZES.map((size) => (
+                <button
+                  key={size}
+                  type="button"
+                  aria-label={t(fontSizeLabelKey(size))}
+                  aria-pressed={fontSize === size}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (size !== fontSize) {
+                      onUpdateState({ fontSize: size });
+                    }
+                  }}
+                  className={toolbarButtonClassName(fontSize === size)}
+                >
+                  <span
+                    aria-hidden="true"
+                    // text-box trims the glyph's box to its cap-height/baseline
+                    // using the font's own metrics, so the button's flex centering
+                    // lands the "A" dead-center at every size with no magic offset.
+                    className={cn(
+                      "inline-block font-semibold leading-none [text-box:trim-both_cap_alphabetic]",
+                      fontSizeGlyphClassName(size),
+                    )}
+                  >
+                    A
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
           <div className="mx-0.5 h-5 w-px bg-border/70" aria-hidden="true" />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label={
-              mode === "edit"
-                ? t("widgets.stickyNote.preview")
-                : t("widgets.stickyNote.edit")
-            }
-            aria-pressed={mode === "preview"}
-            onMouseDown={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              if (mode === "edit") {
-                commitText(draft);
-                setMode("preview");
-              } else {
-                setMode("edit");
-              }
-            }}
-            className={toolbarButtonClassName(mode === "preview")}
-          >
-            {mode === "edit" ? (
-              <Eye aria-hidden="true" />
-            ) : (
-              <Pencil aria-hidden="true" />
-            )}
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t("widgets.stickyNote.bold")}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleFormat("bold");
+              }}
+              className={toolbarButtonClassName(toolbarFormatting.bold)}
+            >
+              <Bold aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t("widgets.stickyNote.italic")}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleFormat("italic");
+              }}
+              className={toolbarButtonClassName(toolbarFormatting.italic)}
+            >
+              <Italic aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t("widgets.stickyNote.strikethrough")}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleFormat("strikeThrough");
+              }}
+              className={toolbarButtonClassName(
+                toolbarFormatting.strikeThrough,
+              )}
+            >
+              <Strikethrough aria-hidden="true" />
+            </Button>
+          </div>
         </div>
       </section>
     );

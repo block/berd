@@ -337,6 +337,18 @@
         "project": "Nada que fijar",
         "skill": "Nada que fijar"
       }
+    },
+    "label": {
+      "label": "Etiqueta",
+      "description": "Texto colocado directamente en el lienzo de Inicio",
+      "dismiss": "Descartar etiqueta",
+      "placeholder": "Añade un encabezado…",
+      "fontSize": {
+        "label": "Tamaño de fuente en píxeles",
+        "decrease": "Reducir tamaño de fuente",
+        "increase": "Aumentar tamaño de fuente",
+        "unit": "píxeles"
+      }
     }
   }
 }

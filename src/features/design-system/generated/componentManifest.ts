@@ -2243,6 +2243,30 @@ export const designSystemComponentManifest = [
     ],
   },
   {
+    name: "Number Stepper",
+    source: "src/shared/ui/number-stepper.tsx",
+    description: "",
+    exports: ["NumberStepper"],
+    slots: [],
+    cva: [],
+    tokenClasses: [
+      "border-border",
+      "focus-visible:ring-ring",
+      "text-foreground",
+    ],
+    stateClasses: [
+      "disabled:opacity-50",
+      "focus-visible:ring-2",
+      "focus-visible:ring-inset",
+      "focus-visible:ring-ring",
+    ],
+    sourceTokenClasses: [
+      "border-border",
+      "focus-visible:ring-ring",
+      "text-foreground",
+    ],
+  },
+  {
     name: "Page Columns",
     source: "src/shared/ui/page-columns.tsx",
     description: "",

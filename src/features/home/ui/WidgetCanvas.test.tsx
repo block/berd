@@ -1320,6 +1320,24 @@ describe("WidgetCanvas", () => {
     );
   });
 
+  it("does not show a resize handle for labels", () => {
+    renderCanvas({
+      instances: [
+        widget({
+          id: "label-widget",
+          type: "label",
+          width: 280,
+          height: 56,
+          state: { text: "Weekly automations" },
+        }),
+      ],
+    });
+
+    expect(
+      screen.queryByRole("button", { name: /resize label/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows a resize handle for the onboarding widget", () => {
     renderCanvas({
       instances: [
@@ -1621,6 +1639,25 @@ describe("WidgetCanvas", () => {
 
     expect(addWidget).toHaveBeenCalledWith(
       "stickyNote",
+      expect.any(Number),
+      expect.any(Number),
+      undefined,
+      CANVAS_CONSTRAINTS,
+    );
+  });
+
+  it("offers the Widgets > Label path for canvas section labels", async () => {
+    const user = userEvent.setup();
+    const addWidget = vi.fn();
+    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
+
+    const { container } = renderCanvas({ mutations: { addWidget } });
+
+    await openPickerPanel(user, container, "widgets");
+    await user.click(screen.getByRole("button", { name: /^label$/i }));
+
+    expect(addWidget).toHaveBeenCalledWith(
+      "label",
       expect.any(Number),
       expect.any(Number),
       undefined,
