@@ -173,6 +173,7 @@ export async function readTextFile(path: string): Promise<TextFilePayload> {
 export interface FileStatPayload {
   byteSize: string;
   modifiedAtNs: string;
+  changedAtNs?: string;
 }
 
 export async function statFile(path: string): Promise<FileStatPayload> {

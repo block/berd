@@ -1,4 +1,10 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArtifactViewer } from "../ArtifactViewer";
@@ -31,12 +37,28 @@ vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => `asset://localhost/${path}`,
 }));
 
-function artifact(path = "/p/report.md") {
+function artifact(path = "/p/report.md", revision = 0) {
   return {
     resolvedPath: path,
     filename: path.split("/").pop() ?? path,
-    revision: 0,
+    revision,
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+async function flushAsyncWork() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
 }
 
 async function openFileActionsMenu() {
@@ -57,6 +79,7 @@ describe("ArtifactViewer header actions", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("reveals the file in the OS file manager from the file actions menu", async () => {
@@ -159,6 +182,31 @@ describe("ArtifactViewer header actions", () => {
     expect(screen.queryByText(/out of date/i)).not.toBeInTheDocument();
   });
 
+  it("detects same-size same-mtime rewrites from change time", async () => {
+    vi.useFakeTimers();
+    let changed = false;
+    mockReadTextFile.mockImplementation(async () => ({
+      contents: changed ? "# Second" : "# First!",
+    }));
+    mockStatFile.mockImplementation(async () => ({
+      byteSize: "8",
+      modifiedAtNs: "1",
+      changedAtNs: changed ? "2" : "1",
+    }));
+
+    render(<ArtifactViewer artifact={artifact()} onClose={vi.fn()} />);
+    await act(flushAsyncWork);
+    expect(screen.getByRole("heading", { name: "First!" })).toBeInTheDocument();
+
+    changed = true;
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await flushAsyncWork();
+    });
+
+    expect(screen.getByRole("heading", { name: "Second" })).toBeInTheDocument();
+  });
+
   it("keeps last-good content visible and marks it stale when a changed file cannot be read", async () => {
     vi.useFakeTimers();
     let changed = false;
@@ -200,5 +248,138 @@ describe("ArtifactViewer header actions", () => {
       await Promise.resolve();
     });
     expect(screen.getByRole("status")).toHaveTextContent(/out of date/i);
+  });
+
+  it("recovers an initially failed empty text file to loaded state", async () => {
+    vi.useFakeTimers();
+    let available = false;
+    mockReadTextFile.mockImplementation(async () => {
+      if (!available) throw new Error("temporarily unavailable");
+      return { contents: "" };
+    });
+
+    render(<ArtifactViewer artifact={artifact()} onClose={vi.fn()} />);
+    await act(flushAsyncWork);
+    expect(screen.getByText(/couldn't load/i)).toBeInTheDocument();
+
+    available = true;
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await flushAsyncWork();
+    });
+
+    expect(screen.queryByText(/couldn't load/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("does not let polling cancel an ACP-forced text reread", async () => {
+    vi.useFakeTimers();
+    const forcedRead = deferred<{ contents: string }>();
+    mockReadTextFile
+      .mockResolvedValueOnce({ contents: "# Original" })
+      .mockReturnValueOnce(forcedRead.promise);
+
+    const { rerender } = render(
+      <ArtifactViewer artifact={artifact()} onClose={vi.fn()} />,
+    );
+    await act(flushAsyncWork);
+
+    rerender(
+      <ArtifactViewer artifact={artifact(undefined, 1)} onClose={vi.fn()} />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+      vi.advanceTimersByTime(1_500);
+      await Promise.resolve();
+    });
+    forcedRead.resolve({ contents: "# Forced refresh" });
+    await act(flushAsyncWork);
+
+    expect(
+      screen.getByRole("heading", { name: "Forced refresh" }),
+    ).toBeInTheDocument();
+  });
+
+  it("commits image status only after the rendered cache-busted URL decodes", async () => {
+    vi.useFakeTimers();
+    const initialStat = deferred<{
+      byteSize: string;
+      modifiedAtNs: string;
+    }>();
+    mockStatFile
+      .mockReturnValueOnce(initialStat.promise)
+      .mockResolvedValue({ byteSize: "20", modifiedAtNs: "2" });
+    const { rerender } = render(
+      <ArtifactViewer
+        artifact={artifact("/p/shot.png", 4)}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const image = screen.getByRole("img");
+    expect(image).toHaveAttribute("src", "asset://localhost//p/shot.png?rev=4");
+    fireEvent.error(image);
+    initialStat.resolve({ byteSize: "20", modifiedAtNs: "1" });
+    await act(flushAsyncWork);
+    // A late successful stat must not overwrite the earlier decode failure.
+    expect(screen.getByRole("status")).toHaveTextContent(/out of date/i);
+
+    rerender(
+      <ArtifactViewer
+        artifact={artifact("/p/shot.png", 5)}
+        onClose={vi.fn()}
+      />,
+    );
+    await act(flushAsyncWork);
+    const refreshedImage = screen.getByRole("img");
+    expect(refreshedImage).toHaveAttribute(
+      "src",
+      "asset://localhost//p/shot.png?rev=5",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(/out of date/i);
+
+    fireEvent.load(refreshedImage);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("preloads and renders the same image URL after a polled change", async () => {
+    vi.useFakeTimers();
+    let changed = false;
+    mockStatFile.mockImplementation(async () => ({
+      byteSize: "20",
+      modifiedAtNs: changed ? "2" : "1",
+    }));
+    const preloadedSources: string[] = [];
+    class PreloadImage {
+      onload: (() => void) | null = null;
+
+      set src(value: string) {
+        preloadedSources.push(value);
+        queueMicrotask(() => this.onload?.());
+      }
+    }
+    vi.stubGlobal("Image", PreloadImage);
+
+    render(
+      <ArtifactViewer
+        artifact={artifact("/p/shot.png", 4)}
+        onClose={vi.fn()}
+      />,
+    );
+    await act(flushAsyncWork);
+    fireEvent.load(screen.getByRole("img"));
+
+    changed = true;
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await flushAsyncWork();
+    });
+
+    const expectedSrc = "asset://localhost//p/shot.png?rev=5";
+    expect(preloadedSources).toEqual([expectedSrc]);
+    expect(screen.getByRole("img")).toHaveAttribute("src", expectedSrc);
+
+    fireEvent.load(screen.getByRole("img"));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

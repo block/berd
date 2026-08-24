@@ -57,6 +57,7 @@ interface TextState {
 interface FileFingerprint {
   byteSize: string;
   modifiedAtNs: string;
+  changedAtNs?: string;
 }
 
 const ARTIFACT_POLL_INTERVAL_MS = 1_500;
@@ -66,7 +67,9 @@ function sameFingerprint(
   right: FileFingerprint,
 ): boolean {
   return (
-    left.byteSize === right.byteSize && left.modifiedAtNs === right.modifiedAtNs
+    left.byteSize === right.byteSize &&
+    left.modifiedAtNs === right.modifiedAtNs &&
+    left.changedAtNs === right.changedAtNs
   );
 }
 
@@ -90,12 +93,28 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
   const [imageDiskRevision, setImageDiskRevision] = useState(0);
   const imageDiskRevisionRef = useRef(0);
   const [retryRevision, setRetryRevision] = useState(0);
+  const consumedRetryRevisionRef = useRef(0);
   const renderedTextState: TextState =
     displayedPathRef.current === artifact.resolvedPath
       ? textState
       : { status: "loading", contents: "" };
   const contentReadRevision = artifact.revision;
-  const refreshGenerationRef = useRef(0);
+  const forcedRefreshGenerationRef = useRef(0);
+  const forcedRefreshInFlightRef = useRef(false);
+  const pollGenerationRef = useRef(0);
+  const loadedImageSrcRef = useRef<string | null>(null);
+  const pendingImageRef = useRef<{
+    src: string;
+    fingerprint: FileFingerprint;
+  } | null>(null);
+  const imageSrc = useMemo(
+    () =>
+      artifactImageSrc(
+        artifact.resolvedPath,
+        artifact.revision + imageDiskRevision,
+      ),
+    [artifact.resolvedPath, artifact.revision, imageDiskRevision],
+  );
 
   const updateTextState = useCallback((next: TextState) => {
     textStateRef.current = next;
@@ -123,13 +142,25 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
   // manual refreshes do not flash a spinner or reset the scroll container.
   useEffect(() => {
     let cancelled = false;
-    const refreshGeneration = ++refreshGenerationRef.current;
+    const refreshGeneration = ++forcedRefreshGenerationRef.current;
+    // A forced ACP/manual refresh supersedes a poll already in flight. Polls
+    // never supersede forced work; they pause until it completes.
+    pollGenerationRef.current += 1;
+    forcedRefreshInFlightRef.current = true;
     const isCurrentRefresh = () =>
-      !cancelled && refreshGeneration === refreshGenerationRef.current;
+      !cancelled && refreshGeneration === forcedRefreshGenerationRef.current;
+    const finishRefresh = () => {
+      if (refreshGeneration === forcedRefreshGenerationRef.current) {
+        forcedRefreshInFlightRef.current = false;
+      }
+    };
     const pathChanged = displayedPathRef.current !== artifact.resolvedPath;
     if (pathChanged) {
       displayedPathRef.current = artifact.resolvedPath;
       fingerprintRef.current = null;
+      pendingImageRef.current = null;
+      loadedImageSrcRef.current = null;
+      consumedRetryRevisionRef.current = retryRevision;
       updateTextState({ status: "loading", contents: "" });
       imageDiskRevisionRef.current = 0;
       setImageDiskRevision(0);
@@ -139,7 +170,9 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
     ) {
       updateTextState({ status: "loading", contents: "" });
     }
-    updateDiskStatus("checking");
+    if (pathChanged || diskStatusRef.current !== "diverged") {
+      updateDiskStatus("checking");
+    }
 
     // Reading this value makes the ACP-driven revision an explicit input to
     // this request even though only its change, not its numeric value, matters.
@@ -150,12 +183,28 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
         if (!isCurrentRefresh()) return;
 
         if (viewMode === "image") {
-          fingerprintRef.current = before;
-          if (retryRevision > 0) {
-            imageDiskRevisionRef.current += 1;
-            setImageDiskRevision(imageDiskRevisionRef.current);
+          const shouldBustImageCache =
+            retryRevision !== consumedRetryRevisionRef.current;
+          const candidateDiskRevision = shouldBustImageCache
+            ? imageDiskRevisionRef.current + 1
+            : imageDiskRevisionRef.current;
+          const candidateSrc = artifactImageSrc(
+            artifact.resolvedPath,
+            artifact.revision + candidateDiskRevision,
+          );
+          if (shouldBustImageCache) {
+            await preloadArtifactImage(candidateSrc);
+            if (!isCurrentRefresh()) return;
+            imageDiskRevisionRef.current = candidateDiskRevision;
+            consumedRetryRevisionRef.current = retryRevision;
+            setImageDiskRevision(candidateDiskRevision);
           }
-          updateDiskStatus("current");
+          pendingImageRef.current = { src: candidateSrc, fingerprint: before };
+          if (loadedImageSrcRef.current === candidateSrc) {
+            fingerprintRef.current = before;
+            pendingImageRef.current = null;
+            updateDiskStatus("current");
+          }
           return;
         }
 
@@ -183,15 +232,21 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
           updateTextState({ status: "error", contents: "" });
           updateDiskStatus("diverged");
         }
+      } finally {
+        finishRefresh();
       }
     })();
 
     return () => {
       cancelled = true;
-      refreshGenerationRef.current += 1;
+      if (refreshGeneration === forcedRefreshGenerationRef.current) {
+        forcedRefreshGenerationRef.current += 1;
+        forcedRefreshInFlightRef.current = false;
+      }
     };
   }, [
     artifact.resolvedPath,
+    artifact.revision,
     contentReadRevision,
     retryRevision,
     updateDiskStatus,
@@ -207,16 +262,22 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
     let checkInFlight = false;
 
     const checkForDiskChange = async () => {
-      if (document.visibilityState === "hidden" || checkInFlight) {
+      if (
+        document.visibilityState === "hidden" ||
+        checkInFlight ||
+        forcedRefreshInFlightRef.current
+      ) {
         return;
       }
-      const refreshGeneration = ++refreshGenerationRef.current;
-      const isCurrentRefresh = () =>
-        !cancelled && refreshGeneration === refreshGenerationRef.current;
+      const pollGeneration = ++pollGenerationRef.current;
+      const isCurrentPoll = () =>
+        !cancelled &&
+        pollGeneration === pollGenerationRef.current &&
+        !forcedRefreshInFlightRef.current;
       checkInFlight = true;
       try {
         const fingerprint = await statFile(artifact.resolvedPath);
-        if (!isCurrentRefresh()) return;
+        if (!isCurrentPoll()) return;
         const previous = fingerprintRef.current;
         if (
           previous &&
@@ -230,33 +291,39 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
         // returned to the last fingerprint, so transient failures self-heal.
 
         if (viewMode === "image") {
-          const candidateRevision = imageDiskRevisionRef.current + 1;
-          await preloadArtifactImage(artifact.resolvedPath, candidateRevision);
-          if (!isCurrentRefresh()) return;
-          fingerprintRef.current = fingerprint;
-          imageDiskRevisionRef.current = candidateRevision;
-          setImageDiskRevision(candidateRevision);
-          updateDiskStatus("current");
+          const candidateDiskRevision = imageDiskRevisionRef.current + 1;
+          const candidateSrc = artifactImageSrc(
+            artifact.resolvedPath,
+            artifact.revision + candidateDiskRevision,
+          );
+          await preloadArtifactImage(candidateSrc);
+          if (!isCurrentPoll()) return;
+          pendingImageRef.current = { src: candidateSrc, fingerprint };
+          imageDiskRevisionRef.current = candidateDiskRevision;
+          setImageDiskRevision(candidateDiskRevision);
           return;
         }
 
         const payload = await readTextFile(artifact.resolvedPath);
-        if (!isCurrentRefresh()) return;
+        if (!isCurrentPoll()) return;
         const confirmedFingerprint = await statFile(artifact.resolvedPath);
         if (
-          !isCurrentRefresh() ||
+          !isCurrentPoll() ||
           !sameFingerprint(fingerprint, confirmedFingerprint)
         ) {
           updateDiskStatus("diverged");
           return;
         }
         fingerprintRef.current = confirmedFingerprint;
-        if (textStateRef.current.contents !== payload.contents) {
+        if (
+          textStateRef.current.contents !== payload.contents ||
+          textStateRef.current.status !== "loaded"
+        ) {
           updateTextState({ status: "loaded", contents: payload.contents });
         }
         updateDiskStatus("current");
       } catch {
-        if (isCurrentRefresh()) updateDiskStatus("diverged");
+        if (isCurrentPoll()) updateDiskStatus("diverged");
       } finally {
         checkInFlight = false;
       }
@@ -275,11 +342,17 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
 
     return () => {
       cancelled = true;
-      refreshGenerationRef.current += 1;
+      pollGenerationRef.current += 1;
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [artifact.resolvedPath, updateDiskStatus, updateTextState, viewMode]);
+  }, [
+    artifact.resolvedPath,
+    artifact.revision,
+    updateDiskStatus,
+    updateTextState,
+    viewMode,
+  ]);
 
   return (
     <Artifact className="h-full min-h-0 flex-1 rounded-none border-0 shadow-none">
@@ -383,8 +456,22 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
         {viewMode === "image" ? (
           <ImageBody
             artifact={artifact}
-            diskRevision={imageDiskRevision}
-            onLoadError={() => updateDiskStatus("diverged")}
+            src={imageSrc}
+            onLoad={(loadedSrc) => {
+              if (loadedSrc !== imageSrc) return;
+              loadedImageSrcRef.current = loadedSrc;
+              const pending = pendingImageRef.current;
+              if (pending?.src !== loadedSrc) return;
+              fingerprintRef.current = pending.fingerprint;
+              pendingImageRef.current = null;
+              updateDiskStatus("current");
+            }}
+            onLoadError={(failedSrc) => {
+              if (failedSrc !== imageSrc) return;
+              loadedImageSrcRef.current = null;
+              pendingImageRef.current = null;
+              updateDiskStatus("diverged");
+            }}
           />
         ) : (
           <MarkdownBody
@@ -405,40 +492,35 @@ function artifactImageSrc(path: string, revision: number): string {
   return revision > 0 ? `${assetSrc}?rev=${revision}` : assetSrc;
 }
 
-function preloadArtifactImage(path: string, revision: number): Promise<void> {
+function preloadArtifactImage(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve();
     image.onerror = () => reject(new Error("Artifact image failed to load"));
-    image.src = artifactImageSrc(path, revision);
+    image.src = src;
   });
 }
 
 function ImageBody({
   artifact,
-  diskRevision,
+  src,
+  onLoad,
   onLoadError,
 }: {
   artifact: OpenArtifact;
-  diskRevision: number;
-  onLoadError: () => void;
+  src: string;
+  onLoad: (src: string) => void;
+  onLoadError: (src: string) => void;
 }) {
   const { t } = useTranslation("chat");
-  const src = useMemo(() => {
-    // Re-opening or detecting an external write to the same path must bypass
-    // the webview's cache for the unchanged asset URL.
-    return artifactImageSrc(
-      artifact.resolvedPath,
-      artifact.revision + diskRevision,
-    );
-  }, [artifact.resolvedPath, artifact.revision, diskRevision]);
   return (
     <div className="flex items-center justify-center p-4">
       <img
         src={src}
         alt={t("artifactViewer.imageAlt", { filename: artifact.filename })}
         className="h-auto max-w-full rounded-md"
-        onError={onLoadError}
+        onLoad={() => onLoad(src)}
+        onError={() => onLoadError(src)}
       />
     </div>
   );

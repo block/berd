@@ -13,7 +13,7 @@ use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
-use std::time::{Duration, Instant, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_FILE_MENTION_LIMIT: usize = 12;
 const MAX_FILE_MENTION_LIMIT: usize = 32;
@@ -851,10 +851,59 @@ pub struct FileStatPayload {
     /// boundary, including nanosecond timestamp precision and large files.
     pub byte_size: String,
     pub modified_at_ns: String,
+    /// Change time catches same-size rewrites whose modification time was
+    /// restored. It is available on Unix and Windows; other platforms omit it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changed_at_ns: Option<String>,
 }
 
-/// Return the size and modification time used by open artifact viewers to
-/// detect writes that do not appear in the main ACP session's tool events.
+fn signed_unix_timestamp_ns(time: SystemTime) -> String {
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_nanos().to_string(),
+        Err(error) => format!("-{}", error.duration().as_nanos()),
+    }
+}
+
+#[cfg(windows)]
+fn windows_file_change_time_ns(path: &Path) -> Result<String, String> {
+    use std::fs::File;
+    use std::mem::{size_of, zeroed};
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FileBasicInfo, GetFileInformationByHandleEx, FILE_BASIC_INFO,
+    };
+
+    let file = File::open(path).map_err(|error| {
+        format!(
+            "Failed to open '{}' for change time: {}",
+            path.display(),
+            error
+        )
+    })?;
+    let mut info: FILE_BASIC_INFO = unsafe { zeroed() };
+    let succeeded = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileBasicInfo,
+            (&raw mut info).cast(),
+            size_of::<FILE_BASIC_INFO>() as u32,
+        )
+    };
+    if succeeded == 0 {
+        return Err(format!(
+            "Failed to read change time for '{}': {}",
+            path.display(),
+            io::Error::last_os_error()
+        ));
+    }
+
+    // Windows reports signed 100ns ticks from 1601. It is an opaque token for
+    // equality comparisons, so preserving that epoch avoids lossy conversion.
+    Ok((i128::from(info.ChangeTime) * 100).to_string())
+}
+
+/// Return the metadata identity used by open artifact viewers to detect writes
+/// that do not appear in the main ACP session's tool events.
 #[tauri::command]
 pub fn stat_file(path: String) -> Result<FileStatPayload, String> {
     let target = Path::new(&path);
@@ -866,26 +915,31 @@ pub fn stat_file(path: String) -> Result<FileStatPayload, String> {
 
     let modified_at_ns = metadata
         .modified()
+        .map(signed_unix_timestamp_ns)
         .map_err(|error| {
             format!(
                 "Failed to read modification time for '{}': {}",
                 target.display(),
                 error
             )
-        })?
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| {
-            format!(
-                "Invalid modification time for '{}': {}",
-                target.display(),
-                error
-            )
-        })?
-        .as_nanos();
+        })?;
+
+    #[cfg(unix)]
+    let changed_at_ns = {
+        use std::os::unix::fs::MetadataExt;
+        let nanoseconds =
+            i128::from(metadata.ctime()) * 1_000_000_000 + i128::from(metadata.ctime_nsec());
+        Some(nanoseconds.to_string())
+    };
+    #[cfg(windows)]
+    let changed_at_ns = Some(windows_file_change_time_ns(target)?);
+    #[cfg(not(any(unix, windows)))]
+    let changed_at_ns = None;
 
     Ok(FileStatPayload {
         byte_size: metadata.len().to_string(),
-        modified_at_ns: modified_at_ns.to_string(),
+        modified_at_ns,
+        changed_at_ns,
     })
 }
 
@@ -2039,9 +2093,9 @@ mod tests {
         get_or_build_file_mention_index_from_cache, inspect_attachment_path,
         inspect_attachment_paths, normalize_attachment_paths, normalize_roots, open_in_chrome_with,
         read_directory_entries, read_image_attachment, read_text_file,
-        search_file_mentions_blocking, stat_file, write_agent_image_atomically,
-        write_sibling_then_replace, FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES,
-        MAX_TEXT_FILE_BYTES,
+        search_file_mentions_blocking, signed_unix_timestamp_ns, stat_file,
+        write_agent_image_atomically, write_sibling_then_replace, FileMentionIndexCache,
+        MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
     };
     use base64::Engine;
     use std::fs;
@@ -2056,7 +2110,7 @@ mod tests {
         Arc, Barrier, Mutex,
     };
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, UNIX_EPOCH};
     use tempfile::tempdir;
 
     /// Create a temp dir with `git init` so the ignore crate picks up `.gitignore`.
@@ -2895,14 +2949,36 @@ mod tests {
     }
 
     #[test]
-    fn stat_file_returns_size_and_modified_time() {
+    fn stat_file_returns_size_and_metadata_times() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("notes.md");
         fs::write(&path, "hello").expect("write");
 
         let payload = stat_file(path.to_string_lossy().into_owned()).expect("stat file");
         assert_eq!(payload.byte_size, "5");
-        assert!(payload.modified_at_ns.parse::<u128>().expect("timestamp") > 0);
+        assert!(payload.modified_at_ns.parse::<i128>().expect("timestamp") > 0);
+        #[cfg(unix)]
+        assert!(payload.changed_at_ns.is_some());
+    }
+
+    #[test]
+    fn serializes_pre_epoch_times_as_signed_nanoseconds() {
+        let timestamp = UNIX_EPOCH - Duration::from_nanos(42);
+        assert_eq!(signed_unix_timestamp_ns(timestamp), "-42");
+    }
+
+    #[test]
+    fn stat_file_accepts_pre_epoch_modification_times() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("old-notes.md");
+        fs::write(&path, "hello").expect("write");
+        let file = fs::File::open(&path).expect("open");
+        let old_timestamp = UNIX_EPOCH - Duration::from_secs(1);
+        file.set_times(fs::FileTimes::new().set_modified(old_timestamp))
+            .expect("set pre-epoch mtime");
+
+        let payload = stat_file(path.to_string_lossy().into_owned()).expect("stat old file");
+        assert_eq!(payload.modified_at_ns, "-1000000000");
     }
 
     #[test]
