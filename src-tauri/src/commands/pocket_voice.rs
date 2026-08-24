@@ -2184,14 +2184,7 @@ fn run_pocket_voice_stream(
                         }
                     }
                     PocketPlaybackEvent::ShutdownImmediately => break,
-                    PocketPlaybackEvent::ShutdownAfterPlayback => {
-                        std::thread::sleep(PLAYBACK_LATENCY_SAFETY_DURATION);
-                        release_completed_pocket_assistant_speech(
-                            completed_generation.load(Ordering::Acquire),
-                            &assistant_speech,
-                        );
-                        break;
-                    }
+                    PocketPlaybackEvent::ShutdownAfterPlayback => break,
                 }
             }
         })
