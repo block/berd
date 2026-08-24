@@ -58,7 +58,8 @@ vi.mock("../lib/voiceOutputPreference", () => ({
     setBackend: vi.fn(),
   }),
 }));
-vi.mock("../lib/voiceInputPreference", () => ({
+vi.mock("../lib/voiceInputPreference", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/voiceInputPreference")>()),
   useVoiceInputPreference: () => ({
     backend: inputState.backend,
     setBackend: vi.fn(),
