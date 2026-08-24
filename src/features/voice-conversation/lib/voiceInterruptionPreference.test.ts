@@ -8,7 +8,12 @@ import {
 } from "./voiceInterruptionPreference";
 
 describe("voice interruption preference", () => {
-  beforeEach(() => window.localStorage.clear());
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.dispatchEvent(
+      new StorageEvent("storage", { key: null, newValue: null }),
+    );
+  });
   afterEach(() => vi.restoreAllMocks());
 
   it("defaults to automatic with the existing VAD thresholds", () => {
