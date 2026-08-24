@@ -9,7 +9,7 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
@@ -2116,9 +2116,8 @@ fn enqueue_transcript_if_active(
 fn forward_macos_events(
     events: &mut tokio_mpsc::UnboundedReceiver<mac_speech::RecognitionEvent>,
     output: &tokio_mpsc::Sender<SttMessage>,
-    finishing: bool,
-) -> Result<bool, ()> {
-    let mut finished = false;
+    delivery_deadline: Option<Instant>,
+) -> Result<(), ()> {
     while let Ok(event) = events.try_recv() {
         match event {
             mac_speech::RecognitionEvent::Final(text) => {
@@ -2126,7 +2125,7 @@ fn forward_macos_events(
                 if text.is_empty() {
                     continue;
                 }
-                let delivered = finishing.then(|| {
+                let delivered = delivery_deadline.map(|_| {
                     let (sender, receiver) = mpsc::sync_channel(0);
                     (sender, receiver)
                 });
@@ -2140,21 +2139,23 @@ fn forward_macos_events(
                 {
                     return Err(());
                 }
-                if let Some((_, receiver)) = delivered {
-                    let _ = receiver.recv_timeout(FINAL_TRANSCRIPT_DELIVERY_TIMEOUT);
+                if let (Some(deadline), Some((_, receiver))) = (delivery_deadline, delivered) {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if !remaining.is_zero() {
+                        let _ = receiver.recv_timeout(remaining);
+                    }
                 }
             }
             mac_speech::RecognitionEvent::Finished => {
-                if !finishing {
+                if delivery_deadline.is_none() {
                     let _ = output.blocking_send(SttMessage::Failed(
                         "macOS speech recognition stopped unexpectedly.".to_string(),
                     ));
                     return Err(());
                 }
-                finished = true;
             }
             mac_speech::RecognitionEvent::Failed(message) => {
-                if !finishing {
+                if delivery_deadline.is_none() {
                     let _ = output.blocking_send(SttMessage::Failed(message));
                 } else {
                     log::error!("macOS speech recognition failed while finishing: {message}");
@@ -2163,7 +2164,7 @@ fn forward_macos_events(
             }
         }
     }
-    Ok(finished)
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -2216,7 +2217,7 @@ fn macos_stt_worker(
     let mut observed_mute_epoch = input_mute_epoch.load(Ordering::Acquire);
 
     loop {
-        if forward_macos_events(&mut recognition_events, &event_tx, false).is_err() {
+        if forward_macos_events(&mut recognition_events, &event_tx, None).is_err() {
             return;
         }
         let batch = match audio_rx.recv_timeout(Duration::from_millis(50)) {
@@ -2300,7 +2301,7 @@ fn macos_stt_worker(
                 }
             }
         }
-        if forward_macos_events(&mut recognition_events, &event_tx, false).is_err() {
+        if forward_macos_events(&mut recognition_events, &event_tx, None).is_err() {
             return;
         }
     }
@@ -2316,7 +2317,8 @@ fn macos_stt_worker(
         log::error!("Could not finish macOS speech recognition: {error}");
         return;
     }
-    let _ = forward_macos_events(&mut recognition_events, &event_tx, true);
+    let delivery_deadline = Instant::now() + FINAL_TRANSCRIPT_DELIVERY_TIMEOUT;
+    let _ = forward_macos_events(&mut recognition_events, &event_tx, Some(delivery_deadline));
 }
 
 #[allow(clippy::too_many_arguments)] // Worker boundary keeps channel and mute lifecycle inputs explicit.
@@ -2613,6 +2615,40 @@ mod tests {
         assert!(!needs_macos_status(true, false));
         assert!(!needs_macos_status(false, true));
         assert!(needs_macos_status(false, false));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn finishing_finals_share_one_delivery_deadline() {
+        let (recognition_tx, mut recognition_rx) = tokio_mpsc::unbounded_channel();
+        recognition_tx
+            .send(mac_speech::RecognitionEvent::Final("first".to_string()))
+            .expect("queue first final");
+        recognition_tx
+            .send(mac_speech::RecognitionEvent::Final("second".to_string()))
+            .expect("queue second final");
+        recognition_tx
+            .send(mac_speech::RecognitionEvent::Finished)
+            .expect("queue finish");
+        let (output_tx, mut output_rx) = tokio_mpsc::channel(4);
+        let started = Instant::now();
+
+        forward_macos_events(
+            &mut recognition_rx,
+            &output_tx,
+            Some(started + Duration::from_millis(20)),
+        )
+        .expect("drain final events");
+
+        assert!(started.elapsed() < Duration::from_millis(100));
+        assert!(matches!(
+            output_rx.try_recv(),
+            Ok(SttMessage::Final { text, .. }) if text == "first"
+        ));
+        assert!(matches!(
+            output_rx.try_recv(),
+            Ok(SttMessage::Final { text, .. }) if text == "second"
+        ));
     }
 
     #[test]
