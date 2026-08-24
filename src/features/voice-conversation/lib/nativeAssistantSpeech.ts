@@ -32,6 +32,7 @@ type SpeechDeliveryEstimate = {
   unspokenText: string;
   confidence: "low" | "medium";
 };
+type InterruptionCause = "userSpeaking" | "voiceStopped";
 type ActiveUtterance = {
   id: string;
   sessionId: string;
@@ -42,6 +43,7 @@ type ActiveUtterance = {
   finishing: boolean;
   nativeStreamStarted: boolean;
   interruptionRequested: boolean;
+  interruptionCause: InterruptionCause | null;
   latestDelivery: VoiceDeliveryProgress | null;
   status: SpeechStatus | null;
   onFailure: SpeechFailureHandler;
@@ -119,6 +121,7 @@ function recordPlaybackNotice(
   text: string,
   status: "interrupted" | "notSpoken" | "failed",
   estimate?: SpeechDeliveryEstimate,
+  interruptionCause: InterruptionCause = "voiceStopped",
 ) {
   const noticeKey = `${sessionId}\0${key}\0${status}`;
   if (recordedNoticeKeys.has(noticeKey)) return;
@@ -126,7 +129,9 @@ function recordPlaybackNotice(
   const excerpt = text.length > 500 ? `${text.slice(0, 497).trimEnd()}…` : text;
   const outcome =
     status === "interrupted"
-      ? "TTS delivery was interrupted because the user started speaking; the assistant reply was not fully spoken."
+      ? interruptionCause === "userSpeaking"
+        ? "TTS delivery was interrupted because the user started speaking; the assistant reply was not fully spoken."
+        : "TTS delivery was interrupted because the voice conversation stopped; the assistant reply was not fully spoken."
       : status === "notSpoken"
         ? "TTS delivery was blocked because the user was speaking; the assistant reply was not spoken."
         : "Native TTS could not deliver the assistant reply.";
@@ -394,6 +399,7 @@ function handleStreamEvent(
         utterance.text,
         "interrupted",
         estimate,
+        utterance.interruptionCause ?? "voiceStopped",
       );
       voice.setUiState("listening");
       activeUtterance = null;
@@ -429,13 +435,17 @@ function handleStreamEvent(
   }
 }
 
-function interruptActiveUtterance(awaitTerminalDelivery = false): boolean {
+function interruptActiveUtterance(
+  awaitTerminalDelivery = false,
+  cause: InterruptionCause = "voiceStopped",
+): boolean {
   const utterance = activeUtterance;
   const terminalEventExpected =
     awaitTerminalDelivery && utterance?.nativeStreamStarted === true;
   commandEpoch += 1;
   if (utterance && !utterance.interruptionRequested) {
     utterance.interruptionRequested = true;
+    utterance.interruptionCause = cause;
     if (terminalEventExpected) utterance.onInterrupted();
   }
   if (utterance && !terminalEventExpected) {
@@ -452,6 +462,7 @@ function interruptActiveUtterance(awaitTerminalDelivery = false): boolean {
       utterance.text,
       "interrupted",
       estimate,
+      utterance.interruptionCause ?? cause,
     );
     reportAssistantActivity(
       utterance.sessionId,
@@ -579,6 +590,7 @@ export function startNativeAssistantSpeech(
       finishing: false,
       nativeStreamStarted: false,
       interruptionRequested: false,
+      interruptionCause: null,
       latestDelivery: null,
       status: null,
       onFailure,
@@ -757,7 +769,7 @@ export function startNativeAssistantSpeech(
     const becameUserSpeaking = voice.userSpeaking && !wasUserSpeaking;
     wasUserSpeaking = voice.userSpeaking;
     if (!becameUserSpeaking || activeGeneration !== generation) return;
-    interruptActiveUtterance(true);
+    interruptActiveUtterance(true, "userSpeaking");
   });
   queueMicrotask(inspect);
 }

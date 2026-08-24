@@ -559,6 +559,34 @@ describe("native assistant speech stream", () => {
     ).toMatchObject({ speech: { status: "interrupted" } });
   });
 
+  it("describes a hang-up as stopping the voice conversation", async () => {
+    takeVoicePlaybackNotices("session-1");
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Goodbye." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    emit("started");
+
+    useVoiceConversationStore.setState((voice) => ({
+      status: {
+        ...voice.status,
+        lifecycle: "stopped",
+        sessionId: null,
+        ownerWindowLabel: null,
+        revision: voice.status.revision + 1,
+      },
+      uiState: "off",
+    }));
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+
+    const notice = takeVoicePlaybackNotices("session-1");
+    expect(notice).toContain("because the voice conversation stopped");
+    expect(notice).not.toContain("because the user started speaking");
+  });
+
   it("uses playback progress to report and decorate only the unspoken suffix", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
