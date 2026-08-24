@@ -4,12 +4,14 @@ import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
 const nativeAssistantSpeechMocks = vi.hoisted(() => ({
+  capture: vi.fn(() => []),
   start: vi.fn(),
   stop: vi.fn(),
   takeNotices: vi.fn<() => string | null>(() => null),
 }));
 
 vi.mock("../lib/nativeAssistantSpeech", () => ({
+  captureNativeAssistantSpeechHistory: nativeAssistantSpeechMocks.capture,
   startNativeAssistantSpeech: nativeAssistantSpeechMocks.start,
   stopNativeAssistantSpeech: nativeAssistantSpeechMocks.stop,
   takeVoicePlaybackNotices: nativeAssistantSpeechMocks.takeNotices,
@@ -182,6 +184,7 @@ describe("voice transcript delivery coordination", () => {
   });
 
   beforeEach(() => {
+    nativeAssistantSpeechMocks.capture.mockClear();
     nativeAssistantSpeechMocks.start.mockClear();
     nativeAssistantSpeechMocks.stop.mockClear();
     nativeAssistantSpeechMocks.takeNotices.mockClear();
@@ -710,14 +713,15 @@ describe("voice transcript delivery coordination", () => {
       revision: 4,
     };
     const winnerRefresh = deferred<typeof active>();
-    const loserRefresh = deferred<typeof active>();
+    const loserRefresh = deferred<typeof active | typeof stopped>();
     const stopRequest = deferred<typeof stopped>();
+    const startRequest = deferred<typeof runningWinner>();
     const refreshStatus = vi
       .fn()
       .mockReturnValueOnce(winnerRefresh.promise)
       .mockReturnValueOnce(loserRefresh.promise);
     const stopForReplacement = vi.fn().mockReturnValue(stopRequest.promise);
-    const start = vi.fn().mockResolvedValue(runningWinner);
+    const start = vi.fn().mockReturnValue(startRequest.promise);
     useVoiceConversationStore.setState({
       status: active,
       uiState: "listening",
@@ -756,24 +760,33 @@ describe("voice transcript delivery coordination", () => {
     });
     winnerRefresh.resolve(active);
     await vi.waitFor(() => expect(stopForReplacement).toHaveBeenCalledOnce());
-    loserRefresh.resolve(active);
+    loserRefresh.resolve(stopped);
     await loserToggle;
     expect(stopForReplacement).toHaveBeenCalledWith(active, winnerSessionId);
     expect(start).not.toHaveBeenCalled();
 
     stopRequest.resolve(stopped);
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    act(() => {
+      useVoiceConversationStore.setState({
+        status: runningWinner,
+        uiState: "listening",
+      });
+    });
+    expect(nativeAssistantSpeechMocks.start).not.toHaveBeenCalled();
+    startRequest.resolve(runningWinner);
     await winnerToggle;
 
-    expect(start).toHaveBeenCalledOnce();
     expect(start).toHaveBeenCalledWith(winnerSessionId);
     expect(nativeAssistantSpeechMocks.start).toHaveBeenLastCalledWith(
       winnerSessionId,
       expect.any(Function),
+      [],
     );
     expect(nativeAssistantSpeechMocks.stop).not.toHaveBeenCalled();
   });
 
-  it("cleans up assistant speech when the current session fails to start", async () => {
+  it("does not disturb assistant speech when the current session fails to start", async () => {
     const stopped = {
       available: true,
       unavailableReason: null,
@@ -826,7 +839,11 @@ describe("voice transcript delivery coordination", () => {
     startRequest.reject(new Error("start failed"));
     await toggling;
 
-    expect(nativeAssistantSpeechMocks.stop).toHaveBeenCalledOnce();
+    expect(nativeAssistantSpeechMocks.capture).toHaveBeenCalledWith(
+      "session-a",
+    );
+    expect(nativeAssistantSpeechMocks.start).not.toHaveBeenCalled();
+    expect(nativeAssistantSpeechMocks.stop).not.toHaveBeenCalled();
   });
 
   it("deduplicates concurrent controls for the same session", async () => {

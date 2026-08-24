@@ -13,8 +13,8 @@ import {
   useVoiceConversationStore,
 } from "../stores/voiceConversationStore";
 import {
+  captureNativeAssistantSpeechHistory,
   startNativeAssistantSpeech,
-  stopNativeAssistantSpeech,
   takeVoicePlaybackNotices,
 } from "../lib/nativeAssistantSpeech";
 import { setVoiceConversationControlsSuppressed } from "../api/voiceConversation";
@@ -708,34 +708,43 @@ export function useVoiceConversationController({
     status.sessionId,
   ]);
 
-  const startAssistantSpeech = useCallback(() => {
-    startNativeAssistantSpeech(sessionId, (text, playbackError) => {
-      addErrorNotification(
+  const startAssistantSpeech = useCallback(
+    (
+      initialMessages?: ReturnType<typeof captureNativeAssistantSpeechHistory>,
+    ) => {
+      startNativeAssistantSpeech(
         sessionId,
-        `Pocket TTS could not speak the assistant response: ${errorText(
-          playbackError,
-        )}`,
+        (text, playbackError) => {
+          addErrorNotification(
+            sessionId,
+            `Pocket TTS could not speak the assistant response: ${errorText(
+              playbackError,
+            )}`,
+          );
+          console.error("Native Pocket playback failed", {
+            sessionId,
+            textLength: text.length,
+            error: playbackError,
+          });
+        },
+        initialMessages,
       );
-      console.error("Native Pocket playback failed", {
-        sessionId,
-        textLength: text.length,
-        error: playbackError,
-      });
-    });
-  }, [sessionId]);
+    },
+    [sessionId],
+  );
 
   const startCurrentConversation = useCallback(async () => {
     // Do not rely on the mount effect racing ahead of the user's first
     // click. The native recognizer can finalize quickly, so its delivery
     // subscriber must exist before the microphone lifecycle starts.
     ensureVoiceEventDeliveryInitialized();
+    const assistantSpeechHistory =
+      captureNativeAssistantSpeechHistory(sessionId);
     const route = { sessionId, send: onSend };
     activeSendRoute = route;
-    // Capture the history boundary before native startup can admit a
-    // transcript and produce the first assistant response.
-    startAssistantSpeech();
     try {
       await start(sessionId);
+      startAssistantSpeech(assistantSpeechHistory);
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;
       const conversationStarted =
@@ -746,7 +755,6 @@ export function useVoiceConversationController({
         activeSendRoute?.sessionId === route.sessionId
       ) {
         activeSendRoute = null;
-        stopNativeAssistantSpeech();
       }
       addErrorNotification(sessionId, errorText(startError));
     }
@@ -755,6 +763,9 @@ export function useVoiceConversationController({
   useEffect(() => {
     if (status.lifecycle !== "running" || status.sessionId !== sessionId)
       return;
+    // The initiating operation captured the pre-start history boundary and
+    // activates speech after native startup succeeds.
+    if (operationInFlightBySession.has(sessionId)) return;
     startAssistantSpeech();
   }, [sessionId, startAssistantSpeech, status.lifecycle, status.sessionId]);
 
@@ -851,6 +862,7 @@ export function useVoiceConversationController({
     if (operationInFlightBySession.has(sessionId)) return;
     operationInFlightBySession.add(sessionId);
     try {
+      if (replacementOperationInFlight) return;
       const currentStatus = await refreshStatus().catch(() => {
         addErrorNotification(
           sessionId,
@@ -859,6 +871,7 @@ export function useVoiceConversationController({
         return null;
       });
       if (!currentStatus) return;
+      if (replacementOperationInFlight) return;
       const currentlyActive =
         currentStatus.sessionId !== null &&
         currentStatus.lifecycle !== "stopped" &&

@@ -1,5 +1,9 @@
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import type { TextContent, VoiceSpeechState } from "@/shared/types/messages";
+import type {
+  Message,
+  TextContent,
+  VoiceSpeechState,
+} from "@/shared/types/messages";
 import {
   appendPocketVoiceStream,
   finishPocketVoiceStream,
@@ -653,9 +657,16 @@ export function stopNativeAssistantSpeech(awaitTerminalDelivery = false): void {
   activeSpeechRevision = null;
 }
 
+export function captureNativeAssistantSpeechHistory(
+  sessionId: string,
+): Message[] {
+  return [...(useChatStore.getState().messagesBySession[sessionId] ?? [])];
+}
+
 export function startNativeAssistantSpeech(
   sessionId: string,
   onFailure: SpeechFailureHandler,
+  initialMessages: Message[] = captureNativeAssistantSpeechHistory(sessionId),
 ): void {
   if (activeSpeechSessionId === sessionId) return;
   stopNativeAssistantSpeech();
@@ -691,8 +702,6 @@ export function startNativeAssistantSpeech(
       stopStreamSubscription = unlisten;
     });
 
-  const initialMessages =
-    useChatStore.getState().messagesBySession[sessionId] ?? [];
   const toolCountByMessage = new Map<string, number>();
   const consumedTextBySlot = new Map<string, string>();
   const completedMessages = new Set<string>();
