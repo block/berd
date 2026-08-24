@@ -7,13 +7,13 @@ without coupling the implementations.
 
 | Track | User-facing name | Implementation term |
 | --- | --- | --- |
-| Berd top bar | PR tracker | Pull Requests popover |
+| Berd top bar | PR Inbox | PR Inbox popover |
 | macOS | Work Status | menu bar popover |
 | Windows | Work Status | system tray flyout |
 
 ## 1. In-app PR tracker
 
-The in-app popover shows open pull requests only. Berd already exposes chat
+The PR Inbox popover shows open pull requests only. Berd already exposes chat
 status in its left sidebar, so duplicating chats inside the app would add noise.
 The PR tracker groups a pull request under the Berd project of the session that
 created it when that association can be recovered; otherwise it uses **No

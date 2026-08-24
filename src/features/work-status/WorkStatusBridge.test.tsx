@@ -1,6 +1,5 @@
-import { StrictMode } from "react";
 import { act, render, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WorkStatusSnapshot } from "./types";
 import { WorkStatusBridge } from "./WorkStatusBridge";
@@ -11,10 +10,6 @@ import {
 } from "./workStatusStore";
 
 const buildWorkStatusSnapshotMock = vi.hoisted(() => vi.fn());
-
-vi.mock("@/features/experiments/experimentPreferences", () => ({
-  useExperiment: () => ({ enabled: true }),
-}));
 
 vi.mock("./workStatusData", () => ({
   buildWorkStatusSnapshot: buildWorkStatusSnapshotMock,
@@ -54,6 +49,11 @@ function snapshot(title: string): WorkStatusSnapshot {
 }
 
 describe("WorkStatusBridge", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     useWorkStatusStore.setState({
@@ -64,29 +64,81 @@ describe("WorkStatusBridge", () => {
     });
   });
 
-  it("starts a fresh request for the active Strict Mode effect generation", async () => {
-    const first = deferred<WorkStatusSnapshot>();
-    const second = deferred<WorkStatusSnapshot>();
-    buildWorkStatusSnapshotMock
-      .mockReturnValueOnce(first.promise)
-      .mockReturnValueOnce(second.promise);
+  it("does not request data while the PR Inbox is closed", async () => {
+    const { rerender } = render(<WorkStatusBridge active={false} />);
 
-    render(
-      <StrictMode>
-        <WorkStatusBridge />
-      </StrictMode>,
+    expect(buildWorkStatusSnapshotMock).not.toHaveBeenCalled();
+
+    rerender(<WorkStatusBridge active />);
+    await waitFor(() =>
+      expect(buildWorkStatusSnapshotMock).toHaveBeenCalledTimes(1),
     );
 
+    rerender(<WorkStatusBridge active={false} />);
+    act(() => {
+      window.dispatchEvent(new CustomEvent(WORK_STATUS_REFRESH_EVENT));
+    });
+    expect(buildWorkStatusSnapshotMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("polls only while the PR Inbox is open", async () => {
+    vi.useFakeTimers();
+    buildWorkStatusSnapshotMock.mockResolvedValue(snapshot("current"));
+    const { rerender } = render(<WorkStatusBridge active />);
+
+    await act(async () => Promise.resolve());
+    expect(buildWorkStatusSnapshotMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(buildWorkStatusSnapshotMock).toHaveBeenCalledTimes(2);
+
+    rerender(<WorkStatusBridge active={false} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(buildWorkStatusSnapshotMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("pauses while hidden and refreshes immediately when visible again", async () => {
+    let visibilityState: DocumentVisibilityState = "visible";
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(
+      () => visibilityState,
+    );
+    buildWorkStatusSnapshotMock.mockResolvedValue(snapshot("current"));
+    render(<WorkStatusBridge active />);
+    await waitFor(() =>
+      expect(buildWorkStatusSnapshotMock).toHaveBeenCalledTimes(1),
+    );
+
+    visibilityState = "hidden";
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    act(() => {
+      window.dispatchEvent(new CustomEvent(WORK_STATUS_REFRESH_EVENT));
+    });
+    expect(buildWorkStatusSnapshotMock).toHaveBeenCalledTimes(1);
+
+    visibilityState = "visible";
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
     await waitFor(() =>
       expect(buildWorkStatusSnapshotMock).toHaveBeenCalledTimes(2),
     );
+  });
 
-    await act(async () => first.resolve(snapshot("stale")));
-    expect(useWorkStatusStore.getState().snapshot.pullRequests).toEqual([]);
+  it("refreshes immediately each time the PR Inbox opens", async () => {
+    buildWorkStatusSnapshotMock.mockResolvedValue(snapshot("current"));
+    const { rerender } = render(<WorkStatusBridge active={false} />);
 
-    await act(async () => second.resolve(snapshot("current")));
-    expect(useWorkStatusStore.getState().snapshot.pullRequests[0]?.title).toBe(
-      "current",
+    rerender(<WorkStatusBridge active />);
+    await waitFor(() =>
+      expect(buildWorkStatusSnapshotMock).toHaveBeenCalledTimes(1),
+    );
+
+    rerender(<WorkStatusBridge active={false} />);
+    rerender(<WorkStatusBridge active />);
+    await waitFor(() =>
+      expect(buildWorkStatusSnapshotMock).toHaveBeenCalledTimes(2),
     );
   });
 
@@ -97,7 +149,7 @@ describe("WorkStatusBridge", () => {
       .mockReturnValueOnce(initial.promise)
       .mockReturnValueOnce(manualRefresh.promise);
 
-    render(<WorkStatusBridge />);
+    render(<WorkStatusBridge active />);
     await waitFor(() =>
       expect(buildWorkStatusSnapshotMock).toHaveBeenCalledTimes(1),
     );
@@ -135,7 +187,7 @@ describe("WorkStatusBridge", () => {
       .mockReturnValueOnce(initial.promise)
       .mockReturnValueOnce(manualRefresh.promise);
 
-    render(<WorkStatusBridge />);
+    render(<WorkStatusBridge active />);
     await waitFor(() =>
       expect(buildWorkStatusSnapshotMock).toHaveBeenCalledTimes(1),
     );
@@ -168,7 +220,7 @@ describe("WorkStatusBridge", () => {
       .mockReturnValueOnce(initial.promise)
       .mockReturnValueOnce(followUp.promise);
 
-    render(<WorkStatusBridge />);
+    render(<WorkStatusBridge active />);
     await waitFor(() =>
       expect(buildWorkStatusSnapshotMock).toHaveBeenCalledTimes(1),
     );

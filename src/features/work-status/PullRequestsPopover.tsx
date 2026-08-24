@@ -11,6 +11,7 @@ import { GitPullRequest } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
 import { PullRequestsPanel } from "./PullRequestsPanel";
+import { WorkStatusBridge } from "./WorkStatusBridge";
 import { useWorkStatusStore } from "./workStatusStore";
 
 const DEFAULT_POPOVER_HEIGHT = 480;
@@ -114,48 +115,53 @@ export function PullRequestsPopover() {
   };
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        <TopBarIconButton
-          type="button"
-          size="icon-top-bar"
-          className="relative"
-          aria-label={t("workStatus.topBarLabel", { count: pullRequestCount })}
-          tooltip={t("workStatus.title")}
+    <>
+      <WorkStatusBridge active={open} />
+      <Popover open={open} onOpenChange={handleOpenChange}>
+        <PopoverTrigger asChild>
+          <TopBarIconButton
+            type="button"
+            size="icon-top-bar"
+            className="relative"
+            aria-label={t("workStatus.topBarLabel", {
+              count: pullRequestCount,
+            })}
+            tooltip={t("workStatus.title")}
+          >
+            <GitPullRequest aria-hidden />
+            {pullRequestCount > 0 ? (
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 font-medium text-[9px] leading-none text-background tabular-nums"
+              >
+                {formatCount(pullRequestCount)}
+              </span>
+            ) : null}
+          </TopBarIconButton>
+        </PopoverTrigger>
+        <PopoverContent
+          align="end"
+          sideOffset={8}
+          style={{ height }}
+          className="relative w-[min(460px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-visible border-0 bg-transparent p-0 shadow-none"
         >
-          <GitPullRequest aria-hidden />
-          {pullRequestCount > 0 ? (
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 font-medium text-[9px] leading-none text-background tabular-nums"
-            >
-              {formatCount(pullRequestCount)}
-            </span>
-          ) : null}
-        </TopBarIconButton>
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        sideOffset={8}
-        style={{ height }}
-        className="relative w-[min(460px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] overflow-visible border-0 bg-transparent p-0 shadow-none"
-      >
-        <PullRequestsPanel />
-        <hr
-          tabIndex={0}
-          aria-label={t("workStatus.resize")}
-          aria-orientation="horizontal"
-          aria-valuemin={minAvailableHeight()}
-          aria-valuemax={maxAvailableHeight()}
-          aria-valuenow={Math.round(height)}
-          onKeyDown={handleResizeKeyDown}
-          onPointerDown={handleResizePointerDown}
-          onPointerMove={handleResizePointerMove}
-          onPointerUp={handleResizePointerUp}
-          onPointerCancel={handleResizePointerUp}
-          className="absolute right-3 bottom-0 left-3 z-10 h-3 translate-y-1/2 cursor-ns-resize touch-none rounded-sm border-0 bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
-      </PopoverContent>
-    </Popover>
+          <PullRequestsPanel />
+          <hr
+            tabIndex={0}
+            aria-label={t("workStatus.resize")}
+            aria-orientation="horizontal"
+            aria-valuemin={minAvailableHeight()}
+            aria-valuemax={maxAvailableHeight()}
+            aria-valuenow={Math.round(height)}
+            onKeyDown={handleResizeKeyDown}
+            onPointerDown={handleResizePointerDown}
+            onPointerMove={handleResizePointerMove}
+            onPointerUp={handleResizePointerUp}
+            onPointerCancel={handleResizePointerUp}
+            className="absolute right-3 bottom-0 left-3 z-10 h-3 translate-y-1/2 cursor-ns-resize touch-none rounded-sm border-0 bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </PopoverContent>
+      </Popover>
+    </>
   );
 }

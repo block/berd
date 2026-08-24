@@ -6,7 +6,6 @@ import { SelectedTextContextMenu } from "@/app/ui/SelectedTextContextMenu";
 import { StartupLoadingView } from "@/app/ui/StartupLoadingView";
 import { useAuthGate } from "@/features/auth/hooks/useAuthGate";
 import { GlobalShortcutBridge } from "@/features/global-shortcut/GlobalShortcutBridge";
-import { WorkStatusBridge } from "@/features/work-status/WorkStatusBridge";
 import { LoginView } from "@/features/auth/ui/LoginView";
 import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { useZoom } from "@/shared/hooks/useZoom";
@@ -49,7 +48,6 @@ export function App() {
     content = (
       <TopBarActionsProvider>
         <GlobalShortcutBridge />
-        <WorkStatusBridge />
         <AppShell
           authStatus={authGate.authStatus}
           onLoggedOut={authGate.completeLogin}

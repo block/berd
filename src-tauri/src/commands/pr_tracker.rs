@@ -34,18 +34,28 @@ const MAX_REPOSITORY_LENGTH: usize = 256;
 const MAX_BRANCH_LENGTH: usize = 512;
 const GIT_PROBE_CONCURRENCY: usize = 4;
 const WORKSPACE_CANDIDATES_QUERY: &str = r#"
-WITH session_activity AS (
+WITH recent_messages AS (
+  SELECT session_id, created_timestamp
+  FROM messages
+  ORDER BY id DESC
+  LIMIT ?
+), recent_message_activity AS (
+  SELECT session_id,
+         MAX(
+           CASE
+             WHEN created_timestamp > 10000000000
+               THEN created_timestamp / 1000
+             ELSE created_timestamp
+           END
+         ) AS activity_at
+  FROM recent_messages
+  GROUP BY session_id
+), session_activity AS (
   SELECT s.id,
          s.working_dir,
          s.project_id,
          COALESCE(
-           MAX(
-             CASE
-               WHEN m.created_timestamp > 10000000000
-                 THEN m.created_timestamp / 1000
-               ELSE m.created_timestamp
-             END
-           ),
+           m.activity_at,
            CASE
              WHEN unixepoch(s.updated_at) >= unixepoch(s.created_at)
                THEN unixepoch(s.updated_at)
@@ -53,14 +63,13 @@ WITH session_activity AS (
            END
          ) AS activity_at
   FROM sessions s
-  LEFT JOIN messages m ON m.session_id = s.id
+  LEFT JOIN recent_message_activity m ON m.session_id = s.id
   WHERE s.archived_at IS NULL
     AND COALESCE(s.session_type, 'user') IN ('user', 'acp')
     AND s.project_id IS NOT NULL
     AND TRIM(s.project_id) != ''
     AND s.working_dir IS NOT NULL
     AND TRIM(s.working_dir) != ''
-  GROUP BY s.id, s.working_dir, s.project_id, s.created_at, s.updated_at
 ), ranked_workspaces AS (
   SELECT id,
          working_dir,
@@ -232,6 +241,7 @@ async fn resolve_pr_tracker_projects_inner(
         .await
         .map_err(|error| format!("Failed to open Berd chat database: {error}"))?;
     let rows = sqlx::query(WORKSPACE_CANDIDATES_QUERY)
+        .bind(MAX_MESSAGE_CANDIDATES)
         .bind(MAX_WORKSPACE_CANDIDATES as i64)
         .fetch_all(&pool)
         .await
@@ -579,7 +589,8 @@ mod tests {
               id INTEGER PRIMARY KEY,
               session_id TEXT NOT NULL,
               created_timestamp INTEGER NOT NULL
-            )
+            );
+            CREATE INDEX idx_messages_session ON messages(session_id);
             "#,
         )
         .execute(&pool)
@@ -624,6 +635,7 @@ mod tests {
             .unwrap();
 
         let rows = sqlx::query(WORKSPACE_CANDIDATES_QUERY)
+            .bind(MAX_MESSAGE_CANDIDATES)
             .bind(MAX_WORKSPACE_CANDIDATES as i64)
             .fetch_all(&pool)
             .await

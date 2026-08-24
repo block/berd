@@ -13,7 +13,6 @@ import {
   STARTER_TASKS_EXPERIMENT_ID,
   TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
   VOICE_CONVERSATION_EXPERIMENT_ID,
-  WORK_STATUS_EXPERIMENT_ID,
   type ExperimentDefinition,
 } from "../experimentDefinitions";
 import { ExperimentsSettings } from "../ExperimentsSettings";
@@ -130,26 +129,11 @@ describe("ExperimentsSettings", () => {
     ).toBeInTheDocument();
   });
 
-  it("enables Work Status by default and lets users turn it off", async () => {
-    vi.stubEnv("DEV", false);
-    const user = userEvent.setup();
-    renderWithProviders(<ExperimentsSettings />);
-
-    const toggle = screen.getByRole("switch", {
-      name: i18n.t("experiments.workStatus.title", { ns: "settings" }),
-    });
-    expect(toggle).toBeChecked();
-
-    await user.click(toggle);
-    expect(toggle).not.toBeChecked();
-  });
-
   it("registers only the currently supported experiments", () => {
     expect(EXPERIMENT_DEFINITIONS.map(({ id }) => id)).toEqual([
       BUILDERBOT_SURFACE_EXPERIMENT_ID,
       TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
       SKILL_DISCOVERY_EXPERIMENT_ID,
-      WORK_STATUS_EXPERIMENT_ID,
       STARTER_TASKS_EXPERIMENT_ID,
       VOICE_CONVERSATION_EXPERIMENT_ID,
       CHAT_ON_CANVAS_EXPERIMENT_ID,

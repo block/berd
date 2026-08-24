@@ -216,8 +216,8 @@
       "title": "Builderbot"
     },
     "relatedPullRequests": {
-      "description": "Busca solicitudes de incorporación de cambios enlazadas en un chat y muestra su estado actual en el panel de contexto.",
-      "title": "Solicitudes de incorporación de cambios relacionadas"
+      "description": "Muestra PR Inbox y el estado actual de las solicitudes de incorporación enlazadas en un chat.",
+      "title": "PR Inbox"
     },
     "defaultLabel": "predeterminado",
     "description": "Activa funciones de Berd en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
@@ -247,10 +247,6 @@
       "resetAria": "Restablecer incorporación de tareas iniciales",
       "resetSuccess": "Se restablecieron las tareas iniciales.",
       "title": "Tareas iniciales de incorporación"
-    },
-    "workStatus": {
-      "description": "Muestra el seguimiento de PR dentro de la aplicación",
-      "title": "Seguimiento de PR"
     },
     "title": "Experimentos",
     "transcriptVirtualRenderer": {

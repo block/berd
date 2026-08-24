@@ -67,7 +67,6 @@ export const SKILL_DISCOVERY_EXPERIMENT_ID = "skill-discovery";
 
 export const RELATED_PULL_REQUESTS_EXPERIMENT_ID = "related-pull-requests";
 
-export const WORK_STATUS_EXPERIMENT_ID = "work-status";
 export const EXPERIMENT_DEFINITIONS = [
   {
     id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
@@ -87,12 +86,6 @@ export const EXPERIMENT_DEFINITIONS = [
     // Skill discovery is an opt-in surface because it requires the optional
     // sq-agents CLI and can make remote catalog requests.
     defaultEnabled: false,
-  },
-  {
-    id: WORK_STATUS_EXPERIMENT_ID,
-    titleKey: "experiments.workStatus.title",
-    descriptionKey: "experiments.workStatus.description",
-    defaultEnabled: true,
   },
   {
     id: STARTER_TASKS_EXPERIMENT_ID,

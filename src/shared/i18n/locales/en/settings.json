@@ -216,8 +216,8 @@
       "title": "Builderbot"
     },
     "relatedPullRequests": {
-      "description": "Find pull requests linked in a chat and show their current status in the context panel.",
-      "title": "Related pull requests"
+      "description": "Show the PR Inbox and the current status of pull requests linked in a chat.",
+      "title": "PR Inbox"
     },
     "defaultLabel": "default",
     "description": "Opt into in-progress Berd features on this device. Experiments can change, break, or disappear.",
@@ -247,10 +247,6 @@
       "resetAria": "Reset starter tasks onboarding",
       "resetSuccess": "Onboarding starter tasks reset.",
       "title": "Onboarding starter tasks"
-    },
-    "workStatus": {
-      "description": "Show in-app PR tracker",
-      "title": "PR tracker"
     },
     "title": "Experiments",
     "transcriptVirtualRenderer": {
