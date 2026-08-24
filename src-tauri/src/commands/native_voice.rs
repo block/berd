@@ -927,8 +927,8 @@ fn needs_macos_status(session_active: bool, parakeet_available: bool) -> bool {
 pub async fn get_native_voice_conversation_status(
     app: AppHandle,
     state: State<'_, NativeVoiceState>,
-) -> NativeVoiceStatus {
-    status(&app, &state).await
+) -> Result<NativeVoiceStatus, String> {
+    Ok(status(&app, &state).await)
 }
 
 #[tauri::command]
