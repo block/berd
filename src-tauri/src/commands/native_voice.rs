@@ -409,17 +409,6 @@ impl NativeVoiceState {
         }
     }
 
-    fn clear_assistant_speech(&self) {
-        let mut lifetimes = self
-            .assistant_speech_lifetimes
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        lifetimes.clear();
-        self.assistant_speech_generation
-            .fetch_add(1, Ordering::AcqRel);
-        self.assistant_speaking.store(false, Ordering::Release);
-    }
-
     fn capture_is_suppressed(&self) -> bool {
         self.capture_suppressions.load(Ordering::SeqCst) > 0
     }
@@ -712,7 +701,6 @@ impl NativeVoiceState {
         let owner = runtime.owner.clone();
         let session_id = runtime.session_id.clone();
         let owner_id = session_id.as_deref().map(native_owner_id);
-        self.clear_assistant_speech();
         Ok(Some((
             session_id,
             runtime.revision,
@@ -1288,7 +1276,6 @@ pub async fn start_native_voice_conversation(
         runtime.controls_suppressed = true;
         runtime.controls_visibility_generation = 0;
         state.microphone_muted.store(false, Ordering::SeqCst);
-        state.clear_assistant_speech();
         let runtime_revision = runtime.revision;
         let mute_app = app.clone();
         let mute_window = webview_window.clone();
@@ -2965,6 +2952,43 @@ mod tests {
             InterruptionSensitivity::More.vad_threshold()
         );
         drop(second_burst);
+    }
+
+    #[test]
+    fn assistant_speech_policy_outlives_voice_lifecycle_replacement() {
+        for suppress_capture in [false, true] {
+            let state = NativeVoiceState::default();
+            {
+                let mut runtime = state.runtime.lock().expect("lock native runtime");
+                runtime.session_id = Some("old-session".to_string());
+                runtime.revision = 7;
+            }
+            let guard =
+                state.begin_assistant_speech(InterruptionSensitivity::Less, suppress_capture);
+
+            state
+                .take_stop_snapshot(Some(("old-session", 7)))
+                .expect("stop old lifecycle")
+                .expect("active old lifecycle");
+            {
+                let mut runtime = state.runtime.lock().expect("lock native runtime");
+                runtime.session_id = Some("new-session".to_string());
+                runtime.revision = 8;
+            }
+
+            assert_eq!(state.capture_is_suppressed(), suppress_capture);
+            assert_eq!(
+                active_vad_threshold(&state.assistant_speaking, &state.assistant_vad_threshold),
+                InterruptionSensitivity::Less.vad_threshold()
+            );
+
+            drop(guard);
+            assert!(!state.capture_is_suppressed());
+            assert_eq!(
+                active_vad_threshold(&state.assistant_speaking, &state.assistant_vad_threshold),
+                VAD_THRESHOLD
+            );
+        }
     }
 
     #[test]
