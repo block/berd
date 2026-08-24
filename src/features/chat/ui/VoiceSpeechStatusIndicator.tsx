@@ -3,6 +3,26 @@ import { Volume2 } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
 import type { VoiceSpeechStatus } from "@/shared/types/messages";
 
+function escapeHtml(text: string): string {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+export function formatInterruptedSpeechMarkdown(
+  spokenText: string,
+  unspokenText: string,
+): string {
+  const struckBlocks = escapeHtml(unspokenText)
+    .split(/(\n\s*\n)/)
+    .map((part, index) =>
+      index % 2 === 0 && part ? `<del>${part}</del>` : part,
+    )
+    .join("");
+  return `${spokenText}${struckBlocks}`;
+}
+
 export function VoiceSpeechStatusIndicator({
   status,
   label,

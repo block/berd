@@ -736,6 +736,36 @@ describe("MessageBubble", () => {
     expect(block?.querySelector("del")).not.toHaveTextContent("One. Two");
   });
 
+  it("strikes every paragraph after the estimated interruption cutoff", () => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text: "Heard text. Unheard first paragraph.\n\nUnheard second paragraph.\n\nUnheard third paragraph.",
+            speech: {
+              status: "interrupted",
+              spokenText: "Heard text.",
+              unspokenText:
+                " Unheard first paragraph.\n\nUnheard second paragraph.\n\nUnheard third paragraph.",
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const block = container.querySelector(
+      '[data-voice-speech-status="interrupted"]',
+    );
+    const struckBlocks = block?.querySelectorAll("del");
+    expect(struckBlocks).toHaveLength(3);
+    expect(struckBlocks?.[0]).toHaveTextContent("Unheard first paragraph.");
+    expect(struckBlocks?.[1]).toHaveTextContent("Unheard second paragraph.");
+    expect(struckBlocks?.[2]).toHaveTextContent("Unheard third paragraph.");
+    expect(struckBlocks?.[0]).not.toHaveTextContent("Heard text.");
+  });
+
   it("preserves provider-error presentation after interrupted delivery", () => {
     const rawError =
       "Ran into this error: thinking blocks in the latest assistant message cannot be modified";

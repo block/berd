@@ -30,7 +30,10 @@ import type {
 import type { TranscriptAgentWorkPayload } from "@/features/chat/transcript/projection/transcriptItemTypes";
 import { useTranscriptRowStateAdapter } from "@/features/chat/transcript/row-state";
 import { ToolCallAdapter } from "./ToolCallAdapter";
-import { VoiceSpeechStatusIndicator } from "./VoiceSpeechStatusIndicator";
+import {
+  formatInterruptedSpeechMarkdown,
+  VoiceSpeechStatusIndicator,
+} from "./VoiceSpeechStatusIndicator";
 
 interface ToolTimelineItem {
   kind: "tool";
@@ -311,10 +314,10 @@ function AgentWorkItemRow({
       speechStatus === "interrupted" &&
       item.content.speech?.spokenText !== undefined &&
       item.content.speech.unspokenText !== undefined
-        ? `${item.content.speech.spokenText}<del>${item.content.speech.unspokenText
-            .replaceAll("&", "&amp;")
-            .replaceAll("<", "&lt;")
-            .replaceAll(">", "&gt;")}</del>`
+        ? formatInterruptedSpeechMarkdown(
+            item.content.speech.spokenText,
+            item.content.speech.unspokenText,
+          )
         : item.content.text;
     const speechLabel = speechStatus
       ? {

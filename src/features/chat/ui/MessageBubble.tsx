@@ -63,7 +63,10 @@ import {
   UserMessageClamp,
 } from "./UserMessageClamp";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
-import { VoiceSpeechStatusIndicator } from "./VoiceSpeechStatusIndicator";
+import {
+  formatInterruptedSpeechMarkdown,
+  VoiceSpeechStatusIndicator,
+} from "./VoiceSpeechStatusIndicator";
 
 interface MessageAttachmentPreviewItem {
   key: string;
@@ -537,10 +540,10 @@ function renderContentBlock(
         speechStatus === "interrupted" &&
         tc.speech?.spokenText !== undefined &&
         tc.speech.unspokenText !== undefined
-          ? `${tc.speech.spokenText}<del>${tc.speech.unspokenText
-              .replaceAll("&", "&amp;")
-              .replaceAll("<", "&lt;")
-              .replaceAll(">", "&gt;")}</del>`
+          ? formatInterruptedSpeechMarkdown(
+              tc.speech.spokenText,
+              tc.speech.unspokenText,
+            )
           : displayText;
       const speechLabel = speechStatus
         ? {
