@@ -103,6 +103,7 @@ describe("voice interruption preference", () => {
     });
     expect(result.current.mode).toBe("preventFeedback");
     setItem.mockRestore();
+    unmount();
 
     act(() => {
       window.dispatchEvent(
@@ -112,10 +113,9 @@ describe("voice interruption preference", () => {
         }),
       );
     });
-    expect(result.current).toMatchObject({
+    expect(getVoiceInterruptionPreference()).toEqual({
       mode: "automatic",
       sensitivity: "balanced",
     });
-    unmount();
   });
 });

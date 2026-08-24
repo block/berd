@@ -24,6 +24,7 @@ let volatilePreference:
       storageValueBeforeWrite: string | null | undefined;
     }
   | undefined;
+let removeVolatileStorageListener: (() => void) | undefined;
 
 function normalize(value: unknown): VoiceInterruptionPreference {
   if (!value || typeof value !== "object") return DEFAULT_PREFERENCE;
@@ -58,7 +59,7 @@ export function getVoiceInterruptionPreference(): VoiceInterruptionPreference {
       ) {
         return volatilePreference.preference;
       }
-      volatilePreference = undefined;
+      clearVolatilePreference();
     }
     return raw ? normalize(JSON.parse(raw)) : DEFAULT_PREFERENCE;
   } catch {
@@ -77,17 +78,35 @@ function notify() {
   for (const listener of listeners) listener();
 }
 
+function clearVolatilePreference() {
+  volatilePreference = undefined;
+  removeVolatileStorageListener?.();
+  removeVolatileStorageListener = undefined;
+}
+
+function retainVolatilePreference(
+  preference: VoiceInterruptionPreference,
+  storageValueBeforeWrite: string | null | undefined,
+) {
+  volatilePreference = { preference, storageValueBeforeWrite };
+  if (removeVolatileStorageListener || typeof window === "undefined") return;
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key !== STORAGE_KEY && event.key !== null) return;
+    clearVolatilePreference();
+    notify();
+  };
+  window.addEventListener("storage", handleStorage);
+  removeVolatileStorageListener = () => {
+    window.removeEventListener("storage", handleStorage);
+  };
+}
+
 function subscribe(listener: () => void) {
   if (typeof window === "undefined") return () => {};
   listeners.add(listener);
   if (!removeWindowListeners) {
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEY || event.key === null) {
-        // A storage event is an explicit cross-window write, even if its value
-        // happens to match the value observed before a failed local write.
-        volatilePreference = undefined;
-        notify();
-      }
+      if (event.key === STORAGE_KEY || event.key === null) notify();
     };
     window.addEventListener(CHANGED_EVENT, notify);
     window.addEventListener("storage", handleStorage);
@@ -114,10 +133,10 @@ export function setVoiceInterruptionPreference(
   try {
     storageValueBeforeWrite = window.localStorage.getItem(STORAGE_KEY);
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
-    volatilePreference = undefined;
+    clearVolatilePreference();
   } catch {
     // Keep the current in-memory renderer usable when storage is unavailable.
-    volatilePreference = { preference: value, storageValueBeforeWrite };
+    retainVolatilePreference(value, storageValueBeforeWrite);
   }
   window.dispatchEvent(new CustomEvent(CHANGED_EVENT, { detail: value }));
 }
