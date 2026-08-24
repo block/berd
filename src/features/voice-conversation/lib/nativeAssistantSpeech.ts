@@ -1,5 +1,5 @@
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import type { VoiceSpeechState } from "@/shared/types/messages";
+import type { TextContent, VoiceSpeechState } from "@/shared/types/messages";
 import {
   appendPocketVoiceStream,
   finishPocketVoiceStream,
@@ -273,6 +273,62 @@ function applyInterruptionEstimate(
   }
 }
 
+function targetContent(
+  sessionId: string,
+  target: SpeechTarget,
+): TextContent | null {
+  const message = useChatStore
+    .getState()
+    .messagesBySession[sessionId]?.find(
+      (candidate) => candidate.id === target.messageId,
+    );
+  if (!message) return null;
+  let textOrdinal = 0;
+  for (const content of message.content) {
+    if (content.type !== "text") continue;
+    if (textOrdinal === target.textOrdinal) return content;
+    textOrdinal += 1;
+  }
+  return null;
+}
+
+function recordInterruptionNotices(
+  utterance: ActiveUtterance,
+  fallbackEstimate: SpeechDeliveryEstimate,
+  cause: InterruptionCause,
+) {
+  let recorded = false;
+  for (const target of utterance.targets) {
+    const content = targetContent(utterance.sessionId, target);
+    if (!content || content.speech?.status === "spoken") continue;
+    const spokenThrough = content.speech?.spokenThrough ?? 0;
+    recordPlaybackNotice(
+      utterance.sessionId,
+      targetKey(target),
+      content.text,
+      "interrupted",
+      {
+        cutoff: spokenThrough,
+        spokenText: content.text.slice(0, spokenThrough),
+        unspokenText: content.text.slice(spokenThrough),
+        confidence: content.speech?.confidence ?? fallbackEstimate.confidence,
+      },
+      cause,
+    );
+    recorded = true;
+  }
+  if (!recorded && utterance.targets.length === 0) {
+    recordPlaybackNotice(
+      utterance.sessionId,
+      utterance.id,
+      utterance.text,
+      "interrupted",
+      fallbackEstimate,
+      cause,
+    );
+  }
+}
+
 function setTargetSpeech(
   sessionId: string,
   target: SpeechTarget,
@@ -377,11 +433,8 @@ function handleStreamEvent(
       );
       applyInterruptionEstimate(utterance, estimate);
       utterance.onInterrupted();
-      recordPlaybackNotice(
-        utterance.sessionId,
-        utterance.targets[0] ? targetKey(utterance.targets[0]) : utterance.id,
-        utterance.text,
-        "interrupted",
+      recordInterruptionNotices(
+        utterance,
         estimate,
         utterance.interruptionCause ?? "voiceStopped",
       );
@@ -440,11 +493,8 @@ function interruptActiveUtterance(
     );
     applyInterruptionEstimate(utterance, estimate);
     utterance.onInterrupted();
-    recordPlaybackNotice(
-      utterance.sessionId,
-      utterance.targets[0] ? targetKey(utterance.targets[0]) : utterance.id,
-      utterance.text,
-      "interrupted",
+    recordInterruptionNotices(
+      utterance,
       estimate,
       utterance.interruptionCause ?? cause,
     );

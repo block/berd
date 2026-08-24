@@ -97,6 +97,7 @@ function emit(
 
 describe("native assistant speech stream", () => {
   beforeEach(() => {
+    takeVoicePlaybackNotices("session-1");
     mocks.backend = "pocket";
     mocks.start.mockReset().mockResolvedValue();
     mocks.append.mockReset().mockResolvedValue();
@@ -420,6 +421,69 @@ describe("native assistant speech stream", () => {
       useChatStore.getState().messagesBySession["session-1"]?.[0]?.content;
     expect(content?.[0]).toMatchObject({ speech: { status: "spoken" } });
     expect(content?.[2]).toMatchObject({ speech: { status: "spoken" } });
+  });
+
+  it("replaces the interrupted tool-suffix notice when more text arrives", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore.getState().setMessages("session-1", [
+      assistant([
+        { type: "text", text: "Before the tool." },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "Read",
+          arguments: {},
+          status: "completed",
+        },
+        { type: "text", text: "After the tool." },
+      ]),
+    ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalledTimes(2));
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+    emit("started");
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        segments: [
+          {
+            text: "Before the tool.",
+            playedFrames: 1_000,
+            totalFrames: 1_000,
+            synthesisComplete: true,
+          },
+          {
+            text: "After the tool.",
+            playedFrames: 500,
+            totalFrames: 1_000,
+            synthesisComplete: true,
+          },
+        ],
+      },
+    });
+
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", " More.");
+    await vi.waitFor(() => {
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[2],
+      ).toMatchObject({
+        text: "After the tool. More.",
+        speech: { status: "interrupted", spokenThrough: "After".length },
+      });
+    });
+
+    const notice = takeVoicePlaybackNotices("session-1") ?? "";
+    expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
+    expect(notice).toContain('"spokenText":"After"');
+    expect(notice).toContain('"unspokenText":" the tool. More."');
+    expect(notice).not.toContain("Before the tool.");
   });
 
   it("queues the next reply until the finishing stream completes", async () => {
