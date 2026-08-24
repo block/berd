@@ -3179,6 +3179,25 @@ describe("AppShell global navigation", () => {
     expect(
       await screen.findByPlaceholderText("Start a conversation"),
     ).toHaveValue("keep this voice draft");
+    expect(
+      screen.getByPlaceholderText("Start a conversation"),
+    ).not.toHaveFocus();
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    await user.keyboard("{Meta>}n{/Meta}");
+    const restoredTextbox = await screen.findByPlaceholderText(
+      "Start a conversation",
+    );
+    await waitFor(() => {
+      expect(restoredTextbox.closest("[data-placement]")).toHaveAttribute(
+        "data-placement",
+        "centered",
+      );
+    });
+    expect(restoredTextbox).toHaveValue("keep this voice draft");
   });
 
   it("queues a ready global voice start for the created chat", async () => {

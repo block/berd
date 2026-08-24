@@ -258,7 +258,6 @@ import type {
 } from "./types/appNavigation";
 import type { TopBarBreadcrumb } from "./ui/TopBar";
 import { STARTUP_LOADING_MIN_DISPLAY_MS } from "./lib/startupLoading";
-import { scheduleAfterNextPaint } from "./lib/scheduleAfterNextPaint";
 import { StartupLoadingView } from "./ui/StartupLoadingView";
 import { deriveStarterTaskCompletion } from "@/features/home/onboarding/starterTaskCompletion";
 import {
@@ -885,6 +884,8 @@ export function AppShell({
     useState<GlobalComposerPlacement>("docked");
   const [globalComposerStarterRequest, setGlobalComposerStarterRequest] =
     useState<GlobalComposerStarterRequest | null>(null);
+  const [retainGlobalComposerDraft, setRetainGlobalComposerDraft] =
+    useState(false);
   const globalComposerStarterRequestIdRef = useRef(0);
   const [chatComposerHandoffRequest, setChatComposerHandoffRequest] =
     useState(0);
@@ -3239,19 +3240,9 @@ export function AppShell({
         return new Promise<boolean>((resolve) => {
           guardAppNavigation(
             () => {
+              setRetainGlobalComposerDraft(true);
               requestOpenSettings("voice");
               resetGlobalComposerTransition();
-              scheduleAfterNextPaint(() => {
-                globalComposerStarterRequestIdRef.current += 1;
-                setGlobalComposerStarterRequest({
-                  id: globalComposerStarterRequestIdRef.current,
-                  text: payload.text,
-                  selectedSkills: payload.selectedSkills,
-                  attachments: payload.options?.attachments,
-                  personaId: payload.options?.personaId,
-                  projectId: payload.options?.projectId,
-                });
-              });
               resolve(false);
             },
             () => resolve(false),
@@ -4577,8 +4568,19 @@ export function AppShell({
   const showGlobalComposer =
     canShowGlobalComposer &&
     (globalComposerPlacement !== "docked" || renderedLocation.view !== "chat");
+  const mountGlobalComposer = showGlobalComposer || retainGlobalComposerDraft;
   const showGlobalComposerShim =
     canShowGlobalComposer && globalComposerPlacement !== "docked";
+
+  useEffect(() => {
+    if (
+      retainGlobalComposerDraft &&
+      showGlobalComposer &&
+      globalComposerPlacement === "centered"
+    ) {
+      setRetainGlobalComposerDraft(false);
+    }
+  }, [globalComposerPlacement, retainGlobalComposerDraft, showGlobalComposer]);
 
   useEffect(() => {
     if (
@@ -5502,8 +5504,9 @@ export function AppShell({
                 onClick={dismissCenteredGlobalComposer}
               />
             ) : null}
-            {showGlobalComposer ? (
+            {mountGlobalComposer ? (
               <GlobalComposerPill
+                hidden={!showGlobalComposer}
                 elevated={renderedLocation.view === "settings"}
                 focusRequest={globalComposerFocusRequest}
                 onSend={handleGlobalCompose}

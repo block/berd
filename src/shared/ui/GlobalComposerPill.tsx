@@ -88,15 +88,13 @@ export interface GlobalComposerHandoffRect {
 
 export interface GlobalComposerStarterRequest {
   id: number;
-  text?: string;
   personaId?: string | null;
   projectId?: string | null;
   skill?: ChatSkillDraft;
-  selectedSkills?: ChatSkillDraft[];
-  attachments?: ChatAttachmentDraft[];
 }
 
 interface GlobalComposerPillProps {
+  hidden?: boolean;
   focusRequest?: number;
   elevated?: boolean;
   onSend: (text: string, options?: GlobalComposeOptions) => void;
@@ -210,6 +208,7 @@ function getPreferredModel(
 }
 
 export function GlobalComposerPill({
+  hidden = false,
   focusRequest = 0,
   elevated = false,
   onSend,
@@ -284,7 +283,6 @@ export function GlobalComposerPill({
     addBrowserFiles,
     addPathAttachments,
     removeAttachment,
-    replaceAttachments,
     clearAttachments,
   } = useChatInputAttachments();
   const attachmentWorkPending = attachmentWorkCount > 0;
@@ -381,9 +379,6 @@ export function GlobalComposerPill({
     }
 
     lastStarterRequestIdRef.current = starterRequest.id;
-    if (starterRequest.text !== undefined) {
-      setText(starterRequest.text);
-    }
     if (starterRequest.personaId !== undefined) {
       setSelectedPersonaId(starterRequest.personaId);
       personaSelectionSourceRef.current = starterRequest.personaId
@@ -403,15 +398,9 @@ export function GlobalComposerPill({
           : [...current, skill],
       );
     }
-    if (starterRequest.selectedSkills !== undefined) {
-      setSelectedSkills([...starterRequest.selectedSkills]);
-    }
-    if (starterRequest.attachments !== undefined) {
-      replaceAttachments(starterRequest.attachments);
-    }
     textareaRef.current?.focus();
     onStarterRequestConsumed?.(starterRequest.id);
-  }, [onStarterRequestConsumed, replaceAttachments, starterRequest]);
+  }, [onStarterRequestConsumed, starterRequest]);
 
   const handleRemoveSelectedSkill = useCallback((skillId: string) => {
     setSelectedSkills((current) =>
@@ -1230,6 +1219,7 @@ export function GlobalComposerPill({
 
   return (
     <div
+      hidden={hidden}
       ref={handleContainerRef}
       role="region"
       aria-label={t("globalPill.ariaLabel")}
