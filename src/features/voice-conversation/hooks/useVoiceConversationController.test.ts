@@ -9,6 +9,11 @@ const nativeAssistantSpeechMocks = vi.hoisted(() => ({
   stop: vi.fn(),
   takeNotices: vi.fn<() => string | null>(() => null),
 }));
+const tauriWindowMocks = vi.hoisted(() => ({ label: "main" }));
+
+vi.mock("@tauri-apps/api/window", () => ({
+  getCurrentWindow: () => ({ label: tauriWindowMocks.label }),
+}));
 
 vi.mock("../lib/nativeAssistantSpeech", () => ({
   captureNativeAssistantSpeechHistory: nativeAssistantSpeechMocks.capture,
@@ -184,6 +189,7 @@ describe("voice transcript delivery coordination", () => {
   });
 
   beforeEach(() => {
+    tauriWindowMocks.label = "main";
     nativeAssistantSpeechMocks.capture.mockClear();
     nativeAssistantSpeechMocks.start.mockClear();
     nativeAssistantSpeechMocks.stop.mockClear();
@@ -893,12 +899,15 @@ describe("voice transcript delivery coordination", () => {
     act(() => {
       useVoiceConversationStore.setState({
         status: running,
-        uiState: "listening",
+        uiState: "error",
+        error: "renderer reconciliation failed",
       });
     });
     expect(nativeAssistantSpeechMocks.start).not.toHaveBeenCalled();
-    startRequest.reject(new Error("renderer reconciliation failed"));
-    await toggling;
+    await act(async () => {
+      startRequest.reject(new Error("renderer reconciliation failed"));
+      await toggling;
+    });
 
     expect(nativeAssistantSpeechMocks.start).toHaveBeenCalledOnce();
     expect(nativeAssistantSpeechMocks.start).toHaveBeenCalledWith(
@@ -906,6 +915,69 @@ describe("voice transcript delivery coordination", () => {
       expect.any(Function),
       [],
     );
+    expect(nativeAssistantSpeechMocks.stop).not.toHaveBeenCalled();
+    expect(useVoiceConversationStore.getState()).toMatchObject({
+      status: running,
+      uiState: "listening",
+      error: null,
+    });
+  });
+
+  it("does not activate speech for another window's same-session lifecycle", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const winner = {
+      ...stopped,
+      lifecycle: "running" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "session-window-winner",
+      revision: 2,
+    };
+    const startRequest = deferred<typeof winner>();
+    const start = vi.fn().mockReturnValue(startRequest.promise);
+    tauriWindowMocks.label = "session-window-loser";
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi.fn().mockResolvedValue(stopped),
+      drainPendingTranscripts: vi.fn().mockResolvedValue(undefined),
+      start,
+    });
+    const { result } = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-a",
+        onSend: vi.fn().mockResolvedValue(true),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+
+    let toggling!: Promise<void>;
+    act(() => {
+      toggling = Promise.resolve(result.current.onToggle());
+    });
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    act(() => {
+      useVoiceConversationStore.setState({
+        status: winner,
+        uiState: "listening",
+      });
+    });
+    startRequest.reject(new Error("lost same-session start"));
+    await toggling;
+
+    expect(nativeAssistantSpeechMocks.start).not.toHaveBeenCalled();
     expect(nativeAssistantSpeechMocks.stop).not.toHaveBeenCalled();
   });
 

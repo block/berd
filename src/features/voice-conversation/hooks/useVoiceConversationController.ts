@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import type {
   ChatInputSendHandler,
@@ -749,8 +750,20 @@ export function useVoiceConversationController({
       const backendStatus = useVoiceConversationStore.getState().status;
       const conversationStarted =
         backendStatus.lifecycle === "running" &&
-        backendStatus.sessionId === sessionId;
+        backendStatus.sessionId === sessionId &&
+        backendStatus.ownerWindowLabel === getCurrentWindow().label;
       if (conversationStarted) {
+        useVoiceConversationStore.setState((state) =>
+          state.status.sessionId === sessionId &&
+          state.status.ownerWindowLabel === backendStatus.ownerWindowLabel &&
+          state.status.revision === backendStatus.revision
+            ? {
+                uiState:
+                  state.uiState === "error" ? "listening" : state.uiState,
+                error: null,
+              }
+            : state,
+        );
         startAssistantSpeech(assistantSpeechHistory);
       } else if (
         !conversationStarted &&
