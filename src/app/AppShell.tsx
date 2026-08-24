@@ -3288,7 +3288,6 @@ export function AppShell({
         chatState.setDraft(sessionId, payload.text);
         chatState.setSkillDrafts(sessionId, payload.selectedSkills);
         chatState.setDraftAttachments(sessionId, options?.attachments ?? []);
-        requestVoiceConversationStart(sessionId);
         if (!globalVoiceReady) {
           requestOpenSettings("voice", {
             returnTarget: { type: "voice-setup", sessionId },
@@ -3296,6 +3295,7 @@ export function AppShell({
           resetGlobalComposerTransition();
           return true;
         }
+        requestVoiceConversationStart(sessionId);
         handleNavigateToSession(sessionId);
         resetGlobalComposerTransition();
         return true;
@@ -3623,6 +3623,11 @@ export function AppShell({
           useVoiceConversationStore
             .getState()
             .clearRequestedStart(currentVoiceTarget.sessionId);
+        }
+        if (nextVoiceTarget) {
+          useVoiceConversationStore
+            .getState()
+            .clearRequestedStart(nextVoiceTarget.sessionId);
         }
         voiceSettingsReturnTargetRef.current = nextVoiceTarget;
         setVoiceSettingsReturnTarget(nextVoiceTarget);

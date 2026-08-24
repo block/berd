@@ -4479,6 +4479,9 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
     });
+    expect(
+      useVoiceConversationStore.getState().requestedStartSessionId,
+    ).toBeNull();
     await user.click(screen.getByRole("button", { name: "Back" }));
 
     await waitFor(() => {

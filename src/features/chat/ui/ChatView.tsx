@@ -73,7 +73,6 @@ import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voic
 import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
-import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import {
   SecurityConfirmationPanel,
   useRegisterSecurityConfirmationSurface,
@@ -241,9 +240,6 @@ export function ChatView({
     voiceInput.backend,
     voiceOutput.backend,
   );
-  const requestVoiceConversationStart = useVoiceConversationStore(
-    (state) => state.requestStart,
-  );
   const voiceConversation = useVoiceConversationController({
     sessionId,
     // Voice delivery only needs to wait for admission. Holding its per-session
@@ -255,7 +251,6 @@ export function ChatView({
     pocketReady: voiceReady,
     inputBackend: voiceInput.backend,
     onPocketSetupRequired: () => {
-      requestVoiceConversationStart(sessionId);
       requestOpenSettings("voice", {
         returnTarget: { type: "voice-setup", sessionId },
       });
