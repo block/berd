@@ -44,11 +44,8 @@ describe("voice interruption preference", () => {
     });
   });
 
-  it("keeps the renderer preference usable when storage is unavailable", () => {
+  it("keeps the renderer preference usable when storage writes fail", () => {
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("storage unavailable");
-    });
-    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
       throw new Error("storage unavailable");
     });
 

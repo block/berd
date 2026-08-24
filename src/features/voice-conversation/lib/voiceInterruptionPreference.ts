@@ -44,11 +44,12 @@ export function getDefaultVoiceInterruptionPreference(): VoiceInterruptionPrefer
 
 export function getVoiceInterruptionPreference(): VoiceInterruptionPreference {
   if (typeof window === "undefined") return DEFAULT_PREFERENCE;
+  if (volatilePreference) return volatilePreference;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     return raw ? normalize(JSON.parse(raw)) : DEFAULT_PREFERENCE;
   } catch {
-    return volatilePreference ?? DEFAULT_PREFERENCE;
+    return DEFAULT_PREFERENCE;
   }
 }
 
@@ -94,6 +95,7 @@ export function setVoiceInterruptionPreference(
   volatilePreference = value;
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+    volatilePreference = undefined;
   } catch {
     // Keep the current in-memory renderer usable when storage is unavailable.
   }
