@@ -22,6 +22,10 @@ fn main() {
             swift_rs::SwiftLinker::new("14.0")
                 .with_package("BerdAirPodsBridge", "swift/BerdAirPodsBridge")
                 .link();
+
+            // Swift packages linked into a Rust executable use @rpath for the
+            // system Swift runtime, which is available from this stable path.
+            println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
         }
     }
     tauri_build::build()
