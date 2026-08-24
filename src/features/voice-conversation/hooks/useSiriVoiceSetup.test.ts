@@ -169,4 +169,64 @@ describe("Siri voice locales", () => {
       apiMocks.selectSiriVoice.mock.invocationCallOrder[0] ?? 0,
     );
   });
+
+  it("preserves a newer voice selection while a download is in progress", async () => {
+    const pendingDownload = deferred<void>();
+    apiMocks.downloadSiriVoice.mockReturnValue(pendingDownload.promise);
+    apiMocks.getSiriVoiceStatus.mockResolvedValue(status("en-US", "Aaron"));
+    const { result } = renderHook(() => useSiriVoiceSetup(true));
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    const downloadedVoice = {
+      name: "Quinn",
+      language: "en-US",
+      sizeBytes: 310_500_000,
+      installed: false,
+    };
+    let downloadPromise!: Promise<void>;
+    act(() => {
+      downloadPromise = result.current.downloadVoice(downloadedVoice);
+    });
+    await waitFor(() => expect(apiMocks.downloadSiriVoice).toHaveBeenCalled());
+
+    await act(async () => {
+      await result.current.selectVoice({
+        name: "Aaron",
+        language: "en-US",
+        sizeBytes: 1,
+        installed: true,
+      });
+    });
+    pendingDownload.resolve();
+    await act(async () => {
+      await downloadPromise;
+    });
+
+    expect(apiMocks.selectSiriVoice).toHaveBeenCalledTimes(1);
+    expect(apiMocks.selectSiriVoice).toHaveBeenCalledWith({
+      name: "Aaron",
+      language: "en-US",
+    });
+  });
+
+  it("refreshes the downloaded voice state when auto-selection fails", async () => {
+    apiMocks.getSiriVoiceStatus.mockResolvedValue(status("en-US", "Aaron"));
+    apiMocks.selectSiriVoice.mockRejectedValueOnce(
+      new Error("Selection failed"),
+    );
+    const { result } = renderHook(() => useSiriVoiceSetup(true));
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    await act(async () => {
+      await result.current.downloadVoice({
+        name: "Quinn",
+        language: "en-US",
+        sizeBytes: 310_500_000,
+        installed: false,
+      });
+    });
+
+    expect(apiMocks.getSiriVoiceStatus.mock.calls.length).toBeGreaterThan(1);
+    expect(result.current.error).toContain("Selection failed");
+  });
 });

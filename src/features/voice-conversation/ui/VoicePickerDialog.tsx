@@ -8,66 +8,60 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/shared/ui/dialog";
 import { SettingsRow } from "@/shared/ui/settings-row";
 
 export function VoicePickerDialog({
   selectedVoice,
-  error,
+  dialogError,
   children,
 }: {
   selectedVoice: string | null;
-  error?: string | null;
+  dialogError?: string | null;
   children: ReactNode;
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const [open, setOpen] = useState(false);
 
   return (
-    <>
+    <Dialog open={open} onOpenChange={setOpen}>
       <SettingsRow
         label={t("voice.voice")}
         description={selectedVoice ?? t("voice.noVoiceSelected")}
         density="compact"
         action={
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => setOpen(true)}
-          >
-            {t("voice.chooseVoice")}
-          </Button>
-        }
-        details={
-          error && !open ? (
-            <p className="text-sm text-destructive" role="alert">
-              {error}
-            </p>
-          ) : undefined
+          <DialogTrigger asChild>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-label={t("voice.chooseVoiceTitle")}
+            >
+              {t("voice.chooseVoice")}
+            </Button>
+          </DialogTrigger>
         }
       />
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent
-          size="lg"
-          closeLabel={t("actions.close", { ns: "common" })}
-        >
-          <DialogHeader>
-            <DialogTitle>{t("voice.chooseVoiceTitle")}</DialogTitle>
-            <DialogDescription>
-              {t("voice.chooseVoiceDescription")}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogBody>
-            {error ? (
-              <p className="text-sm text-destructive" role="alert">
-                {error}
-              </p>
-            ) : null}
-            {children}
-          </DialogBody>
-        </DialogContent>
-      </Dialog>
-    </>
+      <DialogContent
+        size="lg"
+        closeLabel={t("actions.close", { ns: "common" })}
+      >
+        <DialogHeader>
+          <DialogTitle>{t("voice.chooseVoiceTitle")}</DialogTitle>
+          <DialogDescription>
+            {t("voice.chooseVoiceDescription")}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogBody>
+          {dialogError ? (
+            <p className="text-sm text-destructive" role="alert">
+              {dialogError}
+            </p>
+          ) : null}
+          {children}
+        </DialogBody>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -52,7 +52,9 @@ describe("SiriVoiceSettings", () => {
     const value = setup();
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Choose…" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Choose a voice" }),
+    );
     await userEvent.click(screen.getByRole("combobox", { name: "Language" }));
     expect(
       screen.getByRole("option", { name: "English (United States)" }),
@@ -81,7 +83,9 @@ describe("SiriVoiceSettings", () => {
     const value = setup();
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Choose…" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Choose a voice" }),
+    );
     expect(
       screen.getByRole("heading", { name: "English (United States)" }),
     ).toBeInTheDocument();
@@ -139,7 +143,9 @@ describe("SiriVoiceSettings", () => {
 
       renderWithProviders(<SiriVoiceSettings setup={value} />);
 
-      await userEvent.click(screen.getByRole("button", { name: "Elegir…" }));
+      await userEvent.click(
+        screen.getByRole("button", { name: "Elige una voz" }),
+      );
       const displayNames = new Intl.DisplayNames(["es"], {
         type: "language",
         languageDisplay: "standard",
@@ -175,7 +181,9 @@ describe("SiriVoiceSettings", () => {
     const value = setup();
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Choose…" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Choose a voice" }),
+    );
     await userEvent.click(
       screen.getByRole("button", { name: "Preview Quinn" }),
     );
@@ -212,7 +220,9 @@ describe("SiriVoiceSettings", () => {
     });
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Choose…" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Choose a voice" }),
+    );
     expect(
       screen.getByRole("button", { name: "Preview Aaron" }),
     ).toBeInTheDocument();
@@ -240,7 +250,9 @@ describe("SiriVoiceSettings", () => {
     });
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
-    await userEvent.click(screen.getByRole("button", { name: "Choose…" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Choose a voice" }),
+    );
     expect(
       screen.getByRole("button", { name: "Playing preview for Quinn" }),
     ).toBeInTheDocument();

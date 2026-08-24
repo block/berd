@@ -213,7 +213,10 @@ export function PocketVoiceSetupContent({
                 speeds={[0.75, 1, 1.25, 1.5, 2]}
                 onChange={setup.setPlaybackSpeed}
               />
-              <VoicePickerDialog selectedVoice={selectedVoice}>
+              <VoicePickerDialog
+                selectedVoice={selectedVoice}
+                dialogError={error}
+              >
                 <RadioGroup
                   value={status.selectedVoice}
                   onValueChange={(voiceId) => void setup.selectVoice(voiceId)}

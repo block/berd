@@ -92,6 +92,7 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
   );
   const languageRef = useRef(language);
   const statusRequestGenerationRef = useRef(0);
+  const selectionGenerationRef = useRef(0);
   const initialSelectedLocaleAppliedRef = useRef(false);
   const languageSelectedByUserRef = useRef(false);
   languageRef.current = language;
@@ -213,13 +214,19 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
   const downloadVoice = useCallback(
     async (voice: SiriVoice) => {
       const selection = { name: voice.name, language: voice.language };
+      const selectionGeneration = selectionGenerationRef.current;
       setError(null);
       setDownloadingVoiceKey(voiceKey(selection));
       try {
         await downloadSiriVoice(selection);
-        await selectSiriVoice(selection);
-        window.dispatchEvent(new Event(SIRI_VOICE_SETTINGS_CHANGED));
-        await refresh(language);
+        try {
+          if (selectionGenerationRef.current === selectionGeneration) {
+            await selectSiriVoice(selection);
+          }
+        } finally {
+          window.dispatchEvent(new Event(SIRI_VOICE_SETTINGS_CHANGED));
+          await refresh(language);
+        }
       } catch (nextError) {
         setError(String(nextError));
       } finally {
@@ -244,6 +251,7 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
 
   const selectVoice = useCallback(
     async (voice: SiriVoice) => {
+      selectionGenerationRef.current += 1;
       setError(null);
       try {
         await selectSiriVoice({ name: voice.name, language: voice.language });

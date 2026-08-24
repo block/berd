@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -261,12 +261,38 @@ describe("PocketVoiceSetupContent", () => {
     );
     await userEvent.click(screen.getByRole("option", { name: "2×" }));
     expect(setPlaybackSpeed).toHaveBeenCalledWith(2);
-    await userEvent.click(screen.getByRole("button", { name: "Choose…" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Choose a voice" }),
+    );
     expect(screen.getAllByRole("radio")).toHaveLength(12);
     await userEvent.click(screen.getByText("Anna"));
     expect(selectVoice).toHaveBeenCalledWith("anna");
     await userEvent.click(screen.getByRole("button", { name: "Preview Anna" }));
     expect(previewVoice).toHaveBeenCalledWith("anna");
+  });
+
+  it("keeps voice errors visible inside the open picker", async () => {
+    renderWithProviders(
+      <PocketVoiceSetupContent
+        setup={setup(
+          {
+            ...baseStatus,
+            installed: true,
+            pocketInstalled: true,
+            voices: [{ id: "mary", name: "Mary" }],
+          },
+          { error: "Voice preview failed" },
+        )}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Voice preview failed");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Choose a voice" }),
+    );
+    expect(
+      within(screen.getByRole("dialog")).getByRole("alert"),
+    ).toHaveTextContent("Voice preview failed");
   });
 
   it("confirms independent model removal", async () => {
