@@ -1,7 +1,7 @@
 //! Native speech recognition for Desktop voice conversations.
 
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{HashMap, VecDeque},
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
@@ -11,6 +11,9 @@ use std::{
     thread,
     time::Duration,
 };
+
+#[cfg(any(test, target_os = "macos"))]
+use std::collections::BTreeMap;
 
 #[cfg(target_os = "macos")]
 use std::time::Instant;
@@ -249,7 +252,9 @@ pub struct NativeVoiceState {
     input_mute_epoch: Arc<AtomicU64>,
     assistant_speaking: Arc<AtomicBool>,
     assistant_vad_threshold: Arc<AtomicU32>,
+    #[cfg(any(test, target_os = "macos"))]
     assistant_speech_generation: Arc<AtomicU64>,
+    #[cfg(any(test, target_os = "macos"))]
     assistant_speech_lifetimes: Arc<Mutex<BTreeMap<u64, u32>>>,
 }
 
