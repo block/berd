@@ -871,12 +871,23 @@ describe("voice transcript delivery coordination", () => {
     };
     const startRequest = deferred<typeof running>();
     const start = vi.fn().mockReturnValue(startRequest.promise);
+    const refreshStatus = vi
+      .fn()
+      .mockResolvedValueOnce(stopped)
+      .mockImplementationOnce(async () => {
+        useVoiceConversationStore.setState({
+          status: running,
+          uiState: "listening",
+          error: null,
+        });
+        return running;
+      });
     useVoiceConversationStore.setState({
       status: stopped,
       uiState: "off",
       hydrated: true,
       init: vi.fn().mockResolvedValue(undefined),
-      refreshStatus: vi.fn().mockResolvedValue(stopped),
+      refreshStatus,
       drainPendingTranscripts: vi.fn().mockResolvedValue(undefined),
       start,
     });
@@ -924,6 +935,70 @@ describe("voice transcript delivery coordination", () => {
     expect(
       useChatStore.getState().messagesBySession["session-a"],
     ).toBeUndefined();
+    expect(refreshStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces a rejected start when owner microphone reconciliation still fails", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const running = {
+      ...stopped,
+      lifecycle: "running" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      revision: 2,
+    };
+    const startRequest = deferred<typeof running>();
+    const start = vi.fn().mockReturnValue(startRequest.promise);
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi
+        .fn()
+        .mockResolvedValueOnce(stopped)
+        .mockRejectedValueOnce(new Error("microphone unavailable")),
+      drainPendingTranscripts: vi.fn().mockResolvedValue(undefined),
+      start,
+    });
+    const { result } = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-a",
+        onSend: vi.fn().mockResolvedValue(true),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+
+    let toggling!: Promise<void>;
+    act(() => {
+      toggling = Promise.resolve(result.current.onToggle());
+    });
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    act(() => {
+      useVoiceConversationStore.setState({
+        status: running,
+        uiState: "error",
+        error: "renderer reconciliation failed",
+      });
+    });
+    startRequest.reject(new Error("renderer reconciliation failed"));
+    await toggling;
+
+    expect(nativeAssistantSpeechMocks.start).not.toHaveBeenCalled();
+    expect(useChatStore.getState().messagesBySession["session-a"]).toHaveLength(
+      1,
+    );
   });
 
   it("does not activate speech when a non-owner mounts an already-running session", () => {

@@ -748,10 +748,27 @@ export function useVoiceConversationController({
       startAssistantSpeech(assistantSpeechHistory);
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;
-      const conversationStarted =
+      const currentWindowLabel = getCurrentWindow().label;
+      const exactOwnerLifecycleSurvived =
         backendStatus.lifecycle === "running" &&
         backendStatus.sessionId === sessionId &&
-        backendStatus.ownerWindowLabel === getCurrentWindow().label;
+        backendStatus.ownerWindowLabel === currentWindowLabel;
+      let conversationStarted = false;
+      if (exactOwnerLifecycleSurvived) {
+        try {
+          const reconciledStatus = await useVoiceConversationStore
+            .getState()
+            .refreshStatus();
+          conversationStarted =
+            reconciledStatus.lifecycle === "running" &&
+            reconciledStatus.sessionId === sessionId &&
+            reconciledStatus.ownerWindowLabel === currentWindowLabel &&
+            reconciledStatus.revision === backendStatus.revision;
+        } catch {
+          // Preserve the original startup failure below. A surviving native
+          // lifecycle is usable only after microphone reconciliation succeeds.
+        }
+      }
       if (conversationStarted) {
         useVoiceConversationStore.setState((state) =>
           state.status.sessionId === sessionId &&
