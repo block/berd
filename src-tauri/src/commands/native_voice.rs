@@ -34,6 +34,11 @@ const VAD_THRESHOLD: f32 = 0.5;
 // Keep ordinary pauses between words inside one offline recognition request.
 // At 16 kHz with 256-sample frames this is 1.2 seconds.
 const SILENCE_FLUSH_FRAMES: usize = 75;
+const FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS: u64 = 5;
+const FINAL_TRANSCRIPT_DELIVERY_TIMEOUT: Duration =
+    Duration::from_secs(FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS);
+const STT_WORKER_SHUTDOWN_TIMEOUT_SECONDS: u64 =
+    mac_speech::RECOGNITION_FINISH_TIMEOUT_SECONDS + FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS + 1;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -835,7 +840,8 @@ impl Drop for SttPipeline {
 }
 
 #[cfg(not(test))]
-const STT_WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const STT_WORKER_SHUTDOWN_TIMEOUT: Duration =
+    Duration::from_secs(STT_WORKER_SHUTDOWN_TIMEOUT_SECONDS);
 #[cfg(test)]
 const STT_WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
 
@@ -2128,7 +2134,7 @@ fn forward_macos_events(
                     return Err(());
                 }
                 if let Some((_, receiver)) = delivered {
-                    let _ = receiver.recv_timeout(Duration::from_secs(5));
+                    let _ = receiver.recv_timeout(FINAL_TRANSCRIPT_DELIVERY_TIMEOUT);
                 }
             }
             mac_speech::RecognitionEvent::Finished => {
@@ -2460,7 +2466,7 @@ fn stt_worker(
             &shutdown_mute_epoch,
             observed_mute_epoch,
         );
-        let _ = delivered_rx.recv_timeout(Duration::from_secs(5));
+        let _ = delivered_rx.recv_timeout(FINAL_TRANSCRIPT_DELIVERY_TIMEOUT);
     }
 }
 
@@ -2583,6 +2589,15 @@ mod tests {
         assert_eq!(
             validation.await.expect_err("stale target must be rejected"),
             "The target session is no longer in the foreground."
+        );
+    }
+
+    #[test]
+    fn worker_shutdown_budget_covers_recognition_and_delivery() {
+        assert!(
+            STT_WORKER_SHUTDOWN_TIMEOUT_SECONDS
+                > mac_speech::RECOGNITION_FINISH_TIMEOUT_SECONDS
+                    + FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS
         );
     }
 

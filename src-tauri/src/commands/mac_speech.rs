@@ -10,6 +10,7 @@ use tauri::Emitter;
 #[cfg(target_os = "macos")]
 const STATUS_EVENT: &str = "mac-speech:status";
 static STATUS_REVISION: AtomicU64 = AtomicU64::new(0);
+pub const RECOGNITION_FINISH_TIMEOUT_SECONDS: u64 = 5;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -221,7 +222,13 @@ mod bridge {
 
         pub fn finish(&mut self) -> Result<(), String> {
             let mut error = ptr::null_mut();
-            let finished = unsafe { berd_macos_stt_finish(self.handle, 5.0, &mut error) };
+            let finished = unsafe {
+                berd_macos_stt_finish(
+                    self.handle,
+                    super::RECOGNITION_FINISH_TIMEOUT_SECONDS as f64,
+                    &mut error,
+                )
+            };
             if finished {
                 Ok(())
             } else {
