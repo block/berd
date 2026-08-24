@@ -785,9 +785,10 @@ describe("MessageBubble", () => {
     );
 
     const list = container.querySelector("ul");
-    expect([...list!.children].every((child) => child.tagName === "LI")).toBe(
-      true,
-    );
+    expect(list).toBeInTheDocument();
+    expect(
+      [...(list?.children ?? [])].every((child) => child.tagName === "LI"),
+    ).toBe(true);
     expect(list?.children[1]?.querySelector("del")).toHaveTextContent(
       "Unheard item",
     );
