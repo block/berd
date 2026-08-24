@@ -1749,6 +1749,129 @@ describe("native assistant speech stream", () => {
     }
   });
 
+  it("keeps every later block of an invalidated response suppressed after causal rollback", async () => {
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      startNativeAssistantSpeech("session-1", vi.fn());
+      const oldReply = assistant(
+        [{ type: "text", text: "Old block." }],
+        "inProgress",
+        "assistant-k0",
+      );
+      useChatStore.getState().setMessages("session-1", [oldReply]);
+
+      finalizeVoiceTranscript("voice-k1");
+      useVoiceConversationStore.setState({
+        latestFinalizedTranscriptKey: null,
+      });
+      useChatStore.getState().setMessages("session-1", [
+        {
+          ...oldReply,
+          content: [
+            ...oldReply.content,
+            { type: "text", text: "New block after rollback." },
+          ],
+        },
+      ]);
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      await vi.runAllTimersAsync();
+
+      expect(mocks.start).not.toHaveBeenCalled();
+      expect(mocks.append).not.toHaveBeenCalled();
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[1],
+      ).toMatchObject({ speech: { status: "notSpoken" } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retains completion until a replacement response can own a stream", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const oldReply = assistant(
+      [{ type: "text", text: "Interrupted K0." }],
+      "inProgress",
+      "assistant-k0",
+    );
+    useChatStore.getState().setMessages("session-1", [oldReply]);
+    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(1));
+    emit("started");
+
+    finalizeVoiceTranscript("voice-k1");
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        oldReply,
+        voiceUser("voice-k1"),
+        assistant(
+          [{ type: "text", text: "Completed K1." }],
+          "completed",
+          "assistant-k1",
+        ),
+      ]);
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    expect(mocks.finish).not.toHaveBeenCalled();
+
+    emit("interrupted");
+    await vi.waitFor(() => {
+      expect(mocks.start).toHaveBeenCalledTimes(2);
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[1]?.[0],
+        "Completed K1.",
+      );
+      expect(mocks.finish).toHaveBeenCalledWith(mocks.start.mock.calls[1]?.[0]);
+    });
+  });
+
+  it("preserves partial interruption status for suffixes arriving during speech", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant(
+          [{ type: "text", text: "Partially spoken." }],
+          "inProgress",
+          "assistant-k0",
+        ),
+      ]);
+    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(1));
+    emit("started");
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        segments: [
+          {
+            text: "Partially spoken.",
+            playedFrames: 500,
+            totalFrames: 1_000,
+            synthesisComplete: true,
+          },
+        ],
+      },
+    });
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-k0", " Later suffix.");
+    finalizeVoiceTranscript("voice-k1");
+    useVoiceConversationStore.setState({ userSpeaking: false });
+
+    await vi.waitFor(() => {
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({ speech: { status: "interrupted" } });
+    });
+    expect(mocks.append).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining("Later suffix"),
+    );
+  });
+
   it("cancels active K0 playback and then speaks new K1 output", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     const oldReply = assistant(

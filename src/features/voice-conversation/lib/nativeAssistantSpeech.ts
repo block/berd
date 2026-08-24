@@ -769,7 +769,7 @@ export function startNativeAssistantSpeech(
   const toolCountByMessage = new Map<string, number>();
   const consumedTextBySlot = new Map<string, string>();
   const causalTranscriptKeyByMessage = new Map<string, string | null>();
-  const invalidatedSlots = new Set<string>();
+  const invalidatedMessages = new Set<string>();
   const completedMessages = new Set<string>();
   const interruptedMessages = new Set<string>();
   const failedMessages = new Set<string>();
@@ -845,7 +845,7 @@ export function startNativeAssistantSpeech(
   };
 
   const suppressTarget = (slot: string, target: SpeechTarget, text: string) => {
-    invalidatedSlots.add(slot);
+    invalidatedMessages.add(target.messageId);
     consumedTextBySlot.set(slot, text);
     setTargetSpeech(sessionId, target, { status: "notSpoken" });
     recordPlaybackNotice(sessionId, slot, text, "notSpoken");
@@ -860,7 +860,9 @@ export function startNativeAssistantSpeech(
     for (const message of messages ?? []) {
       if (
         message.role !== "assistant" ||
-        message.metadata?.userVisible === false
+        message.metadata?.userVisible === false ||
+        interruptedMessages.has(message.id) ||
+        failedMessages.has(message.id)
       ) {
         continue;
       }
@@ -871,7 +873,7 @@ export function startNativeAssistantSpeech(
         const slot = targetKey(target);
         textOrdinal += 1;
         if (content.text === (consumedTextBySlot.get(slot) ?? "")) continue;
-        if (invalidatedSlots.has(slot)) {
+        if (invalidatedMessages.has(message.id)) {
           suppressTarget(slot, target, content.text);
           continue;
         }
@@ -1029,9 +1031,6 @@ export function startNativeAssistantSpeech(
       const completed =
         message.metadata?.completionStatus === "completed" &&
         !completedMessages.has(message.id);
-      toolCountByMessage.set(message.id, toolCount);
-      if (completed) completedMessages.add(message.id);
-
       let textOrdinal = 0;
       for (const content of message.content) {
         if (content.type !== "text") continue;
@@ -1128,7 +1127,7 @@ export function startNativeAssistantSpeech(
         }
 
         if (
-          invalidatedSlots.has(slot) ||
+          invalidatedMessages.has(message.id) ||
           causalTranscriptKey !== finalizedTranscriptKey
         ) {
           suppressTarget(slot, target, content.text);
@@ -1175,6 +1174,14 @@ export function startNativeAssistantSpeech(
       const utteranceOwnsMessage = utterance?.targets.some(
         (target) => target.messageId === message.id,
       );
+      const messageCannotSpeak =
+        failedMessages.has(message.id) ||
+        interruptedMessages.has(message.id) ||
+        invalidatedMessages.has(message.id);
+      if (utteranceOwnsMessage || messageCannotSpeak) {
+        toolCountByMessage.set(message.id, toolCount);
+        if (completed) completedMessages.add(message.id);
+      }
       if (
         crossedToolBoundary &&
         utterance &&
