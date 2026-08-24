@@ -561,7 +561,7 @@ describe("native assistant speech stream", () => {
 
   it("finalizes an interruption before native playback starts", async () => {
     let resolveStart: (() => void) | undefined;
-    mocks.start.mockImplementation(
+    mocks.start.mockImplementationOnce(
       () =>
         new Promise<void>((resolve) => {
           resolveStart = resolve;
@@ -575,6 +575,7 @@ describe("native assistant speech stream", () => {
       ]);
     await vi.waitFor(() => expect(mocks.start).toHaveBeenCalled());
 
+    mocks.stop.mockResolvedValueOnce(false).mockResolvedValue(true);
     useVoiceConversationStore.setState({ userSpeaking: true });
     await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
 
@@ -589,6 +590,54 @@ describe("native assistant speech stream", () => {
     });
     expect(takeVoicePlaybackNotices("session-1")).toContain('"spokenText":""');
     resolveStart?.();
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalledTimes(2));
+
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant(
+          [{ type: "text", text: "Queued reply." }],
+          "completed",
+          "assistant-1",
+        ),
+        assistant(
+          [{ type: "text", text: "Next reply." }],
+          "completed",
+          "assistant-2",
+        ),
+      ]);
+    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(2));
+  });
+
+  it("ignores a late started event after interruption is requested", async () => {
+    let resolveStop: ((stopped: boolean) => void) | undefined;
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Native reply." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+
+    mocks.stop.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveStop = resolve;
+        }),
+    );
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    emit("started");
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).not.toMatchObject({ speech: { status: "speaking" } });
+    expect(mocks.setAssistantSpeaking).not.toHaveBeenCalledWith(
+      "session-1",
+      1,
+      true,
+    );
+    resolveStop?.(true);
+    emit("interrupted");
   });
 
   it("waits for terminal delivery once the native stream exists", async () => {

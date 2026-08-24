@@ -434,6 +434,7 @@ function handleStreamEvent(
       utterance.latestDelivery = event.delivery ?? null;
       break;
     case "started":
+      if (utterance.interruptionRequested) break;
       setUtteranceStatus(utterance, "speaking");
       voice.setUiState("agent-speaking");
       reportAssistantActivity(
@@ -672,6 +673,13 @@ export function startNativeAssistantSpeech(
       async () => {
         await streamListenerReady;
         await streamBackend.start(utterance.id);
+        if (
+          utterance.interruptionRequested ||
+          activeUtterance?.id !== utterance.id
+        ) {
+          await streamBackend.stop();
+          return;
+        }
         utterance.nativeStreamStarted = true;
       },
       onFailure,
