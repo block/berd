@@ -907,7 +907,6 @@
     },
     "interruptionSensitivity": "Interruption sensitivity",
     "interruptionSensitivityDescription": "Choose how easily your voice interrupts Berd while it is speaking.",
-    "interruptionSensitivityUnavailable": "Sensitivity is available when speech input is Parakeet.",
     "modelInstalled": "Installed",
     "modelInstalledSize": "Installed · {{size}} on disk",
     "modelMissingSize": "Not installed · {{size}} download",

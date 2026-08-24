@@ -826,10 +826,17 @@ impl SttPipeline {
     fn new_macos(
         input_muted: Arc<AtomicBool>,
         input_mute_epoch: Arc<AtomicU64>,
+        assistant_speaking: Arc<AtomicBool>,
+        assistant_vad_threshold: Arc<AtomicU32>,
     ) -> Result<(Self, tokio_mpsc::Receiver<SttMessage>), String> {
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = (input_muted, input_mute_epoch);
+            let _ = (
+                input_muted,
+                input_mute_epoch,
+                assistant_speaking,
+                assistant_vad_threshold,
+            );
             Err("macOS speech recognition requires macOS 26 or later.".to_string())
         }
         #[cfg(target_os = "macos")]
@@ -855,6 +862,8 @@ impl SttPipeline {
                         worker_input_muted,
                         worker_input_mute_epoch,
                         worker_shutdown_mute_epoch,
+                        assistant_speaking,
+                        assistant_vad_threshold,
                     )
                 })
                 .map_err(|error| format!("start macOS speech recognition: {error}"))?;
@@ -1205,6 +1214,8 @@ pub async fn start_native_voice_conversation(
         VoiceInputBackend::Macos => SttPipeline::new_macos(
             Arc::clone(&state.input_muted),
             Arc::clone(&state.input_mute_epoch),
+            Arc::clone(&state.assistant_speaking),
+            Arc::clone(&state.assistant_vad_threshold),
         ),
     };
     let (pipeline, mut events) = match pipeline {
@@ -2302,6 +2313,8 @@ fn macos_stt_worker(
     input_muted: Arc<AtomicBool>,
     input_mute_epoch: Arc<AtomicU64>,
     shutdown_mute_epoch: Arc<AtomicU64>,
+    assistant_speaking: Arc<AtomicBool>,
+    assistant_vad_threshold: Arc<AtomicU32>,
 ) {
     use rubato::{Fft, FixedSync, Resampler};
 
@@ -2398,7 +2411,9 @@ fn macos_stt_worker(
                 let frame: Vec<f32> = leftover_16k.drain(..VAD_FRAME_SAMPLES).collect();
                 let clamped: Vec<f32> =
                     frame.iter().map(|sample| sample.clamp(-1.0, 1.0)).collect();
-                if vad.predict_f32(&clamped) > VAD_THRESHOLD {
+                let vad_threshold =
+                    active_vad_threshold(&assistant_speaking, &assistant_vad_threshold);
+                if vad.predict_f32(&clamped) > vad_threshold {
                     silence_frames = 0;
                     if !in_speech {
                         in_speech = true;

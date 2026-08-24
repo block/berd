@@ -276,17 +276,12 @@ export function VoiceSettings() {
                 id={sensitivityDescriptionId}
                 className="mt-0.5 text-xs text-muted-foreground"
               >
-                {t(
-                  input.backend === "parakeet"
-                    ? "voice.interruptionSensitivityDescription"
-                    : "voice.interruptionSensitivityUnavailable",
-                )}
+                {t("voice.interruptionSensitivityDescription")}
               </p>
             </div>
             <div className="w-full min-w-0 sm:w-auto sm:shrink-0">
               <Select
                 value={interruption.sensitivity}
-                disabled={input.backend !== "parakeet"}
                 onValueChange={(value) =>
                   interruption.setSensitivity(
                     value as VoiceInterruptionSensitivity,

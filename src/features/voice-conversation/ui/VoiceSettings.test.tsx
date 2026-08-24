@@ -231,7 +231,7 @@ describe("VoiceSettings", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("explains that Earshot sensitivity requires Parakeet input", () => {
+  it("keeps Earshot sensitivity available for macOS speech input", () => {
     setupState.current = setup(pocketStatus());
     inputState.backend = "macos";
     renderWithProviders(<VoiceSettings />);
@@ -242,9 +242,9 @@ describe("VoiceSettings", () => {
     const sensitivity = screen.getByRole("combobox", {
       name: "Interruption sensitivity",
     });
-    expect(sensitivity).toBeDisabled();
+    expect(sensitivity).toBeEnabled();
     expect(sensitivity).toHaveAccessibleDescription(
-      "Sensitivity is available when speech input is Parakeet.",
+      "Choose how easily your voice interrupts Berd while it is speaking.",
     );
   });
 

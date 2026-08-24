@@ -910,7 +910,6 @@
     },
     "interruptionSensitivity": "Sensibilidad de interrupción",
     "interruptionSensitivityDescription": "Elige con qué facilidad tu voz interrumpe a Berd mientras habla.",
-    "interruptionSensitivityUnavailable": "La sensibilidad está disponible cuando la entrada de voz es Parakeet.",
     "modelInstalled": "Instalado",
     "modelInstalledSize": "Instalado · {{size}} en disco",
     "modelMissingSize": "No instalado · descarga de {{size}}",
