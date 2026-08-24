@@ -22,6 +22,18 @@ interface ProviderCatalogActions {
 export type ProviderCatalogStore = ProviderCatalogState &
   ProviderCatalogActions;
 
+function mergeAliases(
+  existing: ProviderCatalogEntry | undefined,
+  incoming: ProviderCatalogEntry,
+): ProviderCatalogEntry {
+  const aliases = [...(existing?.aliases ?? []), ...(incoming.aliases ?? [])];
+  if (aliases.length === 0) {
+    return incoming;
+  }
+
+  return { ...incoming, aliases: [...new Set(aliases)] };
+}
+
 function curatedState(): ProviderCatalogState {
   return {
     entries: CURATED_PROVIDER_CATALOG,
@@ -52,9 +64,17 @@ export const useProviderCatalogStore = create<ProviderCatalogStore>((set) => ({
   mergeEntries: (entries) => {
     set((state) => {
       const incomingIds = new Set(entries.map((entry) => entry.id));
+      const existingById = new Map(
+        state.entries.map((entry) => [entry.id, entry]),
+      );
       const kept = state.entries.filter((entry) => !incomingIds.has(entry.id));
       return {
-        entries: [...kept, ...entries],
+        entries: [
+          ...kept,
+          ...entries.map((entry) =>
+            mergeAliases(existingById.get(entry.id), entry),
+          ),
+        ],
         loading: false,
         loaded: true,
         error: null,

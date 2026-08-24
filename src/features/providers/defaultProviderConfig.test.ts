@@ -178,6 +178,7 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
   function mockClientWithStatuses(
     statuses: ProviderConfigStatusDto[],
     secrets: unknown[] = [],
+    configValues: Record<string, unknown[]> = {},
   ) {
     mockGetClient.mockResolvedValue({
       goose: {
@@ -191,6 +192,11 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
         GooseUnstableProvidersSecretsList: vi
           .fn()
           .mockResolvedValue({ secrets }),
+        GooseUnstableProvidersConfigRead: vi
+          .fn()
+          .mockImplementation(({ providerId }) => ({
+            fields: configValues[providerId] ?? [],
+          })),
       },
     } as never);
   }
@@ -232,6 +238,7 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
         setupMethod: "host_with_oauth_fallback",
         group: "default",
         catalogSource: "runtime",
+        aliases: ["databricks"],
       },
       {
         id: "lmstudio",
@@ -299,8 +306,18 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
     });
   });
 
-  it("does not recover a credentialless provider even with changed settings", async () => {
-    mockClientWithStatuses([status("lmstudio", true)], []);
+  it("does not recover a credentialless provider with only its default setting", async () => {
+    mockClientWithStatuses([status("lmstudio", true)], [], {
+      lmstudio: [
+        {
+          key: "LMSTUDIO_HOST",
+          value: "http://localhost:1234",
+          isSet: true,
+          isSecret: false,
+          required: false,
+        },
+      ],
+    });
 
     await expect(
       saveDefaultProviderSelectionFromConfiguredProvider(),
@@ -308,13 +325,46 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
     expect(defaultsSave).not.toHaveBeenCalled();
   });
 
-  it("ignores stored credentials for providers Goose does not report configured", async () => {
-    mockClientWithStatuses([status("lmstudio", true)], [secret("openai")]);
+  it("restores a provider with a meaningful saved non-secret setting", async () => {
+    mockClientWithStatuses([status("lmstudio", true)], [], {
+      lmstudio: [
+        {
+          key: "LMSTUDIO_HOST",
+          value: "http://my-model-server:1234",
+          isSet: true,
+          isSecret: false,
+          required: false,
+        },
+      ],
+    });
 
     await expect(
       saveDefaultProviderSelectionFromConfiguredProvider(),
-    ).resolves.toBeNull();
-    expect(defaultsSave).not.toHaveBeenCalled();
+    ).resolves.toEqual({
+      providerId: "lmstudio",
+      modelId: "gpt-4o",
+      modelName: "gpt-4o",
+    });
+    expect(defaultsSave).toHaveBeenCalledWith({
+      providerId: "lmstudio",
+      modelId: "gpt-4o",
+    });
+  });
+
+  it("trusts aliased OAuth credentials when Goose's field status misses them", async () => {
+    mockClientWithStatuses([status("lmstudio", true)], [secret("databricks")]);
+
+    await expect(
+      saveDefaultProviderSelectionFromConfiguredProvider(),
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-6-sol",
+      modelName: "GPT-5.6 Sol",
+    });
+    expect(defaultsSave).toHaveBeenCalledWith({
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-6-sol",
+    });
   });
 
   it("restores a configured runtime-managed provider when defaults were lost", async () => {

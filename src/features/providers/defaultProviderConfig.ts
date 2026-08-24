@@ -1,8 +1,15 @@
 import { getClient } from "@/shared/api/acpConnection";
-import { checkAllProviderStatus, listProviderSecrets } from "./api/credentials";
+import {
+  checkAllProviderStatus,
+  getProviderConfig,
+  listProviderSecrets,
+} from "./api/credentials";
 import { getModelProviders } from "./providerCatalog";
-import { getCredentialedProviderIds } from "./lib/providerConnectionPolicy";
-import { connectedModelProviderIds } from "./lib/providerState";
+import {
+  getCredentialedProviderIds,
+  getProviderConnectionEvidence,
+  hasMeaningfulSavedSettings,
+} from "./lib/providerConnectionPolicy";
 import { useProviderModelCacheStore } from "./stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "./stores/defaultProviderReadinessStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
@@ -18,11 +25,12 @@ import {
 } from "@/features/runtime-config/defaults";
 
 /**
- * Providers eligible for default-provider recovery: Goose reports them
- * configured AND they have deliberate setup evidence: a stored Goose
- * credential, a user-created custom provider, or a distribution-managed
- * endpoint. Merely appearing in runtime inventory or having ambient/default
- * setup values does not satisfy the readiness gate.
+ * Providers eligible for model discovery and default-provider recovery. A
+ * stored credential is authoritative even when Goose's field-only status
+ * probe cannot see an OAuth cache. Otherwise Goose must report the provider
+ * configured and Berd must find deliberate setup evidence: a user-created
+ * custom provider, a distribution-managed endpoint, or a meaningful saved
+ * non-secret value. Untouched defaults and ambient readiness do not qualify.
  */
 export async function getIntentionalConfiguredProviderIds(
   statuses: Awaited<ReturnType<typeof checkAllProviderStatus>>,
@@ -43,15 +51,41 @@ export async function getIntentionalConfiguredProviderIds(
       )
       .map((provider) => provider.id),
   );
+  const modelProviders = getModelProviders();
+  const configuredBySavedValueIds = new Set(
+    (
+      await Promise.all(
+        modelProviders
+          .filter(
+            (provider) =>
+              configuredIds.has(provider.id) &&
+              (provider.fields?.length ?? 0) > 0,
+          )
+          .map(async (provider) => {
+            try {
+              const values = await getProviderConfig(provider.id);
+              return hasMeaningfulSavedSettings(provider, values)
+                ? provider.id
+                : null;
+            } catch {
+              return null;
+            }
+          }),
+      )
+    ).filter((providerId): providerId is string => providerId !== null),
+  );
   const connectionSnapshot = {
     configuredIds,
     credentialedIds,
     runtimeManagedIds: runtimeConfiguredIds,
+    configuredBySavedValueIds,
   };
-  return connectedModelProviderIds(
-    getModelProviders().filter((provider) => configuredIds.has(provider.id)),
-    connectionSnapshot,
-  );
+  return modelProviders
+    .filter(
+      (provider) =>
+        getProviderConnectionEvidence(provider, connectionSnapshot) !== "none",
+    )
+    .map((provider) => provider.id);
 }
 
 export async function reconcileManagedDefaultProviderSelection(): Promise<{
