@@ -505,7 +505,7 @@ typedef void (^BerdAudioHandler)(
     });
 }
 - (NSString *)deliveryJSON {
-    __block NSString *json = @"{\"segments\":[]}";
+    __block NSString *json = @"{\"sampleRate\":0,\"segments\":[]}";
     void (^snapshot)(void) = ^{
         uint64_t playedFrames = 0;
         if (self.player && self.player.lastRenderTime) {
@@ -532,7 +532,10 @@ typedef void (^BerdAudioHandler)(
             }];
             segmentStart += segment.totalFrames;
         }
-        NSData *data = [NSJSONSerialization dataWithJSONObject:@{ @"segments": segments }
+        NSData *data = [NSJSONSerialization dataWithJSONObject:@{
+            @"sampleRate": @((uint32_t)llround(self.playbackSampleRate)),
+            @"segments": segments,
+        }
                                                        options:0 error:nil];
         if (data) json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
     };
@@ -1067,9 +1070,9 @@ uint64_t berd_siri_tts_stream_progress(void *stream) {
 }
 
 char *berd_siri_tts_stream_copy_delivery_json(void *stream) {
-    if (!stream) return strdup("{\"segments\":[]}");
+    if (!stream) return strdup("{\"sampleRate\":0,\"segments\":[]}");
     NSString *json = [(__bridge BerdSiriSpeechPlayer *)stream deliveryJSON];
-    return strdup((json ?: @"{\"segments\":[]}").UTF8String);
+    return strdup((json ?: @"{\"sampleRate\":0,\"segments\":[]}").UTF8String);
 }
 
 char *berd_siri_tts_stream_copy_error(void *stream) {

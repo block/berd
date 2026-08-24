@@ -191,6 +191,8 @@ struct VoiceDeliverySegment {
 #[cfg(any(test, target_os = "macos"))]
 #[derive(Clone, Debug, Serialize)]
 struct VoiceDeliveryProgress {
+    #[serde(rename = "sampleRate")]
+    sample_rate: u32,
     segments: Vec<VoiceDeliverySegment>,
 }
 
@@ -256,7 +258,10 @@ impl PlaybackDeliveryLedger {
                 }
             })
             .collect();
-        VoiceDeliveryProgress { segments }
+        VoiceDeliveryProgress {
+            sample_rate: berd_voice::SAMPLE_RATE,
+            segments,
+        }
     }
 }
 

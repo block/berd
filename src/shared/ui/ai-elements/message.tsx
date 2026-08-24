@@ -21,6 +21,7 @@ import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { toast } from "sonner";
 import type {
+  ComponentType,
   ComponentProps,
   HTMLAttributes,
   MouseEvent,
@@ -558,11 +559,41 @@ const markdownHeadingComponents = {
   h6: createMarkdownHeading(6),
 } satisfies Pick<StreamdownComponents, "h1" | "h2" | "h3" | "h4" | "h5" | "h6">;
 
-function buildStreamdownComponents(imageRenderer?: MarkdownImageRenderer) {
+function buildStreamdownComponents(
+  imageRenderer?: MarkdownImageRenderer,
+  unspokenLabel?: string,
+) {
+  const ImageRenderer = (imageRenderer ??
+    DefaultMarkdownImage) as unknown as ComponentType<
+    ComponentProps<"img"> & { node?: unknown }
+  >;
+  const VoiceAwareImage: MarkdownImageRenderer = (props) => {
+    const marksBoundary = props.className
+      ?.split(/\s+/)
+      .includes("voice-unspoken-boundary");
+    const image = (
+      <ImageRenderer
+        {...props}
+        alt={
+          marksBoundary && unspokenLabel && props.alt
+            ? `${unspokenLabel}: ${props.alt ?? ""}`
+            : props.alt
+        }
+      />
+    );
+    return marksBoundary && unspokenLabel && !props.alt ? (
+      <>
+        <span className="sr-only">{unspokenLabel}: </span>
+        {image}
+      </>
+    ) : (
+      image
+    );
+  };
   return {
     ...markdownHeadingComponents,
     a: MarkdownLink,
-    img: imageRenderer ?? DefaultMarkdownImage,
+    img: VoiceAwareImage,
   };
 }
 
@@ -705,11 +736,67 @@ const berdRehypePlugins: NonNullable<
   restoreBerdMarkdownDestinations,
 ];
 
-function strikethroughFromPlugin(cutoff: number, label: string) {
+const decodedEntityCache = new Map<string, string | null>();
+
+function decodeHtmlEntity(entity: string): string | null {
+  const cached = decodedEntityCache.get(entity);
+  if (cached !== undefined) return cached;
+  if (
+    typeof document === "undefined" ||
+    !/^&(?:#[0-9]+|#x[0-9a-f]+|[a-z][a-z0-9]+);$/i.test(entity)
+  ) {
+    return null;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.innerHTML = entity;
+  const decoded = textarea.value === entity ? null : textarea.value;
+  decodedEntityCache.set(entity, decoded);
+  return decoded;
+}
+
+function renderedPrefixLength(source: string, rendered: string): number {
+  let sourceOffset = 0;
+  let renderedOffset = 0;
+  while (sourceOffset < source.length && renderedOffset < rendered.length) {
+    if (
+      source[sourceOffset] === "\\" &&
+      sourceOffset + 1 < source.length &&
+      source[sourceOffset + 1] === rendered[renderedOffset]
+    ) {
+      sourceOffset += 2;
+      renderedOffset += 1;
+      continue;
+    }
+    if (source[sourceOffset] === "&") {
+      const semicolon = source.indexOf(";", sourceOffset + 1);
+      if (semicolon !== -1) {
+        const decoded = decodeHtmlEntity(
+          source.slice(sourceOffset, semicolon + 1),
+        );
+        if (decoded && rendered.startsWith(decoded, renderedOffset)) {
+          sourceOffset = semicolon + 1;
+          renderedOffset += decoded.length;
+          continue;
+        }
+      }
+    }
+    if (source[sourceOffset] !== rendered[renderedOffset]) break;
+    sourceOffset += 1;
+    renderedOffset += 1;
+  }
+  return renderedOffset;
+}
+
+function strikethroughFromPlugin(
+  cutoff: number,
+  label: string,
+  source: string,
+) {
   const structureElements = new Set([
     "dl",
     "menu",
     "ol",
+    "p",
     "select",
     "table",
     "tbody",
@@ -718,12 +805,34 @@ function strikethroughFromPlugin(cutoff: number, label: string) {
     "tr",
     "ul",
   ]);
+  const voidElements = new Set([
+    "area",
+    "base",
+    "br",
+    "col",
+    "embed",
+    "hr",
+    "img",
+    "input",
+    "link",
+    "meta",
+    "param",
+    "source",
+    "track",
+    "wbr",
+  ]);
   const accessibleLabel = (): MarkdownHastNode => ({
     type: "element",
     tagName: "span",
     properties: { className: ["sr-only"] },
     children: [{ type: "text", value: `${label}: ` }],
   });
+  let boundaryAnnounced = false;
+  const boundaryLabel = (): MarkdownHastNode[] => {
+    if (boundaryAnnounced) return [];
+    boundaryAnnounced = true;
+    return [accessibleLabel()];
+  };
   const wrap = (node: MarkdownHastNode): MarkdownHastNode => ({
     type: "element",
     tagName: "span",
@@ -731,7 +840,7 @@ function strikethroughFromPlugin(cutoff: number, label: string) {
       className: ["line-through"],
       "data-voice-unspoken": "true",
     },
-    children: [accessibleLabel(), node],
+    children: [node],
     position: node.position,
   });
 
@@ -744,10 +853,35 @@ function strikethroughFromPlugin(cutoff: number, label: string) {
       if (
         child.type === "element" &&
         start !== undefined &&
-        cutoff <= start &&
+        end !== undefined &&
+        (cutoff <= start ||
+          (voidElements.has(child.tagName ?? "") && cutoff < end)) &&
         !structureElements.has(child.tagName ?? "")
       ) {
+        if (voidElements.has(child.tagName ?? "")) {
+          const className = child.properties?.className;
+          const marksBoundary =
+            child.tagName === "img" &&
+            (cutoff > start || !source.slice(cutoff, start).trim());
+          if (marksBoundary) boundaryAnnounced = true;
+          child.properties = {
+            ...child.properties,
+            className: [
+              ...(Array.isArray(className)
+                ? className
+                : typeof className === "string"
+                  ? [className]
+                  : []),
+              "line-through",
+              ...(marksBoundary ? ["voice-unspoken-boundary"] : []),
+            ],
+            "data-voice-unspoken": "true",
+          };
+          children.push(child);
+          continue;
+        }
         if (child.tagName === "pre") {
+          children.push(...boundaryLabel());
           children.push({
             type: "element",
             tagName: "div",
@@ -755,7 +889,7 @@ function strikethroughFromPlugin(cutoff: number, label: string) {
               className: ["line-through"],
               "data-voice-unspoken": "true",
             },
-            children: [accessibleLabel(), child],
+            children: [child],
             position: child.position,
           });
           continue;
@@ -773,7 +907,11 @@ function strikethroughFromPlugin(cutoff: number, label: string) {
           ],
           "data-voice-unspoken": "true",
         };
-        child.children = [accessibleLabel(), ...(child.children ?? [])];
+        if (child.children) {
+          child.children = [...boundaryLabel(), ...child.children];
+        } else {
+          children.push(...boundaryLabel());
+        }
         children.push(child);
         continue;
       }
@@ -783,25 +921,27 @@ function strikethroughFromPlugin(cutoff: number, label: string) {
         start !== undefined &&
         end !== undefined
       ) {
+        if (!child.value.trim()) {
+          children.push(child);
+          continue;
+        }
         if (cutoff <= start) {
+          children.push(...boundaryLabel());
           children.push(wrap(child));
           continue;
         }
         if (cutoff < end) {
-          const sourceLength = Math.max(1, end - start);
-          const valueOffset = Math.max(
-            0,
-            Math.min(
-              child.value.length,
-              Math.round(
-                ((cutoff - start) / sourceLength) * child.value.length,
-              ),
-            ),
+          const valueOffset = renderedPrefixLength(
+            source.slice(start, cutoff),
+            child.value,
           );
           const spoken = child.value.slice(0, valueOffset);
           const unspoken = child.value.slice(valueOffset);
           if (spoken) children.push({ ...child, value: spoken });
-          if (unspoken) children.push(wrap({ ...child, value: unspoken }));
+          if (unspoken) {
+            children.push(...boundaryLabel());
+            children.push(wrap({ ...child, value: unspoken }));
+          }
           continue;
         }
       }
@@ -835,8 +975,8 @@ export const MessageResponse = memo(
     const { t } = useTranslation("common");
     const [modalUrl, setModalUrl] = useState<string | null>(null);
     const streamdownComponents = useMemo(
-      () => buildStreamdownComponents(imageRenderer),
-      [imageRenderer],
+      () => buildStreamdownComponents(imageRenderer, strikethroughLabel),
+      [imageRenderer, strikethroughLabel],
     );
     const rehypePlugins = useMemo<
       NonNullable<ComponentProps<typeof Streamdown>["rehypePlugins"]>
@@ -846,9 +986,14 @@ export const MessageResponse = memo(
           ? berdRehypePlugins
           : [
               ...berdRehypePlugins,
-              [strikethroughFromPlugin, strikethroughFrom, strikethroughLabel],
+              [
+                strikethroughFromPlugin,
+                strikethroughFrom,
+                strikethroughLabel,
+                children,
+              ],
             ],
-      [strikethroughFrom, strikethroughLabel],
+      [children, strikethroughFrom, strikethroughLabel],
     );
     const streamdownRootRef = useRef<HTMLDivElement>(null);
     const streamdownLayoutPending = useVirtualLayoutPendingForStreamdown({
@@ -907,7 +1052,11 @@ export const MessageResponse = memo(
           {...streamdownLayoutPending.layoutPendingAttributes}
         >
           <Streamdown
-            key={strikethroughFrom ?? "normal"}
+            key={
+              strikethroughFrom === undefined
+                ? "normal"
+                : `${strikethroughFrom}:${strikethroughLabel}`
+            }
             className={cn(
               "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
               className,
@@ -945,6 +1094,7 @@ export const MessageResponse = memo(
     nextProps.isAnimating === prevProps.isAnimating &&
     nextProps.mode === prevProps.mode &&
     nextProps.strikethroughFrom === prevProps.strikethroughFrom &&
+    nextProps.strikethroughLabel === prevProps.strikethroughLabel &&
     nextProps.codeRenderers === prevProps.codeRenderers,
 );
 

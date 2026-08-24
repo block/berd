@@ -85,6 +85,8 @@ struct VoiceDeliverySegment {
 #[cfg(target_os = "macos")]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct VoiceDeliveryProgress {
+    #[serde(rename = "sampleRate")]
+    sample_rate: u32,
     segments: Vec<VoiceDeliverySegment>,
 }
 

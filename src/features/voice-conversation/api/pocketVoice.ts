@@ -49,6 +49,7 @@ export interface VoiceDeliverySegment {
 }
 
 export interface VoiceDeliveryProgress {
+  sampleRate?: number;
   segments: VoiceDeliverySegment[];
 }
 

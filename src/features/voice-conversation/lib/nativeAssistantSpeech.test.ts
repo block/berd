@@ -861,6 +861,10 @@ describe("native assistant speech stream", () => {
     ).toMatchObject({
       speech: { status: "interrupted", spokenThrough: "One. Two".length },
     });
+    expect(useVoiceConversationStore.getState()).toMatchObject({
+      status: { lifecycle: "stopped" },
+      uiState: "off",
+    });
   });
 
   it("bounds the terminal delivery wait during hang-up", async () => {
@@ -890,9 +894,92 @@ describe("native assistant speech stream", () => {
       ).toMatchObject({
         speech: { status: "interrupted", spokenThrough: 0 },
       });
+      expect(useVoiceConversationStore.getState()).toMatchObject({
+        status: { lifecycle: "stopped" },
+        uiState: "off",
+      });
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it.each([
+    "completed",
+    "failed",
+  ] as const)("keeps voice off when a late %s event races hang-up", async (state) => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Goodbye." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+
+    useVoiceConversationStore.setState((voice) => ({
+      status: {
+        ...voice.status,
+        lifecycle: "stopped",
+        sessionId: null,
+        ownerWindowLabel: null,
+        revision: voice.status.revision + 1,
+      },
+      uiState: "off",
+    }));
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    mocks.streamHandler?.({
+      streamId,
+      state,
+      error: state === "failed" ? "native failure" : null,
+    });
+
+    expect(useVoiceConversationStore.getState()).toMatchObject({
+      status: { lifecycle: "stopped" },
+      uiState: "off",
+    });
+  });
+
+  it("does not let an old terminal overwrite a restarted same-session run", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Old reply." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+
+    useVoiceConversationStore.setState((voice) => ({
+      status: {
+        ...voice.status,
+        lifecycle: "stopped",
+        sessionId: null,
+        ownerWindowLabel: null,
+        revision: voice.status.revision + 1,
+      },
+      uiState: "off",
+    }));
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    useVoiceConversationStore.setState((voice) => ({
+      status: {
+        ...voice.status,
+        lifecycle: "running",
+        sessionId: "session-1",
+        revision: voice.status.revision + 1,
+      },
+      uiState: "user-speaking",
+    }));
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: { segments: [] },
+    });
+
+    expect(useVoiceConversationStore.getState()).toMatchObject({
+      status: { lifecycle: "running", sessionId: "session-1" },
+      uiState: "user-speaking",
+    });
   });
 
   it("uses playback progress to report and decorate only the unspoken suffix", async () => {
@@ -973,7 +1060,7 @@ describe("native assistant speech stream", () => {
     expect(notice).toContain('"confidence":"medium"');
   });
 
-  it("uses played audio from incomplete synthesis with low confidence", async () => {
+  it("uses a duration-bounded estimate for incomplete synthesis", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
       .getState()
@@ -990,11 +1077,12 @@ describe("native assistant speech stream", () => {
       state: "interrupted",
       error: null,
       delivery: {
+        sampleRate: 24_000,
         segments: [
           {
             text: "One. Two. Three.",
-            playedFrames: 600,
-            totalFrames: 1_000,
+            playedFrames: 24_000,
+            totalFrames: 24_000,
             synthesisComplete: false,
           },
         ],
@@ -1006,14 +1094,51 @@ describe("native assistant speech stream", () => {
     ).toMatchObject({
       speech: {
         status: "interrupted",
-        spokenThrough: "One. Two".length,
+        spokenThrough: "One".length,
         confidence: "low",
       },
     });
     const notice = takeVoicePlaybackNotices("session-1") ?? "";
-    expect(notice).toContain('"spokenText":"One. Two"');
-    expect(notice).toContain('"unspokenText":". Three."');
+    expect(notice).toContain('"spokenText":"One"');
+    expect(notice).toContain('"unspokenText":". Two. Three."');
     expect(notice).toContain('"confidence":"low"');
+  });
+
+  it("never marks a short incomplete segment fully spoken", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [assistant([{ type: "text", text: "Yes" }])]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        sampleRate: 24_000,
+        segments: [
+          {
+            text: "Yes",
+            playedFrames: 12_000,
+            totalFrames: 12_000,
+            synthesisComplete: false,
+          },
+        ],
+      },
+    });
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({
+      speech: { status: "interrupted", spokenThrough: 0, confidence: "low" },
+    });
+    expect(takeVoicePlaybackNotices("session-1")).toContain(
+      '"unspokenText":"Yes"',
+    );
   });
 
   it("sums only each target's interleaved delivered spans", async () => {

@@ -73,6 +73,10 @@ let activityReportQueue = Promise.resolve();
 const pendingNotices = new Map<string, Map<string, string>>();
 const DELIVERY_NOTICE_TEXT_LIMIT = 250;
 const INTERRUPTION_TERMINAL_TIMEOUT_MS = 1_000;
+// An incomplete segment has no trustworthy final-frame denominator. Bound its
+// text estimate by deliberately slow speech so generated-so-far audio cannot
+// make a long source segment look fully delivered.
+const INCOMPLETE_SEGMENT_MAX_CHARS_PER_SECOND = 6;
 
 function boundedDeliveryText(
   text: string,
@@ -166,19 +170,27 @@ function targetKey(target: SpeechTarget): string {
   return `${target.messageId}\0text:${target.textOrdinal}`;
 }
 
-function completedWordCutoff(text: string, playedRatio: number): number {
-  const approximateCutoff = Math.floor(
-    text.length * Math.max(0, Math.min(1, playedRatio)),
-  );
-  if (approximateCutoff >= text.length) return text.length;
+function completedWordCutoffAt(
+  text: string,
+  approximateCutoff: number,
+): number {
+  const boundedCutoff = Math.max(0, Math.min(text.length, approximateCutoff));
+  if (boundedCutoff >= text.length) return text.length;
   const segmenter = new Intl.Segmenter(undefined, { granularity: "word" });
   let cutoff = 0;
   for (const part of segmenter.segment(text)) {
     const end = part.index + part.segment.length;
-    if (end > approximateCutoff) break;
+    if (end > boundedCutoff) break;
     if (part.isWordLike) cutoff = end;
   }
   return cutoff;
+}
+
+function completedWordCutoff(text: string, playedRatio: number): number {
+  return completedWordCutoffAt(
+    text,
+    Math.floor(text.length * Math.max(0, Math.min(1, playedRatio))),
+  );
 }
 
 function estimateSpeechDelivery(
@@ -209,9 +221,32 @@ function estimateSpeechDelivery(
     );
     if (totalFrames === 0 || playedFrames === 0) break;
     usedIncompleteSegment ||= !segment.synthesisComplete;
+    if (!segment.synthesisComplete) {
+      const sampleRate = Math.max(0, delivery.sampleRate ?? 0);
+      const generatedRatioCutoff = Math.floor(
+        segment.text.length * (playedFrames / totalFrames),
+      );
+      const durationBound =
+        sampleRate > 0
+          ? Math.floor(
+              (playedFrames / sampleRate) *
+                INCOMPLETE_SEGMENT_MAX_CHARS_PER_SECOND,
+            )
+          : 0;
+      cutoff =
+        segmentStart +
+        completedWordCutoffAt(
+          segment.text,
+          Math.min(
+            generatedRatioCutoff,
+            durationBound,
+            Math.max(0, segment.text.length - 1),
+          ),
+        );
+      break;
+    }
     if (playedFrames >= totalFrames) {
       cutoff = segmentStart + segment.text.length;
-      if (!segment.synthesisComplete) break;
       searchFrom = cutoff;
       continue;
     }
@@ -275,6 +310,17 @@ function applyInterruptionEstimate(
       confidence: estimate.confidence,
       interruptionCause: utterance.interruptionCause ?? "voiceStopped",
     });
+  }
+}
+
+function restoreListeningIfConversationIsRunning(utterance: ActiveUtterance) {
+  const voice = useVoiceConversationStore.getState();
+  if (
+    voice.status.lifecycle === "running" &&
+    voice.status.sessionId === utterance.sessionId &&
+    voice.status.revision === utterance.voiceRevision
+  ) {
+    voice.setUiState("listening");
   }
 }
 
@@ -380,7 +426,7 @@ function failActiveUtterance(
     utterance.text,
     "failed",
   );
-  useVoiceConversationStore.getState().setUiState("listening");
+  restoreListeningIfConversationIsRunning(utterance);
   activeUtterance = null;
   reportAssistantActivity(utterance.sessionId, utterance.voiceRevision, false);
   onFailure(utterance.text, error);
@@ -404,7 +450,7 @@ function finalizeInterruptedUtterance(
   utterance.onInterrupted();
   recordInterruptionNotices(utterance, estimate, cause);
   activeUtterance = null;
-  useVoiceConversationStore.getState().setUiState("listening");
+  restoreListeningIfConversationIsRunning(utterance);
   reportAssistantActivity(utterance.sessionId, utterance.voiceRevision, false);
   utterance.onTerminal();
 }
@@ -452,7 +498,7 @@ function handleStreamEvent(
         utterance.interruptionFallback = null;
       }
       setUtteranceStatus(utterance, "spoken");
-      voice.setUiState("listening");
+      restoreListeningIfConversationIsRunning(utterance);
       activeUtterance = null;
       reportAssistantActivity(
         utterance.sessionId,
@@ -477,7 +523,7 @@ function handleStreamEvent(
         utterance.text,
         "failed",
       );
-      voice.setUiState("listening");
+      restoreListeningIfConversationIsRunning(utterance);
       activeUtterance = null;
       reportAssistantActivity(
         utterance.sessionId,

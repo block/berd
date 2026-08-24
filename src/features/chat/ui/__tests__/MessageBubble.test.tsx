@@ -837,8 +837,12 @@ describe("MessageBubble", () => {
     expect(
       paragraphs?.[0]?.querySelector("[data-voice-unspoken]"),
     ).not.toHaveTextContent("Heard text.");
-    expect(paragraphs?.[1]).toHaveAttribute("data-voice-unspoken", "true");
-    expect(paragraphs?.[2]).toHaveAttribute("data-voice-unspoken", "true");
+    expect(
+      paragraphs?.[1]?.querySelector("[data-voice-unspoken]"),
+    ).toHaveTextContent("Unheard second paragraph.");
+    expect(
+      paragraphs?.[2]?.querySelector("[data-voice-unspoken]"),
+    ).toHaveTextContent("Unheard third paragraph.");
   });
 
   it("preserves Markdown structure while striking the unspoken range", async () => {
@@ -888,7 +892,125 @@ describe("MessageBubble", () => {
       expect(block?.querySelector("pre code")).toHaveTextContent(
         "const value = 1;",
       );
+      expect(block?.querySelectorAll(".sr-only")).toHaveLength(1);
     });
+  });
+
+  it("keeps void Markdown elements valid after the delivery boundary", async () => {
+    const spoken = "Heard.\n\n";
+    const text = `${spoken}![alt text](https://example.com/image.png)\n\n- [ ] task\n\nline  \nbreak\n\n---`;
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text,
+            speech: {
+              status: "interrupted",
+              spokenThrough: spoken.length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    await waitFor(() => {
+      const block = container.querySelector(
+        '[data-voice-speech-status="interrupted"]',
+      );
+      expect(block?.querySelector("img")).toBeInTheDocument();
+      expect(
+        block?.querySelector('input[type="checkbox"]'),
+      ).toBeInTheDocument();
+      expect(block?.querySelector("br")).toBeInTheDocument();
+      expect(block?.querySelector("hr")).toBeInTheDocument();
+      expect(block?.querySelector("img")).toHaveAttribute(
+        "data-voice-unspoken",
+        "true",
+      );
+      expect(block?.querySelector("img")).toHaveAttribute(
+        "alt",
+        "Not spoken: alt text",
+      );
+    });
+  });
+
+  it("conservatively marks an image intersected by the delivery boundary", async () => {
+    const text = "Heard ![multi word alt](https://example.com/image.png)";
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text,
+            speech: {
+              status: "interrupted",
+              spokenThrough: "Heard ![multi".length,
+              confidence: "low",
+            },
+          },
+        ])}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector("img")).toHaveAttribute(
+        "data-voice-unspoken",
+        "true",
+      );
+      expect(container.querySelector("img")).toHaveAttribute(
+        "alt",
+        "Not spoken: multi word alt",
+      );
+    });
+  });
+
+  it("preserves decorative image semantics at the delivery boundary", async () => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text: "![](https://example.com/decorative.png)",
+            speech: {
+              status: "notSpoken",
+            },
+          },
+        ])}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector("img")).toHaveAttribute("alt", "");
+      expect(container.querySelector(".sr-only")).toHaveTextContent(
+        "Not spoken:",
+      );
+    });
+  });
+
+  it("maps Markdown entities and escapes at the delivery boundary", () => {
+    const spoken = "Heard &amp;";
+    const text = `${spoken} escaped \\*asterisk\\*.`;
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text,
+            speech: {
+              status: "interrupted",
+              spokenThrough: spoken.length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const unheard = container.querySelector("[data-voice-unspoken]");
+    expect(unheard).toHaveTextContent("escaped *asterisk*.");
+    expect(unheard).not.toHaveTextContent("Heard &");
   });
 
   it("preserves provider-error presentation after interrupted delivery", () => {
