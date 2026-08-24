@@ -126,7 +126,7 @@ describe("AvatarCollectionOverlay", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("highlights an avatar on click and commits it via the Select button", () => {
+  it("highlights an avatar, persists it, then closes", async () => {
     const onSelectAvatar = vi.fn();
     renderWithProviders(
       <AvatarCollectionOverlay
@@ -150,9 +150,124 @@ describe("AvatarCollectionOverlay", () => {
     ).toBe(true);
 
     fireEvent.click(overlay().getByRole("button", { name: /^select$/i }));
-    expect(onSelectAvatar).not.toHaveBeenCalled();
-    finishExitAnimation();
     expect(onSelectAvatar).toHaveBeenCalledWith("app-avatar:g-1");
+    await act(async () => {});
+    finishExitAnimation();
+  });
+
+  it("keeps the canvas and highlighted selection locked while persistence is pending", async () => {
+    let resolveSelection: (() => void) | undefined;
+    const onSelectAvatar = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSelection = resolve;
+        }),
+    );
+    const onClose = vi.fn();
+    renderWithProviders(
+      <AvatarCollectionOverlay
+        library={libraryWith(catalogWith({ gloopies: ["g-1", "g-2"] }))}
+        onSelectAvatar={onSelectAvatar}
+        onClose={onClose}
+      />,
+    );
+
+    const selectedTile = overlay().getAllByRole("button", { name: "g-1" })[0];
+    fireEvent.click(selectedTile);
+    fireEvent.click(overlay().getByRole("button", { name: /^select$/i }));
+
+    expect(selectedTile).toBeDisabled();
+    expect(overlay().getAllByRole("button", { name: "g-2" })[0]).toBeDisabled();
+    expect(overlay().getByRole("button", { name: /^close$/i })).toBeDisabled();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(screen.getByTestId("avatar-collection-overlay"));
+    finishExitAnimation();
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(
+      overlay()
+        .getAllByRole("button", { name: "g-1" })
+        .some((tile) => tile.getAttribute("aria-pressed") === "true"),
+    ).toBe(true);
+
+    await act(async () => resolveSelection?.());
+    finishExitAnimation();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a neutral loading state while the catalog loads", () => {
+    const onClose = vi.fn();
+    renderWithProviders(
+      <AvatarCollectionOverlay
+        library={libraryWith(null, { loading: true, cacheChecking: true })}
+        onSelectAvatar={vi.fn()}
+        onClose={onClose}
+      />,
+    );
+
+    expect(overlay().getByRole("status")).toHaveTextContent("Loading");
+    fireEvent.click(overlay().getByRole("button", { name: /^close$/i }));
+    finishExitAnimation();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a failed selection highlighted and lets the user retry", async () => {
+    const onSelectAvatar = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("save failed"))
+      .mockResolvedValueOnce(undefined);
+    renderWithProviders(
+      <AvatarCollectionOverlay
+        library={libraryWith(catalogWith({ gloopies: ["g-1", "g-2"] }))}
+        onSelectAvatar={onSelectAvatar}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(overlay().getAllByRole("button", { name: "g-1" })[0]);
+    fireEvent.click(overlay().getByRole("button", { name: /^select$/i }));
+    await act(async () => {});
+
+    expect(overlay().getByRole("alert")).toHaveTextContent(
+      "Save failed. Your edits are still here.",
+    );
+    expect(
+      overlay()
+        .getAllByRole("button", { name: "g-1" })
+        .some((tile) => tile.getAttribute("aria-pressed") === "true"),
+    ).toBe(true);
+
+    fireEvent.click(overlay().getByRole("button", { name: /retry save/i }));
+    await act(async () => {});
+    expect(onSelectAvatar).toHaveBeenCalledTimes(2);
+    expect(onSelectAvatar).toHaveBeenLastCalledWith("app-avatar:g-1");
+    finishExitAnimation();
+  });
+
+  it("clears a failed selection when the highlighted avatar is toggled off", async () => {
+    const onSelectAvatar = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("save failed"));
+    renderWithProviders(
+      <AvatarCollectionOverlay
+        library={libraryWith(catalogWith({ gloopies: ["g-1", "g-2"] }))}
+        onSelectAvatar={onSelectAvatar}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(overlay().getAllByRole("button", { name: "g-1" })[0]);
+    fireEvent.click(overlay().getByRole("button", { name: /^select$/i }));
+    await act(async () => {});
+
+    expect(overlay().getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(overlay().getAllByRole("button", { name: "g-1" })[0]);
+
+    expect(overlay().queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      overlay().queryByRole("button", { name: /^select$/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("toggles the highlight off when the same avatar is clicked again", () => {
@@ -283,6 +398,38 @@ describe("AvatarCollectionOverlay", () => {
     expect(
       overlay().queryByRole("button", { name: /^select$/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("clears a failed selection when going up to the collections level", async () => {
+    const onSelectAvatar = vi.fn().mockRejectedValue(new Error("save failed"));
+    renderWithProviders(
+      <AvatarCollectionOverlay
+        library={libraryWith(
+          catalogWith({ gloopies: ["g-1"], robots: ["r-1"] }),
+        )}
+        onSelectAvatar={onSelectAvatar}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(
+      overlay().getAllByRole("button", {
+        name: /open the gloopies collection/i,
+      })[0],
+    );
+    fireEvent.click(overlay().getAllByRole("button", { name: "g-1" })[0]);
+    fireEvent.click(overlay().getByRole("button", { name: /^select$/i }));
+    await act(async () => {});
+
+    expect(overlay().getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(
+      overlay().getByRole("button", { name: /back to avatar collections/i }),
+    );
+
+    expect(overlay().queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      overlay().getByRole("heading", { name: /avatar collections/i }),
+    ).toBeInTheDocument();
   });
 
   it("returns to the collections level on Escape before closing", () => {

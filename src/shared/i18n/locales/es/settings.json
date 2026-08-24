@@ -199,10 +199,6 @@
       "description": "Las compilaciones de desarrollo activan los experimentos de forma predeterminada. Desactiva experimentos individuales abajo cuando necesites el flujo estable.",
       "label": "Activar nuevos experimentos automáticamente"
     },
-    "avatarCollectionPage": {
-      "description": "Elige avatares de agentes en un lienzo de colección de pantalla completa y desplazable en lugar del selector integrado en el generador de agentes.",
-      "title": "Lienzo de colección de avatares"
-    },
     "berdyOnboarding": {
       "description": "Muestra la guía interactiva de introducción y ayuda de Berdy en Inicio.",
       "resetDescription": "Restaura el mensaje inicial de Berdy y lo centra en Inicio.",

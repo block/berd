@@ -113,7 +113,6 @@ const buttonStylingPattern =
   /(?:^|[\s"'`(])(?:bg-(?!transparent\b)[a-z[]|text-(?:foreground|muted|primary|secondary|destructive|accent|current|white|black|surface|app|sidebar)|border-(?:input|border|destructive|primary|accent|current|surface)|hover:(?!opacity-100\b)|active:(?:bg|text|border|opacity)|focus-visible:(?:bg|text|border)|data-\[state=open\]:(?:bg|text)|aria-expanded:(?:bg|text)|shadow-(?!none)|opacity-(?!0\b|100\b)\d|backdrop-|ring-(?!offset|ring\b|\d))/;
 
 const buttonStylingBaseline = new Set([
-  "src/features/agents/ui/AgentDetailPage.tsx",
   "src/features/chat/ui/ChatInputToolbar.tsx",
   "src/features/chat/ui/MessageBubbleActions.tsx",
   "src/features/chat/ui/PersonaPicker.tsx",
