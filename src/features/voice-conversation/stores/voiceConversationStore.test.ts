@@ -468,6 +468,7 @@ describe("voice conversation store lifecycle ordering", () => {
     store.setState({
       status: winner,
       uiState: "agent-speaking",
+      assistantSpeaking: true,
       error: "session C playback warning",
     });
     staleReplacement.reject(new Error("session B handoff failed"));
@@ -660,7 +661,8 @@ describe("voice conversation store lifecycle ordering", () => {
     await vi.waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(2));
     store.setState({
       status: runningB,
-      uiState: "agent-speaking",
+      uiState: "user-speaking",
+      userSpeaking: true,
       error: "session B playback warning",
     });
     const mutedRunningB = { ...runningB, microphoneMuted: true };
@@ -669,7 +671,7 @@ describe("voice conversation store lifecycle ordering", () => {
     await expect(startingA).rejects.toThrow("session A start tail failed");
     expect(store.getState()).toMatchObject({
       status: mutedRunningB,
-      uiState: "agent-speaking",
+      uiState: "listening",
       error: "session B playback warning",
       microphoneMuted: true,
       userSpeaking: false,

@@ -615,10 +615,16 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   const microphoneMuted = preserveCurrentMute
                     ? state.microphoneMuted
                     : status.microphoneMuted;
+                  const userSpeaking = microphoneMuted
+                    ? false
+                    : state.userSpeaking;
                   return {
                     status: { ...state.status, microphoneMuted },
                     microphoneMuted,
-                    userSpeaking: microphoneMuted ? false : state.userSpeaking,
+                    userSpeaking,
+                    uiState: microphoneMuted
+                      ? activityUiState({ ...state, userSpeaking })
+                      : state.uiState,
                   };
                 }
                 return {
@@ -764,10 +770,16 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                 const microphoneMuted = preserveCurrentMute
                   ? state.microphoneMuted
                   : status.microphoneMuted;
+                const userSpeaking = microphoneMuted
+                  ? false
+                  : state.userSpeaking;
                 return {
                   status: { ...state.status, microphoneMuted },
                   microphoneMuted,
-                  userSpeaking: microphoneMuted ? false : state.userSpeaking,
+                  userSpeaking,
+                  uiState: microphoneMuted
+                    ? activityUiState({ ...state, userSpeaking })
+                    : state.uiState,
                 };
               }
               return {
