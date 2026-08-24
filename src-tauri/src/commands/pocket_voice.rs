@@ -51,6 +51,8 @@ const DOWNLOAD_TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const STREAMING_EMIT_FRAMES: usize = 12;
 #[cfg(target_os = "macos")]
 const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+#[cfg(target_os = "macos")]
+const PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_millis(100);
 
 #[cfg(target_os = "macos")]
 struct PocketPlaybackSource<I> {
@@ -2147,10 +2149,25 @@ fn run_pocket_voice_stream(
             while let Ok(event) = playback_completion_receiver.recv() {
                 match event {
                     PocketPlaybackEvent::SourceFinished => {
-                        release_completed_pocket_assistant_speech(
-                            completed_generation.load(Ordering::Acquire),
-                            &assistant_speech,
-                        );
+                        let mut generation = completed_generation.load(Ordering::Acquire);
+                        loop {
+                            match playback_completion_receiver
+                                .recv_timeout(PLAYBACK_LATENCY_SAFETY_DURATION)
+                            {
+                                Ok(PocketPlaybackEvent::SourceFinished) => {
+                                    generation = completed_generation.load(Ordering::Acquire);
+                                }
+                                Ok(PocketPlaybackEvent::Shutdown)
+                                | Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                                Err(mpsc::RecvTimeoutError::Timeout) => {
+                                    release_completed_pocket_assistant_speech(
+                                        generation,
+                                        &assistant_speech,
+                                    );
+                                    break;
+                                }
+                            }
+                        }
                     }
                     PocketPlaybackEvent::Shutdown => break,
                 }
