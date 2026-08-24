@@ -846,6 +846,69 @@ describe("voice transcript delivery coordination", () => {
     expect(nativeAssistantSpeechMocks.stop).not.toHaveBeenCalled();
   });
 
+  it("activates captured speech history when a rejected start is already running", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const running = {
+      ...stopped,
+      lifecycle: "running" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      revision: 2,
+    };
+    const startRequest = deferred<typeof running>();
+    const start = vi.fn().mockReturnValue(startRequest.promise);
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi.fn().mockResolvedValue(stopped),
+      drainPendingTranscripts: vi.fn().mockResolvedValue(undefined),
+      start,
+    });
+    const { result } = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-a",
+        onSend: vi.fn().mockResolvedValue(true),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+
+    let toggling!: Promise<void>;
+    act(() => {
+      toggling = Promise.resolve(result.current.onToggle());
+    });
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    act(() => {
+      useVoiceConversationStore.setState({
+        status: running,
+        uiState: "listening",
+      });
+    });
+    expect(nativeAssistantSpeechMocks.start).not.toHaveBeenCalled();
+    startRequest.reject(new Error("renderer reconciliation failed"));
+    await toggling;
+
+    expect(nativeAssistantSpeechMocks.start).toHaveBeenCalledOnce();
+    expect(nativeAssistantSpeechMocks.start).toHaveBeenCalledWith(
+      "session-a",
+      expect.any(Function),
+      [],
+    );
+    expect(nativeAssistantSpeechMocks.stop).not.toHaveBeenCalled();
+  });
+
   it("deduplicates concurrent controls for the same session", async () => {
     const stopped = {
       available: true,

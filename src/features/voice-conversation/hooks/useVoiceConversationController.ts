@@ -750,7 +750,9 @@ export function useVoiceConversationController({
       const conversationStarted =
         backendStatus.lifecycle === "running" &&
         backendStatus.sessionId === sessionId;
-      if (
+      if (conversationStarted) {
+        startAssistantSpeech(assistantSpeechHistory);
+      } else if (
         !conversationStarted &&
         activeSendRoute?.sessionId === route.sessionId
       ) {
