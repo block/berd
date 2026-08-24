@@ -2465,6 +2465,7 @@ fn release_completed_pocket_assistant_speech(
 }
 
 #[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
 fn mark_pocket_playback_started(
     app: &AppHandle,
     stream_id: &str,
