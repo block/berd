@@ -60,7 +60,8 @@ interface FileFingerprint {
   changedAtNs?: string;
 }
 
-const ARTIFACT_POLL_INTERVAL_MS = 1_500;
+const FOREGROUND_ARTIFACT_POLL_INTERVAL_MS = 1_500;
+const BACKGROUND_ARTIFACT_POLL_INTERVAL_MS = 10_000;
 
 function sameFingerprint(
   left: FileFingerprint,
@@ -268,10 +269,12 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
 
   // Tool events cannot account for shell writes, delegated subagents, or
   // external editors. Poll the one open file while this document is visible,
-  // including an immediate check on return from the background.
+  // slowing down when the app is not focused and checking immediately when it
+  // returns to the foreground.
   useEffect(() => {
     let cancelled = false;
     let checkInFlight = false;
+    let pollTimerId: number | null = null;
 
     const checkForDiskChange = async () => {
       if (
@@ -352,21 +355,49 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
       }
     };
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState !== "hidden") {
-        void checkForDiskChange();
+    const clearPollTimer = () => {
+      if (pollTimerId !== null) {
+        window.clearTimeout(pollTimerId);
+        pollTimerId = null;
       }
     };
-    const intervalId = window.setInterval(
-      () => void checkForDiskChange(),
-      ARTIFACT_POLL_INTERVAL_MS,
-    );
+    const scheduleNextPoll = () => {
+      clearPollTimer();
+      if (cancelled || document.visibilityState === "hidden") return;
+
+      const interval = document.hasFocus()
+        ? FOREGROUND_ARTIFACT_POLL_INTERVAL_MS
+        : BACKGROUND_ARTIFACT_POLL_INTERVAL_MS;
+      pollTimerId = window.setTimeout(() => {
+        pollTimerId = null;
+        void checkForDiskChange().finally(scheduleNextPoll);
+      }, interval);
+    };
+    const handleFocus = () => {
+      clearPollTimer();
+      void checkForDiskChange().finally(scheduleNextPoll);
+    };
+    const handleBlur = () => {
+      scheduleNextPoll();
+    };
+    const handleVisibilityChange = () => {
+      clearPollTimer();
+      if (document.visibilityState !== "hidden") {
+        void checkForDiskChange().finally(scheduleNextPoll);
+      }
+    };
+
+    scheduleNextPoll();
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("blur", handleBlur);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       cancelled = true;
       pollGenerationRef.current += 1;
-      window.clearInterval(intervalId);
+      clearPollTimer();
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("blur", handleBlur);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [

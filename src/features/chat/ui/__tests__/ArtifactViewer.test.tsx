@@ -69,6 +69,7 @@ async function openFileActionsMenu() {
 
 describe("ArtifactViewer header actions", () => {
   beforeEach(() => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
     mockOpenResolvedPath.mockClear();
     mockRevealInFileManager.mockClear();
     mockReadTextFile.mockReset();
@@ -180,6 +181,86 @@ describe("ArtifactViewer header actions", () => {
       screen.getByRole("heading", { name: "Updated externally" }),
     ).toBeInTheDocument();
     expect(screen.queryByText(/out of date/i)).not.toBeInTheDocument();
+  });
+
+  it("slows polling to ten seconds while the app is not foregrounded", async () => {
+    vi.useFakeTimers();
+    vi.mocked(document.hasFocus).mockReturnValue(false);
+    let changed = false;
+    mockReadTextFile.mockImplementation(async () => ({
+      contents: changed ? "# Background update" : "# Original",
+    }));
+    mockStatFile.mockImplementation(async () =>
+      changed
+        ? { byteSize: "20", modifiedAtNs: "2" }
+        : { byteSize: "10", modifiedAtNs: "1" },
+    );
+
+    render(<ArtifactViewer artifact={artifact()} onClose={vi.fn()} />);
+    await act(flushAsyncWork);
+    expect(
+      screen.getByRole("heading", { name: "Original" }),
+    ).toBeInTheDocument();
+
+    changed = true;
+    await act(async () => {
+      vi.advanceTimersByTime(9_999);
+      await flushAsyncWork();
+    });
+    expect(
+      screen.getByRole("heading", { name: "Original" }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await flushAsyncWork();
+    });
+    expect(
+      screen.getByRole("heading", { name: "Background update" }),
+    ).toBeInTheDocument();
+  });
+
+  it("checks immediately on focus and restores foreground polling", async () => {
+    vi.useFakeTimers();
+    vi.mocked(document.hasFocus).mockReturnValue(false);
+    let version = 0;
+    mockReadTextFile.mockImplementation(async () => ({
+      contents: `# Version ${version}`,
+    }));
+    mockStatFile.mockImplementation(async () => ({
+      byteSize: String(10 + version),
+      modifiedAtNs: String(version),
+    }));
+
+    render(<ArtifactViewer artifact={artifact()} onClose={vi.fn()} />);
+    await act(flushAsyncWork);
+
+    version = 1;
+    vi.mocked(document.hasFocus).mockReturnValue(true);
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await flushAsyncWork();
+    });
+    expect(
+      screen.getByRole("heading", { name: "Version 1" }),
+    ).toBeInTheDocument();
+
+    version = 2;
+    await act(async () => {
+      vi.advanceTimersByTime(1_499);
+      await flushAsyncWork();
+    });
+    expect(
+      screen.getByRole("heading", { name: "Version 1" }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await flushAsyncWork();
+    });
+    expect(
+      screen.getByRole("heading", { name: "Version 2" }),
+    ).toBeInTheDocument();
   });
 
   it("detects same-size same-mtime rewrites from change time", async () => {
