@@ -389,6 +389,7 @@ struct SiriStreamCallbackContext {
     stream_id: String,
     native_voice: NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
+    suppress_capture: bool,
     assistant_speech: Mutex<Option<AssistantSpeechGuard>>,
 }
 
@@ -408,7 +409,7 @@ unsafe extern "C" fn siri_playback_started(context: *mut std::ffi::c_void) {
         *assistant_speech = Some(
             context
                 .native_voice
-                .begin_assistant_speech(context.interruption_sensitivity),
+                .begin_assistant_speech(context.interruption_sensitivity, context.suppress_capture),
         );
     }
     let _ = context.app.emit(
@@ -655,6 +656,7 @@ fn run_siri_stream(
     receiver: mpsc::Receiver<SiriStreamCommand>,
     native_voice: NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
+    suppress_capture: bool,
 ) -> Result<SiriStreamOutcome, SiriStreamFailure> {
     let language = CString::new(selection.language)
         .map_err(|_| "Siri voice language cannot contain NUL bytes".to_string())?;
@@ -665,6 +667,7 @@ fn run_siri_stream(
         stream_id: stream_id.clone(),
         native_voice,
         interruption_sensitivity,
+        suppress_capture,
         assistant_speech: Mutex::new(None),
     });
     let callback_context = Box::into_raw(callback_context);
@@ -849,16 +852,10 @@ pub fn start_siri_voice_stream(
             "Select an installed Siri voice in Voice settings before using Siri TTS".to_string()
         })?;
         let active = begin_playback(&state, webview_window.label())?;
-        let capture_suppression = should_suppress_capture(
+        let suppress_capture = should_suppress_capture(
             interruption_mode,
             effective_output_device_name(None).as_deref(),
-        )
-        .then(|| {
-            log::info!(
-                "[voice-echo-guard] capture suppression selected mode={interruption_mode:?}"
-            );
-            native_voice.suppress_capture()
-        });
+        );
         let (sender, receiver) = mpsc::channel();
         {
             let mut runtime = state
@@ -874,7 +871,6 @@ pub fn start_siri_voice_stream(
         let playback_active = active.clone();
         let native_voice_state = native_voice.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
-            let _capture_suppression = capture_suppression;
             let result = run_siri_stream(
                 app.clone(),
                 stream_id.clone(),
@@ -886,6 +882,7 @@ pub fn start_siri_voice_stream(
                 receiver,
                 native_voice_state,
                 interruption_sensitivity,
+                suppress_capture,
             );
             let (event_state, error, delivery) = match result {
                 Ok(outcome) => (outcome.state, None, outcome.delivery),

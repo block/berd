@@ -272,6 +272,7 @@ impl Drop for CaptureSuppressionGuard {
 #[must_use = "assistant speech sensitivity ends when the guard is dropped"]
 #[cfg(any(test, target_os = "macos"))]
 pub(crate) struct AssistantSpeechGuard {
+    _capture_suppression: Option<CaptureSuppressionGuard>,
     assistant_speaking: Arc<AtomicBool>,
     assistant_speech_generation: Arc<AtomicU64>,
     assistant_speech_lock: Arc<Mutex<()>>,
@@ -388,6 +389,7 @@ impl NativeVoiceState {
     pub(crate) fn begin_assistant_speech(
         &self,
         sensitivity: InterruptionSensitivity,
+        suppress_capture: bool,
     ) -> AssistantSpeechGuard {
         let _lifecycle = self
             .assistant_speech_lock
@@ -401,6 +403,7 @@ impl NativeVoiceState {
             .wrapping_add(1);
         self.assistant_speaking.store(true, Ordering::Release);
         AssistantSpeechGuard {
+            _capture_suppression: suppress_capture.then(|| self.suppress_capture()),
             assistant_speaking: Arc::clone(&self.assistant_speaking),
             assistant_speech_generation: Arc::clone(&self.assistant_speech_generation),
             assistant_speech_lock: Arc::clone(&self.assistant_speech_lock),
@@ -2842,7 +2845,7 @@ mod tests {
         );
 
         {
-            let _guard = state.begin_assistant_speech(InterruptionSensitivity::More);
+            let _guard = state.begin_assistant_speech(InterruptionSensitivity::More, false);
             assert_eq!(
                 active_vad_threshold(&state.assistant_speaking, &state.assistant_vad_threshold),
                 InterruptionSensitivity::More.vad_threshold()
@@ -2860,8 +2863,8 @@ mod tests {
     #[test]
     fn stale_assistant_speech_guard_does_not_clear_newer_playback() {
         let state = NativeVoiceState::default();
-        let older = state.begin_assistant_speech(InterruptionSensitivity::Less);
-        let newer = state.begin_assistant_speech(InterruptionSensitivity::More);
+        let older = state.begin_assistant_speech(InterruptionSensitivity::Less, false);
+        let newer = state.begin_assistant_speech(InterruptionSensitivity::More, false);
 
         drop(older);
         assert_eq!(
@@ -2891,6 +2894,18 @@ mod tests {
         }
 
         drop(first);
+        assert!(!state.capture_is_suppressed());
+    }
+
+    #[test]
+    fn assistant_speech_guard_scopes_capture_suppression_to_playback() {
+        let state = NativeVoiceState::default();
+        assert!(!state.capture_is_suppressed());
+
+        let guard = state.begin_assistant_speech(InterruptionSensitivity::Balanced, true);
+        assert!(state.capture_is_suppressed());
+
+        drop(guard);
         assert!(!state.capture_is_suppressed());
     }
 

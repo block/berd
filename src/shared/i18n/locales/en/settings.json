@@ -892,7 +892,7 @@
     "interruptionMode": "While Berd is speaking",
     "interruptionModeDescriptions": {
       "allowInterruptions": "Keeps listening so you can interrupt on any output device.",
-      "automatic": "Listens through headphones and prevents feedback through speakers.",
+      "automatic": "Listens through recognized headphones and prevents feedback on other outputs.",
       "preventFeedback": "Pauses speech recognition until Berd finishes speaking."
     },
     "interruptionModes": {

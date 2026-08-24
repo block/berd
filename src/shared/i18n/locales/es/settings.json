@@ -895,7 +895,7 @@
     "interruptionMode": "Mientras Berd habla",
     "interruptionModeDescriptions": {
       "allowInterruptions": "Sigue escuchando para que puedas interrumpir con cualquier dispositivo de salida.",
-      "automatic": "Escucha con auriculares y evita la retroalimentación por los altavoces.",
+      "automatic": "Escucha con auriculares reconocidos y evita la retroalimentación en otras salidas.",
       "preventFeedback": "Pausa el reconocimiento de voz hasta que Berd termine de hablar."
     },
     "interruptionModes": {

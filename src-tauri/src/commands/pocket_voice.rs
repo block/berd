@@ -892,15 +892,8 @@ pub fn start_pocket_voice_stream(
         let speed = playback_speed(&base);
         let output_device = selected_output_device();
         let effective_output_device = effective_output_device_name(output_device.as_deref());
-        let capture_suppression =
-            should_suppress_capture(interruption_mode, effective_output_device.as_deref()).then(
-                || {
-                    log::info!(
-                    "[voice-echo-guard] capture suppression selected mode={interruption_mode:?}"
-                );
-                    native_voice.suppress_capture()
-                },
-            );
+        let suppress_capture =
+            should_suppress_capture(interruption_mode, effective_output_device.as_deref());
         let (sender, receiver) = mpsc::channel();
         {
             let mut playback = state
@@ -917,7 +910,6 @@ pub fn start_pocket_voice_stream(
         let playback_active = active.clone();
         let native_voice_state = native_voice.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
-            let _capture_suppression = capture_suppression;
             let result = run_pocket_voice_stream(
                 &app,
                 &stream_id,
@@ -929,6 +921,7 @@ pub fn start_pocket_voice_stream(
                 receiver,
                 native_voice_state,
                 interruption_sensitivity,
+                suppress_capture,
             );
             let (event_state, error, delivery) = match result {
                 Ok(outcome) => (outcome.state, None, outcome.delivery),
@@ -2013,6 +2006,7 @@ fn run_pocket_voice_stream(
     receiver: mpsc::Receiver<PocketStreamCommand>,
     native_voice: NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
+    suppress_capture: bool,
 ) -> Result<PocketStreamOutcome, PocketStreamFailure> {
     use std::num::NonZero;
 
@@ -2090,6 +2084,7 @@ fn run_pocket_voice_stream(
                     &mut playback_started,
                     &native_voice,
                     interruption_sensitivity,
+                    suppress_capture,
                     &mut assistant_speech,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
@@ -2121,6 +2116,7 @@ fn run_pocket_voice_stream(
                     &mut playback_started,
                     &native_voice,
                     interruption_sensitivity,
+                    suppress_capture,
                     &mut assistant_speech,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
@@ -2142,6 +2138,7 @@ fn run_pocket_voice_stream(
                         stream_id,
                         &native_voice,
                         interruption_sensitivity,
+                        suppress_capture,
                         &mut playback_started,
                         &mut assistant_speech,
                     )?;
@@ -2165,6 +2162,7 @@ fn run_pocket_voice_stream(
                     &mut playback_started,
                     &native_voice,
                     interruption_sensitivity,
+                    suppress_capture,
                     &mut assistant_speech,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
@@ -2186,6 +2184,7 @@ fn run_pocket_voice_stream(
                         stream_id,
                         &native_voice,
                         interruption_sensitivity,
+                        suppress_capture,
                         &mut playback_started,
                         &mut assistant_speech,
                     )?;
@@ -2273,13 +2272,15 @@ fn mark_pocket_playback_started(
     stream_id: &str,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
+    suppress_capture: bool,
     playback_started: &mut bool,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
 ) -> Result<(), String> {
     if *playback_started {
         return Ok(());
     }
-    *assistant_speech = Some(native_voice.begin_assistant_speech(interruption_sensitivity));
+    *assistant_speech =
+        Some(native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture));
     *playback_started = true;
     emit_pocket_stream_event(app, stream_id, PocketStreamEventState::Started, None, None);
     println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
@@ -2305,6 +2306,7 @@ fn synthesize_pocket_stream_ready(
     playback_started: &mut bool,
     native_voice: &NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
+    suppress_capture: bool,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
     delivery_ledger: &mut PlaybackDeliveryLedger,
     last_progress_emit: &mut Instant,
@@ -2344,6 +2346,7 @@ fn synthesize_pocket_stream_ready(
                     stream_id,
                     native_voice,
                     interruption_sensitivity,
+                    suppress_capture,
                     playback_started,
                     assistant_speech,
                 ) {
