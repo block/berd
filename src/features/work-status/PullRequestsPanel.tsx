@@ -522,7 +522,7 @@ function PullRequestRow({ item }: { item: WorkStatusItem }) {
       statuses={statuses}
       timestamp={formatPullRequestTimestamp(item.updatedAt, formatDate)}
       ariaLabel={`${item.title} · ${item.groupName} ${item.subtitle ?? ""}`.trim()}
-      className="pl-[38px]"
+      className="ml-[38px] w-[calc(100%-38px)]"
       onOpen={() => {
         openWorkStatusUrl(item.destination.url).catch((error) => {
           console.error("Failed to open pull request:", error);

@@ -27,6 +27,12 @@ describe("PullRequestListItem", () => {
     expect(screen.getByText("Checks pending")).toBeVisible();
     expect(screen.getByText("Aug 19")).toBeVisible();
 
+    const item = screen.getByRole("button", {
+      name: "Open block/berd pull request #42 on GitHub",
+    });
+    expect(item.className).toContain("bg-muted/60");
+    expect(item.className).toContain("normal-case");
+
     fireEvent.click(
       screen.getByRole("button", {
         name: "Open block/berd pull request #42 on GitHub",
