@@ -209,7 +209,7 @@ describe("Siri voice locales", () => {
     });
   });
 
-  it("applies a manual selection after an in-flight auto-selection", async () => {
+  it("applies a manual selection after an in-flight auto-selection fails", async () => {
     const pendingAutoSelection = deferred<void>();
     apiMocks.getSiriVoiceStatus.mockResolvedValue(status("en-US", "Aaron"));
     apiMocks.selectSiriVoice.mockImplementation(
@@ -248,7 +248,7 @@ describe("Siri voice locales", () => {
     });
     expect(apiMocks.selectSiriVoice).toHaveBeenCalledTimes(1);
 
-    pendingAutoSelection.resolve();
+    pendingAutoSelection.reject(new Error("Auto-selection failed"));
     await act(async () => {
       await Promise.all([downloadPromise, manualSelectionPromise]);
     });
@@ -258,6 +258,7 @@ describe("Siri voice locales", () => {
       name: "Aaron",
       language: "en-US",
     });
+    expect(result.current.error).toBeNull();
   });
 
   it("preserves a manual selection error across a download refresh", async () => {
