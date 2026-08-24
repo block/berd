@@ -30,6 +30,7 @@ interface VoiceSendRoute {
 let activeSendRoute: VoiceSendRoute | null = null;
 let deliveryInitialized = false;
 const operationInFlightBySession = new Set<string>();
+let replacementOperationInFlight = false;
 
 export function createVoiceTranscriptDeliveryQueue() {
   const queues = new Map<string, Promise<void>>();
@@ -883,6 +884,8 @@ export function useVoiceConversationController({
           ) {
             return;
           }
+          if (replacementOperationInFlight) return;
+          replacementOperationInFlight = true;
           try {
             const replaced = await replaceActiveVoiceConversation({
               stop: () => stopForReplacement(currentStatus, sessionId),
@@ -899,6 +902,8 @@ export function useVoiceConversationController({
               sessionId,
               t("toolbar.voiceConversation.buddy.errors.stop"),
             );
+          } finally {
+            replacementOperationInFlight = false;
           }
           return;
         }

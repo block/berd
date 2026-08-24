@@ -684,6 +684,95 @@ describe("voice transcript delivery coordination", () => {
     });
   });
 
+  it.each([
+    ["session-b", "session-c"],
+    ["session-c", "session-b"],
+  ] as const)("serializes a %s handoff ahead of competing %s", async (winnerSessionId, loserSessionId) => {
+    const active = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      microphoneMuted: false,
+      revision: 2,
+    };
+    const stopped = {
+      ...active,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      revision: 3,
+    };
+    const runningWinner = {
+      ...active,
+      sessionId: winnerSessionId,
+      revision: 4,
+    };
+    const winnerRefresh = deferred<typeof active>();
+    const loserRefresh = deferred<typeof active>();
+    const stopRequest = deferred<typeof stopped>();
+    const refreshStatus = vi
+      .fn()
+      .mockReturnValueOnce(winnerRefresh.promise)
+      .mockReturnValueOnce(loserRefresh.promise);
+    const stopForReplacement = vi.fn().mockReturnValue(stopRequest.promise);
+    const start = vi.fn().mockResolvedValue(runningWinner);
+    useVoiceConversationStore.setState({
+      status: active,
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus,
+      drainPendingTranscripts: vi.fn().mockResolvedValue(undefined),
+      stopForReplacement,
+      start,
+    });
+    const controllers = new Map(
+      ["session-b", "session-c"].map((candidateSessionId) => [
+        candidateSessionId,
+        renderHook(() =>
+          useVoiceConversationController({
+            sessionId: candidateSessionId,
+            onSend: vi.fn().mockResolvedValue(true),
+            enabled: true,
+            isGooseSession: true,
+            pocketReady: true,
+            onPocketSetupRequired: vi.fn(),
+          }),
+        ),
+      ]),
+    );
+
+    let winnerToggle!: Promise<void>;
+    let loserToggle!: Promise<void>;
+    act(() => {
+      winnerToggle = Promise.resolve(
+        controllers.get(winnerSessionId)?.result.current.onToggle(),
+      );
+      loserToggle = Promise.resolve(
+        controllers.get(loserSessionId)?.result.current.onToggle(),
+      );
+    });
+    winnerRefresh.resolve(active);
+    await vi.waitFor(() => expect(stopForReplacement).toHaveBeenCalledOnce());
+    loserRefresh.resolve(active);
+    await loserToggle;
+    expect(stopForReplacement).toHaveBeenCalledWith(active, winnerSessionId);
+    expect(start).not.toHaveBeenCalled();
+
+    stopRequest.resolve(stopped);
+    await winnerToggle;
+
+    expect(start).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledWith(winnerSessionId);
+    expect(nativeAssistantSpeechMocks.start).toHaveBeenLastCalledWith(
+      winnerSessionId,
+      expect.any(Function),
+    );
+    expect(nativeAssistantSpeechMocks.stop).not.toHaveBeenCalled();
+  });
+
   it("cleans up assistant speech when the current session fails to start", async () => {
     const stopped = {
       available: true,
