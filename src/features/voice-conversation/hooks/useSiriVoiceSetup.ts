@@ -217,6 +217,7 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
       setDownloadingVoiceKey(voiceKey(selection));
       try {
         await downloadSiriVoice(selection);
+        await selectSiriVoice(selection);
         window.dispatchEvent(new Event(SIRI_VOICE_SETTINGS_CHANGED));
         await refresh(language);
       } catch (nextError) {

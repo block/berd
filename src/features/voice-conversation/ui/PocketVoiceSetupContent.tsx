@@ -8,6 +8,8 @@ import { Progress } from "@/shared/ui/progress";
 import { RadioGroup, RadioGroupItem } from "@/shared/ui/radio-group";
 import type { VoiceModelKind } from "../api/pocketVoice";
 import type { PocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
+import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
+import { VoicePickerDialog } from "./VoicePickerDialog";
 
 function formatBytes(bytes: number): string {
   return `${(bytes / 1_000_000).toFixed(1)} MB`;
@@ -65,6 +67,9 @@ export function PocketVoiceSetupContent({
       modelError: status?.parakeetError ?? null,
     },
   ].filter(({ model }) => !visibleModels || visibleModels.includes(model));
+  const selectedVoice =
+    status?.voices.find((voice) => voice.id === status.selectedVoice)?.name ??
+    null;
 
   return (
     <div className="space-y-4 overflow-hidden">
@@ -202,69 +207,55 @@ export function PocketVoiceSetupContent({
           ) : null}
 
           {showPocketVoiceControls && status && pocketInstalled ? (
-            <>
-              <fieldset className="space-y-2">
-                <legend className="text-sm font-medium">
-                  {t("voice.playbackSpeed")}
-                </legend>
-                <div className="flex flex-wrap gap-2">
-                  {[0.75, 1, 1.25, 1.5, 2].map((speed) => (
-                    <Button
-                      key={speed}
-                      type="button"
-                      size="sm"
-                      variant={
-                        status.playbackSpeed === speed ? "primary" : "outline"
-                      }
-                      aria-pressed={status.playbackSpeed === speed}
-                      onClick={() => void setup.setPlaybackSpeed(speed)}
+            <div className="divide-y divide-border">
+              <PlaybackSpeedRow
+                speed={status.playbackSpeed}
+                speeds={[0.75, 1, 1.25, 1.5, 2]}
+                onChange={setup.setPlaybackSpeed}
+              />
+              <VoicePickerDialog selectedVoice={selectedVoice}>
+                <RadioGroup
+                  value={status.selectedVoice}
+                  onValueChange={(voiceId) => void setup.selectVoice(voiceId)}
+                  className="space-y-2"
+                  aria-label={t("voice.voice")}
+                >
+                  {status.voices.map((voice) => (
+                    <div
+                      key={voice.id}
+                      data-testid={`pocket-voice-${voice.id}`}
+                      className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"
                     >
-                      {speed}×
-                    </Button>
+                      <label
+                        htmlFor={`pocket-voice-${voice.id}`}
+                        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
+                      >
+                        <RadioGroupItem
+                          id={`pocket-voice-${voice.id}`}
+                          value={voice.id}
+                        />
+                        <span>{voice.name}</span>
+                      </label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={t("voice.previewVoice", {
+                          voice: voice.name,
+                        })}
+                        disabled={setup.previewingVoiceId !== null}
+                        onClick={() => void setup.previewVoice(voice.id)}
+                      >
+                        <Play className="size-3.5" />
+                        {setup.previewingVoiceId === voice.id
+                          ? t("voice.playing")
+                          : t("voice.preview")}
+                      </Button>
+                    </div>
                   ))}
-                </div>
-              </fieldset>
-              <RadioGroup
-                value={status.selectedVoice}
-                onValueChange={(voiceId) => void setup.selectVoice(voiceId)}
-                className="grid grid-cols-2 gap-2"
-                aria-label={t("voice.voiceLabel")}
-              >
-                {status.voices.map((voice) => (
-                  <div
-                    key={voice.id}
-                    data-testid={`pocket-voice-${voice.id}`}
-                    className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"
-                  >
-                    <label
-                      htmlFor={`pocket-voice-${voice.id}`}
-                      className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
-                    >
-                      <RadioGroupItem
-                        id={`pocket-voice-${voice.id}`}
-                        value={voice.id}
-                      />
-                      <span>{voice.name}</span>
-                    </label>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      aria-label={t("voice.previewVoice", {
-                        voice: voice.name,
-                      })}
-                      disabled={setup.previewingVoiceId !== null}
-                      onClick={() => void setup.previewVoice(voice.id)}
-                    >
-                      <Play className="size-3.5" />
-                      {setup.previewingVoiceId === voice.id
-                        ? t("voice.playing")
-                        : t("voice.preview")}
-                    </Button>
-                  </div>
-                ))}
-              </RadioGroup>
-            </>
+                </RadioGroup>
+              </VoicePickerDialog>
+            </div>
           ) : null}
         </div>
       ) : null}

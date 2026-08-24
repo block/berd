@@ -10,6 +10,10 @@ if (!HTMLElement.prototype.hasPointerCapture) {
   HTMLElement.prototype.hasPointerCapture = () => false;
 }
 
+if (!HTMLElement.prototype.scrollIntoView) {
+  HTMLElement.prototype.scrollIntoView = () => {};
+}
+
 describe("PocketVoiceSetupContent", () => {
   const baseStatus: PocketVoiceStatus = {
     statusRevision: 0,
@@ -252,9 +256,13 @@ describe("PocketVoiceSetupContent", () => {
       />,
     );
 
-    expect(screen.getAllByRole("radio")).toHaveLength(12);
-    await userEvent.click(screen.getByRole("button", { name: "2×" }));
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Playback speed" }),
+    );
+    await userEvent.click(screen.getByRole("option", { name: "2×" }));
     expect(setPlaybackSpeed).toHaveBeenCalledWith(2);
+    await userEvent.click(screen.getByRole("button", { name: "Choose…" }));
+    expect(screen.getAllByRole("radio")).toHaveLength(12);
     await userEvent.click(screen.getByText("Anna"));
     expect(selectVoice).toHaveBeenCalledWith("anna");
     await userEvent.click(screen.getByRole("button", { name: "Preview Anna" }));

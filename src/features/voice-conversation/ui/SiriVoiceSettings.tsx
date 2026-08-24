@@ -12,6 +12,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select";
+import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
+import { VoicePickerDialog } from "./VoicePickerDialog";
 
 const PLAYBACK_SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 
@@ -79,6 +81,7 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
   const selectedKey = setup.status?.selectedVoice
     ? voiceKey(setup.status.selectedVoice)
     : null;
+  const selectedVoice = setup.status?.selectedVoice?.name ?? null;
 
   if (setup.status && !setup.status.supported) {
     return (
@@ -89,178 +92,159 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
   }
 
   return (
-    <div className="space-y-5 px-4 pb-4">
-      <div className="space-y-2">
-        <label htmlFor="siri-language" className="text-sm font-medium">
-          {t("voice.siriLanguage")}
-        </label>
-        <Select value={setup.language} onValueChange={setup.setLanguage}>
-          <SelectTrigger id="siri-language" className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {languages.map((language) => (
-              <SelectItem key={language} value={language}>
-                {localeLabel(language, displayLocale)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground">
-          {t("voice.siriLanguageDescription")}
-        </p>
-      </div>
-
+    <div className="divide-y divide-border px-4 pb-4">
       {setup.status ? (
-        <fieldset className="space-y-2">
-          <legend className="text-sm font-medium">
-            {t("voice.playbackSpeed")}
-          </legend>
-          <div className="flex flex-wrap gap-2">
-            {PLAYBACK_SPEEDS.map((speed) => (
-              <Button
-                key={speed}
-                type="button"
-                size="sm"
-                variant={
-                  setup.status?.playbackSpeed === speed ? "primary" : "outline"
-                }
-                aria-pressed={setup.status?.playbackSpeed === speed}
-                onClick={() => void setup.setPlaybackSpeed(speed)}
-              >
-                {speed}×
-              </Button>
-            ))}
-          </div>
-        </fieldset>
+        <PlaybackSpeedRow
+          speed={setup.status.playbackSpeed}
+          speeds={PLAYBACK_SPEEDS}
+          onChange={setup.setPlaybackSpeed}
+        />
       ) : null}
+      <VoicePickerDialog selectedVoice={selectedVoice} error={setup.error}>
+        <div className="space-y-2">
+          <label htmlFor="siri-language" className="text-sm font-medium">
+            {t("voice.siriLanguage")}
+          </label>
+          <Select value={setup.language} onValueChange={setup.setLanguage}>
+            <SelectTrigger id="siri-language" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {languages.map((language) => (
+                <SelectItem key={language} value={language}>
+                  {localeLabel(language, displayLocale)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            {t("voice.siriLanguageDescription")}
+          </p>
+        </div>
 
-      {setup.error ? (
-        <p className="text-sm text-destructive" role="alert">
-          {setup.error}
-        </p>
-      ) : null}
-
-      {setup.loading ? (
-        <p className="text-sm text-muted-foreground" aria-live="polite">
-          {t("voice.siriLoading")}
-        </p>
-      ) : groups.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {t("voice.siriNoVoices")}
-        </p>
-      ) : (
-        <div className="space-y-5">
-          {groups.map((group) => (
-            <section key={group.locale} className="space-y-2">
-              <h3 className="text-sm font-medium">
-                {localeLabel(group.locale, displayLocale)}
-              </h3>
-              <div className="divide-y divide-border rounded-md border border-border">
-                {group.voices.map((voice) => {
-                  const key = voiceKey(voice);
-                  const selected = key === selectedKey;
-                  const downloading = setup.downloadingVoiceKey === key;
-                  const previewing = setup.previewingVoiceKey === key;
-                  const voiceDetails = (
-                    <span className="min-w-0 text-left">
-                      <span className="block truncate text-sm font-medium">
-                        {voice.name}
+        {setup.loading ? (
+          <p className="text-sm text-muted-foreground" aria-live="polite">
+            {t("voice.siriLoading")}
+          </p>
+        ) : groups.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {t("voice.siriNoVoices")}
+          </p>
+        ) : (
+          <div className="space-y-5">
+            {groups.map((group) => (
+              <section key={group.locale} className="space-y-2">
+                <h3 className="text-sm font-medium">
+                  {localeLabel(group.locale, displayLocale)}
+                </h3>
+                <div className="divide-y divide-border rounded-md border border-border">
+                  {group.voices.map((voice) => {
+                    const key = voiceKey(voice);
+                    const selected = key === selectedKey;
+                    const downloading = setup.downloadingVoiceKey === key;
+                    const previewing = setup.previewingVoiceKey === key;
+                    const voiceDetails = (
+                      <span className="min-w-0 text-left">
+                        <span className="block truncate text-sm font-medium">
+                          {voice.name}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {voice.installed
+                            ? t("voice.modelInstalledSize", {
+                                size: formatBytes(voice.sizeBytes),
+                              })
+                            : formatBytes(voice.sizeBytes)}
+                        </span>
                       </span>
-                      <span className="block text-xs text-muted-foreground">
-                        {voice.installed
-                          ? t("voice.modelInstalledSize", {
-                              size: formatBytes(voice.sizeBytes),
-                            })
-                          : formatBytes(voice.sizeBytes)}
-                      </span>
-                    </span>
-                  );
-                  return (
-                    <div
-                      key={key}
-                      className="flex min-h-12 items-center gap-3 px-3 py-2"
-                      data-testid={`siri-voice-${key}`}
-                    >
-                      {voice.installed ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="h-auto min-w-0 flex-1 justify-start rounded-none p-0"
-                          aria-label={t(
-                            selected ? "voice.selectedVoice" : "voice.useVoice",
-                            { voice: voice.name },
-                          )}
-                          aria-pressed={selected}
-                          onClick={() => void setup.selectVoice(voice)}
-                        >
-                          {voiceDetails}
-                        </Button>
-                      ) : (
-                        <div className="min-w-0 flex-1">{voiceDetails}</div>
-                      )}
-                      {selected ? (
-                        <Check
-                          className="size-5 shrink-0 text-primary"
-                          aria-hidden="true"
-                        />
-                      ) : null}
-                      {!voice.installed ? (
+                    );
+                    return (
+                      <div
+                        key={key}
+                        className="flex min-h-12 items-center gap-3 px-3 py-2"
+                        data-testid={`siri-voice-${key}`}
+                      >
+                        {voice.installed ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            className="h-auto min-w-0 flex-1 justify-start rounded-none p-0"
+                            aria-label={t(
+                              selected
+                                ? "voice.selectedVoice"
+                                : "voice.useVoice",
+                              { voice: voice.name },
+                            )}
+                            aria-pressed={selected}
+                            onClick={() => void setup.selectVoice(voice)}
+                          >
+                            {voiceDetails}
+                          </Button>
+                        ) : (
+                          <div className="min-w-0 flex-1">{voiceDetails}</div>
+                        )}
+                        {selected ? (
+                          <Check
+                            className="size-5 shrink-0 text-primary"
+                            aria-hidden="true"
+                          />
+                        ) : null}
+                        {!voice.installed ? (
+                          <Button
+                            type="button"
+                            size="icon-sm"
+                            variant="ghost"
+                            feedbackState={downloading ? "loading" : "idle"}
+                            loadingVisual="spinner"
+                            loadingLabel={t("voice.downloadingVoice", {
+                              voice: voice.name,
+                            })}
+                            disabled={setup.downloadingVoiceKey !== null}
+                            aria-label={t(
+                              downloading
+                                ? "voice.downloadingVoice"
+                                : "voice.downloadVoice",
+                              { voice: voice.name },
+                            )}
+                            tooltip={t("voice.downloadVoice", {
+                              voice: voice.name,
+                            })}
+                            onClick={() => void setup.downloadVoice(voice)}
+                          >
+                            <CloudDownload />
+                          </Button>
+                        ) : null}
                         <Button
                           type="button"
                           size="icon-sm"
-                          variant="ghost"
-                          feedbackState={downloading ? "loading" : "idle"}
+                          variant="outline"
+                          feedbackState={previewing ? "loading" : "idle"}
                           loadingVisual="spinner"
-                          loadingLabel={t("voice.downloadingVoice", {
+                          loadingLabel={t("voice.playingVoice", {
                             voice: voice.name,
                           })}
-                          disabled={setup.downloadingVoiceKey !== null}
+                          disabled={setup.previewingVoiceKey !== null}
                           aria-label={t(
-                            downloading
-                              ? "voice.downloadingVoice"
-                              : "voice.downloadVoice",
+                            previewing
+                              ? "voice.playingVoice"
+                              : "voice.previewVoice",
                             { voice: voice.name },
                           )}
-                          tooltip={t("voice.downloadVoice", {
+                          tooltip={t("voice.previewVoice", {
                             voice: voice.name,
                           })}
-                          onClick={() => void setup.downloadVoice(voice)}
+                          onClick={() => void setup.previewVoice(voice)}
                         >
-                          <CloudDownload />
+                          <Play />
                         </Button>
-                      ) : null}
-                      <Button
-                        type="button"
-                        size="icon-sm"
-                        variant="outline"
-                        feedbackState={previewing ? "loading" : "idle"}
-                        loadingVisual="spinner"
-                        loadingLabel={t("voice.playingVoice", {
-                          voice: voice.name,
-                        })}
-                        disabled={setup.previewingVoiceKey !== null}
-                        aria-label={t(
-                          previewing
-                            ? "voice.playingVoice"
-                            : "voice.previewVoice",
-                          { voice: voice.name },
-                        )}
-                        tooltip={t("voice.previewVoice", {
-                          voice: voice.name,
-                        })}
-                        onClick={() => void setup.previewVoice(voice)}
-                      >
-                        <Play />
-                      </Button>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
+      </VoicePickerDialog>
     </div>
   );
 }

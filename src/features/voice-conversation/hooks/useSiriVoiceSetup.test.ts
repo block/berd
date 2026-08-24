@@ -9,11 +9,17 @@ import {
   useSiriVoiceSetup,
 } from "./useSiriVoiceSetup";
 
-const mockGetSiriVoiceStatus = vi.hoisted(() => vi.fn());
+const apiMocks = vi.hoisted(() => ({
+  downloadSiriVoice: vi.fn(),
+  getSiriVoiceStatus: vi.fn(),
+  selectSiriVoice: vi.fn(),
+}));
 
 vi.mock("../api/siriVoice", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api/siriVoice")>()),
-  getSiriVoiceStatus: mockGetSiriVoiceStatus,
+  downloadSiriVoice: apiMocks.downloadSiriVoice,
+  getSiriVoiceStatus: apiMocks.getSiriVoiceStatus,
+  selectSiriVoice: apiMocks.selectSiriVoice,
 }));
 
 const originalTauriInternals = window.__TAURI_INTERNALS__;
@@ -40,7 +46,11 @@ function status(language: string, name: string): SiriVoiceStatus {
 }
 
 beforeEach(() => {
-  mockGetSiriVoiceStatus.mockReset();
+  apiMocks.downloadSiriVoice.mockReset();
+  apiMocks.getSiriVoiceStatus.mockReset();
+  apiMocks.selectSiriVoice.mockReset();
+  apiMocks.downloadSiriVoice.mockResolvedValue(undefined);
+  apiMocks.selectSiriVoice.mockResolvedValue(undefined);
   window.__TAURI_INTERNALS__ = {} as typeof window.__TAURI_INTERNALS__;
 });
 
@@ -80,15 +90,15 @@ describe("Siri voice locales", () => {
   it("ignores an old-language failure after the current language succeeds", async () => {
     const oldRequest = deferred<SiriVoiceStatus>();
     const currentRequest = deferred<SiriVoiceStatus>();
-    mockGetSiriVoiceStatus.mockImplementation((language: string) =>
+    apiMocks.getSiriVoiceStatus.mockImplementation((language: string) =>
       language === "en-AU" ? currentRequest.promise : oldRequest.promise,
     );
     const { result } = renderHook(() => useSiriVoiceSetup(true));
 
-    await waitFor(() => expect(mockGetSiriVoiceStatus).toHaveBeenCalled());
+    await waitFor(() => expect(apiMocks.getSiriVoiceStatus).toHaveBeenCalled());
     act(() => result.current.setLanguage("en-AU"));
     await waitFor(() =>
-      expect(mockGetSiriVoiceStatus).toHaveBeenCalledWith("en-AU", {
+      expect(apiMocks.getSiriVoiceStatus).toHaveBeenCalledWith("en-AU", {
         coalesce: true,
       }),
     );
@@ -110,7 +120,7 @@ describe("Siri voice locales", () => {
 
   it("ignores a refresh failure after Siri setup is disabled", async () => {
     const focusRefresh = deferred<SiriVoiceStatus>();
-    mockGetSiriVoiceStatus
+    apiMocks.getSiriVoiceStatus
       .mockResolvedValueOnce(status("en-US", "Aaron"))
       .mockReturnValueOnce(focusRefresh.promise);
     const { result, rerender } = renderHook(
@@ -123,7 +133,7 @@ describe("Siri voice locales", () => {
 
     act(() => window.dispatchEvent(new Event("focus")));
     await waitFor(() =>
-      expect(mockGetSiriVoiceStatus).toHaveBeenCalledTimes(2),
+      expect(apiMocks.getSiriVoiceStatus).toHaveBeenCalledTimes(2),
     );
     rerender({ enabled: false });
     await waitFor(() => expect(result.current.status).toBeNull());
@@ -134,5 +144,29 @@ describe("Siri voice locales", () => {
     });
     expect(result.current.error).toBeNull();
     expect(result.current.statusError).toBeNull();
+  });
+
+  it("selects the exact Siri voice after its download completes", async () => {
+    const initialStatus = status("en-US", "Aaron");
+    apiMocks.getSiriVoiceStatus.mockResolvedValue(initialStatus);
+    const { result } = renderHook(() => useSiriVoiceSetup(true));
+    await waitFor(() => expect(result.current.status).toEqual(initialStatus));
+
+    const voice = {
+      name: "Quinn",
+      language: "en-US",
+      sizeBytes: 310_500_000,
+      installed: false,
+    };
+    await act(async () => {
+      await result.current.downloadVoice(voice);
+    });
+
+    const selection = { name: "Quinn", language: "en-US" };
+    expect(apiMocks.downloadSiriVoice).toHaveBeenCalledWith(selection);
+    expect(apiMocks.selectSiriVoice).toHaveBeenCalledWith(selection);
+    expect(apiMocks.downloadSiriVoice.mock.invocationCallOrder[0]).toBeLessThan(
+      apiMocks.selectSiriVoice.mock.invocationCallOrder[0] ?? 0,
+    );
   });
 });

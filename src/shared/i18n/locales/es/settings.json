@@ -872,6 +872,9 @@
     "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
     "backendSiri": "Voces de Siri (macOS)",
+    "chooseVoice": "Elegir…",
+    "chooseVoiceDescription": "Previsualiza una voz y luego selecciónala o descárgala.",
+    "chooseVoiceTitle": "Elige una voz",
     "download": "Descargar modelo",
     "downloadVoice": "Descargar {{voice}}",
     "downloadingVoice": "Descargando {{voice}}",
@@ -916,6 +919,7 @@
     "notReadyPocketOutput": "Pocket TTS no está instalado. Descárgalo abajo para usar la conversación por voz.",
     "notReadySiriOutput": "No hay ninguna voz de Siri instalada seleccionada. Descarga o selecciona una abajo para usar la conversación por voz.",
     "notReadyTitle": "La conversación por voz no está lista",
+    "noVoiceSelected": "No hay ninguna voz seleccionada",
     "outputBackendDescription": "Elige cómo Berd reproduce las respuestas del asistente.",
     "playbackSpeed": "Velocidad de reproducción",
     "playing": "Reproduciendo",
@@ -938,6 +942,7 @@
     "speechOutput": "Salida de voz",
     "selectedVoice": "Voz seleccionada: {{voice}}",
     "useVoice": "Usar {{voice}}",
+    "voice": "Voz",
     "voiceLabel": "Voz de Pocket TTS"
   }
 }
