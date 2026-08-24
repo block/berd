@@ -553,11 +553,14 @@ typedef void (^BerdAudioHandler)(
         self.startedCallback = NULL;
         self.stoppedCallback = NULL;
         self.callbackContext = NULL;
-        if (self.finished) return;
-        [self.session cancel];
+        BOOL wasFinished = self.finished;
+        if (!wasFinished) [self.session cancel];
         [self.player stop];
         [self.engine stop];
-        [self finish:BerdError(NSUserCancelledError, @"Siri playback cancelled.")];
+        self.playbackStarted = NO;
+        if (!wasFinished) {
+            [self finish:BerdError(NSUserCancelledError, @"Siri playback cancelled.")];
+        }
     };
     if (dispatch_get_specific(BerdSiriSpeechQueueKey)) cancelWork();
     else dispatch_sync(self.queue, cancelWork);
