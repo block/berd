@@ -720,7 +720,8 @@ export function startNativeAssistantSpeech(
         textOrdinal += 1;
         const previous = consumedTextBySlot.get(slot) ?? "";
         if (content.text === previous) continue;
-        const delta = content.text.startsWith(previous)
+        const appendOnly = content.text.startsWith(previous);
+        const delta = appendOnly
           ? content.text.slice(previous.length)
           : content.text;
         consumedTextBySlot.set(slot, content.text);
@@ -732,7 +733,26 @@ export function startNativeAssistantSpeech(
             currentSpeech?.interruptionCause ??
             interruptionCauseByMessage.get(message.id) ??
             "voiceStopped";
-          const spokenThrough = currentSpeech?.spokenThrough ?? 0;
+          const spokenThrough = appendOnly
+            ? (currentSpeech?.spokenThrough ?? 0)
+            : 0;
+          if (!appendOnly) {
+            setTargetSpeech(sessionId, target, { status: "notSpoken" });
+            recordPlaybackNotice(
+              sessionId,
+              slot,
+              content.text,
+              "interrupted",
+              {
+                cutoff: 0,
+                spokenText: "",
+                unspokenText: content.text,
+                confidence: "low",
+              },
+              interruptionCause,
+            );
+            continue;
+          }
           if (currentSpeech?.status !== "interrupted") {
             setTargetSpeech(
               sessionId,

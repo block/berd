@@ -938,6 +938,49 @@ describe("native assistant speech stream", () => {
     expect(notice).toContain('"unspokenText":" Three."');
   });
 
+  it("does not reuse an interrupted cutoff after a non-prefix rewrite", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Original reply." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        segments: [
+          {
+            text: "Original reply.",
+            playedFrames: 700,
+            totalFrames: 1_000,
+            synthesisComplete: true,
+          },
+        ],
+      },
+    });
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Replacement text." }]),
+      ]);
+
+    await vi.waitFor(() => {
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({ speech: { status: "notSpoken" } });
+    });
+    const notice = takeVoicePlaybackNotices("session-1") ?? "";
+    expect(notice).toContain('"spokenText":""');
+    expect(notice).toContain('"unspokenText":"Replacement text."');
+  });
+
   it("bounds spoken and unspoken excerpts in the model delivery notice", async () => {
     const text = `${"spoken ".repeat(100)}${"unspoken ".repeat(100)}`;
     startNativeAssistantSpeech("session-1", vi.fn());
