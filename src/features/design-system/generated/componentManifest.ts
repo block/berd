@@ -2707,6 +2707,7 @@ export const designSystemComponentManifest = [
       "data-[size=default]:h-9",
       "data-[size=sm]:h-8",
       "data-[size=xs]:h-7",
+      "data-[size=xs]:text-xs",
       "data-[state=closed]:animate-out",
       "data-[state=closed]:fade-out-0",
       "data-[state=closed]:zoom-out-95",
