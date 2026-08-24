@@ -1,15 +1,11 @@
 import { getClient } from "@/shared/api/acpConnection";
-import {
-  checkAllProviderStatus,
-  getProviderConfig,
-  listProviderSecrets,
-} from "./api/credentials";
+import { checkAllProviderStatus, listProviderSecrets } from "./api/credentials";
 import { getModelProviders } from "./providerCatalog";
 import {
   getCredentialedProviderIds,
-  getProviderConnectionEvidence,
-  hasMeaningfulSavedSettings,
+  isCredentialedProvider,
 } from "./lib/providerConnectionPolicy";
+import { connectedModelProviderIds } from "./lib/providerState";
 import { useProviderModelCacheStore } from "./stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "./stores/defaultProviderReadinessStore";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
@@ -25,12 +21,11 @@ import {
 } from "@/features/runtime-config/defaults";
 
 /**
- * Providers eligible for model discovery and default-provider recovery. A
- * stored credential is authoritative even when Goose's field-only status
- * probe cannot see an OAuth cache. Otherwise Goose must report the provider
- * configured and Berd must find deliberate setup evidence: a user-created
- * custom provider, a distribution-managed endpoint, or a meaningful saved
- * non-secret value. Untouched defaults and ambient readiness do not qualify.
+ * Providers eligible for default-provider recovery: Goose reports them
+ * configured AND they have deliberate setup evidence: a stored Goose
+ * credential, a user-created custom provider, or a distribution-managed
+ * endpoint. Merely appearing in runtime inventory or having ambient/default
+ * setup values does not satisfy the readiness gate.
  */
 export async function getIntentionalConfiguredProviderIds(
   statuses: Awaited<ReturnType<typeof checkAllProviderStatus>>,
@@ -51,39 +46,40 @@ export async function getIntentionalConfiguredProviderIds(
       )
       .map((provider) => provider.id),
   );
-  const modelProviders = getModelProviders();
-  const configuredBySavedValueIds = new Set(
-    (
-      await Promise.all(
-        modelProviders
-          .filter(
-            (provider) =>
-              configuredIds.has(provider.id) &&
-              (provider.fields?.length ?? 0) > 0,
-          )
-          .map(async (provider) => {
-            try {
-              const values = await getProviderConfig(provider.id);
-              return hasMeaningfulSavedSettings(provider, values)
-                ? provider.id
-                : null;
-            } catch {
-              return null;
-            }
-          }),
-      )
-    ).filter((providerId): providerId is string => providerId !== null),
-  );
   const connectionSnapshot = {
     configuredIds,
     credentialedIds,
     runtimeManagedIds: runtimeConfiguredIds,
-    configuredBySavedValueIds,
   };
-  return modelProviders
+  return connectedModelProviderIds(
+    getModelProviders().filter((provider) => configuredIds.has(provider.id)),
+    connectionSnapshot,
+  );
+}
+
+/**
+ * Providers safe to probe for model inventory. A positive Goose status is
+ * enough for discovery, while stored credentials also cover OAuth providers
+ * whose field-only status probe cannot see the shared token cache. Unlike
+ * default recovery, this only refreshes provider-local cache state and never
+ * persists a provider selection.
+ */
+export async function getModelDiscoveryProviderIds(
+  statuses: Awaited<ReturnType<typeof checkAllProviderStatus>>,
+): Promise<string[]> {
+  const configuredIds = new Set(
+    statuses
+      .filter((status) => status.isConfigured)
+      .map((status) => status.providerId),
+  );
+  const credentialedIds = getCredentialedProviderIds(
+    await listProviderSecrets(),
+  );
+  return getModelProviders()
     .filter(
       (provider) =>
-        getProviderConnectionEvidence(provider, connectionSnapshot) !== "none",
+        configuredIds.has(provider.id) ||
+        isCredentialedProvider(provider, credentialedIds),
     )
     .map((provider) => provider.id);
 }

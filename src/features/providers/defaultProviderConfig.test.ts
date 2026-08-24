@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderConfigStatusDto } from "@aaif/goose-sdk";
 import {
+  getModelDiscoveryProviderIds,
   reconcileManagedDefaultProviderSelection,
   saveDefaultProviderSelection,
   saveDefaultProviderSelectionFromConfiguredProvider,
@@ -178,7 +179,6 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
   function mockClientWithStatuses(
     statuses: ProviderConfigStatusDto[],
     secrets: unknown[] = [],
-    configValues: Record<string, unknown[]> = {},
   ) {
     mockGetClient.mockResolvedValue({
       goose: {
@@ -192,11 +192,6 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
         GooseUnstableProvidersSecretsList: vi
           .fn()
           .mockResolvedValue({ secrets }),
-        GooseUnstableProvidersConfigRead: vi
-          .fn()
-          .mockImplementation(({ providerId }) => ({
-            fields: configValues[providerId] ?? [],
-          })),
       },
     } as never);
   }
@@ -306,18 +301,8 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
     });
   });
 
-  it("does not recover a credentialless provider with only its default setting", async () => {
-    mockClientWithStatuses([status("lmstudio", true)], [], {
-      lmstudio: [
-        {
-          key: "LMSTUDIO_HOST",
-          value: "http://localhost:1234",
-          isSet: true,
-          isSecret: false,
-          required: false,
-        },
-      ],
-    });
+  it("does not recover a credentialless provider from status alone", async () => {
+    mockClientWithStatuses([status("lmstudio", true)]);
 
     await expect(
       saveDefaultProviderSelectionFromConfiguredProvider(),
@@ -325,46 +310,30 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
     expect(defaultsSave).not.toHaveBeenCalled();
   });
 
-  it("restores a provider with a meaningful saved non-secret setting", async () => {
-    mockClientWithStatuses([status("lmstudio", true)], [], {
-      lmstudio: [
-        {
-          key: "LMSTUDIO_HOST",
-          value: "http://my-model-server:1234",
-          isSet: true,
-          isSecret: false,
-          required: false,
-        },
-      ],
-    });
+  it("discovers a status-configured provider without making it a recovery candidate", async () => {
+    const statuses = [status("lmstudio", true)];
+    mockClientWithStatuses(statuses);
 
+    await expect(getModelDiscoveryProviderIds(statuses)).resolves.toContain(
+      "lmstudio",
+    );
     await expect(
       saveDefaultProviderSelectionFromConfiguredProvider(),
-    ).resolves.toEqual({
-      providerId: "lmstudio",
-      modelId: "gpt-4o",
-      modelName: "gpt-4o",
-    });
-    expect(defaultsSave).toHaveBeenCalledWith({
-      providerId: "lmstudio",
-      modelId: "gpt-4o",
-    });
+    ).resolves.toBeNull();
+    expect(defaultsSave).not.toHaveBeenCalled();
   });
 
-  it("trusts aliased OAuth credentials when Goose's field status misses them", async () => {
-    mockClientWithStatuses([status("lmstudio", true)], [secret("databricks")]);
+  it("discovers an aliased OAuth credential when Goose's field status misses it", async () => {
+    const statuses = [status("lmstudio", false)];
+    mockClientWithStatuses(statuses, [secret("databricks")]);
 
+    await expect(getModelDiscoveryProviderIds(statuses)).resolves.toContain(
+      "databricks_v2",
+    );
     await expect(
       saveDefaultProviderSelectionFromConfiguredProvider(),
-    ).resolves.toEqual({
-      providerId: "databricks_v2",
-      modelId: "goose-gpt-5-6-sol",
-      modelName: "GPT-5.6 Sol",
-    });
-    expect(defaultsSave).toHaveBeenCalledWith({
-      providerId: "databricks_v2",
-      modelId: "goose-gpt-5-6-sol",
-    });
+    ).resolves.toBeNull();
+    expect(defaultsSave).not.toHaveBeenCalled();
   });
 
   it("restores a configured runtime-managed provider when defaults were lost", async () => {

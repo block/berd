@@ -106,7 +106,7 @@ vi.mock("@/features/providers/stores/providerCatalogStore", () => ({
 }));
 
 vi.mock("@/features/providers/defaultProviderConfig", () => ({
-  getIntentionalConfiguredProviderIds: async () => [],
+  getModelDiscoveryProviderIds: async () => [],
   reconcileManagedDefaultProviderSelection: async () => {},
   saveDefaultProviderSelectionFromConfiguredProvider: async () => {},
 }));

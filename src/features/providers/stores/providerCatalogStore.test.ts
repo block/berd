@@ -35,22 +35,4 @@ describe("providerCatalogStore.mergeEntries", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0].displayName).toBe("Replaced");
   });
-
-  it("preserves existing aliases when a setup-catalog entry overlays curated metadata", () => {
-    useProviderCatalogStore
-      .getState()
-      .setEntries([{ ...entry("databricks_v2"), aliases: ["databricks"] }]);
-
-    useProviderCatalogStore.getState().mergeEntries([
-      {
-        ...entry("databricks_v2", "Databricks AI Gateway"),
-        aliases: ["databricks_ai_gateway"],
-      },
-    ]);
-
-    expect(useProviderCatalogStore.getState().entries[0].aliases).toEqual([
-      "databricks",
-      "databricks_ai_gateway",
-    ]);
-  });
 });

@@ -2,10 +2,23 @@ import type { ProviderSetupCatalogEntryDto } from "@aaif/goose-sdk";
 import { getClient } from "@/shared/api/acpConnection";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import { perfLog } from "@/shared/lib/perfLog";
+import { CURATED_PROVIDER_CATALOG } from "../curatedProviders";
+
+function setupCatalogAliases(
+  dto: ProviderSetupCatalogEntryDto,
+): string[] | undefined {
+  const curatedAliases = CURATED_PROVIDER_CATALOG.find(
+    (provider) =>
+      provider.category === "model" && provider.id === dto.providerId,
+  )?.aliases;
+  const aliases = [...(curatedAliases ?? []), ...(dto.aliases ?? [])];
+  return aliases.length > 0 ? [...new Set(aliases)] : undefined;
+}
 
 export function mapProviderSetupCatalogEntryDto(
   dto: ProviderSetupCatalogEntryDto,
 ): ProviderCatalogEntry {
+  const aliases = setupCatalogAliases(dto);
   return {
     id: dto.providerId,
     displayName: dto.name,
@@ -20,7 +33,7 @@ export function mapProviderSetupCatalogEntryDto(
     ...(dto.docUrl ? { docsUrl: dto.docUrl } : {}),
     group: dto.group,
     showOnlyWhenInstalled: dto.showOnlyWhenInstalled,
-    ...(dto.aliases?.length ? { aliases: dto.aliases } : {}),
+    ...(aliases ? { aliases } : {}),
     supportsInstall: dto.supportsInstall,
     supportsAuth: dto.supportsAuth,
     supportsAuthStatus: dto.supportsAuthStatus,
