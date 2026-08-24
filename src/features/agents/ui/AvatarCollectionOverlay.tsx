@@ -139,6 +139,10 @@ const COLLECTION_CARD_LABEL_CLASS =
 interface AvatarCollectionOverlayProps {
   library: AvatarLibraryState;
   /**
+   * Opens the takeover directly on a collection when provided.
+   */
+  initialCollectionId?: string | null;
+  /**
    * Hands the full persisted ref (`app-avatar:<id>` or `user-avatar:<id>`) to
    * the owning editor. A synchronous owner has accepted it into its working
    * buffer; an asynchronous owner can delay dismissal until its own commit
