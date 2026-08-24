@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tokio::sync::mpsc as tokio_mpsc;
 
-#[cfg(target_os = "macos")]
 use super::mac_speech;
 use super::{
     native_input_mute, pocket_voice::parakeet_model_dir, voice_buddy,
@@ -883,10 +882,14 @@ async fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus 
     };
     let parakeet_available = parakeet_model_dir(app).is_ok();
     #[cfg(target_os = "macos")]
-    let macos_available = mac_speech::status_async()
-        .await
-        .map(|status| status.model_installed)
-        .unwrap_or(false);
+    let macos_available = if needs_macos_status(session_id.is_some(), parakeet_available) {
+        mac_speech::status_async()
+            .await
+            .map(|status| status.model_installed)
+            .unwrap_or(false)
+    } else {
+        false
+    };
     #[cfg(not(target_os = "macos"))]
     let macos_available = false;
     let (available, unavailable_reason) =
@@ -911,6 +914,10 @@ async fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus 
         microphone_muted: state.microphone_is_muted(),
         revision,
     }
+}
+
+fn needs_macos_status(session_active: bool, parakeet_available: bool) -> bool {
+    !session_active && !parakeet_available
 }
 
 #[tauri::command]
@@ -2599,6 +2606,13 @@ mod tests {
                 > mac_speech::RECOGNITION_FINISH_TIMEOUT_SECONDS
                     + FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS
         );
+    }
+
+    #[test]
+    fn apple_status_is_only_queried_when_it_can_change_availability() {
+        assert!(!needs_macos_status(true, false));
+        assert!(!needs_macos_status(false, true));
+        assert!(needs_macos_status(false, false));
     }
 
     #[test]
