@@ -1410,9 +1410,18 @@ fn voice_target_window_focus_is_valid(
     window_label: &str,
     focused: bool,
     app_is_active: bool,
+    main_surface_is_available: bool,
     another_window_is_focused: bool,
 ) -> bool {
-    focused || (window_label == "main" && app_is_active && !another_window_is_focused)
+    focused
+        || (window_label == "main"
+            && app_is_active
+            && main_surface_is_available
+            && !another_window_is_focused)
+}
+
+fn voice_main_surface_is_available(visible: bool, minimized: bool) -> bool {
+    visible && !minimized
 }
 
 #[cfg(target_os = "macos")]
@@ -1474,12 +1483,24 @@ fn validate_voice_target_session(
     let app_is_active = !focused
         && webview_window.label() == "main"
         && app_is_active_for_main_window_focus_fallback();
+    let main_surface_is_available = if app_is_active {
+        let visible = webview_window
+            .is_visible()
+            .map_err(|error| format!("Could not confirm the main window visibility: {error}"))?;
+        let minimized = webview_window
+            .is_minimized()
+            .map_err(|error| format!("Could not confirm the main window state: {error}"))?;
+        voice_main_surface_is_available(visible, minimized)
+    } else {
+        false
+    };
     let another_window_is_focused =
-        app_is_active && another_user_window_is_focused(webview_window)?;
+        main_surface_is_available && another_user_window_is_focused(webview_window)?;
     if !voice_target_window_focus_is_valid(
         webview_window.label(),
         focused,
         app_is_active,
+        main_surface_is_available,
         another_window_is_focused,
     ) {
         return Err("The target session window is no longer focused.".to_string());
@@ -2304,27 +2325,35 @@ mod tests {
 
     #[test]
     fn replacement_focus_accepts_an_active_app_only_for_the_main_window() {
+        assert!(voice_main_surface_is_available(true, false));
+        assert!(!voice_main_surface_is_available(false, false));
+        assert!(!voice_main_surface_is_available(true, true));
         assert!(voice_target_window_focus_is_valid(
-            "main", true, false, false,
+            "main", true, false, false, false,
         ));
         assert!(voice_target_window_focus_is_valid(
-            "main", false, true, false,
+            "main", false, true, true, false,
         ));
         assert!(!voice_target_window_focus_is_valid(
-            "main", false, true, true,
+            "main", false, true, true, true,
         ));
         assert!(!voice_target_window_focus_is_valid(
-            "main", false, false, false,
+            "main", false, true, false, false,
+        ));
+        assert!(!voice_target_window_focus_is_valid(
+            "main", false, false, true, false,
         ));
         assert!(voice_target_window_focus_is_valid(
             "session:target",
             true,
             false,
             false,
+            false,
         ));
         assert!(!voice_target_window_focus_is_valid(
             "session:target",
             false,
+            true,
             true,
             false,
         ));
