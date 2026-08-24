@@ -597,14 +597,29 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             error instanceof Error ? error.message : String(error);
           try {
             const status = await getVoiceConversationStatus();
-            set((state) =>
-              status.revision >= state.status.revision
-                ? { status, uiState: "error", error: message }
-                : state,
-            );
+            set((state) => {
+              if (status.revision < state.status.revision) return state;
+              if (
+                status.lifecycle === "running" &&
+                status.sessionId !== sessionId
+              ) {
+                return {
+                  status,
+                  uiState: uiStateForStatus(status),
+                  microphoneMuted: status.microphoneMuted,
+                  error: null,
+                };
+              }
+              return { status, uiState: "error", error: message };
+            });
             await reconcileVoiceConversationMicrophone(get().status);
           } catch {
-            set({ uiState: "error", error: message });
+            set((state) =>
+              state.status.lifecycle === "running" &&
+              state.status.sessionId !== sessionId
+                ? state
+                : { uiState: "error", error: message },
+            );
           }
           throw error;
         }

@@ -53,10 +53,12 @@ function status(
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolver) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolver, rejecter) => {
     resolve = resolver;
+    reject = rejecter;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 describe("voice conversation store lifecycle ordering", () => {
@@ -527,6 +529,25 @@ describe("voice conversation store lifecycle ordering", () => {
 
     expect(store.getState()).toMatchObject({
       status: status("running", 2, "session-1"),
+      uiState: "listening",
+      error: null,
+    });
+  });
+
+  it("does not let a stale start failure mark a replacement call as errored", async () => {
+    const store = await loadStore();
+    const startA = deferred<VoiceConversationStatus>();
+    const runningB = status("running", 4, "session-b");
+    mocks.start.mockReturnValue(startA.promise);
+    mocks.getStatus.mockResolvedValue(runningB);
+
+    const startingA = store.getState().start("session-a");
+    store.setState({ status: runningB, uiState: "listening", error: null });
+    startA.reject(new Error("session A start tail failed"));
+
+    await expect(startingA).rejects.toThrow("session A start tail failed");
+    expect(store.getState()).toMatchObject({
+      status: runningB,
       uiState: "listening",
       error: null,
     });

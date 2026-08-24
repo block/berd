@@ -728,7 +728,8 @@ export function useVoiceConversationController({
     // click. The native recognizer can finalize quickly, so its delivery
     // subscriber must exist before the microphone lifecycle starts.
     ensureVoiceEventDeliveryInitialized();
-    activeSendRoute = { sessionId, send: onSend };
+    const route = { sessionId, send: onSend };
+    activeSendRoute = route;
     // Capture the history boundary before native startup can admit a
     // transcript and produce the first assistant response.
     startAssistantSpeech();
@@ -736,7 +737,7 @@ export function useVoiceConversationController({
       await start(sessionId);
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;
-      if (backendStatus.sessionId !== sessionId) {
+      if (backendStatus.sessionId !== sessionId && activeSendRoute === route) {
         activeSendRoute = null;
         stopNativeAssistantSpeech();
       }

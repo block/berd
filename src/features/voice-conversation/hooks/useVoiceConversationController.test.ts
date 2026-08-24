@@ -38,10 +38,12 @@ import {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 describe("voice transcript delivery coordination", () => {
@@ -621,6 +623,7 @@ describe("voice transcript delivery coordination", () => {
       hydrated: true,
       init: vi.fn().mockResolvedValue(undefined),
       refreshStatus,
+      drainPendingTranscripts: vi.fn().mockResolvedValue(undefined),
       stopForReplacement,
       start,
     });
@@ -662,10 +665,23 @@ describe("voice transcript delivery coordination", () => {
       await sessionB.result.current.onToggle();
     });
 
-    startA.resolve(runningA);
+    act(() => {
+      useVoiceConversationStore.setState({
+        status: runningB,
+        uiState: "listening",
+        error: null,
+      });
+    });
+    startA.reject(new Error("session A start tail failed"));
     await startRequest;
     expect(stopForReplacement).toHaveBeenCalledWith(runningA, "session-b");
     expect(start).toHaveBeenCalledTimes(2);
+    expect(nativeAssistantSpeechMocks.stop).not.toHaveBeenCalled();
+    expect(useVoiceConversationStore.getState()).toMatchObject({
+      status: runningB,
+      uiState: "listening",
+      error: null,
+    });
   });
 
   it("deduplicates concurrent controls for the same session", async () => {
