@@ -237,9 +237,24 @@ fn schedule_siri_playback_release<T: Send + 'static>(
     generation: u64,
     delay: Duration,
 ) -> std::thread::JoinHandle<()> {
+    schedule_siri_playback_release_after(lifetime, generation, move || {
+        std::thread::sleep(delay);
+    })
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn schedule_siri_playback_release_after<T, F>(
+    lifetime: &Arc<SiriPlaybackLifetime<T>>,
+    generation: u64,
+    wait: F,
+) -> std::thread::JoinHandle<()>
+where
+    T: Send + 'static,
+    F: FnOnce() + Send + 'static,
+{
     let lifetime = Arc::clone(lifetime);
     std::thread::spawn(move || {
-        std::thread::sleep(delay);
+        wait();
         lifetime.release_if_current(generation);
     })
 }
@@ -1382,11 +1397,22 @@ mod tests {
         lifetime.start(|| DropCounter(Arc::clone(&drops)));
 
         let first_drain = lifetime.begin_drain().expect("first drain");
+        let (release_pending_sender, release_pending_receiver) = std::sync::mpsc::sync_channel(1);
+        let (continue_sender, continue_receiver) = std::sync::mpsc::sync_channel(1);
         let first_release =
-            schedule_siri_playback_release(&lifetime, first_drain, Duration::from_millis(1));
+            schedule_siri_playback_release_after(&lifetime, first_drain, move || {
+                release_pending_sender
+                    .send(())
+                    .expect("signal pending release");
+                continue_receiver.recv().expect("continue release");
+            });
+        release_pending_receiver
+            .recv()
+            .expect("release task reached barrier");
         assert!(lifetime.is_active());
 
         lifetime.start(|| panic!("resumed buffering must retain the existing guard"));
+        continue_sender.send(()).expect("release barrier");
         first_release.join().expect("first release task");
         assert!(lifetime.is_active());
         assert_eq!(drops.load(Ordering::SeqCst), 0);
@@ -1412,12 +1438,22 @@ mod tests {
         let lifetime = Arc::new(SiriPlaybackLifetime::default());
         lifetime.start(|| DropCounter(Arc::clone(&drops)));
         let drain = lifetime.begin_drain().expect("drain before cancellation");
-        let pending_release =
-            schedule_siri_playback_release(&lifetime, drain, Duration::from_millis(1));
+        let (release_pending_sender, release_pending_receiver) = std::sync::mpsc::sync_channel(1);
+        let (continue_sender, continue_receiver) = std::sync::mpsc::sync_channel(1);
+        let pending_release = schedule_siri_playback_release_after(&lifetime, drain, move || {
+            release_pending_sender
+                .send(())
+                .expect("signal pending release");
+            continue_receiver.recv().expect("continue release");
+        });
+        release_pending_receiver
+            .recv()
+            .expect("release task reached barrier");
 
         lifetime.cancel();
         assert!(!lifetime.is_active());
         assert_eq!(drops.load(Ordering::SeqCst), 1);
+        continue_sender.send(()).expect("release barrier");
         pending_release.join().expect("pending release task");
         assert_eq!(drops.load(Ordering::SeqCst), 1);
     }
