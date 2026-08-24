@@ -47,13 +47,17 @@ type ActiveUtterance = {
   finishing: boolean;
   nativeStreamStarted: boolean;
   interruptionRequested: boolean;
+  resumptionDiscarded: boolean;
   interruptionFallback: ReturnType<typeof setTimeout> | null;
   interruptionCause: InterruptionCause | null;
   latestDelivery: VoiceDeliveryProgress | null;
   causalTranscriptKey: string | null;
   status: SpeechStatus | null;
   onFailure: SpeechFailureHandler;
-  onInterrupted: () => void;
+  onInterrupted: (
+    estimate: SpeechDeliveryEstimate,
+    cause: InterruptionCause,
+  ) => boolean;
   onTerminal: () => void;
 };
 type HeldSpeech = {
@@ -61,6 +65,11 @@ type HeldSpeech = {
     string,
     { target: SpeechTarget; text: string; causalTranscriptKey: string | null }
   >;
+};
+type ResumableInterruption = {
+  utterance: ActiveUtterance;
+  estimate: SpeechDeliveryEstimate;
+  resumeCutoff: number;
 };
 type SpeechStatus =
   | "speaking"
@@ -304,6 +313,29 @@ function estimateSpeechDelivery(
   };
 }
 
+function safeResumeCutoff(
+  text: string,
+  delivery: VoiceDeliveryProgress | null,
+): number {
+  if (!delivery?.segments.length) return 0;
+
+  let searchFrom = 0;
+  let cutoff = 0;
+  for (const segment of delivery.segments) {
+    const segmentStart = text.indexOf(segment.text, searchFrom);
+    if (segmentStart === -1) return cutoff;
+    const segmentEnd = segmentStart + segment.text.length;
+    const fullyPlayed =
+      segment.synthesisComplete &&
+      segment.totalFrames > 0 &&
+      segment.playedFrames >= segment.totalFrames;
+    if (!fullyPlayed) return segmentStart;
+    cutoff = segmentEnd;
+    searchFrom = segmentEnd;
+  }
+  return cutoff;
+}
+
 function applyInterruptionEstimate(
   utterance: ActiveUtterance,
   estimate: SpeechDeliveryEstimate,
@@ -534,8 +566,10 @@ function finalizeInterruptedUtterance(
     utterance.latestDelivery,
   );
   applyInterruptionEstimate(utterance, estimate);
-  utterance.onInterrupted();
-  recordDeliveryNotices(utterance, estimate, "interrupted", cause);
+  const noticeDeferred = utterance.onInterrupted(estimate, cause);
+  if (!noticeDeferred) {
+    recordDeliveryNotices(utterance, estimate, "interrupted", cause);
+  }
   activeUtterance = null;
   restoreListeningIfConversationIsRunning(utterance);
   reportAssistantActivity(utterance.sessionId, utterance.voiceRevision, false);
@@ -624,7 +658,6 @@ function interruptActiveUtterance(
   if (utterance && !utterance.interruptionRequested) {
     utterance.interruptionRequested = true;
     utterance.interruptionCause = cause;
-    if (terminalEventExpected) utterance.onInterrupted();
   }
   if (utterance && !terminalEventExpected) {
     finalizeInterruptedUtterance(
@@ -816,7 +849,9 @@ export function startNativeAssistantSpeech(
   }
 
   let heldSpeech: HeldSpeech | null = null;
+  let resumableInterruption: ResumableInterruption | null = null;
   let heldReleaseReady = false;
+  let interruptionReleaseReady = false;
   let idleSettling = false;
   let heldReleaseTimer: number | null = null;
 
@@ -893,6 +928,10 @@ export function startNativeAssistantSpeech(
     if (!held) return;
     for (const [slot, heldTarget] of held.targets) {
       if (heldTarget.causalTranscriptKey === finalizedTranscriptKey) continue;
+      if (interruptedMessages.has(heldTarget.target.messageId)) {
+        held.targets.delete(slot);
+        continue;
+      }
       suppressTarget(slot, heldTarget.target, heldTarget.text);
       held.targets.delete(slot);
     }
@@ -900,6 +939,68 @@ export function startNativeAssistantSpeech(
       heldSpeech = null;
       heldReleaseReady = false;
     }
+  };
+
+  const discardResumableInterruption = () => {
+    const pending = resumableInterruption;
+    if (!pending) return;
+    for (const target of pending.utterance.targets) {
+      interruptedMessages.add(target.messageId);
+      interruptionCauseByMessage.set(target.messageId, "userSpeaking");
+    }
+    recordDeliveryNotices(
+      pending.utterance,
+      pending.estimate,
+      "interrupted",
+      "userSpeaking",
+    );
+    resumableInterruption = null;
+    interruptionReleaseReady = false;
+  };
+
+  const releaseResumableInterruption = () => {
+    const pending = resumableInterruption;
+    if (!pending || !interruptionReleaseReady) return;
+    const finalizedTranscriptKey =
+      useVoiceConversationStore.getState().latestFinalizedTranscriptKey;
+    if (
+      pending.utterance.resumptionDiscarded ||
+      pending.utterance.causalTranscriptKey !== finalizedTranscriptKey
+    ) {
+      discardResumableInterruption();
+      return;
+    }
+    for (const { target, localCutoff } of targetDeliveryCutoffs(
+      pending.utterance,
+      pending.resumeCutoff,
+    )) {
+      const content = targetContent(sessionId, target);
+      if (!content) continue;
+      const priorText = consumedTextBySlot.get(targetKey(target)) ?? "";
+      const safeLocalCutoff = content.text.startsWith(priorText)
+        ? localCutoff
+        : 0;
+      consumedTextBySlot.set(
+        targetKey(target),
+        content.text.slice(0, safeLocalCutoff),
+      );
+      completedMessages.delete(target.messageId);
+    }
+    resumableInterruption = null;
+    interruptionReleaseReady = false;
+  };
+
+  const discardHeldAndResumableSpeech = () => {
+    const held = heldSpeech;
+    if (held) {
+      for (const [slot, heldTarget] of held.targets) {
+        suppressTarget(slot, heldTarget.target, heldTarget.text);
+      }
+      heldSpeech = null;
+      heldReleaseReady = false;
+    }
+    if (activeUtterance) activeUtterance.resumptionDiscarded = true;
+    discardResumableInterruption();
   };
 
   const ensureUtterance = (
@@ -936,6 +1037,7 @@ export function startNativeAssistantSpeech(
       finishing: false,
       nativeStreamStarted: false,
       interruptionRequested: false,
+      resumptionDiscarded: false,
       interruptionFallback: null,
       interruptionCause: null,
       latestDelivery: null,
@@ -947,7 +1049,25 @@ export function startNativeAssistantSpeech(
         }
         onFailure(text, error);
       },
-      onInterrupted: () => {
+      onInterrupted: (estimate, cause) => {
+        const finalizedTranscriptKey =
+          useVoiceConversationStore.getState().latestFinalizedTranscriptKey;
+        if (
+          cause === "userSpeaking" &&
+          !utterance.resumptionDiscarded &&
+          utterance.causalTranscriptKey === finalizedTranscriptKey
+        ) {
+          resumableInterruption = {
+            utterance,
+            estimate,
+            resumeCutoff: safeResumeCutoff(
+              utterance.text,
+              utterance.latestDelivery,
+            ),
+          };
+          releaseResumableInterruption();
+          return true;
+        }
         for (const utteranceTarget of utterance.targets) {
           interruptedMessages.add(utteranceTarget.messageId);
           interruptionCauseByMessage.set(
@@ -955,6 +1075,7 @@ export function startNativeAssistantSpeech(
             utterance.interruptionCause ?? "voiceStopped",
           );
         }
+        return false;
       },
       onTerminal: () => queueMicrotask(inspect),
     };
@@ -994,16 +1115,26 @@ export function startNativeAssistantSpeech(
       holdAssistantChanges(messages);
     }
     const finalizedTranscriptKey = voice.latestFinalizedTranscriptKey;
+    if (
+      resumableInterruption &&
+      (resumableInterruption.utterance.resumptionDiscarded ||
+        resumableInterruption.utterance.causalTranscriptKey !==
+          finalizedTranscriptKey)
+    ) {
+      discardResumableInterruption();
+    }
     discardInvalidHeldSpeech(finalizedTranscriptKey);
     if (
       activeUtterance &&
       activeUtterance.causalTranscriptKey !== finalizedTranscriptKey
     ) {
+      activeUtterance.resumptionDiscarded = true;
       interruptActiveUtterance(true, "userSpeaking");
     }
 
     if (voice.userSpeaking || idleSettling) return;
     if (heldSpeech && !heldReleaseReady) return;
+    if (resumableInterruption) return;
 
     // The backend owns the current stream until its terminal playback event.
     // Leave later transcript changes entirely unconsumed so that terminal
@@ -1229,6 +1360,7 @@ export function startNativeAssistantSpeech(
     activeSpeechRevision = initialVoice.status.revision;
   }
   let wasUserSpeaking = initialVoice.userSpeaking;
+  let wasMicrophoneMuted = initialVoice.microphoneMuted;
   const unsubscribeVoice = useVoiceConversationStore.subscribe((voice) => {
     const runningForSession =
       voice.status.lifecycle === "running" &&
@@ -1248,13 +1380,25 @@ export function startNativeAssistantSpeech(
     activeSpeechRevision = voice.status.revision;
     const becameUserSpeaking = voice.userSpeaking && !wasUserSpeaking;
     const becameUserIdle = !voice.userSpeaking && wasUserSpeaking;
+    const becameMicrophoneMuted = voice.microphoneMuted && !wasMicrophoneMuted;
     wasUserSpeaking = voice.userSpeaking;
+    wasMicrophoneMuted = voice.microphoneMuted;
     if (activeGeneration !== generation) return;
+    if (becameMicrophoneMuted) {
+      if (heldReleaseTimer !== null) window.clearTimeout(heldReleaseTimer);
+      heldReleaseTimer = null;
+      idleSettling = false;
+      interruptionReleaseReady = false;
+      discardHeldAndResumableSpeech();
+      inspect();
+      return;
+    }
     if (becameUserSpeaking) {
       if (heldReleaseTimer !== null) window.clearTimeout(heldReleaseTimer);
       heldReleaseTimer = null;
       idleSettling = false;
       heldReleaseReady = false;
+      interruptionReleaseReady = false;
       interruptActiveUtterance(true, "userSpeaking");
       inspect();
       return;
@@ -1278,6 +1422,8 @@ export function startNativeAssistantSpeech(
         }
         idleSettling = false;
         heldReleaseReady = heldSpeech !== null;
+        interruptionReleaseReady = true;
+        releaseResumableInterruption();
         inspect();
       }, USER_IDLE_TRANSCRIPT_SETTLE_MS);
       return;
@@ -1287,6 +1433,7 @@ export function startNativeAssistantSpeech(
   stopVoiceSubscription = () => {
     if (heldReleaseTimer !== null) window.clearTimeout(heldReleaseTimer);
     heldReleaseTimer = null;
+    discardHeldAndResumableSpeech();
     unsubscribeVoice();
   };
   queueMicrotask(inspect);
