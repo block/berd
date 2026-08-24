@@ -132,8 +132,6 @@ const mockSessionWindowSupport = vi.hoisted(() => ({ supported: false }));
 const mockFocusSessionWindow = vi.hoisted(() => vi.fn());
 const mockVoiceSetupReadiness = vi.hoisted(() => ({
   ready: false,
-  authoritativeReady: false,
-  refreshPromise: null as Promise<boolean> | null,
 }));
 const mockVoiceSettingsEnabled = vi.hoisted(() => ({ enabled: false }));
 
@@ -156,9 +154,6 @@ vi.mock("@/features/settings/ui/settingsSections", async (importOriginal) => {
 
 vi.mock("@/features/voice-conversation/lib/voiceSetupReadiness", () => ({
   isVoiceSetupReady: () => mockVoiceSetupReadiness.ready,
-  refreshStableVoiceSetupReadiness: () =>
-    mockVoiceSetupReadiness.refreshPromise ??
-    Promise.resolve(mockVoiceSetupReadiness.authoritativeReady),
 }));
 
 function deferred<T>() {
@@ -948,8 +943,6 @@ describe("AppShell global navigation", () => {
     document.documentElement.removeAttribute("data-global-composer-visible");
     mockSessionWindowSupport.supported = false;
     mockVoiceSetupReadiness.ready = false;
-    mockVoiceSetupReadiness.authoritativeReady = false;
-    mockVoiceSetupReadiness.refreshPromise = null;
     mockVoiceSettingsEnabled.enabled = false;
     mockFocusSessionWindow.mockReset();
     useSessionWindowStore.getState().setSnapshot([]);
@@ -4577,7 +4570,7 @@ describe("AppShell global navigation", () => {
     ).toBeNull();
   });
 
-  it("preserves a voice start when authoritative readiness leads the AppShell snapshot", async () => {
+  it("cancels a voice start when setup becomes ready before returning", async () => {
     const user = userEvent.setup();
     const session = useChatSessionStore.getState().createDraftSession({
       title: "Voice setup target",
@@ -4604,7 +4597,7 @@ describe("AppShell global navigation", () => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
     });
 
-    mockVoiceSetupReadiness.authoritativeReady = true;
+    mockVoiceSetupReadiness.ready = true;
     view.rerender(appShellWithTheme());
     await user.click(screen.getByRole("button", { name: "Back" }));
 
@@ -4612,59 +4605,9 @@ describe("AppShell global navigation", () => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     });
     expect(useChatSessionStore.getState().activeSessionId).toBe(session.id);
-    expect(useVoiceConversationStore.getState().requestedStartSessionId).toBe(
-      session.id,
-    );
-  });
-
-  it("lets a reopened Voice target return while its previous readiness refresh is pending", async () => {
-    const user = userEvent.setup();
-    const session = useChatSessionStore.getState().createDraftSession({
-      title: "Voice target",
-      workingDir: "/tmp/voice-target",
-    });
-    const firstRefresh = deferred<boolean>();
-    const secondRefresh = deferred<boolean>();
-    mockVoiceSettingsEnabled.enabled = true;
-    renderAppShell();
-
-    const openVoiceSetup = (sessionId: string) => {
-      useVoiceConversationStore.getState().requestStart(sessionId);
-      window.dispatchEvent(
-        new CustomEvent(OPEN_SETTINGS_EVENT, {
-          detail: {
-            section: "voice",
-            returnTarget: { type: "voice-setup", sessionId },
-          },
-        }),
-      );
-    };
-
-    act(() => openVoiceSetup(session.id));
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
-    });
-    mockVoiceSetupReadiness.refreshPromise = firstRefresh.promise;
-    await user.click(screen.getByRole("button", { name: "Back" }));
-
-    act(() => openVoiceSetup(session.id));
-    mockVoiceSetupReadiness.refreshPromise = secondRefresh.promise;
-    await user.click(screen.getByRole("button", { name: "Back" }));
-
-    firstRefresh.resolve(false);
-    await act(async () => {
-      await firstRefresh.promise;
-    });
-    expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
-
-    secondRefresh.resolve(true);
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
-    });
-    expect(useChatSessionStore.getState().activeSessionId).toBe(session.id);
-    expect(useVoiceConversationStore.getState().requestedStartSessionId).toBe(
-      session.id,
-    );
+    expect(
+      useVoiceConversationStore.getState().requestedStartSessionId,
+    ).toBeNull();
   });
 
   it("guards Voice setup navigation from a dirty agent draft", async () => {
