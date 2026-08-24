@@ -90,9 +90,17 @@ const transcriptDeliveries = new Map<string, Promise<boolean>>();
 const deliveredTranscripts = new Set<string>();
 const deliveredTranscriptOrder: string[] = [];
 const MAX_DELIVERED_TRANSCRIPT_KEYS = 256;
+const priorFinalizedTranscriptKeys = new Map<string, string | null>();
 
 function observeFinalizedTranscript(transcript: PendingVoiceTranscript): void {
+  const deliveryKey = transcriptKey(transcript);
   const key = finalizedTranscriptKey(transcript);
+  if (!priorFinalizedTranscriptKeys.has(deliveryKey)) {
+    priorFinalizedTranscriptKeys.set(
+      deliveryKey,
+      useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
+    );
+  }
   useVoiceConversationStore.setState({ latestFinalizedTranscriptKey: key });
 }
 
@@ -156,6 +164,7 @@ async function deliverTranscriptOnce(
   const key = transcriptKey(transcript);
   if (deliveredTranscripts.has(key)) {
     await acknowledgeVoiceConversationTranscript(transcript);
+    priorFinalizedTranscriptKeys.delete(key);
     return true;
   }
 
@@ -163,6 +172,7 @@ async function deliverTranscriptOnce(
   if (existing) return existing;
 
   const event = { type: "user" as const, ...transcript };
+  const finalizedKey = finalizedTranscriptKey(transcript);
   const subscribers = [...eventSubscribers];
   if (subscribers.length === 0) return false;
   const delivery = (async () => {
@@ -173,8 +183,18 @@ async function deliverTranscriptOnce(
     if (accepted) {
       rememberDeliveredTranscript(key);
       await acknowledgeVoiceConversationTranscript(transcript);
+      priorFinalizedTranscriptKeys.delete(key);
     } else {
-      await rejectVoiceConversationTranscript(transcript);
+      const rejection = await rejectVoiceConversationTranscript(transcript);
+      if (rejection.terminal) {
+        const priorKey = priorFinalizedTranscriptKeys.get(key) ?? null;
+        priorFinalizedTranscriptKeys.delete(key);
+        useVoiceConversationStore.setState((state) =>
+          state.latestFinalizedTranscriptKey === finalizedKey
+            ? { latestFinalizedTranscriptKey: priorKey }
+            : state,
+        );
+      }
     }
     return accepted;
   })().finally(() => transcriptDeliveries.delete(key));
@@ -342,6 +362,15 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           ) {
             microphoneMuteIntent += 1;
             microphoneMuteStateVersion += 1;
+          }
+
+          if (
+            event.type === "startup" ||
+            event.type === "cleanShutdown" ||
+            event.type === "controlsDismissed" ||
+            (event.type === "error" && event.terminal)
+          ) {
+            priorFinalizedTranscriptKeys.clear();
           }
 
           set((state) => {

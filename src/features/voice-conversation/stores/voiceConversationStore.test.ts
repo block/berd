@@ -192,6 +192,34 @@ describe("voice conversation store lifecycle ordering", () => {
     unsubscribe();
   });
 
+  it("restores prior causal state after terminal transcript rejection", async () => {
+    mocks.reject.mockResolvedValueOnce({ attempts: 3, terminal: true });
+    const module = await import("./voiceConversationStore");
+    const unsubscribe = module.subscribeToVoiceConversationEvents(() =>
+      Promise.reject(new Error("chat unavailable")),
+    );
+    await module.useVoiceConversationStore.getState().init();
+    module.useVoiceConversationStore.setState({
+      latestFinalizedTranscriptKey: "prior-transcript",
+    });
+
+    emit({
+      type: "user",
+      sessionId: "session-1",
+      lifecycleId: "lifecycle-1",
+      id: "terminal-rejection",
+      text: "Cannot deliver",
+      revision: 1,
+      deliveryAttempts: 2,
+    });
+
+    await vi.waitFor(() => expect(mocks.reject).toHaveBeenCalledOnce());
+    expect(
+      module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
+    ).toBe("prior-transcript");
+    unsubscribe();
+  });
+
   it("records a recovered transcript before its subscriber settles", async () => {
     const delivery = deferred<void>();
     const transcript = {
