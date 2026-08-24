@@ -157,8 +157,12 @@ describe("StickyNoteWidget", () => {
 
     const note = screen.getByLabelText("Label");
     expect(note).toHaveClass("text-foreground");
-    expect(note.firstElementChild).toHaveClass("bg-transparent");
+    expect(note.firstElementChild).toHaveClass(
+      "bg-transparent",
+      "overflow-visible",
+    );
     expect(note.firstElementChild).not.toHaveClass("shadow-sticky-note");
+    expect(getEditor()).toHaveClass("whitespace-nowrap", "overflow-visible");
     expect(getEditor()).toHaveStyle({ fontSize: "18px" });
     expect(getEditor()).toHaveAttribute("contenteditable", "false");
     expect(getEditor()).toHaveAttribute("data-placeholder", "Add a heading…");

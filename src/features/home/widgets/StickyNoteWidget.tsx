@@ -539,8 +539,10 @@ export function StickyNoteWidget({
       >
         <div
           className={cn(
-            "flex h-full w-full flex-col overflow-hidden rounded-xs",
-            isLabel ? "px-4 py-2" : "px-5 py-5 shadow-sticky-note",
+            "flex h-full w-full flex-col rounded-xs",
+            isLabel
+              ? "overflow-visible px-4 py-2"
+              : "overflow-hidden px-5 py-5 shadow-sticky-note",
             isLabel ? "bg-transparent" : toneClassName(tone),
           )}
         >
@@ -662,7 +664,7 @@ export function StickyNoteWidget({
             className={cn(
               "scrollbar-none overscroll-contain relative min-h-0 flex-1 whitespace-pre-wrap break-words border-0 bg-transparent p-0 font-sans caret-foreground outline-none [box-shadow:none] [outline:0]",
               isLabel
-                ? "overflow-hidden"
+                ? "overflow-visible whitespace-nowrap"
                 : "overflow-x-hidden overflow-y-auto pr-6",
               isLabel && !labelEditing
                 ? "cursor-grab select-none active:cursor-grabbing"
