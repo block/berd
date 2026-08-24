@@ -89,9 +89,11 @@ describe("voice interruption preference", () => {
     const { result, unmount } = renderHook(() =>
       useVoiceInterruptionPreference(),
     );
-    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
-      throw new Error("storage unavailable");
-    });
+    const setItem = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(() => {
+        throw new Error("storage unavailable");
+      });
 
     act(() => {
       setVoiceInterruptionPreference({
