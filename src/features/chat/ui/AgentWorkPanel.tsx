@@ -145,7 +145,8 @@ function buildAgentWorkTimeline(
       const previous = items[items.length - 1];
       if (
         previous?.kind === "progress" &&
-        previous.content.speech?.status === block.speech?.status
+        previous.content.speech === undefined &&
+        block.speech === undefined
       ) {
         previous.content = {
           ...previous.content,
@@ -307,6 +308,13 @@ function AgentWorkItemRow({
 
   if (item.kind === "progress") {
     const speechStatus = item.content.speech?.status;
+    const strikethroughFrom =
+      (speechStatus === "interrupted" || speechStatus === "failed") &&
+      item.content.speech?.spokenThrough !== undefined
+        ? item.content.speech.spokenThrough
+        : speechStatus === "notSpoken"
+          ? 0
+          : undefined;
     const speechLabel = speechStatus
       ? {
           speaking: t("message.voiceSpeechSpeakingLabel"),
@@ -324,7 +332,7 @@ function AgentWorkItemRow({
           className={cn(
             "min-w-0 flex-1 pb-2 text-sm leading-relaxed",
             usePrimaryText ? "text-foreground" : "text-muted-foreground",
-            speechStatus === "interrupted" && "line-through opacity-70",
+            speechStatus === "interrupted" && "opacity-80",
           )}
         >
           {speechStatus && speechLabel ? (
@@ -333,7 +341,13 @@ function AgentWorkItemRow({
               label={speechLabel}
             />
           ) : null}
-          <MessageResponse mode="static">{item.content.text}</MessageResponse>
+          <MessageResponse
+            mode="static"
+            strikethroughFrom={strikethroughFrom}
+            strikethroughLabel={t("message.voiceSpeechNotSpokenLabel")}
+          >
+            {item.content.text}
+          </MessageResponse>
         </div>
       </div>
     );

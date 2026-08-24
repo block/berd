@@ -57,12 +57,12 @@ function buildSingleTextMessageRevisions(
     message.created,
   )}:${renderMetadataRevision(message.metadata)}:text:${revision}:${annotationsRevision(
     content.annotations,
-  )}:${content.speech?.status ?? ""}`;
+  )}:${speechRevision(content)}`;
   const heightRevision = `message-height:${message.id}:${
     message.role
-  }:${heightMetadataRevision(message.metadata)}:text-height:${revision}:${
-    content.speech?.status ?? ""
-  }`;
+  }:${heightMetadataRevision(message.metadata)}:text-height:${revision}:${speechRevision(
+    content,
+  )}`;
 
   return {
     renderRevision,
@@ -106,13 +106,11 @@ function buildSingleContentRevisionParts(
           "text",
           revision,
           annotationsRevision(content.annotations),
-          content.speech?.status ?? "",
+          speechRevision(content),
         ].join(":"),
-        heightRevision: [
-          "text-height",
-          revision,
-          content.speech?.status ?? "",
-        ].join(":"),
+        heightRevision: ["text-height", revision, speechRevision(content)].join(
+          ":",
+        ),
       };
     }
     case "image":
@@ -131,6 +129,17 @@ function buildSingleContentRevisionParts(
     default:
       return assertNever(content);
   }
+}
+
+function speechRevision(content: TextContent): string {
+  const speech = content.speech;
+  if (!speech) return "";
+  return [
+    speech.status,
+    speech.spokenThrough ?? "",
+    speech.confidence ?? "",
+    speech.interruptionCause ?? "",
+  ].join(":");
 }
 
 export function buildContentRenderRevision(content: MessageContent): string {

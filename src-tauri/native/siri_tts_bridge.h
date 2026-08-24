@@ -54,6 +54,7 @@ bool berd_siri_tts_stream_enqueue(void *stream, const char *text, char **error_o
 void berd_siri_tts_stream_finish(void *stream);
 bool berd_siri_tts_stream_is_finished(void *stream);
 uint64_t berd_siri_tts_stream_progress(void *stream);
+char *berd_siri_tts_stream_copy_delivery_json(void *stream);
 char *berd_siri_tts_stream_copy_error(void *stream);
 void berd_siri_tts_stream_cancel(void *stream);
 void berd_siri_tts_stream_release(void *stream);

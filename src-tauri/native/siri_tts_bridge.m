@@ -3,6 +3,7 @@
 #import <AVFoundation/AVFoundation.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import <Foundation/Foundation.h>
+#import <math.h>
 #import <dlfcn.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
@@ -273,13 +274,23 @@ typedef void (^BerdAudioHandler)(
 - (void)dealloc { [self.connection invalidate]; }
 @end
 
+@interface BerdSiriDeliverySegment : NSObject
+@property(nonatomic, copy) NSString *text;
+@property(nonatomic, assign) uint64_t totalFrames;
+@property(nonatomic, assign) BOOL synthesisComplete;
+@end
+
+@implementation BerdSiriDeliverySegment
+@end
+
 @interface BerdSiriSpeechPlayer : NSObject
 @property(nonatomic, strong) dispatch_queue_t queue;
 @property(nonatomic, strong) AVAudioEngine *engine;
 @property(nonatomic, strong) AVAudioPlayerNode *player;
 @property(nonatomic, strong) AVAudioConverter *converter;
 @property(nonatomic, strong) BerdSiriSynthesisSession *session;
-@property(nonatomic, strong) NSMutableArray<NSString *> *pendingTexts;
+@property(nonatomic, strong) NSMutableArray<BerdSiriDeliverySegment *> *pendingTexts;
+@property(nonatomic, strong) NSMutableArray<BerdSiriDeliverySegment *> *deliverySegments;
 @property(nonatomic, strong) dispatch_semaphore_t completionSemaphore;
 @property(nonatomic, strong) NSError *error;
 @property(nonatomic, assign) NSInteger pendingBuffers;
@@ -287,6 +298,7 @@ typedef void (^BerdAudioHandler)(
 @property(nonatomic, assign) BOOL playbackStarted;
 @property(nonatomic, assign) BOOL finished;
 @property(nonatomic, assign) uint64_t progressGeneration;
+@property(nonatomic, assign) double playbackSampleRate;
 @property(nonatomic, assign) BerdSiriTTSPlaybackStarted startedCallback;
 @property(nonatomic, assign) void *callbackContext;
 @property(nonatomic, copy) NSString *language;
@@ -295,6 +307,7 @@ typedef void (^BerdAudioHandler)(
 - (void)enqueueText:(NSString *)text;
 - (void)finishInput;
 - (void)cancel;
+- (NSString *)deliveryJSON;
 @end
 
 @implementation BerdSiriSpeechPlayer
@@ -306,6 +319,7 @@ typedef void (^BerdAudioHandler)(
                                     BerdSiriSpeechQueueKey, NULL);
         _completionSemaphore = dispatch_semaphore_create(0);
         _pendingTexts = [NSMutableArray array];
+        _deliverySegments = [NSMutableArray array];
     }
     return self;
 }
@@ -405,7 +419,8 @@ typedef void (^BerdAudioHandler)(
     return YES;
 }
 - (void)enqueueData:(NSData *)data format:(AudioStreamBasicDescription)format
-         packetCount:(UInt32)packetCount packetDescriptions:(NSData *)packetDescriptions {
+         packetCount:(UInt32)packetCount packetDescriptions:(NSData *)packetDescriptions
+         deliverySegment:(BerdSiriDeliverySegment *)deliverySegment {
     if (self.finished || !data.length) return;
     self.progressGeneration += 1;
     NSError *error = nil;
@@ -419,6 +434,10 @@ typedef void (^BerdAudioHandler)(
         [self finish:error];
         return;
     }
+    if (self.playbackSampleRate == 0) {
+        self.playbackSampleRate = buffer.format.sampleRate;
+    }
+    deliverySegment.totalFrames += buffer.frameLength;
     self.pendingBuffers += 1;
     [self.player scheduleBuffer:buffer completionCallbackType:AVAudioPlayerNodeCompletionDataPlayedBack
                completionHandler:^(__unused AVAudioPlayerNodeCompletionCallbackType type) {
@@ -439,7 +458,8 @@ typedef void (^BerdAudioHandler)(
         [self finishIfReady];
         return;
     }
-    NSString *text = self.pendingTexts.firstObject;
+    BerdSiriDeliverySegment *deliverySegment = self.pendingTexts.firstObject;
+    NSString *text = deliverySegment.text;
     [self.pendingTexts removeObjectAtIndex:0];
     self.progressGeneration += 1;
     __weak typeof(self) weakSelf = self;
@@ -448,7 +468,7 @@ typedef void (^BerdAudioHandler)(
                                UInt32 packetCount, NSData *descriptions) {
             dispatch_async(weakSelf.queue, ^{
                 [weakSelf enqueueData:data format:format packetCount:packetCount
-                   packetDescriptions:descriptions];
+                   packetDescriptions:descriptions deliverySegment:deliverySegment];
             });
         }];
     [self.session synthesizeText:text language:self.language voiceName:self.voiceName rate:self.rate
@@ -460,6 +480,7 @@ typedef void (^BerdAudioHandler)(
                 [weakSelf finish:error];
                 return;
             }
+            if (!error) deliverySegment.synthesisComplete = YES;
             [weakSelf startNextSynthesis];
         });
     }];
@@ -467,7 +488,10 @@ typedef void (^BerdAudioHandler)(
 - (void)enqueueText:(NSString *)text {
     dispatch_async(self.queue, ^{
         if (self.finished || self.inputFinished || !text.length) return;
-        [self.pendingTexts addObject:text];
+        BerdSiriDeliverySegment *segment = [BerdSiriDeliverySegment new];
+        segment.text = text;
+        [self.pendingTexts addObject:segment];
+        [self.deliverySegments addObject:segment];
         self.progressGeneration += 1;
         [self startNextSynthesis];
     });
@@ -479,6 +503,45 @@ typedef void (^BerdAudioHandler)(
         [self startNextSynthesis];
         [self finishIfReady];
     });
+}
+- (NSString *)deliveryJSON {
+    __block NSString *json = @"{\"sampleRate\":0,\"segments\":[]}";
+    void (^snapshot)(void) = ^{
+        uint64_t playedFrames = 0;
+        if (self.player && self.player.lastRenderTime) {
+            AVAudioTime *playerTime = [self.player playerTimeForNodeTime:self.player.lastRenderTime];
+            if (playerTime && playerTime.sampleTime > 0) {
+                playedFrames = (uint64_t)playerTime.sampleTime;
+            }
+        }
+        uint64_t latencyFrames = self.playbackSampleRate > 0
+            ? (uint64_t)llround(self.playbackSampleRate * 0.1)
+            : 0;
+        playedFrames = playedFrames > latencyFrames ? playedFrames - latencyFrames : 0;
+        uint64_t segmentStart = 0;
+        NSMutableArray<NSDictionary<NSString *, id> *> *segments = [NSMutableArray array];
+        for (BerdSiriDeliverySegment *segment in self.deliverySegments) {
+            uint64_t played = playedFrames > segmentStart
+                ? MIN(segment.totalFrames, playedFrames - segmentStart)
+                : 0;
+            [segments addObject:@{
+                @"text": segment.text ?: @"",
+                @"playedFrames": @(played),
+                @"totalFrames": @(segment.totalFrames),
+                @"synthesisComplete": @(segment.synthesisComplete),
+            }];
+            segmentStart += segment.totalFrames;
+        }
+        NSData *data = [NSJSONSerialization dataWithJSONObject:@{
+            @"sampleRate": @((uint32_t)llround(self.playbackSampleRate)),
+            @"segments": segments,
+        }
+                                                       options:0 error:nil];
+        if (data) json = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    };
+    if (dispatch_get_specific(BerdSiriSpeechQueueKey)) snapshot();
+    else dispatch_sync(self.queue, snapshot);
+    return json;
 }
 - (void)cancel {
     void (^cancelWork)(void) = ^{
@@ -1004,6 +1067,12 @@ uint64_t berd_siri_tts_stream_progress(void *stream) {
     __block uint64_t progress = 0;
     dispatch_sync(player.queue, ^{ progress = player.progressGeneration; });
     return progress;
+}
+
+char *berd_siri_tts_stream_copy_delivery_json(void *stream) {
+    if (!stream) return strdup("{\"sampleRate\":0,\"segments\":[]}");
+    NSString *json = [(__bridge BerdSiriSpeechPlayer *)stream deliveryJSON];
+    return strdup((json ?: @"{\"sampleRate\":0,\"segments\":[]}").UTF8String);
 }
 
 char *berd_siri_tts_stream_copy_error(void *stream) {

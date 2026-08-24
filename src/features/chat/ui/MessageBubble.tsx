@@ -532,6 +532,14 @@ function renderContentBlock(
         options.resolveProviderErrorNotice?.(tc.text) ?? null;
       const displayText = providerErrorNotice ?? tc.text;
       const speechStatus = tc.speech?.status;
+      const strikethroughFrom =
+        providerErrorNotice === null &&
+        (speechStatus === "interrupted" || speechStatus === "failed") &&
+        tc.speech?.spokenThrough !== undefined
+          ? tc.speech.spokenThrough
+          : providerErrorNotice === null && speechStatus === "notSpoken"
+            ? 0
+            : undefined;
       const speechLabel = speechStatus
         ? {
             speaking: options.voiceSpeechSpeakingLabel,
@@ -545,9 +553,7 @@ function renderContentBlock(
         <div
           key={`text-${index}`}
           data-voice-speech-status={speechStatus}
-          className={cn(
-            speechStatus === "interrupted" && "line-through opacity-70",
-          )}
+          className={cn(speechStatus === "interrupted" && "opacity-80")}
         >
           {speechStatus && speechLabel ? (
             <VoiceSpeechStatusIndicator
@@ -562,6 +568,8 @@ function renderContentBlock(
               options.onRunShellCommand ? options.runItCodeRenderers : undefined
             }
             imageRenderer={MarkdownImage}
+            strikethroughFrom={strikethroughFrom}
+            strikethroughLabel={options.voiceSpeechNotSpokenLabel}
           >
             {displayText}
           </MessageResponse>
