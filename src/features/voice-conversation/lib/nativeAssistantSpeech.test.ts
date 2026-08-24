@@ -658,7 +658,7 @@ describe("native assistant speech stream", () => {
     expect(takeVoicePlaybackNotices("session-1")).toBeNull();
   });
 
-  it("finalizes an interruption before native playback starts", async () => {
+  it("waits for terminal ownership when interruption races native startup", async () => {
     let resolveStart: (() => void) | undefined;
     mocks.start.mockImplementationOnce(
       () =>
@@ -678,7 +678,20 @@ describe("native assistant speech stream", () => {
     useVoiceConversationStore.setState({ userSpeaking: true });
     await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
     finalizeVoiceTranscript("voice-after-queued-reply");
-
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).not.toMatchObject({ speech: { status: "interrupted" } });
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+    resolveStart?.();
+    await vi.waitFor(() =>
+      expect(mocks.stop.mock.calls.length).toBeGreaterThan(1),
+    );
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: { segments: [] },
+    });
     expect(
       useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
     ).toMatchObject({
@@ -689,8 +702,6 @@ describe("native assistant speech stream", () => {
       },
     });
     expect(takeVoicePlaybackNotices("session-1")).toContain('"spokenText":""');
-    resolveStart?.();
-    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalledTimes(2));
 
     useVoiceConversationStore.setState({ userSpeaking: false });
     useChatStore
@@ -709,6 +720,36 @@ describe("native assistant speech stream", () => {
         ),
       ]);
     await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(2));
+  });
+
+  it("resumes a false-positive interruption before native startup is invoked", async () => {
+    vi.useFakeTimers();
+    try {
+      startNativeAssistantSpeech("session-1", vi.fn());
+      useChatStore
+        .getState()
+        .setMessages("session-1", [
+          assistant(
+            [{ type: "text", text: "Queued false positive." }],
+            "completed",
+          ),
+        ]);
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      await vi.runAllTimersAsync();
+      expect(mocks.start).not.toHaveBeenCalled();
+
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.runAllTimersAsync();
+
+      expect(mocks.start).toHaveBeenCalledTimes(1);
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "Queued false positive.",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("ignores a late started event after interruption is requested", async () => {
@@ -1062,6 +1103,42 @@ describe("native assistant speech stream", () => {
     expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
     expect(notice).toContain("TTS delivery was interrupted");
     expect(notice).not.toContain("TTS delivery was blocked");
+  });
+
+  it("keeps a held suffix unspoken when completion wins the mute race", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Spoken prefix." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    emit("started");
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", " Held suffix.");
+    useVoiceConversationStore.setState({
+      microphoneMuted: true,
+      status: {
+        ...useVoiceConversationStore.getState().status,
+        microphoneMuted: true,
+      },
+    });
+    emit("completed");
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({
+      speech: {
+        status: "interrupted",
+        spokenThrough: "Spoken prefix.".length,
+      },
+    });
+    const notice = takeVoicePlaybackNotices("session-1") ?? "";
+    expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
+    expect(notice).toContain('"unspokenText":" Held suffix."');
   });
 
   it("describes a hang-up as stopping the voice conversation", async () => {

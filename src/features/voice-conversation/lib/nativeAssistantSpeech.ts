@@ -50,7 +50,7 @@ type ActiveUtterance = {
   targetSpans: SpeechTargetSpan[];
   text: string;
   finishing: boolean;
-  nativeStreamStarted: boolean;
+  nativeStartInvoked: boolean;
   interruptionRequested: boolean;
   resumptionDiscarded: boolean;
   interruptionFallback: ReturnType<typeof setTimeout> | null;
@@ -183,7 +183,7 @@ function recordPlaybackNotice(
   estimate?: SpeechDeliveryEstimate,
   interruptionCause: InterruptionCause = "voiceStopped",
 ) {
-  const noticeKey = `${sessionId}\0${key}\0${status}`;
+  const noticeKey = `${sessionId}\0${key}`;
   const excerpt = text.length > 500 ? `${text.slice(0, 497).trimEnd()}…` : text;
   const outcome =
     status === "interrupted"
@@ -521,6 +521,34 @@ function setUtteranceStatus(utterance: ActiveUtterance, status: SpeechStatus) {
   }
 }
 
+function applyCompletedUtteranceStatus(utterance: ActiveUtterance): boolean {
+  let hasDiscardedSuffix = false;
+  for (const target of utterance.targets) {
+    const content = targetContent(utterance.sessionId, target);
+    const targetEnd = utterance.targetSpans
+      .filter((span) => targetKey(span) === targetKey(target))
+      .at(-1)?.targetEnd;
+    if (
+      utterance.resumptionDiscarded &&
+      content &&
+      targetEnd !== undefined &&
+      content.text.length > targetEnd
+    ) {
+      hasDiscardedSuffix = true;
+      setTargetSpeech(utterance.sessionId, target, {
+        status: "interrupted",
+        spokenThrough: targetEnd,
+        confidence: "medium",
+        interruptionCause: utterance.interruptionCause ?? "voiceStopped",
+      });
+      continue;
+    }
+    setTargetSpeech(utterance.sessionId, target, { status: "spoken" });
+  }
+  utterance.status = hasDiscardedSuffix ? "interrupted" : "spoken";
+  return hasDiscardedSuffix;
+}
+
 function failActiveUtterance(
   utteranceId: string,
   error: unknown,
@@ -625,7 +653,14 @@ function handleStreamEvent(
         clearTimeout(utterance.interruptionFallback);
         utterance.interruptionFallback = null;
       }
-      setUtteranceStatus(utterance, "spoken");
+      if (applyCompletedUtteranceStatus(utterance)) {
+        recordDeliveryNotices(
+          utterance,
+          estimateSpeechDelivery(utterance.text, utterance.latestDelivery),
+          "interrupted",
+          utterance.interruptionCause ?? "voiceStopped",
+        );
+      }
       restoreListeningIfConversationIsRunning(utterance);
       activeUtterance = null;
       reportAssistantActivity(
@@ -661,7 +696,7 @@ function interruptActiveUtterance(
 ): boolean {
   const utterance = activeUtterance;
   const terminalEventExpected =
-    awaitTerminalDelivery && utterance?.nativeStreamStarted === true;
+    awaitTerminalDelivery && utterance?.nativeStartInvoked === true;
   commandEpoch += 1;
   if (utterance && !utterance.interruptionRequested) {
     utterance.interruptionRequested = true;
@@ -671,6 +706,7 @@ function interruptActiveUtterance(
     finalizeInterruptedUtterance(
       utterance,
       utterance.interruptionCause ?? cause,
+      awaitTerminalDelivery && cause === "userSpeaking",
     );
   }
   if (utterance && terminalEventExpected) {
@@ -698,7 +734,7 @@ export function stopNativeAssistantSpeech(awaitTerminalDelivery = false): void {
   stopVoiceSubscription?.();
   stopVoiceSubscription = null;
   const shouldAwaitTerminal =
-    awaitTerminalDelivery && utterance?.nativeStreamStarted === true;
+    awaitTerminalDelivery && utterance?.nativeStartInvoked === true;
   if (utterance && shouldAwaitTerminal) {
     const onTerminal = utterance.onTerminal;
     utterance.onTerminal = () => {
@@ -984,27 +1020,16 @@ export function startNativeAssistantSpeech(
   };
 
   const discardHeldAndResumableSpeech = () => {
-    const activeTargetKeys = new Set(
-      activeUtterance?.targets.map((target) => targetKey(target)) ?? [],
-    );
-    const resumableTargetKeys = new Set(
-      resumableInterruption?.utterance.targets.map((target) =>
-        targetKey(target),
-      ) ?? [],
-    );
     if (activeUtterance) activeUtterance.resumptionDiscarded = true;
-    discardResumableInterruption();
     const held = heldSpeech;
     if (held) {
       for (const [slot, heldTarget] of held.targets) {
-        if (activeTargetKeys.has(slot) || resumableTargetKeys.has(slot)) {
-          continue;
-        }
         suppressTarget(slot, heldTarget.target, heldTarget.text);
       }
       heldSpeech = null;
       heldReleaseReady = false;
     }
+    discardResumableInterruption();
   };
 
   const ensureUtterance = (
@@ -1039,7 +1064,7 @@ export function startNativeAssistantSpeech(
       targetSpans: [],
       text: "",
       finishing: false,
-      nativeStreamStarted: false,
+      nativeStartInvoked: false,
       interruptionRequested: false,
       resumptionDiscarded: false,
       interruptionFallback: null,
@@ -1089,6 +1114,13 @@ export function startNativeAssistantSpeech(
       utterance,
       async () => {
         await streamListenerReady;
+        if (
+          utterance.interruptionRequested ||
+          activeUtterance?.id !== utterance.id
+        ) {
+          return;
+        }
+        utterance.nativeStartInvoked = true;
         await streamBackend.start(utterance.id);
         if (
           utterance.interruptionRequested ||
@@ -1097,7 +1129,6 @@ export function startNativeAssistantSpeech(
           await streamBackend.stop();
           return;
         }
-        utterance.nativeStreamStarted = true;
       },
       onFailure,
     );
