@@ -104,7 +104,9 @@ describe("voice conversation API", () => {
         deliveryAttempts: 0,
       }),
     ).resolves.toEqual(status);
-    await expect(startVoiceConversation("session-1")).resolves.toEqual(status);
+    await expect(startVoiceConversation("session-1", "macos")).resolves.toEqual(
+      status,
+    );
     await expect(stopVoiceConversation(status)).resolves.toEqual(stoppedStatus);
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(
@@ -126,6 +128,7 @@ describe("voice conversation API", () => {
       "start_native_voice_conversation",
       {
         sessionId: "session-1",
+        inputBackend: "macos",
         rendererId: "renderer-test",
         rendererEpoch: 7,
         foregroundGeneration: 0,

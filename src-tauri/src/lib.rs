@@ -640,6 +640,8 @@ pub fn run() {
             commands::siri_voice::flush_siri_voice_stream,
             commands::siri_voice::finish_siri_voice_stream,
             commands::siri_voice::stop_siri_voice,
+            commands::mac_speech::get_mac_speech_status,
+            commands::mac_speech::install_mac_speech_model,
             commands::native_voice::get_native_voice_conversation_status,
             commands::native_voice::block_native_voice_conversation_starts,
             commands::native_voice::release_native_voice_conversation_start_block,

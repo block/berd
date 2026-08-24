@@ -17,6 +17,7 @@ import {
   type VoiceConversationEvent,
   type VoiceConversationStatus,
 } from "../api/voiceConversation";
+import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 
 export type VoiceConversationUiState =
   | "off"
@@ -54,6 +55,7 @@ interface VoiceConversationStore {
   clearRequestedStart: (sessionId: string) => void;
   start: (
     sessionId: string,
+    inputBackend?: VoiceInputBackend,
     foregroundGeneration?: number,
   ) => Promise<VoiceConversationStatus>;
   stop: () => Promise<VoiceConversationStatus>;
@@ -568,7 +570,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       return status;
     },
 
-    start: (sessionId, foregroundGeneration) => {
+    start: (sessionId, inputBackend = "parakeet", foregroundGeneration) => {
       if (voiceStartBlocks.has(sessionId)) {
         return Promise.reject(
           new Error("Voice cannot start while this chat is being archived."),
@@ -581,6 +583,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
         try {
           const status = await startVoiceConversation(
             sessionId,
+            inputBackend,
             foregroundGeneration,
           );
           set((state) =>

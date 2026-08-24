@@ -868,6 +868,8 @@
     }
   },
   "voice": {
+    "backendMacSpeech": "Reconocimiento de voz de Apple",
+    "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
     "backendSiri": "Voces de Siri (macOS)",
     "download": "Descargar modelo",
@@ -882,6 +884,14 @@
       "verifying": "Verificando modelo"
     },
     "downloadProgress": "{{downloaded}} de {{total}}",
+    "inputBackendDescription": "Elige cómo Berd transcribe tu voz.",
+    "macSpeechDownloading": "Descargando el modelo de dictado… {{progress}} %",
+    "macSpeechInstalled": "Instalado para {{locale}}",
+    "macSpeechLoading": "Comprobando el reconocimiento de voz de macOS…",
+    "macSpeechLocaleUnsupported": "El reconocimiento de voz de Apple no admite {{locale}}.",
+    "macSpeechModel": "Dictado en el dispositivo",
+    "macSpeechNotInstalled": "No instalado para {{locale}}",
+    "macSpeechSystemLocale": "el idioma del sistema",
     "modelInstalled": "Instalado",
     "modelInstalledSize": "Instalado · {{size}} en disco",
     "modelMissingSize": "No instalado · descarga de {{size}}",
@@ -889,6 +899,9 @@
     "notReadyInput": "Parakeet STT no está instalado. Descárgalo abajo para usar la conversación por voz.",
     "notReadyInputAndPocketOutput": "Parakeet STT y Pocket TTS no están instalados. Descarga ambos abajo para usar la conversación por voz.",
     "notReadyInputAndSiriOutput": "Parakeet STT no está instalado y no hay ninguna voz de Siri instalada seleccionada. Completa ambos pasos abajo para usar la conversación por voz.",
+    "notReadyMacInput": "El modelo de dictado de Apple no está instalado. Descárgalo abajo para usar la conversación por voz.",
+    "notReadyMacInputAndPocketOutput": "El modelo de dictado de Apple y Pocket TTS no están instalados. Completa ambos pasos abajo para usar la conversación por voz.",
+    "notReadyMacInputAndSiriOutput": "El modelo de dictado de Apple no está instalado y no hay ninguna voz de Siri instalada seleccionada. Completa ambos pasos abajo para usar la conversación por voz.",
     "notReadyPocketOutput": "Pocket TTS no está instalado. Descárgalo abajo para usar la conversación por voz.",
     "notReadySiriOutput": "No hay ninguna voz de Siri instalada seleccionada. Descarga o selecciona una abajo para usar la conversación por voz.",
     "notReadyTitle": "La conversación por voz no está lista",

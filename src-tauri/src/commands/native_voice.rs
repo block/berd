@@ -1,4 +1,4 @@
-//! Native Parakeet speech recognition for Desktop voice conversations.
+//! Native speech recognition for Desktop voice conversations.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -12,10 +12,14 @@ use std::{
     time::Duration,
 };
 
+#[cfg(target_os = "macos")]
+use std::time::Instant;
+
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tokio::sync::mpsc as tokio_mpsc;
 
+use super::mac_speech;
 use super::{
     native_input_mute, pocket_voice::parakeet_model_dir, voice_buddy,
     voice_capture::VoiceCaptureState,
@@ -32,6 +36,18 @@ const VAD_THRESHOLD: f32 = 0.5;
 // Keep ordinary pauses between words inside one offline recognition request.
 // At 16 kHz with 256-sample frames this is 1.2 seconds.
 const SILENCE_FLUSH_FRAMES: usize = 75;
+const FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS: u64 = 5;
+const FINAL_TRANSCRIPT_DELIVERY_TIMEOUT: Duration =
+    Duration::from_secs(FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS);
+const STT_WORKER_SHUTDOWN_TIMEOUT_SECONDS: u64 =
+    mac_speech::RECOGNITION_FINISH_TIMEOUT_SECONDS + FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS + 1;
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum VoiceInputBackend {
+    Parakeet,
+    Macos,
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -656,7 +672,7 @@ struct AudioBatch {
 }
 
 impl SttPipeline {
-    fn new(
+    fn new_parakeet(
         model_dir: PathBuf,
         input_muted: Arc<AtomicBool>,
         input_mute_epoch: Arc<AtomicU64>,
@@ -701,6 +717,57 @@ impl SttPipeline {
         ))
     }
 
+    fn new_macos(
+        input_muted: Arc<AtomicBool>,
+        input_mute_epoch: Arc<AtomicU64>,
+    ) -> Result<(Self, tokio_mpsc::Receiver<SttMessage>), String> {
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (input_muted, input_mute_epoch);
+            Err("macOS speech recognition requires macOS 26 or later.".to_string())
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let (audio_tx, audio_rx) = mpsc::sync_channel(AUDIO_QUEUE_DEPTH);
+            let (event_tx, event_rx) = tokio_mpsc::channel(64);
+            let shutdown = Arc::new(AtomicBool::new(false));
+            let discard_on_shutdown = Arc::new(AtomicBool::new(false));
+            let shutdown_mute_epoch = Arc::new(AtomicU64::new(0));
+            let worker_shutdown = Arc::clone(&shutdown);
+            let worker_discard_on_shutdown = Arc::clone(&discard_on_shutdown);
+            let worker_input_muted = Arc::clone(&input_muted);
+            let worker_input_mute_epoch = Arc::clone(&input_mute_epoch);
+            let worker_shutdown_mute_epoch = Arc::clone(&shutdown_mute_epoch);
+            let thread = thread::Builder::new()
+                .name("berd-macos-stt".into())
+                .spawn(move || {
+                    macos_stt_worker(
+                        audio_rx,
+                        event_tx,
+                        worker_shutdown,
+                        worker_discard_on_shutdown,
+                        worker_input_muted,
+                        worker_input_mute_epoch,
+                        worker_shutdown_mute_epoch,
+                    )
+                })
+                .map_err(|error| format!("start macOS speech recognition: {error}"))?;
+            Ok((
+                Self {
+                    audio_tx,
+                    audio_seen: AtomicBool::new(false),
+                    shutdown,
+                    discard_on_shutdown,
+                    input_muted,
+                    input_mute_epoch,
+                    shutdown_mute_epoch,
+                    thread: Some(thread),
+                },
+                event_rx,
+            ))
+        }
+    }
+
     fn push(&self, bytes: Vec<u8>) -> Result<(), String> {
         if bytes.len() > MAX_AUDIO_BATCH_BYTES {
             return Err(format!(
@@ -722,7 +789,7 @@ impl SttPipeline {
         }
         if !self.audio_seen.swap(true, Ordering::AcqRel) {
             log::info!(
-                "Native Parakeet received its first audio batch ({} bytes)",
+                "Native STT received its first audio batch ({} bytes)",
                 bytes.len()
             );
         }
@@ -775,7 +842,8 @@ impl Drop for SttPipeline {
 }
 
 #[cfg(not(test))]
-const STT_WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const STT_WORKER_SHUTDOWN_TIMEOUT: Duration =
+    Duration::from_secs(STT_WORKER_SHUTDOWN_TIMEOUT_SECONDS);
 #[cfg(test)]
 const STT_WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_millis(100);
 
@@ -800,38 +868,68 @@ async fn shutdown_pipeline(mut pipeline: SttPipeline) {
     }
 }
 
-fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
-    let model = parakeet_model_dir(app);
-    let runtime = state
-        .runtime
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+async fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
+    let (session_id, owner_window_label, revision) = {
+        let runtime = state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        (
+            runtime.session_id.clone(),
+            runtime
+                .owner
+                .as_ref()
+                .map(|owner| owner.window_label.clone()),
+            runtime.revision,
+        )
+    };
+    let parakeet_available = parakeet_model_dir(app).is_ok();
+    #[cfg(target_os = "macos")]
+    let macos_available = if needs_macos_status(session_id.is_some(), parakeet_available) {
+        mac_speech::status_async()
+            .await
+            .map(|status| status.model_installed)
+            .unwrap_or(false)
+    } else {
+        false
+    };
+    #[cfg(not(target_os = "macos"))]
+    let macos_available = false;
+    let (available, unavailable_reason) =
+        if session_id.is_some() || parakeet_available || macos_available {
+            (true, None)
+        } else {
+            (
+                false,
+                Some("Download speech recognition before starting a call.".to_string()),
+            )
+        };
     NativeVoiceStatus {
-        available: model.is_ok(),
-        unavailable_reason: model
-            .err()
-            .map(|_| "Download native voice before starting a call.".to_string()),
-        lifecycle: if runtime.session_id.is_some() {
+        available,
+        unavailable_reason,
+        lifecycle: if session_id.is_some() {
             Lifecycle::Running
         } else {
             Lifecycle::Stopped
         },
-        session_id: runtime.session_id.clone(),
-        owner_window_label: runtime
-            .owner
-            .as_ref()
-            .map(|owner| owner.window_label.clone()),
+        session_id,
+        owner_window_label,
         microphone_muted: state.microphone_is_muted(),
-        revision: runtime.revision,
+        revision,
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
+fn needs_macos_status(session_active: bool, parakeet_available: bool) -> bool {
+    !session_active && !parakeet_available
+}
+
 #[tauri::command]
-pub fn get_native_voice_conversation_status(
+pub async fn get_native_voice_conversation_status(
     app: AppHandle,
     state: State<'_, NativeVoiceState>,
-) -> NativeVoiceStatus {
-    status(&app, &state)
+) -> Result<NativeVoiceStatus, String> {
+    Ok(status(&app, &state).await)
 }
 
 #[tauri::command]
@@ -951,6 +1049,7 @@ pub async fn start_native_voice_conversation(
     window_sessions: State<'_, super::window_session::WindowSessionRegistry>,
     webview_window: WebviewWindow,
     session_id: String,
+    input_backend: VoiceInputBackend,
     renderer_id: String,
     renderer_epoch: u64,
     foreground_generation: u64,
@@ -958,6 +1057,13 @@ pub async fn start_native_voice_conversation(
     let session_id = session_id.trim().to_string();
     if session_id.is_empty() || session_id.len() > 256 {
         return Err("session id must be between 1 and 256 bytes".to_string());
+    }
+    if input_backend == VoiceInputBackend::Macos
+        && !mac_speech::status_async().await?.model_installed
+    {
+        return Err(
+            "Download the macOS speech recognition model before starting a call.".to_string(),
+        );
     }
     let window_label = webview_window.label().to_string();
     let owner_id = native_owner_id(&session_id);
@@ -980,20 +1086,20 @@ pub async fn start_native_voice_conversation(
         renderer_epoch,
         owner_id.clone(),
     )?;
-    let model_dir = match parakeet_model_dir(&app) {
-        Ok(model_dir) => model_dir,
-        Err(error) => {
-            if microphone_claimed {
-                capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
-            }
-            return Err(error);
-        }
+    let pipeline = match input_backend {
+        VoiceInputBackend::Parakeet => parakeet_model_dir(&app).and_then(|model_dir| {
+            SttPipeline::new_parakeet(
+                model_dir,
+                Arc::clone(&state.input_muted),
+                Arc::clone(&state.input_mute_epoch),
+            )
+        }),
+        VoiceInputBackend::Macos => SttPipeline::new_macos(
+            Arc::clone(&state.input_muted),
+            Arc::clone(&state.input_mute_epoch),
+        ),
     };
-    let (pipeline, mut events) = match SttPipeline::new(
-        model_dir,
-        Arc::clone(&state.input_muted),
-        Arc::clone(&state.input_mute_epoch),
-    ) {
+    let (pipeline, mut events) = match pipeline {
         Ok(result) => result,
         Err(error) => {
             if microphone_claimed {
@@ -1125,7 +1231,7 @@ pub async fn start_native_voice_conversation(
         NativeVoiceEvent::Startup {
             session_id: session_id.clone(),
             owner_window_label: window_label.clone(),
-            line: "Native Parakeet voice conversation is on".to_string(),
+            line: "Native voice conversation is on".to_string(),
             revision,
         },
     );
@@ -1134,7 +1240,7 @@ pub async fn start_native_voice_conversation(
         NativeVoiceEvent::Startup {
             session_id: session_id.clone(),
             owner_window_label: window_label.clone(),
-            line: "Native Parakeet voice conversation is on".to_string(),
+            line: "Native voice conversation is on".to_string(),
             revision,
         },
     );
@@ -1268,11 +1374,11 @@ pub async fn start_native_voice_conversation(
             }
         }
     });
-    Ok(status(&app, &state))
+    Ok(status(&app, &state).await)
 }
 
 #[tauri::command]
-pub fn set_native_voice_microphone_muted(
+pub async fn set_native_voice_microphone_muted(
     app: AppHandle,
     state: State<'_, NativeVoiceState>,
     capture: State<'_, VoiceCaptureState>,
@@ -1298,7 +1404,7 @@ pub fn set_native_voice_microphone_muted(
             apply,
         )?;
     }
-    Ok(status(&app, &state))
+    Ok(status(&app, &state).await)
 }
 
 #[tauri::command]
@@ -1343,7 +1449,7 @@ pub async fn stop_native_voice_conversation(
             .stop_active_for_lifecycle(&app, &capture, &session_id, expected_revision)
             .await?;
     }
-    Ok(status(&app, &state))
+    Ok(status(&app, &state).await)
 }
 
 #[tauri::command]
@@ -1389,7 +1495,7 @@ pub async fn stop_native_voice_conversation_for_replacement(
     state
         .stop_active_inner_locked(&app, &capture, Some((&session_id, expected_revision, None)))
         .await?;
-    Ok(status(&app, &state))
+    Ok(status(&app, &state).await)
 }
 
 fn replacement_caller_matches_target(
@@ -2010,6 +2116,215 @@ fn enqueue_transcript_if_active(
     Ok((true, evicted))
 }
 
+#[cfg(target_os = "macos")]
+fn forward_macos_events(
+    events: &mut tokio_mpsc::UnboundedReceiver<mac_speech::RecognitionEvent>,
+    output: &tokio_mpsc::Sender<SttMessage>,
+    delivery_deadline: Option<Instant>,
+) -> Result<(), ()> {
+    while let Ok(event) = events.try_recv() {
+        match event {
+            mac_speech::RecognitionEvent::Final(text) => {
+                let text = text.trim().to_string();
+                if text.is_empty() {
+                    continue;
+                }
+                let delivered = delivery_deadline.map(|_| {
+                    let (sender, receiver) = mpsc::sync_channel(0);
+                    (sender, receiver)
+                });
+                let sender = delivered.as_ref().map(|(sender, _)| sender.clone());
+                if output
+                    .blocking_send(SttMessage::Final {
+                        text,
+                        delivered: sender,
+                    })
+                    .is_err()
+                {
+                    return Err(());
+                }
+                if let (Some(deadline), Some((_, receiver))) = (delivery_deadline, delivered) {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if !remaining.is_zero() {
+                        let _ = receiver.recv_timeout(remaining);
+                    }
+                }
+            }
+            mac_speech::RecognitionEvent::Finished => {
+                if delivery_deadline.is_none() {
+                    let _ = output.blocking_send(SttMessage::Failed(
+                        "macOS speech recognition stopped unexpectedly.".to_string(),
+                    ));
+                    return Err(());
+                }
+            }
+            mac_speech::RecognitionEvent::Failed(message) => {
+                if delivery_deadline.is_none() {
+                    let _ = output.blocking_send(SttMessage::Failed(message));
+                } else {
+                    log::error!("macOS speech recognition failed while finishing: {message}");
+                }
+                return Err(());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn new_macos_recognition_session() -> Result<
+    (
+        mac_speech::RecognitionSession,
+        tokio_mpsc::UnboundedReceiver<mac_speech::RecognitionEvent>,
+    ),
+    String,
+> {
+    let (events_tx, events_rx) = tokio_mpsc::unbounded_channel();
+    mac_speech::RecognitionSession::new(events_tx).map(|session| (session, events_rx))
+}
+
+#[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
+fn macos_stt_worker(
+    audio_rx: Receiver<AudioBatch>,
+    event_tx: tokio_mpsc::Sender<SttMessage>,
+    shutdown: Arc<AtomicBool>,
+    discard_on_shutdown: Arc<AtomicBool>,
+    input_muted: Arc<AtomicBool>,
+    input_mute_epoch: Arc<AtomicU64>,
+    shutdown_mute_epoch: Arc<AtomicU64>,
+) {
+    use rubato::{Fft, FixedSync, Resampler};
+
+    let (mut session, mut recognition_events) = match new_macos_recognition_session() {
+        Ok(session) => session,
+        Err(error) => {
+            let _ = event_tx.blocking_send(SttMessage::Failed(error));
+            return;
+        }
+    };
+    let mut resampler = match Fft::<f32>::new(48_000, 16_000, 1024, 2, 1, FixedSync::Input) {
+        Ok(resampler) => resampler,
+        Err(error) => {
+            let _ = event_tx.blocking_send(SttMessage::Failed(format!(
+                "Could not initialize native audio resampling: {error}"
+            )));
+            return;
+        }
+    };
+    let chunk_in = resampler.input_frames_next();
+    let mut vad = earshot::Detector::new(earshot::DefaultPredictor::new());
+    let mut input_48k = Vec::new();
+    let mut leftover_16k = Vec::new();
+    let mut silence_frames = 0_usize;
+    let mut in_speech = false;
+    let mut observed_mute_epoch = input_mute_epoch.load(Ordering::Acquire);
+
+    loop {
+        if forward_macos_events(&mut recognition_events, &event_tx, None).is_err() {
+            return;
+        }
+        let batch = match audio_rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(batch) => Some(batch),
+            Err(mpsc::RecvTimeoutError::Timeout) => None,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+        let (shutting_down, current_mute_epoch) =
+            sample_effective_mute_epoch(&input_mute_epoch, &shutdown, &shutdown_mute_epoch);
+        if current_mute_epoch != observed_mute_epoch {
+            observed_mute_epoch = current_mute_epoch;
+            input_48k.clear();
+            leftover_16k.clear();
+            silence_frames = 0;
+            if std::mem::take(&mut in_speech) {
+                let _ = event_tx.blocking_send(SttMessage::Speaking(false));
+            }
+            // A mute boundary must discard Apple's partial hypothesis just as
+            // the Parakeet worker discards its buffered utterance.
+            session.cancel();
+            if shutting_down {
+                break;
+            }
+            match new_macos_recognition_session() {
+                Ok((next_session, next_events)) => {
+                    session = next_session;
+                    recognition_events = next_events;
+                }
+                Err(error) => {
+                    let _ = event_tx.blocking_send(SttMessage::Failed(error));
+                    return;
+                }
+            }
+        }
+        if shutting_down && (discard_on_shutdown.load(Ordering::Acquire) || batch.is_none()) {
+            break;
+        }
+        if !shutting_down && input_muted.load(Ordering::Acquire) {
+            continue;
+        }
+        let Some(batch) = batch else {
+            continue;
+        };
+        if batch.mute_epoch != observed_mute_epoch {
+            continue;
+        }
+
+        let samples: Vec<f32> = batch
+            .bytes
+            .chunks_exact(4)
+            .map(|sample| f32::from_le_bytes([sample[0], sample[1], sample[2], sample[3]]))
+            .collect();
+        // Feed Apple continuously. Earshot below controls activity only and
+        // never holds audio until its silence boundary.
+        if let Err(error) = session.push(&samples) {
+            let _ = event_tx.blocking_send(SttMessage::Failed(error));
+            return;
+        }
+
+        input_48k.extend_from_slice(&samples);
+        while input_48k.len() >= chunk_in {
+            let chunk: Vec<f32> = input_48k.drain(..chunk_in).collect();
+            leftover_16k.extend_from_slice(&resample(&mut resampler, &chunk));
+            while leftover_16k.len() >= VAD_FRAME_SAMPLES {
+                let frame: Vec<f32> = leftover_16k.drain(..VAD_FRAME_SAMPLES).collect();
+                let clamped: Vec<f32> =
+                    frame.iter().map(|sample| sample.clamp(-1.0, 1.0)).collect();
+                if vad.predict_f32(&clamped) > VAD_THRESHOLD {
+                    silence_frames = 0;
+                    if !in_speech {
+                        in_speech = true;
+                        let _ = event_tx.blocking_send(SttMessage::Speaking(true));
+                    }
+                } else if in_speech {
+                    silence_frames += 1;
+                    if silence_frames >= SILENCE_FLUSH_FRAMES {
+                        silence_frames = 0;
+                        in_speech = false;
+                        let _ = event_tx.blocking_send(SttMessage::Speaking(false));
+                    }
+                }
+            }
+        }
+        if forward_macos_events(&mut recognition_events, &event_tx, None).is_err() {
+            return;
+        }
+    }
+
+    if in_speech {
+        let _ = event_tx.blocking_send(SttMessage::Speaking(false));
+    }
+    if discard_on_shutdown.load(Ordering::Acquire) {
+        session.cancel();
+        return;
+    }
+    if let Err(error) = session.finish() {
+        log::error!("Could not finish macOS speech recognition: {error}");
+        return;
+    }
+    let delivery_deadline = Instant::now() + FINAL_TRANSCRIPT_DELIVERY_TIMEOUT;
+    let _ = forward_macos_events(&mut recognition_events, &event_tx, Some(delivery_deadline));
+}
+
 #[allow(clippy::too_many_arguments)] // Worker boundary keeps channel and mute lifecycle inputs explicit.
 fn stt_worker(
     model_dir: PathBuf,
@@ -2164,7 +2479,7 @@ fn stt_worker(
             &shutdown_mute_epoch,
             observed_mute_epoch,
         );
-        let _ = delivered_rx.recv_timeout(Duration::from_secs(5));
+        let _ = delivered_rx.recv_timeout(FINAL_TRANSCRIPT_DELIVERY_TIMEOUT);
     }
 }
 
@@ -2288,6 +2603,56 @@ mod tests {
             validation.await.expect_err("stale target must be rejected"),
             "The target session is no longer in the foreground."
         );
+    }
+
+    #[test]
+    fn worker_shutdown_budget_covers_recognition_and_delivery() {
+        assert!(
+            STT_WORKER_SHUTDOWN_TIMEOUT_SECONDS
+                > mac_speech::RECOGNITION_FINISH_TIMEOUT_SECONDS
+                    + FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS
+        );
+    }
+
+    #[test]
+    fn apple_status_is_only_queried_when_it_can_change_availability() {
+        assert!(!needs_macos_status(true, false));
+        assert!(!needs_macos_status(false, true));
+        assert!(needs_macos_status(false, false));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn finishing_finals_share_one_delivery_deadline() {
+        let (recognition_tx, mut recognition_rx) = tokio_mpsc::unbounded_channel();
+        recognition_tx
+            .send(mac_speech::RecognitionEvent::Final("first".to_string()))
+            .expect("queue first final");
+        recognition_tx
+            .send(mac_speech::RecognitionEvent::Final("second".to_string()))
+            .expect("queue second final");
+        recognition_tx
+            .send(mac_speech::RecognitionEvent::Finished)
+            .expect("queue finish");
+        let (output_tx, mut output_rx) = tokio_mpsc::channel(4);
+        let started = Instant::now();
+
+        forward_macos_events(
+            &mut recognition_rx,
+            &output_tx,
+            Some(started + Duration::from_millis(20)),
+        )
+        .expect("drain final events");
+
+        assert!(started.elapsed() < Duration::from_millis(100));
+        assert!(matches!(
+            output_rx.try_recv(),
+            Ok(SttMessage::Final { text, .. }) if text == "first"
+        ));
+        assert!(matches!(
+            output_rx.try_recv(),
+            Ok(SttMessage::Final { text, .. }) if text == "second"
+        ));
     }
 
     #[test]
@@ -3290,6 +3655,20 @@ mod tests {
                 "type": "controlsDismissed",
                 "revision": 3,
             }),
+        );
+    }
+
+    #[test]
+    fn input_backend_uses_renderer_wire_values() {
+        assert_eq!(
+            serde_json::from_str::<VoiceInputBackend>("\"parakeet\"")
+                .expect("deserialize Parakeet backend"),
+            VoiceInputBackend::Parakeet,
+        );
+        assert_eq!(
+            serde_json::from_str::<VoiceInputBackend>("\"macos\"")
+                .expect("deserialize macOS backend"),
+            VoiceInputBackend::Macos,
         );
     }
 }

@@ -463,7 +463,9 @@ describe("voice transcript delivery coordination", () => {
       }));
     });
 
-    await waitFor(() => expect(start).toHaveBeenCalledWith("session-1", 1));
+    await waitFor(() =>
+      expect(start).toHaveBeenCalledWith("session-1", "parakeet", 1),
+    );
     expect(
       useVoiceConversationStore.getState().requestedStartSessionId,
     ).toBeNull();
@@ -552,7 +554,7 @@ describe("voice transcript delivery coordination", () => {
       stopRequest.resolve(stopped);
       await handoff;
     });
-    expect(start).toHaveBeenCalledWith("session-b", 1);
+    expect(start).toHaveBeenCalledWith("session-b", "parakeet", 1);
   });
 
   it("does not start a replacement superseded after the active call stops", async () => {
@@ -845,7 +847,7 @@ describe("voice transcript delivery coordination", () => {
     startRequest.resolve(runningWinner);
     await winnerToggle;
 
-    expect(start).toHaveBeenCalledWith(winnerSessionId, 1);
+    expect(start).toHaveBeenCalledWith(winnerSessionId, "parakeet", 1);
     expect(nativeAssistantSpeechMocks.start).toHaveBeenLastCalledWith(
       winnerSessionId,
       expect.any(Function),
