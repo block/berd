@@ -1593,7 +1593,11 @@ describe("native assistant speech stream", () => {
       useChatStore
         .getState()
         .setMessages("session-1", [
-          assistant([{ type: "text", text: "Obsolete reply." }], "completed"),
+          assistant(
+            [{ type: "text", text: "Obsolete reply." }],
+            "completed",
+            "assistant-delayed-final",
+          ),
         ]);
 
       useVoiceConversationStore.setState({ userSpeaking: false });
@@ -1608,6 +1612,9 @@ describe("native assistant speech stream", () => {
       expect(
         useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
       ).toMatchObject({ speech: { status: "notSpoken" } });
+      expect(takeVoicePlaybackNotices("session-1")).toContain(
+        "Original text: Obsolete reply.",
+      );
     } finally {
       vi.useRealTimers();
     }
