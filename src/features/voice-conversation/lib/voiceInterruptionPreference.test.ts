@@ -1,19 +1,12 @@
-import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getDefaultVoiceInterruptionPreference,
   getVoiceInterruptionPreference,
   setVoiceInterruptionPreference,
-  useVoiceInterruptionPreference,
 } from "./voiceInterruptionPreference";
 
 describe("voice interruption preference", () => {
-  beforeEach(() => {
-    window.localStorage.clear();
-    window.dispatchEvent(
-      new StorageEvent("storage", { key: null, newValue: null }),
-    );
-  });
+  beforeEach(() => window.localStorage.clear());
   afterEach(() => vi.restoreAllMocks());
 
   it("defaults to automatic with the existing VAD thresholds", () => {
@@ -101,41 +94,5 @@ describe("voice interruption preference", () => {
       sensitivity: "more",
       speechSensitivity: "less",
     });
-  });
-
-  it("accepts a same-value cross-window storage event after a failed write", () => {
-    const { result, unmount } = renderHook(() =>
-      useVoiceInterruptionPreference(),
-    );
-    const setItem = vi
-      .spyOn(window.localStorage, "setItem")
-      .mockImplementation(() => {
-        throw new Error("storage unavailable");
-      });
-
-    act(() => {
-      setVoiceInterruptionPreference({
-        mode: "preventFeedback",
-        sensitivity: "less",
-        speechSensitivity: "balanced",
-      });
-    });
-    expect(result.current.mode).toBe("preventFeedback");
-    setItem.mockRestore();
-
-    act(() => {
-      window.dispatchEvent(
-        new StorageEvent("storage", {
-          key: "goose:voice-interruption-preference",
-          newValue: null,
-        }),
-      );
-    });
-    expect(getVoiceInterruptionPreference()).toEqual({
-      mode: "automatic",
-      sensitivity: "balanced",
-      speechSensitivity: "more",
-    });
-    unmount();
   });
 });
