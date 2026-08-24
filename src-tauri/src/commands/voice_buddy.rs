@@ -79,7 +79,7 @@ pub fn restore_hidden_owner(app: &AppHandle, owner_window_label: &str) {
 pub fn open_active_session(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<NativeVoiceState>();
     let Some((session_id, owner_window_label)) = state.active_session_target() else {
-        return Ok(());
+        Ok(())
     };
     let window = app
         .get_webview_window(&owner_window_label)
