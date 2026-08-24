@@ -74,10 +74,6 @@ export function VoiceSettings() {
             macSpeechSetup.status.modelInstalled,
         )
       : (setup.status?.parakeetInstalled ?? false);
-  const macSpeechAuthorizationRequired =
-    input.backend === "macos" &&
-    macSpeechSetup.status !== null &&
-    macSpeechSetup.status.authorizationStatus !== "authorized";
   const outputReady =
     output.backend === "siri"
       ? Boolean(
@@ -93,26 +89,20 @@ export function VoiceSettings() {
     setup.status !== null;
   const readinessKey = !pocketStatusLoaded
     ? null
-    : macSpeechAuthorizationRequired
-      ? outputReady
-        ? "voice.notReadyMacPermission"
-        : output.backend === "siri"
-          ? "voice.notReadyMacPermissionAndSiriOutput"
-          : "voice.notReadyMacPermissionAndPocketOutput"
-      : !inputReady && output.backend === "siri" && !siriOutputLoaded
-        ? input.backend === "macos"
-          ? "voice.notReadyMacInput"
-          : "voice.notReadyInput"
-        : output.backend === "siri" && !siriOutputLoaded
+    : !inputReady && output.backend === "siri" && !siriOutputLoaded
+      ? input.backend === "macos"
+        ? "voice.notReadyMacInput"
+        : "voice.notReadyInput"
+      : output.backend === "siri" && !siriOutputLoaded
+        ? null
+        : input.backend === null
           ? null
-          : input.backend === null
-            ? null
-            : readinessDescriptionKey(
-                inputReady,
-                outputReady,
-                output.backend,
-                input.backend,
-              );
+          : readinessDescriptionKey(
+              inputReady,
+              outputReady,
+              output.backend,
+              input.backend,
+            );
 
   return (
     <SettingsPage

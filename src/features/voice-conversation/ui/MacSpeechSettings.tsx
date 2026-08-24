@@ -21,39 +21,26 @@ export function MacSpeechSettings({ setup }: { setup: MacSpeechSetup }) {
 
   const locale = status.locale ?? t("voice.macSpeechSystemLocale");
   const error = setup.error ?? status.error;
-  const authorizationRequired = status.authorizationStatus !== "authorized";
-  const authorizationCanBeRequested =
-    status.authorizationStatus === "notDetermined" ||
-    status.authorizationStatus === "unknown";
   return (
     <div className="space-y-3 overflow-hidden">
       <SettingsRow
         label={t("voice.macSpeechModel")}
         description={
-          authorizationRequired
-            ? status.unavailableReason
-            : status.modelInstalled
-              ? t("voice.macSpeechInstalled", { locale })
-              : t("voice.macSpeechNotInstalled", { locale })
+          status.modelInstalled
+            ? t("voice.macSpeechInstalled", { locale })
+            : t("voice.macSpeechNotInstalled", { locale })
         }
         action={
-          status.modelInstalled ||
-          status.installing ||
-          (authorizationRequired &&
-            !authorizationCanBeRequested) ? undefined : (
+          status.modelInstalled || status.installing ? undefined : (
             <Button
               type="button"
               variant="outline"
               size="sm"
-              leftIcon={authorizationRequired ? undefined : <Download />}
+              leftIcon={<Download />}
               disabled={!status.localeSupported}
               onClick={() => void setup.install()}
             >
-              {authorizationRequired
-                ? t("voice.allowSpeechRecognition")
-                : error
-                  ? t("voice.retryDownload")
-                  : t("voice.download")}
+              {error ? t("voice.retryDownload") : t("voice.download")}
             </Button>
           )
         }
@@ -70,10 +57,6 @@ export function MacSpeechSettings({ setup }: { setup: MacSpeechSetup }) {
           ) : !status.localeSupported ? (
             <p className="text-xs text-destructive" role="alert">
               {t("voice.macSpeechLocaleUnsupported", { locale })}
-            </p>
-          ) : authorizationRequired && !authorizationCanBeRequested ? (
-            <p className="text-xs text-destructive" role="alert">
-              {status.unavailableReason}
             </p>
           ) : error ? (
             <p className="text-xs text-destructive" role="alert">

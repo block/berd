@@ -4,13 +4,6 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 export interface MacSpeechStatus {
   supported: boolean;
   unavailableReason: string | null;
-  authorizationStatus:
-    | "authorized"
-    | "denied"
-    | "restricted"
-    | "notDetermined"
-    | "unknown"
-    | "unsupported";
   locale: string | null;
   localeSupported: boolean;
   modelInstalled: boolean;

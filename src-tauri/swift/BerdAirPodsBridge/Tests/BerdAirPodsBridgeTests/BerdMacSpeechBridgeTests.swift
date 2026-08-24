@@ -3,25 +3,6 @@ import Speech
 import XCTest
 
 final class BerdMacSpeechBridgeTests: XCTestCase {
-    func testSpeechAuthorizationLifecycleStates() {
-        XCTAssertEqual(
-            speechAuthorizationDisposition(for: .authorized),
-            .proceed
-        )
-        XCTAssertEqual(
-            speechAuthorizationDisposition(for: .notDetermined),
-            .request
-        )
-        XCTAssertEqual(
-            speechAuthorizationDisposition(for: .denied),
-            .denied
-        )
-        XCTAssertEqual(
-            speechAuthorizationDisposition(for: .restricted),
-            .restricted
-        )
-    }
-
     @available(macOS 26.0, *)
     func testCompatibleInstalledFormatWinsOverLaggingInventory() {
         let readiness = resolveModelReadiness(
@@ -43,5 +24,4 @@ final class BerdMacSpeechBridgeTests: XCTestCase {
         XCTAssertFalse(readiness.ready)
         XCTAssertEqual(readiness.status, "downloading")
     }
-
 }
