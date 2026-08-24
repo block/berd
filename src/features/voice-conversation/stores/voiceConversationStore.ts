@@ -596,6 +596,8 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           const message =
             error instanceof Error ? error.message : String(error);
           try {
+            const muteStateVersion = microphoneMuteStateVersion;
+            const muteRequestWasPending = pendingMicrophoneMuteRequests > 0;
             const status = await getVoiceConversationStatus();
             set((state) => {
               if (status.revision < state.status.revision) return state;
@@ -605,7 +607,19 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   state.status.revision === status.revision &&
                   state.status.lifecycle === status.lifecycle
                 ) {
-                  return state;
+                  const preserveCurrentMute =
+                    isSameRunningLifecycle(state.status, status) &&
+                    (muteRequestWasPending ||
+                      pendingMicrophoneMuteRequests > 0 ||
+                      muteStateVersion !== microphoneMuteStateVersion);
+                  const microphoneMuted = preserveCurrentMute
+                    ? state.microphoneMuted
+                    : status.microphoneMuted;
+                  return {
+                    status: { ...state.status, microphoneMuted },
+                    microphoneMuted,
+                    userSpeaking: microphoneMuted ? false : state.userSpeaking,
+                  };
                 }
                 return {
                   status,
@@ -727,8 +741,11 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         try {
+          const muteStateVersion = microphoneMuteStateVersion;
+          const muteRequestWasPending = pendingMicrophoneMuteRequests > 0;
           const status = await getVoiceConversationStatus();
           set((state) => {
+            if (status.revision < state.status.revision) return state;
             const foreignWinner =
               status.sessionId !== null &&
               status.sessionId !== activeStatus.sessionId &&
@@ -739,7 +756,19 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                 state.status.revision === status.revision &&
                 state.status.lifecycle === status.lifecycle
               ) {
-                return state;
+                const preserveCurrentMute =
+                  isSameRunningLifecycle(state.status, status) &&
+                  (muteRequestWasPending ||
+                    pendingMicrophoneMuteRequests > 0 ||
+                    muteStateVersion !== microphoneMuteStateVersion);
+                const microphoneMuted = preserveCurrentMute
+                  ? state.microphoneMuted
+                  : status.microphoneMuted;
+                return {
+                  status: { ...state.status, microphoneMuted },
+                  microphoneMuted,
+                  userSpeaking: microphoneMuted ? false : state.userSpeaking,
+                };
               }
               return {
                 status,

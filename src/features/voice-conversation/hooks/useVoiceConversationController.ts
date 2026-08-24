@@ -737,7 +737,13 @@ export function useVoiceConversationController({
       await start(sessionId);
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;
-      if (backendStatus.sessionId !== sessionId && activeSendRoute === route) {
+      const conversationStarted =
+        backendStatus.lifecycle === "running" &&
+        backendStatus.sessionId === sessionId;
+      if (
+        !conversationStarted &&
+        activeSendRoute?.sessionId === route.sessionId
+      ) {
         activeSendRoute = null;
         stopNativeAssistantSpeech();
       }

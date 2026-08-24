@@ -684,6 +684,62 @@ describe("voice transcript delivery coordination", () => {
     });
   });
 
+  it("cleans up assistant speech when the current session fails to start", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const starting = {
+      ...stopped,
+      lifecycle: "starting" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      revision: 2,
+    };
+    const startRequest = deferred<typeof starting>();
+    const start = vi.fn().mockReturnValue(startRequest.promise);
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi.fn().mockResolvedValue(stopped),
+      drainPendingTranscripts: vi.fn().mockResolvedValue(undefined),
+      start,
+    });
+    const { result } = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-a",
+        onSend: vi.fn().mockResolvedValue(true),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+
+    let toggling!: Promise<void>;
+    act(() => {
+      toggling = Promise.resolve(result.current.onToggle());
+    });
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    act(() => {
+      useVoiceConversationStore.setState({
+        status: starting,
+        uiState: "starting",
+      });
+    });
+    startRequest.reject(new Error("start failed"));
+    await toggling;
+
+    expect(nativeAssistantSpeechMocks.stop).toHaveBeenCalledOnce();
+  });
+
   it("deduplicates concurrent controls for the same session", async () => {
     const stopped = {
       available: true,

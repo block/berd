@@ -450,10 +450,14 @@ describe("voice conversation store lifecycle ordering", () => {
     const active = status("running", 2, "session-a");
     const staleReplacement = deferred<VoiceConversationStatus>();
     const winner = status("running", 4, "session-c");
+    const observedWinner =
+      refreshOutcome === "resolves"
+        ? { ...winner, microphoneMuted: true }
+        : winner;
     store.setState({ status: active, uiState: "listening" });
     mocks.stopForReplacement.mockReturnValue(staleReplacement.promise);
     if (refreshOutcome === "resolves") {
-      mocks.getStatus.mockResolvedValue(winner);
+      mocks.getStatus.mockResolvedValue(observedWinner);
     } else {
       mocks.getStatus.mockRejectedValue(new Error("status unavailable"));
     }
@@ -470,9 +474,41 @@ describe("voice conversation store lifecycle ordering", () => {
 
     await expect(replacingWithB).rejects.toThrow("session B handoff failed");
     expect(store.getState()).toMatchObject({
-      status: winner,
+      status: observedWinner,
       uiState: "agent-speaking",
       error: "session C playback warning",
+      microphoneMuted: observedWinner.microphoneMuted,
+    });
+  });
+
+  it("does not let a delayed competing-handoff refresh regress a newer winner", async () => {
+    const store = await loadStore();
+    const active = status("running", 2, "session-a");
+    const staleReplacement = deferred<VoiceConversationStatus>();
+    const statusRefresh = deferred<VoiceConversationStatus>();
+    const observedWinner = status("running", 4, "session-c");
+    const newerWinner = status("running", 6, "session-d");
+    store.setState({ status: active, uiState: "listening" });
+    mocks.stopForReplacement.mockReturnValue(staleReplacement.promise);
+    mocks.getStatus.mockReturnValue(statusRefresh.promise);
+
+    const replacingWithB = store
+      .getState()
+      .stopForReplacement(active, "session-b");
+    staleReplacement.reject(new Error("session B handoff failed"));
+    await vi.waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(2));
+    store.setState({
+      status: newerWinner,
+      uiState: "agent-speaking",
+      error: "session D playback warning",
+    });
+    statusRefresh.resolve(observedWinner);
+
+    await expect(replacingWithB).rejects.toThrow("session B handoff failed");
+    expect(store.getState()).toMatchObject({
+      status: newerWinner,
+      uiState: "agent-speaking",
+      error: "session D playback warning",
     });
   });
 
@@ -627,14 +663,18 @@ describe("voice conversation store lifecycle ordering", () => {
       uiState: "agent-speaking",
       error: "session B playback warning",
     });
-    statusRefresh.resolve(runningB);
+    const mutedRunningB = { ...runningB, microphoneMuted: true };
+    statusRefresh.resolve(mutedRunningB);
 
     await expect(startingA).rejects.toThrow("session A start tail failed");
     expect(store.getState()).toMatchObject({
-      status: runningB,
+      status: mutedRunningB,
       uiState: "agent-speaking",
       error: "session B playback warning",
+      microphoneMuted: true,
+      userSpeaking: false,
     });
+    expect(mocks.reconcileMicrophone).toHaveBeenLastCalledWith(mutedRunningB);
   });
 
   it("reconciles status after a failed stop", async () => {
