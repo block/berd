@@ -18,7 +18,7 @@ import {
   type VoiceConversationStatus,
 } from "../api/voiceConversation";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
-import type { VoiceDetectionPreference } from "../lib/voiceDetectionPreference";
+import type { VoiceInterruptionSensitivity } from "../lib/voiceInterruptionPreference";
 
 export type VoiceConversationUiState =
   | "off"
@@ -58,7 +58,7 @@ interface VoiceConversationStore {
     sessionId: string,
     inputBackend?: VoiceInputBackend,
     foregroundGeneration?: number,
-    voiceDetection?: VoiceDetectionPreference,
+    speechDetectionSensitivity?: VoiceInterruptionSensitivity,
   ) => Promise<VoiceConversationStatus>;
   stop: () => Promise<VoiceConversationStatus>;
   stopForReplacement: (
@@ -576,7 +576,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       sessionId,
       inputBackend = "parakeet",
       foregroundGeneration,
-      voiceDetection,
+      speechDetectionSensitivity,
     ) => {
       if (voiceStartBlocks.has(sessionId)) {
         return Promise.reject(
@@ -592,7 +592,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             sessionId,
             inputBackend,
             foregroundGeneration,
-            voiceDetection,
+            speechDetectionSensitivity,
           );
           set((state) =>
             shouldApplyResponseRevision(state.status, status.revision) ||

@@ -869,20 +869,13 @@
   },
   "voice": {
     "advancedDetection": {
-      "description": "Ajusta cómo Berd detecta el inicio y el final de tu voz.",
+      "description": "Ajusta cómo Berd detecta tu voz.",
       "done": "Listo",
-      "endOfSpeechPause": "Pausa al final del habla",
-      "endOfSpeechPauseDescription": "Cuánto espera Berd durante el silencio antes de terminar tu turno.",
       "interruptionSensitivity": "Sensibilidad de interrupción",
       "interruptionSensitivityDescription": "Con qué facilidad tu voz interrumpe a Berd mientras habla.",
       "open": "Avanzado…",
-      "pauseOptions": {
-        "long": "Larga · 1,6 segundos",
-        "short": "Corta · 0,8 segundos",
-        "standard": "Estándar · 1,2 segundos"
-      },
       "reset": "Restablecer valores predeterminados",
-      "rowDescription": "Ajusta los umbrales de voz y el tiempo de finalización.",
+      "rowDescription": "Ajusta los umbrales de detección de voz e interrupción.",
       "rowTitle": "Detección de voz",
       "sensitivityOptions": {
         "balanced": "Equilibrada · umbral 0,65",

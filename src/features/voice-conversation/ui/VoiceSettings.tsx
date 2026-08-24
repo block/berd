@@ -272,10 +272,7 @@ export function VoiceSettings() {
             </p>
           </div>
           <div className="w-full min-w-0 sm:w-auto sm:shrink-0">
-            <AdvancedVoiceDetectionDialog
-              interruptionSensitivity={interruption.sensitivity}
-              setInterruptionSensitivity={interruption.setSensitivity}
-            />
+            <AdvancedVoiceDetectionDialog />
           </div>
         </div>
       </section>

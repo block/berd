@@ -18,40 +18,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select";
-import type {
-  EndOfSpeechPause,
-  VoiceDetectionSensitivity,
-} from "../lib/voiceDetectionPreference";
-import { useVoiceDetectionPreference } from "../lib/voiceDetectionPreference";
 import type { VoiceInterruptionSensitivity } from "../lib/voiceInterruptionPreference";
+import { useVoiceInterruptionPreference } from "../lib/voiceInterruptionPreference";
 
-const SENSITIVITIES: VoiceDetectionSensitivity[] = ["less", "balanced", "more"];
-const PAUSES: EndOfSpeechPause[] = ["short", "standard", "long"];
+const SENSITIVITIES: VoiceInterruptionSensitivity[] = [
+  "less",
+  "balanced",
+  "more",
+];
 
-interface AdvancedVoiceDetectionDialogProps {
-  interruptionSensitivity: VoiceInterruptionSensitivity;
-  setInterruptionSensitivity: (
-    sensitivity: VoiceInterruptionSensitivity,
-  ) => void;
-}
-
-export function AdvancedVoiceDetectionDialog({
-  interruptionSensitivity,
-  setInterruptionSensitivity,
-}: AdvancedVoiceDetectionDialogProps) {
+export function AdvancedVoiceDetectionDialog() {
   const { t } = useTranslation("settings");
-  const detection = useVoiceDetectionPreference();
+  const interruption = useVoiceInterruptionPreference();
   const speechHeadingId = useId();
   const speechDescriptionId = useId();
   const interruptionHeadingId = useId();
   const interruptionDescriptionId = useId();
-  const pauseHeadingId = useId();
-  const pauseDescriptionId = useId();
 
-  const reset = () => {
-    detection.reset();
-    setInterruptionSensitivity("balanced");
-  };
+  const reset = () => interruption.resetSensitivities();
 
   return (
     <Dialog>
@@ -82,10 +66,10 @@ export function AdvancedVoiceDetectionDialog({
               </p>
             </div>
             <Select
-              value={detection.speechSensitivity}
+              value={interruption.speechSensitivity}
               onValueChange={(value) =>
-                detection.setSpeechSensitivity(
-                  value as VoiceDetectionSensitivity,
+                interruption.setSpeechSensitivity(
+                  value as VoiceInterruptionSensitivity,
                 )
               }
             >
@@ -108,81 +92,48 @@ export function AdvancedVoiceDetectionDialog({
             </Select>
           </div>
 
-          <div className="space-y-2">
-            <div>
-              <h3 id={interruptionHeadingId} className="text-sm font-medium">
-                {t("voice.advancedDetection.interruptionSensitivity")}
-              </h3>
-              <p
-                id={interruptionDescriptionId}
-                className="mt-0.5 text-xs text-muted-foreground"
+          {interruption.mode !== "preventFeedback" ? (
+            <div className="space-y-2">
+              <div>
+                <h3 id={interruptionHeadingId} className="text-sm font-medium">
+                  {t("voice.advancedDetection.interruptionSensitivity")}
+                </h3>
+                <p
+                  id={interruptionDescriptionId}
+                  className="mt-0.5 text-xs text-muted-foreground"
+                >
+                  {t(
+                    "voice.advancedDetection.interruptionSensitivityDescription",
+                  )}
+                </p>
+              </div>
+              <Select
+                value={interruption.sensitivity}
+                onValueChange={(value) =>
+                  interruption.setSensitivity(
+                    value as VoiceInterruptionSensitivity,
+                  )
+                }
               >
-                {t(
-                  "voice.advancedDetection.interruptionSensitivityDescription",
-                )}
-              </p>
+                <SelectTrigger
+                  className="w-full"
+                  aria-labelledby={interruptionHeadingId}
+                  aria-describedby={interruptionDescriptionId}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SENSITIVITIES.map((sensitivity) => (
+                    <SelectItem key={sensitivity} value={sensitivity}>
+                      {t(
+                        `voice.advancedDetection.sensitivityOptions.${sensitivity}`,
+                      )}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <Select
-              value={interruptionSensitivity}
-              onValueChange={(value) =>
-                setInterruptionSensitivity(
-                  value as VoiceInterruptionSensitivity,
-                )
-              }
-            >
-              <SelectTrigger
-                className="w-full"
-                aria-labelledby={interruptionHeadingId}
-                aria-describedby={interruptionDescriptionId}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SENSITIVITIES.map((sensitivity) => (
-                  <SelectItem key={sensitivity} value={sensitivity}>
-                    {t(
-                      `voice.advancedDetection.sensitivityOptions.${sensitivity}`,
-                    )}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <div>
-              <h3 id={pauseHeadingId} className="text-sm font-medium">
-                {t("voice.advancedDetection.endOfSpeechPause")}
-              </h3>
-              <p
-                id={pauseDescriptionId}
-                className="mt-0.5 text-xs text-muted-foreground"
-              >
-                {t("voice.advancedDetection.endOfSpeechPauseDescription")}
-              </p>
-            </div>
-            <Select
-              value={detection.endOfSpeechPause}
-              onValueChange={(value) =>
-                detection.setEndOfSpeechPause(value as EndOfSpeechPause)
-              }
-            >
-              <SelectTrigger
-                className="w-full"
-                aria-labelledby={pauseHeadingId}
-                aria-describedby={pauseDescriptionId}
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PAUSES.map((pause) => (
-                  <SelectItem key={pause} value={pause}>
-                    {t(`voice.advancedDetection.pauseOptions.${pause}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          ) : null}
         </div>
 
         <DialogFooter className="sm:justify-between">

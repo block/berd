@@ -23,7 +23,7 @@ import {
   setVoiceConversationControlsSuppressed,
 } from "../api/voiceConversation";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
-import { getVoiceDetectionPreference } from "../lib/voiceDetectionPreference";
+import { getVoiceInterruptionPreference } from "../lib/voiceInterruptionPreference";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -760,7 +760,7 @@ export function useVoiceConversationController({
         sessionId,
         inputBackend,
         foregroundGeneration,
-        getVoiceDetectionPreference(),
+        getVoiceInterruptionPreference().speechSensitivity,
       );
       startAssistantSpeech(assistantSpeechHistory);
     } catch (startError) {

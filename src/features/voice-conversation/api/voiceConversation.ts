@@ -6,7 +6,7 @@ import {
   startNativeMicrophone,
   type NativeMicrophone,
 } from "../lib/nativeMicrophone";
-import type { VoiceDetectionPreference } from "../lib/voiceDetectionPreference";
+import type { VoiceInterruptionSensitivity } from "../lib/voiceInterruptionPreference";
 
 let activeMicrophone: NativeMicrophone | null = null;
 let microphoneGeneration = 0;
@@ -512,10 +512,7 @@ export async function startVoiceConversation(
   sessionId: string,
   inputBackend: "parakeet" | "macos" = "parakeet",
   foregroundGeneration = 0,
-  voiceDetection: VoiceDetectionPreference = {
-    speechSensitivity: "more",
-    endOfSpeechPause: "standard",
-  },
+  speechDetectionSensitivity: VoiceInterruptionSensitivity = "more",
 ): Promise<VoiceConversationStatus> {
   resetMicrophoneMuteState();
   const { rendererId, rendererEpoch } = await getRendererInstance();
@@ -527,8 +524,7 @@ export async function startVoiceConversation(
       rendererId,
       rendererEpoch,
       foregroundGeneration,
-      speechDetectionSensitivity: voiceDetection.speechSensitivity,
-      endOfSpeechPause: voiceDetection.endOfSpeechPause,
+      speechDetectionSensitivity,
     },
   );
   try {
