@@ -19,7 +19,7 @@ const macSpeechSetupState = vi.hoisted(() => ({
   current: {
     status: {
       supported: false,
-      unavailableReason: "Requires macOS 26 or later.",
+      unavailableReason: "Apple speech recognition is unavailable.",
       locale: "",
       localeSupported: false,
       modelInstalled: false,
@@ -151,7 +151,7 @@ describe("VoiceSettings", () => {
     macSpeechSetupState.current = {
       status: {
         supported: false,
-        unavailableReason: "Requires macOS 26 or later.",
+        unavailableReason: "Apple speech recognition is unavailable.",
         locale: "en-US",
         localeSupported: false,
         modelInstalled: false,

@@ -16,13 +16,7 @@ export function MacSpeechSettings({ setup }: { setup: MacSpeechSetup }) {
     );
   }
   if (!status?.supported) {
-    return (
-      <p className="px-4 py-3 text-sm text-destructive" role="alert">
-        {setup.error ??
-          status?.unavailableReason ??
-          t("voice.macSpeechUnsupported")}
-      </p>
-    );
+    return null;
   }
 
   const locale = status.locale ?? t("voice.macSpeechSystemLocale");

@@ -24,7 +24,7 @@ describe("voice input preference", () => {
     expect(resolveVoiceInputBackend("parakeet", true)).toBe("parakeet");
   });
 
-  it("uses Parakeet without erasing a persisted macOS choice off macOS 26", () => {
+  it("uses Parakeet without erasing a persisted unavailable choice", () => {
     setVoiceInputBackend("macos");
     expect(getStoredVoiceInputBackend()).toBe("macos");
     expect(resolveVoiceInputBackend(getStoredVoiceInputBackend(), false)).toBe(

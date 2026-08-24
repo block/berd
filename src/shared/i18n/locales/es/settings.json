@@ -868,7 +868,7 @@
     }
   },
   "voice": {
-    "backendMacSpeech": "Reconocimiento de voz de Apple (macOS 26+)",
+    "backendMacSpeech": "Reconocimiento de voz de Apple",
     "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
     "backendSiri": "Voces de Siri (macOS)",
@@ -892,7 +892,6 @@
     "macSpeechModel": "Dictado en el dispositivo",
     "macSpeechNotInstalled": "No instalado para {{locale}}",
     "macSpeechSystemLocale": "el idioma del sistema",
-    "macSpeechUnsupported": "El reconocimiento de voz de Apple requiere macOS 26 o posterior.",
     "modelInstalled": "Instalado",
     "modelInstalledSize": "Instalado · {{size}} en disco",
     "modelMissingSize": "No instalado · descarga de {{size}}",

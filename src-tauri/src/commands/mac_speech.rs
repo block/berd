@@ -121,7 +121,7 @@ mod bridge {
         Ok(super::MacSpeechStatus {
             supported: status.supported,
             unavailable_reason: (!status.supported)
-                .then(|| "Requires macOS 26 or later.".to_string()),
+                .then(|| "Apple speech recognition is unavailable.".to_string()),
             locale: status.locale.unwrap_or_default(),
             locale_supported: status.locale_supported,
             model_installed: status.ready,
@@ -252,7 +252,7 @@ mod bridge {
 fn unsupported_status() -> MacSpeechStatus {
     MacSpeechStatus {
         supported: false,
-        unavailable_reason: Some("Requires macOS 26 or later.".to_string()),
+        unavailable_reason: Some("Apple speech recognition is unavailable.".to_string()),
         locale: String::new(),
         locale_supported: false,
         model_installed: false,
@@ -377,7 +377,7 @@ mod tests {
         assert_eq!(status.progress, None);
         assert_eq!(
             status.unavailable_reason.as_deref(),
-            Some("Requires macOS 26 or later."),
+            Some("Apple speech recognition is unavailable."),
         );
     }
 
