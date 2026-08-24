@@ -534,22 +534,72 @@ describe("voice conversation store lifecycle ordering", () => {
     });
   });
 
-  it("does not let a stale start failure mark a replacement call as errored", async () => {
+  it.each([
+    ["starting", "starting"],
+    ["running", "listening"],
+    ["stopping", "stopping"],
+  ] as const)("does not let a stale start failure mark a %s replacement as errored", async (lifecycle, uiState) => {
     const store = await loadStore();
     const startA = deferred<VoiceConversationStatus>();
-    const runningB = status("running", 4, "session-b");
+    const replacementB = status(lifecycle, 4, "session-b");
     mocks.start.mockReturnValue(startA.promise);
-    mocks.getStatus.mockResolvedValue(runningB);
+    mocks.getStatus.mockResolvedValue(replacementB);
 
     const startingA = store.getState().start("session-a");
-    store.setState({ status: runningB, uiState: "listening", error: null });
+    store.setState({ status: replacementB, uiState, error: null });
     startA.reject(new Error("session A start tail failed"));
 
     await expect(startingA).rejects.toThrow("session A start tail failed");
     expect(store.getState()).toMatchObject({
-      status: runningB,
-      uiState: "listening",
+      status: replacementB,
+      uiState,
       error: null,
+    });
+  });
+
+  it("preserves a local replacement when stale-start status refresh fails", async () => {
+    const store = await loadStore();
+    const startA = deferred<VoiceConversationStatus>();
+    const startingB = status("starting", 4, "session-b");
+    mocks.start.mockReturnValue(startA.promise);
+    mocks.getStatus.mockRejectedValue(new Error("status unavailable"));
+
+    const startingA = store.getState().start("session-a");
+    store.setState({ status: startingB, uiState: "starting", error: null });
+    startA.reject(new Error("session A start tail failed"));
+
+    await expect(startingA).rejects.toThrow("session A start tail failed");
+    expect(store.getState()).toMatchObject({
+      status: startingB,
+      uiState: "starting",
+      error: null,
+    });
+  });
+
+  it("preserves replacement activity while stale-start status refresh settles", async () => {
+    const store = await loadStore();
+    const startA = deferred<VoiceConversationStatus>();
+    const statusRefresh = deferred<VoiceConversationStatus>();
+    const runningB = status("running", 4, "session-b");
+    mocks.start.mockReturnValue(startA.promise);
+    mocks.getStatus.mockReturnValue(statusRefresh.promise);
+
+    const startingA = store.getState().start("session-a");
+    store.setState({ status: runningB, uiState: "listening", error: null });
+    startA.reject(new Error("session A start tail failed"));
+    await vi.waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(2));
+    store.setState({
+      status: runningB,
+      uiState: "agent-speaking",
+      error: "session B playback warning",
+    });
+    statusRefresh.resolve(runningB);
+
+    await expect(startingA).rejects.toThrow("session A start tail failed");
+    expect(store.getState()).toMatchObject({
+      status: runningB,
+      uiState: "agent-speaking",
+      error: "session B playback warning",
     });
   });
 

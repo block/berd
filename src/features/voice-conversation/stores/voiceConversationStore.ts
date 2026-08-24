@@ -599,10 +599,14 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             const status = await getVoiceConversationStatus();
             set((state) => {
               if (status.revision < state.status.revision) return state;
-              if (
-                status.lifecycle === "running" &&
-                status.sessionId !== sessionId
-              ) {
+              if (status.sessionId !== null && status.sessionId !== sessionId) {
+                if (
+                  state.status.sessionId === status.sessionId &&
+                  state.status.revision === status.revision &&
+                  state.status.lifecycle === status.lifecycle
+                ) {
+                  return state;
+                }
                 return {
                   status,
                   uiState: uiStateForStatus(status),
@@ -615,7 +619,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             await reconcileVoiceConversationMicrophone(get().status);
           } catch {
             set((state) =>
-              state.status.lifecycle === "running" &&
+              state.status.sessionId !== null &&
               state.status.sessionId !== sessionId
                 ? state
                 : { uiState: "error", error: message },
