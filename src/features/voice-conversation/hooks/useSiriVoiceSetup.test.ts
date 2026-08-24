@@ -209,6 +209,96 @@ describe("Siri voice locales", () => {
     });
   });
 
+  it("applies a manual selection after an in-flight auto-selection", async () => {
+    const pendingAutoSelection = deferred<void>();
+    apiMocks.getSiriVoiceStatus.mockResolvedValue(status("en-US", "Aaron"));
+    apiMocks.selectSiriVoice.mockImplementation(
+      (selection: { name: string }) =>
+        selection.name === "Quinn"
+          ? pendingAutoSelection.promise
+          : Promise.resolve(),
+    );
+    const { result } = renderHook(() => useSiriVoiceSetup(true));
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    let downloadPromise!: Promise<void>;
+    act(() => {
+      downloadPromise = result.current.downloadVoice({
+        name: "Quinn",
+        language: "en-US",
+        sizeBytes: 310_500_000,
+        installed: false,
+      });
+    });
+    await waitFor(() =>
+      expect(apiMocks.selectSiriVoice).toHaveBeenCalledWith({
+        name: "Quinn",
+        language: "en-US",
+      }),
+    );
+
+    let manualSelectionPromise!: Promise<void>;
+    act(() => {
+      manualSelectionPromise = result.current.selectVoice({
+        name: "Aaron",
+        language: "en-US",
+        sizeBytes: 1,
+        installed: true,
+      });
+    });
+    expect(apiMocks.selectSiriVoice).toHaveBeenCalledTimes(1);
+
+    pendingAutoSelection.resolve();
+    await act(async () => {
+      await Promise.all([downloadPromise, manualSelectionPromise]);
+    });
+
+    expect(apiMocks.selectSiriVoice).toHaveBeenCalledTimes(2);
+    expect(apiMocks.selectSiriVoice.mock.calls[1]?.[0]).toEqual({
+      name: "Aaron",
+      language: "en-US",
+    });
+  });
+
+  it("preserves a manual selection error across a download refresh", async () => {
+    const pendingDownload = deferred<void>();
+    apiMocks.downloadSiriVoice.mockReturnValue(pendingDownload.promise);
+    apiMocks.getSiriVoiceStatus.mockResolvedValue(status("en-US", "Aaron"));
+    apiMocks.selectSiriVoice.mockRejectedValueOnce(
+      new Error("Manual selection failed"),
+    );
+    const { result } = renderHook(() => useSiriVoiceSetup(true));
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    let downloadPromise!: Promise<void>;
+    act(() => {
+      downloadPromise = result.current.downloadVoice({
+        name: "Quinn",
+        language: "en-US",
+        sizeBytes: 310_500_000,
+        installed: false,
+      });
+    });
+    await waitFor(() => expect(apiMocks.downloadSiriVoice).toHaveBeenCalled());
+
+    await act(async () => {
+      await result.current.selectVoice({
+        name: "Aaron",
+        language: "en-US",
+        sizeBytes: 1,
+        installed: true,
+      });
+    });
+    expect(result.current.error).toContain("Manual selection failed");
+
+    pendingDownload.resolve();
+    await act(async () => {
+      await downloadPromise;
+    });
+
+    expect(result.current.error).toContain("Manual selection failed");
+  });
+
   it("refreshes the downloaded voice state when auto-selection fails", async () => {
     apiMocks.getSiriVoiceStatus.mockResolvedValue(status("en-US", "Aaron"));
     apiMocks.selectSiriVoice.mockRejectedValueOnce(
