@@ -82,6 +82,7 @@ export function VoiceSettings() {
   const outputHeadingId = useId();
   const outputDescriptionId = useId();
   const interruptionHeadingId = useId();
+  const interruptionDescriptionId = useId();
   const sensitivityHeadingId = useId();
   const sensitivityDescriptionId = useId();
   const inputReady =
@@ -180,7 +181,6 @@ export function VoiceSettings() {
                 setup={setup}
                 models={["parakeet"]}
                 showPocketVoiceControls={false}
-                embedded
               />
             ) : null
           }
@@ -223,11 +223,7 @@ export function VoiceSettings() {
             output.backend === "siri" ? (
               <SiriVoiceSettings setup={siriSetup} />
             ) : (
-              <PocketVoiceSetupContent
-                setup={setup}
-                models={["pocket"]}
-                embedded
-              />
+              <PocketVoiceSetupContent setup={setup} models={["pocket"]} />
             )
           }
         />
@@ -236,7 +232,10 @@ export function VoiceSettings() {
         <h2 id={interruptionHeadingId} className="text-sm font-medium">
           {t("voice.interruptionMode")}
         </h2>
-        <p className="text-xs text-muted-foreground">
+        <p
+          id={interruptionDescriptionId}
+          className="text-xs text-muted-foreground"
+        >
           {t("voice.interruptionDescription")}
         </p>
         <RadioGroup
@@ -245,6 +244,7 @@ export function VoiceSettings() {
             interruption.setMode(value as VoiceInterruptionMode)
           }
           aria-labelledby={interruptionHeadingId}
+          aria-describedby={interruptionDescriptionId}
           className="gap-2"
         >
           {INTERRUPTION_MODES.map((mode) => {

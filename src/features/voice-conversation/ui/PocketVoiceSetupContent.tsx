@@ -17,12 +17,10 @@ export function PocketVoiceSetupContent({
   setup,
   models: visibleModels,
   showPocketVoiceControls = true,
-  embedded = false,
 }: {
   setup: PocketVoiceSetup;
   models?: VoiceModelKind[];
   showPocketVoiceControls?: boolean;
-  embedded?: boolean;
 }) {
   const { t } = useTranslation("settings");
   const { status } = setup;
@@ -40,7 +38,6 @@ export function PocketVoiceSetupContent({
   const models = [
     {
       model: "pocket" as const,
-      label: "Pocket TTS",
       installed: pocketInstalled,
       diskBytes: status?.pocketSizeBytes ?? null,
       downloadBytes: status?.pocketDownloadBytes ?? 0,
@@ -54,7 +51,6 @@ export function PocketVoiceSetupContent({
     },
     {
       model: "parakeet" as const,
-      label: "Parakeet STT",
       installed: parakeetInstalled,
       diskBytes: status?.parakeetSizeBytes ?? null,
       downloadBytes: status?.parakeetDownloadBytes ?? 0,
@@ -74,7 +70,6 @@ export function PocketVoiceSetupContent({
         {models.map(
           ({
             model,
-            label,
             installed,
             diskBytes,
             downloadBytes,
@@ -86,29 +81,16 @@ export function PocketVoiceSetupContent({
               key={model}
               data-testid={`voice-model-${model}`}
               label={
-                embedded
-                  ? installed
-                    ? t("voice.modelInstalledSize", {
-                        size: formatBytes(diskBytes ?? 0),
-                      })
-                    : t("voice.modelMissingSize", {
-                        size: formatBytes(downloadBytes),
-                      })
-                  : label
+                installed
+                  ? t("voice.modelInstalledSize", {
+                      size: formatBytes(diskBytes ?? 0),
+                    })
+                  : t("voice.modelMissingSize", {
+                      size: formatBytes(downloadBytes),
+                    })
               }
-              description={
-                embedded
-                  ? undefined
-                  : installed
-                    ? t("voice.modelInstalledSize", {
-                        size: formatBytes(diskBytes ?? 0),
-                      })
-                    : t("voice.modelMissingSize", {
-                        size: formatBytes(downloadBytes),
-                      })
-              }
-              density={embedded ? "compact" : "default"}
-              className={embedded ? "rounded-md bg-muted/40 pl-3.5" : undefined}
+              density="compact"
+              className="rounded-md bg-muted/40 pl-3.5"
               action={
                 inProgress ? undefined : installed ? (
                   <Button
