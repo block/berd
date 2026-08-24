@@ -10,8 +10,10 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+#[cfg(any(test, target_os = "macos"))]
+use std::time::Duration;
 #[cfg(target_os = "macos")]
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
@@ -140,10 +142,107 @@ const SIRI_STREAM_EVENT: &str = "siri-voice:stream-event";
 const SIRI_STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 #[cfg(target_os = "macos")]
 const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+#[cfg(target_os = "macos")]
+const SIRI_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_millis(100);
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
 static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
 static SIRI_SETTINGS_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(any(test, target_os = "macos"))]
+struct SiriPlaybackLifetimeState<T> {
+    guard: Option<T>,
+    generation: u64,
+    cancelled: bool,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+struct SiriPlaybackLifetime<T> {
+    state: Mutex<SiriPlaybackLifetimeState<T>>,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+impl<T> Default for SiriPlaybackLifetime<T> {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(SiriPlaybackLifetimeState {
+                guard: None,
+                generation: 0,
+                cancelled: false,
+            }),
+        }
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+impl<T> SiriPlaybackLifetime<T> {
+    fn start(&self, create_guard: impl FnOnce() -> T) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.cancelled {
+            return;
+        }
+        state.generation = state.generation.wrapping_add(1);
+        if state.guard.is_none() {
+            state.guard = Some(create_guard());
+        }
+    }
+
+    fn begin_drain(&self) -> Option<u64> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.cancelled || state.guard.is_none() {
+            return None;
+        }
+        state.generation = state.generation.wrapping_add(1);
+        Some(state.generation)
+    }
+
+    fn release_if_current(&self, generation: u64) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !state.cancelled && state.generation == generation {
+            state.guard.take();
+        }
+    }
+
+    fn is_active(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .guard
+            .is_some()
+    }
+
+    fn cancel(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.cancelled = true;
+        state.generation = state.generation.wrapping_add(1);
+        state.guard.take();
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn schedule_siri_playback_release<T: Send + 'static>(
+    lifetime: &Arc<SiriPlaybackLifetime<T>>,
+    generation: u64,
+    delay: Duration,
+) -> std::thread::JoinHandle<()> {
+    let lifetime = Arc::clone(lifetime);
+    std::thread::spawn(move || {
+        std::thread::sleep(delay);
+        lifetime.release_if_current(generation);
+    })
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -392,7 +491,7 @@ struct SiriStreamCallbackContext {
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
     playback_started: AtomicBool,
-    assistant_speech: Mutex<Option<AssistantSpeechGuard>>,
+    playback_lifetime: Arc<SiriPlaybackLifetime<AssistantSpeechGuard>>,
 }
 
 #[cfg(target_os = "macos")]
@@ -403,17 +502,11 @@ unsafe extern "C" fn siri_playback_started(context: *mut std::ffi::c_void) {
     // SAFETY: The stream worker owns this boxed context until after the native
     // player has completed and been released.
     let context = unsafe { &*(context.cast::<SiriStreamCallbackContext>()) };
-    let Ok(mut assistant_speech) = context.assistant_speech.lock() else {
-        log::error!("Siri assistant speech guard lock was poisoned");
-        return;
-    };
-    if assistant_speech.is_none() {
-        *assistant_speech = Some(
-            context
-                .native_voice
-                .begin_assistant_speech(context.interruption_sensitivity, context.suppress_capture),
-        );
-    }
+    context.playback_lifetime.start(|| {
+        context
+            .native_voice
+            .begin_assistant_speech(context.interruption_sensitivity, context.suppress_capture)
+    });
     if !context.playback_started.swap(true, Ordering::AcqRel) {
         let _ = context.app.emit(
             SIRI_STREAM_EVENT,
@@ -435,11 +528,14 @@ unsafe extern "C" fn siri_playback_stopped(context: *mut std::ffi::c_void) {
     // SAFETY: The stream worker owns this boxed context until after the native
     // player has completed and been released.
     let context = unsafe { &*(context.cast::<SiriStreamCallbackContext>()) };
-    let Ok(mut assistant_speech) = context.assistant_speech.lock() else {
-        log::error!("Siri assistant speech guard lock was poisoned");
+    let Some(generation) = context.playback_lifetime.begin_drain() else {
         return;
     };
-    assistant_speech.take();
+    let _release = schedule_siri_playback_release(
+        &context.playback_lifetime,
+        generation,
+        SIRI_PLAYBACK_LATENCY_SAFETY_DURATION,
+    );
 }
 
 #[cfg(target_os = "macos")]
@@ -681,6 +777,7 @@ fn run_siri_stream(
         .map_err(|_| "Siri voice language cannot contain NUL bytes".to_string())?;
     let name = CString::new(selection.name)
         .map_err(|_| "Siri voice name cannot contain NUL bytes".to_string())?;
+    let playback_lifetime = Arc::new(SiriPlaybackLifetime::default());
     let callback_context = Box::new(SiriStreamCallbackContext {
         app: app.clone(),
         stream_id: stream_id.clone(),
@@ -688,7 +785,7 @@ fn run_siri_stream(
         interruption_sensitivity,
         suppress_capture,
         playback_started: AtomicBool::new(false),
-        assistant_speech: Mutex::new(None),
+        playback_lifetime: Arc::clone(&playback_lifetime),
     });
     let callback_context = Box::into_raw(callback_context);
     let mut error = std::ptr::null_mut();
@@ -730,13 +827,15 @@ fn run_siri_stream(
             if finishing && unsafe { berd_siri_tts_stream_is_finished(stream) } {
                 let native_error =
                     take_bridge_string(unsafe { berd_siri_tts_stream_copy_error(stream) });
-                return native_error.map_or(
-                    Ok(SiriStreamOutcome {
+                if let Some(error) = native_error {
+                    return Err(error);
+                }
+                if !playback_lifetime.is_active() {
+                    return Ok(SiriStreamOutcome {
                         state: SiriStreamEventState::Completed,
                         delivery: None,
-                    }),
-                    Err,
-                );
+                    });
+                }
             }
             if let Some(watchdog) = watchdog.as_mut() {
                 let progress = unsafe { berd_siri_tts_stream_progress(stream) };
@@ -832,8 +931,9 @@ fn run_siri_stream(
         SiriStreamFailure { error, delivery }
     });
 
+    unsafe { berd_siri_tts_stream_release(stream) };
+    playback_lifetime.cancel();
     unsafe {
-        berd_siri_tts_stream_release(stream);
         drop(Box::from_raw(callback_context));
     }
     result
@@ -1263,6 +1363,60 @@ mod tests {
 
         finish_playback(&state, &active);
         assert!(begin_playback(&state, "next-window").is_ok());
+    }
+
+    #[test]
+    fn siri_playback_guard_spans_drain_grace_and_resumed_buffering() {
+        struct DropCounter(Arc<AtomicU64>);
+        impl Drop for DropCounter {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let drops = Arc::new(AtomicU64::new(0));
+        let lifetime = Arc::new(SiriPlaybackLifetime::default());
+        lifetime.start(|| DropCounter(Arc::clone(&drops)));
+
+        let first_drain = lifetime.begin_drain().expect("first drain");
+        let first_release =
+            schedule_siri_playback_release(&lifetime, first_drain, Duration::from_millis(1));
+        assert!(lifetime.is_active());
+
+        lifetime.start(|| panic!("resumed buffering must retain the existing guard"));
+        first_release.join().expect("first release task");
+        assert!(lifetime.is_active());
+        assert_eq!(drops.load(Ordering::SeqCst), 0);
+
+        let final_drain = lifetime.begin_drain().expect("final drain");
+        schedule_siri_playback_release(&lifetime, final_drain, Duration::from_millis(1))
+            .join()
+            .expect("final release task");
+        assert!(!lifetime.is_active());
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn cancelling_siri_playback_invalidates_a_pending_grace_release() {
+        struct DropCounter(Arc<AtomicU64>);
+        impl Drop for DropCounter {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let drops = Arc::new(AtomicU64::new(0));
+        let lifetime = Arc::new(SiriPlaybackLifetime::default());
+        lifetime.start(|| DropCounter(Arc::clone(&drops)));
+        let drain = lifetime.begin_drain().expect("drain before cancellation");
+        let pending_release =
+            schedule_siri_playback_release(&lifetime, drain, Duration::from_millis(1));
+
+        lifetime.cancel();
+        assert!(!lifetime.is_active());
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        pending_release.join().expect("pending release task");
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
     }
 
     #[cfg(target_os = "macos")]
