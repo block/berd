@@ -90,21 +90,9 @@ const transcriptDeliveries = new Map<string, Promise<boolean>>();
 const deliveredTranscripts = new Set<string>();
 const deliveredTranscriptOrder: string[] = [];
 const MAX_DELIVERED_TRANSCRIPT_KEYS = 256;
-const observedFinalizedTranscripts = new Set<string>();
-const observedFinalizedTranscriptOrder: string[] = [];
 
 function observeFinalizedTranscript(transcript: PendingVoiceTranscript): void {
   const key = finalizedTranscriptKey(transcript);
-  if (!observedFinalizedTranscripts.has(key)) {
-    observedFinalizedTranscripts.add(key);
-    observedFinalizedTranscriptOrder.push(key);
-    if (
-      observedFinalizedTranscriptOrder.length > MAX_DELIVERED_TRANSCRIPT_KEYS
-    ) {
-      const expired = observedFinalizedTranscriptOrder.shift();
-      if (expired) observedFinalizedTranscripts.delete(expired);
-    }
-  }
   useVoiceConversationStore.setState({ latestFinalizedTranscriptKey: key });
 }
 
