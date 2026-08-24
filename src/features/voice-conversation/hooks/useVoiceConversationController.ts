@@ -765,24 +765,33 @@ export function useVoiceConversationController({
             : state,
         );
         startAssistantSpeech(assistantSpeechHistory);
-      } else if (
-        !conversationStarted &&
-        activeSendRoute?.sessionId === route.sessionId
-      ) {
-        activeSendRoute = null;
+      } else {
+        if (activeSendRoute?.sessionId === route.sessionId) {
+          activeSendRoute = null;
+        }
+        addErrorNotification(sessionId, errorText(startError));
       }
-      addErrorNotification(sessionId, errorText(startError));
     }
   }, [onSend, sessionId, start, startAssistantSpeech]);
 
   useEffect(() => {
-    if (status.lifecycle !== "running" || status.sessionId !== sessionId)
+    if (
+      status.lifecycle !== "running" ||
+      status.sessionId !== sessionId ||
+      status.ownerWindowLabel !== getCurrentWindow().label
+    )
       return;
     // The initiating operation captured the pre-start history boundary and
     // activates speech after native startup succeeds.
     if (operationInFlightBySession.has(sessionId)) return;
     startAssistantSpeech();
-  }, [sessionId, startAssistantSpeech, status.lifecycle, status.sessionId]);
+  }, [
+    sessionId,
+    startAssistantSpeech,
+    status.lifecycle,
+    status.ownerWindowLabel,
+    status.sessionId,
+  ]);
 
   useEffect(() => {
     if (

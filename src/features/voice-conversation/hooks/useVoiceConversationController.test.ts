@@ -921,6 +921,43 @@ describe("voice transcript delivery coordination", () => {
       uiState: "listening",
       error: null,
     });
+    expect(
+      useChatStore.getState().messagesBySession["session-a"],
+    ).toBeUndefined();
+  });
+
+  it("does not activate speech when a non-owner mounts an already-running session", () => {
+    const running = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "session-window-owner",
+      microphoneMuted: false,
+      revision: 2,
+    };
+    tauriWindowMocks.label = "session-window-mirror";
+    useVoiceConversationStore.setState({
+      status: running,
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      drainPendingTranscripts: vi.fn().mockResolvedValue(undefined),
+    });
+
+    renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-a",
+        onSend: vi.fn().mockResolvedValue(true),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+
+    expect(nativeAssistantSpeechMocks.start).not.toHaveBeenCalled();
+    expect(nativeAssistantSpeechMocks.stop).not.toHaveBeenCalled();
   });
 
   it("does not activate speech for another window's same-session lifecycle", async () => {
