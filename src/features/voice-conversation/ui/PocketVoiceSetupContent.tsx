@@ -17,10 +17,12 @@ export function PocketVoiceSetupContent({
   setup,
   models: visibleModels,
   showPocketVoiceControls = true,
+  embedded = false,
 }: {
   setup: PocketVoiceSetup;
   models?: VoiceModelKind[];
   showPocketVoiceControls?: boolean;
+  embedded?: boolean;
 }) {
   const { t } = useTranslation("settings");
   const { status } = setup;
@@ -83,16 +85,30 @@ export function PocketVoiceSetupContent({
             <SettingsRow
               key={model}
               data-testid={`voice-model-${model}`}
-              label={label}
-              description={
-                installed
-                  ? t("voice.modelInstalledSize", {
-                      size: formatBytes(diskBytes ?? 0),
-                    })
-                  : t("voice.modelMissingSize", {
-                      size: formatBytes(downloadBytes),
-                    })
+              label={
+                embedded
+                  ? installed
+                    ? t("voice.modelInstalledSize", {
+                        size: formatBytes(diskBytes ?? 0),
+                      })
+                    : t("voice.modelMissingSize", {
+                        size: formatBytes(downloadBytes),
+                      })
+                  : label
               }
+              description={
+                embedded
+                  ? undefined
+                  : installed
+                    ? t("voice.modelInstalledSize", {
+                        size: formatBytes(diskBytes ?? 0),
+                      })
+                    : t("voice.modelMissingSize", {
+                        size: formatBytes(downloadBytes),
+                      })
+              }
+              density={embedded ? "compact" : "default"}
+              className={embedded ? "rounded-md bg-muted/40 pl-3.5" : undefined}
               action={
                 inProgress ? undefined : installed ? (
                   <Button

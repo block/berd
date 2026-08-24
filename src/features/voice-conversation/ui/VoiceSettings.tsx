@@ -6,6 +6,7 @@ import { getPlatform } from "@/shared/lib/platform";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { RadioGroup, RadioGroupItem } from "@/shared/ui/radio-group";
+import { SettingsRow } from "@/shared/ui/settings-row";
 import {
   Select,
   SelectContent,
@@ -135,19 +136,15 @@ export function VoiceSettings() {
         </Alert>
       ) : null}
       <section className="space-y-2 overflow-hidden">
-        <div className="flex min-w-0 flex-col gap-4 py-4 pr-4 sm:flex-row sm:items-center">
-          <div className="min-w-0 flex-1">
-            <h2 id={inputHeadingId} className="text-sm font-medium">
-              {t("voice.speechInput")}
-            </h2>
-            <p
-              id={inputDescriptionId}
-              className="mt-0.5 text-xs text-muted-foreground"
-            >
-              {t("voice.inputBackendDescription")}
-            </p>
-          </div>
-          <div className="w-full min-w-0 sm:w-auto sm:shrink-0">
+        <SettingsRow
+          label={
+            <h2 className="text-sm font-medium">{t("voice.speechInput")}</h2>
+          }
+          description={t("voice.inputBackendDescription")}
+          labelId={inputHeadingId}
+          descriptionId={inputDescriptionId}
+          layout="responsive"
+          action={({ labelId, descriptionId }) => (
             <Select
               value={input.backend ?? undefined}
               disabled={input.backend === null}
@@ -157,8 +154,8 @@ export function VoiceSettings() {
             >
               <SelectTrigger
                 className="w-full sm:w-auto"
-                aria-labelledby={inputHeadingId}
-                aria-describedby={inputDescriptionId}
+                aria-labelledby={labelId}
+                aria-describedby={descriptionId}
               >
                 <SelectValue placeholder={t("voice.macSpeechLoading")} />
               </SelectTrigger>
@@ -174,32 +171,31 @@ export function VoiceSettings() {
                 ) : null}
               </SelectContent>
             </Select>
-          </div>
-        </div>
-        {input.backend === "macos" ? (
-          <MacSpeechSettings setup={macSpeechSetup} />
-        ) : input.backend === "parakeet" ? (
-          <PocketVoiceSetupContent
-            setup={setup}
-            models={["parakeet"]}
-            showPocketVoiceControls={false}
-          />
-        ) : null}
+          )}
+          details={
+            input.backend === "macos" ? (
+              <MacSpeechSettings setup={macSpeechSetup} />
+            ) : input.backend === "parakeet" ? (
+              <PocketVoiceSetupContent
+                setup={setup}
+                models={["parakeet"]}
+                showPocketVoiceControls={false}
+                embedded
+              />
+            ) : null
+          }
+        />
       </section>
       <section className="space-y-2">
-        <div className="flex min-w-0 flex-col gap-4 py-4 pr-4 sm:flex-row sm:items-center">
-          <div className="min-w-0 flex-1">
-            <h2 id={outputHeadingId} className="text-sm font-medium">
-              {t("voice.speechOutput")}
-            </h2>
-            <p
-              id={outputDescriptionId}
-              className="mt-0.5 text-xs text-muted-foreground"
-            >
-              {t("voice.outputBackendDescription")}
-            </p>
-          </div>
-          <div className="w-full min-w-0 sm:w-auto sm:shrink-0">
+        <SettingsRow
+          label={
+            <h2 className="text-sm font-medium">{t("voice.speechOutput")}</h2>
+          }
+          description={t("voice.outputBackendDescription")}
+          labelId={outputHeadingId}
+          descriptionId={outputDescriptionId}
+          layout="responsive"
+          action={({ labelId, descriptionId }) => (
             <Select
               value={output.backend}
               onValueChange={(value) =>
@@ -208,8 +204,8 @@ export function VoiceSettings() {
             >
               <SelectTrigger
                 className="w-full sm:w-auto"
-                aria-labelledby={outputHeadingId}
-                aria-describedby={outputDescriptionId}
+                aria-labelledby={labelId}
+                aria-describedby={descriptionId}
               >
                 <SelectValue />
               </SelectTrigger>
@@ -222,18 +218,27 @@ export function VoiceSettings() {
                 ) : null}
               </SelectContent>
             </Select>
-          </div>
-        </div>
-        {output.backend === "siri" ? (
-          <SiriVoiceSettings setup={siriSetup} />
-        ) : (
-          <PocketVoiceSetupContent setup={setup} models={["pocket"]} />
-        )}
+          )}
+          details={
+            output.backend === "siri" ? (
+              <SiriVoiceSettings setup={siriSetup} />
+            ) : (
+              <PocketVoiceSetupContent
+                setup={setup}
+                models={["pocket"]}
+                embedded
+              />
+            )
+          }
+        />
       </section>
       <section className="space-y-4 py-4 pr-4">
         <h2 id={interruptionHeadingId} className="text-sm font-medium">
           {t("voice.interruptionMode")}
         </h2>
+        <p className="text-xs text-muted-foreground">
+          {t("voice.interruptionDescription")}
+        </p>
         <RadioGroup
           value={interruption.mode}
           onValueChange={(value) =>

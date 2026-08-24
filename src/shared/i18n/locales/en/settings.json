@@ -889,7 +889,8 @@
     "macSpeechModel": "On-device dictation",
     "macSpeechNotInstalled": "Not installed for {{locale}}",
     "macSpeechSystemLocale": "the system language",
-    "interruptionMode": "While Berd is speaking",
+    "interruptionDescription": "Choose what happens when you speak while Berd is talking.",
+    "interruptionMode": "Interruptions",
     "interruptionModeDescriptions": {
       "allowInterruptions": "Berd keeps listening on every audio device. You can interrupt, but speaker audio may be mistaken for your voice.",
       "automatic": "Allows interruptions on most audio devices. If the device name contains “speaker,” Berd pauses listening to prevent feedback.",
