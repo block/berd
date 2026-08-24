@@ -428,7 +428,7 @@ pub async fn show_voice_conversation_controls(
     };
     loop {
         let apply_result = if target.suppressed {
-            window.hide()
+            window.hide().map_err(|error| error.to_string())
         } else {
             show_controls_without_activation(&window)
         };
@@ -511,7 +511,7 @@ pub fn set_voice_conversation_controls_suppressed(
             let result = if should_show {
                 show_controls_without_activation(&controls)
             } else {
-                controls.hide()
+                controls.hide().map_err(|error| error.to_string())
             };
             if let Err(error) = result {
                 state.rollback_controls_suppression(
