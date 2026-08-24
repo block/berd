@@ -2066,6 +2066,7 @@ fn run_pocket_voice_stream(
                 delivery: Some(delivery),
             });
         }
+        release_pocket_assistant_speech_if_idle(&player, &mut assistant_speech);
         match receiver.recv_timeout(Duration::from_millis(20)) {
             Ok(PocketStreamCommand::Append(text)) => {
                 pending.push_str(&text);
@@ -2133,6 +2134,7 @@ fn run_pocket_voice_stream(
                 }
                 let tail = speed_processor.drain_and_reset()?;
                 if !tail.is_empty() {
+                    release_pocket_assistant_speech_if_idle(&player, &mut assistant_speech);
                     mark_pocket_playback_started(
                         app,
                         stream_id,
@@ -2179,6 +2181,7 @@ fn run_pocket_voice_stream(
                 }
                 let tail = speed_processor.finish()?;
                 if !tail.is_empty() {
+                    release_pocket_assistant_speech_if_idle(&player, &mut assistant_speech);
                     mark_pocket_playback_started(
                         app,
                         stream_id,
@@ -2217,9 +2220,6 @@ fn run_pocket_voice_stream(
                 });
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                if player.empty() {
-                    assistant_speech.take();
-                }
                 if playback_started
                     && last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL
                 {
@@ -2267,6 +2267,16 @@ fn capture_before_stop(
     let delivery = snapshot();
     stop();
     delivery
+}
+
+#[cfg(target_os = "macos")]
+fn release_pocket_assistant_speech_if_idle(
+    player: &Player,
+    assistant_speech: &mut Option<AssistantSpeechGuard>,
+) {
+    if player.empty() {
+        assistant_speech.take();
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -2347,6 +2357,7 @@ fn synthesize_pocket_stream_ready(
                 if delta.is_empty() {
                     return true;
                 }
+                release_pocket_assistant_speech_if_idle(player, assistant_speech);
                 if let Err(error) = mark_pocket_playback_started(
                     app,
                     stream_id,

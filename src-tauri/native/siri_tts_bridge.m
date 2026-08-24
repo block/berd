@@ -550,10 +550,10 @@ typedef void (^BerdAudioHandler)(
 }
 - (void)cancel {
     void (^cancelWork)(void) = ^{
-        if (self.finished) return;
         self.startedCallback = NULL;
         self.stoppedCallback = NULL;
         self.callbackContext = NULL;
+        if (self.finished) return;
         [self.session cancel];
         [self.player stop];
         [self.engine stop];
