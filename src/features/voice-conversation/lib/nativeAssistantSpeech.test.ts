@@ -6,7 +6,21 @@ import type { PocketVoiceStreamEvent } from "../api/pocketVoice";
 
 const mocks = vi.hoisted(() => ({
   backend: "pocket" as "pocket" | "siri",
-  start: vi.fn<(streamId: string) => Promise<void>>(),
+  interruptionMode: "automatic" as
+    | "automatic"
+    | "allowInterruptions"
+    | "preventFeedback",
+  interruptionSensitivity: "balanced" as "less" | "balanced" | "more",
+  start:
+    vi.fn<
+      (
+        streamId: string,
+        interruptionMode:
+          | "automatic"
+          | "allowInterruptions"
+          | "preventFeedback",
+      ) => Promise<void>
+    >(),
   append: vi.fn<(streamId: string, text: string) => Promise<void>>(),
   flush: vi.fn<(streamId: string) => Promise<void>>(),
   finish: vi.fn<(streamId: string) => Promise<void>>(),
@@ -17,10 +31,20 @@ const mocks = vi.hoisted(() => ({
         sessionId: string,
         expectedRevision: number,
         speaking: boolean,
+        interruptionSensitivity: "less" | "balanced" | "more",
       ) => Promise<void>
     >(),
   streamHandler: null as ((event: PocketVoiceStreamEvent) => void) | null,
-  siriStart: vi.fn<(streamId: string) => Promise<void>>(),
+  siriStart:
+    vi.fn<
+      (
+        streamId: string,
+        interruptionMode:
+          | "automatic"
+          | "allowInterruptions"
+          | "preventFeedback",
+      ) => Promise<void>
+    >(),
   siriAppend: vi.fn<(streamId: string, text: string) => Promise<void>>(),
   siriFlush: vi.fn<(streamId: string) => Promise<void>>(),
   siriFinish: vi.fn<(streamId: string) => Promise<void>>(),
@@ -32,7 +56,10 @@ vi.mock("../api/voiceConversation", () => ({
 }));
 
 vi.mock("../api/pocketVoice", () => ({
-  startPocketVoiceStream: (streamId: string) => mocks.start(streamId),
+  startPocketVoiceStream: (
+    streamId: string,
+    interruptionMode: typeof mocks.interruptionMode,
+  ) => mocks.start(streamId, interruptionMode),
   appendPocketVoiceStream: (streamId: string, text: string) =>
     mocks.append(streamId, text),
   flushPocketVoiceStream: (streamId: string) => mocks.flush(streamId),
@@ -47,7 +74,10 @@ vi.mock("../api/pocketVoice", () => ({
 }));
 
 vi.mock("../api/siriVoice", () => ({
-  startSiriVoiceStream: (streamId: string) => mocks.siriStart(streamId),
+  startSiriVoiceStream: (
+    streamId: string,
+    interruptionMode: typeof mocks.interruptionMode,
+  ) => mocks.siriStart(streamId, interruptionMode),
   appendSiriVoiceStream: (streamId: string, text: string) =>
     mocks.siriAppend(streamId, text),
   flushSiriVoiceStream: (streamId: string) => mocks.siriFlush(streamId),
@@ -63,6 +93,12 @@ vi.mock("../api/siriVoice", () => ({
 
 vi.mock("./voiceOutputPreference", () => ({
   getVoiceOutputBackend: () => mocks.backend,
+}));
+vi.mock("./voiceInterruptionPreference", () => ({
+  getVoiceInterruptionPreference: () => ({
+    mode: mocks.interruptionMode,
+    sensitivity: mocks.interruptionSensitivity,
+  }),
 }));
 
 import {
@@ -99,6 +135,8 @@ describe("native assistant speech stream", () => {
   beforeEach(() => {
     takeVoicePlaybackNotices("session-1");
     mocks.backend = "pocket";
+    mocks.interruptionMode = "automatic";
+    mocks.interruptionSensitivity = "balanced";
     mocks.start.mockReset().mockResolvedValue();
     mocks.append.mockReset().mockResolvedValue();
     mocks.flush.mockReset().mockResolvedValue();
@@ -169,6 +207,8 @@ describe("native assistant speech stream", () => {
 
   it("routes the complete utterance stream through Siri when selected", async () => {
     mocks.backend = "siri";
+    mocks.interruptionMode = "allowInterruptions";
+    mocks.interruptionSensitivity = "more";
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
       .getState()
@@ -177,7 +217,10 @@ describe("native assistant speech stream", () => {
       ]);
 
     await vi.waitFor(() => {
-      expect(mocks.siriStart).toHaveBeenCalledTimes(1);
+      expect(mocks.siriStart).toHaveBeenCalledWith(
+        expect.any(String),
+        "allowInterruptions",
+      );
       expect(mocks.siriAppend).toHaveBeenCalledWith(
         mocks.siriStart.mock.calls[0]?.[0],
         "Hello from Siri.",
@@ -308,6 +351,7 @@ describe("native assistant speech stream", () => {
         "session-1",
         1,
         true,
+        "balanced",
       ),
     );
     expect(mocks.append).not.toHaveBeenCalledWith(
@@ -331,6 +375,7 @@ describe("native assistant speech stream", () => {
         "session-1",
         1,
         true,
+        "balanced",
       ),
     );
     expect(
@@ -359,6 +404,7 @@ describe("native assistant speech stream", () => {
         "session-1",
         1,
         false,
+        "balanced",
       ),
     );
     expect(
@@ -391,12 +437,14 @@ describe("native assistant speech stream", () => {
         "session-1",
         1,
         true,
+        "balanced",
       ),
     );
     expect(mocks.setAssistantSpeaking).not.toHaveBeenCalledWith(
       "session-1",
       1,
       false,
+      "balanced",
     );
 
     finishSpeakingReport?.();
@@ -405,6 +453,7 @@ describe("native assistant speech stream", () => {
         "session-1",
         1,
         false,
+        "balanced",
       ),
     );
   });
@@ -707,6 +756,7 @@ describe("native assistant speech stream", () => {
       "session-1",
       1,
       true,
+      "balanced",
     );
     resolveStop?.(true);
     emit("interrupted");

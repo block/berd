@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, Receiver, SyncSender, TrySendError},
         Arc, Mutex,
     },
@@ -49,6 +49,17 @@ pub enum VoiceInputBackend {
     Macos,
 }
 
+fn active_vad_threshold(
+    assistant_speaking: &AtomicBool,
+    assistant_vad_threshold: &AtomicU32,
+) -> f32 {
+    if assistant_speaking.load(Ordering::Acquire) {
+        f32::from_bits(assistant_vad_threshold.load(Ordering::Acquire))
+    } else {
+        VAD_THRESHOLD
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MicrophoneMuteRequest {
@@ -65,8 +76,27 @@ pub struct AssistantSpeakingRequest {
     session_id: String,
     expected_revision: u64,
     speaking: bool,
+    interruption_sensitivity: InterruptionSensitivity,
     renderer_id: String,
     renderer_epoch: u64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum InterruptionSensitivity {
+    Less,
+    Balanced,
+    More,
+}
+
+impl InterruptionSensitivity {
+    fn vad_threshold(self) -> f32 {
+        match self {
+            Self::Less => 0.65,
+            Self::Balanced => VAD_THRESHOLD,
+            Self::More => 0.35,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Serialize)]
@@ -217,6 +247,8 @@ pub struct NativeVoiceState {
     microphone_muted: Arc<AtomicBool>,
     input_muted: Arc<AtomicBool>,
     input_mute_epoch: Arc<AtomicU64>,
+    assistant_speaking: Arc<AtomicBool>,
+    assistant_vad_threshold: Arc<AtomicU32>,
 }
 
 #[must_use = "capture suppression ends when the guard is dropped"]
@@ -570,12 +602,20 @@ impl NativeVoiceState {
         session_id: &str,
         expected_revision: u64,
         speaking: bool,
+        interruption_sensitivity: InterruptionSensitivity,
     ) -> Result<(), String> {
         let Some((owner_window_label, revision)) =
             self.assistant_activity_target(caller_window_label, session_id, expected_revision)?
         else {
             return Ok(());
         };
+        if speaking {
+            self.assistant_vad_threshold.store(
+                interruption_sensitivity.vad_threshold().to_bits(),
+                Ordering::Release,
+            );
+        }
+        self.assistant_speaking.store(speaking, Ordering::Release);
         let event = NativeVoiceEvent::Activity {
             session_id: session_id.to_string(),
             activity: if speaking {
@@ -611,6 +651,7 @@ impl NativeVoiceState {
         let owner = runtime.owner.clone();
         let session_id = runtime.session_id.clone();
         let owner_id = session_id.as_deref().map(native_owner_id);
+        self.assistant_speaking.store(false, Ordering::Release);
         Ok(Some((
             session_id,
             runtime.revision,
@@ -676,6 +717,8 @@ impl SttPipeline {
         model_dir: PathBuf,
         input_muted: Arc<AtomicBool>,
         input_mute_epoch: Arc<AtomicU64>,
+        assistant_speaking: Arc<AtomicBool>,
+        assistant_vad_threshold: Arc<AtomicU32>,
     ) -> Result<(Self, tokio_mpsc::Receiver<SttMessage>), String> {
         let (audio_tx, audio_rx) = mpsc::sync_channel(AUDIO_QUEUE_DEPTH);
         let (event_tx, event_rx) = tokio_mpsc::channel(64);
@@ -699,6 +742,8 @@ impl SttPipeline {
                     worker_input_muted,
                     worker_input_mute_epoch,
                     worker_shutdown_mute_epoch,
+                    assistant_speaking,
+                    assistant_vad_threshold,
                 )
             })
             .map_err(|error| format!("start native transcription: {error}"))?;
@@ -1169,6 +1214,7 @@ pub async fn start_native_voice_conversation(
         runtime.controls_suppressed = true;
         runtime.controls_visibility_generation = 0;
         state.microphone_muted.store(false, Ordering::SeqCst);
+        state.assistant_speaking.store(false, Ordering::Release);
         let runtime_revision = runtime.revision;
         let mute_app = app.clone();
         let mute_window = webview_window.clone();
@@ -1426,6 +1472,7 @@ pub fn set_native_voice_assistant_speaking(
                 &request.session_id,
                 request.expected_revision,
                 request.speaking,
+                request.interruption_sensitivity,
             )
         },
     )
@@ -2335,6 +2382,8 @@ fn stt_worker(
     input_muted: Arc<AtomicBool>,
     input_mute_epoch: Arc<AtomicU64>,
     shutdown_mute_epoch: Arc<AtomicU64>,
+    assistant_speaking: Arc<AtomicBool>,
+    assistant_vad_threshold: Arc<AtomicU32>,
 ) {
     use rubato::{Fft, FixedSync, Resampler};
     use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig};
@@ -2420,7 +2469,9 @@ fn stt_worker(
                 let frame: Vec<f32> = leftover_16k.drain(..VAD_FRAME_SAMPLES).collect();
                 let clamped: Vec<f32> =
                     frame.iter().map(|sample| sample.clamp(-1.0, 1.0)).collect();
-                let speaking = vad.predict_f32(&clamped) > VAD_THRESHOLD;
+                let vad_threshold =
+                    active_vad_threshold(&assistant_speaking, &assistant_vad_threshold);
+                let speaking = vad.predict_f32(&clamped) > vad_threshold;
                 if speaking {
                     if !in_speech {
                         in_speech = true;
@@ -2722,6 +2773,24 @@ mod tests {
             true,
             false,
         ));
+    }
+
+    #[test]
+    fn interruption_sensitivity_only_changes_vad_while_assistant_speaks() {
+        let assistant_speaking = AtomicBool::new(false);
+        let threshold = AtomicU32::new(InterruptionSensitivity::More.vad_threshold().to_bits());
+        assert_eq!(
+            active_vad_threshold(&assistant_speaking, &threshold),
+            VAD_THRESHOLD
+        );
+
+        assistant_speaking.store(true, Ordering::Release);
+        assert_eq!(
+            active_vad_threshold(&assistant_speaking, &threshold),
+            InterruptionSensitivity::More.vad_threshold()
+        );
+        assert!(InterruptionSensitivity::Less.vad_threshold() > VAD_THRESHOLD);
+        assert!(InterruptionSensitivity::More.vad_threshold() < VAD_THRESHOLD);
     }
 
     #[test]

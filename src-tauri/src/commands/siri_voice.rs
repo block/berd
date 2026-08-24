@@ -19,8 +19,11 @@ use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 
 use super::native_voice::NativeVoiceState;
+use super::pocket_voice::VoiceInterruptionMode;
 #[cfg(target_os = "macos")]
-use super::pocket_voice::{effective_output_device_name, output_device_uses_speakers};
+use super::pocket_voice::{
+    effective_output_device_name, output_device_uses_speakers, should_suppress_capture,
+};
 
 #[derive(Clone, Debug, Default)]
 pub struct SiriVoiceState {
@@ -798,10 +801,18 @@ pub fn start_siri_voice_stream(
     state: tauri::State<'_, SiriVoiceState>,
     native_voice: tauri::State<'_, NativeVoiceState>,
     stream_id: String,
+    interruption_mode: VoiceInterruptionMode,
 ) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, webview_window, state, native_voice, stream_id);
+        let _ = (
+            app,
+            webview_window,
+            state,
+            native_voice,
+            stream_id,
+            interruption_mode,
+        );
         Err("Siri TTS is only available on macOS".to_string())
     }
 
@@ -815,11 +826,16 @@ pub fn start_siri_voice_stream(
             "Select an installed Siri voice in Voice settings before using Siri TTS".to_string()
         })?;
         let active = begin_playback(&state, webview_window.label())?;
-        let capture_suppression =
-            output_device_uses_speakers(effective_output_device_name(None).as_deref()).then(|| {
-                log::info!("[voice-echo-guard] speaker output detected");
-                native_voice.suppress_capture()
-            });
+        let capture_suppression = should_suppress_capture(
+            interruption_mode,
+            effective_output_device_name(None).as_deref(),
+        )
+        .then(|| {
+            log::info!(
+                "[voice-echo-guard] capture suppression selected mode={interruption_mode:?}"
+            );
+            native_voice.suppress_capture()
+        });
         let (sender, receiver) = mpsc::channel();
         {
             let mut runtime = state

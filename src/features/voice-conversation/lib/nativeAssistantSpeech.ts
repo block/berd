@@ -24,6 +24,11 @@ import {
   type SiriVoiceStreamEvent,
 } from "../api/siriVoice";
 import { setVoiceConversationAssistantSpeaking } from "../api/voiceConversation";
+import {
+  getVoiceInterruptionPreference,
+  type VoiceInterruptionMode,
+  type VoiceInterruptionSensitivity,
+} from "./voiceInterruptionPreference";
 import { getVoiceOutputBackend } from "./voiceOutputPreference";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
@@ -41,6 +46,8 @@ type ActiveUtterance = {
   id: string;
   sessionId: string;
   voiceRevision: number;
+  interruptionMode: VoiceInterruptionMode;
+  interruptionSensitivity: VoiceInterruptionSensitivity;
   targets: SpeechTarget[];
   targetSpans: SpeechTargetSpan[];
   text: string;
@@ -105,6 +112,7 @@ function reportAssistantActivity(
   sessionId: string,
   expectedRevision: number,
   speaking: boolean,
+  interruptionSensitivity = getVoiceInterruptionPreference().sensitivity,
 ): void {
   activityReportQueue = activityReportQueue
     .catch(() => undefined)
@@ -113,6 +121,7 @@ function reportAssistantActivity(
         sessionId,
         expectedRevision,
         speaking,
+        interruptionSensitivity,
       ),
     )
     .catch((error) => {
@@ -542,6 +551,7 @@ function handleStreamEvent(
         utterance.sessionId,
         utterance.voiceRevision,
         true,
+        utterance.interruptionSensitivity,
       );
       break;
     case "completed":
@@ -772,12 +782,15 @@ export function startNativeAssistantSpeech(
       }
       return activeUtterance;
     }
+    const interruptionPreference = getVoiceInterruptionPreference();
     const utterance: ActiveUtterance = {
       id: crypto.randomUUID(),
       sessionId,
       voiceRevision:
         activeSpeechRevision ??
         useVoiceConversationStore.getState().status.revision,
+      interruptionMode: interruptionPreference.mode,
+      interruptionSensitivity: interruptionPreference.sensitivity,
       targets: [target],
       targetSpans: [],
       text: "",
@@ -810,7 +823,7 @@ export function startNativeAssistantSpeech(
       utterance,
       async () => {
         await streamListenerReady;
-        await streamBackend.start(utterance.id);
+        await streamBackend.start(utterance.id, utterance.interruptionMode);
         if (
           utterance.interruptionRequested ||
           activeUtterance?.id !== utterance.id

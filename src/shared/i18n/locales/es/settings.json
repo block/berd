@@ -892,6 +892,24 @@
     "macSpeechModel": "Dictado en el dispositivo",
     "macSpeechNotInstalled": "No instalado para {{locale}}",
     "macSpeechSystemLocale": "el idioma del sistema",
+    "interruptionMode": "Mientras Berd habla",
+    "interruptionModeDescriptions": {
+      "allowInterruptions": "Sigue escuchando para que puedas interrumpir con cualquier dispositivo de salida.",
+      "automatic": "Escucha con auriculares y evita la retroalimentación por los altavoces.",
+      "preventFeedback": "Pausa el reconocimiento de voz hasta que Berd termine de hablar."
+    },
+    "interruptionModes": {
+      "allowInterruptions": "Permitir interrupciones",
+      "automatic": "Automático",
+      "preventFeedback": "Evitar retroalimentación"
+    },
+    "interruptionSensitivities": {
+      "balanced": "Equilibrada",
+      "less": "Menor",
+      "more": "Mayor"
+    },
+    "interruptionSensitivity": "Sensibilidad de interrupción",
+    "interruptionSensitivityDescription": "Elige con qué facilidad tu voz interrumpe a Berd.",
     "modelInstalled": "Instalado",
     "modelInstalledSize": "Instalado · {{size}} en disco",
     "modelMissingSize": "No instalado · descarga de {{size}}",

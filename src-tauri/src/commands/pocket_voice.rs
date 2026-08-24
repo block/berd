@@ -489,6 +489,26 @@ pub(crate) fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
     output_device.is_some_and(|name| name.to_lowercase().contains("speaker"))
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum VoiceInterruptionMode {
+    Automatic,
+    AllowInterruptions,
+    PreventFeedback,
+}
+
+#[cfg_attr(not(any(test, target_os = "macos")), allow(dead_code))]
+pub(crate) fn should_suppress_capture(
+    mode: VoiceInterruptionMode,
+    output_device: Option<&str>,
+) -> bool {
+    match mode {
+        VoiceInterruptionMode::Automatic => output_device_uses_speakers(output_device),
+        VoiceInterruptionMode::AllowInterruptions => false,
+        VoiceInterruptionMode::PreventFeedback => true,
+    }
+}
+
 fn file_has_size(path: &Path, size: u64) -> bool {
     fs::metadata(path).is_ok_and(|metadata| metadata.len() == size)
 }
@@ -823,10 +843,11 @@ pub fn start_pocket_voice_stream(
     state: State<'_, PocketVoiceState>,
     native_voice: State<'_, NativeVoiceState>,
     stream_id: String,
+    interruption_mode: VoiceInterruptionMode,
 ) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, state, native_voice, stream_id);
+        let _ = (app, state, native_voice, stream_id, interruption_mode);
         Err("Pocket voice playback is currently supported on macOS only".to_string())
     }
 
@@ -849,11 +870,15 @@ pub fn start_pocket_voice_stream(
         let speed = playback_speed(&base);
         let output_device = selected_output_device();
         let effective_output_device = effective_output_device_name(output_device.as_deref());
-        let capture_suppression = output_device_uses_speakers(effective_output_device.as_deref())
-            .then(|| {
-                log::info!("[voice-echo-guard] speaker output detected");
-                native_voice.suppress_capture()
-            });
+        let capture_suppression =
+            should_suppress_capture(interruption_mode, effective_output_device.as_deref()).then(
+                || {
+                    log::info!(
+                    "[voice-echo-guard] capture suppression selected mode={interruption_mode:?}"
+                );
+                    native_voice.suppress_capture()
+                },
+            );
         let (sender, receiver) = mpsc::channel();
         {
             let mut playback = state
@@ -2850,6 +2875,26 @@ mod tests {
             assert!(!output_device_uses_speakers(Some(name)), "{name}");
         }
         assert!(!output_device_uses_speakers(None));
+    }
+
+    #[test]
+    fn interruption_mode_selects_capture_suppression_policy() {
+        assert!(should_suppress_capture(
+            VoiceInterruptionMode::Automatic,
+            Some("MacBook Pro Speakers"),
+        ));
+        assert!(!should_suppress_capture(
+            VoiceInterruptionMode::Automatic,
+            Some("AirPods Pro"),
+        ));
+        assert!(!should_suppress_capture(
+            VoiceInterruptionMode::AllowInterruptions,
+            Some("MacBook Pro Speakers"),
+        ));
+        assert!(should_suppress_capture(
+            VoiceInterruptionMode::PreventFeedback,
+            Some("AirPods Pro"),
+        ));
     }
 
     #[test]

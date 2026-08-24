@@ -6,6 +6,7 @@ import {
   startNativeMicrophone,
   type NativeMicrophone,
 } from "../lib/nativeMicrophone";
+import type { VoiceInterruptionSensitivity } from "../lib/voiceInterruptionPreference";
 
 let activeMicrophone: NativeMicrophone | null = null;
 let microphoneGeneration = 0;
@@ -437,6 +438,7 @@ export async function setVoiceConversationAssistantSpeaking(
   sessionId: string,
   expectedRevision: number,
   speaking: boolean,
+  interruptionSensitivity: VoiceInterruptionSensitivity,
 ): Promise<void> {
   const { rendererId, rendererEpoch } = await getRendererInstance();
   return invoke("set_native_voice_assistant_speaking", {
@@ -444,6 +446,7 @@ export async function setVoiceConversationAssistantSpeaking(
       sessionId,
       expectedRevision,
       speaking,
+      interruptionSensitivity,
       rendererId,
       rendererEpoch,
     },

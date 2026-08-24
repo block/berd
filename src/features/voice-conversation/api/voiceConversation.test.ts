@@ -284,7 +284,7 @@ describe("voice conversation API", () => {
     await openVoiceConversationSession();
     await showVoiceConversationControls("session-1", 3);
     await setVoiceConversationControlsSuppressed("session-1", 3, true);
-    await setVoiceConversationAssistantSpeaking("session-1", 3, true);
+    await setVoiceConversationAssistantSpeaking("session-1", 3, true, "more");
     await stopVoiceConversationFromBuddy(status);
 
     expect(mocks.invoke.mock.calls).toEqual([
@@ -312,6 +312,7 @@ describe("voice conversation API", () => {
             sessionId: "session-1",
             expectedRevision: 3,
             speaking: true,
+            interruptionSensitivity: "more",
             rendererId: "renderer-test",
             rendererEpoch: 7,
           },

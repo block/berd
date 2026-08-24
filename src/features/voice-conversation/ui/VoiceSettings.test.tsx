@@ -40,6 +40,10 @@ const inputState = vi.hoisted(() => ({
 const outputState = vi.hoisted(() => ({
   backend: "pocket" as VoiceOutputBackend,
 }));
+const interruptionState = vi.hoisted(() => ({
+  mode: "automatic" as "automatic" | "allowInterruptions" | "preventFeedback",
+  sensitivity: "balanced" as "less" | "balanced" | "more",
+}));
 
 vi.mock("../hooks/usePocketVoiceSetup", () => ({
   usePocketVoiceSetup: () => setupState.current,
@@ -63,6 +67,13 @@ vi.mock("../lib/voiceInputPreference", async (importOriginal) => ({
   useVoiceInputPreference: () => ({
     backend: inputState.backend,
     setBackend: vi.fn(),
+  }),
+}));
+vi.mock("../lib/voiceInterruptionPreference", () => ({
+  useVoiceInterruptionPreference: () => ({
+    ...interruptionState,
+    setMode: vi.fn(),
+    setSensitivity: vi.fn(),
   }),
 }));
 
@@ -166,7 +177,46 @@ describe("VoiceSettings", () => {
       refresh: vi.fn(),
       install: vi.fn(),
     };
+    interruptionState.mode = "automatic";
+    interruptionState.sensitivity = "balanced";
     siriSetupState.current = siriSetup();
+  });
+
+  it("shows sensitivity for automatic and allow-interruptions modes", () => {
+    setupState.current = setup(pocketStatus());
+    const view = renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByRole("combobox", { name: "While Berd is speaking" }),
+    ).toHaveAccessibleDescription(
+      "Listens through headphones and prevents feedback through speakers.",
+    );
+    expect(
+      screen.getByRole("combobox", { name: "Interruption sensitivity" }),
+    ).toHaveAccessibleDescription(
+      "Choose how easily your voice interrupts Berd.",
+    );
+
+    interruptionState.mode = "allowInterruptions";
+    view.rerender(<VoiceSettings />);
+    expect(
+      screen.getByRole("combobox", { name: "Interruption sensitivity" }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides sensitivity when feedback prevention disables interruptions", () => {
+    setupState.current = setup(pocketStatus());
+    interruptionState.mode = "preventFeedback";
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByRole("combobox", { name: "While Berd is speaking" }),
+    ).toHaveAccessibleDescription(
+      "Pauses speech recognition until Berd finishes speaking.",
+    );
+    expect(
+      screen.queryByRole("combobox", { name: "Interruption sensitivity" }),
+    ).not.toBeInTheDocument();
   });
 
   it("uses one accessible speech output heading for the backend picker", () => {

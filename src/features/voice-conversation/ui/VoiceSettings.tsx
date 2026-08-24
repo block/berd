@@ -19,6 +19,11 @@ import {
   isMacSpeechAvailable,
   useVoiceInputPreference,
 } from "../lib/voiceInputPreference";
+import type {
+  VoiceInterruptionMode,
+  VoiceInterruptionSensitivity,
+} from "../lib/voiceInterruptionPreference";
+import { useVoiceInterruptionPreference } from "../lib/voiceInterruptionPreference";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
 import { useVoiceOutputPreference } from "../lib/voiceOutputPreference";
 import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
@@ -60,12 +65,17 @@ export function VoiceSettings() {
     isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
   const output = useVoiceOutputPreference();
+  const interruption = useVoiceInterruptionPreference();
   const siriSetup = useSiriVoiceSetup(output.backend === "siri");
   const siriSupported = getPlatform() === "mac";
   const inputHeadingId = useId();
   const inputDescriptionId = useId();
   const outputHeadingId = useId();
   const outputDescriptionId = useId();
+  const interruptionHeadingId = useId();
+  const interruptionDescriptionId = useId();
+  const sensitivityHeadingId = useId();
+  const sensitivityDescriptionId = useId();
   const inputReady =
     input.backend === "macos"
       ? Boolean(
@@ -167,6 +177,92 @@ export function VoiceSettings() {
             models={["parakeet"]}
             showPocketVoiceControls={false}
           />
+        ) : null}
+      </section>
+      <section className="space-y-2">
+        <div className="flex min-w-0 flex-col gap-4 py-4 pr-4 sm:flex-row sm:items-center">
+          <div className="min-w-0 flex-1">
+            <h2 id={interruptionHeadingId} className="text-sm font-medium">
+              {t("voice.interruptionMode")}
+            </h2>
+            <p
+              id={interruptionDescriptionId}
+              className="mt-0.5 text-xs text-muted-foreground"
+            >
+              {t(`voice.interruptionModeDescriptions.${interruption.mode}`)}
+            </p>
+          </div>
+          <div className="w-full min-w-0 sm:w-auto sm:shrink-0">
+            <Select
+              value={interruption.mode}
+              onValueChange={(value) =>
+                interruption.setMode(value as VoiceInterruptionMode)
+              }
+            >
+              <SelectTrigger
+                className="w-full sm:w-auto"
+                aria-labelledby={interruptionHeadingId}
+                aria-describedby={interruptionDescriptionId}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="automatic">
+                  {t("voice.interruptionModes.automatic")}
+                </SelectItem>
+                <SelectItem value="allowInterruptions">
+                  {t("voice.interruptionModes.allowInterruptions")}
+                </SelectItem>
+                <SelectItem value="preventFeedback">
+                  {t("voice.interruptionModes.preventFeedback")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+        {interruption.mode !== "preventFeedback" ? (
+          <div className="flex min-w-0 flex-col gap-4 py-4 pr-4 sm:flex-row sm:items-center">
+            <div className="min-w-0 flex-1">
+              <h2 id={sensitivityHeadingId} className="text-sm font-medium">
+                {t("voice.interruptionSensitivity")}
+              </h2>
+              <p
+                id={sensitivityDescriptionId}
+                className="mt-0.5 text-xs text-muted-foreground"
+              >
+                {t("voice.interruptionSensitivityDescription")}
+              </p>
+            </div>
+            <div className="w-full min-w-0 sm:w-auto sm:shrink-0">
+              <Select
+                value={interruption.sensitivity}
+                onValueChange={(value) =>
+                  interruption.setSensitivity(
+                    value as VoiceInterruptionSensitivity,
+                  )
+                }
+              >
+                <SelectTrigger
+                  className="w-full sm:w-auto"
+                  aria-labelledby={sensitivityHeadingId}
+                  aria-describedby={sensitivityDescriptionId}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="less">
+                    {t("voice.interruptionSensitivities.less")}
+                  </SelectItem>
+                  <SelectItem value="balanced">
+                    {t("voice.interruptionSensitivities.balanced")}
+                  </SelectItem>
+                  <SelectItem value="more">
+                    {t("voice.interruptionSensitivities.more")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
         ) : null}
       </section>
       <section className="space-y-2">

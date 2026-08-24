@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { shareInFlight } from "@/shared/lib/shareInFlight";
+import type { VoiceInterruptionMode } from "../lib/voiceInterruptionPreference";
 
 export interface PocketVoice {
   id: string;
@@ -100,8 +101,11 @@ export function speakPocketVoice(text: string): Promise<void> {
   return invoke("speak_pocket_voice", { text });
 }
 
-export function startPocketVoiceStream(streamId: string): Promise<void> {
-  return invoke("start_pocket_voice_stream", { streamId });
+export function startPocketVoiceStream(
+  streamId: string,
+  interruptionMode: VoiceInterruptionMode,
+): Promise<void> {
+  return invoke("start_pocket_voice_stream", { streamId, interruptionMode });
 }
 
 export function appendPocketVoiceStream(
