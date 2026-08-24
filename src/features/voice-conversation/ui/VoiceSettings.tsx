@@ -1,11 +1,10 @@
 import { CircleAlert } from "lucide-react";
 import { useId } from "react";
 import { useTranslation } from "react-i18next";
-import { cn } from "@/shared/lib/cn";
 import { getPlatform } from "@/shared/lib/platform";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
-import { RadioGroup, RadioGroupItem } from "@/shared/ui/radio-group";
+import { RadioGroup, RadioGroupCard } from "@/shared/ui/radio-group";
 import {
   Select,
   SelectContent,
@@ -245,24 +244,13 @@ export function VoiceSettings() {
           {INTERRUPTION_MODES.map((mode) => {
             const optionId = `${interruptionHeadingId}-${mode}`;
             return (
-              <label
+              <RadioGroupCard
                 key={mode}
-                htmlFor={optionId}
-                className={cn(
-                  "flex cursor-pointer items-start gap-3 rounded-md border border-border px-3 py-3 transition-colors",
-                  interruption.mode === mode && "border-primary bg-muted",
-                )}
-              >
-                <RadioGroupItem id={optionId} value={mode} className="mt-0.5" />
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium">
-                    {t(`voice.interruptionModes.${mode}`)}
-                  </span>
-                  <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
-                    {t(`voice.interruptionModeDescriptions.${mode}`)}
-                  </span>
-                </span>
-              </label>
+                id={optionId}
+                value={mode}
+                label={t(`voice.interruptionModes.${mode}`)}
+                description={t(`voice.interruptionModeDescriptions.${mode}`)}
+              />
             );
           })}
         </RadioGroup>

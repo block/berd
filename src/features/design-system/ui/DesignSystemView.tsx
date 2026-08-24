@@ -143,7 +143,11 @@ import {
 } from "@/shared/ui/pagination";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { Progress } from "@/shared/ui/progress";
-import { RadioGroup, RadioGroupItem } from "@/shared/ui/radio-group";
+import {
+  RadioGroup,
+  RadioGroupCard,
+  RadioGroupItem,
+} from "@/shared/ui/radio-group";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -317,7 +321,7 @@ const componentPageDescriptions: Partial<Record<string, string>> = {
   Progress:
     "Linear completion feedback tied to primary color and track tokens.",
   "Radio Group":
-    "Single-choice controls with grouped keyboard behavior and selected state tokens.",
+    "Single-choice controls with grouped keyboard behavior, selected state tokens, and an optional full-row card treatment.",
   "Resizable Handle": "Drag handle affordances for resizable panel layouts.",
   "Scroll Area":
     "Custom scroll containers that preserve overlay and scrollbar consistency.",
@@ -2627,16 +2631,32 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
   ),
   Progress: () => <Progress value={62} className="w-72" />,
   "Radio Group": () => (
-    <RadioGroup defaultValue="comfortable">
-      <Label className="items-center">
-        <RadioGroupItem value="compact" />
-        Compact
-      </Label>
-      <Label className="items-center">
-        <RadioGroupItem value="comfortable" />
-        Comfortable
-      </Label>
-    </RadioGroup>
+    <div className="grid w-80 gap-5">
+      <RadioGroup defaultValue="comfortable">
+        <Label className="items-center">
+          <RadioGroupItem value="compact" />
+          Compact
+        </Label>
+        <Label className="items-center">
+          <RadioGroupItem value="comfortable" />
+          Comfortable
+        </Label>
+      </RadioGroup>
+      <RadioGroup defaultValue="automatic" className="gap-2">
+        <RadioGroupCard
+          id="radio-card-automatic"
+          value="automatic"
+          label="Automatic"
+          description="Choose behavior based on the current audio output."
+        />
+        <RadioGroupCard
+          id="radio-card-prevent"
+          value="prevent"
+          label="Prevent feedback"
+          description="Pause listening while audio is playing."
+        />
+      </RadioGroup>
+    </div>
   ),
   "Resizable Handle": () => (
     <ResizablePanelGroup
