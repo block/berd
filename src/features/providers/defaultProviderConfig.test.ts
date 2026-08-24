@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderConfigStatusDto } from "@aaif/goose-sdk";
 import {
   getModelDiscoveryProviderIds,
+  MODEL_DISCOVERY_SECRET_LOOKUP_TIMEOUT_MS,
   reconcileManagedDefaultProviderSelection,
   saveDefaultProviderSelection,
   saveDefaultProviderSelectionFromConfiguredProvider,
@@ -334,6 +335,30 @@ describe("saveDefaultProviderSelectionFromConfiguredProvider", () => {
     await expect(getModelDiscoveryProviderIds(statuses)).resolves.toContain(
       "lmstudio",
     );
+  });
+
+  it("bounds secret lookup before returning status-based discovery", async () => {
+    vi.useFakeTimers();
+    try {
+      const statuses = [status("lmstudio", true)];
+      mockClientWithStatuses(statuses);
+      const client = await mockGetClient();
+      vi.mocked(client.goose.GooseUnstableProvidersSecretsList).mockReturnValue(
+        new Promise(() => {}) as never,
+      );
+
+      let discovered: string[] | undefined;
+      void getModelDiscoveryProviderIds(statuses).then((providerIds) => {
+        discovered = providerIds;
+      });
+
+      await vi.advanceTimersByTimeAsync(
+        MODEL_DISCOVERY_SECRET_LOOKUP_TIMEOUT_MS,
+      );
+      expect(discovered).toContain("lmstudio");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("discovers an aliased OAuth credential when Goose's field status misses it", async () => {

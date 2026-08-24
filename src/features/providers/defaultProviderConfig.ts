@@ -20,6 +20,28 @@ import {
   getDefaultGooseModelProviderId,
 } from "@/features/runtime-config/defaults";
 
+export const MODEL_DISCOVERY_SECRET_LOOKUP_TIMEOUT_MS = 3_000;
+
+async function listProviderSecretsForDiscovery() {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timeoutId = setTimeout(
+      () => resolve(null),
+      MODEL_DISCOVERY_SECRET_LOOKUP_TIMEOUT_MS,
+    );
+  });
+
+  try {
+    return await Promise.race([listProviderSecrets(), timeout]);
+  } catch {
+    return null;
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 /**
  * Providers eligible for default-provider recovery: Goose reports them
  * configured AND they have deliberate setup evidence: a stored Goose
@@ -72,12 +94,10 @@ export async function getModelDiscoveryProviderIds(
       .filter((status) => status.isConfigured)
       .map((status) => status.providerId),
   );
-  let credentialedIds: ReadonlySet<string> = new Set();
-  try {
-    credentialedIds = getCredentialedProviderIds(await listProviderSecrets());
-  } catch {
-    // Status-based discovery remains useful when secure storage is unavailable.
-  }
+  const secrets = await listProviderSecretsForDiscovery();
+  const credentialedIds: ReadonlySet<string> = secrets
+    ? getCredentialedProviderIds(secrets)
+    : new Set();
   return getModelProviders()
     .filter(
       (provider) =>
