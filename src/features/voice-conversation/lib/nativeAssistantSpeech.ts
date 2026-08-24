@@ -271,19 +271,10 @@ function applyInterruptionEstimate(
   const firstTargetKey = utterance.targets[0]
     ? targetKey(utterance.targets[0])
     : null;
-  for (const target of utterance.targets) {
-    const spans = utterance.targetSpans.filter(
-      (span) => targetKey(span) === targetKey(target),
-    );
-    const targetLength = spans.reduce(
-      (length, span) => length + (span.end - span.start),
-      0,
-    );
-    const localCutoff = spans.reduce(
-      (length, span) =>
-        length + Math.max(0, Math.min(span.end, estimate.cutoff) - span.start),
-      0,
-    );
+  for (const { target, targetLength, localCutoff } of targetDeliveryCutoffs(
+    utterance,
+    estimate.cutoff,
+  )) {
     if (localCutoff >= targetLength && targetLength > 0) {
       setTargetSpeech(utterance.sessionId, target, {
         status: "spoken",
@@ -309,6 +300,49 @@ function applyInterruptionEstimate(
       spokenThrough: localCutoff,
       confidence: estimate.confidence,
       interruptionCause: utterance.interruptionCause ?? "voiceStopped",
+    });
+  }
+}
+
+function targetDeliveryCutoffs(utterance: ActiveUtterance, cutoff: number) {
+  return utterance.targets.map((target) => {
+    const spans = utterance.targetSpans.filter(
+      (span) => targetKey(span) === targetKey(target),
+    );
+    return {
+      target,
+      targetLength: spans.reduce(
+        (length, span) => length + (span.end - span.start),
+        0,
+      ),
+      localCutoff: spans.reduce(
+        (length, span) =>
+          length + Math.max(0, Math.min(span.end, cutoff) - span.start),
+        0,
+      ),
+    };
+  });
+}
+
+function applyFailureEstimate(
+  utterance: ActiveUtterance,
+  estimate: SpeechDeliveryEstimate,
+) {
+  for (const { target, targetLength, localCutoff } of targetDeliveryCutoffs(
+    utterance,
+    estimate.cutoff,
+  )) {
+    if (localCutoff >= targetLength && targetLength > 0) {
+      setTargetSpeech(utterance.sessionId, target, {
+        status: "spoken",
+        spokenThrough: targetLength,
+      });
+      continue;
+    }
+    setTargetSpeech(utterance.sessionId, target, {
+      status: "failed",
+      spokenThrough: localCutoff,
+      confidence: estimate.confidence,
     });
   }
 }
@@ -343,10 +377,11 @@ function targetContent(
   return null;
 }
 
-function recordInterruptionNotices(
+function recordDeliveryNotices(
   utterance: ActiveUtterance,
   fallbackEstimate: SpeechDeliveryEstimate,
-  cause: InterruptionCause,
+  status: "interrupted" | "failed",
+  cause: InterruptionCause = "voiceStopped",
 ) {
   let recorded = false;
   for (const target of utterance.targets) {
@@ -357,7 +392,7 @@ function recordInterruptionNotices(
       utterance.sessionId,
       targetKey(target),
       content.text,
-      "interrupted",
+      status,
       {
         cutoff: spokenThrough,
         spokenText: content.text.slice(0, spokenThrough),
@@ -373,7 +408,7 @@ function recordInterruptionNotices(
       utterance.sessionId,
       utterance.id,
       utterance.text,
-      "interrupted",
+      status,
       fallbackEstimate,
       cause,
     );
@@ -419,13 +454,25 @@ function failActiveUtterance(
     clearTimeout(utterance.interruptionFallback);
     utterance.interruptionFallback = null;
   }
-  setUtteranceStatus(utterance, "failed");
-  recordPlaybackNotice(
-    utterance.sessionId,
-    utterance.id,
-    utterance.text,
-    "failed",
+  const hasDeliveryEvidence = utterance.latestDelivery?.segments.some(
+    (segment) => segment.playedFrames > 0,
   );
+  if (hasDeliveryEvidence) {
+    const estimate = estimateSpeechDelivery(
+      utterance.text,
+      utterance.latestDelivery,
+    );
+    applyFailureEstimate(utterance, estimate);
+    recordDeliveryNotices(utterance, estimate, "failed");
+  } else {
+    setUtteranceStatus(utterance, "failed");
+    recordPlaybackNotice(
+      utterance.sessionId,
+      utterance.id,
+      utterance.text,
+      "failed",
+    );
+  }
   restoreListeningIfConversationIsRunning(utterance);
   activeUtterance = null;
   reportAssistantActivity(utterance.sessionId, utterance.voiceRevision, false);
@@ -448,7 +495,7 @@ function finalizeInterruptedUtterance(
   );
   applyInterruptionEstimate(utterance, estimate);
   utterance.onInterrupted();
-  recordInterruptionNotices(utterance, estimate, cause);
+  recordDeliveryNotices(utterance, estimate, "interrupted", cause);
   activeUtterance = null;
   restoreListeningIfConversationIsRunning(utterance);
   reportAssistantActivity(utterance.sessionId, utterance.voiceRevision, false);
@@ -516,25 +563,12 @@ function handleStreamEvent(
       break;
     }
     case "failed":
-      setUtteranceStatus(utterance, "failed");
-      recordPlaybackNotice(
-        utterance.sessionId,
+      utterance.latestDelivery = event.delivery ?? utterance.latestDelivery;
+      failActiveUtterance(
         utterance.id,
-        utterance.text,
-        "failed",
+        event.error ?? new Error("Native voice stream failed"),
+        utterance.onFailure,
       );
-      restoreListeningIfConversationIsRunning(utterance);
-      activeUtterance = null;
-      reportAssistantActivity(
-        utterance.sessionId,
-        utterance.voiceRevision,
-        false,
-      );
-      utterance.onFailure(
-        utterance.text,
-        event.error ?? new Error("Pocket voice stream failed"),
-      );
-      utterance.onTerminal();
       break;
   }
 }
@@ -663,6 +697,7 @@ export function startNativeAssistantSpeech(
   const consumedTextBySlot = new Map<string, string>();
   const completedMessages = new Set<string>();
   const interruptedMessages = new Set<string>();
+  const failedMessages = new Set<string>();
   const interruptionCauseByMessage = new Map<string, InterruptionCause>();
   for (const message of initialMessages) {
     toolCountByMessage.set(
@@ -716,7 +751,12 @@ export function startNativeAssistantSpeech(
       interruptionCause: null,
       latestDelivery: null,
       status: null,
-      onFailure,
+      onFailure: (text, error) => {
+        for (const utteranceTarget of utterance.targets) {
+          failedMessages.add(utteranceTarget.messageId);
+        }
+        onFailure(text, error);
+      },
       onInterrupted: () => {
         for (const utteranceTarget of utterance.targets) {
           interruptedMessages.add(utteranceTarget.messageId);
@@ -795,6 +835,29 @@ export function startNativeAssistantSpeech(
           : content.text;
         consumedTextBySlot.set(slot, content.text);
         if (!delta) continue;
+
+        if (failedMessages.has(message.id)) {
+          const currentSpeech = content.speech;
+          const spokenThrough = appendOnly
+            ? (currentSpeech?.spokenThrough ?? 0)
+            : 0;
+          setTargetSpeech(sessionId, target, {
+            status: "failed",
+            spokenThrough,
+            confidence: appendOnly
+              ? (currentSpeech?.confidence ?? "low")
+              : "low",
+          });
+          recordPlaybackNotice(sessionId, slot, content.text, "failed", {
+            cutoff: spokenThrough,
+            spokenText: content.text.slice(0, spokenThrough),
+            unspokenText: content.text.slice(spokenThrough),
+            confidence: appendOnly
+              ? (currentSpeech?.confidence ?? "low")
+              : "low",
+          });
+          continue;
+        }
 
         if (interruptedMessages.has(message.id)) {
           const currentSpeech = content.speech;

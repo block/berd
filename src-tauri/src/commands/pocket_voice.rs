@@ -271,6 +271,32 @@ struct PocketStreamOutcome {
     delivery: Option<VoiceDeliveryProgress>,
 }
 
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct PocketStreamFailure {
+    error: String,
+    delivery: Option<VoiceDeliveryProgress>,
+}
+
+#[cfg(target_os = "macos")]
+impl From<String> for PocketStreamFailure {
+    fn from(error: String) -> Self {
+        Self {
+            error,
+            delivery: None,
+        }
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn delivery_with_played_audio(delivery: VoiceDeliveryProgress) -> Option<VoiceDeliveryProgress> {
+    delivery
+        .segments
+        .iter()
+        .any(|segment| segment.played_frames > 0)
+        .then_some(delivery)
+}
+
 #[derive(Clone, Debug, Default)]
 struct InstallRuntime {
     status_revision: u64,
@@ -856,11 +882,15 @@ pub fn start_pocket_voice_stream(
             );
             let (event_state, error, delivery) = match result {
                 Ok(outcome) => (outcome.state, None, outcome.delivery),
-                Err(error) if !active.load(Ordering::SeqCst) => {
-                    log::debug!("Pocket voice stream stopped after error: {error}");
-                    (PocketStreamEventState::Interrupted, None, None)
+                Err(failure) if !active.load(Ordering::SeqCst) => {
+                    log::debug!("Pocket voice stream stopped after error: {}", failure.error);
+                    (PocketStreamEventState::Interrupted, None, failure.delivery)
                 }
-                Err(error) => (PocketStreamEventState::Failed, Some(error), None),
+                Err(failure) => (
+                    PocketStreamEventState::Failed,
+                    Some(failure.error),
+                    failure.delivery,
+                ),
             };
             emit_pocket_stream_event(&app, &stream_id, event_state, error, delivery);
             finish_playback(&playback, &playback_active);
@@ -1931,7 +1961,7 @@ fn run_pocket_voice_stream(
     active: Arc<AtomicBool>,
     speed: f32,
     receiver: mpsc::Receiver<PocketStreamCommand>,
-) -> Result<PocketStreamOutcome, String> {
+) -> Result<PocketStreamOutcome, PocketStreamFailure> {
     use std::num::NonZero;
 
     use rodio::cpal::traits::HostTrait;
@@ -1980,7 +2010,7 @@ fn run_pocket_voice_stream(
     let mut delivery_ledger = PlaybackDeliveryLedger::default();
     let mut last_progress_emit = Instant::now();
 
-    loop {
+    let result: Result<PocketStreamOutcome, String> = (|| loop {
         if !active.load(Ordering::SeqCst) {
             let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
             player.stop();
@@ -2147,7 +2177,15 @@ fn run_pocket_voice_stream(
                 }
             }
         }
-    }
+    })();
+
+    result.map_err(|error| {
+        let delivery = delivery_with_played_audio(capture_before_stop(
+            || pocket_delivery_snapshot(&delivery_ledger, &player),
+            || player.stop(),
+        ));
+        PocketStreamFailure { error, delivery }
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -2252,7 +2290,6 @@ fn synthesize_pocket_stream_ready(
                 true
             })?;
         if let Some(error) = callback_error {
-            player.stop();
             return Err(error);
         }
         if !completed {
@@ -2440,7 +2477,7 @@ mod tests {
     }
 
     #[test]
-    fn cancellation_captures_delivery_before_stopping_playback() {
+    fn interruption_and_failure_capture_delivery_before_stopping_playback() {
         use std::cell::RefCell;
 
         let mut ledger = PlaybackDeliveryLedger::default();
@@ -2464,6 +2501,37 @@ mod tests {
         assert_eq!(&*calls.borrow(), &["snapshot", "stop"]);
         assert_eq!(delivery.segments[0].played_frames, 3_600);
         assert_eq!(delivery.segments[1].played_frames, 0);
+    }
+
+    #[test]
+    fn failed_stream_retains_only_delivery_with_played_audio() {
+        let progress = VoiceDeliveryProgress {
+            sample_rate: berd_voice::SAMPLE_RATE,
+            segments: vec![VoiceDeliverySegment {
+                text: "Partly heard.".to_string(),
+                played_frames: 1_200,
+                total_frames: 4_800,
+                synthesis_complete: true,
+            }],
+        };
+        assert_eq!(
+            delivery_with_played_audio(progress)
+                .expect("played audio is evidence")
+                .segments[0]
+                .played_frames,
+            1_200
+        );
+
+        let unheard = VoiceDeliveryProgress {
+            sample_rate: berd_voice::SAMPLE_RATE,
+            segments: vec![VoiceDeliverySegment {
+                text: "Not heard.".to_string(),
+                played_frames: 0,
+                total_frames: 4_800,
+                synthesis_complete: true,
+            }],
+        };
+        assert!(delivery_with_played_audio(unheard).is_none());
     }
 
     #[test]

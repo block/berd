@@ -534,7 +534,7 @@ function renderContentBlock(
       const speechStatus = tc.speech?.status;
       const strikethroughFrom =
         providerErrorNotice === null &&
-        speechStatus === "interrupted" &&
+        (speechStatus === "interrupted" || speechStatus === "failed") &&
         tc.speech?.spokenThrough !== undefined
           ? tc.speech.spokenThrough
           : providerErrorNotice === null && speechStatus === "notSpoken"

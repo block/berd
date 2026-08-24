@@ -72,7 +72,7 @@ struct SiriStreamEvent {
     delivery: Option<VoiceDeliveryProgress>,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(test, target_os = "macos"))]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct VoiceDeliverySegment {
@@ -82,7 +82,7 @@ struct VoiceDeliverySegment {
     synthesis_complete: bool,
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(test, target_os = "macos"))]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 struct VoiceDeliveryProgress {
     #[serde(rename = "sampleRate")]
@@ -94,6 +94,39 @@ struct VoiceDeliveryProgress {
 struct SiriStreamOutcome {
     state: SiriStreamEventState,
     delivery: Option<VoiceDeliveryProgress>,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct SiriStreamFailure {
+    error: String,
+    delivery: Option<VoiceDeliveryProgress>,
+}
+
+#[cfg(target_os = "macos")]
+impl From<String> for SiriStreamFailure {
+    fn from(error: String) -> Self {
+        Self {
+            error,
+            delivery: None,
+        }
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn delivery_with_played_audio(delivery: VoiceDeliveryProgress) -> Option<VoiceDeliveryProgress> {
+    delivery
+        .segments
+        .iter()
+        .any(|segment| segment.played_frames > 0)
+        .then_some(delivery)
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn capture_before_cancel<T>(snapshot: impl FnOnce() -> T, cancel: impl FnOnce()) -> T {
+    let delivery = snapshot();
+    cancel();
+    delivery
 }
 
 #[cfg(target_os = "macos")]
@@ -601,7 +634,7 @@ fn run_siri_stream(
     speed: f32,
     active: Arc<AtomicBool>,
     receiver: mpsc::Receiver<SiriStreamCommand>,
-) -> Result<SiriStreamOutcome, String> {
+) -> Result<SiriStreamOutcome, SiriStreamFailure> {
     let language = CString::new(selection.language)
         .map_err(|_| "Siri voice language cannot contain NUL bytes".to_string())?;
     let name = CString::new(selection.name)
@@ -627,7 +660,7 @@ fn run_siri_stream(
     if stream.is_null() {
         // SAFETY: Native creation failed, so no callback retained the box.
         unsafe { drop(Box::from_raw(callback_context)) };
-        return Err(bridge_error(error, "Could not start Siri voice stream"));
+        return Err(bridge_error(error, "Could not start Siri voice stream").into());
     }
 
     let result = (|| {
@@ -660,7 +693,6 @@ fn run_siri_stream(
             if let Some(watchdog) = watchdog.as_mut() {
                 let progress = unsafe { berd_siri_tts_stream_progress(stream) };
                 if watchdog.observe(progress, Instant::now()) {
-                    unsafe { berd_siri_tts_stream_cancel(stream) };
                     return Err("Siri synthesis stopped making progress".to_string());
                 }
             }
@@ -743,6 +775,15 @@ fn run_siri_stream(
         }
     })();
 
+    let result = result.map_err(|error| {
+        let delivery = capture_before_cancel(
+            || siri_delivery_progress(stream),
+            || unsafe { berd_siri_tts_stream_cancel(stream) },
+        )
+        .and_then(delivery_with_played_audio);
+        SiriStreamFailure { error, delivery }
+    });
+
     unsafe {
         berd_siri_tts_stream_release(stream);
         drop(Box::from_raw(callback_context));
@@ -806,10 +847,14 @@ pub fn start_siri_voice_stream(
             );
             let (event_state, error, delivery) = match result {
                 Ok(outcome) => (outcome.state, None, outcome.delivery),
-                Err(_error) if !active.load(Ordering::SeqCst) => {
-                    (SiriStreamEventState::Interrupted, None, None)
+                Err(failure) if !active.load(Ordering::SeqCst) => {
+                    (SiriStreamEventState::Interrupted, None, failure.delivery)
                 }
-                Err(error) => (SiriStreamEventState::Failed, Some(error), None),
+                Err(failure) => (
+                    SiriStreamEventState::Failed,
+                    Some(failure.error),
+                    failure.delivery,
+                ),
             };
             emit_stream_event(&app, &stream_id, event_state, error, delivery);
             finish_playback(&playback_state, &playback_active);
@@ -1172,5 +1217,47 @@ mod tests {
             started + SIRI_STREAM_STALL_TIMEOUT + Duration::from_millis(1),
         ));
         assert!(watchdog.observe(2, started + SIRI_STREAM_STALL_TIMEOUT * 2,));
+    }
+
+    #[test]
+    fn failed_stream_retains_only_delivery_with_played_audio() {
+        use std::cell::RefCell;
+
+        let calls = RefCell::new(Vec::new());
+        let progress = VoiceDeliveryProgress {
+            sample_rate: 24_000,
+            segments: vec![VoiceDeliverySegment {
+                text: "Partly heard.".to_string(),
+                played_frames: 1_200,
+                total_frames: 4_800,
+                synthesis_complete: true,
+            }],
+        };
+        let progress = capture_before_cancel(
+            || {
+                calls.borrow_mut().push("snapshot");
+                progress
+            },
+            || calls.borrow_mut().push("cancel"),
+        );
+        assert_eq!(&*calls.borrow(), &["snapshot", "cancel"]);
+        assert_eq!(
+            delivery_with_played_audio(progress)
+                .expect("played audio is evidence")
+                .segments[0]
+                .played_frames,
+            1_200
+        );
+
+        let unheard = VoiceDeliveryProgress {
+            sample_rate: 24_000,
+            segments: vec![VoiceDeliverySegment {
+                text: "Not heard.".to_string(),
+                played_frames: 0,
+                total_frames: 4_800,
+                synthesis_complete: true,
+            }],
+        };
+        assert!(delivery_with_played_audio(unheard).is_none());
     }
 }

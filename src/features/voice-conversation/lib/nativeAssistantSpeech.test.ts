@@ -188,6 +188,78 @@ describe("native assistant speech stream", () => {
     expect(mocks.append).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "pocket",
+    "siri",
+  ] as const)("preserves partial delivery when a %s stream fails", async (backend) => {
+    mocks.backend = backend;
+    const onFailure = vi.fn();
+    startNativeAssistantSpeech("session-1", onFailure);
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "One. Two. Three." }]),
+      ]);
+    const append = backend === "pocket" ? mocks.append : mocks.siriAppend;
+    await vi.waitFor(() => expect(append).toHaveBeenCalled());
+    const start = backend === "pocket" ? mocks.start : mocks.siriStart;
+    const handler =
+      backend === "pocket" ? mocks.streamHandler : mocks.siriStreamHandler;
+    const streamId = start.mock.calls[0]?.[0] as string;
+
+    handler?.({
+      streamId,
+      state: "failed",
+      error: "later synthesis failure",
+      delivery: {
+        sampleRate: 24_000,
+        segments: [
+          {
+            text: "One. Two. Three.",
+            playedFrames: 600,
+            totalFrames: 1_000,
+            synthesisComplete: true,
+          },
+        ],
+      },
+    });
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({
+      speech: {
+        status: "failed",
+        spokenThrough: "One. Two".length,
+        confidence: "medium",
+      },
+    });
+    expect(onFailure).toHaveBeenCalledWith(
+      "One. Two. Three.",
+      "later synthesis failure",
+    );
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", " Four.");
+    await vi.waitFor(() => {
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({
+        text: "One. Two. Three. Four.",
+        speech: {
+          status: "failed",
+          spokenThrough: "One. Two".length,
+          confidence: "medium",
+        },
+      });
+    });
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(append).toHaveBeenCalledTimes(1);
+    const notice = takeVoicePlaybackNotices("session-1") ?? "";
+    expect(notice).toContain("Native TTS could not deliver");
+    expect(notice).toContain('"spokenText":"One. Two"');
+    expect(notice).toContain('"unspokenText":". Three. Four."');
+  });
+
   it("preserves the first live reply while speech is arming", async () => {
     const history = assistant(
       [{ type: "text", text: "Historical response." }],

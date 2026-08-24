@@ -309,7 +309,7 @@ function AgentWorkItemRow({
   if (item.kind === "progress") {
     const speechStatus = item.content.speech?.status;
     const strikethroughFrom =
-      speechStatus === "interrupted" &&
+      (speechStatus === "interrupted" || speechStatus === "failed") &&
       item.content.speech?.spokenThrough !== undefined
         ? item.content.speech.spokenThrough
         : speechStatus === "notSpoken"

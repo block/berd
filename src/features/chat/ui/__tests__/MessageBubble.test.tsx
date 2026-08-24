@@ -2077,4 +2077,31 @@ describe("MessageBubble", () => {
 
     expect(screen.queryByRole("button")).toBeNull();
   });
+
+  it("shows a speech failure while marking only its estimated unspoken suffix", () => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text: "An unusually long heard prefix. Unheard suffix.",
+            speech: {
+              status: "failed",
+              spokenThrough: "An unusually long heard prefix".length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const block = container.querySelector(
+      '[data-voice-speech-status="failed"]',
+    );
+    expect(block).toHaveTextContent("Failed");
+    expect(block?.querySelector("[data-voice-unspoken]")).toHaveTextContent(
+      ". Unheard suffix.",
+    );
+    expect(block?.querySelector(".sr-only")).toHaveTextContent("Not spoken:");
+  });
 });
