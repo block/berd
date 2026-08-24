@@ -960,6 +960,19 @@ pub async fn start_native_voice_conversation(
     }
     let window_label = webview_window.label().to_string();
     let owner_id = native_owner_id(&session_id);
+    let lifecycle_guard = state
+        .target_lifecycle_guard(|| {
+            validate_voice_target_session(
+                capture.inner(),
+                &window_sessions,
+                &webview_window,
+                &renderer_id,
+                renderer_epoch,
+                &session_id,
+                Some(foreground_generation),
+            )
+        })
+        .await?;
     let mut microphone_claimed = capture.claim_microphone(
         window_label.clone(),
         renderer_id.clone(),
@@ -988,28 +1001,21 @@ pub async fn start_native_voice_conversation(
             return Err(error);
         }
     };
-    let lifecycle_guard = state
-        .target_lifecycle_guard(|| {
-            validate_voice_target_session(
-                capture.inner(),
-                &window_sessions,
-                &webview_window,
-                &renderer_id,
-                renderer_epoch,
-                &session_id,
-                Some(foreground_generation),
-            )
-        })
-        .await;
-    let lifecycle_guard = match lifecycle_guard {
-        Ok(guard) => guard,
-        Err(error) => {
-            if microphone_claimed {
-                capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
-            }
-            return Err(error);
+    if let Err(error) = validate_voice_target_session(
+        capture.inner(),
+        &window_sessions,
+        &webview_window,
+        &renderer_id,
+        renderer_epoch,
+        &session_id,
+        Some(foreground_generation),
+    ) {
+        drop(lifecycle_guard);
+        if microphone_claimed {
+            capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
         }
-    };
+        return Err(error);
+    }
     match refresh_microphone_claim(
         capture.inner(),
         &window_label,
