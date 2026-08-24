@@ -67,7 +67,8 @@ struct PocketPlaybackSource<I> {
 #[cfg(target_os = "macos")]
 enum PocketPlaybackEvent {
     SourceFinished,
-    Shutdown,
+    ShutdownImmediately,
+    ShutdownAfterPlayback,
 }
 
 #[cfg(target_os = "macos")]
@@ -2150,15 +2151,28 @@ fn run_pocket_voice_stream(
                 match event {
                     PocketPlaybackEvent::SourceFinished => {
                         let mut generation = completed_generation.load(Ordering::Acquire);
+                        let mut grace_started = Instant::now();
                         loop {
                             match playback_completion_receiver
                                 .recv_timeout(PLAYBACK_LATENCY_SAFETY_DURATION)
                             {
                                 Ok(PocketPlaybackEvent::SourceFinished) => {
                                     generation = completed_generation.load(Ordering::Acquire);
+                                    grace_started = Instant::now();
                                 }
-                                Ok(PocketPlaybackEvent::Shutdown)
+                                Ok(PocketPlaybackEvent::ShutdownImmediately)
                                 | Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                                Ok(PocketPlaybackEvent::ShutdownAfterPlayback) => {
+                                    std::thread::sleep(
+                                        PLAYBACK_LATENCY_SAFETY_DURATION
+                                            .saturating_sub(grace_started.elapsed()),
+                                    );
+                                    release_completed_pocket_assistant_speech(
+                                        completed_generation.load(Ordering::Acquire),
+                                        &assistant_speech,
+                                    );
+                                    return;
+                                }
                                 Err(mpsc::RecvTimeoutError::Timeout) => {
                                     release_completed_pocket_assistant_speech(
                                         generation,
@@ -2169,7 +2183,15 @@ fn run_pocket_voice_stream(
                             }
                         }
                     }
-                    PocketPlaybackEvent::Shutdown => break,
+                    PocketPlaybackEvent::ShutdownImmediately => break,
+                    PocketPlaybackEvent::ShutdownAfterPlayback => {
+                        std::thread::sleep(PLAYBACK_LATENCY_SAFETY_DURATION);
+                        release_completed_pocket_assistant_speech(
+                            completed_generation.load(Ordering::Acquire),
+                            &assistant_speech,
+                        );
+                        break;
+                    }
                 }
             }
         })
@@ -2382,6 +2404,13 @@ fn run_pocket_voice_stream(
         }
     })();
 
+    let wait_for_output_latency = matches!(
+        &result,
+        Ok(PocketStreamOutcome {
+            state: PocketStreamEventState::Completed,
+            ..
+        })
+    );
     let result = result.map_err(|error| {
         let delivery = delivery_with_played_audio(capture_before_stop(
             || pocket_delivery_snapshot(&delivery_ledger, &player),
@@ -2390,7 +2419,12 @@ fn run_pocket_voice_stream(
         PocketStreamFailure { error, delivery }
     });
 
-    let _ = playback_completion_sender.send(PocketPlaybackEvent::Shutdown);
+    let shutdown = if wait_for_output_latency {
+        PocketPlaybackEvent::ShutdownAfterPlayback
+    } else {
+        PocketPlaybackEvent::ShutdownImmediately
+    };
+    let _ = playback_completion_sender.send(shutdown);
     let _ = playback_monitor.join();
     if let Ok(mut assistant_speech) = assistant_speech.lock() {
         assistant_speech.take();
