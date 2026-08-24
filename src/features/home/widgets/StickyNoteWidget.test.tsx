@@ -199,6 +199,7 @@ describe("StickyNoteWidget", () => {
     fireEvent.doubleClick(editor);
 
     expect(editor).toHaveAttribute("contenteditable", "true");
+    expect(editor).toHaveFocus();
     expect(selection?.rangeCount).toBe(1);
     expect(selection?.getRangeAt(0).startOffset).toBe(0);
     expect(selection?.getRangeAt(0).endOffset).toBe(0);
@@ -212,6 +213,28 @@ describe("StickyNoteWidget", () => {
     fireEvent.pointerDown(screen.getByTestId("outside"));
     expect(editor).toHaveAttribute("contenteditable", "false");
     expect(input).not.toBeVisible();
+  });
+
+  it("prevents line breaks in labels", () => {
+    render(
+      <StickyNoteWidget
+        {...baseProps}
+        instance={{
+          ...baseProps.instance,
+          type: "label",
+          state: { text: "Roadmap label" },
+        }}
+      />,
+    );
+
+    fireEvent.doubleClick(getEditor());
+    const enter = new KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    });
+    expect(getEditor().dispatchEvent(enter)).toBe(false);
+    expect(getEditor()).toHaveAttribute("aria-multiline", "false");
   });
 
   it("applies and persists the selected label font family", () => {

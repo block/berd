@@ -378,12 +378,14 @@ export function StickyNoteWidget({
 
   useEffect(() => {
     if (!labelEditing) return;
+    editorRef.current?.focus({ preventScroll: true });
 
     const handlePointerDown = (event: PointerEvent) => {
-      if (
-        event.target instanceof Node &&
-        !sectionRef.current?.contains(event.target)
-      ) {
+      if (!(event.target instanceof Element)) return;
+      const interactionStaysInEditor =
+        sectionRef.current?.contains(event.target) ||
+        event.target.closest('[data-slot="select-content"]');
+      if (!interactionStaysInEditor) {
         setLabelEditing(false);
         editorRef.current?.blur();
       }
@@ -571,7 +573,7 @@ export function StickyNoteWidget({
             tabIndex={isLabel && !labelEditing ? -1 : 0}
             role="textbox"
             aria-label={t("widgets.stickyNote.editAria")}
-            aria-multiline="true"
+            aria-multiline={isLabel ? "false" : "true"}
             data-empty={draft.trim().length === 0}
             data-placeholder={t(
               isLabel
@@ -618,6 +620,12 @@ export function StickyNoteWidget({
             }}
             onWheel={(event) => event.stopPropagation()}
             onInput={saveEditor}
+            onKeyDown={(event) => {
+              if (isLabel && event.key === "Enter") {
+                event.preventDefault();
+                event.stopPropagation();
+              }
+            }}
             onKeyUp={saveSelection}
             onMouseUp={saveSelection}
             onFocus={() => {
@@ -635,7 +643,11 @@ export function StickyNoteWidget({
               document.execCommand?.(
                 "insertText",
                 false,
-                event.clipboardData.getData("text/plain"),
+                isLabel
+                  ? event.clipboardData
+                      .getData("text/plain")
+                      .replace(/[\r\n]+/g, " ")
+                  : event.clipboardData.getData("text/plain"),
               );
               saveEditor();
             }}
@@ -729,9 +741,12 @@ export function StickyNoteWidget({
             <div className="flex items-center gap-1">
               <Select
                 value={labelFamily}
-                onValueChange={(value: LabelFontFamily) =>
-                  onUpdateState({ fontFamily: value })
-                }
+                onValueChange={(value: LabelFontFamily) => {
+                  onUpdateState({ fontFamily: value });
+                  requestAnimationFrame(() => {
+                    editorRef.current?.focus({ preventScroll: true });
+                  });
+                }}
               >
                 <SelectTrigger
                   size="xs"
