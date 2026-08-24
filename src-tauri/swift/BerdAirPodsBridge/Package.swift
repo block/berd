@@ -15,7 +15,7 @@ let package = Package(
         .target(
             name: "BerdObjCExceptionCatch",
             publicHeadersPath: "include"
-        ),
+        )
         .target(
             name: "BerdAirPodsBridge",
             dependencies: ["BerdObjCExceptionCatch"],
