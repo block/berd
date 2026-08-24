@@ -795,7 +795,7 @@ export function StickyNoteWidget({
               ))}
             </div>
           )}
-          <div className="mx-0.5 h-5 w-px bg-border/70" aria-hidden="true" />
+          <div className="ml-2 h-5 w-px bg-border/70" aria-hidden="true" />
           <div className="flex items-center gap-1">
             <Button
               type="button"
