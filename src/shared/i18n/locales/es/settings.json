@@ -868,6 +868,31 @@
     }
   },
   "voice": {
+    "advancedDetection": {
+      "description": "Ajusta cómo Berd detecta el inicio y el final de tu voz.",
+      "done": "Listo",
+      "endOfSpeechPause": "Pausa al final del habla",
+      "endOfSpeechPauseDescription": "Cuánto espera Berd durante el silencio antes de terminar tu turno.",
+      "interruptionSensitivity": "Sensibilidad de interrupción",
+      "interruptionSensitivityDescription": "Con qué facilidad tu voz interrumpe a Berd mientras habla.",
+      "open": "Avanzado…",
+      "pauseOptions": {
+        "long": "Larga · 1,6 segundos",
+        "short": "Corta · 0,8 segundos",
+        "standard": "Estándar · 1,2 segundos"
+      },
+      "reset": "Restablecer valores predeterminados",
+      "rowDescription": "Ajusta los umbrales de voz y el tiempo de finalización.",
+      "rowTitle": "Detección de voz",
+      "sensitivityOptions": {
+        "balanced": "Equilibrada · umbral 0,65",
+        "less": "Menos sensible · umbral 0,80",
+        "more": "Más sensible · umbral 0,50"
+      },
+      "speechSensitivity": "Sensibilidad de detección de voz",
+      "speechSensitivityDescription": "Con qué facilidad Berd reconoce que empezaste a hablar.",
+      "title": "Detección de voz avanzada"
+    },
     "backendMacSpeech": "Reconocimiento de voz de Apple",
     "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
@@ -903,13 +928,6 @@
       "automatic": "Automático",
       "preventFeedback": "Evitar retroalimentación"
     },
-    "interruptionSensitivities": {
-      "balanced": "Equilibrada",
-      "less": "Menor",
-      "more": "Mayor"
-    },
-    "interruptionSensitivity": "Sensibilidad de interrupción",
-    "interruptionSensitivityDescription": "Elige con qué facilidad tu voz interrumpe a Berd mientras habla.",
     "modelInstalled": "Instalado",
     "modelInstalledSize": "Instalado · {{size}} en disco",
     "modelMissingSize": "No instalado · descarga de {{size}}",

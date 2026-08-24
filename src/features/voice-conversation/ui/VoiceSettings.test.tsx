@@ -1,4 +1,5 @@
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import type { PocketVoiceStatus } from "../api/pocketVoice";
@@ -43,6 +44,14 @@ const outputState = vi.hoisted(() => ({
 const interruptionState = vi.hoisted(() => ({
   mode: "automatic" as "automatic" | "allowInterruptions" | "preventFeedback",
   sensitivity: "balanced" as "less" | "balanced" | "more",
+  setSensitivity: vi.fn(),
+}));
+const detectionState = vi.hoisted(() => ({
+  speechSensitivity: "more" as "less" | "balanced" | "more",
+  endOfSpeechPause: "standard" as "short" | "standard" | "long",
+  setSpeechSensitivity: vi.fn(),
+  setEndOfSpeechPause: vi.fn(),
+  reset: vi.fn(),
 }));
 
 vi.mock("../hooks/usePocketVoiceSetup", () => ({
@@ -73,8 +82,11 @@ vi.mock("../lib/voiceInterruptionPreference", () => ({
   useVoiceInterruptionPreference: () => ({
     ...interruptionState,
     setMode: vi.fn(),
-    setSensitivity: vi.fn(),
+    setSensitivity: interruptionState.setSensitivity,
   }),
+}));
+vi.mock("../lib/voiceDetectionPreference", () => ({
+  useVoiceDetectionPreference: () => detectionState,
 }));
 
 function setup(status: PocketVoiceStatus): PocketVoiceSetup {
@@ -179,10 +191,17 @@ describe("VoiceSettings", () => {
     };
     interruptionState.mode = "automatic";
     interruptionState.sensitivity = "balanced";
+    interruptionState.setSensitivity.mockReset();
+    detectionState.speechSensitivity = "more";
+    detectionState.endOfSpeechPause = "standard";
+    detectionState.setSpeechSensitivity.mockReset();
+    detectionState.setEndOfSpeechPause.mockReset();
+    detectionState.reset.mockReset();
     siriSetupState.current = siriSetup();
   });
 
-  it("shows sensitivity for automatic and allow-interruptions modes", () => {
+  it("keeps interruption modes visible and moves sensitivity into Advanced", async () => {
+    const user = userEvent.setup();
     setupState.current = setup(pocketStatus());
     const view = renderWithProviders(<VoiceSettings />);
 
@@ -206,19 +225,32 @@ describe("VoiceSettings", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("combobox", { name: "Interruption sensitivity" }),
-    ).toHaveAccessibleDescription(
-      "Choose how easily your voice interrupts Berd while it is speaking.",
-    );
-
-    interruptionState.mode = "allowInterruptions";
-    view.rerender(<VoiceSettings />);
+      screen.queryByText("Interruption sensitivity"),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Advanced…" }));
+    expect(
+      screen.getByRole("dialog", { name: "Advanced voice detection" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("combobox", { name: "Interruption sensitivity" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", {
+        name: "Speech detection sensitivity",
+      }),
+    ).toHaveTextContent("More sensitive · 0.50 threshold");
+    expect(
+      screen.getByRole("combobox", { name: "End-of-speech pause" }),
+    ).toHaveTextContent("Standard · 1.2 seconds");
+
+    await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    expect(detectionState.reset).toHaveBeenCalledOnce();
+    expect(interruptionState.setSensitivity).toHaveBeenCalledWith("balanced");
+
+    view.unmount();
   });
 
-  it("hides sensitivity when feedback prevention disables interruptions", () => {
+  it("keeps Advanced voice detection available when interruptions are prevented", () => {
     setupState.current = setup(pocketStatus());
     interruptionState.mode = "preventFeedback";
     renderWithProviders(<VoiceSettings />);
@@ -227,11 +259,11 @@ describe("VoiceSettings", () => {
       screen.getByRole("radio", { name: /^Prevent feedback/ }),
     ).toBeChecked();
     expect(
-      screen.queryByRole("combobox", { name: "Interruption sensitivity" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "Advanced…" }),
+    ).toBeInTheDocument();
   });
 
-  it("keeps Earshot sensitivity available for macOS speech input", () => {
+  it("keeps Advanced voice detection available for macOS speech input", () => {
     setupState.current = setup(pocketStatus());
     inputState.backend = "macos";
     renderWithProviders(<VoiceSettings />);
@@ -239,13 +271,7 @@ describe("VoiceSettings", () => {
     expect(
       screen.getByRole("radiogroup", { name: "While Berd is speaking" }),
     ).toBeInTheDocument();
-    const sensitivity = screen.getByRole("combobox", {
-      name: "Interruption sensitivity",
-    });
-    expect(sensitivity).toBeEnabled();
-    expect(sensitivity).toHaveAccessibleDescription(
-      "Choose how easily your voice interrupts Berd while it is speaking.",
-    );
+    expect(screen.getByRole("button", { name: "Advanced…" })).toBeEnabled();
   });
 
   it("uses one accessible speech output heading for the backend picker", () => {

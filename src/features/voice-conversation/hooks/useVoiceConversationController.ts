@@ -23,6 +23,7 @@ import {
   setVoiceConversationControlsSuppressed,
 } from "../api/voiceConversation";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
+import { getVoiceDetectionPreference } from "../lib/voiceDetectionPreference";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -755,7 +756,12 @@ export function useVoiceConversationController({
     try {
       const foregroundGeneration =
         await confirmVoiceConversationForegroundSession(sessionId);
-      await start(sessionId, inputBackend, foregroundGeneration);
+      await start(
+        sessionId,
+        inputBackend,
+        foregroundGeneration,
+        getVoiceDetectionPreference(),
+      );
       startAssistantSpeech(assistantSpeechHistory);
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;

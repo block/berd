@@ -49,15 +49,24 @@ pub enum VoiceInputBackend {
     Macos,
 }
 
-fn active_vad_threshold(
+fn active_vad_threshold_for_speech(
     assistant_speaking: &AtomicBool,
     assistant_vad_threshold: &AtomicU32,
+    speech_vad_threshold: f32,
 ) -> f32 {
     if assistant_speaking.load(Ordering::Acquire) {
         f32::from_bits(assistant_vad_threshold.load(Ordering::Acquire))
     } else {
-        VAD_THRESHOLD
+        speech_vad_threshold
     }
+}
+
+#[cfg(test)]
+fn active_vad_threshold(
+    assistant_speaking: &AtomicBool,
+    assistant_vad_threshold: &AtomicU32,
+) -> f32 {
+    active_vad_threshold_for_speech(assistant_speaking, assistant_vad_threshold, VAD_THRESHOLD)
 }
 
 #[derive(Deserialize)]
@@ -86,6 +95,42 @@ pub enum InterruptionSensitivity {
     Less,
     Balanced,
     More,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum VoiceDetectionSensitivity {
+    Less,
+    Balanced,
+    More,
+}
+
+impl VoiceDetectionSensitivity {
+    fn vad_threshold(self) -> f32 {
+        match self {
+            Self::Less => 0.8,
+            Self::Balanced => 0.65,
+            Self::More => VAD_THRESHOLD,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum EndOfSpeechPause {
+    Short,
+    Standard,
+    Long,
+}
+
+impl EndOfSpeechPause {
+    fn silence_frames(self) -> usize {
+        match self {
+            Self::Short => 50,
+            Self::Standard => SILENCE_FLUSH_FRAMES,
+            Self::Long => 100,
+        }
+    }
 }
 
 impl InterruptionSensitivity {
@@ -780,6 +825,8 @@ impl SttPipeline {
         input_mute_epoch: Arc<AtomicU64>,
         assistant_speaking: Arc<AtomicBool>,
         assistant_vad_threshold: Arc<AtomicU32>,
+        speech_vad_threshold: f32,
+        silence_flush_frames: usize,
     ) -> Result<(Self, tokio_mpsc::Receiver<SttMessage>), String> {
         let (audio_tx, audio_rx) = mpsc::sync_channel(AUDIO_QUEUE_DEPTH);
         let (event_tx, event_rx) = tokio_mpsc::channel(64);
@@ -805,6 +852,8 @@ impl SttPipeline {
                     worker_shutdown_mute_epoch,
                     assistant_speaking,
                     assistant_vad_threshold,
+                    speech_vad_threshold,
+                    silence_flush_frames,
                 )
             })
             .map_err(|error| format!("start native transcription: {error}"))?;
@@ -828,6 +877,8 @@ impl SttPipeline {
         input_mute_epoch: Arc<AtomicU64>,
         assistant_speaking: Arc<AtomicBool>,
         assistant_vad_threshold: Arc<AtomicU32>,
+        speech_vad_threshold: f32,
+        silence_flush_frames: usize,
     ) -> Result<(Self, tokio_mpsc::Receiver<SttMessage>), String> {
         #[cfg(not(target_os = "macos"))]
         {
@@ -836,6 +887,8 @@ impl SttPipeline {
                 input_mute_epoch,
                 assistant_speaking,
                 assistant_vad_threshold,
+                speech_vad_threshold,
+                silence_flush_frames,
             );
             Err("macOS speech recognition requires macOS 26 or later.".to_string())
         }
@@ -864,6 +917,8 @@ impl SttPipeline {
                         worker_shutdown_mute_epoch,
                         assistant_speaking,
                         assistant_vad_threshold,
+                        speech_vad_threshold,
+                        silence_flush_frames,
                     )
                 })
                 .map_err(|error| format!("start macOS speech recognition: {error}"))?;
@@ -1168,6 +1223,8 @@ pub async fn start_native_voice_conversation(
     renderer_id: String,
     renderer_epoch: u64,
     foreground_generation: u64,
+    speech_detection_sensitivity: VoiceDetectionSensitivity,
+    end_of_speech_pause: EndOfSpeechPause,
 ) -> Result<NativeVoiceStatus, String> {
     let session_id = session_id.trim().to_string();
     if session_id.is_empty() || session_id.len() > 256 {
@@ -1201,6 +1258,8 @@ pub async fn start_native_voice_conversation(
         renderer_epoch,
         owner_id.clone(),
     )?;
+    let speech_vad_threshold = speech_detection_sensitivity.vad_threshold();
+    let silence_flush_frames = end_of_speech_pause.silence_frames();
     let pipeline = match input_backend {
         VoiceInputBackend::Parakeet => parakeet_model_dir(&app).and_then(|model_dir| {
             SttPipeline::new_parakeet(
@@ -1209,6 +1268,8 @@ pub async fn start_native_voice_conversation(
                 Arc::clone(&state.input_mute_epoch),
                 Arc::clone(&state.assistant_speaking),
                 Arc::clone(&state.assistant_vad_threshold),
+                speech_vad_threshold,
+                silence_flush_frames,
             )
         }),
         VoiceInputBackend::Macos => SttPipeline::new_macos(
@@ -1216,6 +1277,8 @@ pub async fn start_native_voice_conversation(
             Arc::clone(&state.input_mute_epoch),
             Arc::clone(&state.assistant_speaking),
             Arc::clone(&state.assistant_vad_threshold),
+            speech_vad_threshold,
+            silence_flush_frames,
         ),
     };
     let (pipeline, mut events) = match pipeline {
@@ -2315,6 +2378,8 @@ fn macos_stt_worker(
     shutdown_mute_epoch: Arc<AtomicU64>,
     assistant_speaking: Arc<AtomicBool>,
     assistant_vad_threshold: Arc<AtomicU32>,
+    speech_vad_threshold: f32,
+    silence_flush_frames: usize,
 ) {
     use rubato::{Fft, FixedSync, Resampler};
 
@@ -2411,8 +2476,11 @@ fn macos_stt_worker(
                 let frame: Vec<f32> = leftover_16k.drain(..VAD_FRAME_SAMPLES).collect();
                 let clamped: Vec<f32> =
                     frame.iter().map(|sample| sample.clamp(-1.0, 1.0)).collect();
-                let vad_threshold =
-                    active_vad_threshold(&assistant_speaking, &assistant_vad_threshold);
+                let vad_threshold = active_vad_threshold_for_speech(
+                    &assistant_speaking,
+                    &assistant_vad_threshold,
+                    speech_vad_threshold,
+                );
                 if vad.predict_f32(&clamped) > vad_threshold {
                     silence_frames = 0;
                     if !in_speech {
@@ -2421,7 +2489,7 @@ fn macos_stt_worker(
                     }
                 } else if in_speech {
                     silence_frames += 1;
-                    if silence_frames >= SILENCE_FLUSH_FRAMES {
+                    if silence_frames >= silence_flush_frames {
                         silence_frames = 0;
                         in_speech = false;
                         let _ = event_tx.blocking_send(SttMessage::Speaking(false));
@@ -2461,6 +2529,8 @@ fn stt_worker(
     shutdown_mute_epoch: Arc<AtomicU64>,
     assistant_speaking: Arc<AtomicBool>,
     assistant_vad_threshold: Arc<AtomicU32>,
+    speech_vad_threshold: f32,
+    silence_flush_frames: usize,
 ) {
     use rubato::{Fft, FixedSync, Resampler};
     use sherpa_onnx::{OfflineRecognizer, OfflineRecognizerConfig};
@@ -2546,8 +2616,11 @@ fn stt_worker(
                 let frame: Vec<f32> = leftover_16k.drain(..VAD_FRAME_SAMPLES).collect();
                 let clamped: Vec<f32> =
                     frame.iter().map(|sample| sample.clamp(-1.0, 1.0)).collect();
-                let vad_threshold =
-                    active_vad_threshold(&assistant_speaking, &assistant_vad_threshold);
+                let vad_threshold = active_vad_threshold_for_speech(
+                    &assistant_speaking,
+                    &assistant_vad_threshold,
+                    speech_vad_threshold,
+                );
                 let speaking = vad.predict_f32(&clamped) > vad_threshold;
                 if speaking {
                     if !in_speech {
@@ -2575,7 +2648,7 @@ fn stt_worker(
                 } else if in_speech {
                     speech.extend_from_slice(&frame);
                     silence_frames += 1;
-                    if silence_frames >= SILENCE_FLUSH_FRAMES {
+                    if silence_frames >= silence_flush_frames {
                         flush_speech(
                             &speech,
                             &recognizer,
@@ -2877,6 +2950,27 @@ mod tests {
         assert_eq!(InterruptionSensitivity::Less.vad_threshold(), 0.8);
         assert!(InterruptionSensitivity::Less.vad_threshold() > VAD_THRESHOLD);
         assert_eq!(InterruptionSensitivity::More.vad_threshold(), VAD_THRESHOLD);
+    }
+
+    #[test]
+    fn voice_detection_presets_include_the_existing_defaults() {
+        assert_eq!(VoiceDetectionSensitivity::Less.vad_threshold(), 0.8);
+        assert_eq!(VoiceDetectionSensitivity::Balanced.vad_threshold(), 0.65);
+        assert_eq!(
+            VoiceDetectionSensitivity::More.vad_threshold(),
+            VAD_THRESHOLD
+        );
+        assert_eq!(EndOfSpeechPause::Short.silence_frames(), 50);
+        assert_eq!(EndOfSpeechPause::Standard.silence_frames(), 75);
+        assert_eq!(EndOfSpeechPause::Long.silence_frames(), 100);
+        assert_eq!(
+            active_vad_threshold_for_speech(
+                &AtomicBool::new(false),
+                &AtomicU32::new(InterruptionSensitivity::Less.vad_threshold().to_bits()),
+                VoiceDetectionSensitivity::Balanced.vad_threshold(),
+            ),
+            VoiceDetectionSensitivity::Balanced.vad_threshold(),
+        );
     }
 
     #[test]
