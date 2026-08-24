@@ -847,7 +847,7 @@ export function startNativeAssistantSpeech(
   const suppressTarget = (slot: string, target: SpeechTarget, text: string) => {
     invalidatedSlots.add(slot);
     consumedTextBySlot.set(slot, text);
-    setTargetStatus(sessionId, target, "notSpoken");
+    setTargetSpeech(sessionId, target, { status: "notSpoken" });
     recordPlaybackNotice(sessionId, slot, text, "notSpoken");
   };
 
@@ -1043,13 +1043,6 @@ export function startNativeAssistantSpeech(
         const appendOnly = content.text.startsWith(previous);
         const causalTranscriptKey =
           causalTranscriptKeyByMessage.get(message.id) ?? null;
-        if (
-          invalidatedSlots.has(slot) ||
-          causalTranscriptKey !== finalizedTranscriptKey
-        ) {
-          suppressTarget(slot, target, content.text);
-          continue;
-        }
         const delta = appendOnly
           ? content.text.slice(previous.length)
           : content.text;
@@ -1131,6 +1124,14 @@ export function startNativeAssistantSpeech(
             },
             interruptionCause,
           );
+          continue;
+        }
+
+        if (
+          invalidatedSlots.has(slot) ||
+          causalTranscriptKey !== finalizedTranscriptKey
+        ) {
+          suppressTarget(slot, target, content.text);
           continue;
         }
 

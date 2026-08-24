@@ -578,6 +578,7 @@ describe("native assistant speech stream", () => {
         speech: { status: "interrupted", spokenThrough: "After".length },
       });
     });
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
 
     const notice = takeVoicePlaybackNotices("session-1") ?? "";
     expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
@@ -1273,6 +1274,7 @@ describe("native assistant speech stream", () => {
         },
       });
     });
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
     expect(mocks.append).toHaveBeenCalledTimes(1);
     const notice = takeVoicePlaybackNotices("session-1") ?? "";
     expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
@@ -1771,8 +1773,9 @@ describe("native assistant speech stream", () => {
         ),
       ]);
 
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    emit("interrupted");
     await vi.waitFor(() => {
-      expect(mocks.stop).toHaveBeenCalled();
       expect(mocks.start).toHaveBeenCalledTimes(2);
       expect(mocks.append).toHaveBeenCalledWith(
         mocks.start.mock.calls[1]?.[0],
@@ -2092,6 +2095,7 @@ describe("native assistant speech stream", () => {
     finalizeVoiceTranscript("voice-user-late");
 
     await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    emit("interrupted");
     expect(
       useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
     ).toMatchObject({ speech: { status: "interrupted" } });
