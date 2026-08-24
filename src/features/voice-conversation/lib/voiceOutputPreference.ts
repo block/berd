@@ -6,7 +6,7 @@ export type VoiceOutputBackend = "pocket" | "siri";
 const STORAGE_KEY = "goose:voice-output-backend";
 const CHANGED_EVENT = "goose:voice-output-backend-changed";
 export function getDefaultVoiceOutputBackend(): VoiceOutputBackend {
-  return "pocket";
+  return getPlatform() === "mac" ? "siri" : "pocket";
 }
 
 function normalize(value: unknown): VoiceOutputBackend {
