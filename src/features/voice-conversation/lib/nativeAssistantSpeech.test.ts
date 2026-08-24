@@ -2041,6 +2041,109 @@ describe("native assistant speech stream", () => {
     }
   });
 
+  it("does not rewind across repeated false-positive interruptions", async () => {
+    vi.useFakeTimers();
+    try {
+      startNativeAssistantSpeech("session-1", vi.fn());
+      useChatStore.getState().setMessages("session-1", [
+        assistant(
+          [
+            {
+              type: "text",
+              text: "First sentence. Second sentence. Third sentence.",
+            },
+          ],
+          "completed",
+          "assistant-repeated-resume",
+        ),
+      ]);
+      await vi.runAllTimersAsync();
+      const firstStreamId = mocks.start.mock.calls[0]?.[0] as string;
+      mocks.streamHandler?.({
+        streamId: firstStreamId,
+        state: "started",
+        error: null,
+      });
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      mocks.streamHandler?.({
+        streamId: firstStreamId,
+        state: "interrupted",
+        error: null,
+        delivery: {
+          segments: [
+            {
+              text: "First sentence. ",
+              playedFrames: 1_000,
+              totalFrames: 1_000,
+              synthesisComplete: true,
+            },
+            {
+              text: "Second sentence. ",
+              playedFrames: 500,
+              totalFrames: 1_000,
+              synthesisComplete: true,
+            },
+          ],
+        },
+      });
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.runAllTimersAsync();
+
+      const secondStreamId = mocks.start.mock.calls[1]?.[0] as string;
+      expect(mocks.append).toHaveBeenCalledWith(
+        secondStreamId,
+        "Second sentence. Third sentence.",
+      );
+      mocks.streamHandler?.({
+        streamId: secondStreamId,
+        state: "started",
+        error: null,
+      });
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      mocks.streamHandler?.({
+        streamId: secondStreamId,
+        state: "interrupted",
+        error: null,
+        delivery: {
+          segments: [
+            {
+              text: "Second sentence. ",
+              playedFrames: 1_000,
+              totalFrames: 1_000,
+              synthesisComplete: true,
+            },
+            {
+              text: "Third sentence.",
+              playedFrames: 500,
+              totalFrames: 1_000,
+              synthesisComplete: true,
+            },
+          ],
+        },
+      });
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      await vi.advanceTimersByTimeAsync(250);
+      await vi.runAllTimersAsync();
+
+      const thirdStreamId = mocks.start.mock.calls[2]?.[0] as string;
+      expect(mocks.append).toHaveBeenCalledWith(
+        thirdStreamId,
+        "Third sentence.",
+      );
+      expect(mocks.append).not.toHaveBeenCalledWith(
+        thirdStreamId,
+        "First sentence. Second sentence. Third sentence.",
+      );
+      expect(mocks.append).not.toHaveBeenCalledWith(
+        thirdStreamId,
+        "Second sentence. Third sentence.",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("restarts rewritten text from the beginning after a false interruption", async () => {
     vi.useFakeTimers();
     try {

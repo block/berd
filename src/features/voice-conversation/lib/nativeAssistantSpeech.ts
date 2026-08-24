@@ -29,7 +29,12 @@ import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
 type SpeechFailureHandler = (text: string, error: unknown) => void;
 type SpeechTarget = { messageId: string; textOrdinal: number };
-type SpeechTargetSpan = SpeechTarget & { start: number; end: number };
+type SpeechTargetSpan = SpeechTarget & {
+  start: number;
+  end: number;
+  targetStart: number;
+  targetEnd: number;
+};
 type SpeechDeliveryEstimate = {
   cutoff: number;
   spokenText: string;
@@ -381,17 +386,17 @@ function targetDeliveryCutoffs(utterance: ActiveUtterance, cutoff: number) {
     const spans = utterance.targetSpans.filter(
       (span) => targetKey(span) === targetKey(target),
     );
+    let localCutoff = 0;
+    for (const span of spans) {
+      if (cutoff < span.start) break;
+      localCutoff =
+        span.targetStart + Math.max(0, Math.min(span.end, cutoff) - span.start);
+      if (cutoff < span.end) break;
+    }
     return {
       target,
-      targetLength: spans.reduce(
-        (length, span) => length + (span.end - span.start),
-        0,
-      ),
-      localCutoff: spans.reduce(
-        (length, span) =>
-          length + Math.max(0, Math.min(span.end, cutoff) - span.start),
-        0,
-      ),
+      targetLength: spans.at(-1)?.targetEnd ?? 0,
+      localCutoff,
     };
   });
 }
@@ -1272,19 +1277,24 @@ export function startNativeAssistantSpeech(
         consumedTextBySlot.set(slot, content.text);
         if (utterance.finishing) continue;
         const spanStart = utterance.text.length;
+        const targetStart = appendOnly ? previous.length : 0;
         utterance.text += delta;
         const previousSpan = utterance.targetSpans.at(-1);
         if (
           previousSpan &&
           targetKey(previousSpan) === targetKey(target) &&
-          previousSpan.end === spanStart
+          previousSpan.end === spanStart &&
+          previousSpan.targetEnd === targetStart
         ) {
           previousSpan.end = utterance.text.length;
+          previousSpan.targetEnd = targetStart + delta.length;
         } else {
           utterance.targetSpans.push({
             ...target,
             start: spanStart,
             end: utterance.text.length,
+            targetStart,
+            targetEnd: targetStart + delta.length,
           });
         }
         queueStreamCommand(
