@@ -108,6 +108,7 @@ function boundedDeliveryText(
       };
 }
 const MALFORMED_VOICE_TRANSCRIPT_KEY = "\0malformed-voice-transcript";
+const USER_IDLE_TRANSCRIPT_SETTLE_MS = 250;
 
 function voiceTranscriptKeyForMessage(
   sessionId: string,
@@ -1253,9 +1254,9 @@ export function startNativeAssistantSpeech(
     if (becameUserIdle) {
       if (heldReleaseTimer !== null) window.clearTimeout(heldReleaseTimer);
       idleSettling = true;
-      // Wait one task turn for an adjacent finalized-transcript event before
-      // releasing held speech. Keep this gate even when no assistant text
-      // exists yet, since model output can race that event.
+      // VAD can report silence shortly before the recognizer commits its final
+      // transcript. Give that transcript a bounded opportunity to invalidate
+      // causally stale speech before releasing the held reply.
       heldReleaseTimer = window.setTimeout(() => {
         heldReleaseTimer = null;
         const current = useVoiceConversationStore.getState();
@@ -1270,7 +1271,7 @@ export function startNativeAssistantSpeech(
         idleSettling = false;
         heldReleaseReady = heldSpeech !== null;
         inspect();
-      }, 0);
+      }, USER_IDLE_TRANSCRIPT_SETTLE_MS);
       return;
     }
     inspect();

@@ -1554,28 +1554,63 @@ describe("native assistant speech stream", () => {
   });
 
   it("plays a reply held during user speech after idle when no transcript arrives", async () => {
-    useVoiceConversationStore.setState({ userSpeaking: true });
-    startNativeAssistantSpeech("session-1", vi.fn());
-    useChatStore
-      .getState()
-      .setMessages("session-1", [
-        assistant([{ type: "text", text: "Held reply." }], "completed"),
-      ]);
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      startNativeAssistantSpeech("session-1", vi.fn());
+      useChatStore
+        .getState()
+        .setMessages("session-1", [
+          assistant([{ type: "text", text: "Held reply." }], "completed"),
+        ]);
 
-    await Promise.resolve();
-    expect(mocks.start).not.toHaveBeenCalled();
-    expect(mocks.append).not.toHaveBeenCalled();
+      await Promise.resolve();
+      expect(mocks.start).not.toHaveBeenCalled();
+      expect(mocks.append).not.toHaveBeenCalled();
 
-    useVoiceConversationStore.setState({ userSpeaking: false });
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      await vi.advanceTimersByTimeAsync(249);
+      expect(mocks.start).not.toHaveBeenCalled();
 
-    await vi.waitFor(() => {
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.runAllTimersAsync();
       expect(mocks.start).toHaveBeenCalledTimes(1);
       expect(mocks.append).toHaveBeenCalledWith(
         mocks.start.mock.calls[0]?.[0],
         "Held reply.",
       );
       expect(mocks.finish).toHaveBeenCalledTimes(1);
-    });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not release held speech when final STT follows VAD idle", async () => {
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      startNativeAssistantSpeech("session-1", vi.fn());
+      useChatStore
+        .getState()
+        .setMessages("session-1", [
+          assistant([{ type: "text", text: "Obsolete reply." }], "completed"),
+        ]);
+
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      await vi.advanceTimersByTimeAsync(50);
+      expect(mocks.start).not.toHaveBeenCalled();
+
+      finalizeVoiceTranscript("voice-k1");
+      await vi.advanceTimersByTimeAsync(250);
+
+      expect(mocks.start).not.toHaveBeenCalled();
+      expect(mocks.append).not.toHaveBeenCalled();
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({ speech: { status: "notSpoken" } });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("plays a K1 continuation held while the same utterance remains active", async () => {
