@@ -225,6 +225,19 @@ private func describe(_ status: AssetInventory.Status) -> String {
 }
 
 @available(macOS 26.0, *)
+func resolveModelReadiness(
+    compatibleInstalledFormatAvailable: Bool,
+    inventory: AssetInventory.Status
+) -> (status: String, ready: Bool) {
+    // bestAvailableAudioFormat considers installed assets and returns nil when
+    // another download is required. Inventory can lag shared, already-usable assets.
+    if compatibleInstalledFormatAvailable {
+        return ("installed", true)
+    }
+    return (describe(inventory), false)
+}
+
+@available(macOS 26.0, *)
 private func status(for requested: Locale) async -> SpeechStatus {
     let authorization = currentSpeechAuthorization()
     guard authorization == .authorized else {
@@ -254,13 +267,16 @@ private func status(for requested: Locale) async -> SpeechStatus {
     let transcriber = speechTranscriber(for: locale)
     let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
     let inventory = await AssetInventory.status(forModules: assetModules(for: locale))
-    let ready = format != nil
+    let readiness = resolveModelReadiness(
+        compatibleInstalledFormatAvailable: format != nil,
+        inventory: inventory
+    )
     return SpeechStatus(
         supported: true,
         locale: locale.identifier(.bcp47),
         localeSupported: true,
-        modelStatus: ready ? "installed" : describe(inventory),
-        ready: ready,
+        modelStatus: readiness.status,
+        ready: readiness.ready,
         authorizationStatus: authorization.rawValue
     )
 }
@@ -276,6 +292,10 @@ private func installModel(
         throw BridgeError.unsupportedLocale(requested.identifier(.bcp47))
     }
     let modules = assetModules(for: locale)
+    if await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: modules) != nil {
+        progress?(1, context.pointer)
+        return
+    }
     let initial = await AssetInventory.status(forModules: modules)
     if initial == .installed {
         progress?(1, context.pointer)
