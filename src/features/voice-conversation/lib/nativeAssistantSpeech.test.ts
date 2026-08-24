@@ -627,6 +627,127 @@ describe("native assistant speech stream", () => {
     ).toMatchObject({ speech: { status: "interrupted" } });
   });
 
+  it.each([
+    ["returns false", () => mocks.stop.mockResolvedValue(false)],
+    ["rejects", () => mocks.stop.mockRejectedValue(new Error("stop failed"))],
+  ])("finalizes immediately when native stop %s", async (_label, setStop) => {
+    setStop();
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "First reply." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await vi.waitFor(() => {
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({
+        speech: { status: "interrupted", spokenThrough: 0 },
+      });
+    });
+
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant(
+          [{ type: "text", text: "First reply." }],
+          "completed",
+          "assistant-1",
+        ),
+        assistant(
+          [{ type: "text", text: "Second reply." }],
+          "completed",
+          "assistant-2",
+        ),
+      ]);
+    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(2));
+  });
+
+  it("bounds a missing native terminal event and allows the next reply", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "First reply." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      await Promise.resolve();
+      expect(mocks.stop).toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({
+        speech: { status: "interrupted", spokenThrough: 0 },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant(
+          [{ type: "text", text: "First reply." }],
+          "completed",
+          "assistant-1",
+        ),
+        assistant(
+          [{ type: "text", text: "Second reply." }],
+          "completed",
+          "assistant-2",
+        ),
+      ]);
+    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(2));
+  });
+
+  it("finalizes only once when a terminal event races the fallback", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "First reply." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+    const stopCallsBeforeInterruption = mocks.stop.mock.calls.length;
+
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      mocks.streamHandler?.({
+        streamId,
+        state: "interrupted",
+        error: null,
+        delivery: {
+          segments: [
+            {
+              text: "First reply.",
+              playedFrames: 500,
+              totalFrames: 1_000,
+              synthesisComplete: true,
+            },
+          ],
+        },
+      });
+      await vi.advanceTimersByTimeAsync(1_000);
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const notice = takeVoicePlaybackNotices("session-1") ?? "";
+    expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
+    expect(mocks.stop).toHaveBeenCalledTimes(stopCallsBeforeInterruption + 1);
+  });
+
   it("describes a hang-up as stopping the voice conversation", async () => {
     takeVoicePlaybackNotices("session-1");
     startNativeAssistantSpeech("session-1", vi.fn());

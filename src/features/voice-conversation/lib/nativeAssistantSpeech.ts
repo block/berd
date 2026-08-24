@@ -43,6 +43,7 @@ type ActiveUtterance = {
   finishing: boolean;
   nativeStreamStarted: boolean;
   interruptionRequested: boolean;
+  interruptionFallback: ReturnType<typeof setTimeout> | null;
   interruptionCause: InterruptionCause | null;
   latestDelivery: VoiceDeliveryProgress | null;
   status: SpeechStatus | null;
@@ -71,6 +72,7 @@ let stopActiveVoice: () => Promise<boolean> = stopPocketVoice;
 let activityReportQueue = Promise.resolve();
 const pendingNotices = new Map<string, Map<string, string>>();
 const DELIVERY_NOTICE_TEXT_LIMIT = 250;
+const INTERRUPTION_TERMINAL_TIMEOUT_MS = 1_000;
 
 function boundedDeliveryText(
   text: string,
@@ -364,6 +366,10 @@ function failActiveUtterance(
 ) {
   const utterance = activeUtterance;
   if (!utterance || utterance.id !== utteranceId) return;
+  if (utterance.interruptionFallback !== null) {
+    clearTimeout(utterance.interruptionFallback);
+    utterance.interruptionFallback = null;
+  }
   setUtteranceStatus(utterance, "failed");
   recordPlaybackNotice(
     utterance.sessionId,
@@ -375,6 +381,28 @@ function failActiveUtterance(
   activeUtterance = null;
   reportAssistantActivity(utterance.sessionId, utterance.voiceRevision, false);
   onFailure(utterance.text, error);
+  utterance.onTerminal();
+}
+
+function finalizeInterruptedUtterance(
+  utterance: ActiveUtterance,
+  cause: InterruptionCause,
+) {
+  if (activeUtterance?.id !== utterance.id) return;
+  if (utterance.interruptionFallback !== null) {
+    clearTimeout(utterance.interruptionFallback);
+    utterance.interruptionFallback = null;
+  }
+  const estimate = estimateSpeechDelivery(
+    utterance.text,
+    utterance.latestDelivery,
+  );
+  applyInterruptionEstimate(utterance, estimate);
+  utterance.onInterrupted();
+  recordInterruptionNotices(utterance, estimate, cause);
+  activeUtterance = null;
+  useVoiceConversationStore.getState().setUiState("listening");
+  reportAssistantActivity(utterance.sessionId, utterance.voiceRevision, false);
   utterance.onTerminal();
 }
 
@@ -415,6 +443,10 @@ function handleStreamEvent(
       );
       break;
     case "completed":
+      if (utterance.interruptionFallback !== null) {
+        clearTimeout(utterance.interruptionFallback);
+        utterance.interruptionFallback = null;
+      }
       setUtteranceStatus(utterance, "spoken");
       voice.setUiState("listening");
       activeUtterance = null;
@@ -427,25 +459,10 @@ function handleStreamEvent(
       break;
     case "interrupted": {
       utterance.latestDelivery = event.delivery ?? utterance.latestDelivery;
-      const estimate = estimateSpeechDelivery(
-        utterance.text,
-        utterance.latestDelivery,
-      );
-      applyInterruptionEstimate(utterance, estimate);
-      utterance.onInterrupted();
-      recordInterruptionNotices(
+      finalizeInterruptedUtterance(
         utterance,
-        estimate,
         utterance.interruptionCause ?? "voiceStopped",
       );
-      voice.setUiState("listening");
-      activeUtterance = null;
-      reportAssistantActivity(
-        utterance.sessionId,
-        utterance.voiceRevision,
-        false,
-      );
-      utterance.onTerminal();
       break;
     }
     case "failed":
@@ -486,29 +503,37 @@ function interruptActiveUtterance(
     if (terminalEventExpected) utterance.onInterrupted();
   }
   if (utterance && !terminalEventExpected) {
-    activeUtterance = null;
-    const estimate = estimateSpeechDelivery(
-      utterance.text,
-      utterance.latestDelivery,
-    );
-    applyInterruptionEstimate(utterance, estimate);
-    utterance.onInterrupted();
-    recordInterruptionNotices(
+    finalizeInterruptedUtterance(
       utterance,
-      estimate,
       utterance.interruptionCause ?? cause,
     );
-    reportAssistantActivity(
-      utterance.sessionId,
-      utterance.voiceRevision,
-      false,
-    );
-    utterance.onTerminal();
   }
-  void stopActiveVoice().catch(() => undefined);
-  commandQueue = commandQueue.then(async () => {
-    await stopActiveVoice().catch(() => undefined);
-  });
+  if (utterance && terminalEventExpected) {
+    utterance.interruptionFallback = setTimeout(() => {
+      finalizeInterruptedUtterance(
+        utterance,
+        utterance.interruptionCause ?? cause,
+      );
+    }, INTERRUPTION_TERMINAL_TIMEOUT_MS);
+    void stopActiveVoice().then(
+      (stopped) => {
+        if (!stopped) {
+          finalizeInterruptedUtterance(
+            utterance,
+            utterance.interruptionCause ?? cause,
+          );
+        }
+      },
+      () => {
+        finalizeInterruptedUtterance(
+          utterance,
+          utterance.interruptionCause ?? cause,
+        );
+      },
+    );
+  } else {
+    void stopActiveVoice().catch(() => undefined);
+  }
   return utterance !== null;
 }
 
@@ -625,6 +650,7 @@ export function startNativeAssistantSpeech(
       finishing: false,
       nativeStreamStarted: false,
       interruptionRequested: false,
+      interruptionFallback: null,
       interruptionCause: null,
       latestDelivery: null,
       status: null,
