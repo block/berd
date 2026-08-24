@@ -82,7 +82,12 @@ function subscribe(listener: () => void) {
   listeners.add(listener);
   if (!removeWindowListeners) {
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEY || event.key === null) notify();
+      if (event.key === STORAGE_KEY || event.key === null) {
+        // A storage event is an explicit cross-window write, even if its value
+        // happens to match the value observed before a failed local write.
+        volatilePreference = undefined;
+        notify();
+      }
     };
     window.addEventListener(CHANGED_EVENT, notify);
     window.addEventListener("storage", handleStorage);
