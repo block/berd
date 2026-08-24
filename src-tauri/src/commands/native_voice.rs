@@ -942,14 +942,17 @@ fn reject_pending_transcript(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects four guards beside the lifecycle claim.
 pub async fn start_native_voice_conversation(
     app: AppHandle,
     state: State<'_, NativeVoiceState>,
     capture: State<'_, VoiceCaptureState>,
+    window_sessions: State<'_, super::window_session::WindowSessionRegistry>,
     webview_window: WebviewWindow,
     session_id: String,
     renderer_id: String,
     renderer_epoch: u64,
+    foreground_generation: u64,
 ) -> Result<NativeVoiceStatus, String> {
     let session_id = session_id.trim().to_string();
     if session_id.is_empty() || session_id.len() > 256 {
@@ -985,7 +988,28 @@ pub async fn start_native_voice_conversation(
             return Err(error);
         }
     };
-    let lifecycle_guard = state.stop_serial.lock().await;
+    let lifecycle_guard = state
+        .target_lifecycle_guard(|| {
+            validate_voice_target_session(
+                capture.inner(),
+                &window_sessions,
+                &webview_window,
+                &renderer_id,
+                renderer_epoch,
+                &session_id,
+                Some(foreground_generation),
+            )
+        })
+        .await;
+    let lifecycle_guard = match lifecycle_guard {
+        Ok(guard) => guard,
+        Err(error) => {
+            if microphone_claimed {
+                capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
+            }
+            return Err(error);
+        }
+    };
     match refresh_microphone_claim(
         capture.inner(),
         &window_label,
@@ -1333,50 +1357,26 @@ pub async fn stop_native_voice_conversation_for_replacement(
     if target_session_id.is_empty() || target_session_id.len() > 256 {
         return Err("target session id must be between 1 and 256 bytes".to_string());
     }
-    let target_owner = window_sessions.label_for(target_session_id);
-    let owns_foreground_session = capture.foreground_session_matches(
-        webview_window.label(),
+    validate_voice_target_session(
+        capture.inner(),
+        &window_sessions,
+        &webview_window,
         &renderer_id,
         renderer_epoch,
         target_session_id,
+        None,
     )?;
-    if !replacement_caller_matches_target(
-        webview_window.label(),
-        target_owner.as_deref(),
-        owns_foreground_session,
-    ) {
-        return Err("Only the target session window can replace a voice conversation.".to_string());
-    }
-    if !webview_window
-        .is_focused()
-        .map_err(|error| format!("Could not confirm the target session window focus: {error}"))?
-    {
-        return Err(
-            "Only the focused target session can replace a voice conversation.".to_string(),
-        );
-    }
     let _stop_guard = state
-        .replacement_stop_guard(|| {
-            let target_owner = window_sessions.label_for(target_session_id);
-            let owns_foreground_session = capture.foreground_session_matches(
-                webview_window.label(),
+        .target_lifecycle_guard(|| {
+            validate_voice_target_session(
+                capture.inner(),
+                &window_sessions,
+                &webview_window,
                 &renderer_id,
                 renderer_epoch,
                 target_session_id,
-            )?;
-            if !replacement_caller_matches_target(
-                webview_window.label(),
-                target_owner.as_deref(),
-                owns_foreground_session,
-            ) {
-                return Err("The target session is no longer in the foreground.".to_string());
-            }
-            if !webview_window.is_focused().map_err(|error| {
-                format!("Could not confirm the target session window focus: {error}")
-            })? {
-                return Err("The target session window is no longer focused.".to_string());
-            }
-            Ok(())
+                None,
+            )
         })
         .await?;
     state
@@ -1397,6 +1397,39 @@ fn replacement_caller_matches_target(
         Some(owner_window_label) => owner_window_label == caller_window_label,
         None => caller_window_label == "main",
     }
+}
+
+fn validate_voice_target_session(
+    capture: &VoiceCaptureState,
+    window_sessions: &super::window_session::WindowSessionRegistry,
+    webview_window: &WebviewWindow,
+    renderer_id: &str,
+    renderer_epoch: u64,
+    target_session_id: &str,
+    foreground_generation: Option<u64>,
+) -> Result<(), String> {
+    let target_owner = window_sessions.label_for(target_session_id);
+    let owns_foreground_session = capture.foreground_session_matches_generation(
+        webview_window.label(),
+        renderer_id,
+        renderer_epoch,
+        target_session_id,
+        foreground_generation,
+    )?;
+    if !replacement_caller_matches_target(
+        webview_window.label(),
+        target_owner.as_deref(),
+        owns_foreground_session,
+    ) {
+        return Err("The target session is no longer in the foreground.".to_string());
+    }
+    if !webview_window
+        .is_focused()
+        .map_err(|error| format!("Could not confirm the target session window focus: {error}"))?
+    {
+        return Err("The target session window is no longer focused.".to_string());
+    }
+    Ok(())
 }
 
 fn native_owner_id(session_id: &str) -> String {
@@ -1422,7 +1455,7 @@ fn refresh_microphone_claim(
 }
 
 impl NativeVoiceState {
-    async fn replacement_stop_guard<F>(
+    async fn target_lifecycle_guard<F>(
         &self,
         validate_target: F,
     ) -> Result<tokio::sync::MutexGuard<'_, ()>, String>
@@ -2159,7 +2192,7 @@ mod tests {
         let state = NativeVoiceState::default();
         let target_is_foreground = AtomicBool::new(true);
         let active_operation = state.stop_serial.lock().await;
-        let validation = state.replacement_stop_guard(|| {
+        let validation = state.target_lifecycle_guard(|| {
             target_is_foreground
                 .load(Ordering::SeqCst)
                 .then_some(())

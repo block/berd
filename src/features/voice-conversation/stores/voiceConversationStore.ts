@@ -52,7 +52,10 @@ interface VoiceConversationStore {
   refreshStatus: () => Promise<VoiceConversationStatus>;
   requestStart: (sessionId: string) => void;
   clearRequestedStart: (sessionId: string) => void;
-  start: (sessionId: string) => Promise<VoiceConversationStatus>;
+  start: (
+    sessionId: string,
+    foregroundGeneration?: number,
+  ) => Promise<VoiceConversationStatus>;
   stop: () => Promise<VoiceConversationStatus>;
   stopForReplacement: (
     status: VoiceConversationStatus,
@@ -565,7 +568,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       return status;
     },
 
-    start: (sessionId) => {
+    start: (sessionId, foregroundGeneration) => {
       if (voiceStartBlocks.has(sessionId)) {
         return Promise.reject(
           new Error("Voice cannot start while this chat is being archived."),
@@ -576,7 +579,10 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       set({ uiState: "starting", microphoneMuted: false, error: null });
       const request = (async () => {
         try {
-          const status = await startVoiceConversation(sessionId);
+          const status = await startVoiceConversation(
+            sessionId,
+            foregroundGeneration,
+          );
           set((state) =>
             shouldApplyResponseRevision(state.status, status.revision) ||
             (status.revision === state.status.revision &&

@@ -11,7 +11,7 @@ const nativeAssistantSpeechMocks = vi.hoisted(() => ({
 }));
 const tauriWindowMocks = vi.hoisted(() => ({ label: "main" }));
 const voiceApiMocks = vi.hoisted(() => ({
-  confirmForegroundSession: vi.fn<() => Promise<void>>(),
+  confirmForegroundSession: vi.fn<() => Promise<number>>(),
 }));
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -204,7 +204,7 @@ describe("voice transcript delivery coordination", () => {
     nativeAssistantSpeechMocks.stop.mockClear();
     nativeAssistantSpeechMocks.takeNotices.mockClear();
     voiceApiMocks.confirmForegroundSession.mockReset();
-    voiceApiMocks.confirmForegroundSession.mockResolvedValue(undefined);
+    voiceApiMocks.confirmForegroundSession.mockResolvedValue(1);
     useChatStore.setState({ messagesBySession: {}, sessionStateById: {} });
   });
   it("serializes deliveries for the same session and re-evaluates in order", async () => {
@@ -463,7 +463,7 @@ describe("voice transcript delivery coordination", () => {
       }));
     });
 
-    await waitFor(() => expect(start).toHaveBeenCalledWith("session-1"));
+    await waitFor(() => expect(start).toHaveBeenCalledWith("session-1", 1));
     expect(
       useVoiceConversationStore.getState().requestedStartSessionId,
     ).toBeNull();
@@ -552,7 +552,58 @@ describe("voice transcript delivery coordination", () => {
       stopRequest.resolve(stopped);
       await handoff;
     });
-    expect(start).toHaveBeenCalledWith("session-b");
+    expect(start).toHaveBeenCalledWith("session-b", 1);
+  });
+
+  it("does not start a replacement superseded after the active call stops", async () => {
+    const active = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "session-window-a",
+      microphoneMuted: false,
+      revision: 2,
+    };
+    const stopped = {
+      ...active,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      revision: 3,
+    };
+    const start = vi.fn();
+    voiceApiMocks.confirmForegroundSession
+      .mockResolvedValueOnce(1)
+      .mockRejectedValueOnce(
+        new Error("The target session is no longer in the foreground."),
+      );
+    useVoiceConversationStore.setState({
+      status: active,
+      uiState: "listening",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi.fn().mockResolvedValue(active),
+      stopForReplacement: vi.fn().mockResolvedValue(stopped),
+      start,
+    });
+    const { result } = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-b",
+        onSend: vi.fn().mockResolvedValue(true),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.onToggle();
+    });
+
+    expect(voiceApiMocks.confirmForegroundSession).toHaveBeenCalledTimes(2);
+    expect(start).not.toHaveBeenCalled();
   });
 
   it("accepts a later toggle after a replacement attempt times out", async () => {
@@ -794,7 +845,7 @@ describe("voice transcript delivery coordination", () => {
     startRequest.resolve(runningWinner);
     await winnerToggle;
 
-    expect(start).toHaveBeenCalledWith(winnerSessionId);
+    expect(start).toHaveBeenCalledWith(winnerSessionId, 1);
     expect(nativeAssistantSpeechMocks.start).toHaveBeenLastCalledWith(
       winnerSessionId,
       expect.any(Function),

@@ -309,7 +309,7 @@ function renewForegroundSessionClaim(
 
 async function awaitForegroundSessionClaim(
   targetSessionId: string,
-): Promise<void> {
+): Promise<number> {
   let targetClaim = foregroundSessionClaim;
   if (
     foregroundSessionId !== targetSessionId ||
@@ -360,14 +360,17 @@ async function awaitForegroundSessionClaim(
     ) {
       throw new Error("The target session is no longer in the foreground.");
     }
-    if (outcome.type === "acknowledged" && latestClaim === targetClaim) return;
+    if (outcome.type === "acknowledged" && latestClaim === targetClaim) {
+      return targetClaim.generation;
+    }
     targetClaim = latestClaim;
   }
+  throw new Error("The target session is no longer in the foreground.");
 }
 
 export function confirmVoiceConversationForegroundSession(
   sessionId: string,
-): Promise<void> {
+): Promise<number> {
   return awaitForegroundSessionClaim(sessionId);
 }
 
@@ -506,6 +509,7 @@ export function rejectVoiceConversationTranscript(
 
 export async function startVoiceConversation(
   sessionId: string,
+  foregroundGeneration = 0,
 ): Promise<VoiceConversationStatus> {
   resetMicrophoneMuteState();
   const { rendererId, rendererEpoch } = await getRendererInstance();
@@ -515,6 +519,7 @@ export async function startVoiceConversation(
       sessionId,
       rendererId,
       rendererEpoch,
+      foregroundGeneration,
     },
   );
   try {

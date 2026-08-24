@@ -96,7 +96,7 @@ export function shouldShowVoiceConversationControl(options: {
 
 export async function replaceActiveVoiceConversation(options: {
   stop: () => Promise<{ lifecycle: string; sessionId: string | null }>;
-  confirmTarget?: () => Promise<void>;
+  confirmTarget?: () => Promise<unknown>;
   start: () => Promise<void>;
 }): Promise<boolean> {
   const stopped = await options.stop();
@@ -749,7 +749,9 @@ export function useVoiceConversationController({
     const route = { sessionId, send: onSend };
     activeSendRoute = route;
     try {
-      await start(sessionId);
+      const foregroundGeneration =
+        await confirmVoiceConversationForegroundSession(sessionId);
+      await start(sessionId, foregroundGeneration);
       startAssistantSpeech(assistantSpeechHistory);
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;
@@ -786,8 +788,17 @@ export function useVoiceConversationController({
               }
             : state,
         );
-        startAssistantSpeech(assistantSpeechHistory);
-      } else {
+        const currentStatus = useVoiceConversationStore.getState().status;
+        conversationStarted =
+          currentStatus.lifecycle === "running" &&
+          currentStatus.sessionId === sessionId &&
+          currentStatus.ownerWindowLabel === currentWindowLabel &&
+          currentStatus.revision === backendStatus.revision;
+        if (conversationStarted) {
+          startAssistantSpeech(assistantSpeechHistory);
+        }
+      }
+      if (!conversationStarted) {
         if (activeSendRoute?.sessionId === route.sessionId) {
           activeSendRoute = null;
         }

@@ -198,12 +198,30 @@ impl VoiceCaptureState {
         Ok(())
     }
 
-    pub fn foreground_session_matches(
+    #[cfg(test)]
+    fn foreground_session_matches(
         &self,
         window_label: &str,
         renderer_id: &str,
         renderer_epoch: u64,
         session_id: &str,
+    ) -> Result<bool, String> {
+        self.foreground_session_matches_generation(
+            window_label,
+            renderer_id,
+            renderer_epoch,
+            session_id,
+            None,
+        )
+    }
+
+    pub fn foreground_session_matches_generation(
+        &self,
+        window_label: &str,
+        renderer_id: &str,
+        renderer_epoch: u64,
+        session_id: &str,
+        expected_generation: Option<u64>,
     ) -> Result<bool, String> {
         validate_id("renderer", renderer_id)?;
         validate_id("session", session_id)?;
@@ -219,6 +237,7 @@ impl VoiceCaptureState {
                 claim.renderer_id == renderer_id
                     && claim.renderer_epoch == renderer_epoch
                     && claim.session_id.as_deref() == Some(session_id)
+                    && expected_generation.is_none_or(|generation| claim.generation == generation)
             }))
     }
 
@@ -525,6 +544,24 @@ mod tests {
         assert!(capture
             .foreground_session_matches("main", "renderer-1", epoch, "session-c")
             .expect("authorize session C"));
+        assert!(!capture
+            .foreground_session_matches_generation(
+                "main",
+                "renderer-1",
+                epoch,
+                "session-c",
+                Some(1),
+            )
+            .expect("reject superseded generation"));
+        assert!(capture
+            .foreground_session_matches_generation(
+                "main",
+                "renderer-1",
+                epoch,
+                "session-c",
+                Some(2),
+            )
+            .expect("authorize current generation"));
     }
 
     #[test]
