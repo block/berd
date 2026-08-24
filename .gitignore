@@ -8,6 +8,7 @@ dist/
 
 # Rust/Tauri build artifacts
 **/target/
+**/.build/
 
 # Environment files
 .env

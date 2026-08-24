@@ -17,6 +17,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 const status: MacSpeechStatus = {
   supported: true,
   unavailableReason: null,
+  authorizationStatus: "authorized",
   locale: "en-US",
   localeSupported: true,
   modelInstalled: true,

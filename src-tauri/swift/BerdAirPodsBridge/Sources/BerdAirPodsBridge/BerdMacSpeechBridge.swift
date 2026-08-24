@@ -37,6 +37,8 @@ private enum BridgeError: LocalizedError {
     case inputOverrun
     case statusTimedOut
     case finishTimedOut
+    case speechAuthorizationDenied
+    case speechAuthorizationRestricted
 
     var errorDescription: String? {
         switch self {
@@ -50,6 +52,10 @@ private enum BridgeError: LocalizedError {
         case .inputOverrun: "macOS speech recognition could not keep up with microphone input."
         case .statusTimedOut: "Apple speech recognition status did not respond before its deadline."
         case .finishTimedOut: "macOS speech recognition did not finish before its deadline."
+        case .speechAuthorizationDenied:
+            "Speech Recognition access was denied. Allow Berd in System Settings > Privacy & Security > Speech Recognition."
+        case .speechAuthorizationRestricted:
+            "Speech Recognition access is restricted on this Mac."
         }
     }
 }
@@ -112,12 +118,79 @@ private func setError(
     output?.pointee = strdup(message)
 }
 
-private struct SpeechStatus: Encodable {
+struct SpeechStatus: Encodable {
     let supported: Bool
     let locale: String?
     let localeSupported: Bool
     let modelStatus: String
     let ready: Bool
+    let authorizationStatus: String
+}
+
+enum SpeechAuthorizationState: String, Equatable {
+    case authorized
+    case denied
+    case restricted
+    case notDetermined
+    case unknown
+}
+
+enum SpeechAuthorizationDisposition: Equatable {
+    case proceed
+    case request
+    case denied
+    case restricted
+}
+
+func speechAuthorizationDisposition(
+    for state: SpeechAuthorizationState
+) -> SpeechAuthorizationDisposition {
+    switch state {
+    case .authorized: .proceed
+    case .notDetermined: .request
+    case .denied, .unknown: .denied
+    case .restricted: .restricted
+    }
+}
+
+private func currentSpeechAuthorization() -> SpeechAuthorizationState {
+    switch SFSpeechRecognizer.authorizationStatus() {
+    case .authorized: .authorized
+    case .denied: .denied
+    case .restricted: .restricted
+    case .notDetermined: .notDetermined
+    @unknown default: .unknown
+    }
+}
+
+private func requestSpeechAuthorization() async -> SpeechAuthorizationState {
+    await withCheckedContinuation { continuation in
+        SFSpeechRecognizer.requestAuthorization { status in
+            let resolved: SpeechAuthorizationState = switch status {
+            case .authorized: .authorized
+            case .denied: .denied
+            case .restricted: .restricted
+            case .notDetermined: .notDetermined
+            @unknown default: .unknown
+            }
+            continuation.resume(returning: resolved)
+        }
+    }
+}
+
+private func ensureSpeechAuthorization() async throws {
+    let status = currentSpeechAuthorization()
+    let resolved = speechAuthorizationDisposition(for: status) == .request
+        ? await requestSpeechAuthorization()
+        : status
+    switch speechAuthorizationDisposition(for: resolved) {
+    case .proceed:
+        return
+    case .denied, .request:
+        throw BridgeError.speechAuthorizationDenied
+    case .restricted:
+        throw BridgeError.speechAuthorizationRestricted
+    }
 }
 
 @available(macOS 26.0, *)
@@ -153,16 +226,29 @@ private func describe(_ status: AssetInventory.Status) -> String {
 
 @available(macOS 26.0, *)
 private func status(for requested: Locale) async -> SpeechStatus {
+    let authorization = currentSpeechAuthorization()
+    guard authorization == .authorized else {
+        return SpeechStatus(
+            supported: true,
+            locale: requested.identifier(.bcp47),
+            localeSupported: true,
+            modelStatus: "unknown",
+            ready: false,
+            authorizationStatus: authorization.rawValue
+        )
+    }
     guard SpeechTranscriber.isAvailable else {
         return SpeechStatus(
             supported: false, locale: nil, localeSupported: false,
-            modelStatus: "unsupported", ready: false
+            modelStatus: "unsupported", ready: false,
+            authorizationStatus: authorization.rawValue
         )
     }
     guard let locale = await resolve(requested) else {
         return SpeechStatus(
             supported: true, locale: nil, localeSupported: false,
-            modelStatus: "unsupported", ready: false
+            modelStatus: "unsupported", ready: false,
+            authorizationStatus: authorization.rawValue
         )
     }
     let transcriber = speechTranscriber(for: locale)
@@ -174,7 +260,8 @@ private func status(for requested: Locale) async -> SpeechStatus {
         locale: locale.identifier(.bcp47),
         localeSupported: true,
         modelStatus: ready ? "installed" : describe(inventory),
-        ready: ready
+        ready: ready,
+        authorizationStatus: authorization.rawValue
     )
 }
 
@@ -184,6 +271,7 @@ private func installModel(
     progress: BerdMacSpeechProgressCallback?,
     context: CallbackContext
 ) async throws {
+    try await ensureSpeechAuthorization()
     guard let locale = await resolve(requested) else {
         throw BridgeError.unsupportedLocale(requested.identifier(.bcp47))
     }
@@ -243,6 +331,7 @@ private final class SpeechSession: @unchecked Sendable {
         callback: @escaping BerdMacSpeechEventCallback,
         context: CallbackContext
     ) async throws -> SpeechSession {
+        try await ensureSpeechAuthorization()
         guard let locale = await resolve(requestedLocale) else {
             throw BridgeError.unsupportedLocale(requestedLocale.identifier(.bcp47))
         }
@@ -464,7 +553,7 @@ private final class SpeechSession: @unchecked Sendable {
 
 @_cdecl("berd_macos_stt_is_supported")
 public func berdMacSTTIsSupported() -> Bool {
-    if #available(macOS 26.0, *) { return SpeechTranscriber.isAvailable }
+    if #available(macOS 26.0, *) { return true }
     return false
 }
 
@@ -490,7 +579,8 @@ public func berdMacSTTStatusJSON(
     } else {
         value = SpeechStatus(
             supported: false, locale: nil, localeSupported: false,
-            modelStatus: "unsupported", ready: false
+            modelStatus: "unsupported", ready: false,
+            authorizationStatus: "unsupported"
         )
     }
     do {

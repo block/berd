@@ -17,6 +17,7 @@ pub const RECOGNITION_FINISH_TIMEOUT_SECONDS: u64 = 5;
 pub struct MacSpeechStatus {
     pub supported: bool,
     pub unavailable_reason: Option<String>,
+    pub authorization_status: String,
     pub locale: String,
     pub locale_supported: bool,
     pub model_installed: bool,
@@ -44,6 +45,7 @@ mod bridge {
         locale_supported: bool,
         model_status: String,
         ready: bool,
+        authorization_status: String,
     }
 
     #[derive(Debug)]
@@ -120,8 +122,23 @@ mod bridge {
             .map_err(|error| format!("decode macOS speech status: {error}"))?;
         Ok(super::MacSpeechStatus {
             supported: status.supported,
-            unavailable_reason: (!status.supported)
-                .then(|| "Apple speech recognition is unavailable.".to_string()),
+            unavailable_reason: match status.authorization_status.as_str() {
+                "denied" => Some(
+                    "Allow Berd in System Settings > Privacy & Security > Speech Recognition."
+                        .to_string(),
+                ),
+                "restricted" => {
+                    Some("Speech Recognition access is restricted on this Mac.".to_string())
+                }
+                "notDetermined" | "unknown" => {
+                    Some("Allow Speech Recognition to use Apple speech recognition.".to_string())
+                }
+                _ if !status.supported => {
+                    Some("Apple speech recognition is unavailable.".to_string())
+                }
+                _ => None,
+            },
+            authorization_status: status.authorization_status,
             locale: status.locale.unwrap_or_default(),
             locale_supported: status.locale_supported,
             model_installed: status.ready,
@@ -258,6 +275,7 @@ fn unsupported_status() -> MacSpeechStatus {
     MacSpeechStatus {
         supported: false,
         unavailable_reason: Some("Apple speech recognition is unavailable.".to_string()),
+        authorization_status: "unsupported".to_string(),
         locale: String::new(),
         locale_supported: false,
         model_installed: false,
@@ -378,6 +396,21 @@ pub use bridge::{RecognitionEvent, RecognitionSession};
 mod tests {
     use super::*;
 
+    #[test]
+    fn macos_bundle_declares_speech_recognition_usage() {
+        let plist = plist::Value::from_reader_xml(std::io::Cursor::new(include_bytes!(
+            "../../Info.plist"
+        )))
+        .expect("valid macOS Info.plist");
+        let description = plist
+            .as_dictionary()
+            .and_then(|dictionary| dictionary.get("NSSpeechRecognitionUsageDescription"))
+            .and_then(plist::Value::as_string)
+            .expect("speech recognition usage description");
+
+        assert!(!description.trim().is_empty());
+    }
+
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn unsupported_platform_status_is_stable() {
@@ -399,6 +432,7 @@ mod tests {
             Ok(MacSpeechStatus {
                 supported: true,
                 unavailable_reason: None,
+                authorization_status: "authorized".to_string(),
                 locale: "en-US".to_string(),
                 locale_supported: true,
                 model_installed: false,

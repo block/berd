@@ -24,6 +24,10 @@ let package = Package(
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("Speech"),
             ]
-        )
+        ),
+        .testTarget(
+            name: "BerdAirPodsBridgeTests",
+            dependencies: ["BerdAirPodsBridge"]
+        ),
     ]
 )

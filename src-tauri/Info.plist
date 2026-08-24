@@ -15,5 +15,7 @@
   </array>
   <key>NSMicrophoneUsageDescription</key>
   <string>Berd uses your microphone to capture voice input for dictation and voice conversations.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Berd uses on-device speech recognition to transcribe your voice during dictation and voice conversations.</string>
 </dict>
 </plist>

@@ -21,6 +21,7 @@ function status(overrides: Partial<MacSpeechStatus> = {}): MacSpeechStatus {
   return {
     supported: true,
     unavailableReason: null,
+    authorizationStatus: "authorized",
     locale: "en-US",
     localeSupported: true,
     modelInstalled: false,

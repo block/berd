@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import type { PocketVoiceStatus } from "../api/pocketVoice";
@@ -20,6 +20,7 @@ const macSpeechSetupState = vi.hoisted(() => ({
     status: {
       supported: false,
       unavailableReason: "Apple speech recognition is unavailable.",
+      authorizationStatus: "unsupported",
       locale: "",
       localeSupported: false,
       modelInstalled: false,
@@ -153,6 +154,7 @@ describe("VoiceSettings", () => {
       status: {
         supported: false,
         unavailableReason: "Apple speech recognition is unavailable.",
+        authorizationStatus: "unsupported",
         locale: "en-US",
         localeSupported: false,
         modelInstalled: false,
@@ -430,6 +432,7 @@ describe("VoiceSettings", () => {
       status: {
         supported: true,
         unavailableReason: null,
+        authorizationStatus: "authorized",
         locale: "en-US",
         localeSupported: true,
         modelInstalled: false,
@@ -464,6 +467,7 @@ describe("VoiceSettings", () => {
       status: {
         supported: true,
         unavailableReason: null,
+        authorizationStatus: "authorized",
         locale: "en-US",
         localeSupported: true,
         modelInstalled: false,
@@ -490,5 +494,81 @@ describe("VoiceSettings", () => {
     expect(
       screen.getByRole("button", { name: "Download model" }),
     ).toBeEnabled();
+  });
+
+  it("requests speech recognition permission before offering model setup", () => {
+    inputState.backend = "macos";
+    setupState.current = setup(pocketStatus({ pocketInstalled: true }));
+    const install = vi.fn();
+    macSpeechSetupState.current = {
+      status: {
+        supported: true,
+        unavailableReason:
+          "Allow Speech Recognition to use Apple speech recognition.",
+        authorizationStatus: "notDetermined",
+        locale: "en-US",
+        localeSupported: true,
+        modelInstalled: false,
+        installing: false,
+        progress: null,
+        error: null,
+        revision: 1,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      install,
+    };
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByText(
+        "Allow Speech Recognition below to use Voice Conversation.",
+      ),
+    ).toBeInTheDocument();
+    const allow = screen.getByRole("button", {
+      name: "Allow speech recognition",
+    });
+    fireEvent.click(allow);
+    expect(install).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole("button", { name: "Download model" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("explains denied speech recognition without offering another prompt", () => {
+    inputState.backend = "macos";
+    setupState.current = setup(pocketStatus({ pocketInstalled: true }));
+    macSpeechSetupState.current = {
+      status: {
+        supported: true,
+        unavailableReason:
+          "Allow Berd in System Settings > Privacy & Security > Speech Recognition.",
+        authorizationStatus: "denied",
+        locale: "en-US",
+        localeSupported: true,
+        modelInstalled: false,
+        installing: false,
+        progress: null,
+        error: null,
+        revision: 1,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      install: vi.fn(),
+    };
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getAllByText(
+        "Allow Berd in System Settings > Privacy & Security > Speech Recognition.",
+      ),
+    ).not.toHaveLength(0);
+    expect(
+      screen.queryByRole("button", { name: "Allow speech recognition" }),
+    ).not.toBeInTheDocument();
   });
 });
