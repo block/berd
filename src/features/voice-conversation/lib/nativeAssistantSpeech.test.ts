@@ -901,41 +901,54 @@ describe("native assistant speech stream", () => {
   it.each([
     ["returns false", () => mocks.stop.mockResolvedValue(false)],
     ["rejects", () => mocks.stop.mockRejectedValue(new Error("stop failed"))],
-  ])("finalizes immediately when native stop %s", async (_label, setStop) => {
-    setStop();
-    startNativeAssistantSpeech("session-1", vi.fn());
-    useChatStore
-      .getState()
-      .setMessages("session-1", [
-        assistant([{ type: "text", text: "First reply." }]),
-      ]);
-    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+  ])("bounds a native stop that %s", async (_label, setStop) => {
+    vi.useFakeTimers();
+    try {
+      setStop();
+      startNativeAssistantSpeech("session-1", vi.fn());
+      useChatStore
+        .getState()
+        .setMessages("session-1", [
+          assistant([{ type: "text", text: "First reply." }]),
+        ]);
+      await vi.runAllTimersAsync();
 
-    useVoiceConversationStore.setState({ userSpeaking: true });
-    await vi.waitFor(() => {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      await Promise.resolve();
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).not.toMatchObject({ speech: { status: "interrupted" } });
+      await vi.advanceTimersByTimeAsync(1_000);
       expect(
         useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
       ).toMatchObject({
         speech: { status: "interrupted", spokenThrough: 0 },
       });
-    });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
-    useVoiceConversationStore.setState({ userSpeaking: false });
+  it("accepts a completed event after native stop returns false", async () => {
+    mocks.stop.mockResolvedValue(false);
+    startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
       .getState()
       .setMessages("session-1", [
-        assistant(
-          [{ type: "text", text: "First reply." }],
-          "completed",
-          "assistant-1",
-        ),
-        assistant(
-          [{ type: "text", text: "Second reply." }],
-          "completed",
-          "assistant-2",
-        ),
+        assistant([{ type: "text", text: "Already completed." }], "completed"),
       ]);
-    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    emit("completed");
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
+
+    expect(mocks.start).toHaveBeenCalledTimes(1);
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({ speech: { status: "spoken" } });
   });
 
   it("bounds a missing native terminal event and allows the next reply", async () => {
@@ -963,6 +976,8 @@ describe("native assistant speech stream", () => {
     }
 
     useVoiceConversationStore.setState({ userSpeaking: false });
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
+    expect(mocks.start).toHaveBeenCalledTimes(1);
     useChatStore
       .getState()
       .setMessages("session-1", [
@@ -977,7 +992,13 @@ describe("native assistant speech stream", () => {
           "assistant-2",
         ),
       ]);
-    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => {
+      expect(mocks.start).toHaveBeenCalledTimes(2);
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[1]?.[0],
+        "Second reply.",
+      );
+    });
   });
 
   it("finalizes only once when a terminal event races the fallback", async () => {
@@ -1018,6 +1039,29 @@ describe("native assistant speech stream", () => {
     const notice = takeVoicePlaybackNotices("session-1") ?? "";
     expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
     expect(mocks.stop).toHaveBeenCalledTimes(stopCallsBeforeInterruption + 1);
+  });
+
+  it("records one notice when held text overlaps a resumable interruption", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "First reply." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    emit("started");
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", " Later suffix.");
+    emit("interrupted");
+    stopNativeAssistantSpeech();
+
+    const notice = takeVoicePlaybackNotices("session-1") ?? "";
+    expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
+    expect(notice).toContain("TTS delivery was interrupted");
+    expect(notice).not.toContain("TTS delivery was blocked");
   });
 
   it("describes a hang-up as stopping the voice conversation", async () => {
@@ -2021,8 +2065,19 @@ describe("native assistant speech stream", () => {
 
       useVoiceConversationStore.setState({ userSpeaking: true });
       useVoiceConversationStore.setState({ userSpeaking: false });
+      useChatStore
+        .getState()
+        .appendStreamingText(
+          "session-1",
+          "assistant-delayed-resume",
+          " Later suffix.",
+        );
       await vi.advanceTimersByTimeAsync(250);
       expect(mocks.start).toHaveBeenCalledTimes(1);
+      expect(mocks.append).not.toHaveBeenCalledWith(
+        firstStreamId,
+        " Later suffix.",
+      );
 
       mocks.streamHandler?.({
         streamId: firstStreamId,
@@ -2034,7 +2089,7 @@ describe("native assistant speech stream", () => {
       expect(mocks.start).toHaveBeenCalledTimes(2);
       expect(mocks.append).toHaveBeenCalledWith(
         mocks.start.mock.calls[1]?.[0],
-        "Delayed terminal.",
+        "Delayed terminal. Later suffix.",
       );
     } finally {
       vi.useRealTimers();

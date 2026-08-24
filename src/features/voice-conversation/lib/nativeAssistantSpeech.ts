@@ -62,6 +62,7 @@ type ActiveUtterance = {
   onInterrupted: (
     estimate: SpeechDeliveryEstimate,
     cause: InterruptionCause,
+    allowResume: boolean,
   ) => boolean;
   onTerminal: () => void;
 };
@@ -560,6 +561,7 @@ function failActiveUtterance(
 function finalizeInterruptedUtterance(
   utterance: ActiveUtterance,
   cause: InterruptionCause,
+  allowResume = false,
 ) {
   if (activeUtterance?.id !== utterance.id) return;
   if (utterance.interruptionFallback !== null) {
@@ -571,7 +573,7 @@ function finalizeInterruptedUtterance(
     utterance.latestDelivery,
   );
   applyInterruptionEstimate(utterance, estimate);
-  const noticeDeferred = utterance.onInterrupted(estimate, cause);
+  const noticeDeferred = utterance.onInterrupted(estimate, cause, allowResume);
   if (!noticeDeferred) {
     recordDeliveryNotices(utterance, estimate, "interrupted", cause);
   }
@@ -638,6 +640,7 @@ function handleStreamEvent(
       finalizeInterruptedUtterance(
         utterance,
         utterance.interruptionCause ?? "voiceStopped",
+        true,
       );
       break;
     }
@@ -677,22 +680,7 @@ function interruptActiveUtterance(
         utterance.interruptionCause ?? cause,
       );
     }, INTERRUPTION_TERMINAL_TIMEOUT_MS);
-    void stopActiveVoice().then(
-      (stopped) => {
-        if (!stopped) {
-          finalizeInterruptedUtterance(
-            utterance,
-            utterance.interruptionCause ?? cause,
-          );
-        }
-      },
-      () => {
-        finalizeInterruptedUtterance(
-          utterance,
-          utterance.interruptionCause ?? cause,
-        );
-      },
-    );
+    void stopActiveVoice().catch(() => undefined);
   } else {
     void stopActiveVoice().catch(() => undefined);
   }
@@ -996,16 +984,27 @@ export function startNativeAssistantSpeech(
   };
 
   const discardHeldAndResumableSpeech = () => {
+    const activeTargetKeys = new Set(
+      activeUtterance?.targets.map((target) => targetKey(target)) ?? [],
+    );
+    const resumableTargetKeys = new Set(
+      resumableInterruption?.utterance.targets.map((target) =>
+        targetKey(target),
+      ) ?? [],
+    );
+    if (activeUtterance) activeUtterance.resumptionDiscarded = true;
+    discardResumableInterruption();
     const held = heldSpeech;
     if (held) {
       for (const [slot, heldTarget] of held.targets) {
+        if (activeTargetKeys.has(slot) || resumableTargetKeys.has(slot)) {
+          continue;
+        }
         suppressTarget(slot, heldTarget.target, heldTarget.text);
       }
       heldSpeech = null;
       heldReleaseReady = false;
     }
-    if (activeUtterance) activeUtterance.resumptionDiscarded = true;
-    discardResumableInterruption();
   };
 
   const ensureUtterance = (
@@ -1054,11 +1053,12 @@ export function startNativeAssistantSpeech(
         }
         onFailure(text, error);
       },
-      onInterrupted: (estimate, cause) => {
+      onInterrupted: (estimate, cause, allowResume) => {
         const finalizedTranscriptKey =
           useVoiceConversationStore.getState().latestFinalizedTranscriptKey;
         if (
           cause === "userSpeaking" &&
+          allowResume &&
           !utterance.resumptionDiscarded &&
           utterance.causalTranscriptKey === finalizedTranscriptKey
         ) {
@@ -1140,6 +1140,7 @@ export function startNativeAssistantSpeech(
     if (voice.userSpeaking || idleSettling) return;
     if (heldSpeech && !heldReleaseReady) return;
     if (resumableInterruption) return;
+    if (activeUtterance?.interruptionRequested) return;
 
     // The backend owns the current stream until its terminal playback event.
     // Leave later transcript changes entirely unconsumed so that terminal
