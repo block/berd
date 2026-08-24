@@ -902,10 +902,7 @@ fn windows_file_change_time_ns(path: &Path) -> Result<String, String> {
     Ok((i128::from(info.ChangeTime) * 100).to_string())
 }
 
-/// Return the metadata identity used by open artifact viewers to detect writes
-/// that do not appear in the main ACP session's tool events.
-#[tauri::command]
-pub fn stat_file(path: String) -> Result<FileStatPayload, String> {
+fn stat_file_blocking(path: String) -> Result<FileStatPayload, String> {
     let target = Path::new(&path);
     let metadata = fs::metadata(target)
         .map_err(|error| format!("Failed to inspect '{}': {}", target.display(), error))?;
@@ -941,6 +938,24 @@ pub fn stat_file(path: String) -> Result<FileStatPayload, String> {
         modified_at_ns,
         changed_at_ns,
     })
+}
+
+async fn stat_file_with<F>(path: String, operation: F) -> Result<FileStatPayload, String>
+where
+    F: FnOnce(String) -> Result<FileStatPayload, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || operation(path))
+        .await
+        .map_err(|error| format!("Failed to inspect file metadata: {error}"))?
+}
+
+/// Return the metadata identity used by open artifact viewers to detect writes
+/// that do not appear in the main ACP session's tool events. Filesystem metadata
+/// calls are blocking and may wait on remote or removable filesystems, so keep
+/// them off Tauri's async command thread.
+#[tauri::command]
+pub async fn stat_file(path: String) -> Result<FileStatPayload, String> {
+    stat_file_with(path, stat_file_blocking).await
 }
 
 fn looks_binary(bytes: &[u8]) -> bool {
@@ -2093,9 +2108,9 @@ mod tests {
         get_or_build_file_mention_index_from_cache, inspect_attachment_path,
         inspect_attachment_paths, normalize_attachment_paths, normalize_roots, open_in_chrome_with,
         read_directory_entries, read_image_attachment, read_text_file,
-        search_file_mentions_blocking, signed_unix_timestamp_ns, stat_file,
-        write_agent_image_atomically, write_sibling_then_replace, FileMentionIndexCache,
-        MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
+        search_file_mentions_blocking, signed_unix_timestamp_ns, stat_file_blocking,
+        stat_file_with, write_agent_image_atomically, write_sibling_then_replace,
+        FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
     };
     use base64::Engine;
     use std::fs;
@@ -2948,13 +2963,19 @@ mod tests {
         assert!(!payload.base64.is_empty());
     }
 
-    #[test]
-    fn stat_file_returns_size_and_metadata_times() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn stat_file_async_command_moves_metadata_work_off_the_runtime_thread() {
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("notes.md");
         fs::write(&path, "hello").expect("write");
+        let runtime_thread = std::thread::current().id();
 
-        let payload = stat_file(path.to_string_lossy().into_owned()).expect("stat file");
+        let payload = stat_file_with(path.to_string_lossy().into_owned(), move |path| {
+            assert_ne!(std::thread::current().id(), runtime_thread);
+            stat_file_blocking(path)
+        })
+        .await
+        .expect("stat file");
         assert_eq!(payload.byte_size, "5");
         assert!(payload.modified_at_ns.parse::<i128>().expect("timestamp") > 0);
         #[cfg(unix)]
@@ -2977,14 +2998,15 @@ mod tests {
         file.set_times(fs::FileTimes::new().set_modified(old_timestamp))
             .expect("set pre-epoch mtime");
 
-        let payload = stat_file(path.to_string_lossy().into_owned()).expect("stat old file");
+        let payload =
+            stat_file_blocking(path.to_string_lossy().into_owned()).expect("stat old file");
         assert_eq!(payload.modified_at_ns, "-1000000000");
     }
 
     #[test]
     fn stat_file_rejects_directories() {
         let dir = tempdir().expect("tempdir");
-        let error = stat_file(dir.path().to_string_lossy().into_owned())
+        let error = stat_file_blocking(dir.path().to_string_lossy().into_owned())
             .expect_err("directory should error");
         assert!(error.contains("not a file"), "unexpected error: {error}");
     }

@@ -192,14 +192,26 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             artifact.resolvedPath,
             artifact.revision + candidateDiskRevision,
           );
+          let confirmedFingerprint = before;
           if (shouldBustImageCache) {
             await preloadArtifactImage(candidateSrc);
             if (!isCurrentRefresh()) return;
+            confirmedFingerprint = await statFile(artifact.resolvedPath);
+            if (
+              !isCurrentRefresh() ||
+              !sameFingerprint(before, confirmedFingerprint)
+            ) {
+              updateDiskStatus("diverged");
+              return;
+            }
             imageDiskRevisionRef.current = candidateDiskRevision;
             consumedRetryRevisionRef.current = retryRevision;
             setImageDiskRevision(candidateDiskRevision);
           }
-          pendingImageRef.current = { src: candidateSrc, fingerprint: before };
+          pendingImageRef.current = {
+            src: candidateSrc,
+            fingerprint: confirmedFingerprint,
+          };
           if (loadedImageSrcRef.current === candidateSrc) {
             fingerprintRef.current = before;
             pendingImageRef.current = null;
@@ -298,7 +310,18 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
           );
           await preloadArtifactImage(candidateSrc);
           if (!isCurrentPoll()) return;
-          pendingImageRef.current = { src: candidateSrc, fingerprint };
+          const confirmedFingerprint = await statFile(artifact.resolvedPath);
+          if (
+            !isCurrentPoll() ||
+            !sameFingerprint(fingerprint, confirmedFingerprint)
+          ) {
+            updateDiskStatus("diverged");
+            return;
+          }
+          pendingImageRef.current = {
+            src: candidateSrc,
+            fingerprint: confirmedFingerprint,
+          };
           imageDiskRevisionRef.current = candidateDiskRevision;
           setImageDiskRevision(candidateDiskRevision);
           return;

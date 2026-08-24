@@ -342,6 +342,53 @@ describe("ArtifactViewer header actions", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  it("rejects a preloaded image when its fingerprint changes during decode", async () => {
+    vi.useFakeTimers();
+    let version = "1";
+    mockStatFile.mockImplementation(async () => ({
+      byteSize: "20",
+      modifiedAtNs: version,
+    }));
+    let finishPreload: (() => void) | undefined;
+    class PreloadImage {
+      onload: (() => void) | null = null;
+
+      set src(_value: string) {
+        finishPreload = () => this.onload?.();
+      }
+    }
+    vi.stubGlobal("Image", PreloadImage);
+
+    render(
+      <ArtifactViewer
+        artifact={artifact("/p/shot.png", 4)}
+        onClose={vi.fn()}
+      />,
+    );
+    await act(flushAsyncWork);
+    const renderedImage = screen.getByRole("img");
+    fireEvent.load(renderedImage);
+
+    version = "2";
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await flushAsyncWork();
+    });
+    expect(finishPreload).toBeDefined();
+
+    version = "3";
+    await act(async () => {
+      finishPreload?.();
+      await flushAsyncWork();
+    });
+
+    expect(renderedImage).toHaveAttribute(
+      "src",
+      "asset://localhost//p/shot.png?rev=4",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(/out of date/i);
+  });
+
   it("preloads and renders the same image URL after a polled change", async () => {
     vi.useFakeTimers();
     let changed = false;
