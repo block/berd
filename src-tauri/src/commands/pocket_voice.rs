@@ -89,6 +89,21 @@ impl<I> PocketPlaybackSource<I> {
             completion_sent: false,
         }
     }
+
+    fn finish(&mut self) {
+        if std::mem::replace(&mut self.completion_sent, true) {
+            return;
+        }
+        let previous = self.pending_audio_sources.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(previous > 0, "Pocket playback source count underflow");
+        if previous == 1 {
+            self.completed_generation
+                .store(self.generation, Ordering::Release);
+            let _ = self
+                .completion_sender
+                .try_send(PocketPlaybackEvent::SourceFinished);
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -97,22 +112,21 @@ impl<I: Source> Iterator for PocketPlaybackSource<I> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let next = self.input.next();
-        if next.is_none() && !self.completion_sent {
-            let previous = self.pending_audio_sources.fetch_sub(1, Ordering::AcqRel);
-            self.completion_sent = true;
-            if previous == 1 {
-                self.completed_generation
-                    .store(self.generation, Ordering::Release);
-                let _ = self
-                    .completion_sender
-                    .try_send(PocketPlaybackEvent::SourceFinished);
-            }
+        if next.is_none() {
+            self.finish();
         }
         next
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         self.input.size_hint()
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl<I> Drop for PocketPlaybackSource<I> {
+    fn drop(&mut self) {
+        self.finish();
     }
 }
 
@@ -3240,6 +3254,66 @@ mod tests {
 
         release_completed_pocket_assistant_speech(2, &assistant_speech);
         assert!(assistant_speech.lock().expect("assistant speech").is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn dropped_pocket_source_finishes_pending_playback_once() {
+        let pending = Arc::new(AtomicUsize::new(1));
+        let completed_generation = Arc::new(AtomicU64::new(0));
+        let (sender, receiver) = mpsc::sync_channel(2);
+        let source = PocketPlaybackSource::new(
+            SamplesBuffer::new(
+                std::num::NonZeroU16::new(1).expect("channels"),
+                std::num::NonZeroU32::new(SAMPLE_RATE).expect("sample rate"),
+                vec![0.0],
+            ),
+            7,
+            Arc::clone(&pending),
+            Arc::clone(&completed_generation),
+            sender,
+        );
+
+        drop(source);
+
+        assert_eq!(pending.load(Ordering::Acquire), 0);
+        assert_eq!(completed_generation.load(Ordering::Acquire), 7);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PocketPlaybackEvent::SourceFinished)
+        ));
+        assert_eq!(receiver.try_iter().count(), 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn exhausted_pocket_source_does_not_finish_again_when_dropped() {
+        let pending = Arc::new(AtomicUsize::new(1));
+        let completed_generation = Arc::new(AtomicU64::new(0));
+        let (sender, receiver) = mpsc::sync_channel(2);
+        let mut source = PocketPlaybackSource::new(
+            SamplesBuffer::new(
+                std::num::NonZeroU16::new(1).expect("channels"),
+                std::num::NonZeroU32::new(SAMPLE_RATE).expect("sample rate"),
+                vec![0.0],
+            ),
+            9,
+            Arc::clone(&pending),
+            Arc::clone(&completed_generation),
+            sender,
+        );
+
+        assert!(source.next().is_some());
+        assert!(source.next().is_none());
+        drop(source);
+
+        assert_eq!(pending.load(Ordering::Acquire), 0);
+        assert_eq!(completed_generation.load(Ordering::Acquire), 9);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PocketPlaybackEvent::SourceFinished)
+        ));
+        assert_eq!(receiver.try_iter().count(), 0);
     }
 
     #[test]
