@@ -17,7 +17,8 @@ use tauri::{AppHandle, Emitter, Manager, State, WebviewWindow};
 use tokio::sync::mpsc as tokio_mpsc;
 
 use super::{
-    native_input_mute, pocket_voice::parakeet_model_dir, voice_capture::VoiceCaptureState,
+    native_input_mute, pocket_voice::parakeet_model_dir, voice_buddy,
+    voice_capture::VoiceCaptureState,
 };
 
 pub(crate) const EVENT_NAME: &str = "voice-conversation:event";
@@ -942,14 +943,17 @@ fn reject_pending_transcript(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects four guards beside the lifecycle claim.
 pub async fn start_native_voice_conversation(
     app: AppHandle,
     state: State<'_, NativeVoiceState>,
     capture: State<'_, VoiceCaptureState>,
+    window_sessions: State<'_, super::window_session::WindowSessionRegistry>,
     webview_window: WebviewWindow,
     session_id: String,
     renderer_id: String,
     renderer_epoch: u64,
+    foreground_generation: u64,
 ) -> Result<NativeVoiceStatus, String> {
     let session_id = session_id.trim().to_string();
     if session_id.is_empty() || session_id.len() > 256 {
@@ -957,6 +961,19 @@ pub async fn start_native_voice_conversation(
     }
     let window_label = webview_window.label().to_string();
     let owner_id = native_owner_id(&session_id);
+    let lifecycle_guard = state
+        .target_lifecycle_guard(|| {
+            validate_voice_target_session(
+                capture.inner(),
+                &window_sessions,
+                &webview_window,
+                &renderer_id,
+                renderer_epoch,
+                &session_id,
+                Some(foreground_generation),
+            )
+        })
+        .await?;
     let mut microphone_claimed = capture.claim_microphone(
         window_label.clone(),
         renderer_id.clone(),
@@ -985,7 +1002,21 @@ pub async fn start_native_voice_conversation(
             return Err(error);
         }
     };
-    let lifecycle_guard = state.stop_serial.lock().await;
+    if let Err(error) = validate_voice_target_session(
+        capture.inner(),
+        &window_sessions,
+        &webview_window,
+        &renderer_id,
+        renderer_epoch,
+        &session_id,
+        Some(foreground_generation),
+    ) {
+        drop(lifecycle_guard);
+        if microphone_claimed {
+            capture.release_microphone(&window_label, &renderer_id, renderer_epoch, &owner_id);
+        }
+        return Err(error);
+    }
     match refresh_microphone_claim(
         capture.inner(),
         &window_label,
@@ -1315,6 +1346,168 @@ pub async fn stop_native_voice_conversation(
     Ok(status(&app, &state))
 }
 
+#[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects four guards beside the exact lifecycle payload.
+pub async fn stop_native_voice_conversation_for_replacement(
+    app: AppHandle,
+    state: State<'_, NativeVoiceState>,
+    capture: State<'_, VoiceCaptureState>,
+    window_sessions: State<'_, super::window_session::WindowSessionRegistry>,
+    webview_window: WebviewWindow,
+    renderer_id: String,
+    renderer_epoch: u64,
+    session_id: String,
+    expected_revision: u64,
+    target_session_id: String,
+) -> Result<NativeVoiceStatus, String> {
+    let target_session_id = target_session_id.trim();
+    if target_session_id.is_empty() || target_session_id.len() > 256 {
+        return Err("target session id must be between 1 and 256 bytes".to_string());
+    }
+    validate_voice_target_session(
+        capture.inner(),
+        &window_sessions,
+        &webview_window,
+        &renderer_id,
+        renderer_epoch,
+        target_session_id,
+        None,
+    )?;
+    let _stop_guard = state
+        .target_lifecycle_guard(|| {
+            validate_voice_target_session(
+                capture.inner(),
+                &window_sessions,
+                &webview_window,
+                &renderer_id,
+                renderer_epoch,
+                target_session_id,
+                None,
+            )
+        })
+        .await?;
+    state
+        .stop_active_inner_locked(&app, &capture, Some((&session_id, expected_revision, None)))
+        .await?;
+    Ok(status(&app, &state))
+}
+
+fn replacement_caller_matches_target(
+    caller_window_label: &str,
+    target_owner: Option<&str>,
+    owns_foreground_session: bool,
+) -> bool {
+    if !owns_foreground_session {
+        return false;
+    }
+    match target_owner {
+        Some(owner_window_label) => owner_window_label == caller_window_label,
+        None => caller_window_label == "main",
+    }
+}
+
+fn voice_target_window_focus_is_valid(
+    window_label: &str,
+    focused: bool,
+    app_is_active: bool,
+    main_surface_is_available: bool,
+    another_window_is_focused: bool,
+) -> bool {
+    focused
+        || (window_label == "main"
+            && app_is_active
+            && main_surface_is_available
+            && !another_window_is_focused)
+}
+
+fn voice_main_surface_is_available(visible: bool, minimized: bool) -> bool {
+    visible && !minimized
+}
+
+#[cfg(target_os = "macos")]
+fn app_is_active_for_main_window_focus_fallback() -> bool {
+    use objc2_app_kit::NSRunningApplication;
+
+    // The non-activating floating controls can leave Berd frontmost while
+    // AppKit reports that none of its ordinary windows are focused.
+    NSRunningApplication::currentApplication().isActive()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn app_is_active_for_main_window_focus_fallback() -> bool {
+    false
+}
+
+fn another_user_window_is_focused(webview_window: &WebviewWindow) -> Result<bool, String> {
+    for (label, window) in webview_window.app_handle().webview_windows() {
+        if label == webview_window.label() || label == voice_buddy::WINDOW_LABEL {
+            continue;
+        }
+        if window
+            .is_focused()
+            .map_err(|error| format!("Could not confirm Berd window focus: {error}"))?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn validate_voice_target_session(
+    capture: &VoiceCaptureState,
+    window_sessions: &super::window_session::WindowSessionRegistry,
+    webview_window: &WebviewWindow,
+    renderer_id: &str,
+    renderer_epoch: u64,
+    target_session_id: &str,
+    foreground_generation: Option<u64>,
+) -> Result<(), String> {
+    let target_owner = window_sessions.label_for(target_session_id);
+    let owns_foreground_session = capture.foreground_session_matches_generation(
+        webview_window.label(),
+        renderer_id,
+        renderer_epoch,
+        target_session_id,
+        foreground_generation,
+    )?;
+    if !replacement_caller_matches_target(
+        webview_window.label(),
+        target_owner.as_deref(),
+        owns_foreground_session,
+    ) {
+        return Err("The target session is no longer in the foreground.".to_string());
+    }
+    let focused = webview_window
+        .is_focused()
+        .map_err(|error| format!("Could not confirm the target session window focus: {error}"))?;
+    let app_is_active = !focused
+        && webview_window.label() == "main"
+        && app_is_active_for_main_window_focus_fallback();
+    let main_surface_is_available = if app_is_active {
+        let visible = webview_window
+            .is_visible()
+            .map_err(|error| format!("Could not confirm the main window visibility: {error}"))?;
+        let minimized = webview_window
+            .is_minimized()
+            .map_err(|error| format!("Could not confirm the main window state: {error}"))?;
+        voice_main_surface_is_available(visible, minimized)
+    } else {
+        false
+    };
+    let another_window_is_focused =
+        main_surface_is_available && another_user_window_is_focused(webview_window)?;
+    if !voice_target_window_focus_is_valid(
+        webview_window.label(),
+        focused,
+        app_is_active,
+        main_surface_is_available,
+        another_window_is_focused,
+    ) {
+        return Err("The target session window is no longer focused.".to_string());
+    }
+    Ok(())
+}
+
 fn native_owner_id(session_id: &str) -> String {
     format!("native-voice:{session_id}")
 }
@@ -1338,6 +1531,18 @@ fn refresh_microphone_claim(
 }
 
 impl NativeVoiceState {
+    async fn target_lifecycle_guard<F>(
+        &self,
+        validate_target: F,
+    ) -> Result<tokio::sync::MutexGuard<'_, ()>, String>
+    where
+        F: FnOnce() -> Result<(), String>,
+    {
+        let guard = self.stop_serial.lock().await;
+        validate_target()?;
+        Ok(guard)
+    }
+
     pub async fn stop_active(
         &self,
         app: &AppHandle,
@@ -1388,6 +1593,16 @@ impl NativeVoiceState {
         expected_lifecycle: Option<(&str, u64, Option<&str>)>,
     ) -> Result<bool, String> {
         let _stop_guard = self.stop_serial.lock().await;
+        self.stop_active_inner_locked(app, capture, expected_lifecycle)
+            .await
+    }
+
+    async fn stop_active_inner_locked(
+        &self,
+        app: &AppHandle,
+        capture: &VoiceCaptureState,
+        expected_lifecycle: Option<(&str, u64, Option<&str>)>,
+    ) -> Result<bool, String> {
         let failure_message = expected_lifecycle.and_then(|(_, _, message)| message);
         let completion = self
             .stop_lifecycle_locked(
@@ -2048,11 +2263,100 @@ fn deliver_recognition_result(
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn replacement_revalidates_target_after_waiting_for_stop_serialization() {
+        let state = NativeVoiceState::default();
+        let target_is_foreground = AtomicBool::new(true);
+        let active_operation = state.stop_serial.lock().await;
+        let validation = state.target_lifecycle_guard(|| {
+            target_is_foreground
+                .load(Ordering::SeqCst)
+                .then_some(())
+                .ok_or_else(|| "The target session is no longer in the foreground.".to_string())
+        });
+        tokio::pin!(validation);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), validation.as_mut())
+                .await
+                .is_err()
+        );
+        target_is_foreground.store(false, Ordering::SeqCst);
+        drop(active_operation);
+
+        assert_eq!(
+            validation.await.expect_err("stale target must be rejected"),
+            "The target session is no longer in the foreground."
+        );
+    }
+
     #[test]
     fn native_mute_control_does_not_latch_the_software_fallback() {
         assert!(!software_microphone_mute(true, true));
         assert!(software_microphone_mute(false, true));
         assert!(!software_microphone_mute(false, false));
+    }
+
+    #[test]
+    fn replacement_stop_requires_the_target_session_window() {
+        assert!(replacement_caller_matches_target("main", None, true));
+        assert!(!replacement_caller_matches_target("main", None, false));
+        assert!(!replacement_caller_matches_target(
+            "main",
+            Some("session:target"),
+            true,
+        ));
+        assert!(replacement_caller_matches_target(
+            "session:target",
+            Some("session:target"),
+            true,
+        ));
+        assert!(!replacement_caller_matches_target(
+            "session:other",
+            Some("session:target"),
+            true,
+        ));
+        assert!(!replacement_caller_matches_target(
+            "voice-buddy",
+            None,
+            true,
+        ));
+    }
+
+    #[test]
+    fn replacement_focus_accepts_an_active_app_only_for_the_main_window() {
+        assert!(voice_main_surface_is_available(true, false));
+        assert!(!voice_main_surface_is_available(false, false));
+        assert!(!voice_main_surface_is_available(true, true));
+        assert!(voice_target_window_focus_is_valid(
+            "main", true, false, false, false,
+        ));
+        assert!(voice_target_window_focus_is_valid(
+            "main", false, true, true, false,
+        ));
+        assert!(!voice_target_window_focus_is_valid(
+            "main", false, true, true, true,
+        ));
+        assert!(!voice_target_window_focus_is_valid(
+            "main", false, true, false, false,
+        ));
+        assert!(!voice_target_window_focus_is_valid(
+            "main", false, false, true, false,
+        ));
+        assert!(voice_target_window_focus_is_valid(
+            "session:target",
+            true,
+            false,
+            false,
+            false,
+        ));
+        assert!(!voice_target_window_focus_is_valid(
+            "session:target",
+            false,
+            true,
+            true,
+            false,
+        ));
     }
 
     #[test]

@@ -229,7 +229,10 @@ import {
   blockVoiceConversationStarts,
   useVoiceConversationStore,
 } from "@/features/voice-conversation/stores/voiceConversationStore";
-import { listenToVoiceConversationOpenSession } from "@/features/voice-conversation/api/voiceConversation";
+import {
+  listenToVoiceConversationOpenSession,
+  setVoiceConversationForegroundSession,
+} from "@/features/voice-conversation/api/voiceConversation";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
@@ -772,6 +775,14 @@ export function AppShell({
   }, [capabilities.voiceConversation, stopVoiceConversation]);
   const sessions = useChatSessionStore(selectSessions);
   const activeSessionId = useChatSessionStore(selectActiveSessionId);
+  useLayoutEffect(() => {
+    const foregroundSessionId = activeView === "chat" ? activeSessionId : null;
+    void setVoiceConversationForegroundSession(foregroundSessionId).catch(
+      (error) => {
+        console.warn("Failed to publish the foreground voice session", error);
+      },
+    );
+  }, [activeSessionId, activeView]);
   const messagesBySession = useChatStore((state) => state.messagesBySession);
   const previousActiveSessionIdRef = useRef(activeSessionId);
   useEffect(() => {

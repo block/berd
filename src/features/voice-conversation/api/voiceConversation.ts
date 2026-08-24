@@ -16,6 +16,15 @@ let microphoneMuted = false;
 let microphoneMuteIntent = 0;
 let microphoneMuteObservationVersion = 0;
 let microphoneMuteQueue: Promise<void> = Promise.resolve();
+let foregroundSessionGeneration = 0;
+let foregroundSessionId: string | null = null;
+let foregroundSessionClaim: {
+  generation: number;
+  sessionId: string | null;
+  acknowledgement: Promise<void>;
+  superseded: Promise<void>;
+  supersede: () => void;
+} | null = null;
 
 function resetMicrophoneMuteState(): void {
   microphoneMuteIntent += 1;
@@ -236,11 +245,133 @@ export type VoiceConversationEvent =
 export const VOICE_CONVERSATION_EVENT = "voice-conversation:event";
 export const VOICE_CONVERSATION_OPEN_SESSION_EVENT =
   "voice-conversation:open-session";
+export const FOREGROUND_SESSION_CLAIM_TIMEOUT_MS = 3_000;
 
 export function getVoiceConversationStatus(): Promise<VoiceConversationStatus> {
   return invoke<VoiceConversationStatus>(
     "get_native_voice_conversation_status",
   );
+}
+
+export function setVoiceConversationForegroundSession(
+  sessionId: string | null,
+): Promise<void> {
+  const generation = ++foregroundSessionGeneration;
+  foregroundSessionId = sessionId;
+  const acknowledgement = getRendererInstance().then(
+    ({ rendererId, rendererEpoch }) =>
+      invoke<void>("set_voice_renderer_foreground_session", {
+        request: {
+          rendererId,
+          rendererEpoch,
+          generation,
+          sessionId,
+        },
+      }),
+  );
+  let supersede!: () => void;
+  const superseded = new Promise<void>((resolve) => {
+    supersede = resolve;
+  });
+  const previousClaim = foregroundSessionClaim;
+  foregroundSessionClaim = {
+    generation,
+    sessionId,
+    acknowledgement,
+    superseded,
+    supersede,
+  };
+  previousClaim?.supersede();
+  return acknowledgement;
+}
+
+export function resetVoiceConversationForegroundSessionForTest(): void {
+  foregroundSessionClaim?.supersede();
+  foregroundSessionGeneration = 0;
+  foregroundSessionId = null;
+  foregroundSessionClaim = null;
+}
+
+function renewForegroundSessionClaim(
+  failedClaim: NonNullable<typeof foregroundSessionClaim>,
+  targetSessionId: string,
+): void {
+  if (
+    foregroundSessionClaim !== failedClaim ||
+    foregroundSessionId !== targetSessionId
+  ) {
+    return;
+  }
+  void setVoiceConversationForegroundSession(targetSessionId).catch(
+    () => undefined,
+  );
+}
+
+async function awaitForegroundSessionClaim(
+  targetSessionId: string,
+): Promise<number> {
+  let targetClaim = foregroundSessionClaim;
+  if (
+    foregroundSessionId !== targetSessionId ||
+    targetClaim?.sessionId !== targetSessionId
+  ) {
+    throw new Error("The target session is no longer in the foreground.");
+  }
+  const acknowledgementDeadline =
+    Date.now() + FOREGROUND_SESSION_CLAIM_TIMEOUT_MS;
+
+  while (targetClaim) {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    const outcome = await Promise.race([
+      targetClaim.acknowledgement.then(
+        () => ({ type: "acknowledged" as const }),
+        (error: unknown) => ({ type: "failed" as const, error }),
+      ),
+      targetClaim.superseded.then(() => ({ type: "superseded" as const })),
+      new Promise<{ type: "timed-out" }>((resolve) => {
+        timeoutId = setTimeout(
+          () => resolve({ type: "timed-out" }),
+          Math.max(0, acknowledgementDeadline - Date.now()),
+        );
+      }),
+    ]).finally(() => {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+    });
+    if (outcome.type === "timed-out") {
+      renewForegroundSessionClaim(targetClaim, targetSessionId);
+      throw new Error("Foreground voice session confirmation timed out.");
+    }
+    if (outcome.type === "failed") {
+      const latestClaim = foregroundSessionClaim;
+      if (
+        latestClaim !== targetClaim &&
+        latestClaim?.sessionId === targetSessionId
+      ) {
+        targetClaim = latestClaim;
+        continue;
+      }
+      renewForegroundSessionClaim(targetClaim, targetSessionId);
+      throw outcome.error;
+    }
+    const latestClaim = foregroundSessionClaim;
+    if (
+      foregroundSessionId !== targetSessionId ||
+      latestClaim?.sessionId !== targetSessionId
+    ) {
+      throw new Error("The target session is no longer in the foreground.");
+    }
+    if (outcome.type === "acknowledged" && latestClaim === targetClaim) {
+      return targetClaim.generation;
+    }
+    targetClaim = latestClaim;
+  }
+  throw new Error("The target session is no longer in the foreground.");
+}
+
+export function confirmVoiceConversationForegroundSession(
+  sessionId: string,
+): Promise<number> {
+  return awaitForegroundSessionClaim(sessionId);
 }
 
 export async function blockNativeVoiceConversationStarts(
@@ -378,6 +509,7 @@ export function rejectVoiceConversationTranscript(
 
 export async function startVoiceConversation(
   sessionId: string,
+  foregroundGeneration = 0,
 ): Promise<VoiceConversationStatus> {
   resetMicrophoneMuteState();
   const { rendererId, rendererEpoch } = await getRendererInstance();
@@ -387,6 +519,7 @@ export async function startVoiceConversation(
       sessionId,
       rendererId,
       rendererEpoch,
+      foregroundGeneration,
     },
   );
   try {
@@ -415,6 +548,27 @@ export async function stopVoiceConversation(
       rendererEpoch,
       sessionId: status.sessionId,
       expectedRevision: status.revision,
+    },
+  );
+  await reconcileVoiceConversationMicrophone(nextStatus);
+  return nextStatus;
+}
+
+export async function stopVoiceConversationForReplacement(
+  status: VoiceConversationStatus,
+  targetSessionId: string,
+): Promise<VoiceConversationStatus> {
+  await awaitForegroundSessionClaim(targetSessionId);
+  resetMicrophoneMuteState();
+  const { rendererId, rendererEpoch } = await getRendererInstance();
+  const nextStatus = await invoke<VoiceConversationStatus>(
+    "stop_native_voice_conversation_for_replacement",
+    {
+      rendererId,
+      rendererEpoch,
+      sessionId: status.sessionId,
+      expectedRevision: status.revision,
+      targetSessionId,
     },
   );
   await reconcileVoiceConversationMicrophone(nextStatus);

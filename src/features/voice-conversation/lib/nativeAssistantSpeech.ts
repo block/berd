@@ -1,5 +1,9 @@
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import type { TextContent, VoiceSpeechState } from "@/shared/types/messages";
+import type {
+  Message,
+  TextContent,
+  VoiceSpeechState,
+} from "@/shared/types/messages";
 import {
   appendPocketVoiceStream,
   finishPocketVoiceStream,
@@ -70,6 +74,7 @@ let activeSpeechRevision: number | null = null;
 let activeUtterance: ActiveUtterance | null = null;
 let stopActiveVoice: () => Promise<boolean> = stopPocketVoice;
 let activityReportQueue = Promise.resolve();
+let startRequestGeneration = 0;
 const pendingNotices = new Map<string, Map<string, string>>();
 const DELIVERY_NOTICE_TEXT_LIMIT = 250;
 const INTERRUPTION_TERMINAL_TIMEOUT_MS = 1_000;
@@ -622,6 +627,7 @@ function interruptActiveUtterance(
 }
 
 export function stopNativeAssistantSpeech(awaitTerminalDelivery = false): void {
+  startRequestGeneration += 1;
   generation += 1;
   const utterance = activeUtterance;
   const terminalStreamSubscription = stopStreamSubscription;
@@ -653,11 +659,44 @@ export function stopNativeAssistantSpeech(awaitTerminalDelivery = false): void {
   activeSpeechRevision = null;
 }
 
+export function captureNativeAssistantSpeechHistory(
+  sessionId: string,
+): Message[] {
+  return [...(useChatStore.getState().messagesBySession[sessionId] ?? [])];
+}
+
 export function startNativeAssistantSpeech(
   sessionId: string,
   onFailure: SpeechFailureHandler,
+  initialMessages: Message[] = captureNativeAssistantSpeechHistory(sessionId),
 ): void {
   if (activeSpeechSessionId === sessionId) return;
+  const startRequest = ++startRequestGeneration;
+  const interruptedUtterance = activeUtterance;
+  if (
+    interruptedUtterance?.interruptionRequested &&
+    interruptedUtterance.interruptionFallback !== null
+  ) {
+    const requestedVoice = useVoiceConversationStore.getState().status;
+    const onTerminal = interruptedUtterance.onTerminal;
+    interruptedUtterance.onTerminal = () => {
+      onTerminal();
+      queueMicrotask(() => {
+        if (startRequest !== startRequestGeneration) return;
+        const currentVoice = useVoiceConversationStore.getState().status;
+        if (
+          currentVoice.lifecycle !== "running" ||
+          currentVoice.sessionId !== sessionId ||
+          currentVoice.revision !== requestedVoice.revision ||
+          currentVoice.ownerWindowLabel !== requestedVoice.ownerWindowLabel
+        ) {
+          return;
+        }
+        startNativeAssistantSpeech(sessionId, onFailure, initialMessages);
+      });
+    };
+    return;
+  }
   stopNativeAssistantSpeech();
   activeSpeechSessionId = sessionId;
   activeSpeechRevision = useVoiceConversationStore.getState().status.revision;
@@ -691,8 +730,6 @@ export function startNativeAssistantSpeech(
       stopStreamSubscription = unlisten;
     });
 
-  const initialMessages =
-    useChatStore.getState().messagesBySession[sessionId] ?? [];
   const toolCountByMessage = new Map<string, number>();
   const consumedTextBySlot = new Map<string, string>();
   const completedMessages = new Set<string>();

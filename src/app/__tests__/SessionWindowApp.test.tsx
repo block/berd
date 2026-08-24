@@ -39,6 +39,7 @@ const mocks = vi.hoisted(() => ({
   buildFeatures: {
     securityMl: true,
   },
+  setVoiceConversationForegroundSession: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/app/lib/chatRuntimeStartup", () => ({
@@ -92,6 +93,11 @@ vi.mock("@/features/chat/ui/ChatView", () => ({
       chat:{sessionId}
     </div>
   ),
+}));
+
+vi.mock("@/features/voice-conversation/api/voiceConversation", () => ({
+  setVoiceConversationForegroundSession:
+    mocks.setVoiceConversationForegroundSession,
 }));
 
 import { SessionWindowApp } from "@/app/SessionWindowApp";
@@ -219,6 +225,7 @@ describe("SessionWindowApp", () => {
     vi.mocked(readSessionHandoffSnapshot).mockReset();
     vi.mocked(readSessionHandoffSnapshot).mockResolvedValue(null);
     vi.mocked(recoverSessionHandoff).mockClear();
+    mocks.setVoiceConversationForegroundSession.mockClear();
   });
 
   it("renders an error state for an unknown session after hydration", async () => {
@@ -233,6 +240,11 @@ describe("SessionWindowApp", () => {
     seedSession();
     renderSessionWindow();
     await screen.findByTestId("chat-view");
+    await waitFor(() =>
+      expect(mocks.setVoiceConversationForegroundSession).toHaveBeenCalledWith(
+        "session-1",
+      ),
+    );
     await waitFor(() => expect(handoffListeners.searchTarget).toBeDefined());
 
     act(() => {

@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   setMicrophoneMuted: vi.fn(),
   start: vi.fn(),
   stop: vi.fn(),
+  stopForReplacement: vi.fn(),
 }));
 
 vi.mock("../api/voiceConversation", () => ({
@@ -31,6 +32,7 @@ vi.mock("../api/voiceConversation", () => ({
   setVoiceConversationMicrophoneMuted: mocks.setMicrophoneMuted,
   startVoiceConversation: mocks.start,
   stopVoiceConversation: mocks.stop,
+  stopVoiceConversationForReplacement: mocks.stopForReplacement,
 }));
 
 function status(
@@ -51,10 +53,12 @@ function status(
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolver) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolver, rejecter) => {
     resolve = resolver;
+    reject = rejecter;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 describe("voice conversation store lifecycle ordering", () => {
@@ -68,6 +72,7 @@ describe("voice conversation store lifecycle ordering", () => {
     mocks.getStatus.mockReset().mockResolvedValue(status("stopped", 0));
     mocks.start.mockReset();
     mocks.stop.mockReset();
+    mocks.stopForReplacement.mockReset();
     mocks.listen.mockReset().mockImplementation(async (callback) => {
       emit = callback;
       return vi.fn();
@@ -418,6 +423,115 @@ describe("voice conversation store lifecycle ordering", () => {
     });
   });
 
+  it("adopts the winner when a concurrent replacement already changed lifecycles", async () => {
+    const store = await loadStore();
+    const active = status("running", 2, "session-a");
+    const winner = status("running", 4, "session-b");
+    store.setState({ status: active, uiState: "listening" });
+    mocks.stopForReplacement.mockResolvedValue(winner);
+
+    await expect(
+      store.getState().stopForReplacement(active, "session-c"),
+    ).resolves.toEqual(winner);
+
+    expect(store.getState()).toMatchObject({
+      status: winner,
+      uiState: "listening",
+      error: null,
+    });
+    expect(mocks.stopForReplacement).toHaveBeenCalledWith(active, "session-c");
+  });
+
+  it.each([
+    "resolves",
+    "rejects",
+  ] as const)("preserves a competing handoff winner when stale status refresh %s", async (refreshOutcome) => {
+    const store = await loadStore();
+    const active = status("running", 2, "session-a");
+    const staleReplacement = deferred<VoiceConversationStatus>();
+    const winner = status("running", 4, "session-c");
+    const observedWinner =
+      refreshOutcome === "resolves"
+        ? { ...winner, microphoneMuted: true }
+        : winner;
+    store.setState({ status: active, uiState: "listening" });
+    mocks.stopForReplacement.mockReturnValue(staleReplacement.promise);
+    if (refreshOutcome === "resolves") {
+      mocks.getStatus.mockResolvedValue(observedWinner);
+    } else {
+      mocks.getStatus.mockRejectedValue(new Error("status unavailable"));
+    }
+
+    const replacingWithB = store
+      .getState()
+      .stopForReplacement(active, "session-b");
+    store.setState({
+      status: winner,
+      uiState: "agent-speaking",
+      assistantSpeaking: true,
+      error: "session C playback warning",
+    });
+    staleReplacement.reject(new Error("session B handoff failed"));
+
+    await expect(replacingWithB).rejects.toThrow("session B handoff failed");
+    expect(store.getState()).toMatchObject({
+      status: observedWinner,
+      uiState: "agent-speaking",
+      error: "session C playback warning",
+      microphoneMuted: observedWinner.microphoneMuted,
+    });
+  });
+
+  it("does not let a delayed competing-handoff refresh regress a newer winner", async () => {
+    const store = await loadStore();
+    const active = status("running", 2, "session-a");
+    const staleReplacement = deferred<VoiceConversationStatus>();
+    const statusRefresh = deferred<VoiceConversationStatus>();
+    const observedWinner = status("running", 4, "session-c");
+    const newerWinner = status("running", 6, "session-d");
+    store.setState({ status: active, uiState: "listening" });
+    mocks.stopForReplacement.mockReturnValue(staleReplacement.promise);
+    mocks.getStatus.mockReturnValue(statusRefresh.promise);
+
+    const replacingWithB = store
+      .getState()
+      .stopForReplacement(active, "session-b");
+    staleReplacement.reject(new Error("session B handoff failed"));
+    await vi.waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(2));
+    store.setState({
+      status: newerWinner,
+      uiState: "agent-speaking",
+      error: "session D playback warning",
+    });
+    statusRefresh.resolve(observedWinner);
+
+    await expect(replacingWithB).rejects.toThrow("session B handoff failed");
+    expect(store.getState()).toMatchObject({
+      status: newerWinner,
+      uiState: "agent-speaking",
+      error: "session D playback warning",
+    });
+  });
+
+  it("refreshes a stale foreign renderer before choosing a call action", async () => {
+    const store = await loadStore();
+    store.setState({
+      status: status("stopped", 1),
+      uiState: "off",
+      hydrated: true,
+    });
+    const active = status("running", 2, "session-a");
+    mocks.getStatus.mockResolvedValue(active);
+
+    await expect(store.getState().refreshStatus()).resolves.toEqual(active);
+
+    expect(store.getState()).toMatchObject({
+      status: active,
+      uiState: "listening",
+      error: null,
+    });
+  });
+
   it("does not reconcile a delayed terminal event from an older lifecycle", async () => {
     const store = await loadStore();
     store.setState({
@@ -488,6 +602,122 @@ describe("voice conversation store lifecycle ordering", () => {
       status: status("running", 2, "session-1"),
       uiState: "listening",
       error: null,
+    });
+  });
+
+  it.each([
+    ["starting", "starting"],
+    ["running", "listening"],
+    ["stopping", "stopping"],
+  ] as const)("does not let a stale start failure mark a %s replacement as errored", async (lifecycle, uiState) => {
+    const store = await loadStore();
+    const startA = deferred<VoiceConversationStatus>();
+    const replacementB = status(lifecycle, 4, "session-b");
+    mocks.start.mockReturnValue(startA.promise);
+    mocks.getStatus.mockResolvedValue(replacementB);
+
+    const startingA = store.getState().start("session-a");
+    store.setState({ status: replacementB, uiState, error: null });
+    startA.reject(new Error("session A start tail failed"));
+
+    await expect(startingA).rejects.toThrow("session A start tail failed");
+    expect(store.getState()).toMatchObject({
+      status: replacementB,
+      uiState,
+      error: null,
+    });
+  });
+
+  it("preserves a local replacement when stale-start status refresh fails", async () => {
+    const store = await loadStore();
+    const startA = deferred<VoiceConversationStatus>();
+    const startingB = status("starting", 4, "session-b");
+    mocks.start.mockReturnValue(startA.promise);
+    mocks.getStatus.mockRejectedValue(new Error("status unavailable"));
+
+    const startingA = store.getState().start("session-a");
+    store.setState({ status: startingB, uiState: "starting", error: null });
+    startA.reject(new Error("session A start tail failed"));
+
+    await expect(startingA).rejects.toThrow("session A start tail failed");
+    expect(store.getState()).toMatchObject({
+      status: startingB,
+      uiState: "starting",
+      error: null,
+    });
+  });
+
+  it("preserves replacement activity while stale-start status refresh settles", async () => {
+    const store = await loadStore();
+    const startA = deferred<VoiceConversationStatus>();
+    const statusRefresh = deferred<VoiceConversationStatus>();
+    const runningB = status("running", 4, "session-b");
+    mocks.start.mockReturnValue(startA.promise);
+    mocks.getStatus.mockReturnValue(statusRefresh.promise);
+
+    const startingA = store.getState().start("session-a");
+    store.setState({ status: runningB, uiState: "listening", error: null });
+    startA.reject(new Error("session A start tail failed"));
+    await vi.waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(2));
+    store.setState({
+      status: runningB,
+      uiState: "user-speaking",
+      userSpeaking: true,
+      error: "session B playback warning",
+    });
+    const mutedRunningB = { ...runningB, microphoneMuted: true };
+    statusRefresh.resolve(mutedRunningB);
+
+    await expect(startingA).rejects.toThrow("session A start tail failed");
+    expect(store.getState()).toMatchObject({
+      status: mutedRunningB,
+      uiState: "listening",
+      error: "session B playback warning",
+      microphoneMuted: true,
+      userSpeaking: false,
+    });
+    expect(mocks.reconcileMicrophone).toHaveBeenLastCalledWith(mutedRunningB);
+  });
+
+  it.each([
+    ["stale start", "agent-speaking"],
+    ["stale start", "error"],
+    ["failed handoff", "agent-speaking"],
+    ["failed handoff", "error"],
+  ] as const)("preserves direct %s %s UI while applying authoritative mute", async (operation, uiState) => {
+    const store = await loadStore();
+    const active = status("running", 2, "session-a");
+    const winner = {
+      ...status("running", 4, "session-c"),
+      microphoneMuted: true,
+    };
+    const request = deferred<VoiceConversationStatus>();
+    mocks.getStatus.mockResolvedValue(winner);
+    store.setState({ status: active, uiState: "listening" });
+
+    let failing: Promise<VoiceConversationStatus>;
+    if (operation === "stale start") {
+      mocks.start.mockReturnValue(request.promise);
+      failing = store.getState().start("session-b");
+    } else {
+      mocks.stopForReplacement.mockReturnValue(request.promise);
+      failing = store.getState().stopForReplacement(active, "session-b");
+    }
+    store.setState({
+      status: winner,
+      uiState,
+      error: uiState === "error" ? "session C warning" : null,
+      assistantSpeaking: false,
+      userSpeaking: false,
+    });
+    request.reject(new Error("stale operation failed"));
+
+    await expect(failing).rejects.toThrow("stale operation failed");
+    expect(store.getState()).toMatchObject({
+      status: winner,
+      uiState,
+      error: uiState === "error" ? "session C warning" : null,
+      microphoneMuted: true,
     });
   });
 

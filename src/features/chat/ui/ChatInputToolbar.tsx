@@ -161,7 +161,7 @@ export function ChatInputToolbar({
   const voiceConversationTooltip = ownsActiveVoiceConversation
     ? t("toolbar.voiceConversation.hangUp")
     : voiceConversationRunning
-      ? t("toolbar.voiceConversation.buddy.openSession")
+      ? t("toolbar.voiceConversation.start")
       : voiceConversationState !== "off"
         ? t(`toolbar.voiceConversation.states.${voiceConversationState}`, {
             sessionId: voiceConversation?.boundSessionId ?? "",

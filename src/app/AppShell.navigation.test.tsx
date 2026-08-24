@@ -36,6 +36,7 @@ import {
 import {
   blockNativeVoiceConversationStarts,
   releaseNativeVoiceConversationStartBlock,
+  setVoiceConversationForegroundSession,
 } from "@/features/voice-conversation/api/voiceConversation";
 import { dispatchOnboarding } from "@/features/onboarding/model";
 import {
@@ -73,6 +74,7 @@ vi.mock(
     releaseNativeVoiceConversationStartBlock: vi
       .fn()
       .mockResolvedValue(undefined),
+    setVoiceConversationForegroundSession: vi.fn().mockResolvedValue(undefined),
   }),
 );
 
@@ -960,6 +962,9 @@ describe("AppShell global navigation", () => {
       .mockReset()
       .mockResolvedValue("archive-token");
     vi.mocked(releaseNativeVoiceConversationStartBlock)
+      .mockReset()
+      .mockResolvedValue(undefined);
+    vi.mocked(setVoiceConversationForegroundSession)
       .mockReset()
       .mockResolvedValue(undefined);
     mockListExtensions.mockReset();
@@ -1985,6 +1990,11 @@ describe("AppShell global navigation", () => {
     expect(screen.getByTestId("rendered-view")).toHaveTextContent("chat");
     expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
       "session-2",
+    );
+    await waitFor(() =>
+      expect(setVoiceConversationForegroundSession).toHaveBeenLastCalledWith(
+        "session-2",
+      ),
     );
   });
 

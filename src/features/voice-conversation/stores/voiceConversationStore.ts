@@ -12,6 +12,7 @@ import {
   setVoiceConversationMicrophoneMuted,
   startVoiceConversation,
   stopVoiceConversation,
+  stopVoiceConversationForReplacement,
   type PendingVoiceTranscript,
   type VoiceConversationEvent,
   type VoiceConversationStatus,
@@ -48,10 +49,18 @@ interface VoiceConversationStore {
   hydrated: boolean;
   requestedStartSessionId: string | null;
   init: () => Promise<void>;
+  refreshStatus: () => Promise<VoiceConversationStatus>;
   requestStart: (sessionId: string) => void;
   clearRequestedStart: (sessionId: string) => void;
-  start: (sessionId: string) => Promise<VoiceConversationStatus>;
+  start: (
+    sessionId: string,
+    foregroundGeneration?: number,
+  ) => Promise<VoiceConversationStatus>;
   stop: () => Promise<VoiceConversationStatus>;
+  stopForReplacement: (
+    status: VoiceConversationStatus,
+    targetSessionId: string,
+  ) => Promise<VoiceConversationStatus>;
   setMicrophoneMuted: (muted: boolean) => Promise<void>;
   setUiState: (state: VoiceConversationUiState, error?: string) => void;
   drainPendingTranscripts: (sessionId: string) => Promise<void>;
@@ -521,7 +530,45 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       }
     },
 
-    start: (sessionId) => {
+    refreshStatus: async () => {
+      const muteStateVersion = microphoneMuteStateVersion;
+      const muteRequestWasPending = pendingMicrophoneMuteRequests > 0;
+      const status = await getVoiceConversationStatus();
+      const shouldPreserveCurrentMute = (
+        observedStatus: VoiceConversationStatus,
+      ) =>
+        isSameRunningLifecycle(observedStatus, status) &&
+        (muteRequestWasPending ||
+          pendingMicrophoneMuteRequests > 0 ||
+          muteStateVersion !== microphoneMuteStateVersion);
+      const preserveCurrentMute = shouldPreserveCurrentMute(get().status);
+      await reconcileVoiceConversationMicrophone(
+        preserveCurrentMute
+          ? { ...status, microphoneMuted: get().microphoneMuted }
+          : status,
+      );
+      set((state) => {
+        if (
+          !shouldApplyResponseRevision(state.status, status.revision) &&
+          status.revision !== state.status.revision
+        ) {
+          return state;
+        }
+        const microphoneMuted = shouldPreserveCurrentMute(state.status)
+          ? state.microphoneMuted
+          : status.microphoneMuted;
+        return {
+          status: { ...status, microphoneMuted },
+          uiState: uiStateForStatus(status),
+          microphoneMuted,
+          hydrated: true,
+          error: null,
+        };
+      });
+      return status;
+    },
+
+    start: (sessionId, foregroundGeneration) => {
       if (voiceStartBlocks.has(sessionId)) {
         return Promise.reject(
           new Error("Voice cannot start while this chat is being archived."),
@@ -532,7 +579,10 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       set({ uiState: "starting", microphoneMuted: false, error: null });
       const request = (async () => {
         try {
-          const status = await startVoiceConversation(sessionId);
+          const status = await startVoiceConversation(
+            sessionId,
+            foregroundGeneration,
+          );
           set((state) =>
             shouldApplyResponseRevision(state.status, status.revision) ||
             (status.revision === state.status.revision &&
@@ -552,15 +602,55 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
           const message =
             error instanceof Error ? error.message : String(error);
           try {
+            const muteStateVersion = microphoneMuteStateVersion;
+            const muteRequestWasPending = pendingMicrophoneMuteRequests > 0;
             const status = await getVoiceConversationStatus();
-            set((state) =>
-              status.revision >= state.status.revision
-                ? { status, uiState: "error", error: message }
-                : state,
-            );
+            set((state) => {
+              if (status.revision < state.status.revision) return state;
+              if (status.sessionId !== null && status.sessionId !== sessionId) {
+                if (
+                  state.status.sessionId === status.sessionId &&
+                  state.status.revision === status.revision &&
+                  state.status.lifecycle === status.lifecycle
+                ) {
+                  const preserveCurrentMute =
+                    isSameRunningLifecycle(state.status, status) &&
+                    (muteRequestWasPending ||
+                      pendingMicrophoneMuteRequests > 0 ||
+                      muteStateVersion !== microphoneMuteStateVersion);
+                  const microphoneMuted = preserveCurrentMute
+                    ? state.microphoneMuted
+                    : status.microphoneMuted;
+                  const userSpeaking = microphoneMuted
+                    ? false
+                    : state.userSpeaking;
+                  return {
+                    status: { ...state.status, microphoneMuted },
+                    microphoneMuted,
+                    userSpeaking,
+                    uiState:
+                      microphoneMuted && state.uiState === "user-speaking"
+                        ? activityUiState({ ...state, userSpeaking })
+                        : state.uiState,
+                  };
+                }
+                return {
+                  status,
+                  uiState: uiStateForStatus(status),
+                  microphoneMuted: status.microphoneMuted,
+                  error: null,
+                };
+              }
+              return { status, uiState: "error", error: message };
+            });
             await reconcileVoiceConversationMicrophone(get().status);
           } catch {
-            set({ uiState: "error", error: message });
+            set((state) =>
+              state.status.sessionId !== null &&
+              state.status.sessionId !== sessionId
+                ? state
+                : { uiState: "error", error: message },
+            );
           }
           throw error;
         }
@@ -630,6 +720,99 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       };
       void request.then(clearStopRequest, clearStopRequest);
       return request;
+    },
+
+    stopForReplacement: async (activeStatus, targetSessionId) => {
+      microphoneMuteIntent += 1;
+      microphoneMuteStateVersion += 1;
+      set({
+        uiState: "stopping",
+        microphoneMuted: false,
+        error: null,
+        requestedStartSessionId: null,
+      });
+      try {
+        const status = await stopVoiceConversationForReplacement(
+          activeStatus,
+          targetSessionId,
+        );
+        set((state) =>
+          shouldApplyResponseRevision(state.status, status.revision) ||
+          (status.revision === state.status.revision &&
+            (status.lifecycle === "stopped" ||
+              status.lifecycle === "unavailable"))
+            ? {
+                status,
+                uiState: uiStateForStatus(status),
+                microphoneMuted: status.microphoneMuted,
+                error: null,
+              }
+            : state,
+        );
+        await reconcileVoiceConversationMicrophone(get().status);
+        return status;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        try {
+          const muteStateVersion = microphoneMuteStateVersion;
+          const muteRequestWasPending = pendingMicrophoneMuteRequests > 0;
+          const status = await getVoiceConversationStatus();
+          set((state) => {
+            if (status.revision < state.status.revision) return state;
+            const foreignWinner =
+              status.sessionId !== null &&
+              status.sessionId !== activeStatus.sessionId &&
+              status.sessionId !== targetSessionId;
+            if (foreignWinner) {
+              if (
+                state.status.sessionId === status.sessionId &&
+                state.status.revision === status.revision &&
+                state.status.lifecycle === status.lifecycle
+              ) {
+                const preserveCurrentMute =
+                  isSameRunningLifecycle(state.status, status) &&
+                  (muteRequestWasPending ||
+                    pendingMicrophoneMuteRequests > 0 ||
+                    muteStateVersion !== microphoneMuteStateVersion);
+                const microphoneMuted = preserveCurrentMute
+                  ? state.microphoneMuted
+                  : status.microphoneMuted;
+                const userSpeaking = microphoneMuted
+                  ? false
+                  : state.userSpeaking;
+                return {
+                  status: { ...state.status, microphoneMuted },
+                  microphoneMuted,
+                  userSpeaking,
+                  uiState:
+                    microphoneMuted && state.uiState === "user-speaking"
+                      ? activityUiState({ ...state, userSpeaking })
+                      : state.uiState,
+                };
+              }
+              return {
+                status,
+                uiState: uiStateForStatus(status),
+                microphoneMuted: status.microphoneMuted,
+                error: null,
+              };
+            }
+            return status.revision >= state.status.revision
+              ? { status, uiState: "error", error: message }
+              : state;
+          });
+          await reconcileVoiceConversationMicrophone(get().status);
+        } catch {
+          set((state) =>
+            state.status.sessionId !== null &&
+            state.status.sessionId !== activeStatus.sessionId &&
+            state.status.sessionId !== targetSessionId
+              ? state
+              : { uiState: "error", error: message },
+          );
+        }
+        throw error;
+      }
     },
 
     setUiState: (uiState, error) =>

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import type {
   ChatInputSendHandler,
@@ -12,12 +14,12 @@ import {
   useVoiceConversationStore,
 } from "../stores/voiceConversationStore";
 import {
+  captureNativeAssistantSpeechHistory,
   startNativeAssistantSpeech,
-  stopNativeAssistantSpeech,
   takeVoicePlaybackNotices,
 } from "../lib/nativeAssistantSpeech";
 import {
-  openVoiceConversationSession,
+  confirmVoiceConversationForegroundSession,
   setVoiceConversationControlsSuppressed,
 } from "../api/voiceConversation";
 
@@ -31,7 +33,8 @@ interface VoiceSendRoute {
 // view for its bound session is mounted.
 let activeSendRoute: VoiceSendRoute | null = null;
 let deliveryInitialized = false;
-let operationInFlight = false;
+const operationInFlightBySession = new Set<string>();
+let replacementOperationInFlight = false;
 
 export function createVoiceTranscriptDeliveryQueue() {
   const queues = new Map<string, Promise<void>>();
@@ -68,8 +71,44 @@ export function canBindVoiceSendRoute(options: {
 export function resolveActiveVoiceButtonAction(
   activeSessionId: string | null,
   candidateSessionId: string,
-): "stop" | "open-owner" {
-  return activeSessionId === candidateSessionId ? "stop" : "open-owner";
+): "stop" | "replace" {
+  return activeSessionId === candidateSessionId ? "stop" : "replace";
+}
+
+export function canReplaceActiveVoiceConversation(options: {
+  canToggle: boolean;
+  hydrated: boolean;
+  pocketReady: boolean;
+}): boolean {
+  return options.canToggle && options.hydrated && options.pocketReady;
+}
+
+export function shouldShowVoiceConversationControl(options: {
+  activeConversation: boolean;
+  controlEnabled: boolean;
+  voiceEnabled: boolean;
+  isGooseSession: boolean;
+}): boolean {
+  return options.activeConversation
+    ? options.controlEnabled
+    : options.voiceEnabled && options.isGooseSession;
+}
+
+export async function replaceActiveVoiceConversation(options: {
+  stop: () => Promise<{ lifecycle: string; sessionId: string | null }>;
+  confirmTarget?: () => Promise<unknown>;
+  start: () => Promise<void>;
+}): Promise<boolean> {
+  const stopped = await options.stop();
+  if (
+    stopped.sessionId !== null ||
+    (stopped.lifecycle !== "stopped" && stopped.lifecycle !== "unavailable")
+  ) {
+    return false;
+  }
+  await options.confirmTarget?.();
+  await options.start();
+  return true;
 }
 
 export function shouldSuppressVoiceConversationControls(options: {
@@ -551,13 +590,20 @@ export function useVoiceConversationController({
   readOnly = false,
   disabled = false,
 }: UseVoiceConversationControllerOptions): ChatInputVoiceConversation {
+  const { t } = useTranslation("chat");
   const status = useVoiceConversationStore((state) => state.status);
   const uiState = useVoiceConversationStore((state) => state.uiState);
   const error = useVoiceConversationStore((state) => state.error);
   const hydrated = useVoiceConversationStore((state) => state.hydrated);
   const init = useVoiceConversationStore((state) => state.init);
+  const refreshStatus = useVoiceConversationStore(
+    (state) => state.refreshStatus,
+  );
   const start = useVoiceConversationStore((state) => state.start);
   const stop = useVoiceConversationStore((state) => state.stop);
+  const stopForReplacement = useVoiceConversationStore(
+    (state) => state.stopForReplacement,
+  );
   const microphoneMuted = useVoiceConversationStore(
     (state) => state.microphoneMuted,
   );
@@ -668,27 +714,117 @@ export function useVoiceConversationController({
     status.sessionId,
   ]);
 
-  const startAssistantSpeech = useCallback(() => {
-    startNativeAssistantSpeech(sessionId, (text, playbackError) => {
-      addErrorNotification(
+  const startAssistantSpeech = useCallback(
+    (
+      initialMessages?: ReturnType<typeof captureNativeAssistantSpeechHistory>,
+    ) => {
+      startNativeAssistantSpeech(
         sessionId,
-        `Pocket TTS could not speak the assistant response: ${errorText(
-          playbackError,
-        )}`,
+        (text, playbackError) => {
+          addErrorNotification(
+            sessionId,
+            `Pocket TTS could not speak the assistant response: ${errorText(
+              playbackError,
+            )}`,
+          );
+          console.error("Native Pocket playback failed", {
+            sessionId,
+            textLength: text.length,
+            error: playbackError,
+          });
+        },
+        initialMessages,
       );
-      console.error("Native Pocket playback failed", {
-        sessionId,
-        textLength: text.length,
-        error: playbackError,
-      });
-    });
-  }, [sessionId]);
+    },
+    [sessionId],
+  );
+
+  const startCurrentConversation = useCallback(async () => {
+    // Do not rely on the mount effect racing ahead of the user's first
+    // click. The native recognizer can finalize quickly, so its delivery
+    // subscriber must exist before the microphone lifecycle starts.
+    ensureVoiceEventDeliveryInitialized();
+    const assistantSpeechHistory =
+      captureNativeAssistantSpeechHistory(sessionId);
+    const route = { sessionId, send: onSend };
+    activeSendRoute = route;
+    try {
+      const foregroundGeneration =
+        await confirmVoiceConversationForegroundSession(sessionId);
+      await start(sessionId, foregroundGeneration);
+      startAssistantSpeech(assistantSpeechHistory);
+    } catch (startError) {
+      const backendStatus = useVoiceConversationStore.getState().status;
+      const currentWindowLabel = getCurrentWindow().label;
+      const exactOwnerLifecycleSurvived =
+        backendStatus.lifecycle === "running" &&
+        backendStatus.sessionId === sessionId &&
+        backendStatus.ownerWindowLabel === currentWindowLabel;
+      let conversationStarted = false;
+      if (exactOwnerLifecycleSurvived) {
+        try {
+          const reconciledStatus = await useVoiceConversationStore
+            .getState()
+            .refreshStatus();
+          conversationStarted =
+            reconciledStatus.lifecycle === "running" &&
+            reconciledStatus.sessionId === sessionId &&
+            reconciledStatus.ownerWindowLabel === currentWindowLabel &&
+            reconciledStatus.revision === backendStatus.revision;
+        } catch {
+          // Preserve the original startup failure below. A surviving native
+          // lifecycle is usable only after microphone reconciliation succeeds.
+        }
+      }
+      if (conversationStarted) {
+        useVoiceConversationStore.setState((state) =>
+          state.status.sessionId === sessionId &&
+          state.status.ownerWindowLabel === backendStatus.ownerWindowLabel &&
+          state.status.revision === backendStatus.revision
+            ? {
+                uiState:
+                  state.uiState === "error" ? "listening" : state.uiState,
+                error: null,
+              }
+            : state,
+        );
+        const currentStatus = useVoiceConversationStore.getState().status;
+        conversationStarted =
+          currentStatus.lifecycle === "running" &&
+          currentStatus.sessionId === sessionId &&
+          currentStatus.ownerWindowLabel === currentWindowLabel &&
+          currentStatus.revision === backendStatus.revision;
+        if (conversationStarted) {
+          startAssistantSpeech(assistantSpeechHistory);
+        }
+      }
+      if (!conversationStarted) {
+        if (activeSendRoute?.sessionId === route.sessionId) {
+          activeSendRoute = null;
+        }
+        addErrorNotification(sessionId, errorText(startError));
+      }
+    }
+  }, [onSend, sessionId, start, startAssistantSpeech]);
 
   useEffect(() => {
-    if (status.lifecycle !== "running" || status.sessionId !== sessionId)
+    if (
+      status.lifecycle !== "running" ||
+      status.sessionId !== sessionId ||
+      status.ownerWindowLabel !== getCurrentWindow().label
+    )
       return;
+    // The initiating operation captured the pre-start history boundary and
+    // activates speech after native startup succeeds.
+    if (operationInFlightBySession.has(sessionId)) return;
     startAssistantSpeech();
-  }, [sessionId, startAssistantSpeech, status.lifecycle, status.sessionId]);
+  }, [
+    sessionId,
+    startAssistantSpeech,
+    status.lifecycle,
+    status.ownerWindowLabel,
+    status.sessionId,
+  ]);
 
   useEffect(() => {
     if (
@@ -776,14 +912,23 @@ export function useVoiceConversationController({
   ]);
 
   const isActive = status.sessionId !== null && status.lifecycle !== "stopped";
-  const controlEnabled = enabled && isGooseSession && !readOnly && !disabled;
-  const canToggle = controlEnabled && (!pocketReady || status.available);
+  const sessionEligible = enabled && isGooseSession && !readOnly && !disabled;
+  const canToggle = sessionEligible && (!pocketReady || status.available);
 
   const toggle = useCallback(async () => {
-    if (operationInFlight) return;
-    operationInFlight = true;
+    if (operationInFlightBySession.has(sessionId)) return;
+    operationInFlightBySession.add(sessionId);
     try {
-      const currentStatus = useVoiceConversationStore.getState().status;
+      if (replacementOperationInFlight) return;
+      const currentStatus = await refreshStatus().catch(() => {
+        addErrorNotification(
+          sessionId,
+          t("toolbar.voiceConversation.buddy.errors.initialize"),
+        );
+        return null;
+      });
+      if (!currentStatus) return;
+      if (replacementOperationInFlight) return;
       const currentlyActive =
         currentStatus.sessionId !== null &&
         currentStatus.lifecycle !== "stopped" &&
@@ -795,14 +940,42 @@ export function useVoiceConversationController({
       });
       if (action === "stop") {
         const boundSessionId = currentStatus.sessionId;
-        if (
-          resolveActiveVoiceButtonAction(boundSessionId, sessionId) ===
-          "open-owner"
-        ) {
+        const activeButtonAction = resolveActiveVoiceButtonAction(
+          boundSessionId,
+          sessionId,
+        );
+        if (activeButtonAction === "replace") {
+          if (
+            !canReplaceActiveVoiceConversation({
+              canToggle,
+              hydrated,
+              pocketReady,
+            })
+          ) {
+            return;
+          }
+          if (replacementOperationInFlight) return;
+          replacementOperationInFlight = true;
           try {
-            await openVoiceConversationSession();
-          } catch (openError) {
-            addErrorNotification(boundSessionId, errorText(openError));
+            const replaced = await replaceActiveVoiceConversation({
+              stop: () => stopForReplacement(currentStatus, sessionId),
+              confirmTarget: () =>
+                confirmVoiceConversationForegroundSession(sessionId),
+              start: startCurrentConversation,
+            });
+            if (!replaced) {
+              addErrorNotification(
+                sessionId,
+                t("toolbar.voiceConversation.buddy.errors.stop"),
+              );
+            }
+          } catch {
+            addErrorNotification(
+              sessionId,
+              t("toolbar.voiceConversation.buddy.errors.stop"),
+            );
+          } finally {
+            replacementOperationInFlight = false;
           }
           return;
         }
@@ -821,36 +994,21 @@ export function useVoiceConversationController({
         return;
       }
 
-      // Do not rely on the mount effect racing ahead of the user's first
-      // click. The native recognizer can finalize quickly, so its delivery
-      // subscriber must exist before the microphone lifecycle starts.
-      ensureVoiceEventDeliveryInitialized();
-      activeSendRoute = { sessionId, send: onSend };
-      // Capture the history boundary before native startup can admit a
-      // transcript and produce the first assistant response.
-      startAssistantSpeech();
-      try {
-        await start(sessionId);
-      } catch (startError) {
-        const backendStatus = useVoiceConversationStore.getState().status;
-        if (backendStatus.sessionId !== sessionId) {
-          activeSendRoute = null;
-          stopNativeAssistantSpeech();
-        }
-        addErrorNotification(sessionId, errorText(startError));
-      }
+      await startCurrentConversation();
     } finally {
-      operationInFlight = false;
+      operationInFlightBySession.delete(sessionId);
     }
   }, [
     canToggle,
+    hydrated,
     onPocketSetupRequired,
-    onSend,
     pocketReady,
+    refreshStatus,
     sessionId,
-    start,
-    startAssistantSpeech,
+    startCurrentConversation,
     stop,
+    stopForReplacement,
+    t,
   ]);
 
   useEffect(() => {
@@ -892,31 +1050,46 @@ export function useVoiceConversationController({
     }
   }, [setMicrophoneMuted, status.lifecycle, status.sessionId]);
 
+  const ownsActiveConversation = isActive && status.sessionId === sessionId;
+  const controlEnabled =
+    ownsActiveConversation ||
+    (isActive
+      ? canReplaceActiveVoiceConversation({
+          canToggle,
+          hydrated,
+          pocketReady,
+        })
+      : canToggle && hydrated);
+
   return useMemo(
     () => ({
-      visible: isActive || (enabled && isGooseSession),
+      visible: shouldShowVoiceConversationControl({
+        activeConversation: isActive,
+        controlEnabled,
+        voiceEnabled: enabled,
+        isGooseSession,
+      }),
       state: uiState,
       boundSessionId: status.sessionId,
       active: isActive,
-      ownsActiveConversation: isActive && status.sessionId === sessionId,
+      ownsActiveConversation,
       microphoneMuted,
       error:
         error ??
         (pocketReady && !status.available ? status.unavailableReason : null),
-      disabled: isActive ? false : !canToggle || !hydrated,
+      disabled: !controlEnabled,
       onToggle: toggle,
       onMicrophoneMuteToggle: toggleMicrophoneMute,
     }),
     [
-      canToggle,
+      controlEnabled,
       enabled,
       error,
-      hydrated,
       isActive,
       isGooseSession,
       microphoneMuted,
       pocketReady,
-      sessionId,
+      ownsActiveConversation,
       status,
       toggle,
       toggleMicrophoneMute,

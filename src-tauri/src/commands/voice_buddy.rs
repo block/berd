@@ -153,6 +153,34 @@ fn make_macos_transparent(window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
+fn show_controls_without_activation(window: &WebviewWindow) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::msg_send;
+        use objc2::runtime::AnyObject;
+
+        window
+            .with_webview(|platform_webview| unsafe {
+                let webview = platform_webview.inner() as *mut AnyObject;
+                if webview.is_null() {
+                    return;
+                }
+                let ns_window: *mut AnyObject = msg_send![&*webview, window];
+                if !ns_window.is_null() {
+                    let _: () = msg_send![&*ns_window, orderFrontRegardless];
+                }
+            })
+            .map_err(|error| error.to_string())?;
+        if !window.is_visible().map_err(|error| error.to_string())? {
+            return Err("The floating voice controls could not be shown.".to_string());
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    window.show().map_err(|error| error.to_string())
+}
+
 pub fn install(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
         window
@@ -183,6 +211,8 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     .skip_taskbar(true)
     .focused(false)
     .visible(false);
+    #[cfg(target_os = "macos")]
+    let builder = builder.accept_first_mouse(true);
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
     let window = builder.build().map_err(|error| error.to_string())?;
@@ -398,9 +428,9 @@ pub async fn show_voice_conversation_controls(
     };
     loop {
         let apply_result = if target.suppressed {
-            window.hide()
+            window.hide().map_err(|error| error.to_string())
         } else {
-            window.show()
+            show_controls_without_activation(&window)
         };
         if let Err(error) = apply_result {
             if state.active_session_lifecycle_target()
@@ -479,9 +509,9 @@ pub fn set_voice_conversation_controls_suppressed(
                 return Err("The floating voice controls are no longer available.".to_string());
             };
             let result = if should_show {
-                controls.show()
+                show_controls_without_activation(&controls)
             } else {
-                controls.hide()
+                controls.hide().map_err(|error| error.to_string())
             };
             if let Err(error) = result {
                 state.rollback_controls_suppression(
