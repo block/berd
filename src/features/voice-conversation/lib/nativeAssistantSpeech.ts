@@ -742,13 +742,26 @@ function interruptActiveUtterance(
     );
   }
   if (utterance && terminalEventExpected) {
+    const stopVoice = stopActiveVoice;
     utterance.interruptionFallback = setTimeout(() => {
-      finalizeInterruptedUtterance(
-        utterance,
-        utterance.interruptionCause ?? cause,
-      );
+      if (activeUtterance?.id !== utterance.id) return;
+      utterance.interruptionFallback = null;
+      void stopVoice()
+        .then((playbackStillActive) => {
+          finalizeInterruptedUtterance(
+            utterance,
+            utterance.interruptionCause ?? cause,
+            cause === "userSpeaking" && !playbackStillActive,
+          );
+        })
+        .catch(() => {
+          finalizeInterruptedUtterance(
+            utterance,
+            utterance.interruptionCause ?? cause,
+          );
+        });
     }, INTERRUPTION_TERMINAL_TIMEOUT_MS);
-    void stopActiveVoice().catch(() => undefined);
+    void stopVoice().catch(() => undefined);
   } else {
     void stopActiveVoice().catch(() => undefined);
   }

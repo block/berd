@@ -992,7 +992,53 @@ describe("native assistant speech stream", () => {
     ).toMatchObject({ speech: { status: "spoken" } });
   });
 
-  it("bounds a missing native terminal event and allows the next reply", async () => {
+  it("resumes after a missing terminal event releases native ownership", async () => {
+    mocks.stop
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "First reply." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    const firstStreamId = mocks.start.mock.calls[0]?.[0] as string;
+
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      await Promise.resolve();
+      expect(mocks.stop).toHaveBeenCalled();
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await Promise.resolve();
+
+      expect(mocks.start).toHaveBeenCalledTimes(2);
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[1]?.[0],
+        "First reply.",
+      );
+      expect(takeVoicePlaybackNotices("session-1")).toBeNull();
+
+      mocks.streamHandler?.({
+        streamId: firstStreamId,
+        state: "interrupted",
+        error: null,
+        delivery: { segments: [] },
+      });
+      await vi.runAllTimersAsync();
+
+      expect(mocks.start).toHaveBeenCalledTimes(2);
+      expect(takeVoicePlaybackNotices("session-1")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not resume after a terminal timeout while playback remains active", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
       .getState()
@@ -1004,9 +1050,11 @@ describe("native assistant speech stream", () => {
     vi.useFakeTimers();
     try {
       useVoiceConversationStore.setState({ userSpeaking: true });
-      await Promise.resolve();
-      expect(mocks.stop).toHaveBeenCalled();
+      useVoiceConversationStore.setState({ userSpeaking: false });
       await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(mocks.stop).toHaveBeenCalledTimes(3);
+      expect(mocks.start).toHaveBeenCalledTimes(1);
       expect(
         useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
       ).toMatchObject({
@@ -1015,31 +1063,6 @@ describe("native assistant speech stream", () => {
     } finally {
       vi.useRealTimers();
     }
-
-    useVoiceConversationStore.setState({ userSpeaking: false });
-    await new Promise((resolve) => window.setTimeout(resolve, 300));
-    expect(mocks.start).toHaveBeenCalledTimes(1);
-    useChatStore
-      .getState()
-      .setMessages("session-1", [
-        assistant(
-          [{ type: "text", text: "First reply." }],
-          "completed",
-          "assistant-1",
-        ),
-        assistant(
-          [{ type: "text", text: "Second reply." }],
-          "completed",
-          "assistant-2",
-        ),
-      ]);
-    await vi.waitFor(() => {
-      expect(mocks.start).toHaveBeenCalledTimes(2);
-      expect(mocks.append).toHaveBeenCalledWith(
-        mocks.start.mock.calls[1]?.[0],
-        "Second reply.",
-      );
-    });
   });
 
   it("finalizes only once when a terminal event races the fallback", async () => {
