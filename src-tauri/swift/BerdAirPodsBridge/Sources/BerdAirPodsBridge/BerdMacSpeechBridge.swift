@@ -153,6 +153,12 @@ private func describe(_ status: AssetInventory.Status) -> String {
 
 @available(macOS 26.0, *)
 private func status(for requested: Locale) async -> SpeechStatus {
+    guard SpeechTranscriber.isAvailable else {
+        return SpeechStatus(
+            supported: false, locale: nil, localeSupported: false,
+            modelStatus: "unsupported", ready: false
+        )
+    }
     guard let locale = await resolve(requested) else {
         return SpeechStatus(
             supported: true, locale: nil, localeSupported: false,
@@ -458,7 +464,7 @@ private final class SpeechSession: @unchecked Sendable {
 
 @_cdecl("berd_macos_stt_is_supported")
 public func berdMacSTTIsSupported() -> Bool {
-    if #available(macOS 26.0, *) { return true }
+    if #available(macOS 26.0, *) { return SpeechTranscriber.isAvailable }
     return false
 }
 
