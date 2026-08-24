@@ -353,7 +353,21 @@ function applyInterruptionEstimate(
     utterance,
     estimate.cutoff,
   )) {
+    const content = targetContent(utterance.sessionId, target);
+    if (!content || !targetRetainsUtteranceText(utterance, target, content)) {
+      setTargetSpeech(utterance.sessionId, target, { status: "notSpoken" });
+      continue;
+    }
     if (localCutoff >= targetLength && targetLength > 0) {
+      if (utterance.resumptionDiscarded && content.text.length > targetLength) {
+        setTargetSpeech(utterance.sessionId, target, {
+          status: "interrupted",
+          spokenThrough: targetLength,
+          confidence: estimate.confidence,
+          interruptionCause: utterance.interruptionCause ?? "voiceStopped",
+        });
+        continue;
+      }
       setTargetSpeech(utterance.sessionId, target, {
         status: "spoken",
         spokenThrough: targetLength,
@@ -455,6 +469,20 @@ function targetContent(
   return null;
 }
 
+function targetRetainsUtteranceText(
+  utterance: ActiveUtterance,
+  target: SpeechTarget,
+  content: TextContent,
+): boolean {
+  return utterance.targetSpans
+    .filter((span) => targetKey(span) === targetKey(target))
+    .every(
+      (span) =>
+        content.text.slice(span.targetStart, span.targetEnd) ===
+        utterance.text.slice(span.start, span.end),
+    );
+}
+
 function recordDeliveryNotices(
   utterance: ActiveUtterance,
   fallbackEstimate: SpeechDeliveryEstimate,
@@ -528,9 +556,13 @@ function applyCompletedUtteranceStatus(utterance: ActiveUtterance): boolean {
     const targetEnd = utterance.targetSpans
       .filter((span) => targetKey(span) === targetKey(target))
       .at(-1)?.targetEnd;
+    if (!content || !targetRetainsUtteranceText(utterance, target, content)) {
+      setTargetSpeech(utterance.sessionId, target, { status: "notSpoken" });
+      hasDiscardedSuffix = true;
+      continue;
+    }
     if (
       utterance.resumptionDiscarded &&
-      content &&
       targetEnd !== undefined &&
       content.text.length > targetEnd
     ) {
@@ -915,6 +947,40 @@ export function startNativeAssistantSpeech(
     recordPlaybackNotice(sessionId, slot, text, "notSpoken");
   };
 
+  const discardHeldTarget = (
+    slot: string,
+    target: SpeechTarget,
+    text: string,
+  ) => {
+    const consumedPrefix = consumedTextBySlot.get(slot) ?? "";
+    const content = targetContent(sessionId, target);
+    if (
+      consumedPrefix.length > 0 &&
+      text.startsWith(consumedPrefix) &&
+      content?.speech?.status === "spoken"
+    ) {
+      invalidatedMessages.add(target.messageId);
+      interruptedMessages.add(target.messageId);
+      interruptionCauseByMessage.set(target.messageId, "voiceStopped");
+      consumedTextBySlot.set(slot, text);
+      const estimate: SpeechDeliveryEstimate = {
+        cutoff: consumedPrefix.length,
+        spokenText: consumedPrefix,
+        unspokenText: text.slice(consumedPrefix.length),
+        confidence: "medium",
+      };
+      setTargetSpeech(sessionId, target, {
+        status: "interrupted",
+        spokenThrough: estimate.cutoff,
+        confidence: estimate.confidence,
+        interruptionCause: "voiceStopped",
+      });
+      recordPlaybackNotice(sessionId, slot, text, "interrupted", estimate);
+      return;
+    }
+    suppressTarget(slot, target, text);
+  };
+
   const holdAssistantChanges = (
     messages: ReturnType<
       typeof useChatStore.getState
@@ -961,7 +1027,7 @@ export function startNativeAssistantSpeech(
         held.targets.delete(slot);
         continue;
       }
-      suppressTarget(slot, heldTarget.target, heldTarget.text);
+      discardHeldTarget(slot, heldTarget.target, heldTarget.text);
       held.targets.delete(slot);
     }
     if (held.targets.size === 0) {
@@ -1024,7 +1090,7 @@ export function startNativeAssistantSpeech(
     const held = heldSpeech;
     if (held) {
       for (const [slot, heldTarget] of held.targets) {
-        suppressTarget(slot, heldTarget.target, heldTarget.text);
+        discardHeldTarget(slot, heldTarget.target, heldTarget.text);
       }
       heldSpeech = null;
       heldReleaseReady = false;

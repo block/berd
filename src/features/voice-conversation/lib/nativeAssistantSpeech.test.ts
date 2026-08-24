@@ -1105,7 +1105,7 @@ describe("native assistant speech stream", () => {
     expect(notice).not.toContain("TTS delivery was blocked");
   });
 
-  it("keeps a held suffix unspoken when completion wins the mute race", async () => {
+  it("keeps a held suffix unspoken when mute wins the completion race", async () => {
     startNativeAssistantSpeech("session-1", vi.fn());
     useChatStore
       .getState()
@@ -1139,6 +1139,128 @@ describe("native assistant speech stream", () => {
     const notice = takeVoicePlaybackNotices("session-1") ?? "";
     expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
     expect(notice).toContain('"unspokenText":" Held suffix."');
+  });
+
+  it("preserves a spoken prefix when completion wins the mute race", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Spoken prefix." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    emit("started");
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", " Held suffix.");
+    emit("completed");
+    useVoiceConversationStore.setState({
+      microphoneMuted: true,
+      status: {
+        ...useVoiceConversationStore.getState().status,
+        microphoneMuted: true,
+      },
+    });
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({
+      speech: {
+        status: "interrupted",
+        spokenThrough: "Spoken prefix.".length,
+      },
+    });
+    const notice = takeVoicePlaybackNotices("session-1") ?? "";
+    expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
+    expect(notice).toContain('"spokenText":"Spoken prefix."');
+    expect(notice).toContain('"unspokenText":" Held suffix."');
+  });
+
+  it("does not mark a held suffix spoken after an interrupted terminal", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Spoken prefix." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+    emit("started");
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", " Held suffix.");
+    useVoiceConversationStore.setState({
+      microphoneMuted: true,
+      status: {
+        ...useVoiceConversationStore.getState().status,
+        microphoneMuted: true,
+      },
+    });
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        segments: [
+          {
+            text: "Spoken prefix.",
+            playedFrames: 1_000,
+            totalFrames: 1_000,
+            synthesisComplete: true,
+          },
+        ],
+      },
+    });
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({
+      speech: {
+        status: "interrupted",
+        spokenThrough: "Spoken prefix.".length,
+      },
+    });
+    const notice = takeVoicePlaybackNotices("session-1") ?? "";
+    expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
+    expect(notice).toContain('"unspokenText":" Held suffix."');
+  });
+
+  it("does not apply a completed terminal to a held rewrite", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Original reply." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+    emit("started");
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    useChatStore
+      .getState()
+      .setMessages("session-1", [assistant([{ type: "text", text: "New." }])]);
+    useVoiceConversationStore.setState({
+      microphoneMuted: true,
+      status: {
+        ...useVoiceConversationStore.getState().status,
+        microphoneMuted: true,
+      },
+    });
+    mocks.streamHandler?.({
+      streamId,
+      state: "completed",
+      error: null,
+      delivery: null,
+    });
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({ speech: { status: "notSpoken" } });
   });
 
   it("describes a hang-up as stopping the voice conversation", async () => {
