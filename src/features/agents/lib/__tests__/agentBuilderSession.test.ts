@@ -786,12 +786,14 @@ describe("agentBuilderSession", () => {
   });
 
   describe("discardUntouchedDraftAgentSession", () => {
-    it("discards an untouched draft, navigating before the chat closes", async () => {
+    it("discards an untouched draft: navigate, then delete, then close", async () => {
       addBuilderSession();
       mocks.listPersonaSources.mockResolvedValue([draftSource]);
       mocks.readAgentSourceFile.mockResolvedValue(draftSource);
-      mocks.deletePersonaSource.mockResolvedValue(undefined);
       const order: string[] = [];
+      mocks.deletePersonaSource.mockImplementation(async () => {
+        order.push("delete");
+      });
       const onBeforeDiscard = vi.fn(() => order.push("navigate"));
       const close = vi.fn(async () => {
         order.push("close");
@@ -806,7 +808,9 @@ describe("agentBuilderSession", () => {
 
       expect(mocks.deletePersonaSource).toHaveBeenCalledWith(draftSource.path);
       expect(close).toHaveBeenCalledWith("sess-1");
-      expect(order).toEqual(["navigate", "close"]);
+      // The caller's transition runs before the async delete begins, so the
+      // old editor is already gone while the file is being removed.
+      expect(order).toEqual(["navigate", "delete", "close"]);
     });
 
     it("keeps the draft when the user types while the lookup is in flight", async () => {
