@@ -75,7 +75,7 @@ export function NumberStepper({
       role="group"
       aria-label={label}
       className={cn(
-        "flex h-7 shrink-0 items-center overflow-hidden rounded-full border border-border bg-transparent text-foreground",
+        "flex h-7 shrink-0 items-center overflow-hidden rounded-full bg-surface-composer-action text-foreground",
         className,
       )}
       onPointerDown={(event) => event.stopPropagation()}
@@ -140,7 +140,7 @@ export function NumberStepper({
             commit(String(max));
           }
         }}
-        className="h-7 w-10 border-x border-border bg-transparent px-1 text-center text-xs font-medium tabular-nums text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50"
+        className="h-7 w-10 border-0 bg-background px-1 text-center text-xs font-medium tabular-nums text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring disabled:opacity-50"
       />
       <Button
         type="button"

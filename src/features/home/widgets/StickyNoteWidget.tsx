@@ -734,7 +734,8 @@ export function StickyNoteWidget({
                 }
               >
                 <SelectTrigger
-                  size="sm"
+                  size="xs"
+                  variant="pill"
                   aria-label={t("widgets.label.fontFamily.label")}
                 >
                   <SelectValue />
