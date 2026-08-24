@@ -343,6 +343,8 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
   codeRenderers?: CustomRenderer[];
   /** Source-text offset after which rendered Markdown is struck through. */
   strikethroughFrom?: number;
+  /** Accessible label announced before visually struck voice-undelivered text. */
+  strikethroughLabel?: string;
   /**
    * Optional feature-aware Markdown image renderer. Chat injects one that can
    * resolve local files through the asset scheme; when omitted, images render
@@ -703,8 +705,8 @@ const berdRehypePlugins: NonNullable<
   restoreBerdMarkdownDestinations,
 ];
 
-function strikethroughFromPlugin(cutoff: number) {
-  const structureParents = new Set([
+function strikethroughFromPlugin(cutoff: number, label: string) {
+  const structureElements = new Set([
     "dl",
     "menu",
     "ol",
@@ -716,11 +718,20 @@ function strikethroughFromPlugin(cutoff: number) {
     "tr",
     "ul",
   ]);
+  const accessibleLabel = (): MarkdownHastNode => ({
+    type: "element",
+    tagName: "span",
+    properties: { className: ["sr-only"] },
+    children: [{ type: "text", value: `${label}: ` }],
+  });
   const wrap = (node: MarkdownHastNode): MarkdownHastNode => ({
     type: "element",
-    tagName: "del",
-    properties: {},
-    children: [node],
+    tagName: "span",
+    properties: {
+      className: ["line-through"],
+      "data-voice-unspoken": "true",
+    },
+    children: [accessibleLabel(), node],
     position: node.position,
   });
 
@@ -734,9 +745,36 @@ function strikethroughFromPlugin(cutoff: number) {
         child.type === "element" &&
         start !== undefined &&
         cutoff <= start &&
-        !structureParents.has(node.tagName ?? "")
+        !structureElements.has(child.tagName ?? "")
       ) {
-        children.push(wrap(child));
+        if (child.tagName === "pre") {
+          children.push({
+            type: "element",
+            tagName: "div",
+            properties: {
+              className: ["line-through"],
+              "data-voice-unspoken": "true",
+            },
+            children: [accessibleLabel(), child],
+            position: child.position,
+          });
+          continue;
+        }
+        const className = child.properties?.className;
+        child.properties = {
+          ...child.properties,
+          className: [
+            ...(Array.isArray(className)
+              ? className
+              : typeof className === "string"
+                ? [className]
+                : []),
+            "line-through",
+          ],
+          "data-voice-unspoken": "true",
+        };
+        child.children = [accessibleLabel(), ...(child.children ?? [])];
+        children.push(child);
         continue;
       }
       if (
@@ -791,6 +829,7 @@ export const MessageResponse = memo(
     onAnimationEnd,
     onAnimationStart,
     strikethroughFrom,
+    strikethroughLabel = "Not spoken",
     ...props
   }: MessageResponseProps) => {
     const { t } = useTranslation("common");
@@ -807,9 +846,9 @@ export const MessageResponse = memo(
           ? berdRehypePlugins
           : [
               ...berdRehypePlugins,
-              [strikethroughFromPlugin, strikethroughFrom],
+              [strikethroughFromPlugin, strikethroughFrom, strikethroughLabel],
             ],
-      [strikethroughFrom],
+      [strikethroughFrom, strikethroughLabel],
     );
     const streamdownRootRef = useRef<HTMLDivElement>(null);
     const streamdownLayoutPending = useVirtualLayoutPendingForStreamdown({

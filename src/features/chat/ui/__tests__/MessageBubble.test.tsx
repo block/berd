@@ -730,9 +730,15 @@ describe("MessageBubble", () => {
     const block = container.querySelector(
       '[data-voice-speech-status="interrupted"]',
     );
-    expect(block).toHaveTextContent("One. Two. Three.");
-    expect(block?.querySelector("del")).toHaveTextContent(". Three.");
-    expect(block?.querySelector("del")).not.toHaveTextContent("One. Two");
+    expect(block).toHaveTextContent("One. Two");
+    expect(block?.querySelector("[data-voice-unspoken]")).toHaveTextContent(
+      ". Three.",
+    );
+    expect(block?.querySelector("[data-voice-unspoken]")).not.toHaveTextContent(
+      "One. Two",
+    );
+    expect(block?.querySelector("del")).toBeNull();
+    expect(block?.querySelector(".sr-only")).toHaveTextContent("Not spoken:");
   });
 
   it("updates the strike when unchanged text becomes interrupted", () => {
@@ -744,7 +750,7 @@ describe("MessageBubble", () => {
         ])}
       />,
     );
-    expect(container.querySelector("del")).toBeNull();
+    expect(container.querySelector("[data-voice-unspoken]")).toBeNull();
 
     rerender(
       <MessageBubble
@@ -762,7 +768,9 @@ describe("MessageBubble", () => {
       />,
     );
 
-    expect(container.querySelector("del")).toHaveTextContent(". Three.");
+    expect(container.querySelector("[data-voice-unspoken]")).toHaveTextContent(
+      ". Three.",
+    );
   });
 
   it("keeps required list and table children structurally valid", () => {
@@ -789,9 +797,8 @@ describe("MessageBubble", () => {
     expect(
       [...(list?.children ?? [])].every((child) => child.tagName === "LI"),
     ).toBe(true);
-    expect(list?.children[1]?.querySelector("del")).toHaveTextContent(
-      "Unheard item",
-    );
+    expect(list?.children[1]).toHaveTextContent("Unheard item");
+    expect(list?.children[1]).toHaveAttribute("data-voice-unspoken", "true");
     const table = container.querySelector("table");
     expect(table).toBeInTheDocument();
     expect(table?.querySelector("tbody")?.parentElement).toBe(table);
@@ -824,14 +831,14 @@ describe("MessageBubble", () => {
     );
     const paragraphs = block?.querySelectorAll("p");
     expect(paragraphs).toHaveLength(3);
-    expect(paragraphs?.[0]?.querySelector("del")).toHaveTextContent(
-      "Unheard first paragraph.",
-    );
-    expect(paragraphs?.[0]?.querySelector("del")).not.toHaveTextContent(
-      "Heard text.",
-    );
-    expect(paragraphs?.[1]?.closest("del")).toBeTruthy();
-    expect(paragraphs?.[2]?.closest("del")).toBeTruthy();
+    expect(
+      paragraphs?.[0]?.querySelector("[data-voice-unspoken]"),
+    ).toHaveTextContent("Unheard first paragraph.");
+    expect(
+      paragraphs?.[0]?.querySelector("[data-voice-unspoken]"),
+    ).not.toHaveTextContent("Heard text.");
+    expect(paragraphs?.[1]).toHaveAttribute("data-voice-unspoken", "true");
+    expect(paragraphs?.[2]).toHaveAttribute("data-voice-unspoken", "true");
   });
 
   it("preserves Markdown structure while striking the unspoken range", async () => {
@@ -858,17 +865,25 @@ describe("MessageBubble", () => {
     );
     await waitFor(() => {
       expect(
-        block?.querySelector('del [data-streamdown="strong"]'),
+        block?.querySelector('[data-streamdown="strong"][data-voice-unspoken]'),
       ).toHaveTextContent("bold");
       expect(
-        block?.querySelector('del a[href="https://example.com/"]'),
+        block?.querySelector(
+          'a[href="https://example.com/"][data-voice-unspoken]',
+        ),
       ).toHaveTextContent("link");
-      expect(block?.querySelector("del li")).toHaveTextContent("list item");
+      expect(block?.querySelector("li[data-voice-unspoken]")).toHaveTextContent(
+        "list item",
+      );
       expect(
-        block?.querySelector('del [data-streamdown="inline-code"]'),
+        block
+          ?.querySelector('[data-streamdown="inline-code"]')
+          ?.closest("[data-voice-unspoken]"),
       ).toHaveTextContent("inline");
       expect(
-        block?.querySelector('del [data-streamdown="code-block"]'),
+        block?.querySelector(
+          '[data-voice-unspoken] [data-streamdown="code-block"]',
+        ),
       ).toBeTruthy();
       expect(block?.querySelector("pre code")).toHaveTextContent(
         "const value = 1;",

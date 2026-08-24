@@ -569,6 +569,7 @@ function renderContentBlock(
             }
             imageRenderer={MarkdownImage}
             strikethroughFrom={strikethroughFrom}
+            strikethroughLabel={options.voiceSpeechNotSpokenLabel}
           >
             {displayText}
           </MessageResponse>
