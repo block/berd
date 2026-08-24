@@ -21,6 +21,7 @@ import {
 import {
   confirmVoiceConversationForegroundSession,
   setVoiceConversationControlsSuppressed,
+  type PendingVoiceTranscript,
 } from "../api/voiceConversation";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 
@@ -304,6 +305,15 @@ export function hasDeliveredVoiceTranscript(
       message.metadata.voiceConversationLifecycleId === lifecycleId &&
       message.metadata.voiceUtteranceId === utteranceId &&
       message.metadata.voiceConversationRevision === revision,
+  );
+}
+
+function transcriptAlreadyInChat(transcript: PendingVoiceTranscript): boolean {
+  return hasDeliveredVoiceTranscript(
+    transcript.sessionId,
+    transcript.lifecycleId,
+    transcript.id,
+    transcript.revision,
   );
 }
 
@@ -666,7 +676,10 @@ export function useVoiceConversationController({
     if (routeMount.drainPending) {
       const routeSessionId = activeSendRoute?.sessionId;
       if (!routeSessionId) return;
-      void drainPendingTranscripts(routeSessionId).catch((drainError) => {
+      void drainPendingTranscripts(
+        routeSessionId,
+        transcriptAlreadyInChat,
+      ).catch((drainError) => {
         addErrorNotification(sessionId, errorText(drainError));
       });
     }
@@ -699,7 +712,7 @@ export function useVoiceConversationController({
     // that durable queue so a missed webview event is retried instead of
     // silently dropping a pause-bounded utterance.
     return startPendingTranscriptRecovery(
-      () => drainPendingTranscripts(sessionId),
+      () => drainPendingTranscripts(sessionId, transcriptAlreadyInChat),
       (drainError) =>
         console.warn("[native-voice] Retained transcript delivery failed", {
           sessionId,

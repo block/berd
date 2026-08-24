@@ -50,10 +50,17 @@ type ActiveUtterance = {
   interruptionFallback: ReturnType<typeof setTimeout> | null;
   interruptionCause: InterruptionCause | null;
   latestDelivery: VoiceDeliveryProgress | null;
+  causalTranscriptKey: string | null;
   status: SpeechStatus | null;
   onFailure: SpeechFailureHandler;
   onInterrupted: () => void;
   onTerminal: () => void;
+};
+type HeldSpeech = {
+  targets: Map<
+    string,
+    { target: SpeechTarget; text: string; causalTranscriptKey: string | null }
+  >;
 };
 type SpeechStatus =
   | "speaking"
@@ -99,6 +106,34 @@ function boundedDeliveryText(
         text: `…${text.slice(-(DELIVERY_NOTICE_TEXT_LIMIT - 1))}`,
         truncated: true,
       };
+}
+const MALFORMED_VOICE_TRANSCRIPT_KEY = "\0malformed-voice-transcript";
+const USER_IDLE_TRANSCRIPT_SETTLE_MS = 250;
+
+function voiceTranscriptKeyForMessage(
+  sessionId: string,
+  message: ReturnType<
+    typeof useChatStore.getState
+  >["messagesBySession"][string][number],
+): string | null {
+  const metadata = message.metadata;
+  if (metadata?.origin !== "voice_conversation") return null;
+  if (
+    typeof metadata.voiceConversationLifecycleId !== "string" ||
+    metadata.voiceConversationLifecycleId.length === 0 ||
+    typeof metadata.voiceConversationRevision !== "number" ||
+    !Number.isInteger(metadata.voiceConversationRevision) ||
+    typeof metadata.voiceUtteranceId !== "string" ||
+    metadata.voiceUtteranceId.length === 0
+  ) {
+    return MALFORMED_VOICE_TRANSCRIPT_KEY;
+  }
+  return [
+    sessionId,
+    metadata.voiceConversationLifecycleId,
+    metadata.voiceConversationRevision,
+    metadata.voiceUtteranceId,
+  ].join("\0");
 }
 
 function reportAssistantActivity(
@@ -730,13 +765,28 @@ export function startNativeAssistantSpeech(
       stopStreamSubscription = unlisten;
     });
 
+  const initialVoice = useVoiceConversationStore.getState();
   const toolCountByMessage = new Map<string, number>();
   const consumedTextBySlot = new Map<string, string>();
+  const causalTranscriptKeyByMessage = new Map<string, string | null>();
+  const invalidatedMessages = new Set<string>();
   const completedMessages = new Set<string>();
   const interruptedMessages = new Set<string>();
   const failedMessages = new Set<string>();
   const interruptionCauseByMessage = new Map<string, InterruptionCause>();
+  let precedingTranscriptKey: string | null = null;
   for (const message of initialMessages) {
+    if (message.role === "user") {
+      const voiceTranscriptKey = voiceTranscriptKeyForMessage(
+        sessionId,
+        message,
+      );
+      if (voiceTranscriptKey !== null) {
+        precedingTranscriptKey = voiceTranscriptKey;
+      }
+    } else if (message.role === "assistant") {
+      causalTranscriptKeyByMessage.set(message.id, precedingTranscriptKey);
+    }
     toolCountByMessage.set(
       message.id,
       message.content.filter((content) => content.type === "toolRequest")
@@ -755,9 +805,111 @@ export function startNativeAssistantSpeech(
       textOrdinal += 1;
     }
   }
+  if (
+    initialVoice.latestFinalizedTranscriptKey === null &&
+    precedingTranscriptKey !== null &&
+    precedingTranscriptKey !== MALFORMED_VOICE_TRANSCRIPT_KEY
+  ) {
+    useVoiceConversationStore.setState({
+      latestFinalizedTranscriptKey: precedingTranscriptKey,
+    });
+  }
 
-  const ensureUtterance = (target: SpeechTarget): ActiveUtterance => {
+  let heldSpeech: HeldSpeech | null = null;
+  let heldReleaseReady = false;
+  let idleSettling = false;
+  let heldReleaseTimer: number | null = null;
+
+  const cacheCausalTranscriptKeys = (
+    messages: ReturnType<
+      typeof useChatStore.getState
+    >["messagesBySession"][string],
+  ) => {
+    let causalTranscriptKey: string | null = null;
+    for (const message of messages ?? []) {
+      if (message.role === "user") {
+        const voiceTranscriptKey = voiceTranscriptKeyForMessage(
+          sessionId,
+          message,
+        );
+        if (voiceTranscriptKey !== null) {
+          causalTranscriptKey = voiceTranscriptKey;
+        }
+      } else if (
+        message.role === "assistant" &&
+        !causalTranscriptKeyByMessage.has(message.id)
+      ) {
+        causalTranscriptKeyByMessage.set(message.id, causalTranscriptKey);
+      }
+    }
+  };
+
+  const suppressTarget = (slot: string, target: SpeechTarget, text: string) => {
+    invalidatedMessages.add(target.messageId);
+    consumedTextBySlot.set(slot, text);
+    setTargetSpeech(sessionId, target, { status: "notSpoken" });
+    recordPlaybackNotice(sessionId, slot, text, "notSpoken");
+  };
+
+  const holdAssistantChanges = (
+    messages: ReturnType<
+      typeof useChatStore.getState
+    >["messagesBySession"][string],
+  ) => {
+    cacheCausalTranscriptKeys(messages);
+    for (const message of messages ?? []) {
+      if (
+        message.role !== "assistant" ||
+        message.metadata?.userVisible === false ||
+        interruptedMessages.has(message.id) ||
+        failedMessages.has(message.id)
+      ) {
+        continue;
+      }
+      let textOrdinal = 0;
+      for (const content of message.content) {
+        if (content.type !== "text") continue;
+        const target = { messageId: message.id, textOrdinal };
+        const slot = targetKey(target);
+        textOrdinal += 1;
+        if (content.text === (consumedTextBySlot.get(slot) ?? "")) continue;
+        if (invalidatedMessages.has(message.id)) {
+          suppressTarget(slot, target, content.text);
+          continue;
+        }
+        heldSpeech ??= { targets: new Map() };
+        heldSpeech.targets.set(slot, {
+          target,
+          text: content.text,
+          causalTranscriptKey:
+            causalTranscriptKeyByMessage.get(message.id) ?? null,
+        });
+      }
+    }
+  };
+
+  const discardInvalidHeldSpeech = (finalizedTranscriptKey: string | null) => {
+    const held = heldSpeech;
+    if (!held) return;
+    for (const [slot, heldTarget] of held.targets) {
+      if (heldTarget.causalTranscriptKey === finalizedTranscriptKey) continue;
+      suppressTarget(slot, heldTarget.target, heldTarget.text);
+      held.targets.delete(slot);
+    }
+    if (held.targets.size === 0) {
+      heldSpeech = null;
+      heldReleaseReady = false;
+    }
+  };
+
+  const ensureUtterance = (
+    target: SpeechTarget,
+    causalTranscriptKey: string | null,
+  ): ActiveUtterance | null => {
     if (activeUtterance) {
+      if (activeUtterance.causalTranscriptKey !== causalTranscriptKey) {
+        return null;
+      }
       if (
         !activeUtterance.targets.some(
           (candidate) => targetKey(candidate) === targetKey(target),
@@ -787,6 +939,7 @@ export function startNativeAssistantSpeech(
       interruptionFallback: null,
       interruptionCause: null,
       latestDelivery: null,
+      causalTranscriptKey,
       status: null,
       onFailure: (text, error) => {
         for (const utteranceTarget of utterance.targets) {
@@ -834,13 +987,36 @@ export function startNativeAssistantSpeech(
     ) {
       return;
     }
+    const messages = useChatStore.getState().messagesBySession[sessionId] ?? [];
+    if (heldSpeech || voice.userSpeaking || idleSettling) {
+      // Text can keep streaming during the idle settling turn. Refresh the
+      // held snapshot before a finalized voice message can invalidate it.
+      holdAssistantChanges(messages);
+    }
+    const finalizedTranscriptKey = voice.latestFinalizedTranscriptKey;
+    discardInvalidHeldSpeech(finalizedTranscriptKey);
+    if (
+      activeUtterance &&
+      activeUtterance.causalTranscriptKey !== finalizedTranscriptKey
+    ) {
+      interruptActiveUtterance(true, "userSpeaking");
+    }
+
+    if (voice.userSpeaking || idleSettling) return;
+    if (heldSpeech && !heldReleaseReady) return;
+
     // The backend owns the current stream until its terminal playback event.
     // Leave later transcript changes entirely unconsumed so that terminal
     // handling can inspect them into a distinct utterance.
     if (activeUtterance?.finishing) return;
 
-    const messages = useChatStore.getState().messagesBySession[sessionId] ?? [];
+    cacheCausalTranscriptKeys(messages);
+
     for (const message of messages) {
+      // Completing one message hands its stream to the backend. Do not
+      // advance any later message's cursors until that terminal event lets a
+      // fresh utterance inspect it.
+      if (activeUtterance?.finishing) break;
       if (
         message.role !== "assistant" ||
         message.metadata?.userVisible === false
@@ -855,9 +1031,6 @@ export function startNativeAssistantSpeech(
       const completed =
         message.metadata?.completionStatus === "completed" &&
         !completedMessages.has(message.id);
-      toolCountByMessage.set(message.id, toolCount);
-      if (completed) completedMessages.add(message.id);
-
       let textOrdinal = 0;
       for (const content of message.content) {
         if (content.type !== "text") continue;
@@ -867,10 +1040,11 @@ export function startNativeAssistantSpeech(
         const previous = consumedTextBySlot.get(slot) ?? "";
         if (content.text === previous) continue;
         const appendOnly = content.text.startsWith(previous);
+        const causalTranscriptKey =
+          causalTranscriptKeyByMessage.get(message.id) ?? null;
         const delta = appendOnly
           ? content.text.slice(previous.length)
           : content.text;
-        consumedTextBySlot.set(slot, content.text);
         if (!delta) continue;
 
         if (failedMessages.has(message.id)) {
@@ -952,13 +1126,19 @@ export function startNativeAssistantSpeech(
           continue;
         }
 
-        if (voice.userSpeaking) {
-          setTargetSpeech(sessionId, target, { status: "notSpoken" });
-          recordPlaybackNotice(sessionId, slot, content.text, "notSpoken");
+        if (
+          invalidatedMessages.has(message.id) ||
+          causalTranscriptKey !== finalizedTranscriptKey
+        ) {
+          suppressTarget(slot, target, content.text);
           continue;
         }
 
-        const utterance = ensureUtterance(target);
+        const targetWasHeld =
+          heldReleaseReady && (heldSpeech?.targets.has(slot) ?? false);
+        const utterance = ensureUtterance(target, causalTranscriptKey);
+        if (!utterance) break;
+        consumedTextBySlot.set(slot, content.text);
         if (utterance.finishing) continue;
         const spanStart = utterance.text.length;
         utterance.text += delta;
@@ -981,17 +1161,45 @@ export function startNativeAssistantSpeech(
           () => streamBackend.append(utterance.id, delta),
           onFailure,
         );
+        if (targetWasHeld) {
+          heldSpeech?.targets.delete(slot);
+          if (heldSpeech?.targets.size === 0) {
+            heldSpeech = null;
+            heldReleaseReady = false;
+          }
+        }
       }
 
       const utterance = activeUtterance;
-      if (crossedToolBoundary && utterance && !utterance.finishing) {
+      const utteranceOwnsMessage = utterance?.targets.some(
+        (target) => target.messageId === message.id,
+      );
+      const messageCannotSpeak =
+        failedMessages.has(message.id) ||
+        interruptedMessages.has(message.id) ||
+        invalidatedMessages.has(message.id);
+      if (utteranceOwnsMessage || messageCannotSpeak) {
+        toolCountByMessage.set(message.id, toolCount);
+        if (completed) completedMessages.add(message.id);
+      }
+      if (
+        crossedToolBoundary &&
+        utterance &&
+        utteranceOwnsMessage &&
+        !utterance.finishing
+      ) {
         queueStreamCommand(
           utterance,
           () => streamBackend.flush(utterance.id),
           onFailure,
         );
       }
-      if (completed && utterance && !utterance.finishing) {
+      if (
+        completed &&
+        utterance &&
+        utteranceOwnsMessage &&
+        !utterance.finishing
+      ) {
         utterance.finishing = true;
         queueStreamCommand(
           utterance,
@@ -1014,7 +1222,6 @@ export function startNativeAssistantSpeech(
   };
 
   stopSubscription = useChatStore.subscribe(inspect);
-  const initialVoice = useVoiceConversationStore.getState();
   let reachedRunning =
     initialVoice.status.lifecycle === "running" &&
     initialVoice.status.sessionId === sessionId;
@@ -1022,7 +1229,7 @@ export function startNativeAssistantSpeech(
     activeSpeechRevision = initialVoice.status.revision;
   }
   let wasUserSpeaking = initialVoice.userSpeaking;
-  stopVoiceSubscription = useVoiceConversationStore.subscribe((voice) => {
+  const unsubscribeVoice = useVoiceConversationStore.subscribe((voice) => {
     const runningForSession =
       voice.status.lifecycle === "running" &&
       voice.status.sessionId === sessionId;
@@ -1039,11 +1246,48 @@ export function startNativeAssistantSpeech(
     }
     reachedRunning = true;
     activeSpeechRevision = voice.status.revision;
-    inspect();
     const becameUserSpeaking = voice.userSpeaking && !wasUserSpeaking;
+    const becameUserIdle = !voice.userSpeaking && wasUserSpeaking;
     wasUserSpeaking = voice.userSpeaking;
-    if (!becameUserSpeaking || activeGeneration !== generation) return;
-    interruptActiveUtterance(true, "userSpeaking");
+    if (activeGeneration !== generation) return;
+    if (becameUserSpeaking) {
+      if (heldReleaseTimer !== null) window.clearTimeout(heldReleaseTimer);
+      heldReleaseTimer = null;
+      idleSettling = false;
+      heldReleaseReady = false;
+      interruptActiveUtterance(true, "userSpeaking");
+      inspect();
+      return;
+    }
+    if (becameUserIdle) {
+      if (heldReleaseTimer !== null) window.clearTimeout(heldReleaseTimer);
+      idleSettling = true;
+      // VAD can report silence shortly before the recognizer commits its final
+      // transcript. Give that transcript a bounded opportunity to invalidate
+      // causally stale speech before releasing the held reply.
+      heldReleaseTimer = window.setTimeout(() => {
+        heldReleaseTimer = null;
+        const current = useVoiceConversationStore.getState();
+        if (
+          activeGeneration !== generation ||
+          current.userSpeaking ||
+          current.status.lifecycle !== "running" ||
+          current.status.sessionId !== sessionId
+        ) {
+          return;
+        }
+        idleSettling = false;
+        heldReleaseReady = heldSpeech !== null;
+        inspect();
+      }, USER_IDLE_TRANSCRIPT_SETTLE_MS);
+      return;
+    }
+    inspect();
   });
+  stopVoiceSubscription = () => {
+    if (heldReleaseTimer !== null) window.clearTimeout(heldReleaseTimer);
+    heldReleaseTimer = null;
+    unsubscribeVoice();
+  };
   queueMicrotask(inspect);
 }

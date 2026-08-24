@@ -87,6 +87,33 @@ function assistant(
   };
 }
 
+function voiceUser(
+  id: string,
+  metadata: Partial<NonNullable<Message["metadata"]>> = {},
+): Message {
+  return {
+    id: `user-${id}`,
+    role: "user",
+    created: 1,
+    content: [{ type: "text", text: `User ${id}` }],
+    metadata: {
+      origin: "voice_conversation",
+      voiceConversationLifecycleId: "lifecycle-1",
+      voiceConversationRevision: 1,
+      voiceUtteranceId: id,
+      ...metadata,
+    },
+  };
+}
+
+function finalizeVoiceTranscript(id = "voice-user-1") {
+  useVoiceConversationStore.setState({
+    latestFinalizedTranscriptKey: ["session-1", "lifecycle-1", "1", id].join(
+      "\0",
+    ),
+  });
+}
+
 function emit(
   state: PocketVoiceStreamEvent["state"],
   error: string | null = null,
@@ -129,6 +156,7 @@ describe("native assistant speech stream", () => {
       uiState: "listening",
       userSpeaking: false,
       assistantSpeaking: false,
+      latestFinalizedTranscriptKey: null,
     });
   });
 
@@ -550,6 +578,7 @@ describe("native assistant speech stream", () => {
         speech: { status: "interrupted", spokenThrough: "After".length },
       });
     });
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
 
     const notice = takeVoicePlaybackNotices("session-1") ?? "";
     expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
@@ -1245,6 +1274,7 @@ describe("native assistant speech stream", () => {
         },
       });
     });
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
     expect(mocks.append).toHaveBeenCalledTimes(1);
     const notice = takeVoicePlaybackNotices("session-1") ?? "";
     expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
@@ -1523,5 +1553,674 @@ describe("native assistant speech stream", () => {
     expect(estimate.unspokenText.length).toBeLessThanOrEqual(250);
     expect(estimate.spokenTextTruncated).toBe(true);
     expect(estimate.unspokenTextTruncated).toBe(true);
+  });
+
+  it("plays a reply held during user speech after idle when no transcript arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      startNativeAssistantSpeech("session-1", vi.fn());
+      useChatStore
+        .getState()
+        .setMessages("session-1", [
+          assistant([{ type: "text", text: "Held reply." }], "completed"),
+        ]);
+
+      await Promise.resolve();
+      expect(mocks.start).not.toHaveBeenCalled();
+      expect(mocks.append).not.toHaveBeenCalled();
+
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      await vi.advanceTimersByTimeAsync(249);
+      expect(mocks.start).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      await vi.runAllTimersAsync();
+      expect(mocks.start).toHaveBeenCalledTimes(1);
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "Held reply.",
+      );
+      expect(mocks.finish).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not release held speech when final STT follows VAD idle", async () => {
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      startNativeAssistantSpeech("session-1", vi.fn());
+      useChatStore
+        .getState()
+        .setMessages("session-1", [
+          assistant(
+            [{ type: "text", text: "Obsolete reply." }],
+            "completed",
+            "assistant-delayed-final",
+          ),
+        ]);
+
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      await vi.advanceTimersByTimeAsync(50);
+      expect(mocks.start).not.toHaveBeenCalled();
+
+      finalizeVoiceTranscript("voice-k1");
+      await vi.advanceTimersByTimeAsync(250);
+
+      expect(mocks.start).not.toHaveBeenCalled();
+      expect(mocks.append).not.toHaveBeenCalled();
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({ speech: { status: "notSpoken" } });
+      expect(takeVoicePlaybackNotices("session-1")).toContain(
+        "Original text: Obsolete reply.",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("plays a K1 continuation held while the same utterance remains active", async () => {
+    finalizeVoiceTranscript("voice-k1");
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        voiceUser("voice-k1"),
+        assistant(
+          [{ type: "text", text: "Continuation for K1." }],
+          "completed",
+          "assistant-k1",
+        ),
+      ]);
+
+    await Promise.resolve();
+    expect(mocks.start).not.toHaveBeenCalled();
+    useVoiceConversationStore.setState({ userSpeaking: false });
+
+    await vi.waitFor(() => {
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "Continuation for K1.",
+      );
+    });
+  });
+
+  it("discards held K0 output while allowing a distinct K1 continuation", async () => {
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const oldReply = assistant(
+      [{ type: "text", text: "Obsolete K0." }],
+      "completed",
+      "assistant-k0",
+    );
+    useChatStore.getState().setMessages("session-1", [oldReply]);
+
+    finalizeVoiceTranscript("voice-k1");
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        oldReply,
+        voiceUser("voice-k1"),
+        assistant(
+          [{ type: "text", text: "Current K1." }],
+          "completed",
+          "assistant-k1",
+        ),
+      ]);
+    useVoiceConversationStore.setState({ userSpeaking: false });
+
+    await vi.waitFor(() => {
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "Current K1.",
+      );
+    });
+    expect(mocks.append).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "Obsolete K0.",
+    );
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({ speech: { status: "notSpoken" } });
+  });
+
+  it("keeps an invalidated K0 slot suppressed while a new K1 slot plays", async () => {
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      startNativeAssistantSpeech("session-1", vi.fn());
+      const oldReply = assistant(
+        [{ type: "text", text: "Old" }],
+        "inProgress",
+        "assistant-k0",
+      );
+      useChatStore.getState().setMessages("session-1", [oldReply]);
+      finalizeVoiceTranscript("voice-k1");
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      await vi.runAllTimersAsync();
+
+      useChatStore
+        .getState()
+        .appendStreamingText("session-1", "assistant-k0", " suffix");
+      const withSuffix = useChatStore.getState().messagesBySession[
+        "session-1"
+      ]?.[0] as Message;
+      useChatStore
+        .getState()
+        .setMessages("session-1", [
+          withSuffix,
+          voiceUser("voice-k1"),
+          assistant(
+            [{ type: "text", text: "Eligible K1." }],
+            "inProgress",
+            "assistant-k1",
+          ),
+        ]);
+      await vi.runAllTimersAsync();
+
+      expect(mocks.append).not.toHaveBeenCalledWith(
+        expect.any(String),
+        expect.stringContaining("suffix"),
+      );
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "Eligible K1.",
+      );
+      useChatStore
+        .getState()
+        .updateMessage("session-1", "assistant-k0", (message) => ({
+          ...message,
+          metadata: { ...message.metadata, completionStatus: "completed" },
+        }));
+      await vi.runAllTimersAsync();
+      expect(mocks.finish).not.toHaveBeenCalled();
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({
+        text: "Old suffix",
+        speech: { status: "notSpoken" },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps every later block of an invalidated response suppressed after causal rollback", async () => {
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      startNativeAssistantSpeech("session-1", vi.fn());
+      const oldReply = assistant(
+        [{ type: "text", text: "Old block." }],
+        "inProgress",
+        "assistant-k0",
+      );
+      useChatStore.getState().setMessages("session-1", [oldReply]);
+
+      finalizeVoiceTranscript("voice-k1");
+      useVoiceConversationStore.setState({
+        latestFinalizedTranscriptKey: null,
+      });
+      useChatStore.getState().setMessages("session-1", [
+        {
+          ...oldReply,
+          content: [
+            ...oldReply.content,
+            { type: "text", text: "New block after rollback." },
+          ],
+        },
+      ]);
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      await vi.runAllTimersAsync();
+
+      expect(mocks.start).not.toHaveBeenCalled();
+      expect(mocks.append).not.toHaveBeenCalled();
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[1],
+      ).toMatchObject({ speech: { status: "notSpoken" } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retains completion until a replacement response can own a stream", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const oldReply = assistant(
+      [{ type: "text", text: "Interrupted K0." }],
+      "inProgress",
+      "assistant-k0",
+    );
+    useChatStore.getState().setMessages("session-1", [oldReply]);
+    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(1));
+    emit("started");
+
+    finalizeVoiceTranscript("voice-k1");
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        oldReply,
+        voiceUser("voice-k1"),
+        assistant(
+          [{ type: "text", text: "Completed K1." }],
+          "completed",
+          "assistant-k1",
+        ),
+      ]);
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    expect(mocks.finish).not.toHaveBeenCalled();
+
+    emit("interrupted");
+    await vi.waitFor(() => {
+      expect(mocks.start).toHaveBeenCalledTimes(2);
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[1]?.[0],
+        "Completed K1.",
+      );
+      expect(mocks.finish).toHaveBeenCalledWith(mocks.start.mock.calls[1]?.[0]);
+    });
+  });
+
+  it("preserves partial interruption status for suffixes arriving during speech", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant(
+          [{ type: "text", text: "Partially spoken." }],
+          "inProgress",
+          "assistant-k0",
+        ),
+      ]);
+    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(1));
+    emit("started");
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        segments: [
+          {
+            text: "Partially spoken.",
+            playedFrames: 500,
+            totalFrames: 1_000,
+            synthesisComplete: true,
+          },
+        ],
+      },
+    });
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-k0", " Later suffix.");
+    finalizeVoiceTranscript("voice-k1");
+    useVoiceConversationStore.setState({ userSpeaking: false });
+
+    await vi.waitFor(() => {
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({ speech: { status: "interrupted" } });
+    });
+    expect(mocks.append).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining("Later suffix"),
+    );
+  });
+
+  it("cancels active K0 playback and then speaks new K1 output", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const oldReply = assistant(
+      [{ type: "text", text: "Active K0." }],
+      "inProgress",
+      "assistant-k0",
+    );
+    useChatStore.getState().setMessages("session-1", [oldReply]);
+    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(1));
+    emit("started");
+
+    finalizeVoiceTranscript("voice-k1");
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        oldReply,
+        voiceUser("voice-k1"),
+        assistant(
+          [{ type: "text", text: "Fresh K1." }],
+          "completed",
+          "assistant-k1",
+        ),
+      ]);
+
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    emit("interrupted");
+    await vi.waitFor(() => {
+      expect(mocks.start).toHaveBeenCalledTimes(2);
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[1]?.[0],
+        "Fresh K1.",
+      );
+    });
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({ speech: { status: "interrupted" } });
+  });
+
+  it("fails closed when voice-origin metadata cannot establish ownership", async () => {
+    finalizeVoiceTranscript("voice-k1");
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        voiceUser("voice-k1", { voiceUtteranceId: undefined }),
+        assistant(
+          [{ type: "text", text: "Unowned output." }],
+          "completed",
+          "assistant-malformed",
+        ),
+      ]);
+
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.append).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[1]?.content[0],
+    ).toMatchObject({ speech: { status: "notSpoken" } });
+  });
+
+  it("speaks a typed turn after finalized voice input", async () => {
+    finalizeVoiceTranscript("voice-k1");
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore.getState().setMessages("session-1", [
+      voiceUser("voice-k1"),
+      {
+        id: "typed-user",
+        role: "user",
+        created: 2,
+        content: [{ type: "text", text: "Typed follow-up" }],
+      },
+      assistant(
+        [{ type: "text", text: "Typed-turn reply." }],
+        "completed",
+        "assistant-typed",
+      ),
+    ]);
+
+    await vi.waitFor(() =>
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "Typed-turn reply.",
+      ),
+    );
+  });
+
+  it("hydrates causal ownership from an existing voice transcript", async () => {
+    useChatStore.getState().setMessages("session-1", [voiceUser("voice-k1")]);
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        voiceUser("voice-k1"),
+        assistant(
+          [{ type: "text", text: "Recovered-turn reply." }],
+          "completed",
+          "assistant-recovered",
+        ),
+      ]);
+
+    await vi.waitFor(() =>
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "Recovered-turn reply.",
+      ),
+    );
+    expect(
+      useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
+    ).toBe(["session-1", "lifecycle-1", "1", "voice-k1"].join("\0"));
+  });
+
+  it("plays each completed reply held during user speech in its own stream", async () => {
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant(
+          [{ type: "text", text: "First held reply." }],
+          "completed",
+          "assistant-1",
+        ),
+        assistant(
+          [{ type: "text", text: "Second held reply." }],
+          "completed",
+          "assistant-2",
+        ),
+      ]);
+
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    await vi.waitFor(() => {
+      expect(mocks.start).toHaveBeenCalledTimes(1);
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "First held reply.",
+      );
+      expect(mocks.finish).toHaveBeenCalledTimes(1);
+    });
+    expect(mocks.append).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "Second held reply.",
+    );
+
+    mocks.streamHandler?.({
+      streamId: mocks.start.mock.calls[0]?.[0] as string,
+      state: "completed",
+      error: null,
+    });
+
+    await vi.waitFor(() => {
+      expect(mocks.start).toHaveBeenCalledTimes(2);
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[1]?.[0],
+        "Second held reply.",
+      );
+      expect(mocks.finish).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("discards every pending held reply when a transcript interrupts the first", async () => {
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const first = assistant(
+      [{ type: "text", text: "First obsolete reply." }],
+      "completed",
+      "assistant-held-first",
+    );
+    const second = assistant(
+      [{ type: "text", text: "Second obsolete reply." }],
+      "completed",
+      "assistant-held-second",
+    );
+    useChatStore.getState().setMessages("session-1", [first, second]);
+
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(1));
+    emit("started");
+    finalizeVoiceTranscript("voice-after-first");
+
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    expect(mocks.start).toHaveBeenCalledTimes(1);
+    expect(mocks.append).not.toHaveBeenCalledWith(
+      expect.any(String),
+      "Second obsolete reply.",
+    );
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[1]?.content[0],
+    ).toMatchObject({ speech: { status: "notSpoken" } });
+  });
+
+  it("does not release held speech when user speech resumes before the idle timer", async () => {
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "Still held." }], "completed"),
+      ]);
+
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    expect(mocks.start).not.toHaveBeenCalled();
+
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    await vi.waitFor(() => {
+      expect(mocks.append).toHaveBeenCalledWith(
+        mocks.start.mock.calls[0]?.[0],
+        "Still held.",
+      );
+    });
+  });
+
+  it("never starts a held reply when a newer finalized voice transcript arrives", async () => {
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const heldReply = assistant(
+      [{ type: "text", text: "Obsolete held reply." }],
+      "completed",
+    );
+    useChatStore.getState().setMessages("session-1", [heldReply]);
+    await Promise.resolve();
+
+    finalizeVoiceTranscript();
+    useVoiceConversationStore.setState({ userSpeaking: false });
+
+    await new Promise((resolve) => window.setTimeout(resolve, 10));
+    expect(mocks.start).not.toHaveBeenCalled();
+    expect(mocks.append).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({ speech: { status: "notSpoken" } });
+    expect(takeVoicePlaybackNotices("session-1")).toContain(
+      "Original text: Obsolete held reply.",
+    );
+  });
+
+  it("discards text appended during idle settling when a voice transcript arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      startNativeAssistantSpeech("session-1", vi.fn());
+      useChatStore
+        .getState()
+        .setMessages("session-1", [
+          assistant(
+            [{ type: "text", text: "Hello" }],
+            "completed",
+            "assistant-idle-suffix",
+          ),
+        ]);
+
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      useChatStore
+        .getState()
+        .appendStreamingText("session-1", "assistant-idle-suffix", " world");
+      finalizeVoiceTranscript();
+
+      await vi.runAllTimersAsync();
+      expect(mocks.start).not.toHaveBeenCalled();
+      expect(mocks.append).not.toHaveBeenCalled();
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({
+        text: "Hello world",
+        speech: { status: "notSpoken" },
+      });
+      expect(takeVoicePlaybackNotices("session-1")).toContain(
+        "Original text: Hello world",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("holds assistant text first arriving during the idle settling task", async () => {
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      startNativeAssistantSpeech("session-1", vi.fn());
+      useVoiceConversationStore.setState({ userSpeaking: false });
+
+      const lateReply = assistant(
+        [{ type: "text", text: "Late obsolete reply." }],
+        "completed",
+        "assistant-after-idle",
+      );
+      useChatStore.getState().setMessages("session-1", [lateReply]);
+      finalizeVoiceTranscript("voice-during-idle-settlement");
+
+      await vi.runAllTimersAsync();
+      expect(mocks.start).not.toHaveBeenCalled();
+      expect(mocks.append).not.toHaveBeenCalled();
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({ speech: { status: "notSpoken" } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("discards stale assistant text that arrives after finalized STT during the hold", async () => {
+    vi.useFakeTimers();
+    try {
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      startNativeAssistantSpeech("session-1", vi.fn());
+      finalizeVoiceTranscript("voice-before-stale-reply");
+
+      useChatStore
+        .getState()
+        .setMessages("session-1", [
+          assistant(
+            [{ type: "text", text: "Stale reply after final STT." }],
+            "completed",
+            "assistant-after-final-stt",
+          ),
+        ]);
+      useVoiceConversationStore.setState({ userSpeaking: false });
+
+      await vi.runAllTimersAsync();
+      expect(mocks.start).not.toHaveBeenCalled();
+      expect(mocks.append).not.toHaveBeenCalled();
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({ speech: { status: "notSpoken" } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels held playback when the finalized voice transcript lands after playback starts", async () => {
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    startNativeAssistantSpeech("session-1", vi.fn());
+    const heldReply = assistant(
+      [{ type: "text", text: "Reply released after idle." }],
+      "completed",
+    );
+    useChatStore.getState().setMessages("session-1", [heldReply]);
+    useVoiceConversationStore.setState({ userSpeaking: false });
+
+    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(1));
+    emit("started");
+    finalizeVoiceTranscript("voice-user-late");
+
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    emit("interrupted");
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({ speech: { status: "interrupted" } });
   });
 });
