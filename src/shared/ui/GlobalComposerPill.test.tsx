@@ -1013,6 +1013,33 @@ describe("GlobalComposerPill", () => {
     expect(screen.getByRole("textbox")).toHaveFocus();
   });
 
+  it("restores a complete starter draft", async () => {
+    renderGlobalComposer(vi.fn(), {
+      starterRequest: {
+        id: 1,
+        text: "keep this voice draft",
+        selectedSkills: [
+          {
+            id: "skill-1",
+            name: "code-review",
+          },
+        ],
+        attachments: [
+          {
+            id: "attachment-1",
+            kind: "file",
+            name: "brief.md",
+            path: "/Users/test/brief.md",
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByRole("textbox")).toHaveValue("keep this voice draft");
+    expect(await screen.findByText("code-review")).toBeInTheDocument();
+    expect(screen.getByText("brief.md")).toBeInTheDocument();
+  });
+
   it("uses the selected provider for skill discovery and instruction prompts", async () => {
     const user = userEvent.setup();
     const skill = {

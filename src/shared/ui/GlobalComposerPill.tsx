@@ -88,9 +88,12 @@ export interface GlobalComposerHandoffRect {
 
 export interface GlobalComposerStarterRequest {
   id: number;
+  text?: string;
   personaId?: string | null;
   projectId?: string | null;
   skill?: ChatSkillDraft;
+  selectedSkills?: ChatSkillDraft[];
+  attachments?: ChatAttachmentDraft[];
 }
 
 interface GlobalComposerPillProps {
@@ -281,6 +284,7 @@ export function GlobalComposerPill({
     addBrowserFiles,
     addPathAttachments,
     removeAttachment,
+    replaceAttachments,
     clearAttachments,
   } = useChatInputAttachments();
   const attachmentWorkPending = attachmentWorkCount > 0;
@@ -377,6 +381,9 @@ export function GlobalComposerPill({
     }
 
     lastStarterRequestIdRef.current = starterRequest.id;
+    if (starterRequest.text !== undefined) {
+      setText(starterRequest.text);
+    }
     if (starterRequest.personaId !== undefined) {
       setSelectedPersonaId(starterRequest.personaId);
       personaSelectionSourceRef.current = starterRequest.personaId
@@ -396,9 +403,15 @@ export function GlobalComposerPill({
           : [...current, skill],
       );
     }
+    if (starterRequest.selectedSkills !== undefined) {
+      setSelectedSkills([...starterRequest.selectedSkills]);
+    }
+    if (starterRequest.attachments !== undefined) {
+      replaceAttachments(starterRequest.attachments);
+    }
     textareaRef.current?.focus();
     onStarterRequestConsumed?.(starterRequest.id);
-  }, [onStarterRequestConsumed, starterRequest]);
+  }, [onStarterRequestConsumed, replaceAttachments, starterRequest]);
 
   const handleRemoveSelectedSkill = useCallback((skillId: string) => {
     setSelectedSkills((current) =>

@@ -258,6 +258,7 @@ import type {
 } from "./types/appNavigation";
 import type { TopBarBreadcrumb } from "./ui/TopBar";
 import { STARTUP_LOADING_MIN_DISPLAY_MS } from "./lib/startupLoading";
+import { scheduleAfterNextPaint } from "./lib/scheduleAfterNextPaint";
 import { StartupLoadingView } from "./ui/StartupLoadingView";
 import { deriveStarterTaskCompletion } from "@/features/home/onboarding/starterTaskCompletion";
 import {
@@ -3234,6 +3235,29 @@ export function AppShell({
   const handleGlobalVoiceConversationStart = useCallback(
     (payload: GlobalComposerExpandPayload): Promise<boolean> => {
       if (!capabilities.voiceConversation) return Promise.resolve(false);
+      if (!globalVoiceReady) {
+        return new Promise<boolean>((resolve) => {
+          guardAppNavigation(
+            () => {
+              requestOpenSettings("voice");
+              resetGlobalComposerTransition();
+              scheduleAfterNextPaint(() => {
+                globalComposerStarterRequestIdRef.current += 1;
+                setGlobalComposerStarterRequest({
+                  id: globalComposerStarterRequestIdRef.current,
+                  text: payload.text,
+                  selectedSkills: payload.selectedSkills,
+                  attachments: payload.options?.attachments,
+                  personaId: payload.options?.personaId,
+                  projectId: payload.options?.projectId,
+                });
+              });
+              resolve(false);
+            },
+            () => resolve(false),
+          );
+        });
+      }
       const options = payload.options;
       const project = options?.projectId
         ? projects.find((candidate) => candidate.id === options.projectId)
@@ -3288,13 +3312,6 @@ export function AppShell({
         chatState.setDraft(sessionId, payload.text);
         chatState.setSkillDrafts(sessionId, payload.selectedSkills);
         chatState.setDraftAttachments(sessionId, options?.attachments ?? []);
-        if (!globalVoiceReady) {
-          requestOpenSettings("voice", {
-            returnTarget: { type: "voice-setup", sessionId },
-          });
-          resetGlobalComposerTransition();
-          return true;
-        }
         requestVoiceConversationStart(sessionId);
         handleNavigateToSession(sessionId);
         resetGlobalComposerTransition();

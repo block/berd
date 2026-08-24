@@ -93,7 +93,10 @@ const mockAcpCreateSession = vi.hoisted(() => vi.fn());
 const mockAcpPrepareSession = vi.hoisted(() => vi.fn());
 const mockAcpSetSessionConfigOption = vi.hoisted(() => vi.fn());
 const mockAcpListSessionsPage = vi.hoisted(() => vi.fn());
-const mockBuildFeatures = vi.hoisted(() => ({ byoKeyProviders: false }));
+const mockBuildFeatures = vi.hoisted(() => ({
+  byoKeyProviders: false,
+  voiceConversation: false,
+}));
 const mockAcpArchiveSession = vi.hoisted(() => vi.fn());
 const mockAcpGetSessionInfo = vi.hoisted(() => vi.fn());
 const mockAcpLoadSession = vi.hoisted(() => vi.fn());
@@ -935,6 +938,7 @@ describe("AppShell global navigation", () => {
     window.history.replaceState(null, "", "/");
     window.localStorage.clear();
     mockBuildFeatures.byoKeyProviders = false;
+    mockBuildFeatures.voiceConversation = false;
     mockGetPlatform.mockReturnValue("mac");
     mockDesignSystemExplorerEnabled.mockReturnValue(false);
     mockAfterNextPaint.callbacks = [];
@@ -3148,6 +3152,56 @@ describe("AppShell global navigation", () => {
       "centered",
     );
     expect(mockAcpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("opens Voice settings without creating a chat when global voice is unready", async () => {
+    mockBuildFeatures.voiceConversation = true;
+    renderAppShell();
+
+    const { textbox, user } = await openCenteredComposerFromChat();
+    mockAcpCreateSession.mockClear();
+    await user.type(textbox, "keep this voice draft");
+    await user.click(
+      screen.getByRole("button", { name: "Start voice conversation" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+    await act(async () => {
+      flushAfterNextPaintCallbacks();
+    });
+    expect(screen.getByTestId("settings-section")).toHaveTextContent("voice");
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+    expect(
+      useVoiceConversationStore.getState().requestedStartSessionId,
+    ).toBeNull();
+    expect(
+      await screen.findByPlaceholderText("Start a conversation"),
+    ).toHaveValue("keep this voice draft");
+  });
+
+  it("queues a ready global voice start for the created chat", async () => {
+    mockBuildFeatures.voiceConversation = true;
+    mockVoiceSetupReadiness.ready = true;
+    renderAppShell();
+
+    const { textbox, user } = await openCenteredComposerFromChat();
+    mockAcpCreateSession.mockClear();
+    mockAcpCreateSession.mockResolvedValueOnce({ sessionId: "voice-session" });
+    await user.type(textbox, "start this voice chat");
+    await user.click(
+      screen.getByRole("button", { name: "Start voice conversation" }),
+    );
+
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().activeSessionId).toBe(
+        "voice-session",
+      );
+    });
+    expect(useVoiceConversationStore.getState().requestedStartSessionId).toBe(
+      "voice-session",
+    );
   });
 
   it("dismisses the centered global composer from the backdrop and global Escape", async () => {
