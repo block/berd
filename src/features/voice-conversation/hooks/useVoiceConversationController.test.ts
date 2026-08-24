@@ -10,6 +10,9 @@ const nativeAssistantSpeechMocks = vi.hoisted(() => ({
   takeNotices: vi.fn<() => string | null>(() => null),
 }));
 const tauriWindowMocks = vi.hoisted(() => ({ label: "main" }));
+const voiceApiMocks = vi.hoisted(() => ({
+  confirmForegroundSession: vi.fn<() => Promise<void>>(),
+}));
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ label: tauriWindowMocks.label }),
@@ -20,6 +23,12 @@ vi.mock("../lib/nativeAssistantSpeech", () => ({
   startNativeAssistantSpeech: nativeAssistantSpeechMocks.start,
   stopNativeAssistantSpeech: nativeAssistantSpeechMocks.stop,
   takeVoicePlaybackNotices: nativeAssistantSpeechMocks.takeNotices,
+}));
+
+vi.mock("../api/voiceConversation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/voiceConversation")>()),
+  confirmVoiceConversationForegroundSession:
+    voiceApiMocks.confirmForegroundSession,
 }));
 
 import {
@@ -194,6 +203,8 @@ describe("voice transcript delivery coordination", () => {
     nativeAssistantSpeechMocks.start.mockClear();
     nativeAssistantSpeechMocks.stop.mockClear();
     nativeAssistantSpeechMocks.takeNotices.mockClear();
+    voiceApiMocks.confirmForegroundSession.mockReset();
+    voiceApiMocks.confirmForegroundSession.mockResolvedValue(undefined);
     useChatStore.setState({ messagesBySession: {}, sessionStateById: {} });
   });
   it("serializes deliveries for the same session and re-evaluates in order", async () => {
@@ -1210,6 +1221,45 @@ describe("voice transcript delivery coordination", () => {
     finishStop?.({ lifecycle: "stopped", sessionId: null });
     await expect(replacement).resolves.toBe(true);
     expect(start).toHaveBeenCalledOnce();
+  });
+
+  it("reconfirms the target after stopping and before starting", async () => {
+    const order: string[] = [];
+    const stop = vi.fn(async () => {
+      order.push("stop");
+      return { lifecycle: "stopped", sessionId: null };
+    });
+    const confirmTarget = vi.fn(async () => {
+      order.push("confirm");
+    });
+    const start = vi.fn(async () => {
+      order.push("start");
+    });
+
+    await expect(
+      replaceActiveVoiceConversation({ stop, confirmTarget, start }),
+    ).resolves.toBe(true);
+    expect(order).toEqual(["stop", "confirm", "start"]);
+  });
+
+  it("does not start when the target changes after stopping", async () => {
+    const start = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      replaceActiveVoiceConversation({
+        stop: vi.fn().mockResolvedValue({
+          lifecycle: "stopped",
+          sessionId: null,
+        }),
+        confirmTarget: vi
+          .fn()
+          .mockRejectedValue(
+            new Error("The target session is no longer in the foreground."),
+          ),
+        start,
+      }),
+    ).rejects.toThrow("no longer in the foreground");
+    expect(start).not.toHaveBeenCalled();
   });
 
   it("does not start a replacement when the active call remains running", async () => {

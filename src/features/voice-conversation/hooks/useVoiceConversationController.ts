@@ -18,7 +18,10 @@ import {
   startNativeAssistantSpeech,
   takeVoicePlaybackNotices,
 } from "../lib/nativeAssistantSpeech";
-import { setVoiceConversationControlsSuppressed } from "../api/voiceConversation";
+import {
+  confirmVoiceConversationForegroundSession,
+  setVoiceConversationControlsSuppressed,
+} from "../api/voiceConversation";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -93,6 +96,7 @@ export function shouldShowVoiceConversationControl(options: {
 
 export async function replaceActiveVoiceConversation(options: {
   stop: () => Promise<{ lifecycle: string; sessionId: string | null }>;
+  confirmTarget?: () => Promise<void>;
   start: () => Promise<void>;
 }): Promise<boolean> {
   const stopped = await options.stop();
@@ -102,6 +106,7 @@ export async function replaceActiveVoiceConversation(options: {
   ) {
     return false;
   }
+  await options.confirmTarget?.();
   await options.start();
   return true;
 }
@@ -943,6 +948,8 @@ export function useVoiceConversationController({
           try {
             const replaced = await replaceActiveVoiceConversation({
               stop: () => stopForReplacement(currentStatus, sessionId),
+              confirmTarget: () =>
+                confirmVoiceConversationForegroundSession(sessionId),
               start: startCurrentConversation,
             });
             if (!replaced) {

@@ -365,6 +365,12 @@ async function awaitForegroundSessionClaim(
   }
 }
 
+export function confirmVoiceConversationForegroundSession(
+  sessionId: string,
+): Promise<void> {
+  return awaitForegroundSessionClaim(sessionId);
+}
+
 export async function blockNativeVoiceConversationStarts(
   sessionId: string,
 ): Promise<string> {

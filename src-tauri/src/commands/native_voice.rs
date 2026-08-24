@@ -1355,8 +1355,32 @@ pub async fn stop_native_voice_conversation_for_replacement(
             "Only the focused target session can replace a voice conversation.".to_string(),
         );
     }
+    let _stop_guard = state
+        .replacement_stop_guard(|| {
+            let target_owner = window_sessions.label_for(target_session_id);
+            let owns_foreground_session = capture.foreground_session_matches(
+                webview_window.label(),
+                &renderer_id,
+                renderer_epoch,
+                target_session_id,
+            )?;
+            if !replacement_caller_matches_target(
+                webview_window.label(),
+                target_owner.as_deref(),
+                owns_foreground_session,
+            ) {
+                return Err("The target session is no longer in the foreground.".to_string());
+            }
+            if !webview_window.is_focused().map_err(|error| {
+                format!("Could not confirm the target session window focus: {error}")
+            })? {
+                return Err("The target session window is no longer focused.".to_string());
+            }
+            Ok(())
+        })
+        .await?;
     state
-        .stop_active_for_lifecycle(&app, &capture, &session_id, expected_revision)
+        .stop_active_inner_locked(&app, &capture, Some((&session_id, expected_revision, None)))
         .await?;
     Ok(status(&app, &state))
 }
@@ -1398,6 +1422,18 @@ fn refresh_microphone_claim(
 }
 
 impl NativeVoiceState {
+    async fn replacement_stop_guard<F>(
+        &self,
+        validate_target: F,
+    ) -> Result<tokio::sync::MutexGuard<'_, ()>, String>
+    where
+        F: FnOnce() -> Result<(), String>,
+    {
+        let guard = self.stop_serial.lock().await;
+        validate_target()?;
+        Ok(guard)
+    }
+
     pub async fn stop_active(
         &self,
         app: &AppHandle,
@@ -1448,6 +1484,16 @@ impl NativeVoiceState {
         expected_lifecycle: Option<(&str, u64, Option<&str>)>,
     ) -> Result<bool, String> {
         let _stop_guard = self.stop_serial.lock().await;
+        self.stop_active_inner_locked(app, capture, expected_lifecycle)
+            .await
+    }
+
+    async fn stop_active_inner_locked(
+        &self,
+        app: &AppHandle,
+        capture: &VoiceCaptureState,
+        expected_lifecycle: Option<(&str, u64, Option<&str>)>,
+    ) -> Result<bool, String> {
         let failure_message = expected_lifecycle.and_then(|(_, _, message)| message);
         let completion = self
             .stop_lifecycle_locked(
@@ -2107,6 +2153,33 @@ fn deliver_recognition_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn replacement_revalidates_target_after_waiting_for_stop_serialization() {
+        let state = NativeVoiceState::default();
+        let target_is_foreground = AtomicBool::new(true);
+        let active_operation = state.stop_serial.lock().await;
+        let validation = state.replacement_stop_guard(|| {
+            target_is_foreground
+                .load(Ordering::SeqCst)
+                .then_some(())
+                .ok_or_else(|| "The target session is no longer in the foreground.".to_string())
+        });
+        tokio::pin!(validation);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), validation.as_mut())
+                .await
+                .is_err()
+        );
+        target_is_foreground.store(false, Ordering::SeqCst);
+        drop(active_operation);
+
+        assert_eq!(
+            validation.await.expect_err("stale target must be rejected"),
+            "The target session is no longer in the foreground."
+        );
+    }
 
     #[test]
     fn native_mute_control_does_not_latch_the_software_fallback() {
