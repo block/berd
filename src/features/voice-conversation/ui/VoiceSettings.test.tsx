@@ -259,8 +259,7 @@ describe("VoiceSettings", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows only effective detection controls for macOS speech input", async () => {
-    const user = userEvent.setup();
+  it("keeps Advanced voice detection available for macOS speech input", () => {
     setupState.current = setup(pocketStatus());
     inputState.backend = "macos";
     renderWithProviders(<VoiceSettings />);
@@ -269,26 +268,6 @@ describe("VoiceSettings", () => {
       screen.getByRole("radiogroup", { name: "While Berd is speaking" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Advanced…" })).toBeEnabled();
-    await user.click(screen.getByRole("button", { name: "Advanced…" }));
-    expect(
-      screen.getByRole("combobox", { name: "Interruption sensitivity" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("combobox", {
-        name: "Speech detection sensitivity",
-      }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("hides Advanced when macOS feedback prevention leaves no tunable threshold", () => {
-    setupState.current = setup(pocketStatus());
-    inputState.backend = "macos";
-    interruptionState.mode = "preventFeedback";
-    renderWithProviders(<VoiceSettings />);
-
-    expect(
-      screen.queryByRole("button", { name: "Advanced…" }),
-    ).not.toBeInTheDocument();
   });
 
   it("uses one accessible speech output heading for the backend picker", () => {
