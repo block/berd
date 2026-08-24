@@ -1016,8 +1016,11 @@ pub fn start_siri_voice_stream(
                     failure.delivery,
                 ),
             };
-            emit_stream_event(&app, &stream_id, event_state, error, delivery);
             finish_playback(&playback_state, &playback_active);
+            // A terminal event hands stream ownership back to the renderer,
+            // which may immediately start a replacement stream. Release the
+            // backend playback token before publishing that handoff.
+            emit_stream_event(&app, &stream_id, event_state, error, delivery);
         });
         Ok(())
     }

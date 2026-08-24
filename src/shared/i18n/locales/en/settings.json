@@ -883,7 +883,6 @@
     "downloadProgress": "{{downloaded}} of {{total}}",
     "inputBackendDescription": "Choose how Berd transcribes your speech.",
     "macSpeechDownloading": "Downloading dictation model… {{progress}}%",
-    "macSpeechInstalled": "Installed for {{locale}}",
     "macSpeechLoading": "Checking macOS speech recognition…",
     "macSpeechLocaleUnsupported": "Apple speech recognition does not support {{locale}}.",
     "macSpeechModel": "On-device dictation",
