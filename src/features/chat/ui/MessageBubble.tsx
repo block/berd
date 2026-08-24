@@ -63,10 +63,7 @@ import {
   UserMessageClamp,
 } from "./UserMessageClamp";
 import { ImageLightbox } from "@/shared/ui/ImageLightbox";
-import {
-  formatInterruptedSpeechMarkdown,
-  VoiceSpeechStatusIndicator,
-} from "./VoiceSpeechStatusIndicator";
+import { VoiceSpeechStatusIndicator } from "./VoiceSpeechStatusIndicator";
 
 interface MessageAttachmentPreviewItem {
   key: string;
@@ -535,16 +532,14 @@ function renderContentBlock(
         options.resolveProviderErrorNotice?.(tc.text) ?? null;
       const displayText = providerErrorNotice ?? tc.text;
       const speechStatus = tc.speech?.status;
-      const speechDisplayText =
+      const strikethroughFrom =
         providerErrorNotice === null &&
         speechStatus === "interrupted" &&
-        tc.speech?.spokenText !== undefined &&
-        tc.speech.unspokenText !== undefined
-          ? formatInterruptedSpeechMarkdown(
-              tc.speech.spokenText,
-              tc.speech.unspokenText,
-            )
-          : displayText;
+        tc.speech?.spokenThrough !== undefined
+          ? tc.speech.spokenThrough
+          : providerErrorNotice === null && speechStatus === "notSpoken"
+            ? 0
+            : undefined;
       const speechLabel = speechStatus
         ? {
             speaking: options.voiceSpeechSpeakingLabel,
@@ -573,8 +568,9 @@ function renderContentBlock(
               options.onRunShellCommand ? options.runItCodeRenderers : undefined
             }
             imageRenderer={MarkdownImage}
+            strikethroughFrom={strikethroughFrom}
           >
-            {speechDisplayText}
+            {displayText}
           </MessageResponse>
         </div>
       );

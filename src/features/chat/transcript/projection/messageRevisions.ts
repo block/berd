@@ -136,9 +136,9 @@ function speechRevision(content: TextContent): string {
   if (!speech) return "";
   return [
     speech.status,
-    speech.spokenText === undefined ? "" : textRevision(speech.spokenText),
-    speech.unspokenText === undefined ? "" : textRevision(speech.unspokenText),
+    speech.spokenThrough ?? "",
     speech.confidence ?? "",
+    speech.interruptionCause ?? "",
   ].join(":");
 }
 

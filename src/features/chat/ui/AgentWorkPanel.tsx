@@ -30,10 +30,7 @@ import type {
 import type { TranscriptAgentWorkPayload } from "@/features/chat/transcript/projection/transcriptItemTypes";
 import { useTranscriptRowStateAdapter } from "@/features/chat/transcript/row-state";
 import { ToolCallAdapter } from "./ToolCallAdapter";
-import {
-  formatInterruptedSpeechMarkdown,
-  VoiceSpeechStatusIndicator,
-} from "./VoiceSpeechStatusIndicator";
+import { VoiceSpeechStatusIndicator } from "./VoiceSpeechStatusIndicator";
 
 interface ToolTimelineItem {
   kind: "tool";
@@ -310,15 +307,13 @@ function AgentWorkItemRow({
 
   if (item.kind === "progress") {
     const speechStatus = item.content.speech?.status;
-    const speechDisplayText =
+    const strikethroughFrom =
       speechStatus === "interrupted" &&
-      item.content.speech?.spokenText !== undefined &&
-      item.content.speech.unspokenText !== undefined
-        ? formatInterruptedSpeechMarkdown(
-            item.content.speech.spokenText,
-            item.content.speech.unspokenText,
-          )
-        : item.content.text;
+      item.content.speech?.spokenThrough !== undefined
+        ? item.content.speech.spokenThrough
+        : speechStatus === "notSpoken"
+          ? 0
+          : undefined;
     const speechLabel = speechStatus
       ? {
           speaking: t("message.voiceSpeechSpeakingLabel"),
@@ -345,7 +340,9 @@ function AgentWorkItemRow({
               label={speechLabel}
             />
           ) : null}
-          <MessageResponse mode="static">{speechDisplayText}</MessageResponse>
+          <MessageResponse mode="static" strikethroughFrom={strikethroughFrom}>
+            {item.content.text}
+          </MessageResponse>
         </div>
       </div>
     );

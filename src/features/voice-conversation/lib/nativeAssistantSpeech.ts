@@ -69,8 +69,7 @@ let activeSpeechRevision: number | null = null;
 let activeUtterance: ActiveUtterance | null = null;
 let stopActiveVoice: () => Promise<boolean> = stopPocketVoice;
 let activityReportQueue = Promise.resolve();
-const pendingNotices = new Map<string, string[]>();
-const recordedNoticeKeys = new Set<string>();
+const pendingNotices = new Map<string, Map<string, string>>();
 const DELIVERY_NOTICE_TEXT_LIMIT = 250;
 
 function boundedDeliveryText(
@@ -124,8 +123,6 @@ function recordPlaybackNotice(
   interruptionCause: InterruptionCause = "voiceStopped",
 ) {
   const noticeKey = `${sessionId}\0${key}\0${status}`;
-  if (recordedNoticeKeys.has(noticeKey)) return;
-  recordedNoticeKeys.add(noticeKey);
   const excerpt = text.length > 500 ? `${text.slice(0, 497).trimEnd()}…` : text;
   const outcome =
     status === "interrupted"
@@ -152,16 +149,15 @@ function recordPlaybackNotice(
   const notice =
     `[voice: tts-delivery-failed]\n${outcome}\nOriginal text: ${excerpt}${estimateLine}\n` +
     "This is TTS delivery state, not live user voice input. Do not respond to this control message or repeat the reply unless re-delivery is still appropriate.";
-  pendingNotices.set(sessionId, [
-    ...(pendingNotices.get(sessionId) ?? []),
-    notice,
-  ]);
+  const notices = pendingNotices.get(sessionId) ?? new Map<string, string>();
+  notices.set(noticeKey, notice);
+  pendingNotices.set(sessionId, notices);
 }
 
 export function takeVoicePlaybackNotices(sessionId: string): string | null {
   const notices = pendingNotices.get(sessionId);
   pendingNotices.delete(sessionId);
-  return notices?.join("\n") ?? null;
+  return notices ? [...notices.values()].join("\n") : null;
 }
 
 function targetKey(target: SpeechTarget): string {
@@ -209,6 +205,9 @@ function estimateSpeechDelivery(
       Math.min(totalFrames, segment.playedFrames),
     );
     if (totalFrames === 0 || playedFrames === 0) break;
+    if (!segment.synthesisComplete) {
+      break;
+    }
     if (playedFrames >= totalFrames) {
       cutoff = segmentStart + segment.text.length;
       searchFrom = cutoff;
@@ -228,23 +227,6 @@ function estimateSpeechDelivery(
   };
 }
 
-function targetText(sessionId: string, target: SpeechTarget): string {
-  const message =
-    useChatStore
-      .getState()
-      .messagesBySession[sessionId]?.find(
-        (candidate) => candidate.id === target.messageId,
-      ) ?? null;
-  if (!message) return "";
-  let textOrdinal = 0;
-  for (const content of message.content) {
-    if (content.type !== "text") continue;
-    if (textOrdinal === target.textOrdinal) return content.text;
-    textOrdinal += 1;
-  }
-  return "";
-}
-
 function applyInterruptionEstimate(
   utterance: ActiveUtterance,
   estimate: SpeechDeliveryEstimate,
@@ -258,7 +240,6 @@ function applyInterruptionEstimate(
     );
     const start = spans.at(0)?.start ?? 0;
     const end = spans.at(-1)?.end ?? start;
-    const text = targetText(utterance.sessionId, target);
     if (estimate.cutoff >= end && end > start) {
       setTargetSpeech(utterance.sessionId, target, { status: "spoken" });
       continue;
@@ -267,9 +248,9 @@ function applyInterruptionEstimate(
       if (targetKey(target) === firstTargetKey) {
         setTargetSpeech(utterance.sessionId, target, {
           status: "interrupted",
-          spokenText: "",
-          unspokenText: text,
+          spokenThrough: 0,
           confidence: estimate.confidence,
+          interruptionCause: utterance.interruptionCause ?? "voiceStopped",
         });
         continue;
       }
@@ -278,13 +259,13 @@ function applyInterruptionEstimate(
     }
     const localCutoff = Math.max(
       0,
-      Math.min(text.length, estimate.cutoff - start),
+      Math.min(end - start, estimate.cutoff - start),
     );
     setTargetSpeech(utterance.sessionId, target, {
       status: "interrupted",
-      spokenText: text.slice(0, localCutoff),
-      unspokenText: text.slice(localCutoff),
+      spokenThrough: localCutoff,
       confidence: estimate.confidence,
+      interruptionCause: utterance.interruptionCause ?? "voiceStopped",
     });
   }
 }
@@ -395,7 +376,7 @@ function handleStreamEvent(
       utterance.onInterrupted();
       recordPlaybackNotice(
         utterance.sessionId,
-        utterance.id,
+        utterance.targets[0] ? targetKey(utterance.targets[0]) : utterance.id,
         utterance.text,
         "interrupted",
         estimate,
@@ -458,7 +439,7 @@ function interruptActiveUtterance(
     utterance.onInterrupted();
     recordPlaybackNotice(
       utterance.sessionId,
-      utterance.id,
+      utterance.targets[0] ? targetKey(utterance.targets[0]) : utterance.id,
       utterance.text,
       "interrupted",
       estimate,
@@ -542,6 +523,7 @@ export function startNativeAssistantSpeech(
   const consumedTextBySlot = new Map<string, string>();
   const completedMessages = new Set<string>();
   const interruptedMessages = new Set<string>();
+  const interruptionCauseByMessage = new Map<string, InterruptionCause>();
   for (const message of initialMessages) {
     toolCountByMessage.set(
       message.id,
@@ -597,6 +579,10 @@ export function startNativeAssistantSpeech(
       onInterrupted: () => {
         for (const utteranceTarget of utterance.targets) {
           interruptedMessages.add(utteranceTarget.messageId);
+          interruptionCauseByMessage.set(
+            utteranceTarget.messageId,
+            utterance.interruptionCause ?? "voiceStopped",
+          );
         }
       },
       onTerminal: () => queueMicrotask(inspect),
@@ -663,18 +649,27 @@ export function startNativeAssistantSpeech(
 
         if (interruptedMessages.has(message.id)) {
           const currentSpeech = content.speech;
-          if (
-            currentSpeech?.status === "interrupted" &&
-            currentSpeech.spokenText !== undefined
-          ) {
-            setTargetSpeech(sessionId, target, {
-              ...currentSpeech,
-              unspokenText: content.text.slice(currentSpeech.spokenText.length),
-            });
-          } else {
+          const interruptionCause =
+            currentSpeech?.interruptionCause ??
+            interruptionCauseByMessage.get(message.id) ??
+            "voiceStopped";
+          if (currentSpeech?.status !== "interrupted") {
             setTargetSpeech(sessionId, target, { status: "notSpoken" });
           }
-          recordPlaybackNotice(sessionId, slot, content.text, "notSpoken");
+          const spokenThrough = currentSpeech?.spokenThrough ?? 0;
+          recordPlaybackNotice(
+            sessionId,
+            slot,
+            content.text,
+            "interrupted",
+            {
+              cutoff: spokenThrough,
+              spokenText: content.text.slice(0, spokenThrough),
+              unspokenText: content.text.slice(spokenThrough),
+              confidence: currentSpeech?.confidence ?? "low",
+            },
+            interruptionCause,
+          );
           continue;
         }
 

@@ -341,6 +341,8 @@ export const MessageBranchPage = ({
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
   codeRenderers?: CustomRenderer[];
+  /** Source-text offset after which rendered Markdown is struck through. */
+  strikethroughFrom?: number;
   /**
    * Optional feature-aware Markdown image renderer. Chat injects one that can
    * resolve local files through the asset scheme; when omitted, images render
@@ -599,6 +601,13 @@ function isReservedBerdSessionLinkPrefix(href: string | undefined): boolean {
 type MarkdownHastNode = {
   children?: MarkdownHastNode[];
   properties?: Record<string, unknown>;
+  position?: {
+    start: { offset?: number };
+    end: { offset?: number };
+  };
+  tagName?: string;
+  type?: string;
+  value?: string;
 };
 
 function hasControlCharacter(value: string): boolean {
@@ -694,6 +703,62 @@ const berdRehypePlugins: NonNullable<
   restoreBerdMarkdownDestinations,
 ];
 
+function strikethroughFromPlugin(cutoff: number) {
+  const wrap = (node: MarkdownHastNode): MarkdownHastNode => ({
+    type: "element",
+    tagName: "del",
+    properties: {},
+    children: [node],
+    position: node.position,
+  });
+
+  const decorate = (node: MarkdownHastNode) => {
+    if (!node.children) return;
+    const children: MarkdownHastNode[] = [];
+    for (const child of node.children) {
+      const start = child.position?.start.offset;
+      const end = child.position?.end.offset;
+      if (child.type === "element" && start !== undefined && cutoff <= start) {
+        children.push(wrap(child));
+        continue;
+      }
+      if (
+        child.type === "text" &&
+        child.value !== undefined &&
+        start !== undefined &&
+        end !== undefined
+      ) {
+        if (cutoff <= start) {
+          children.push(wrap(child));
+          continue;
+        }
+        if (cutoff < end) {
+          const sourceLength = Math.max(1, end - start);
+          const valueOffset = Math.max(
+            0,
+            Math.min(
+              child.value.length,
+              Math.round(
+                ((cutoff - start) / sourceLength) * child.value.length,
+              ),
+            ),
+          );
+          const spoken = child.value.slice(0, valueOffset);
+          const unspoken = child.value.slice(valueOffset);
+          if (spoken) children.push({ ...child, value: spoken });
+          if (unspoken) children.push(wrap({ ...child, value: unspoken }));
+          continue;
+        }
+      }
+      decorate(child);
+      children.push(child);
+    }
+    node.children = children;
+  };
+
+  return (tree: MarkdownHastNode) => decorate(tree);
+}
+
 const linkSafetyConfig: ComponentProps<typeof Streamdown>["linkSafety"] = {
   enabled: false,
 };
@@ -708,6 +773,7 @@ export const MessageResponse = memo(
     mode,
     onAnimationEnd,
     onAnimationStart,
+    strikethroughFrom,
     ...props
   }: MessageResponseProps) => {
     const { t } = useTranslation("common");
@@ -715,6 +781,18 @@ export const MessageResponse = memo(
     const streamdownComponents = useMemo(
       () => buildStreamdownComponents(imageRenderer),
       [imageRenderer],
+    );
+    const rehypePlugins = useMemo<
+      NonNullable<ComponentProps<typeof Streamdown>["rehypePlugins"]>
+    >(
+      () =>
+        strikethroughFrom === undefined
+          ? berdRehypePlugins
+          : [
+              ...berdRehypePlugins,
+              [strikethroughFromPlugin, strikethroughFrom],
+            ],
+      [strikethroughFrom],
     );
     const streamdownRootRef = useRef<HTMLDivElement>(null);
     const streamdownLayoutPending = useVirtualLayoutPendingForStreamdown({
@@ -780,10 +858,10 @@ export const MessageResponse = memo(
             components={streamdownComponents}
             isAnimating={isAnimating}
             linkSafety={linkSafetyConfig}
-            mode={mode}
+            mode={strikethroughFrom === undefined ? mode : "static"}
             onAnimationEnd={streamdownLayoutPending.onAnimationEnd}
             onAnimationStart={streamdownLayoutPending.onAnimationStart}
-            rehypePlugins={berdRehypePlugins}
+            rehypePlugins={rehypePlugins}
             plugins={
               codeRenderers
                 ? { ...streamdownPlugins, renderers: codeRenderers }

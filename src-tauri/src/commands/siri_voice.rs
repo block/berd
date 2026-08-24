@@ -79,6 +79,7 @@ struct VoiceDeliverySegment {
     text: String,
     played_frames: u64,
     total_frames: u64,
+    synthesis_complete: bool,
 }
 
 #[cfg(target_os = "macos")]

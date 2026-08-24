@@ -45,6 +45,7 @@ export interface VoiceDeliverySegment {
   text: string;
   playedFrames: number;
   totalFrames: number;
+  synthesisComplete: boolean;
 }
 
 export interface VoiceDeliveryProgress {

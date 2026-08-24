@@ -719,8 +719,7 @@ describe("MessageBubble", () => {
             text: "One. Two. Three.",
             speech: {
               status: "interrupted",
-              spokenText: "One. Two",
-              unspokenText: ". Three.",
+              spokenThrough: "One. Two".length,
               confidence: "medium",
             },
           },
@@ -745,9 +744,7 @@ describe("MessageBubble", () => {
             text: "Heard text. Unheard first paragraph.\n\nUnheard second paragraph.\n\nUnheard third paragraph.",
             speech: {
               status: "interrupted",
-              spokenText: "Heard text.",
-              unspokenText:
-                " Unheard first paragraph.\n\nUnheard second paragraph.\n\nUnheard third paragraph.",
+              spokenThrough: "Heard text.".length,
               confidence: "medium",
             },
           },
@@ -758,12 +755,58 @@ describe("MessageBubble", () => {
     const block = container.querySelector(
       '[data-voice-speech-status="interrupted"]',
     );
-    const struckBlocks = block?.querySelectorAll("del");
-    expect(struckBlocks).toHaveLength(3);
-    expect(struckBlocks?.[0]).toHaveTextContent("Unheard first paragraph.");
-    expect(struckBlocks?.[1]).toHaveTextContent("Unheard second paragraph.");
-    expect(struckBlocks?.[2]).toHaveTextContent("Unheard third paragraph.");
-    expect(struckBlocks?.[0]).not.toHaveTextContent("Heard text.");
+    const paragraphs = block?.querySelectorAll("p");
+    expect(paragraphs).toHaveLength(3);
+    expect(paragraphs?.[0]?.querySelector("del")).toHaveTextContent(
+      "Unheard first paragraph.",
+    );
+    expect(paragraphs?.[0]?.querySelector("del")).not.toHaveTextContent(
+      "Heard text.",
+    );
+    expect(paragraphs?.[1]?.closest("del")).toBeTruthy();
+    expect(paragraphs?.[2]?.closest("del")).toBeTruthy();
+  });
+
+  it("preserves Markdown structure while striking the unspoken range", async () => {
+    const spoken = "Heard. ";
+    const text = `${spoken}**bold** [link](https://example.com)\n\n- list item\n\n\`inline\`\n\n\`\`\`ts\nconst value = 1;\n\`\`\``;
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text,
+            speech: {
+              status: "interrupted",
+              spokenThrough: spoken.length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const block = container.querySelector(
+      '[data-voice-speech-status="interrupted"]',
+    );
+    await waitFor(() => {
+      expect(
+        block?.querySelector('del [data-streamdown="strong"]'),
+      ).toHaveTextContent("bold");
+      expect(
+        block?.querySelector('del a[href="https://example.com/"]'),
+      ).toHaveTextContent("link");
+      expect(block?.querySelector("del li")).toHaveTextContent("list item");
+      expect(
+        block?.querySelector('del [data-streamdown="inline-code"]'),
+      ).toHaveTextContent("inline");
+      expect(
+        block?.querySelector('del [data-streamdown="code-block"]'),
+      ).toBeTruthy();
+      expect(block?.querySelector("pre code")).toHaveTextContent(
+        "const value = 1;",
+      );
+    });
   });
 
   it("preserves provider-error presentation after interrupted delivery", () => {
@@ -777,9 +820,7 @@ describe("MessageBubble", () => {
             text: rawError,
             speech: {
               status: "interrupted",
-              spokenText: "Ran into this error:",
-              unspokenText:
-                " thinking blocks in the latest assistant message cannot be modified",
+              spokenThrough: "Ran into this error:".length,
               confidence: "medium",
             },
           },

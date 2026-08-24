@@ -519,8 +519,7 @@ describe("native assistant speech stream", () => {
     ).toMatchObject({
       speech: {
         status: "interrupted",
-        spokenText: "",
-        unspokenText: "Queued reply.",
+        spokenThrough: 0,
         confidence: "low",
       },
     });
@@ -550,7 +549,12 @@ describe("native assistant speech stream", () => {
       error: null,
       delivery: {
         segments: [
-          { text: "Native reply.", playedFrames: 400, totalFrames: 1_000 },
+          {
+            text: "Native reply.",
+            playedFrames: 400,
+            totalFrames: 1_000,
+            synthesisComplete: true,
+          },
         ],
       },
     });
@@ -607,6 +611,7 @@ describe("native assistant speech stream", () => {
             text: "One. Two. Three.",
             playedFrames: 300,
             totalFrames: 1_000,
+            synthesisComplete: true,
           },
         ],
       },
@@ -627,6 +632,7 @@ describe("native assistant speech stream", () => {
             text: "One. Two. Three.",
             playedFrames: 600,
             totalFrames: 1_000,
+            synthesisComplete: true,
           },
         ],
       },
@@ -637,16 +643,10 @@ describe("native assistant speech stream", () => {
     ).toMatchObject({
       speech: {
         status: "interrupted",
-        spokenText: "One. Two",
-        unspokenText: ". Three.",
+        spokenThrough: "One. Two".length,
         confidence: "medium",
       },
     });
-    const notice = takeVoicePlaybackNotices("session-1");
-    expect(notice).toContain('"spokenText":"One. Two"');
-    expect(notice).toContain('"unspokenText":". Three."');
-    expect(notice).toContain('"confidence":"medium"');
-
     useVoiceConversationStore.setState({ userSpeaking: false });
     useChatStore
       .getState()
@@ -657,12 +657,51 @@ describe("native assistant speech stream", () => {
       ).toMatchObject({
         speech: {
           status: "interrupted",
-          spokenText: "One. Two",
-          unspokenText: ". Three. Four.",
+          spokenThrough: "One. Two".length,
         },
       });
     });
     expect(mocks.append).toHaveBeenCalledTimes(1);
+    const notice = takeVoicePlaybackNotices("session-1") ?? "";
+    expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
+    expect(notice).toContain('"spokenText":"One. Two"');
+    expect(notice).toContain('"unspokenText":". Three. Four."');
+    expect(notice).toContain('"confidence":"medium"');
+  });
+
+  it("does not treat generated-but-incomplete audio as fully spoken", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "One. Two. Three." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        segments: [
+          {
+            text: "One. Two. Three.",
+            playedFrames: 1_000,
+            totalFrames: 1_000,
+            synthesisComplete: false,
+          },
+        ],
+      },
+    });
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+    ).toMatchObject({
+      speech: { status: "interrupted", spokenThrough: 0 },
+    });
   });
 
   it("bounds spoken and unspoken excerpts in the model delivery notice", async () => {
@@ -682,7 +721,14 @@ describe("native assistant speech stream", () => {
       state: "interrupted",
       error: null,
       delivery: {
-        segments: [{ text, playedFrames: 1_000, totalFrames: 2_000 }],
+        segments: [
+          {
+            text,
+            playedFrames: 1_000,
+            totalFrames: 2_000,
+            synthesisComplete: true,
+          },
+        ],
       },
     });
 

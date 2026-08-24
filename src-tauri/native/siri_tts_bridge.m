@@ -277,6 +277,7 @@ typedef void (^BerdAudioHandler)(
 @interface BerdSiriDeliverySegment : NSObject
 @property(nonatomic, copy) NSString *text;
 @property(nonatomic, assign) uint64_t totalFrames;
+@property(nonatomic, assign) BOOL synthesisComplete;
 @end
 
 @implementation BerdSiriDeliverySegment
@@ -479,6 +480,7 @@ typedef void (^BerdAudioHandler)(
                 [weakSelf finish:error];
                 return;
             }
+            if (!error) deliverySegment.synthesisComplete = YES;
             [weakSelf startNextSynthesis];
         });
     }];
@@ -526,6 +528,7 @@ typedef void (^BerdAudioHandler)(
                 @"text": segment.text ?: @"",
                 @"playedFrames": @(played),
                 @"totalFrames": @(segment.totalFrames),
+                @"synthesisComplete": @(segment.synthesisComplete),
             }];
             segmentStart += segment.totalFrames;
         }

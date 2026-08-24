@@ -1546,7 +1546,7 @@ describe("transcript projection cache", () => {
       "One. Two. Three.",
       utc(2026, 6, 4, 10),
     );
-    const interrupted = (spokenText: string, unspokenText: string) => ({
+    const interrupted = (spokenThrough: number) => ({
       ...original,
       content: original.content.map((content) =>
         content.type === "text"
@@ -1554,8 +1554,7 @@ describe("transcript projection cache", () => {
               ...content,
               speech: {
                 status: "interrupted" as const,
-                spokenText,
-                unspokenText,
+                spokenThrough,
                 confidence: "medium" as const,
               },
             }
@@ -1563,8 +1562,8 @@ describe("transcript projection cache", () => {
       ),
     });
 
-    const first = buildMessageRevisions(interrupted("One.", " Two. Three."));
-    const second = buildMessageRevisions(interrupted("One. Two.", " Three."));
+    const first = buildMessageRevisions(interrupted("One.".length));
+    const second = buildMessageRevisions(interrupted("One. Two.".length));
 
     expect(second.renderRevision).not.toBe(first.renderRevision);
     expect(second.heightRevision).not.toBe(first.heightRevision);

@@ -185,6 +185,7 @@ struct VoiceDeliverySegment {
     text: String,
     played_frames: u64,
     total_frames: u64,
+    synthesis_complete: bool,
 }
 
 #[cfg(any(test, target_os = "macos"))]
@@ -196,14 +197,14 @@ struct VoiceDeliveryProgress {
 #[cfg(any(test, target_os = "macos"))]
 #[derive(Debug, Default)]
 struct PlaybackDeliveryLedger {
-    segments: Vec<(String, u64)>,
+    segments: Vec<(String, u64, bool)>,
     pieces: Vec<u64>,
 }
 
 #[cfg(any(test, target_os = "macos"))]
 impl PlaybackDeliveryLedger {
     fn begin_segment(&mut self, text: String) {
-        self.segments.push((text, 0));
+        self.segments.push((text, 0, false));
     }
 
     fn append_frames(&mut self, frames: usize) {
@@ -211,9 +212,21 @@ impl PlaybackDeliveryLedger {
         if frames == 0 {
             return;
         }
-        if let Some((_, total)) = self.segments.last_mut() {
+        // The speed processor can retain a tail between text segments. The
+        // previous segment is final only once output for its successor arrives.
+        if self.segments.len() > 1 {
+            let previous = self.segments.len() - 2;
+            self.segments[previous].2 = true;
+        }
+        if let Some((_, total, _)) = self.segments.last_mut() {
             *total = total.saturating_add(frames);
             self.pieces.push(frames);
+        }
+    }
+
+    fn complete_segment(&mut self) {
+        if let Some((_, _, synthesis_complete)) = self.segments.last_mut() {
+            *synthesis_complete = true;
         }
     }
 
@@ -233,7 +246,7 @@ impl PlaybackDeliveryLedger {
         let segments = self
             .segments
             .iter()
-            .map(|(text, total_frames)| {
+            .map(|(text, total_frames, synthesis_complete)| {
                 let played_frames = consumed_frames
                     .saturating_sub(segment_start)
                     .min(*total_frames);
@@ -242,6 +255,7 @@ impl PlaybackDeliveryLedger {
                     text: text.clone(),
                     played_frames,
                     total_frames: *total_frames,
+                    synthesis_complete: *synthesis_complete,
                 }
             })
             .collect();
@@ -2041,6 +2055,7 @@ fn run_pocket_voice_stream(
                             .map_err(|error| format!("signal Pocket playback start: {error}"))?;
                     }
                 }
+                delivery_ledger.complete_segment();
             }
             Ok(PocketStreamCommand::Finish) => {
                 if !synthesize_pocket_stream_ready(
@@ -2079,6 +2094,7 @@ fn run_pocket_voice_stream(
                         );
                     }
                 }
+                delivery_ledger.complete_segment();
                 while !player.empty() {
                     if !active.load(Ordering::SeqCst) {
                         let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
@@ -2381,6 +2397,8 @@ mod tests {
         ledger.begin_segment("First sentence.".to_string());
         ledger.append_frames(4_800);
         ledger.begin_segment("Second sentence.".to_string());
+        let before_second_audio = ledger.snapshot(1, 0);
+        assert!(!before_second_audio.segments[0].synthesis_complete);
         ledger.append_frames(4_800);
 
         // One source has completed and the next is 50 ms in. The 100 ms
@@ -2389,8 +2407,10 @@ mod tests {
         let progress = ledger.snapshot(1, 1_200);
         assert_eq!(progress.segments[0].played_frames, 3_600);
         assert_eq!(progress.segments[0].total_frames, 4_800);
+        assert!(progress.segments[0].synthesis_complete);
         assert_eq!(progress.segments[1].played_frames, 0);
         assert_eq!(progress.segments[1].total_frames, 4_800);
+        assert!(!progress.segments[1].synthesis_complete);
     }
 
     #[test]
