@@ -189,7 +189,7 @@ describe("VoiceSettings", () => {
     expect(
       screen.getByRole("combobox", { name: "While Berd is speaking" }),
     ).toHaveAccessibleDescription(
-      "Listens through headphones and prevents feedback through speakers.",
+      "Listens through recognized headphones and prevents feedback on other outputs.",
     );
     expect(
       screen.getByRole("combobox", { name: "Interruption sensitivity" }),
