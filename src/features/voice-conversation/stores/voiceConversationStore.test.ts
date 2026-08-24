@@ -679,6 +679,48 @@ describe("voice conversation store lifecycle ordering", () => {
     expect(mocks.reconcileMicrophone).toHaveBeenLastCalledWith(mutedRunningB);
   });
 
+  it.each([
+    ["stale start", "agent-speaking"],
+    ["stale start", "error"],
+    ["failed handoff", "agent-speaking"],
+    ["failed handoff", "error"],
+  ] as const)("preserves direct %s %s UI while applying authoritative mute", async (operation, uiState) => {
+    const store = await loadStore();
+    const active = status("running", 2, "session-a");
+    const winner = {
+      ...status("running", 4, "session-c"),
+      microphoneMuted: true,
+    };
+    const request = deferred<VoiceConversationStatus>();
+    mocks.getStatus.mockResolvedValue(winner);
+    store.setState({ status: active, uiState: "listening" });
+
+    let failing: Promise<VoiceConversationStatus>;
+    if (operation === "stale start") {
+      mocks.start.mockReturnValue(request.promise);
+      failing = store.getState().start("session-b");
+    } else {
+      mocks.stopForReplacement.mockReturnValue(request.promise);
+      failing = store.getState().stopForReplacement(active, "session-b");
+    }
+    store.setState({
+      status: winner,
+      uiState,
+      error: uiState === "error" ? "session C warning" : null,
+      assistantSpeaking: false,
+      userSpeaking: false,
+    });
+    request.reject(new Error("stale operation failed"));
+
+    await expect(failing).rejects.toThrow("stale operation failed");
+    expect(store.getState()).toMatchObject({
+      status: winner,
+      uiState,
+      error: uiState === "error" ? "session C warning" : null,
+      microphoneMuted: true,
+    });
+  });
+
   it("reconciles status after a failed stop", async () => {
     const store = await loadStore();
     store.setState({

@@ -622,9 +622,10 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                     status: { ...state.status, microphoneMuted },
                     microphoneMuted,
                     userSpeaking,
-                    uiState: microphoneMuted
-                      ? activityUiState({ ...state, userSpeaking })
-                      : state.uiState,
+                    uiState:
+                      microphoneMuted && state.uiState === "user-speaking"
+                        ? activityUiState({ ...state, userSpeaking })
+                        : state.uiState,
                   };
                 }
                 return {
@@ -777,9 +778,10 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
                   status: { ...state.status, microphoneMuted },
                   microphoneMuted,
                   userSpeaking,
-                  uiState: microphoneMuted
-                    ? activityUiState({ ...state, userSpeaking })
-                    : state.uiState,
+                  uiState:
+                    microphoneMuted && state.uiState === "user-speaking"
+                      ? activityUiState({ ...state, userSpeaking })
+                      : state.uiState,
                 };
               }
               return {
