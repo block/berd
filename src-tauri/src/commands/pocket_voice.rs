@@ -2004,9 +2004,13 @@ fn run_pocket_voice_stream(
                     &mut last_progress_emit,
                     false,
                 )? {
+                    let delivery = capture_before_stop(
+                        || pocket_delivery_snapshot(&delivery_ledger, &player),
+                        || player.stop(),
+                    );
                     return Ok(PocketStreamOutcome {
                         state: PocketStreamEventState::Interrupted,
-                        delivery: Some(pocket_delivery_snapshot(&delivery_ledger, &player)),
+                        delivery: Some(delivery),
                     });
                 }
             }
@@ -2028,9 +2032,13 @@ fn run_pocket_voice_stream(
                     &mut last_progress_emit,
                     true,
                 )? {
+                    let delivery = capture_before_stop(
+                        || pocket_delivery_snapshot(&delivery_ledger, &player),
+                        || player.stop(),
+                    );
                     return Ok(PocketStreamOutcome {
                         state: PocketStreamEventState::Interrupted,
-                        delivery: Some(pocket_delivery_snapshot(&delivery_ledger, &player)),
+                        delivery: Some(delivery),
                     });
                 }
                 let tail = speed_processor.drain_and_reset()?;
@@ -2071,9 +2079,13 @@ fn run_pocket_voice_stream(
                     &mut last_progress_emit,
                     true,
                 )? {
+                    let delivery = capture_before_stop(
+                        || pocket_delivery_snapshot(&delivery_ledger, &player),
+                        || player.stop(),
+                    );
                     return Ok(PocketStreamOutcome {
                         state: PocketStreamEventState::Interrupted,
-                        delivery: Some(pocket_delivery_snapshot(&delivery_ledger, &player)),
+                        delivery: Some(delivery),
                     });
                 }
                 let tail = speed_processor.finish()?;
@@ -2147,6 +2159,16 @@ fn pocket_delivery_snapshot(
     ledger.snapshot(queued_pieces, current_piece_frames)
 }
 
+#[cfg(any(test, target_os = "macos"))]
+fn capture_before_stop(
+    snapshot: impl FnOnce() -> VoiceDeliveryProgress,
+    stop: impl FnOnce(),
+) -> VoiceDeliveryProgress {
+    let delivery = snapshot();
+    stop();
+    delivery
+}
+
 #[cfg(target_os = "macos")]
 #[allow(clippy::too_many_arguments)]
 fn synthesize_pocket_stream_ready(
@@ -2171,7 +2193,6 @@ fn synthesize_pocket_stream_ready(
     *first_chunk_pending = split.first_chunk_pending;
     for text in split.ready {
         if !active.load(Ordering::SeqCst) {
-            player.stop();
             return Ok(false);
         }
         let text = text.trim().to_string();
@@ -2230,7 +2251,6 @@ fn synthesize_pocket_stream_ready(
             return Err(error);
         }
         if !completed {
-            player.stop();
             return Ok(false);
         }
         let final_total_frames = speed_processor
@@ -2412,6 +2432,33 @@ mod tests {
         assert_eq!(progress.segments[1].played_frames, 0);
         assert_eq!(progress.segments[1].total_frames, 4_800);
         assert!(progress.segments[1].synthesis_complete);
+    }
+
+    #[test]
+    fn cancellation_captures_delivery_before_stopping_playback() {
+        use std::cell::RefCell;
+
+        let mut ledger = PlaybackDeliveryLedger::default();
+        ledger.begin_segment("Played piece.".to_string());
+        ledger.append_frames(4_800);
+        ledger.complete_segment(4_800);
+        ledger.begin_segment("Queued audio.".to_string());
+        ledger.append_frames(4_800);
+        ledger.append_frames(4_800);
+        ledger.complete_segment(9_600);
+        let calls = RefCell::new(Vec::new());
+
+        let delivery = capture_before_stop(
+            || {
+                calls.borrow_mut().push("snapshot");
+                ledger.snapshot(2, 1_200)
+            },
+            || calls.borrow_mut().push("stop"),
+        );
+
+        assert_eq!(&*calls.borrow(), &["snapshot", "stop"]);
+        assert_eq!(delivery.segments[0].played_frames, 3_600);
+        assert_eq!(delivery.segments[1].played_frames, 0);
     }
 
     #[test]
