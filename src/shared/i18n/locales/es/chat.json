@@ -685,6 +685,8 @@
     "viewCode": "Código",
     "loading": "Cargando archivo…",
     "loadError": "No se pudo cargar este archivo.",
+    "diskDiverged": "Esta vista previa puede estar desactualizada porque el archivo cambió o no está disponible en el disco.",
+    "reload": "Volver a cargar",
     "imageAlt": "Vista previa de {{filename}}"
   },
   "artifactChips": {

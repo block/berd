@@ -1,11 +1,12 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArtifactViewer } from "../ArtifactViewer";
 
 const mockOpenResolvedPath = vi.fn().mockResolvedValue(undefined);
 const mockRevealInFileManager = vi.fn().mockResolvedValue(undefined);
 const mockReadTextFile = vi.fn();
+const mockStatFile = vi.fn();
 
 vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
   useArtifactActionsContext: () => ({
@@ -22,6 +23,7 @@ vi.mock("@/shared/lib/fileManager", () => ({
 
 vi.mock("@/shared/api/system", () => ({
   readTextFile: (path: string) => mockReadTextFile(path),
+  statFile: (path: string) => mockStatFile(path),
 }));
 
 // jsdom has no Tauri internals, so the real asset-URL converter throws.
@@ -49,6 +51,12 @@ describe("ArtifactViewer header actions", () => {
     mockRevealInFileManager.mockClear();
     mockReadTextFile.mockReset();
     mockReadTextFile.mockResolvedValue({ contents: "# Title\n\nBody copy." });
+    mockStatFile.mockReset();
+    mockStatFile.mockResolvedValue({ byteSize: "20", modifiedAtNs: "1" });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("reveals the file in the OS file manager from the file actions menu", async () => {
@@ -115,5 +123,82 @@ describe("ArtifactViewer header actions", () => {
     );
     expect(heading.className).not.toMatch(/\buppercase\b/);
     expect(heading.textContent).toBe("api_KEY and Path");
+  });
+
+  it("polls the open file and swaps in externally changed text", async () => {
+    vi.useFakeTimers();
+    let changed = false;
+    mockReadTextFile.mockImplementation(async () => ({
+      contents: changed ? "# Updated externally" : "# Original",
+    }));
+    mockStatFile.mockImplementation(async () =>
+      changed
+        ? { byteSize: "20", modifiedAtNs: "2" }
+        : { byteSize: "10", modifiedAtNs: "1" },
+    );
+
+    render(<ArtifactViewer artifact={artifact()} onClose={vi.fn()} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(
+      screen.getByRole("heading", { name: "Original" }),
+    ).toBeInTheDocument();
+
+    changed = true;
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.getByRole("heading", { name: "Updated externally" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/out of date/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps last-good content visible and marks it stale when a changed file cannot be read", async () => {
+    vi.useFakeTimers();
+    let changed = false;
+    mockReadTextFile.mockImplementation(async () => {
+      if (changed) throw new Error("mid-write");
+      return { contents: "# Last good copy" };
+    });
+    mockStatFile.mockImplementation(async () =>
+      changed
+        ? { byteSize: "20", modifiedAtNs: "2" }
+        : { byteSize: "16", modifiedAtNs: "1" },
+    );
+
+    render(<ArtifactViewer artifact={artifact()} onClose={vi.fn()} />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    changed = true;
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(
+      screen.getByRole("heading", { name: "Last good copy" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/out of date/i);
+    expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument();
+
+    // A later unchanged stat must not silently clear the warning: the viewer
+    // still has the old contents until a read succeeds.
+    mockStatFile.mockResolvedValue({ byteSize: "20", modifiedAtNs: "2" });
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("status")).toHaveTextContent(/out of date/i);
   });
 });

@@ -13,7 +13,7 @@ use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 const DEFAULT_FILE_MENTION_LIMIT: usize = 12;
 const MAX_FILE_MENTION_LIMIT: usize = 32;
@@ -842,6 +842,51 @@ pub struct TextFilePayload {
     pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileStatPayload {
+    /// Decimal strings preserve exact identity across the JSON/JavaScript
+    /// boundary, including nanosecond timestamp precision and large files.
+    pub byte_size: String,
+    pub modified_at_ns: String,
+}
+
+/// Return the size and modification time used by open artifact viewers to
+/// detect writes that do not appear in the main ACP session's tool events.
+#[tauri::command]
+pub fn stat_file(path: String) -> Result<FileStatPayload, String> {
+    let target = Path::new(&path);
+    let metadata = fs::metadata(target)
+        .map_err(|error| format!("Failed to inspect '{}': {}", target.display(), error))?;
+    if !metadata.is_file() {
+        return Err(format!("Path is not a file: {}", target.display()));
+    }
+
+    let modified_at_ns = metadata
+        .modified()
+        .map_err(|error| {
+            format!(
+                "Failed to read modification time for '{}': {}",
+                target.display(),
+                error
+            )
+        })?
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| {
+            format!(
+                "Invalid modification time for '{}': {}",
+                target.display(),
+                error
+            )
+        })?
+        .as_nanos();
+
+    Ok(FileStatPayload {
+        byte_size: metadata.len().to_string(),
+        modified_at_ns: modified_at_ns.to_string(),
+    })
 }
 
 fn looks_binary(bytes: &[u8]) -> bool {
@@ -1994,8 +2039,9 @@ mod tests {
         get_or_build_file_mention_index_from_cache, inspect_attachment_path,
         inspect_attachment_paths, normalize_attachment_paths, normalize_roots, open_in_chrome_with,
         read_directory_entries, read_image_attachment, read_text_file,
-        search_file_mentions_blocking, write_agent_image_atomically, write_sibling_then_replace,
-        FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
+        search_file_mentions_blocking, stat_file, write_agent_image_atomically,
+        write_sibling_then_replace, FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES,
+        MAX_TEXT_FILE_BYTES,
     };
     use base64::Engine;
     use std::fs;
@@ -2846,6 +2892,25 @@ mod tests {
 
         assert_eq!(payload.mime_type, "image/png");
         assert!(!payload.base64.is_empty());
+    }
+
+    #[test]
+    fn stat_file_returns_size_and_modified_time() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("notes.md");
+        fs::write(&path, "hello").expect("write");
+
+        let payload = stat_file(path.to_string_lossy().into_owned()).expect("stat file");
+        assert_eq!(payload.byte_size, "5");
+        assert!(payload.modified_at_ns.parse::<u128>().expect("timestamp") > 0);
+    }
+
+    #[test]
+    fn stat_file_rejects_directories() {
+        let dir = tempdir().expect("tempdir");
+        let error = stat_file(dir.path().to_string_lossy().into_owned())
+            .expect_err("directory should error");
+        assert!(error.contains("not a file"), "unexpected error: {error}");
     }
 
     #[test]

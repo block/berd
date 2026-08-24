@@ -169,3 +169,12 @@ export interface TextFilePayload {
 export async function readTextFile(path: string): Promise<TextFilePayload> {
   return invoke("read_text_file", { path });
 }
+
+export interface FileStatPayload {
+  byteSize: string;
+  modifiedAtNs: string;
+}
+
+export async function statFile(path: string): Promise<FileStatPayload> {
+  return invoke("stat_file", { path });
+}
