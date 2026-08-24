@@ -189,6 +189,14 @@ async function deliverTranscriptOnce(
       if (rejection.terminal) {
         const priorKey = priorFinalizedTranscriptKeys.get(key) ?? null;
         priorFinalizedTranscriptKeys.delete(key);
+        for (const [
+          pendingKey,
+          pendingPriorKey,
+        ] of priorFinalizedTranscriptKeys) {
+          if (pendingPriorKey === finalizedKey) {
+            priorFinalizedTranscriptKeys.set(pendingKey, priorKey);
+          }
+        }
         useVoiceConversationStore.setState((state) =>
           state.latestFinalizedTranscriptKey === finalizedKey
             ? { latestFinalizedTranscriptKey: priorKey }

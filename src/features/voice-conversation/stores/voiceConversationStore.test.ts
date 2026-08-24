@@ -220,6 +220,50 @@ describe("voice conversation store lifecycle ordering", () => {
     unsubscribe();
   });
 
+  it("removes terminally rejected transcripts from pending rollback chains", async () => {
+    mocks.reject.mockResolvedValue({ attempts: 3, terminal: true });
+    const firstDelivery = deferred<void>();
+    const secondDelivery = deferred<void>();
+    const module = await import("./voiceConversationStore");
+    const unsubscribe = module.subscribeToVoiceConversationEvents((event) =>
+      event.type === "user" && event.id === "first-rejection"
+        ? firstDelivery.promise
+        : secondDelivery.promise,
+    );
+    await module.useVoiceConversationStore.getState().init();
+    module.useVoiceConversationStore.setState({
+      latestFinalizedTranscriptKey: "prior-transcript",
+    });
+
+    emit({
+      type: "user",
+      sessionId: "session-1",
+      lifecycleId: "lifecycle-1",
+      id: "first-rejection",
+      text: "First failure",
+      revision: 1,
+      deliveryAttempts: 2,
+    });
+    emit({
+      type: "user",
+      sessionId: "session-1",
+      lifecycleId: "lifecycle-1",
+      id: "second-rejection",
+      text: "Second failure",
+      revision: 2,
+      deliveryAttempts: 2,
+    });
+
+    firstDelivery.reject(new Error("chat unavailable"));
+    await vi.waitFor(() => expect(mocks.reject).toHaveBeenCalledOnce());
+    secondDelivery.reject(new Error("chat unavailable"));
+    await vi.waitFor(() => expect(mocks.reject).toHaveBeenCalledTimes(2));
+    expect(
+      module.useVoiceConversationStore.getState().latestFinalizedTranscriptKey,
+    ).toBe("prior-transcript");
+    unsubscribe();
+  });
+
   it("records a recovered transcript before its subscriber settles", async () => {
     const delivery = deferred<void>();
     const transcript = {
