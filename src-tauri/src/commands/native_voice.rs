@@ -919,6 +919,7 @@ async fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus 
     }
 }
 
+#[cfg(target_os = "macos")]
 fn needs_macos_status(session_active: bool, parakeet_available: bool) -> bool {
     !session_active && !parakeet_available
 }
