@@ -190,14 +190,15 @@ export function useAgentBuilderCoordinator({
         }
 
         void (async () => {
-          // Same shape as the Back guard: the moment the discard decision is
-          // final, move the user into the new builder so the old editor is
-          // gone while its file is being deleted, then close the old chat.
+          // This path is only reachable from the Agents view, so no editor for
+          // the old draft is on screen while it is discarded. Starting the
+          // replacement builder is async (it resolves a provider/model first),
+          // so it runs after the untouched draft is gone rather than racing it.
           const outcome = await discardUntouchedDraftAgentSession(session.id, {
             closeSession,
-            onBeforeDiscard: startBuilderSession,
           });
           if (outcome === "discarded") {
+            startBuilderSession();
             return;
           }
 
