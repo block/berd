@@ -704,6 +704,18 @@ const berdRehypePlugins: NonNullable<
 ];
 
 function strikethroughFromPlugin(cutoff: number) {
+  const structureParents = new Set([
+    "dl",
+    "menu",
+    "ol",
+    "select",
+    "table",
+    "tbody",
+    "tfoot",
+    "thead",
+    "tr",
+    "ul",
+  ]);
   const wrap = (node: MarkdownHastNode): MarkdownHastNode => ({
     type: "element",
     tagName: "del",
@@ -718,7 +730,12 @@ function strikethroughFromPlugin(cutoff: number) {
     for (const child of node.children) {
       const start = child.position?.start.offset;
       const end = child.position?.end.offset;
-      if (child.type === "element" && start !== undefined && cutoff <= start) {
+      if (
+        child.type === "element" &&
+        start !== undefined &&
+        cutoff <= start &&
+        !structureParents.has(node.tagName ?? "")
+      ) {
         children.push(wrap(child));
         continue;
       }
@@ -851,6 +868,7 @@ export const MessageResponse = memo(
           {...streamdownLayoutPending.layoutPendingAttributes}
         >
           <Streamdown
+            key={strikethroughFrom ?? "normal"}
             className={cn(
               "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
               className,
@@ -887,6 +905,7 @@ export const MessageResponse = memo(
     prevProps.children === nextProps.children &&
     nextProps.isAnimating === prevProps.isAnimating &&
     nextProps.mode === prevProps.mode &&
+    nextProps.strikethroughFrom === prevProps.strikethroughFrom &&
     nextProps.codeRenderers === prevProps.codeRenderers,
 );
 

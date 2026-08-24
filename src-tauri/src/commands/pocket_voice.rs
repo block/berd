@@ -212,20 +212,17 @@ impl PlaybackDeliveryLedger {
         if frames == 0 {
             return;
         }
-        // The speed processor can retain a tail between text segments. The
-        // previous segment is final only once output for its successor arrives.
-        if self.segments.len() > 1 {
-            let previous = self.segments.len() - 2;
-            self.segments[previous].2 = true;
-        }
-        if let Some((_, total, _)) = self.segments.last_mut() {
-            *total = total.saturating_add(frames);
+        if let Some((_, total, synthesis_complete)) = self.segments.last_mut() {
+            if !*synthesis_complete {
+                *total = total.saturating_add(frames);
+            }
             self.pieces.push(frames);
         }
     }
 
-    fn complete_segment(&mut self) {
-        if let Some((_, _, synthesis_complete)) = self.segments.last_mut() {
+    fn complete_segment(&mut self, final_total_frames: u64) {
+        if let Some((_, total, synthesis_complete)) = self.segments.last_mut() {
+            *total = (*total).max(final_total_frames);
             *synthesis_complete = true;
         }
     }
@@ -2055,7 +2052,6 @@ fn run_pocket_voice_stream(
                             .map_err(|error| format!("signal Pocket playback start: {error}"))?;
                     }
                 }
-                delivery_ledger.complete_segment();
             }
             Ok(PocketStreamCommand::Finish) => {
                 if !synthesize_pocket_stream_ready(
@@ -2094,7 +2090,6 @@ fn run_pocket_voice_stream(
                         );
                     }
                 }
-                delivery_ledger.complete_segment();
                 while !player.empty() {
                     if !active.load(Ordering::SeqCst) {
                         let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
@@ -2181,6 +2176,7 @@ fn synthesize_pocket_stream_ready(
         }
         let text = text.trim().to_string();
         delivery_ledger.begin_segment(text.clone());
+        let output_start = speed_processor.expected_output_frames();
         let mut callback_error = None;
         let completed =
             engine.synth_chunk_streaming(&text, style, STREAMING_EMIT_FRAMES, &mut |samples| {
@@ -2237,6 +2233,10 @@ fn synthesize_pocket_stream_ready(
             player.stop();
             return Ok(false);
         }
+        let final_total_frames = speed_processor
+            .expected_output_frames()
+            .saturating_sub(output_start) as u64;
+        delivery_ledger.complete_segment(final_total_frames);
     }
     Ok(true)
 }
@@ -2396,10 +2396,11 @@ mod tests {
         let mut ledger = PlaybackDeliveryLedger::default();
         ledger.begin_segment("First sentence.".to_string());
         ledger.append_frames(4_800);
+        assert!(!ledger.snapshot(1, 0).segments[0].synthesis_complete);
+        ledger.complete_segment(4_800);
         ledger.begin_segment("Second sentence.".to_string());
-        let before_second_audio = ledger.snapshot(1, 0);
-        assert!(!before_second_audio.segments[0].synthesis_complete);
         ledger.append_frames(4_800);
+        ledger.complete_segment(4_800);
 
         // One source has completed and the next is 50 ms in. The 100 ms
         // output-latency allowance leaves 3,600 safely delivered frames in
@@ -2410,7 +2411,7 @@ mod tests {
         assert!(progress.segments[0].synthesis_complete);
         assert_eq!(progress.segments[1].played_frames, 0);
         assert_eq!(progress.segments[1].total_frames, 4_800);
-        assert!(!progress.segments[1].synthesis_complete);
+        assert!(progress.segments[1].synthesis_complete);
     }
 
     #[test]

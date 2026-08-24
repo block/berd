@@ -91,6 +91,10 @@ impl StreamingSpeedProcessor {
         Ok(self.trim_and_count(output[0].as_slice()))
     }
 
+    pub(super) fn expected_output_frames(&self) -> usize {
+        stretched_len(self.total_input, self.speed)
+    }
+
     pub(super) fn finish(&mut self) -> Result<Vec<f32>, String> {
         if self.stretch.is_none() {
             return Ok(Vec::new());

@@ -241,7 +241,10 @@ function applyInterruptionEstimate(
     const start = spans.at(0)?.start ?? 0;
     const end = spans.at(-1)?.end ?? start;
     if (estimate.cutoff >= end && end > start) {
-      setTargetSpeech(utterance.sessionId, target, { status: "spoken" });
+      setTargetSpeech(utterance.sessionId, target, {
+        status: "spoken",
+        spokenThrough: end - start,
+      });
       continue;
     }
     if (estimate.cutoff <= start) {
@@ -653,10 +656,21 @@ export function startNativeAssistantSpeech(
             currentSpeech?.interruptionCause ??
             interruptionCauseByMessage.get(message.id) ??
             "voiceStopped";
-          if (currentSpeech?.status !== "interrupted") {
-            setTargetSpeech(sessionId, target, { status: "notSpoken" });
-          }
           const spokenThrough = currentSpeech?.spokenThrough ?? 0;
+          if (currentSpeech?.status !== "interrupted") {
+            setTargetSpeech(
+              sessionId,
+              target,
+              spokenThrough > 0
+                ? {
+                    status: "interrupted",
+                    spokenThrough,
+                    confidence: currentSpeech?.confidence ?? "medium",
+                    interruptionCause,
+                  }
+                : { status: "notSpoken" },
+            );
+          }
           recordPlaybackNotice(
             sessionId,
             slot,

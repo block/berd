@@ -735,6 +735,72 @@ describe("MessageBubble", () => {
     expect(block?.querySelector("del")).not.toHaveTextContent("One. Two");
   });
 
+  it("updates the strike when unchanged text becomes interrupted", () => {
+    const text = "One. Two. Three.";
+    const { container, rerender } = render(
+      <MessageBubble
+        message={assistantMessage([
+          { type: "text", text, speech: { status: "speaking" } },
+        ])}
+      />,
+    );
+    expect(container.querySelector("del")).toBeNull();
+
+    rerender(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text,
+            speech: {
+              status: "interrupted",
+              spokenThrough: "One. Two".length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    expect(container.querySelector("del")).toHaveTextContent(". Three.");
+  });
+
+  it("keeps required list and table children structurally valid", () => {
+    const text =
+      "- Heard item\n- Unheard item\n\n| Name |\n| --- |\n| Heard |\n| Unheard |";
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text,
+            speech: {
+              status: "interrupted",
+              spokenThrough: "- Heard item".length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const list = container.querySelector("ul");
+    expect([...list!.children].every((child) => child.tagName === "LI")).toBe(
+      true,
+    );
+    expect(list?.children[1]?.querySelector("del")).toHaveTextContent(
+      "Unheard item",
+    );
+    const table = container.querySelector("table");
+    expect(table).toBeInTheDocument();
+    expect(table?.querySelector("tbody")?.parentElement).toBe(table);
+    expect(
+      [...(table?.querySelector("tbody")?.children ?? [])].every(
+        (child) => child.tagName === "TR",
+      ),
+    ).toBe(true);
+  });
+
   it("strikes every paragraph after the estimated interruption cutoff", () => {
     const { container } = render(
       <MessageBubble

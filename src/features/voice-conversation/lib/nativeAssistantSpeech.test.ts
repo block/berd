@@ -704,6 +704,55 @@ describe("native assistant speech stream", () => {
     });
   });
 
+  it("preserves a fully spoken prefix when text arrives after interruption", async () => {
+    startNativeAssistantSpeech("session-1", vi.fn());
+    useChatStore
+      .getState()
+      .setMessages("session-1", [
+        assistant([{ type: "text", text: "One. Two." }]),
+      ]);
+    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
+    const streamId = mocks.start.mock.calls[0]?.[0] as string;
+
+    useVoiceConversationStore.setState({ userSpeaking: true });
+    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    mocks.streamHandler?.({
+      streamId,
+      state: "interrupted",
+      error: null,
+      delivery: {
+        segments: [
+          {
+            text: "One. Two.",
+            playedFrames: 1_000,
+            totalFrames: 1_000,
+            synthesisComplete: true,
+          },
+        ],
+      },
+    });
+
+    useVoiceConversationStore.setState({ userSpeaking: false });
+    useChatStore
+      .getState()
+      .appendStreamingText("session-1", "assistant-1", " Three.");
+    await vi.waitFor(() => {
+      expect(
+        useChatStore.getState().messagesBySession["session-1"]?.[0]?.content[0],
+      ).toMatchObject({
+        speech: {
+          status: "interrupted",
+          spokenThrough: "One. Two.".length,
+        },
+      });
+    });
+
+    const notice = takeVoicePlaybackNotices("session-1") ?? "";
+    expect(notice.match(/\[voice: tts-delivery-failed\]/g)).toHaveLength(1);
+    expect(notice).toContain('"spokenText":"One. Two."');
+    expect(notice).toContain('"unspokenText":" Three."');
+  });
+
   it("bounds spoken and unspoken excerpts in the model delivery notice", async () => {
     const text = `${"spoken ".repeat(100)}${"unspoken ".repeat(100)}`;
     startNativeAssistantSpeech("session-1", vi.fn());
