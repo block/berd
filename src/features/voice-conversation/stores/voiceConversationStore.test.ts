@@ -442,6 +442,40 @@ describe("voice conversation store lifecycle ordering", () => {
     expect(mocks.stopForReplacement).toHaveBeenCalledWith(active, "session-c");
   });
 
+  it.each([
+    "resolves",
+    "rejects",
+  ] as const)("preserves a competing handoff winner when stale status refresh %s", async (refreshOutcome) => {
+    const store = await loadStore();
+    const active = status("running", 2, "session-a");
+    const staleReplacement = deferred<VoiceConversationStatus>();
+    const winner = status("running", 4, "session-c");
+    store.setState({ status: active, uiState: "listening" });
+    mocks.stopForReplacement.mockReturnValue(staleReplacement.promise);
+    if (refreshOutcome === "resolves") {
+      mocks.getStatus.mockResolvedValue(winner);
+    } else {
+      mocks.getStatus.mockRejectedValue(new Error("status unavailable"));
+    }
+
+    const replacingWithB = store
+      .getState()
+      .stopForReplacement(active, "session-b");
+    store.setState({
+      status: winner,
+      uiState: "agent-speaking",
+      error: "session C playback warning",
+    });
+    staleReplacement.reject(new Error("session B handoff failed"));
+
+    await expect(replacingWithB).rejects.toThrow("session B handoff failed");
+    expect(store.getState()).toMatchObject({
+      status: winner,
+      uiState: "agent-speaking",
+      error: "session C playback warning",
+    });
+  });
+
   it("refreshes a stale foreign renderer before choosing a call action", async () => {
     const store = await loadStore();
     store.setState({

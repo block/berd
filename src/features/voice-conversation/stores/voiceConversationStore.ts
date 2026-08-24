@@ -728,14 +728,39 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
         const message = error instanceof Error ? error.message : String(error);
         try {
           const status = await getVoiceConversationStatus();
-          set((state) =>
-            status.revision >= state.status.revision
+          set((state) => {
+            const foreignWinner =
+              status.sessionId !== null &&
+              status.sessionId !== activeStatus.sessionId &&
+              status.sessionId !== targetSessionId;
+            if (foreignWinner) {
+              if (
+                state.status.sessionId === status.sessionId &&
+                state.status.revision === status.revision &&
+                state.status.lifecycle === status.lifecycle
+              ) {
+                return state;
+              }
+              return {
+                status,
+                uiState: uiStateForStatus(status),
+                microphoneMuted: status.microphoneMuted,
+                error: null,
+              };
+            }
+            return status.revision >= state.status.revision
               ? { status, uiState: "error", error: message }
-              : state,
-          );
+              : state;
+          });
           await reconcileVoiceConversationMicrophone(get().status);
         } catch {
-          set({ uiState: "error", error: message });
+          set((state) =>
+            state.status.sessionId !== null &&
+            state.status.sessionId !== activeStatus.sessionId &&
+            state.status.sessionId !== targetSessionId
+              ? state
+              : { uiState: "error", error: message },
+          );
         }
         throw error;
       }
