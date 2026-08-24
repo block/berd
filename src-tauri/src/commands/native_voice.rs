@@ -721,12 +721,6 @@ impl SttPipeline {
         }
         #[cfg(target_os = "macos")]
         {
-            if !mac_speech::status()?.model_installed {
-                return Err(
-                    "Download the macOS speech recognition model before starting a call."
-                        .to_string(),
-                );
-            }
             let (audio_tx, audio_rx) = mpsc::sync_channel(AUDIO_QUEUE_DEPTH);
             let (event_tx, event_rx) = tokio_mpsc::channel(64);
             let shutdown = Arc::new(AtomicBool::new(false));
@@ -866,20 +860,31 @@ async fn shutdown_pipeline(mut pipeline: SttPipeline) {
     }
 }
 
-fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
-    let runtime = state
-        .runtime
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
+async fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
+    let (session_id, owner_window_label, revision) = {
+        let runtime = state
+            .runtime
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        (
+            runtime.session_id.clone(),
+            runtime
+                .owner
+                .as_ref()
+                .map(|owner| owner.window_label.clone()),
+            runtime.revision,
+        )
+    };
     let parakeet_available = parakeet_model_dir(app).is_ok();
     #[cfg(target_os = "macos")]
-    let macos_available = mac_speech::status()
+    let macos_available = mac_speech::status_async()
+        .await
         .map(|status| status.model_installed)
         .unwrap_or(false);
     #[cfg(not(target_os = "macos"))]
     let macos_available = false;
     let (available, unavailable_reason) =
-        if runtime.session_id.is_some() || parakeet_available || macos_available {
+        if session_id.is_some() || parakeet_available || macos_available {
             (true, None)
         } else {
             (
@@ -890,27 +895,24 @@ fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
     NativeVoiceStatus {
         available,
         unavailable_reason,
-        lifecycle: if runtime.session_id.is_some() {
+        lifecycle: if session_id.is_some() {
             Lifecycle::Running
         } else {
             Lifecycle::Stopped
         },
-        session_id: runtime.session_id.clone(),
-        owner_window_label: runtime
-            .owner
-            .as_ref()
-            .map(|owner| owner.window_label.clone()),
+        session_id,
+        owner_window_label,
         microphone_muted: state.microphone_is_muted(),
-        revision: runtime.revision,
+        revision,
     }
 }
 
 #[tauri::command]
-pub fn get_native_voice_conversation_status(
+pub async fn get_native_voice_conversation_status(
     app: AppHandle,
     state: State<'_, NativeVoiceState>,
 ) -> NativeVoiceStatus {
-    status(&app, &state)
+    status(&app, &state).await
 }
 
 #[tauri::command]
@@ -1038,6 +1040,13 @@ pub async fn start_native_voice_conversation(
     let session_id = session_id.trim().to_string();
     if session_id.is_empty() || session_id.len() > 256 {
         return Err("session id must be between 1 and 256 bytes".to_string());
+    }
+    if input_backend == VoiceInputBackend::Macos
+        && !mac_speech::status_async().await?.model_installed
+    {
+        return Err(
+            "Download the macOS speech recognition model before starting a call.".to_string(),
+        );
     }
     let window_label = webview_window.label().to_string();
     let owner_id = native_owner_id(&session_id);
@@ -1348,11 +1357,11 @@ pub async fn start_native_voice_conversation(
             }
         }
     });
-    Ok(status(&app, &state))
+    Ok(status(&app, &state).await)
 }
 
 #[tauri::command]
-pub fn set_native_voice_microphone_muted(
+pub async fn set_native_voice_microphone_muted(
     app: AppHandle,
     state: State<'_, NativeVoiceState>,
     capture: State<'_, VoiceCaptureState>,
@@ -1378,7 +1387,7 @@ pub fn set_native_voice_microphone_muted(
             apply,
         )?;
     }
-    Ok(status(&app, &state))
+    Ok(status(&app, &state).await)
 }
 
 #[tauri::command]
@@ -1423,7 +1432,7 @@ pub async fn stop_native_voice_conversation(
             .stop_active_for_lifecycle(&app, &capture, &session_id, expected_revision)
             .await?;
     }
-    Ok(status(&app, &state))
+    Ok(status(&app, &state).await)
 }
 
 #[tauri::command]
@@ -2099,9 +2108,6 @@ fn forward_macos_events(
     let mut finished = false;
     while let Ok(event) = events.try_recv() {
         match event {
-            // Earshot owns activity so Apple's volatile text cannot make
-            // barge-in timing depend on recognition latency.
-            mac_speech::RecognitionEvent::Interim => {}
             mac_speech::RecognitionEvent::Final(text) => {
                 let text = text.trim().to_string();
                 if text.is_empty() {

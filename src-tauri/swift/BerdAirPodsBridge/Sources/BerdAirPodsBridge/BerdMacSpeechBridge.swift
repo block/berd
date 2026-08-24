@@ -4,7 +4,6 @@ import Foundation
 @preconcurrency import Speech
 
 // Stable event values consumed by the Rust bridge.
-private let interimEvent: Int32 = 0
 private let finalEvent: Int32 = 1
 private let finishedEvent: Int32 = 2
 private let failedEvent: Int32 = 3
@@ -36,6 +35,7 @@ private enum BridgeError: LocalizedError {
     case conversion(String)
     case inputClosed
     case inputOverrun
+    case statusTimedOut
     case finishTimedOut
 
     var errorDescription: String? {
@@ -48,6 +48,7 @@ private enum BridgeError: LocalizedError {
         case .conversion(let detail): "Could not convert macOS speech input: \(detail)"
         case .inputClosed: "The macOS speech input stream is closed."
         case .inputOverrun: "macOS speech recognition could not keep up with microphone input."
+        case .statusTimedOut: "Apple speech recognition status did not respond before its deadline."
         case .finishTimedOut: "macOS speech recognition did not finish before its deadline."
         }
     }
@@ -82,6 +83,7 @@ private func wait<Value>(
 
 private func wait<Value>(
     until deadline: DispatchTime,
+    timeoutError: BridgeError,
     _ operation: @escaping @Sendable () async throws -> Value
 ) throws -> Value {
     let semaphore = DispatchSemaphore(value: 0)
@@ -92,7 +94,7 @@ private func wait<Value>(
         semaphore.signal()
     }
     guard semaphore.wait(timeout: deadline) == .success else {
-        throw BridgeError.finishTimedOut
+        throw timeoutError
     }
     return try box.take()
 }
@@ -112,12 +114,10 @@ private func setError(
 
 private struct SpeechStatus: Encodable {
     let supported: Bool
-    let requestedLocale: String
     let locale: String?
     let localeSupported: Bool
     let modelStatus: String
     let ready: Bool
-    let sampleRate: Double?
 }
 
 @available(macOS 26.0, *)
@@ -130,7 +130,7 @@ private func speechTranscriber(for locale: Locale) -> SpeechTranscriber {
     SpeechTranscriber(
         locale: locale,
         transcriptionOptions: [],
-        reportingOptions: [.volatileResults],
+        reportingOptions: [],
         attributeOptions: [.audioTimeRange]
     )
 }
@@ -153,12 +153,10 @@ private func describe(_ status: AssetInventory.Status) -> String {
 
 @available(macOS 26.0, *)
 private func status(for requested: Locale) async -> SpeechStatus {
-    let requestedID = requested.identifier(.bcp47)
     guard let locale = await resolve(requested) else {
         return SpeechStatus(
-            supported: true, requestedLocale: requestedID, locale: nil,
-            localeSupported: false, modelStatus: "unsupported", ready: false,
-            sampleRate: nil
+            supported: true, locale: nil, localeSupported: false,
+            modelStatus: "unsupported", ready: false
         )
     }
     let transcriber = speechTranscriber(for: locale)
@@ -167,12 +165,10 @@ private func status(for requested: Locale) async -> SpeechStatus {
     let ready = format != nil
     return SpeechStatus(
         supported: true,
-        requestedLocale: requestedID,
         locale: locale.identifier(.bcp47),
         localeSupported: true,
         modelStatus: ready ? "installed" : describe(inventory),
-        ready: ready,
-        sampleRate: format?.sampleRate
+        ready: ready
     )
 }
 
@@ -295,7 +291,8 @@ private final class SpeechSession: @unchecked Sendable {
                         let text = String(result.text.characters)
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !text.isEmpty else { continue }
-                        self.emit(result.isFinal ? finalEvent : interimEvent, text: text)
+                        guard result.isFinal else { continue }
+                        self.emit(finalEvent, text: text)
                     }
                     self?.taskCompleted()
                 } catch is CancellationError { self?.taskCompleted() }
@@ -377,7 +374,7 @@ private final class SpeechSession: @unchecked Sendable {
         }
         guard shouldFinish else { return }
         do {
-            try wait(until: deadline) {
+            try wait(until: deadline, timeoutError: .finishTimedOut) {
                 [analyzer] in try await analyzer.finalizeAndFinishThroughEndOfInput()
             }
         } catch {
@@ -474,16 +471,20 @@ public func berdMacSTTStatusJSON(
     let requested = locale(from: identifier)
     let value: SpeechStatus
     if #available(macOS 26.0, *) {
-        do { value = try wait { await status(for: requested) } }
+        do {
+            value = try wait(
+                until: .now() + 5,
+                timeoutError: .statusTimedOut
+            ) { await status(for: requested) }
+        }
         catch {
             setError(errorOut, error.localizedDescription)
             return nil
         }
     } else {
         value = SpeechStatus(
-            supported: false, requestedLocale: requested.identifier,
-            locale: nil, localeSupported: false, modelStatus: "unsupported",
-            ready: false, sampleRate: nil
+            supported: false, locale: nil, localeSupported: false,
+            modelStatus: "unsupported", ready: false
         )
     }
     do {

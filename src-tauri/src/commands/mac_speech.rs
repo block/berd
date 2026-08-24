@@ -47,7 +47,6 @@ mod bridge {
 
     #[derive(Debug)]
     pub enum RecognitionEvent {
-        Interim,
         Final(String),
         Finished,
         Failed(String),
@@ -162,7 +161,6 @@ mod bridge {
         let text = (!text.is_null())
             .then(|| unsafe { CStr::from_ptr(text).to_string_lossy().into_owned() });
         let event = match code {
-            0 => RecognitionEvent::Interim,
             1 => RecognitionEvent::Final(text.unwrap_or_default()),
             2 => RecognitionEvent::Finished,
             3 => RecognitionEvent::Failed(
@@ -274,6 +272,12 @@ pub fn status() -> Result<MacSpeechStatus, String> {
     }
 }
 
+pub async fn status_async() -> Result<MacSpeechStatus, String> {
+    tauri::async_runtime::spawn_blocking(status)
+        .await
+        .map_err(|error| format!("read macOS speech status task failed: {error}"))?
+}
+
 #[cfg(any(target_os = "macos", test))]
 fn terminal_install_failure(
     current_status: Result<MacSpeechStatus, String>,
@@ -288,15 +292,15 @@ fn terminal_install_failure(
 }
 
 #[cfg(target_os = "macos")]
-fn emit_terminal_install_failure(app: &AppHandle, error: String) -> String {
-    let next = terminal_install_failure(status(), error.clone());
+async fn emit_terminal_install_failure(app: &AppHandle, error: String) -> String {
+    let next = terminal_install_failure(status_async().await, error.clone());
     let _ = app.emit(STATUS_EVENT, next);
     error
 }
 
 #[tauri::command]
-pub fn get_mac_speech_status() -> Result<MacSpeechStatus, String> {
-    status()
+pub async fn get_mac_speech_status() -> Result<MacSpeechStatus, String> {
+    status_async().await
 }
 
 #[tauri::command]
@@ -339,15 +343,15 @@ pub async fn install_mac_speech_model(app: AppHandle) -> Result<MacSpeechStatus,
             Ok(result) => result,
             Err(error) => {
                 let error = format!("install macOS speech model task failed: {error}");
-                return Err(emit_terminal_install_failure(&app, error));
+                return Err(emit_terminal_install_failure(&app, error).await);
             }
         };
         if let Err(error) = result {
-            return Err(emit_terminal_install_failure(&app, error));
+            return Err(emit_terminal_install_failure(&app, error).await);
         }
-        let mut next = match status() {
+        let mut next = match status_async().await {
             Ok(next) => next,
-            Err(error) => return Err(emit_terminal_install_failure(&app, error)),
+            Err(error) => return Err(emit_terminal_install_failure(&app, error).await),
         };
         next.revision = STATUS_REVISION.fetch_add(1, Ordering::AcqRel) + 1;
         let _ = app.emit(STATUS_EVENT, next.clone());
