@@ -1,8 +1,10 @@
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getDefaultVoiceInterruptionPreference,
   getVoiceInterruptionPreference,
   setVoiceInterruptionPreference,
+  useVoiceInterruptionPreference,
 } from "./voiceInterruptionPreference";
 
 describe("voice interruption preference", () => {
@@ -81,5 +83,37 @@ describe("voice interruption preference", () => {
       mode: "allowInterruptions",
       sensitivity: "more",
     });
+  });
+
+  it("accepts a same-value cross-window storage event after a failed write", () => {
+    const { result, unmount } = renderHook(() =>
+      useVoiceInterruptionPreference(),
+    );
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+
+    act(() => {
+      setVoiceInterruptionPreference({
+        mode: "preventFeedback",
+        sensitivity: "less",
+      });
+    });
+    expect(result.current.mode).toBe("preventFeedback");
+    setItem.mockRestore();
+
+    act(() => {
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: "goose:voice-interruption-preference",
+          newValue: null,
+        }),
+      );
+    });
+    expect(result.current).toMatchObject({
+      mode: "automatic",
+      sensitivity: "balanced",
+    });
+    unmount();
   });
 });
