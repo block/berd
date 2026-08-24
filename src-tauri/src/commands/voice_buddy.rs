@@ -183,6 +183,8 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     .skip_taskbar(true)
     .focused(false)
     .visible(false);
+    #[cfg(target_os = "macos")]
+    let builder = builder.focusable(false).accept_first_mouse(true);
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
     let window = builder.build().map_err(|error| error.to_string())?;
