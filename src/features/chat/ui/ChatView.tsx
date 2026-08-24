@@ -65,7 +65,10 @@ import { useVoiceConversationController } from "@/features/voice-conversation/ho
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "@/features/voice-conversation/hooks/useMacSpeechSetup";
 import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
-import { useVoiceInputPreference } from "@/features/voice-conversation/lib/voiceInputPreference";
+import {
+  isMacSpeechAvailable,
+  useVoiceInputPreference,
+} from "@/features/voice-conversation/lib/voiceInputPreference";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
 import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
@@ -225,7 +228,7 @@ export function ChatView({
   const pocketVoiceSetup = usePocketVoiceSetup(capabilities.voiceConversation);
   const macSpeechSetup = useMacSpeechSetup(capabilities.voiceConversation);
   const voiceInput = useVoiceInputPreference(
-    macSpeechSetup.status?.supported ?? (macSpeechSetup.loading ? null : false),
+    isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
   const voiceOutput = useVoiceOutputPreference();
   const siriVoiceSetup = useSiriVoiceSetup(

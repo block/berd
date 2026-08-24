@@ -236,7 +236,10 @@ import {
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "@/features/voice-conversation/hooks/useMacSpeechSetup";
 import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
-import { useVoiceInputPreference } from "@/features/voice-conversation/lib/voiceInputPreference";
+import {
+  isMacSpeechAvailable,
+  useVoiceInputPreference,
+} from "@/features/voice-conversation/lib/voiceInputPreference";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
 import {
   isVoiceSetupReady,
@@ -736,8 +739,10 @@ export function AppShell({
     capabilities.voiceConversation,
   );
   const globalVoiceInput = useVoiceInputPreference(
-    globalMacSpeechSetup.status?.supported ??
-      (globalMacSpeechSetup.loading ? null : false),
+    isMacSpeechAvailable(
+      globalMacSpeechSetup.status,
+      globalMacSpeechSetup.loading,
+    ),
   );
   const globalVoiceOutput = useVoiceOutputPreference();
   const globalSiriVoiceSetup = useSiriVoiceSetup(

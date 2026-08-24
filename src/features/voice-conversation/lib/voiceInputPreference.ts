@@ -1,4 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react";
+import type { MacSpeechStatus } from "../api/macSpeech";
 
 export type VoiceInputBackend = "parakeet" | "macos";
 
@@ -20,12 +21,20 @@ export function getStoredVoiceInputBackend(): VoiceInputBackend | null {
 
 export function resolveVoiceInputBackend(
   stored: VoiceInputBackend | null,
-  macSpeechSupported: boolean | null,
+  macSpeechAvailable: boolean | null,
 ): VoiceInputBackend | null {
-  if (macSpeechSupported === null) return null;
+  if (macSpeechAvailable === null) return null;
   if (stored === "parakeet") return "parakeet";
-  if (stored === "macos" && macSpeechSupported) return "macos";
-  return macSpeechSupported ? "macos" : "parakeet";
+  if (stored === "macos" && macSpeechAvailable) return "macos";
+  return macSpeechAvailable ? "macos" : "parakeet";
+}
+
+export function isMacSpeechAvailable(
+  status: Pick<MacSpeechStatus, "supported" | "localeSupported"> | null,
+  loading: boolean,
+): boolean | null {
+  if (!status) return loading ? null : false;
+  return status.supported && status.localeSupported;
 }
 
 const listeners = new Set<() => void>();
@@ -68,13 +77,13 @@ export function setVoiceInputBackend(backend: VoiceInputBackend): void {
   window.dispatchEvent(new CustomEvent(CHANGED_EVENT, { detail: { backend } }));
 }
 
-export function useVoiceInputPreference(macSpeechSupported: boolean | null) {
+export function useVoiceInputPreference(macSpeechAvailable: boolean | null) {
   const stored = useSyncExternalStore(
     subscribe,
     getStoredVoiceInputBackend,
     () => null,
   );
-  const backend = resolveVoiceInputBackend(stored, macSpeechSupported);
+  const backend = resolveVoiceInputBackend(stored, macSpeechAvailable);
   const setBackend = useCallback((value: VoiceInputBackend) => {
     setVoiceInputBackend(value);
   }, []);

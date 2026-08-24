@@ -15,7 +15,10 @@ import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import { useSiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
-import { useVoiceInputPreference } from "../lib/voiceInputPreference";
+import {
+  isMacSpeechAvailable,
+  useVoiceInputPreference,
+} from "../lib/voiceInputPreference";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
 import { useVoiceOutputPreference } from "../lib/voiceOutputPreference";
 import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
@@ -54,7 +57,7 @@ export function VoiceSettings() {
   const setup = usePocketVoiceSetup();
   const macSpeechSetup = useMacSpeechSetup();
   const input = useVoiceInputPreference(
-    macSpeechSetup.status?.supported ?? (macSpeechSetup.loading ? null : false),
+    isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
   const output = useVoiceOutputPreference();
   const siriSetup = useSiriVoiceSetup(output.backend === "siri");
@@ -146,7 +149,8 @@ export function VoiceSettings() {
                 <SelectItem value="parakeet">
                   {t("voice.backendParakeet")}
                 </SelectItem>
-                {macSpeechSetup.status?.supported ? (
+                {macSpeechSetup.status?.supported &&
+                macSpeechSetup.status.localeSupported ? (
                   <SelectItem value="macos">
                     {t("voice.backendMacSpeech")}
                   </SelectItem>

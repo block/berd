@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   getStoredVoiceInputBackend,
+  isMacSpeechAvailable,
   resolveVoiceInputBackend,
   setVoiceInputBackend,
 } from "./voiceInputPreference";
@@ -12,11 +13,17 @@ describe("voice input preference", () => {
     expect(resolveVoiceInputBackend(null, null)).toBeNull();
   });
 
+  it("treats an unsupported current locale as unavailable", () => {
+    expect(
+      isMacSpeechAvailable({ supported: true, localeSupported: false }, false),
+    ).toBe(false);
+  });
+
   it("defaults to native macOS speech when it is supported", () => {
     expect(resolveVoiceInputBackend(null, true)).toBe("macos");
   });
 
-  it("defaults to Parakeet when native macOS speech is unsupported", () => {
+  it("defaults to Parakeet when native macOS speech is unavailable", () => {
     expect(resolveVoiceInputBackend(null, false)).toBe("parakeet");
   });
 
