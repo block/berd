@@ -578,6 +578,96 @@ describe("voice transcript delivery coordination", () => {
     expect(stopForReplacement).toHaveBeenCalledTimes(2);
   });
 
+  it("allows a new session to replace a running call while the prior start settles", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const runningA = {
+      ...stopped,
+      lifecycle: "running" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      revision: 2,
+    };
+    const stoppedA = {
+      ...stopped,
+      revision: 3,
+    };
+    const runningB = {
+      ...runningA,
+      sessionId: "session-b",
+      revision: 4,
+    };
+    const startA = deferred<typeof runningA>();
+    const refreshStatus = vi
+      .fn()
+      .mockImplementation(() =>
+        Promise.resolve(useVoiceConversationStore.getState().status),
+      );
+    const start = vi
+      .fn()
+      .mockReturnValueOnce(startA.promise)
+      .mockResolvedValueOnce(runningB);
+    const stopForReplacement = vi.fn().mockResolvedValue(stoppedA);
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus,
+      stopForReplacement,
+      start,
+    });
+    const sessionA = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-a",
+        onSend: vi.fn().mockResolvedValue(true),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+
+    let startRequest!: Promise<void>;
+    act(() => {
+      startRequest = Promise.resolve(sessionA.result.current.onToggle());
+    });
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    sessionA.unmount();
+    act(() => {
+      useVoiceConversationStore.setState({
+        status: runningA,
+        uiState: "listening",
+      });
+    });
+
+    const sessionB = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-b",
+        onSend: vi.fn().mockResolvedValue(true),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: vi.fn(),
+      }),
+    );
+    await act(async () => {
+      await sessionB.result.current.onToggle();
+    });
+
+    startA.resolve(runningA);
+    await startRequest;
+    expect(stopForReplacement).toHaveBeenCalledWith(runningA, "session-b");
+    expect(start).toHaveBeenCalledTimes(2);
+  });
+
   it("keeps an ineligible foreign session from controlling the active call", () => {
     expect(
       canReplaceActiveVoiceConversation({

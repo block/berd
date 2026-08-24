@@ -29,7 +29,6 @@ interface VoiceSendRoute {
 // view for its bound session is mounted.
 let activeSendRoute: VoiceSendRoute | null = null;
 let deliveryInitialized = false;
-let operationInFlight = false;
 
 export function createVoiceTranscriptDeliveryQueue() {
   const queues = new Map<string, Promise<void>>();
@@ -612,6 +611,7 @@ export function useVoiceConversationController({
   const clearRequestedStart = useVoiceConversationStore(
     (state) => state.clearRequestedStart,
   );
+  const operationInFlightRef = useRef(false);
   const previousPocketReady = useRef(pocketReady);
 
   useEffect(() => {
@@ -840,8 +840,8 @@ export function useVoiceConversationController({
   const canToggle = sessionEligible && (!pocketReady || status.available);
 
   const toggle = useCallback(async () => {
-    if (operationInFlight) return;
-    operationInFlight = true;
+    if (operationInFlightRef.current) return;
+    operationInFlightRef.current = true;
     try {
       const currentStatus = await refreshStatus().catch(() => {
         addErrorNotification(
@@ -912,7 +912,7 @@ export function useVoiceConversationController({
 
       await startCurrentConversation();
     } finally {
-      operationInFlight = false;
+      operationInFlightRef.current = false;
     }
   }, [
     canToggle,
