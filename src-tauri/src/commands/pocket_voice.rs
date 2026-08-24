@@ -2186,9 +2186,7 @@ fn run_pocket_voice_stream(
                 delivery: Some(delivery),
             });
         }
-        release_pocket_assistant_speech_if_idle(&pending_audio_sources, &assistant_speech);
         let command = receiver.recv_timeout(Duration::from_millis(20));
-        release_pocket_assistant_speech_if_idle(&pending_audio_sources, &assistant_speech);
         match command {
             Ok(PocketStreamCommand::Append(text)) => {
                 pending.push_str(&text);
@@ -2422,18 +2420,6 @@ fn capture_before_stop(
     let delivery = snapshot();
     stop();
     delivery
-}
-
-#[cfg(target_os = "macos")]
-fn release_pocket_assistant_speech_if_idle(
-    pending_audio_sources: &AtomicUsize,
-    assistant_speech: &Mutex<Option<(u64, AssistantSpeechGuard)>>,
-) {
-    if let Ok(mut assistant_speech) = assistant_speech.lock() {
-        if pending_audio_sources.load(Ordering::Acquire) == 0 {
-            assistant_speech.take();
-        }
-    }
 }
 
 #[cfg(target_os = "macos")]
@@ -3216,24 +3202,6 @@ mod tests {
             VoiceInterruptionMode::PreventFeedback,
             Some("AirPods Pro"),
         ));
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn playback_completion_releases_policy_independently_of_stream_commands() {
-        let native_voice = NativeVoiceState::default();
-        let assistant_speech = Mutex::new(Some((
-            1,
-            native_voice.begin_assistant_speech(InterruptionSensitivity::Balanced, true),
-        )));
-        let pending_audio_sources = AtomicUsize::new(1);
-
-        release_pocket_assistant_speech_if_idle(&pending_audio_sources, &assistant_speech);
-        assert!(assistant_speech.lock().expect("assistant speech").is_some());
-
-        pending_audio_sources.store(0, Ordering::Release);
-        release_pocket_assistant_speech_if_idle(&pending_audio_sources, &assistant_speech);
-        assert!(assistant_speech.lock().expect("assistant speech").is_none());
     }
 
     #[cfg(target_os = "macos")]
