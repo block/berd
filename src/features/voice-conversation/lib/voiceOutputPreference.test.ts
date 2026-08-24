@@ -53,6 +53,7 @@ describe("voice output preference", () => {
 
   it("keeps an explicit Pocket choice when local storage rejects the write", () => {
     setPlatform("Macintosh");
+    window.localStorage.setItem("goose:voice-output-backend", "siri");
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("storage unavailable");
     });

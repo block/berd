@@ -19,13 +19,12 @@ function normalize(value: unknown): VoiceOutputBackend {
 
 export function getVoiceOutputBackend(): VoiceOutputBackend {
   if (typeof window === "undefined") return getDefaultVoiceOutputBackend();
+  if (inMemoryBackend) return inMemoryBackend;
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY);
-    return stored === null
-      ? (inMemoryBackend ?? getDefaultVoiceOutputBackend())
-      : normalize(stored);
+    return stored === null ? getDefaultVoiceOutputBackend() : normalize(stored);
   } catch {
-    return inMemoryBackend ?? getDefaultVoiceOutputBackend();
+    return getDefaultVoiceOutputBackend();
   }
 }
 
