@@ -15,7 +15,7 @@ let package = Package(
         .target(
             name: "BerdObjCExceptionCatch",
             publicHeadersPath: "include"
-        )
+        ),
         .target(
             name: "BerdAirPodsBridge",
             dependencies: ["BerdObjCExceptionCatch"],
@@ -24,6 +24,6 @@ let package = Package(
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("Speech"),
             ]
-        ),
+        )
     ]
 )
