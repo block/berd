@@ -891,9 +891,9 @@
     "macSpeechSystemLocale": "the system language",
     "interruptionMode": "While Berd is speaking",
     "interruptionModeDescriptions": {
-      "allowInterruptions": "Keeps listening so you can interrupt on any output device.",
-      "automatic": "Listens through recognized headphones and prevents feedback on other outputs.",
-      "preventFeedback": "Pauses speech recognition until Berd finishes speaking."
+      "allowInterruptions": "Berd keeps listening on every audio device. You can interrupt, but speaker audio may be mistaken for your voice.",
+      "automatic": "Allows interruptions on most audio devices. If the device name contains “speaker,” Berd pauses listening to prevent feedback.",
+      "preventFeedback": "Berd pauses listening on every audio device. This prevents feedback, but you can’t interrupt."
     },
     "interruptionModes": {
       "allowInterruptions": "Allow interruptions",
@@ -906,7 +906,8 @@
       "more": "More"
     },
     "interruptionSensitivity": "Interruption sensitivity",
-    "interruptionSensitivityDescription": "Choose how easily your voice interrupts Berd.",
+    "interruptionSensitivityDescription": "Choose how easily your voice interrupts Berd while it is speaking.",
+    "interruptionSensitivityUnavailable": "Sensitivity is available when speech input is Parakeet.",
     "modelInstalled": "Installed",
     "modelInstalledSize": "Installed · {{size}} on disk",
     "modelMissingSize": "Not installed · {{size}} download",

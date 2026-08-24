@@ -92,9 +92,9 @@ impl InterruptionSensitivity {
     #[cfg(any(test, target_os = "macos"))]
     pub(crate) fn vad_threshold(self) -> f32 {
         match self {
-            Self::Less => 0.65,
-            Self::Balanced => VAD_THRESHOLD,
-            Self::More => 0.35,
+            Self::Less => 0.8,
+            Self::Balanced => 0.65,
+            Self::More => VAD_THRESHOLD,
         }
     }
 }
@@ -1198,6 +1198,8 @@ pub async fn start_native_voice_conversation(
                 model_dir,
                 Arc::clone(&state.input_muted),
                 Arc::clone(&state.input_mute_epoch),
+                Arc::clone(&state.assistant_speaking),
+                Arc::clone(&state.assistant_vad_threshold),
             )
         }),
         VoiceInputBackend::Macos => SttPipeline::new_macos(
@@ -2855,8 +2857,11 @@ mod tests {
             active_vad_threshold(&state.assistant_speaking, &state.assistant_vad_threshold),
             VAD_THRESHOLD
         );
+        assert_eq!(InterruptionSensitivity::More.vad_threshold(), 0.5);
+        assert_eq!(InterruptionSensitivity::Balanced.vad_threshold(), 0.65);
+        assert_eq!(InterruptionSensitivity::Less.vad_threshold(), 0.8);
         assert!(InterruptionSensitivity::Less.vad_threshold() > VAD_THRESHOLD);
-        assert!(InterruptionSensitivity::More.vad_threshold() < VAD_THRESHOLD);
+        assert_eq!(InterruptionSensitivity::More.vad_threshold(), VAD_THRESHOLD);
     }
 
     #[test]

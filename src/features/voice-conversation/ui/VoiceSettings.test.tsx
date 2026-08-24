@@ -187,14 +187,28 @@ describe("VoiceSettings", () => {
     const view = renderWithProviders(<VoiceSettings />);
 
     expect(
-      screen.getByRole("combobox", { name: "While Berd is speaking" }),
-    ).toHaveAccessibleDescription(
-      "Listens through recognized headphones and prevents feedback on other outputs.",
-    );
+      screen.getByRole("radiogroup", { name: "While Berd is speaking" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /^Automatic/ })).toBeChecked();
+    expect(
+      screen.getByText(
+        "Allows interruptions on most audio devices. If the device name contains “speaker,” Berd pauses listening to prevent feedback.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Berd keeps listening on every audio device. You can interrupt, but speaker audio may be mistaken for your voice.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Berd pauses listening on every audio device. This prevents feedback, but you can’t interrupt.",
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("combobox", { name: "Interruption sensitivity" }),
     ).toHaveAccessibleDescription(
-      "Choose how easily your voice interrupts Berd.",
+      "Choose how easily your voice interrupts Berd while it is speaking.",
     );
 
     interruptionState.mode = "allowInterruptions";
@@ -210,13 +224,28 @@ describe("VoiceSettings", () => {
     renderWithProviders(<VoiceSettings />);
 
     expect(
-      screen.getByRole("combobox", { name: "While Berd is speaking" }),
-    ).toHaveAccessibleDescription(
-      "Pauses speech recognition until Berd finishes speaking.",
-    );
+      screen.getByRole("radio", { name: /^Prevent feedback/ }),
+    ).toBeChecked();
     expect(
       screen.queryByRole("combobox", { name: "Interruption sensitivity" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("explains that Earshot sensitivity requires Parakeet input", () => {
+    setupState.current = setup(pocketStatus());
+    inputState.backend = "macos";
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByRole("radiogroup", { name: "While Berd is speaking" }),
+    ).toBeInTheDocument();
+    const sensitivity = screen.getByRole("combobox", {
+      name: "Interruption sensitivity",
+    });
+    expect(sensitivity).toBeDisabled();
+    expect(sensitivity).toHaveAccessibleDescription(
+      "Sensitivity is available when speech input is Parakeet.",
+    );
   });
 
   it("uses one accessible speech output heading for the backend picker", () => {

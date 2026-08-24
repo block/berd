@@ -579,15 +579,6 @@ pub(crate) fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
     output_device.is_some_and(|name| name.to_lowercase().contains("speaker"))
 }
 
-fn output_device_allows_interruptions(output_device: Option<&str>) -> bool {
-    output_device.is_some_and(|name| {
-        let name = name.to_lowercase();
-        ["airpods", "earbud", "earphone", "headphone", "headset"]
-            .iter()
-            .any(|private_output| name.contains(private_output))
-    })
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum VoiceInterruptionMode {
@@ -602,7 +593,7 @@ pub(crate) fn should_suppress_capture(
     output_device: Option<&str>,
 ) -> bool {
     match mode {
-        VoiceInterruptionMode::Automatic => !output_device_allows_interruptions(output_device),
+        VoiceInterruptionMode::Automatic => output_device_uses_speakers(output_device),
         VoiceInterruptionMode::AllowInterruptions => false,
         VoiceInterruptionMode::PreventFeedback => true,
     }
@@ -3214,11 +3205,11 @@ mod tests {
             VoiceInterruptionMode::Automatic,
             Some("USB Headphones"),
         ));
-        assert!(should_suppress_capture(
+        assert!(!should_suppress_capture(
             VoiceInterruptionMode::Automatic,
             Some("Studio Display Audio"),
         ));
-        assert!(should_suppress_capture(
+        assert!(!should_suppress_capture(
             VoiceInterruptionMode::Automatic,
             None,
         ));
