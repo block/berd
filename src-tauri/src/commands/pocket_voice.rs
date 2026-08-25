@@ -1528,6 +1528,7 @@ fn finish_playback(playback: &std::sync::Mutex<PlaybackRuntime>, completed: &Arc
     }
 }
 
+#[cfg(target_os = "macos")]
 fn run_with_playback_cleanup<T>(
     playback: &std::sync::Mutex<PlaybackRuntime>,
     active: &Arc<AtomicBool>,
