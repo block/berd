@@ -2638,7 +2638,7 @@ describe("native assistant speech stream", () => {
     vi.useFakeTimers();
     try {
       mocks.backend = "siri";
-      let siriVoice = {
+      const initialSiriVoice = {
         name: "Samantha",
         language: "en-US",
       };
@@ -2646,7 +2646,7 @@ describe("native assistant speech stream", () => {
         "session-1",
         vi.fn(),
         undefined,
-        () => siriVoice,
+        () => initialSiriVoice,
       );
       useChatStore
         .getState()
@@ -2671,13 +2671,19 @@ describe("native assistant speech stream", () => {
         error: null,
         delivery: { segments: [] },
       });
-      siriVoice = { name: "Eddy", language: "en-GB" };
+      const refreshedSiriVoice = { name: "Eddy", language: "en-GB" };
+      startNativeAssistantSpeech(
+        "session-1",
+        vi.fn(),
+        undefined,
+        () => refreshedSiriVoice,
+      );
       useVoiceConversationStore.setState({ userSpeaking: false });
       await vi.advanceTimersByTimeAsync(250);
       await vi.runAllTimersAsync();
 
       expect(mocks.siriStart).toHaveBeenCalledTimes(2);
-      expect(mocks.siriStart.mock.calls[1]?.[1]).toEqual(siriVoice);
+      expect(mocks.siriStart.mock.calls[1]?.[1]).toEqual(refreshedSiriVoice);
       expect(mocks.siriAppend).toHaveBeenCalledWith(
         mocks.siriStart.mock.calls[1]?.[0],
         "Siri resumes.",

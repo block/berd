@@ -104,6 +104,7 @@ let activeSpeechSessionId: string | null = null;
 let activeSpeechRevision: number | null = null;
 let activeUtterance: ActiveUtterance | null = null;
 let stopActiveVoice: () => Promise<boolean> = stopPocketVoice;
+let getActiveSiriVoice: () => SiriVoiceSelection | null = () => null;
 let activityReportQueue = Promise.resolve();
 let startRequestGeneration = 0;
 const pendingNotices = new Map<string, Map<string, string>>();
@@ -808,6 +809,7 @@ export function stopNativeAssistantSpeech(awaitTerminalDelivery = false): void {
   }
   activeSpeechSessionId = null;
   activeSpeechRevision = null;
+  getActiveSiriVoice = () => null;
 }
 
 export function captureNativeAssistantSpeechHistory(
@@ -820,9 +822,12 @@ export function startNativeAssistantSpeech(
   sessionId: string,
   onFailure: SpeechFailureHandler,
   initialMessages: Message[] = captureNativeAssistantSpeechHistory(sessionId),
-  getSiriVoice: () => SiriVoiceSelection | null = () => null,
+  getSiriVoice?: () => SiriVoiceSelection | null,
 ): void {
-  if (activeSpeechSessionId === sessionId) return;
+  if (activeSpeechSessionId === sessionId) {
+    if (getSiriVoice) getActiveSiriVoice = getSiriVoice;
+    return;
+  }
   const startRequest = ++startRequestGeneration;
   const interruptedUtterance = activeUtterance;
   if (
@@ -848,13 +853,14 @@ export function startNativeAssistantSpeech(
           sessionId,
           onFailure,
           initialMessages,
-          getSiriVoice,
+          getActiveSiriVoice,
         );
       });
     };
     return;
   }
   stopNativeAssistantSpeech();
+  getActiveSiriVoice = getSiriVoice ?? (() => null);
   activeSpeechSessionId = sessionId;
   activeSpeechRevision = useVoiceConversationStore.getState().status.revision;
   const activeGeneration = generation;
@@ -866,7 +872,7 @@ export function startNativeAssistantSpeech(
             interruptionMode: VoiceInterruptionMode,
             interruptionSensitivity: VoiceInterruptionSensitivity,
           ) => {
-            const siriVoice = getSiriVoice();
+            const siriVoice = getActiveSiriVoice();
             if (!siriVoice) {
               return Promise.reject(
                 new Error("No installed Siri voice is available for playback"),
