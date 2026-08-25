@@ -31,9 +31,9 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[cfg(target_os = "macos")]
-use super::pocket_audio_player::PocketAudioPlayer;
-#[cfg(target_os = "macos")]
 use super::native_voice::AssistantSpeechGuard;
+#[cfg(target_os = "macos")]
+use super::pocket_audio_player::PocketAudioPlayer;
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     voice_capture::VoiceCaptureState,
