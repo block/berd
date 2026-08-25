@@ -35,7 +35,7 @@ pub fn get_microphone_permission_status() -> MicrophonePermissionStatus {
         // SAFETY: Berd's minimum macOS version is 14.0, where
         // AVAudioApplication and recordPermission are public API.
         let application = unsafe { AVAudioApplication::sharedInstance() };
-        return status_from_record_permission(unsafe { application.recordPermission() });
+        status_from_record_permission(unsafe { application.recordPermission() })
     }
 
     #[cfg(not(target_os = "macos"))]
