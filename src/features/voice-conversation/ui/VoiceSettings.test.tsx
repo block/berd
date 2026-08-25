@@ -1,5 +1,4 @@
 import { screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/shared/i18n";
 import { renderWithProviders } from "@/test/render";
@@ -9,10 +8,6 @@ import type { MacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import type { SiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
-import {
-  useVoiceConversationStore,
-  VOICE_CONVERSATION_OFF_STATUS,
-} from "../stores/voiceConversationStore";
 import { VoiceSettings } from "./VoiceSettings";
 
 const setupState = vi.hoisted(() => ({
@@ -48,11 +43,6 @@ const outputState = vi.hoisted(() => ({
 }));
 const interruptionState = vi.hoisted(() => ({
   mode: "automatic" as "automatic" | "allowInterruptions" | "preventFeedback",
-  sensitivity: "balanced" as "less" | "balanced" | "more",
-  speechSensitivity: "more" as "less" | "balanced" | "more",
-  setSensitivity: vi.fn(),
-  setSpeechSensitivity: vi.fn(),
-  resetSensitivities: vi.fn(),
 }));
 
 vi.mock("../hooks/usePocketVoiceSetup", () => ({
@@ -83,9 +73,6 @@ vi.mock("../lib/voiceInterruptionPreference", () => ({
   useVoiceInterruptionPreference: () => ({
     ...interruptionState,
     setMode: vi.fn(),
-    setSensitivity: interruptionState.setSensitivity,
-    setSpeechSensitivity: interruptionState.setSpeechSensitivity,
-    resetSensitivities: interruptionState.resetSensitivities,
   }),
 }));
 
@@ -191,21 +178,12 @@ describe("VoiceSettings", () => {
       install: vi.fn(),
     };
     interruptionState.mode = "automatic";
-    interruptionState.sensitivity = "balanced";
-    interruptionState.speechSensitivity = "more";
-    interruptionState.setSensitivity.mockReset();
-    interruptionState.setSpeechSensitivity.mockReset();
-    interruptionState.resetSensitivities.mockReset();
-    useVoiceConversationStore.setState({
-      status: VOICE_CONVERSATION_OFF_STATUS,
-    });
     siriSetupState.current = siriSetup();
   });
 
-  it("shows interruption modes and advanced detection thresholds", async () => {
-    const user = userEvent.setup();
+  it("shows interruption modes without VAD controls", () => {
     setupState.current = setup(pocketStatus());
-    const view = renderWithProviders(<VoiceSettings />);
+    renderWithProviders(<VoiceSettings />);
 
     expect(
       screen.getByRole("radiogroup", { name: "Interruptions" }),
@@ -234,101 +212,9 @@ describe("VoiceSettings", () => {
     expect(
       screen.queryByText("Interruption sensitivity"),
     ).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Advanced…" }));
-    const dialog = screen.getByRole("dialog", {
-      name: "Advanced voice detection",
-    });
-    expect(dialog).toHaveClass("max-w-lg");
     expect(
-      dialog.querySelector('[data-slot="dialog-body"]'),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("combobox", { name: "Interruption sensitivity" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("combobox", {
-        name: "Speech detection sensitivity",
-      }),
-    ).toHaveTextContent("More sensitive · 0.50 threshold");
-    const resetButton = screen.getByRole("button", {
-      name: "Reset to defaults",
-    });
-    expect(resetButton).toHaveClass("sm:mr-auto");
-    await user.click(resetButton);
-    expect(interruptionState.resetSensitivities).toHaveBeenCalledOnce();
-
-    view.unmount();
-  });
-
-  it("defers speech sensitivity changes until an active conversation stops", async () => {
-    const user = userEvent.setup();
-    setupState.current = setup(pocketStatus());
-    useVoiceConversationStore.setState({
-      status: {
-        ...VOICE_CONVERSATION_OFF_STATUS,
-        available: true,
-        lifecycle: "running",
-        sessionId: "session-1",
-        ownerWindowLabel: "main",
-        revision: 1,
-      },
-    });
-    renderWithProviders(<VoiceSettings />);
-
-    await user.click(screen.getByRole("button", { name: "Advanced…" }));
-
-    expect(
-      screen.getByRole("combobox", { name: "Speech detection sensitivity" }),
-    ).toBeDisabled();
-    expect(
-      screen.getByText("Stop Voice Conversation to change this setting."),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Reset to defaults" }),
-    ).toBeDisabled();
-  });
-
-  it("localizes the advanced detection dialog close control", async () => {
-    const user = userEvent.setup();
-    setupState.current = setup(pocketStatus());
-    await i18n.changeLanguage("es");
-    renderWithProviders(<VoiceSettings />);
-
-    await user.click(screen.getByRole("button", { name: "Avanzado…" }));
-
-    expect(screen.getByRole("button", { name: "Cerrar" })).toBeInTheDocument();
-  });
-
-  it("hides interruption sensitivity when interruptions are prevented", async () => {
-    const user = userEvent.setup();
-    setupState.current = setup(pocketStatus());
-    interruptionState.mode = "preventFeedback";
-    renderWithProviders(<VoiceSettings />);
-
-    expect(
-      screen.getByRole("radio", { name: /^Prevent feedback/ }),
-    ).toBeChecked();
-    expect(
-      screen.getByRole("button", { name: "Advanced…" }),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Advanced…" }));
-    expect(
-      screen.getByRole("combobox", { name: "Speech detection sensitivity" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("combobox", { name: "Interruption sensitivity" }),
+      screen.queryByRole("button", { name: "Advanced…" }),
     ).not.toBeInTheDocument();
-  });
-
-  it("keeps Advanced voice detection available for macOS speech input", () => {
-    setupState.current = setup(pocketStatus());
-    inputState.backend = "macos";
-    renderWithProviders(<VoiceSettings />);
-
-    expect(
-      screen.getByRole("radiogroup", { name: "Interruptions" }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Advanced…" })).toBeEnabled();
   });
 
   it("uses one accessible speech output heading for the backend picker", () => {

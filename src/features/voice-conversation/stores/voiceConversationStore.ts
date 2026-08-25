@@ -18,7 +18,6 @@ import {
   type VoiceConversationStatus,
 } from "../api/voiceConversation";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
-import type { VoiceInterruptionSensitivity } from "../lib/voiceInterruptionPreference";
 
 export type VoiceConversationUiState =
   | "off"
@@ -59,7 +58,6 @@ interface VoiceConversationStore {
     sessionId: string,
     inputBackend?: VoiceInputBackend,
     foregroundGeneration?: number,
-    speechDetectionSensitivity?: VoiceInterruptionSensitivity,
   ) => Promise<VoiceConversationStatus>;
   stop: () => Promise<VoiceConversationStatus>;
   stopForReplacement: (
@@ -630,12 +628,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
       return status;
     },
 
-    start: (
-      sessionId,
-      inputBackend = "parakeet",
-      foregroundGeneration,
-      speechDetectionSensitivity,
-    ) => {
+    start: (sessionId, inputBackend = "parakeet", foregroundGeneration) => {
       if (voiceStartBlocks.has(sessionId)) {
         return Promise.reject(
           new Error("Voice cannot start while this chat is being archived."),
@@ -650,7 +643,6 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             sessionId,
             inputBackend,
             foregroundGeneration,
-            speechDetectionSensitivity,
           );
           set((state) =>
             shouldApplyResponseRevision(state.status, status.revision) ||

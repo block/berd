@@ -5,19 +5,17 @@ export type VoiceInterruptionMode =
   | "allowInterruptions"
   | "preventFeedback";
 export type VoiceInterruptionSensitivity = "less" | "balanced" | "more";
+export const FIXED_INTERRUPTION_SENSITIVITY: VoiceInterruptionSensitivity =
+  "less";
 
 export interface VoiceInterruptionPreference {
   mode: VoiceInterruptionMode;
-  sensitivity: VoiceInterruptionSensitivity;
-  speechSensitivity: VoiceInterruptionSensitivity;
 }
 
 const STORAGE_KEY = "goose:voice-interruption-preference";
 const CHANGED_EVENT = "goose:voice-interruption-preference-changed";
 const DEFAULT_PREFERENCE: VoiceInterruptionPreference = {
   mode: "automatic",
-  sensitivity: "less",
-  speechSensitivity: "more",
 };
 const DEFAULT_SNAPSHOT = JSON.stringify(DEFAULT_PREFERENCE);
 let volatilePreference:
@@ -37,19 +35,7 @@ function normalize(value: unknown): VoiceInterruptionPreference {
     candidate.mode === "preventFeedback"
       ? candidate.mode
       : DEFAULT_PREFERENCE.mode;
-  const sensitivity =
-    candidate.sensitivity === "less" ||
-    candidate.sensitivity === "balanced" ||
-    candidate.sensitivity === "more"
-      ? candidate.sensitivity
-      : DEFAULT_PREFERENCE.sensitivity;
-  const speechSensitivity =
-    candidate.speechSensitivity === "less" ||
-    candidate.speechSensitivity === "balanced" ||
-    candidate.speechSensitivity === "more"
-      ? candidate.speechSensitivity
-      : DEFAULT_PREFERENCE.speechSensitivity;
-  return { mode, sensitivity, speechSensitivity };
+  return { mode };
 }
 
 export function getDefaultVoiceInterruptionPreference(): VoiceInterruptionPreference {
@@ -165,36 +151,5 @@ export function useVoiceInterruptionPreference() {
       mode,
     });
   }, []);
-  const setSensitivity = useCallback(
-    (sensitivity: VoiceInterruptionSensitivity) => {
-      setVoiceInterruptionPreference({
-        ...getVoiceInterruptionPreference(),
-        sensitivity,
-      });
-    },
-    [],
-  );
-  const setSpeechSensitivity = useCallback(
-    (speechSensitivity: VoiceInterruptionSensitivity) => {
-      setVoiceInterruptionPreference({
-        ...getVoiceInterruptionPreference(),
-        speechSensitivity,
-      });
-    },
-    [],
-  );
-  const resetSensitivities = useCallback(() => {
-    setVoiceInterruptionPreference({
-      ...getVoiceInterruptionPreference(),
-      sensitivity: DEFAULT_PREFERENCE.sensitivity,
-      speechSensitivity: DEFAULT_PREFERENCE.speechSensitivity,
-    });
-  }, []);
-  return {
-    ...preference,
-    setMode,
-    setSensitivity,
-    setSpeechSensitivity,
-    resetSensitivities,
-  };
+  return { ...preference, setMode };
 }

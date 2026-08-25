@@ -132,7 +132,6 @@ describe("voice conversation API", () => {
         rendererId: "renderer-test",
         rendererEpoch: 7,
         foregroundGeneration: 0,
-        speechDetectionSensitivity: "more",
       },
     );
     expect(mocks.stopMicrophone).toHaveBeenCalledOnce();

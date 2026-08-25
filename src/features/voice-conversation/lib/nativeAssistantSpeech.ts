@@ -25,6 +25,7 @@ import {
 } from "../api/siriVoice";
 import { setVoiceConversationAssistantSpeaking } from "../api/voiceConversation";
 import {
+  FIXED_INTERRUPTION_SENSITIVITY,
   getVoiceInterruptionPreference,
   type VoiceInterruptionMode,
   type VoiceInterruptionSensitivity,
@@ -1148,7 +1149,7 @@ export function startNativeAssistantSpeech(
         activeSpeechRevision ??
         useVoiceConversationStore.getState().status.revision,
       interruptionMode: interruptionPreference.mode,
-      interruptionSensitivity: interruptionPreference.sensitivity,
+      interruptionSensitivity: FIXED_INTERRUPTION_SENSITIVITY,
       targets: [target],
       targetSpans: [],
       text: "",

@@ -28,7 +28,6 @@ import { useVoiceOutputPreference } from "../lib/voiceOutputPreference";
 import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
 import { MacSpeechSettings } from "./MacSpeechSettings";
 import { SiriVoiceSettings } from "./SiriVoiceSettings";
-import { AdvancedVoiceDetectionDialog } from "./AdvancedVoiceDetectionDialog";
 
 const INTERRUPTION_MODES: VoiceInterruptionMode[] = [
   "automatic",
@@ -255,19 +254,6 @@ export function VoiceSettings() {
             );
           })}
         </RadioGroup>
-        <div className="flex min-w-0 flex-col gap-4 pt-2 sm:flex-row sm:items-center">
-          <div className="min-w-0 flex-1">
-            <h2 className="text-sm font-medium">
-              {t("voice.advancedDetection.rowTitle")}
-            </h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {t("voice.advancedDetection.rowDescription")}
-            </p>
-          </div>
-          <div className="w-full min-w-0 sm:w-auto sm:shrink-0">
-            <AdvancedVoiceDetectionDialog />
-          </div>
-        </div>
       </section>
     </SettingsPage>
   );

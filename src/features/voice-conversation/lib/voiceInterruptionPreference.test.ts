@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  FIXED_INTERRUPTION_SENSITIVITY,
   getDefaultVoiceInterruptionPreference,
   getVoiceInterruptionPreference,
   setVoiceInterruptionPreference,
@@ -9,34 +10,27 @@ describe("voice interruption preference", () => {
   beforeEach(() => window.localStorage.clear());
   afterEach(() => vi.restoreAllMocks());
 
-  it("defaults to automatic with a less sensitive barge-in threshold", () => {
+  it("defaults to automatic", () => {
+    expect(FIXED_INTERRUPTION_SENSITIVITY).toBe("less");
     expect(getDefaultVoiceInterruptionPreference()).toEqual({
       mode: "automatic",
-      sensitivity: "less",
-      speechSensitivity: "more",
     });
     expect(getVoiceInterruptionPreference()).toEqual({
       mode: "automatic",
-      sensitivity: "less",
-      speechSensitivity: "more",
     });
   });
 
-  it("persists the selected mode and sensitivities", () => {
+  it("persists the selected mode", () => {
     setVoiceInterruptionPreference({
       mode: "allowInterruptions",
-      sensitivity: "more",
-      speechSensitivity: "less",
     });
 
     expect(getVoiceInterruptionPreference()).toEqual({
       mode: "allowInterruptions",
-      sensitivity: "more",
-      speechSensitivity: "less",
     });
   });
 
-  it("falls back field-by-field for malformed storage", () => {
+  it("ignores retired sensitivity fields in storage", () => {
     window.localStorage.setItem(
       "goose:voice-interruption-preference",
       JSON.stringify({ mode: "preventFeedback", sensitivity: "maximum" }),
@@ -44,8 +38,6 @@ describe("voice interruption preference", () => {
 
     expect(getVoiceInterruptionPreference()).toEqual({
       mode: "preventFeedback",
-      sensitivity: "less",
-      speechSensitivity: "more",
     });
   });
 
@@ -56,14 +48,10 @@ describe("voice interruption preference", () => {
 
     setVoiceInterruptionPreference({
       mode: "preventFeedback",
-      sensitivity: "less",
-      speechSensitivity: "balanced",
     });
 
     expect(getVoiceInterruptionPreference()).toEqual({
       mode: "preventFeedback",
-      sensitivity: "less",
-      speechSensitivity: "balanced",
     });
   });
 
@@ -76,23 +64,17 @@ describe("voice interruption preference", () => {
 
     setVoiceInterruptionPreference({
       mode: "preventFeedback",
-      sensitivity: "less",
-      speechSensitivity: "balanced",
     });
     setItem.mockRestore();
     window.localStorage.setItem(
       "goose:voice-interruption-preference",
       JSON.stringify({
         mode: "allowInterruptions",
-        sensitivity: "more",
-        speechSensitivity: "less",
       }),
     );
 
     expect(getVoiceInterruptionPreference()).toEqual({
       mode: "allowInterruptions",
-      sensitivity: "more",
-      speechSensitivity: "less",
     });
   });
 });

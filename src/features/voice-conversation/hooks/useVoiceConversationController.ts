@@ -24,7 +24,6 @@ import {
   type PendingVoiceTranscript,
 } from "../api/voiceConversation";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
-import { getVoiceInterruptionPreference } from "../lib/voiceInterruptionPreference";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -769,12 +768,7 @@ export function useVoiceConversationController({
     try {
       const foregroundGeneration =
         await confirmVoiceConversationForegroundSession(sessionId);
-      await start(
-        sessionId,
-        inputBackend,
-        foregroundGeneration,
-        getVoiceInterruptionPreference().speechSensitivity,
-      );
+      await start(sessionId, inputBackend, foregroundGeneration);
       startAssistantSpeech(assistantSpeechHistory);
     } catch (startError) {
       const backendStatus = useVoiceConversationStore.getState().status;
