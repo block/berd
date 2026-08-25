@@ -19,8 +19,16 @@ pub(crate) struct AdditionalConfigFiles {
 /// Resolve the upstream goose config file path. Matches
 /// `crates/goose/src/config/paths.rs::Paths::config_dir`.
 pub(crate) fn config_path() -> Result<PathBuf, String> {
-    if let Some(root) = validated_path_root(env::var_os(GOOSE_PATH_ROOT_ENV)) {
-        return Ok(root.join("config").join(CONFIG_FILE_NAME));
+    Ok(config_dir()?.join(CONFIG_FILE_NAME))
+}
+
+pub(crate) fn path_root() -> Option<PathBuf> {
+    validated_path_root(env::var_os(GOOSE_PATH_ROOT_ENV))
+}
+
+pub(crate) fn config_dir() -> Result<PathBuf, String> {
+    if let Some(root) = path_root() {
+        return Ok(root.join("config"));
     }
 
     let strategy = choose_app_strategy(AppStrategyArgs {
@@ -30,7 +38,26 @@ pub(crate) fn config_path() -> Result<PathBuf, String> {
     })
     .map_err(|err| format!("Failed to resolve goose config directory: {err}"))?;
 
-    Ok(strategy.config_dir().join(CONFIG_FILE_NAME))
+    Ok(strategy.config_dir())
+}
+
+pub(crate) fn agents_root() -> Result<PathBuf, String> {
+    if let Some(root) = agents_root_from_path_root(path_root()) {
+        return Ok(root);
+    }
+
+    let strategy = choose_app_strategy(AppStrategyArgs {
+        top_level_domain: "Block".to_string(),
+        author: "Block".to_string(),
+        app_name: "goose".to_string(),
+    })
+    .map_err(|err| format!("Failed to resolve goose agents directory: {err}"))?;
+
+    Ok(strategy.home_dir().join(".agents"))
+}
+
+fn agents_root_from_path_root(path_root: Option<PathBuf>) -> Option<PathBuf> {
+    path_root.map(|root| root.join(".agents"))
 }
 
 fn validated_path_root(value: Option<OsString>) -> Option<PathBuf> {
@@ -109,6 +136,16 @@ mod tests {
         assert_eq!(
             validated_path_root(Some(absolute.clone().into_os_string())),
             Some(absolute)
+        );
+    }
+
+    #[test]
+    fn agents_root_uses_goose_path_root() {
+        let root = PathBuf::from("/tmp/goose-root");
+
+        assert_eq!(
+            agents_root_from_path_root(Some(root.clone())),
+            Some(root.join(".agents"))
         );
     }
 }
