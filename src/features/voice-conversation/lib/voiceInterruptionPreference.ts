@@ -16,7 +16,7 @@ const STORAGE_KEY = "goose:voice-interruption-preference";
 const CHANGED_EVENT = "goose:voice-interruption-preference-changed";
 const DEFAULT_PREFERENCE: VoiceInterruptionPreference = {
   mode: "automatic",
-  sensitivity: "balanced",
+  sensitivity: "less",
   speechSensitivity: "more",
 };
 const DEFAULT_SNAPSHOT = JSON.stringify(DEFAULT_PREFERENCE);

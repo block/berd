@@ -30,6 +30,9 @@ describe("DesignSystemView surfaces", () => {
     expect(source).toContain('anatomy: "Card surface"');
     expect(source).toContain('state: "Focus visible"');
     expect(source).toContain('"muted-foreground / 50% opacity"');
+    expect(source).toContain(
+      'presentation === "card" ? "font-medium" : "font-normal"',
+    );
     expect(source).not.toContain(
       'function RadioGroupPage() {\n  return <GenericComponentPage name="Radio Group" />;',
     );

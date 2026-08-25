@@ -35,6 +35,8 @@ export function PocketVoiceSetupContent({
   const pocketInstalled = status?.pocketInstalled ?? status?.installed ?? false;
   const parakeetInstalled =
     status?.parakeetInstalled ?? status?.installed ?? false;
+  const modelName = (model: VoiceModelKind) =>
+    t(model === "pocket" ? "voice.backendPocket" : "voice.backendParakeet");
   const models = [
     {
       model: "pocket" as const,
@@ -99,6 +101,14 @@ export function PocketVoiceSetupContent({
                     destructive
                     size="sm"
                     data-testid={`voice-model-${model}-remove`}
+                    aria-label={`${
+                      setup.removingModel === model ||
+                      status?.removing === model
+                        ? status?.removalQueued
+                          ? t("voice.removeModelQueued")
+                          : t("voice.removingModel")
+                        : t("voice.removeModel")
+                    } · ${modelName(model)}`}
                     leftIcon={<Trash2 />}
                     disabled={
                       setup.removingModel !== null || status?.removing !== null
@@ -117,6 +127,11 @@ export function PocketVoiceSetupContent({
                     variant="outline"
                     size="sm"
                     data-testid={`voice-model-${model}-download`}
+                    aria-label={`${
+                      modelError
+                        ? t("voice.retryDownload")
+                        : t("voice.download")
+                    } · ${modelName(model)}`}
                     leftIcon={<Download />}
                     disabled={setup.loading || setup.removingModel !== null}
                     onClick={() => void setup.installModel(model)}

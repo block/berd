@@ -9,15 +9,15 @@ describe("voice interruption preference", () => {
   beforeEach(() => window.localStorage.clear());
   afterEach(() => vi.restoreAllMocks());
 
-  it("defaults to automatic with the existing VAD thresholds", () => {
+  it("defaults to automatic with a less sensitive barge-in threshold", () => {
     expect(getDefaultVoiceInterruptionPreference()).toEqual({
       mode: "automatic",
-      sensitivity: "balanced",
+      sensitivity: "less",
       speechSensitivity: "more",
     });
     expect(getVoiceInterruptionPreference()).toEqual({
       mode: "automatic",
-      sensitivity: "balanced",
+      sensitivity: "less",
       speechSensitivity: "more",
     });
   });
@@ -44,7 +44,7 @@ describe("voice interruption preference", () => {
 
     expect(getVoiceInterruptionPreference()).toEqual({
       mode: "preventFeedback",
-      sensitivity: "balanced",
+      sensitivity: "less",
       speechSensitivity: "more",
     });
   });

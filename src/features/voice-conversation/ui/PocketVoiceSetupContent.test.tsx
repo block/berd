@@ -66,8 +66,11 @@ describe("PocketVoiceSetupContent", () => {
     expect(screen.getByText(/173.8 MB download/)).toBeInTheDocument();
     expect(screen.getByText(/104.3 MB download/)).toBeInTheDocument();
     expect(
-      screen.getAllByRole("button", { name: "Download model" }),
-    ).toHaveLength(2);
+      screen.getByRole("button", { name: "Download model · Pocket TTS" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Download model · Parakeet STT" }),
+    ).toBeEnabled();
     await userEvent.click(screen.getByTestId("voice-model-pocket-download"));
     await userEvent.click(screen.getByTestId("voice-model-parakeet-download"));
     expect(installModel).toHaveBeenNthCalledWith(1, "pocket");
@@ -94,7 +97,7 @@ describe("PocketVoiceSetupContent", () => {
     expect(screen.getByText("52.2 MB of 104.3 MB")).toBeInTheDocument();
     expect(screen.getAllByRole("progressbar")).toHaveLength(1);
     expect(
-      screen.getAllByRole("button", { name: "Download model" })[0],
+      screen.getByRole("button", { name: "Download model · Pocket TTS" }),
     ).toBeEnabled();
   });
 
@@ -121,7 +124,9 @@ describe("PocketVoiceSetupContent", () => {
       />,
     );
 
-    const remove = screen.getByRole("button", { name: "Remove model" });
+    const remove = screen.getByRole("button", {
+      name: "Remove model · Pocket TTS",
+    });
     expect(remove).toBeEnabled();
     await userEvent.click(remove);
     await userEvent.click(screen.getByRole("button", { name: "Remove model" }));
@@ -195,7 +200,9 @@ describe("PocketVoiceSetupContent", () => {
     expect(screen.getByText(/173.8 MB on disk/)).toBeInTheDocument();
     expect(screen.getByText("network failed")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Retry model download" }),
+      screen.getByRole("button", {
+        name: "Retry model download · Parakeet STT",
+      }),
     ).toBeInTheDocument();
   });
 

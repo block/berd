@@ -4926,7 +4926,7 @@ function RadioGroupPage() {
               {
                 anatomy: presentation === "card" ? "Card label" : "Item label",
                 size: "text-sm",
-                weight: "font-medium",
+                weight: presentation === "card" ? "font-medium" : "font-normal",
               },
               ...(presentation === "card"
                 ? [
