@@ -54,11 +54,11 @@ import {
 } from "@/features/agents/lib/agentTelemetry";
 import { runAgentViewTransition } from "@/features/agents/lib/agentViewTransitions";
 import {
-  deleteDraftAgentSession,
+  deleteDraftAgentSource,
   fileStem,
   isEmptyPlaceholderDraft,
 } from "@/features/agents/lib/agentBuilderSession";
-import { discardAgentBuilderSource } from "@/features/agents/lib/agentBuilderSourceLifecycle";
+import { AgentBuilderSourceNotDraftError } from "@/features/agents/lib/agentBuilderSourceLifecycle";
 import type { GalleryDraft } from "@/features/agents/ui/PersonaGallery";
 import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
 import { isSafePngAvatarDataUrl } from "@/shared/lib/avatarUrl";
@@ -294,22 +294,33 @@ export function AgentsView({
   const handleDeleteDraft = useCallback(
     (draft: GalleryDraft) => {
       const { sessionId, source } = draft;
-      // Run as a gallery mutation so a disk refresh that started before the
-      // delete cannot land afterwards and put the card back.
+      // The delete itself is fenced and re-reads the file; the card removal
+      // rides inside the same mutation so a disk refresh that started before
+      // the delete cannot land between the two and put the card back.
       void mutateGallery(async () => {
-        if (sessionId) {
-          await deleteDraftAgentSession(sessionId, {
-            closeSession: onDeleteDraftSession,
-          });
-        } else {
-          await discardAgentBuilderSource(source.path);
-        }
+        await deleteDraftAgentSource(source.path, {
+          sessionId,
+          closeSession: onDeleteDraftSession,
+        });
         removeDraftSource(source.path);
       }).catch((error) => {
+        // Either way the card was out of date with disk; show what is
+        // actually there. A stale card over a finished agent is not an error
+        // the user caused, so it gets no toast.
+        void refreshFromDisk();
+        if (error instanceof AgentBuilderSourceNotDraftError) {
+          return;
+        }
         toast.error(formatAgentError(error, t("view.deleteFailed")));
       });
     },
-    [mutateGallery, onDeleteDraftSession, removeDraftSource, t],
+    [
+      mutateGallery,
+      onDeleteDraftSession,
+      refreshFromDisk,
+      removeDraftSource,
+      t,
+    ],
   );
 
   useEffect(() => {

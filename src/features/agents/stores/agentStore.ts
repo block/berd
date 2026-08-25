@@ -44,9 +44,12 @@ interface AgentStoreState {
   draftSources: AgentSourceEntry[];
   // Gallery fence. A disk snapshot is only applied if no gallery mutation
   // started or finished while it was in flight, so a slow refresh can never
-  // resurrect something the user just deleted or promoted.
+  // resurrect something the user just deleted or promoted. Snapshots are also
+  // latest-wins: an older listing that resolves after a newer one is dropped,
+  // so a file removed outside the app cannot flicker back.
   galleryRevision: number;
   galleryMutationsInFlight: number;
+  galleryRefreshGeneration: number;
 
   // Agents
   agents: Agent[];
@@ -118,6 +121,7 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   draftSources: [],
   galleryRevision: 0,
   galleryMutationsInFlight: 0,
+  galleryRefreshGeneration: 0,
   agents: [],
   agentsLoading: false,
   providers: [],
@@ -156,10 +160,20 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     })),
 
   refreshGallery: async (fetchGallery) => {
+    const generation = get().galleryRefreshGeneration + 1;
+    set({ galleryRefreshGeneration: generation });
     const revisionAtStart = get().galleryRevision;
     const { personas, drafts } = await fetchGallery();
-    const { galleryRevision, galleryMutationsInFlight } = get();
-    if (revisionAtStart !== galleryRevision || galleryMutationsInFlight !== 0) {
+    const {
+      galleryRevision,
+      galleryMutationsInFlight,
+      galleryRefreshGeneration,
+    } = get();
+    if (
+      revisionAtStart !== galleryRevision ||
+      galleryMutationsInFlight !== 0 ||
+      generation !== galleryRefreshGeneration
+    ) {
       return false;
     }
     set({ personas, draftSources: drafts });

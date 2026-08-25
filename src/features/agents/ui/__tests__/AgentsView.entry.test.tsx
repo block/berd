@@ -137,12 +137,13 @@ vi.mock("@/features/agents/lib/agentTelemetry", () => ({
   trackAgentDeleteCompleted: vi.fn(),
 }));
 
+const mockRefreshFromDisk = vi.fn();
 vi.mock("@/features/agents/hooks/usePersonas", () => ({
   usePersonas: () => ({
     createPersona: mockCreatePersona,
     updatePersona: mockUpdatePersona,
     deletePersona: vi.fn(),
-    refreshFromDisk: vi.fn(),
+    refreshFromDisk: mockRefreshFromDisk,
   }),
 }));
 
@@ -838,6 +839,37 @@ describe("AgentsView entry points", () => {
     await expect(staleRefresh).resolves.toBe(false);
     expect(useAgentStore.getState().draftSources).toEqual([]);
     expect(screen.queryByText("gallery.draft")).not.toBeInTheDocument();
+  });
+
+  it("does not delete a finished agent that now lives where a stale Draft card points", async () => {
+    // The card was photographed while the path held a draft. Since then the
+    // file at that path became a finished agent. Delete must re-read and
+    // refuse, then show what is really on disk.
+    const { deletePersonaSource, readAgentSourceFile } = await import(
+      "@/shared/api/agents"
+    );
+    vi.mocked(readAgentSourceFile).mockResolvedValueOnce({
+      ...mockDraftSource,
+      name: "Constructive Critic",
+      properties: {},
+    });
+    useAgentStore.setState({
+      personas: [persona],
+      draftSources: [mockDraftSource],
+    });
+    useChatSessionStore.setState({ sessions: [] });
+
+    render(<AgentsView onDeleteDraftSession={vi.fn()} />);
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", { name: "gallery.deleteDraftAria" }),
+    );
+
+    await waitFor(() => {
+      expect(mockRefreshFromDisk).toHaveBeenCalled();
+    });
+    expect(deletePersonaSource).not.toHaveBeenCalled();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("does not show a card for an untouched New agent placeholder", () => {

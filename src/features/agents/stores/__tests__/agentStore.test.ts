@@ -46,6 +46,7 @@ describe("agentStore", () => {
       draftSources: [],
       galleryRevision: 0,
       galleryMutationsInFlight: 0,
+      galleryRefreshGeneration: 0,
       agents: [],
       agentsLoading: false,
       activeAgentId: null,
@@ -269,6 +270,23 @@ describe("agentStore", () => {
       const pending = useAgentStore.getState().refreshGallery(listing.fetch);
       listing.resolve({ personas: [], drafts: [draft] });
       await expect(pending).resolves.toBe(true);
+    });
+
+    it("drops an older snapshot that resolves after a newer one (latest wins)", async () => {
+      // The draft file was removed outside the app between two refreshes.
+      // The newer listing (no draft) lands first; the older one (still has
+      // the draft) must not put the card back.
+      const older = deferredListing();
+      const newer = deferredListing();
+      const pendingOlder = useAgentStore.getState().refreshGallery(older.fetch);
+      const pendingNewer = useAgentStore.getState().refreshGallery(newer.fetch);
+
+      newer.resolve({ personas: [], drafts: [] });
+      await expect(pendingNewer).resolves.toBe(true);
+      older.resolve({ personas: [], drafts: [draft] });
+      await expect(pendingOlder).resolves.toBe(false);
+
+      expect(useAgentStore.getState().draftSources).toEqual([]);
     });
   });
 });

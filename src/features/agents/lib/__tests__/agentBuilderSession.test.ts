@@ -20,7 +20,8 @@ const chatState = vi.hoisted(() => ({
   hasMoreSessions: false,
   messagesBySession: {} as Record<string, unknown[]>,
   draftsBySession: {} as Record<string, string>,
-  queuedMessageBySession: {} as Record<string, { text: string }>,
+  queuedMessageBySession: {} as Record<string, unknown[]>,
+  draftAttachmentsBySession: {} as Record<string, unknown[]>,
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -31,6 +32,7 @@ const mocks = vi.hoisted(() => ({
   promotePersonaSource: vi.fn(),
   listPersonaSources: vi.fn(),
   readAgentSourceFile: vi.fn(),
+  updatePersonaSource: vi.fn(),
 }));
 
 const sessionListeners = new Set<() => void>();
@@ -80,6 +82,7 @@ vi.mock("@/features/chat/stores/chatStore", () => ({
       messagesBySession: chatState.messagesBySession,
       draftsBySession: chatState.draftsBySession,
       queuedMessageBySession: chatState.queuedMessageBySession,
+      draftAttachmentsBySession: chatState.draftAttachmentsBySession,
       setSkillDrafts: mocks.setSkillDrafts,
     }),
   },
@@ -91,6 +94,7 @@ vi.mock("@/shared/api/agents", () => ({
   promotePersonaSource: mocks.promotePersonaSource,
   listPersonaSources: mocks.listPersonaSources,
   readAgentSourceFile: mocks.readAgentSourceFile,
+  updatePersonaSource: mocks.updatePersonaSource,
 }));
 
 vi.mock("@/features/runtime-config/defaults", () => ({
@@ -99,7 +103,7 @@ vi.mock("@/features/runtime-config/defaults", () => ({
 }));
 
 import {
-  deleteDraftAgentSession,
+  deleteDraftAgentSource,
   discardDraftAgentSession,
   discardUntouchedDraftAgentSession,
   hasAgentBuilderSessionUserContent,
@@ -107,12 +111,18 @@ import {
   promoteDraft,
   recoverDraftAgent,
   reconcileAgentBuilderSessions,
+  resetAgentBuilderSessionStateForTests,
   saveDraftAgentSession,
   setAgentBuilderSessionLocalEdits,
   setAgentBuilderSessionSaveHandler,
   startAgentBuilderSession,
 } from "../agentBuilderSession";
-import { resetAgentBuilderSourceLifecycleForTests } from "../agentBuilderSourceLifecycle";
+import {
+  AgentBuilderSourceNotDraftError,
+  findAgentBuilderSource,
+  resetAgentBuilderSourceLifecycleForTests,
+  updateAgentBuilderSource,
+} from "../agentBuilderSourceLifecycle";
 import { setStoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 
@@ -167,10 +177,12 @@ describe("agentBuilderSession", () => {
     chatState.messagesBySession = {};
     chatState.draftsBySession = {};
     chatState.queuedMessageBySession = {};
+    chatState.draftAttachmentsBySession = {};
     mocks.createPersonaSource.mockReset();
     mocks.deletePersonaSource.mockReset();
     mocks.promotePersonaSource.mockReset();
     mocks.listPersonaSources.mockReset();
+    mocks.updatePersonaSource.mockReset();
     mocks.readAgentSourceFile.mockReset();
     mocks.readAgentSourceFile.mockImplementation(
       async (_path: string, fallback: unknown) => fallback,
@@ -182,7 +194,7 @@ describe("agentBuilderSession", () => {
     closeSession.mockClear();
     navigateChat.mockClear();
     resetAgentBuilderSourceLifecycleForTests();
-    setAgentBuilderSessionLocalEdits("sess-1", false);
+    resetAgentBuilderSessionStateForTests();
     window.localStorage.clear();
     useAgentStore.getState().setProviders([], false);
   });
@@ -565,14 +577,17 @@ describe("agentBuilderSession", () => {
     expect(mocks.listPersonaSources).not.toHaveBeenCalled();
   });
 
-  it("deleteDraftAgentSession fails before closing when the draft cannot be deleted", async () => {
+  it("deleteDraftAgentSource fails before closing when the draft cannot be deleted", async () => {
     addBuilderSession();
     mocks.listPersonaSources.mockResolvedValue([draftSource]);
     mocks.readAgentSourceFile.mockResolvedValue(draftSource);
     mocks.deletePersonaSource.mockRejectedValue(new Error("disk locked"));
 
     await expect(
-      deleteDraftAgentSession("sess-1", { closeSession }),
+      deleteDraftAgentSource(draftSource.path, {
+        sessionId: "sess-1",
+        closeSession,
+      }),
     ).rejects.toThrow("disk locked");
 
     expect(closeSession).not.toHaveBeenCalled();
@@ -582,9 +597,9 @@ describe("agentBuilderSession", () => {
     );
   });
 
-  it("deleteDraftAgentSession clears a draft whose file was removed outside the app", async () => {
-    // Creating the draft caches it locally; then the file is moved away so
-    // the backend stops listing it and reads fail.
+  it("deleteDraftAgentSource hands an unreadable path to the backend and still closes the session", async () => {
+    // The card's file was moved away so reads fail. The backend decides
+    // whether anything is left to delete; the bound chat closes regardless.
     mocks.createPersonaSource.mockResolvedValue(draftSource);
     await startAgentBuilderSession({}, deps);
     await flushDraftPreparation();
@@ -592,10 +607,14 @@ describe("agentBuilderSession", () => {
     mocks.readAgentSourceFile.mockRejectedValue(
       new Error("Failed to read agent source file"),
     );
+    mocks.deletePersonaSource.mockResolvedValue(undefined);
 
-    await deleteDraftAgentSession("sess-1", { closeSession });
+    await deleteDraftAgentSource(draftSource.path, {
+      sessionId: "sess-1",
+      closeSession,
+    });
 
-    expect(mocks.deletePersonaSource).not.toHaveBeenCalled();
+    expect(mocks.deletePersonaSource).toHaveBeenCalledWith(draftSource.path);
     expect(closeSession).toHaveBeenCalledWith("sess-1");
     expect(mocks.patchSession).toHaveBeenCalledWith(
       "sess-1",
@@ -620,6 +639,53 @@ describe("agentBuilderSession", () => {
       { id: "skill-1", name: "code-review" },
     ]);
     expect(closeSession).toHaveBeenCalledWith("sess-1");
+  });
+
+  it("deleteDraftAgentSource refuses a path that no longer holds a draft", async () => {
+    // A gallery card is a snapshot. If the file at that path has since become
+    // a finished agent, the delete must not go through on the card's say-so.
+    addBuilderSession();
+    const finishedAgent = {
+      ...draftSource,
+      name: "Constructive Critic",
+      properties: {},
+    };
+    mocks.readAgentSourceFile.mockResolvedValue(finishedAgent);
+
+    await expect(
+      deleteDraftAgentSource(draftSource.path, {
+        sessionId: "sess-1",
+        closeSession,
+      }),
+    ).rejects.toBeInstanceOf(AgentBuilderSourceNotDraftError);
+    expect(mocks.deletePersonaSource).not.toHaveBeenCalled();
+    expect(closeSession).not.toHaveBeenCalled();
+  });
+
+  it("findAgentBuilderSource prefers the backend's moved file over an edited cache entry whose file is gone", async () => {
+    // The user edited the draft (so the cache holds a non-placeholder at A),
+    // then renamed the file to B outside the app. The backend lists B; A no
+    // longer reads. The lookup must land on B, not report the draft missing.
+    const editedAtA = { ...draftSource, name: "Constructive Critic" };
+    mocks.updatePersonaSource.mockResolvedValue(editedAtA);
+    await updateAgentBuilderSource(draftSource.path, {
+      name: "Constructive Critic",
+    });
+    const movedToB = {
+      ...editedAtA,
+      path: "/Users/x/.agents/agents/constructive-critic.md",
+    };
+    mocks.listPersonaSources.mockResolvedValue([movedToB]);
+    mocks.readAgentSourceFile.mockImplementation(async (path: string) => {
+      if (path === movedToB.path) {
+        return movedToB;
+      }
+      throw new Error("Failed to read agent source file");
+    });
+
+    await expect(
+      findAgentBuilderSource("sess-1", draftSource.path),
+    ).resolves.toMatchObject({ path: movedToB.path });
   });
 
   it("discardDraftAgentSession follows a draft moved under the same builder session id", async () => {
@@ -903,6 +969,95 @@ describe("agentBuilderSession", () => {
       ).resolves.toBe("discarded");
       expect(mocks.deletePersonaSource).not.toHaveBeenCalled();
       expect(closeSession).toHaveBeenCalledWith("sess-1");
+    });
+
+    it("keeps a draft whose only edit was a setup field that has since saved", async () => {
+      // Picking an avatar or model writes a file that still looks like the
+      // seeded placeholder on disk. The rail reported the edit, then the save
+      // landed and the unsaved flag cleared; the session is still touched.
+      addBuilderSession();
+      mocks.listPersonaSources.mockResolvedValue([draftSource]);
+      mocks.readAgentSourceFile.mockResolvedValue(draftSource);
+      setAgentBuilderSessionLocalEdits("sess-1", true);
+      setAgentBuilderSessionLocalEdits("sess-1", false);
+
+      await expect(
+        discardUntouchedDraftAgentSession("sess-1", { closeSession }),
+      ).resolves.toBe("kept");
+      expect(mocks.deletePersonaSource).not.toHaveBeenCalled();
+      expect(closeSession).not.toHaveBeenCalled();
+    });
+
+    it("keeps a draft when the composer holds only an attachment", async () => {
+      addBuilderSession();
+      mocks.listPersonaSources.mockResolvedValue([draftSource]);
+      mocks.readAgentSourceFile.mockResolvedValue(draftSource);
+      chatState.draftAttachmentsBySession = {
+        "sess-1": [{ kind: "image", id: "att-1" }],
+      };
+
+      await expect(
+        discardUntouchedDraftAgentSession("sess-1", { closeSession }),
+      ).resolves.toBe("kept");
+      expect(mocks.deletePersonaSource).not.toHaveBeenCalled();
+    });
+
+    it("keeps a draft when a queued message carries only an attachment", async () => {
+      addBuilderSession();
+      mocks.listPersonaSources.mockResolvedValue([draftSource]);
+      mocks.readAgentSourceFile.mockResolvedValue(draftSource);
+      chatState.queuedMessageBySession = {
+        "sess-1": [
+          {
+            kind: "transport-ready",
+            recordId: "q-1",
+            payload: { text: "   ", attachments: [{ kind: "file", id: "a" }] },
+          },
+        ],
+      };
+
+      await expect(
+        discardUntouchedDraftAgentSession("sess-1", { closeSession }),
+      ).resolves.toBe("kept");
+      expect(mocks.deletePersonaSource).not.toHaveBeenCalled();
+    });
+
+    it("keeps a draft whose file is listed but cannot be read", async () => {
+      // The listing says "placeholder" but the file itself is unreadable.
+      // Unreadable is not empty; nothing may be deleted on that evidence.
+      addBuilderSession();
+      mocks.listPersonaSources.mockResolvedValue([draftSource]);
+      mocks.readAgentSourceFile.mockRejectedValue(new Error("EBUSY"));
+
+      await expect(
+        discardUntouchedDraftAgentSession("sess-1", { closeSession }),
+      ).resolves.toBe("kept");
+      expect(mocks.deletePersonaSource).not.toHaveBeenCalled();
+      expect(closeSession).not.toHaveBeenCalled();
+    });
+
+    it("closes the live backend session when the builder started under a provisional ID", async () => {
+      // The session was created as "sess-1" and renamed to the backend's ID
+      // while the check ran; the archive has to reach the live ID.
+      chatState.sessions = [
+        {
+          id: "acp-1",
+          clientSessionId: "sess-1",
+          title: "New agent",
+          intent: "build-agent",
+          agentBuilderOpen: true,
+          targetAgentPath: draftSource.path,
+          targetAgentSlug: "draft-sess-1",
+        } as (typeof chatState.sessions)[number],
+      ];
+      mocks.listPersonaSources.mockResolvedValue([draftSource]);
+      mocks.readAgentSourceFile.mockResolvedValue(draftSource);
+      mocks.deletePersonaSource.mockResolvedValue(undefined);
+
+      await expect(
+        discardUntouchedDraftAgentSession("sess-1", { closeSession }),
+      ).resolves.toBe("discarded");
+      expect(closeSession).toHaveBeenCalledWith("acp-1");
     });
   });
 

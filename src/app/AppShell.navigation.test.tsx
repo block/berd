@@ -2063,6 +2063,53 @@ describe("AppShell global navigation", () => {
     expect(mockToastError).toHaveBeenCalledWith("backend down");
   });
 
+  it("stays on Settings when the chat selected underneath it is archived", async () => {
+    // Settings keeps the active chat selected beneath it. Archiving that chat
+    // (for example an untouched agent draft being discarded on the way to
+    // Settings) must not yank the user to Home.
+    const user = userEvent.setup();
+    mockAcpArchiveSession.mockResolvedValueOnce(undefined);
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Active chat",
+          executionTarget: { harnessId: "goose" },
+          workingDir: "~/goose artifacts",
+          createdAt: "2026-06-09T00:00:00.000Z",
+          updatedAt: "2026-06-09T00:00:00.000Z",
+          messageCount: 1,
+        },
+      ],
+      activeSessionId: null,
+    });
+
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(OPEN_SETTINGS_EVENT, {
+          detail: { section: "providers" },
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+    expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
+
+    await user.click(screen.getByRole("button", { name: "Archive session 1" }));
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().activeSessionId).toBeNull();
+    });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+  });
+
   it("removes a pinned chat from Home only after archive succeeds", async () => {
     const user = userEvent.setup();
     const archive = deferred<void>();
