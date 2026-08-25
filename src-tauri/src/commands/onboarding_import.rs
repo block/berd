@@ -28,6 +28,7 @@ const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_SKILL_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_SECRET_UPDATES: usize = 256;
 const MAX_EXTENSION_UPDATES: usize = 256;
+const SKILL_STAGING_PREFIX: &str = ".berd-onboarding-";
 const DEFAULT_EXTENSION_TIMEOUT_SECONDS: u64 = 300;
 const ACP_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const ACP_CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
@@ -439,9 +440,10 @@ struct ParsedGooseConfig {
 fn parse_goose_config(bytes: &[u8]) -> Result<ParsedGooseConfig, String> {
     let root: YamlValue =
         yaml_serde::from_slice(bytes).map_err(|error| format!("invalid YAML: {error}"))?;
-    let mapping = root
-        .as_mapping()
-        .ok_or_else(|| "top-level value must be a mapping".to_string())?;
+    // Goose treated a non-mapping top level (empty file, null, scalar) as an
+    // empty mapping, so secrets and skills still import for this root.
+    let empty_mapping = yaml_serde::Mapping::new();
+    let mapping = root.as_mapping().unwrap_or(&empty_mapping);
     let provider_id = yaml_string(mapping, "GOOSE_PROVIDER");
     let model_id = yaml_string(mapping, "GOOSE_MODEL");
     let provider_defaults = provider_id.map(|provider_id| ImportedProviderDefaults {
@@ -522,11 +524,6 @@ fn parse_claude_extensions(
             warnings.push(format!("Claude MCP server '{name}' has no command."));
             continue;
         };
-        let envs = server
-            .env
-            .into_iter()
-            .filter(|(key, _)| !is_disallowed_environment_key(key))
-            .collect::<BTreeMap<_, _>>();
         let config_key = extension_config_key(&name);
         let mut extension = serde_json::Map::new();
         extension.insert("enabled".to_string(), JsonValue::Bool(true));
@@ -543,7 +540,7 @@ fn parse_claude_extensions(
         );
         extension.insert(
             "envs".to_string(),
-            serde_json::to_value(envs).expect("string environment map serializes"),
+            serde_json::to_value(server.env).expect("string environment map serializes"),
         );
         extension.insert("env_keys".to_string(), JsonValue::Array(Vec::new()));
         extension.insert(
@@ -588,6 +585,7 @@ fn copy_legacy_skills(source_root: &Path, target_root: &Path) -> SkillCopyOutcom
         counts: SkillCopyCounts::default(),
         warnings: Vec::new(),
     };
+    remove_stale_skill_staging(target_root, &mut outcome.warnings);
     let metadata = match fs::symlink_metadata(source_root) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -692,7 +690,7 @@ fn copy_legacy_skills(source_root: &Path, target_root: &Path) -> SkillCopyOutcom
             continue;
         }
         let staging = target_root.join(format!(
-            ".berd-onboarding-{}",
+            "{SKILL_STAGING_PREFIX}{}",
             uuid::Uuid::new_v4().simple()
         ));
         if let Err(error) = copy_skill_tree(&source, &staging) {
@@ -722,6 +720,41 @@ fn copy_legacy_skills(source_root: &Path, target_root: &Path) -> SkillCopyOutcom
     }
 
     outcome
+}
+
+/// A crash between `copy_skill_tree` and the publish rename leaves a staging
+/// directory behind, and retries use fresh names, so sweep old ones here.
+fn remove_stale_skill_staging(target_root: &Path, warnings: &mut Vec<String>) {
+    let Ok(metadata) = fs::symlink_metadata(target_root) else {
+        return;
+    };
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+        return;
+    }
+    let Ok(directory) = fs::read_dir(target_root) else {
+        return;
+    };
+    for entry in directory.flatten() {
+        if !entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(SKILL_STAGING_PREFIX)
+        {
+            continue;
+        }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() || !file_type.is_dir() {
+            continue;
+        }
+        if let Err(error) = fs::remove_dir_all(entry.path()) {
+            warnings.push(format!(
+                "Failed to remove stale import staging directory '{}': {error}",
+                entry.path().display()
+            ));
+        }
+    }
 }
 
 fn copy_skill_tree(source: &Path, target: &Path) -> Result<(), String> {
@@ -851,45 +884,6 @@ fn extension_config_key(name: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn is_disallowed_environment_key(key: &str) -> bool {
-    const DISALLOWED: &[&str] = &[
-        "PATH",
-        "PATHEXT",
-        "SystemRoot",
-        "windir",
-        "LD_LIBRARY_PATH",
-        "LD_PRELOAD",
-        "LD_AUDIT",
-        "LD_DEBUG",
-        "LD_BIND_NOW",
-        "LD_ASSUME_KERNEL",
-        "DYLD_LIBRARY_PATH",
-        "DYLD_INSERT_LIBRARIES",
-        "DYLD_FRAMEWORK_PATH",
-        "PYTHONPATH",
-        "PYTHONHOME",
-        "NODE_OPTIONS",
-        "RUBYOPT",
-        "GEM_PATH",
-        "GEM_HOME",
-        "CLASSPATH",
-        "GO111MODULE",
-        "GOROOT",
-        "APPINIT_DLLS",
-        "SESSIONNAME",
-        "ComSpec",
-        "TEMP",
-        "TMP",
-        "LOCALAPPDATA",
-        "USERPROFILE",
-        "HOMEDRIVE",
-        "HOMEPATH",
-    ];
-    DISALLOWED
-        .iter()
-        .any(|disallowed| disallowed.eq_ignore_ascii_case(key))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -994,14 +988,14 @@ extensions:
     }
 
     #[test]
-    fn parses_claude_servers_and_filters_unsafe_environment() {
+    fn parses_claude_servers_and_copies_environment_verbatim() {
         let (extensions, warnings) = parse_claude_extensions(
             br#"{
               "mcpServers": {
                 "Git Hub": {
                   "command": "npx",
                   "args": ["github-mcp"],
-                  "env": {"TOKEN": "secret", "PATH": "/untrusted"}
+                  "env": {"TOKEN": "secret", "PATH": "/custom", "PYTHONPATH": "/lib"}
                 },
                 "broken": {"args": []}
               }
@@ -1013,7 +1007,45 @@ extensions:
         let extension = &extensions["github"];
         assert_eq!(extension["name"], "Git Hub");
         assert_eq!(extension["envs"]["TOKEN"], "secret");
-        assert!(extension["envs"].get("PATH").is_none());
+        assert_eq!(extension["envs"]["PATH"], "/custom");
+        assert_eq!(extension["envs"]["PYTHONPATH"], "/lib");
+    }
+
+    #[test]
+    fn non_mapping_config_top_level_still_imports_secrets_and_skills() {
+        for bytes in [&b""[..], &b"null\n"[..], &b"just a scalar\n"[..]] {
+            let config = parse_goose_config(bytes).unwrap();
+            assert!(config.provider_defaults.is_none());
+            assert!(config.extensions.is_empty());
+            assert!(config.warnings.is_empty());
+        }
+        assert!(parse_goose_config(b"{unclosed").is_err());
+
+        let temp = TempDir::new().unwrap();
+        let active = temp.path().join("config/config.yaml");
+        fs::create_dir_all(active.parent().unwrap()).unwrap();
+        fs::write(&active, "").unwrap();
+        fs::write(
+            active.parent().unwrap().join("secrets.yaml"),
+            "OPENAI_API_KEY: secret\n",
+        )
+        .unwrap();
+        let skill = active.parent().unwrap().join("skills/reviewer");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "# Reviewer").unwrap();
+        let locations = ImportLocations {
+            goose_configs: vec![active],
+            claude_configs: Vec::new(),
+            personal_skills_root: temp.path().join("personal"),
+        };
+
+        let prepared = prepare_onboarding_import_from_locations(&locations).unwrap();
+
+        assert!(prepared.plan.provider_defaults.is_none());
+        assert_eq!(prepared.secret_updates.len(), 1);
+        assert_eq!(prepared.plan.imported_skills, 1);
+        assert!(prepared.plan.warnings.is_empty());
+        assert!(temp.path().join("personal/reviewer/SKILL.md").exists());
     }
 
     #[test]
@@ -1040,6 +1072,29 @@ extensions:
             fs::read_to_string(target.join("reviewer/SKILL.md")).unwrap(),
             "# Reviewer"
         );
+    }
+
+    #[test]
+    fn removes_stale_staging_directories_from_earlier_crashed_runs() {
+        let temp = TempDir::new().unwrap();
+        let source = temp.path().join("legacy");
+        let target = temp.path().join("personal");
+        let skill = source.join("reviewer");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), "# Reviewer").unwrap();
+        let stale = target.join(format!("{SKILL_STAGING_PREFIX}deadbeef"));
+        fs::create_dir_all(&stale).unwrap();
+        fs::write(stale.join("SKILL.md"), "# Orphaned").unwrap();
+        let unrelated = target.join(".hidden-user-dir");
+        fs::create_dir_all(&unrelated).unwrap();
+
+        let outcome = copy_legacy_skills(&source, &target);
+
+        assert_eq!(outcome.counts.imported, 1);
+        assert!(outcome.warnings.is_empty());
+        assert!(!stale.exists());
+        assert!(unrelated.exists());
+        assert!(target.join("reviewer/SKILL.md").exists());
     }
 
     #[test]
