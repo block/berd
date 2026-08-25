@@ -508,28 +508,6 @@ export function buildInitScript(options?: {
           case "_goose/unstable/config/extensions/remove":
           case "_goose/unstable/config/extensions/set-enabled":
             return jsonRpcResult(message.id, {});
-          case "_goose/onboarding/import/scan":
-            return jsonRpcResult(message.id, { candidates: [] });
-          case "_goose/onboarding/import/apply":
-            return jsonRpcResult(message.id, {
-              imported: {
-                providers: 0,
-                extensions: 0,
-                sessions: 0,
-                skills: 0,
-                projects: 0,
-                preferences: 0,
-              },
-              skipped: {
-                providers: 0,
-                extensions: 0,
-                sessions: 0,
-                skills: 0,
-                projects: 0,
-                preferences: 0,
-              },
-              warnings: [],
-            });
           case "_goose/working_dir/update":
           case "goose/working_dir/update":
             return jsonRpcResult(message.id, {});
@@ -724,6 +702,12 @@ export function buildInitScript(options?: {
               return Promise.resolve({
                 backedUp: false,
                 backupPath: null,
+              });
+            case "prepare_onboarding_import":
+              return Promise.resolve({
+                importedSkills: 0,
+                skippedSkills: 0,
+                warnings: [],
               });
             case "log_renderer_event":
             case "write_diagnostic_event":

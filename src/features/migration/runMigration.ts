@@ -9,7 +9,7 @@ import {
 } from "@/features/extensions/api/extensions";
 import { getDisplayName } from "@/features/extensions/types";
 import { getClient } from "@/shared/api/acpConnection";
-import { backupGooseConfig } from "./api/migration";
+import { backupGooseConfig, prepareOnboardingImport } from "./api/migration";
 import {
   getDefaultGooseModelId,
   getDefaultGooseModelName,
@@ -21,11 +21,11 @@ import type { DisabledExtension, MigrationResult } from "./types";
 /**
  * One-shot orchestrator that performs the silent first-boot migration.
  *
- * Order matters: the backup MUST happen before `GooseOnboardingImportApply`,
- * since the import mutates the same `config.yaml`. The marker file is
- * intentionally NOT written here — that's the caller's responsibility, so a
- * crash mid-sequence leaves the marker absent and the next boot re-runs
- * everything from scratch.
+ * Order matters: the backup MUST happen before applying the native import plan,
+ * since the plan mutates the same Goose config through ACP. The marker file is
+ * intentionally NOT written here — that's the caller's responsibility. Every
+ * mutation is idempotent, so a crash leaves the marker absent and the next boot
+ * can retry safely.
  *
  * Failures from migration/import work bubble up as thrown errors. Saving the
  * default model is best effort because provider auth/connectivity should not
@@ -36,22 +36,31 @@ export async function runMigration(): Promise<MigrationResult> {
   const backup = await backupGooseConfig();
   const backupPath = backup.backupPath;
 
+  // 2. Tauri discovers only fixed platform locations, parses bounded files,
+  //    applies secrets and extensions through a native Goose connection, and
+  //    copies legacy skills to the canonical personal-skills directory.
+  //    Sensitive config values never cross into the renderer.
+  const importPlan = await prepareOnboardingImport();
+  if (importPlan.warnings.length > 0) {
+    console.warn("Some onboarding imports were skipped:", importPlan.warnings);
+  }
+
   const client = await getClient();
 
-  // 2. Discover everything goose can import from the user's machine.
-  const scan = await client.goose.GooseUnstableOnboardingImportScan({
-    sources: [],
-  });
-  const candidateIds = scan.candidates.map((candidate) => candidate.id);
-
-  // 3. Apply every candidate, enabling any imported extensions in the process.
-  //    The "yes to everything" semantics are intentional — the plan replaces
-  //    the multi-step opt-in flow with a silent migration.
-  if (candidateIds.length > 0) {
-    await client.goose.GooseUnstableOnboardingImportApply({
-      candidateIds,
-      enableImportedExtensions: true,
-    });
+  // 3. Goose remains authoritative for its provider and config state.
+  //    Imported provider defaults are best effort because the distro default
+  //    below intentionally supersedes them when configured.
+  if (importPlan.providerDefaults) {
+    try {
+      await client.goose.GooseUnstableDefaultsSave({
+        providerId: importPlan.providerDefaults.providerId,
+        ...(importPlan.providerDefaults.modelId
+          ? { modelId: importPlan.providerDefaults.modelId }
+          : {}),
+      });
+    } catch (error) {
+      console.warn("Failed to apply imported provider default:", error);
+    }
   }
 
   const defaultProviderId = getDefaultGooseModelProviderId();

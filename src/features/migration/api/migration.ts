@@ -4,6 +4,7 @@ import type {
   MarkLegacyExtensionCleanupCompleteRequest,
   MarkMigrationCompleteRequest,
   MigrationStatus,
+  OnboardingImportPlan,
 } from "../types";
 
 /**
@@ -21,6 +22,15 @@ export async function getMigrationStatus(): Promise<MigrationStatus> {
  */
 export async function backupGooseConfig(): Promise<BackupResult> {
   return invoke<BackupResult>("backup_goose_config");
+}
+
+/**
+ * Discover fixed legacy locations, apply imported secrets/extensions through
+ * a native Goose connection, and copy legacy skills into Berd's canonical
+ * directory. The returned plan never contains sensitive config values.
+ */
+export async function prepareOnboardingImport(): Promise<OnboardingImportPlan> {
+  return invoke<OnboardingImportPlan>("prepare_onboarding_import");
 }
 
 /**

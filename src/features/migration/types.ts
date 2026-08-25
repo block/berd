@@ -38,6 +38,22 @@ export interface BackupResult {
   backupPath?: string;
 }
 
+export interface ImportedProviderDefaults {
+  providerId: string;
+  modelId?: string;
+}
+
+/**
+ * Non-sensitive import result returned after Tauri has applied imported
+ * secrets and extensions through a native, backend-only Goose connection.
+ */
+export interface OnboardingImportPlan {
+  providerDefaults?: ImportedProviderDefaults;
+  importedSkills: number;
+  skippedSkills: number;
+  warnings: string[];
+}
+
 export interface MarkMigrationCompleteRequest {
   disabledExtensions: DisabledExtension[];
   backupPath?: string;
