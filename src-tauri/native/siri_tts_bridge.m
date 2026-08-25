@@ -605,9 +605,6 @@ typedef void (^BerdAudioHandler)(
         _timePitch = [AVAudioUnitTimePitch new];
         _timePitch.rate = rate;
         _timePitch.pitch = 0.0f;
-        // Apple documents that higher overlap values reduce artifacts at the
-        // cost of CPU. Voice playback is mono and short-lived, so prefer quality.
-        _timePitch.overlap = 32.0f;
     }
     _format = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32
                                               sampleRate:sampleRate
