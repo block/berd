@@ -96,6 +96,19 @@ enum PocketPlaybackMonitorOutcome {
 }
 
 #[cfg(target_os = "macos")]
+fn apply_pocket_playback_monitor_outcome(
+    result: Result<PocketStreamOutcome, PocketStreamFailure>,
+    outcome: PocketPlaybackMonitorOutcome,
+) -> Result<PocketStreamOutcome, PocketStreamFailure> {
+    if outcome == PocketPlaybackMonitorOutcome::SourceCompletionTimedOut {
+        log::warn!(
+            "Pocket playback source completion bookkeeping timed out after the player drained"
+        );
+    }
+    result
+}
+
+#[cfg(target_os = "macos")]
 fn run_pocket_playback_monitor(
     playback_completion_receiver: mpsc::Receiver<PocketPlaybackEvent>,
     assistant_speech: Arc<Mutex<Option<(u64, AssistantSpeechGuard)>>>,
@@ -2718,14 +2731,7 @@ fn run_pocket_voice_stream(
         assistant_speech.take();
     }
     match playback_monitor_outcome {
-        Ok(PocketPlaybackMonitorOutcome::Completed) => result,
-        Ok(PocketPlaybackMonitorOutcome::SourceCompletionTimedOut) => Err(PocketStreamFailure {
-            error: "Pocket playback source did not finish after output drained".to_string(),
-            delivery: delivery_with_played_audio(pocket_delivery_snapshot(
-                &delivery_ledger,
-                &player,
-            )),
-        }),
+        Ok(outcome) => apply_pocket_playback_monitor_outcome(result, outcome),
         Err(_) => Err(PocketStreamFailure {
             error: "Pocket playback monitor panicked".to_string(),
             delivery: delivery_with_played_audio(pocket_delivery_snapshot(
@@ -3818,6 +3824,19 @@ mod tests {
             outcome,
             PocketPlaybackMonitorOutcome::SourceCompletionTimedOut
         );
+        assert!(matches!(
+            apply_pocket_playback_monitor_outcome(
+                Ok(PocketStreamOutcome {
+                    state: PocketStreamEventState::Completed,
+                    delivery: None,
+                }),
+                outcome,
+            ),
+            Ok(PocketStreamOutcome {
+                state: PocketStreamEventState::Completed,
+                ..
+            })
+        ));
         assert!(assistant_speech.lock().expect("assistant speech").is_none());
         assert!(begin_playback_runtime(&state, "still active").is_ok());
     }

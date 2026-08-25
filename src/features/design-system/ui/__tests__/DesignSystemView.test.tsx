@@ -26,6 +26,9 @@ describe("DesignSystemView surfaces", () => {
   it("documents radio cards with state-aware controls and token rows", () => {
     expect(source).toContain('id: "radio-group-presentation"');
     expect(source).toContain('id: "radio-group-selected"');
+    expect(source).toContain(
+      'onValueChange={(value) => setSelected(value === "option")}',
+    );
     expect(source).toContain('id: "radio-group-disabled"');
     expect(source).toContain('anatomy: "Card surface"');
     expect(source).toContain('state: "Focus visible"');

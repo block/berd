@@ -4879,7 +4879,11 @@ function RadioGroupPage() {
       <ComponentPlayground
         description="Switch presentation and state to inspect the exact anatomy and semantic tokens used by the shared primitive."
         preview={
-          <RadioGroup value={value} className="w-full max-w-sm">
+          <RadioGroup
+            value={value}
+            onValueChange={(value) => setSelected(value === "option")}
+            className="w-full max-w-sm"
+          >
             {presentation === "card" ? (
               <RadioGroupCard
                 id="radio-group-playground-option"
