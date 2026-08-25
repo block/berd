@@ -83,13 +83,26 @@ export function PocketVoiceSetupContent({
               key={model}
               data-testid={`voice-model-${model}`}
               label={
-                installed
-                  ? t("voice.modelInstalledSize", {
-                      size: formatBytes(diskBytes ?? 0),
-                    })
-                  : t("voice.modelMissingSize", {
-                      size: formatBytes(downloadBytes),
-                    })
+                visibleModels
+                  ? installed
+                    ? t("voice.modelInstalledSize", {
+                        size: formatBytes(diskBytes ?? 0),
+                      })
+                    : t("voice.modelMissingSize", {
+                        size: formatBytes(downloadBytes),
+                      })
+                  : modelName(model)
+              }
+              description={
+                visibleModels
+                  ? undefined
+                  : installed
+                    ? t("voice.modelInstalledSize", {
+                        size: formatBytes(diskBytes ?? 0),
+                      })
+                    : t("voice.modelMissingSize", {
+                        size: formatBytes(downloadBytes),
+                      })
               }
               density="compact"
               className="rounded-md bg-muted/40 pl-3.5"
@@ -146,6 +159,7 @@ export function PocketVoiceSetupContent({
                 inProgress && modelProgress ? (
                   <div className="space-y-1" aria-live="polite">
                     <Progress
+                      aria-label={modelName(model)}
                       value={
                         modelProgress.totalBytes > 0
                           ? (modelProgress.downloadedBytes /

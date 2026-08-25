@@ -65,6 +65,8 @@ describe("PocketVoiceSetupContent", () => {
 
     expect(screen.getByText(/173.8 MB download/)).toBeInTheDocument();
     expect(screen.getByText(/104.3 MB download/)).toBeInTheDocument();
+    expect(screen.getByText("Pocket TTS")).toBeInTheDocument();
+    expect(screen.getByText("Parakeet STT")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Download model · Pocket TTS" }),
     ).toBeEnabled();
@@ -95,7 +97,9 @@ describe("PocketVoiceSetupContent", () => {
     );
 
     expect(screen.getByText("52.2 MB of 104.3 MB")).toBeInTheDocument();
-    expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+    expect(
+      screen.getByRole("progressbar", { name: "Parakeet STT" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Download model · Pocket TTS" }),
     ).toBeEnabled();

@@ -215,9 +215,10 @@ pub(crate) fn playback_latency_safety_duration(output_device: Option<&str>) -> D
         get_default_device_id, get_device_id_from_name, get_device_transport_type,
     };
 
-    let device_id = output_device
-        .and_then(|name| get_device_id_from_name(name, false))
-        .or_else(|| get_default_device_id(false));
+    let device_id = match output_device {
+        Some(name) => get_device_id_from_name(name, false),
+        None => get_default_device_id(false),
+    };
     playback_latency_safety_duration_for_transport(
         device_id.and_then(|id| get_device_transport_type(id).ok()),
     )
@@ -803,7 +804,7 @@ fn output_device_is_builtin_speaker(output_device: Option<&str>) -> bool {
             NonNull::from(&streams_address),
             0,
             null(),
-            NonNull::from(&streams_size),
+            NonNull::from(&mut streams_size),
             NonNull::new(streams.as_mut_ptr())
                 .expect("non-empty stream buffer")
                 .cast(),
@@ -820,7 +821,7 @@ fn output_device_is_builtin_speaker(output_device: Option<&str>) -> bool {
             mElement: kAudioObjectPropertyElementMain,
         };
         let mut terminal_type = 0;
-        let terminal_size = mem::size_of::<u32>() as u32;
+        let mut terminal_size = mem::size_of::<u32>() as u32;
         // SAFETY: Core Audio writes one u32 into the valid terminal_type stack value.
         let status = unsafe {
             AudioObjectGetPropertyData(
@@ -828,7 +829,7 @@ fn output_device_is_builtin_speaker(output_device: Option<&str>) -> bool {
                 NonNull::from(&terminal_address),
                 0,
                 null(),
-                NonNull::from(&terminal_size),
+                NonNull::from(&mut terminal_size),
                 NonNull::from(&mut terminal_type).cast(),
             )
         };
