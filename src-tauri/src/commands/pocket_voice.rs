@@ -2357,7 +2357,6 @@ fn run_pocket_voice_stream(
                 let drain_started = Instant::now();
                 let mut completion_timed_out = false;
                 loop {
-                    sync_pocket_playback_rate(&player, &playback_rate, &mut applied_rate_bits)?;
                     if !active.load(Ordering::SeqCst) {
                         let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
                         player.stop();
@@ -2366,6 +2365,9 @@ fn run_pocket_voice_stream(
                             delivery: Some(delivery),
                         });
                     }
+                    sync_pocket_playback_rate_before_timeout(completion_timed_out, || {
+                        sync_pocket_playback_rate(&player, &playback_rate, &mut applied_rate_bits)
+                    })?;
                     if !completion_timed_out {
                         player.ensure_healthy()?;
                         match pocket_native_drain_status(
@@ -2533,6 +2535,18 @@ fn pocket_native_drain_timeout(
         remaining_source_frames as f64 / f64::from(berd_voice::SAMPLE_RATE) / f64::from(rate);
     Duration::from_secs_f64(remaining_playback_seconds)
         .saturating_add(POCKET_SOURCE_COMPLETION_TIMEOUT)
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn sync_pocket_playback_rate_before_timeout(
+    completion_timed_out: bool,
+    sync: impl FnOnce() -> Result<(), String>,
+) -> Result<(), String> {
+    if completion_timed_out {
+        Ok(())
+    } else {
+        sync()
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -3402,6 +3416,22 @@ mod tests {
             Duration::from_secs_f64(2.0 / f64::from(MIN_POCKET_PLAYBACK_SPEED))
                 .saturating_add(POCKET_SOURCE_COMPLETION_TIMEOUT)
         );
+    }
+
+    #[test]
+    fn post_timeout_grace_ignores_live_rate_changes() {
+        let mut sync_count = 0;
+        sync_pocket_playback_rate_before_timeout(false, || {
+            sync_count += 1;
+            Ok(())
+        })
+        .expect("sync while native playback is active");
+        sync_pocket_playback_rate_before_timeout(true, || {
+            sync_count += 1;
+            Err("stopped player rejected rate change".to_string())
+        })
+        .expect("ignore rate change after native timeout");
+        assert_eq!(sync_count, 1);
     }
 
     #[cfg(target_os = "macos")]
