@@ -871,7 +871,7 @@
     "backendMacSpeech": "Reconocimiento de voz de Apple",
     "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
-    "backendSiri": "Voces de Apple",
+    "backendSiri": "Voces de Siri",
     "chooseVoice": "Elegir…",
     "chooseVoiceTitle": "Elige una voz",
     "download": "Descargar modelo",
