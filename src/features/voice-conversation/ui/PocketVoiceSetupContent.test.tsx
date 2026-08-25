@@ -174,8 +174,9 @@ describe("PocketVoiceSetupContent", () => {
       />,
     );
 
-    expect(screen.getByText("Pocket TTS")).toBeInTheDocument();
-    expect(screen.getByText("Parakeet STT")).toBeInTheDocument();
+    expect(screen.getByTestId("voice-model-pocket")).toBeInTheDocument();
+    expect(screen.getByTestId("voice-model-parakeet")).toBeInTheDocument();
+    expect(screen.getByText(/173.8 MB on disk/)).toBeInTheDocument();
     expect(screen.getByText(/131.7 MB on disk/)).toBeInTheDocument();
   });
 

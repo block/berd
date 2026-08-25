@@ -187,7 +187,12 @@ describe("VoiceSettings", () => {
     const view = renderWithProviders(<VoiceSettings />);
 
     expect(
-      screen.getByRole("radiogroup", { name: "While Berd is speaking" }),
+      screen.getByRole("radiogroup", { name: "Interruptions" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Choose what happens when you speak while Berd is talking.",
+      ),
     ).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /^Automatic/ })).toBeChecked();
     expect(
@@ -237,7 +242,7 @@ describe("VoiceSettings", () => {
     renderWithProviders(<VoiceSettings />);
 
     expect(
-      screen.getByRole("radiogroup", { name: "While Berd is speaking" }),
+      screen.getByRole("radiogroup", { name: "Interruptions" }),
     ).toBeInTheDocument();
     const sensitivity = screen.getByRole("combobox", {
       name: "Interruption sensitivity",
@@ -292,8 +297,10 @@ describe("VoiceSettings", () => {
     expect(outputPicker).toHaveClass("w-full", "sm:w-auto");
     expect(
       screen.getByRole("heading", { name: "Speech output" }).parentElement
-        ?.parentElement,
+        ?.parentElement?.parentElement,
     ).toHaveClass("flex-col", "sm:flex-row");
+    expect(screen.getAllByText("Pocket TTS")).toHaveLength(1);
+    expect(screen.getAllByText("Parakeet STT")).toHaveLength(1);
   });
 
   it("keeps the Voice settings page open while Parakeet completes in place", () => {
@@ -336,12 +343,12 @@ describe("VoiceSettings", () => {
     expect(modelList).toHaveClass("divide-y", "divide-border");
     expect(modelList).not.toHaveClass("border", "rounded-md");
     expect(screen.getByTestId("voice-model-pocket")).toHaveClass(
-      "pr-4",
-      "py-4",
+      "py-2.5",
+      "pl-3.5",
+      "bg-muted/40",
     );
-    expect(screen.getByTestId("voice-model-pocket")).not.toHaveClass(
-      "pl-4",
-      "px-4",
+    expect(screen.getByTestId("voice-model-pocket")).not.toHaveTextContent(
+      "Pocket TTS",
     );
 
     setupState.current = setup({

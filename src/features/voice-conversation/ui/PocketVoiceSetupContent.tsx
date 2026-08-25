@@ -38,7 +38,6 @@ export function PocketVoiceSetupContent({
   const models = [
     {
       model: "pocket" as const,
-      label: "Pocket TTS",
       installed: pocketInstalled,
       diskBytes: status?.pocketSizeBytes ?? null,
       downloadBytes: status?.pocketDownloadBytes ?? 0,
@@ -52,7 +51,6 @@ export function PocketVoiceSetupContent({
     },
     {
       model: "parakeet" as const,
-      label: "Parakeet STT",
       installed: parakeetInstalled,
       diskBytes: status?.parakeetSizeBytes ?? null,
       downloadBytes: status?.parakeetDownloadBytes ?? 0,
@@ -72,7 +70,6 @@ export function PocketVoiceSetupContent({
         {models.map(
           ({
             model,
-            label,
             installed,
             diskBytes,
             downloadBytes,
@@ -83,8 +80,7 @@ export function PocketVoiceSetupContent({
             <SettingsRow
               key={model}
               data-testid={`voice-model-${model}`}
-              label={label}
-              description={
+              label={
                 installed
                   ? t("voice.modelInstalledSize", {
                       size: formatBytes(diskBytes ?? 0),
@@ -93,6 +89,8 @@ export function PocketVoiceSetupContent({
                       size: formatBytes(downloadBytes),
                     })
               }
+              density="compact"
+              className="rounded-md bg-muted/40 pl-3.5"
               action={
                 inProgress ? undefined : installed ? (
                   <Button
