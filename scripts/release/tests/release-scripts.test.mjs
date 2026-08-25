@@ -5,6 +5,7 @@ import {
   mkdir,
   chmod,
   readFile,
+  readlink,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -57,6 +58,20 @@ describe("Tauri Cargo target isolation", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe(override);
+  });
+});
+
+describe("shared Rust compiler cache", () => {
+  it("provides sccache through Hermit and configures Cargo to use it", async () => {
+    const [hermitConfig, packageLink, executableLink] = await Promise.all([
+      readFile(join(repo, "bin/hermit.hcl"), "utf8"),
+      readlink(join(repo, "bin/.sccache@0.17.pkg")),
+      readlink(join(repo, "bin/sccache")),
+    ]);
+
+    expect(hermitConfig).toContain('"RUSTC_WRAPPER": "sccache"');
+    expect(packageLink).toBe("hermit");
+    expect(executableLink).toBe(".sccache@0.17.pkg");
   });
 });
 
