@@ -716,6 +716,20 @@ fn resolve_voice_selection(
     })
 }
 
+fn resolve_stream_voice(
+    selection: &SiriVoiceSelection,
+    load_all_voices: impl FnOnce() -> Result<Vec<SiriVoice>, String>,
+) -> Result<SiriVoiceSelection, String> {
+    let voices = load_all_voices()?;
+    if find_voice(&voices, selection).is_some_and(|voice| voice.installed) {
+        return Ok(selection.clone());
+    }
+
+    first_installed_voice(&voices).ok_or_else(|| {
+        "No installed Siri voice is available. Open Voice settings to download one.".to_string()
+    })
+}
+
 fn status(app: &AppHandle, language_prefix: &str) -> Result<SiriVoiceStatus, String> {
     let voices = discover_voices(language_prefix)?;
     let available_languages = discover_languages()?;
@@ -1088,6 +1102,7 @@ pub fn start_siri_voice_stream(
         if stream_id.trim().is_empty() {
             return Err("Siri voice stream id cannot be empty".to_string());
         }
+        let voice = resolve_stream_voice(&voice, || discover_voices(""))?;
         let settings = read_settings(&settings_path(&app)?);
         let active = begin_playback(&state, webview_window.label())?;
         let effective_output_device = effective_output_device_name(None);
@@ -1537,6 +1552,65 @@ mod tests {
         assert_eq!(
             resolve_voice_selection(&voices, Some(&selected), || Ok(voices.clone())),
             Ok((Some(selected), false))
+        );
+    }
+
+    #[test]
+    fn stream_voice_ingress_re_resolves_a_voice_removed_after_status() {
+        let selected = SiriVoiceSelection {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+        };
+        let status_catalog = vec![SiriVoice {
+            name: selected.name.clone(),
+            language: selected.language.clone(),
+            size_bytes: 10,
+            installed: true,
+        }];
+        assert!(find_voice(&status_catalog, &selected).is_some_and(|voice| voice.installed));
+
+        let current_catalog = vec![
+            SiriVoice {
+                installed: false,
+                ..status_catalog[0].clone()
+            },
+            SiriVoice {
+                name: "Catherine".to_string(),
+                language: "en-AU".to_string(),
+                size_bytes: 10,
+                installed: true,
+            },
+        ];
+
+        assert_eq!(
+            resolve_stream_voice(&selected, || Ok(current_catalog)),
+            Ok(SiriVoiceSelection {
+                name: "Catherine".to_string(),
+                language: "en-AU".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn stream_voice_ingress_rejects_when_no_siri_voice_is_installed() {
+        let selected = SiriVoiceSelection {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+        };
+
+        assert_eq!(
+            resolve_stream_voice(&selected, || {
+                Ok(vec![SiriVoice {
+                    name: selected.name.clone(),
+                    language: selected.language.clone(),
+                    size_bytes: 10,
+                    installed: false,
+                }])
+            }),
+            Err(
+                "No installed Siri voice is available. Open Voice settings to download one."
+                    .to_string()
+            )
         );
     }
 
