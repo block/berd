@@ -20,6 +20,13 @@ use berd_voice::SAMPLE_RATE;
 use berd_voice::{load_text_to_speech, load_voice_style, PocketTts, VoiceStyle};
 use futures_util::StreamExt;
 #[cfg(target_os = "macos")]
+use objc2_core_audio::{
+    kAudioDevicePropertyScopeOutput, kAudioDevicePropertyStreams, kAudioDeviceTransportTypeBuiltIn,
+    kAudioHardwareNoError, kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
+    kAudioStreamPropertyTerminalType, kAudioStreamTerminalTypeSpeaker, AudioObjectGetPropertyData,
+    AudioObjectGetPropertyDataSize, AudioObjectID, AudioObjectPropertyAddress,
+};
+#[cfg(target_os = "macos")]
 use rodio::buffer::SamplesBuffer;
 #[cfg(target_os = "macos")]
 use rodio::{ChannelCount, DeviceTrait, Player, SampleRate, Source};
@@ -735,7 +742,107 @@ fn effective_output_device_name(configured: Option<&str>) -> Option<String> {
 }
 
 pub(crate) fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
-    output_device.is_some_and(|name| name.to_lowercase().contains("speaker"))
+    if output_device.is_some_and(|name| name.to_lowercase().contains("speaker")) {
+        return true;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        return output_device_is_builtin_speaker(output_device);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn output_device_is_builtin_speaker(output_device: Option<&str>) -> bool {
+    use coreaudio::audio_unit::macos_helpers::{
+        get_default_device_id, get_device_id_from_name, get_device_transport_type,
+    };
+    use std::mem;
+    use std::ptr::{null, NonNull};
+
+    let device_id = match output_device {
+        Some(name) => get_device_id_from_name(name, false),
+        None => get_default_device_id(false),
+    };
+    let Some(device_id) = device_id else {
+        return false;
+    };
+    let transport_type = get_device_transport_type(device_id).ok();
+
+    let streams_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyStreams,
+        mScope: kAudioDevicePropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut streams_size = 0;
+    // SAFETY: Core Audio writes only the property byte count into the valid stack value.
+    let status = unsafe {
+        AudioObjectGetPropertyDataSize(
+            device_id,
+            NonNull::from(&streams_address),
+            0,
+            null(),
+            NonNull::from(&mut streams_size),
+        )
+    };
+    if status != kAudioHardwareNoError || streams_size == 0 {
+        return false;
+    }
+
+    let mut streams =
+        vec![0 as AudioObjectID; streams_size as usize / mem::size_of::<AudioObjectID>()];
+    // SAFETY: The buffer is sized from Core Audio's preceding property-size query.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device_id,
+            NonNull::from(&streams_address),
+            0,
+            null(),
+            NonNull::from(&streams_size),
+            NonNull::new(streams.as_mut_ptr())
+                .expect("non-empty stream buffer")
+                .cast(),
+        )
+    };
+    if status != kAudioHardwareNoError {
+        return false;
+    }
+
+    streams.into_iter().any(|stream_id| {
+        let terminal_address = AudioObjectPropertyAddress {
+            mSelector: kAudioStreamPropertyTerminalType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain,
+        };
+        let mut terminal_type = 0;
+        let terminal_size = mem::size_of::<u32>() as u32;
+        // SAFETY: Core Audio writes one u32 into the valid terminal_type stack value.
+        let status = unsafe {
+            AudioObjectGetPropertyData(
+                stream_id,
+                NonNull::from(&terminal_address),
+                0,
+                null(),
+                NonNull::from(&terminal_size),
+                NonNull::from(&mut terminal_type).cast(),
+            )
+        };
+        status == kAudioHardwareNoError
+            && output_metadata_uses_builtin_speakers(transport_type, terminal_type)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn output_metadata_uses_builtin_speakers(transport_type: Option<u32>, terminal_type: u32) -> bool {
+    // Apple's built-in Mac speaker stream currently reports the USB Audio
+    // speaker terminal code, while other Core Audio devices may report 'spkr'.
+    const USB_AUDIO_SPEAKER_TERMINAL: u32 = 0x0301;
+    transport_type == Some(kAudioDeviceTransportTypeBuiltIn)
+        && (terminal_type == kAudioStreamTerminalTypeSpeaker
+            || terminal_type == USB_AUDIO_SPEAKER_TERMINAL)
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
@@ -3331,6 +3438,26 @@ mod tests {
             assert!(!output_device_uses_speakers(Some(name)), "{name}");
         }
         assert!(!output_device_uses_speakers(None));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn localized_builtin_speaker_metadata_is_distinct_from_headphones() {
+        assert!(!"Altavoces del MacBook Pro"
+            .to_lowercase()
+            .contains("speaker"));
+        assert!(output_metadata_uses_builtin_speakers(
+            Some(kAudioDeviceTransportTypeBuiltIn),
+            kAudioStreamTerminalTypeSpeaker,
+        ));
+        assert!(output_metadata_uses_builtin_speakers(
+            Some(kAudioDeviceTransportTypeBuiltIn),
+            0x0301,
+        ));
+        assert!(!output_metadata_uses_builtin_speakers(
+            Some(kAudioDeviceTransportTypeBuiltIn),
+            0x0302,
+        ));
     }
 
     #[test]
