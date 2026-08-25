@@ -37,8 +37,15 @@ pub struct SiriVoiceState {
 struct SiriVoiceRuntime {
     active: Option<Arc<AtomicBool>>,
     owner_window: Option<String>,
+    resolved_voice: Option<ResolvedSiriVoice>,
     #[cfg(target_os = "macos")]
     stream: Option<ActiveSiriStream>,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedSiriVoice {
+    configured: Option<SiriVoiceSelection>,
+    effective: Option<SiriVoiceSelection>,
 }
 
 #[cfg(target_os = "macos")]
@@ -709,22 +716,65 @@ fn resolve_voice_selection(
         }
     }
 
-    let fallback =
-        first_installed_voice(preferred_voices).or_else(|| first_installed_voice(&all_voices));
+    let fallback = if selected_voice.is_some() {
+        first_installed_voice(&all_voices)
+    } else {
+        first_installed_voice(preferred_voices).or_else(|| first_installed_voice(&all_voices))
+    };
     Ok(match fallback {
         Some(selection) => (Some(selection), true),
         None => (selected_voice.cloned(), false),
     })
 }
 
-fn status(app: &AppHandle, language_prefix: &str) -> Result<SiriVoiceStatus, String> {
+fn voice_for_playback(
+    configured: Option<&SiriVoiceSelection>,
+    resolved: Option<&ResolvedSiriVoice>,
+) -> Option<SiriVoiceSelection> {
+    match resolved.filter(|resolved| resolved.configured.as_ref() == configured) {
+        Some(resolved) => resolved.effective.clone(),
+        None => configured.cloned(),
+    }
+}
+
+fn status(
+    app: &AppHandle,
+    state: &SiriVoiceState,
+    language_prefix: &str,
+) -> Result<SiriVoiceStatus, String> {
     let voices = discover_voices(language_prefix)?;
     let available_languages = discover_languages()?;
-    let settings = read_settings(&settings_path(app)?);
-    let (resolved_selection, resolved_selection_installed) =
+    let path = settings_path(app)?;
+    let mut settings = read_settings(&path);
+    let (mut resolved_selection, mut resolved_selection_installed) =
         resolve_voice_selection(&voices, settings.selected_voice.as_ref(), || {
             discover_voices("")
         })?;
+    if settings.selected_voice.is_none() && resolved_selection_installed {
+        let automatic_selection = resolved_selection.clone();
+        settings = update_settings(&path, |settings| {
+            if settings.selected_voice.is_none() {
+                settings.selected_voice = automatic_selection;
+                true
+            } else {
+                false
+            }
+        })?;
+        if settings.selected_voice != resolved_selection {
+            resolved_selection = settings.selected_voice.clone();
+            resolved_selection_installed = resolved_selection.is_some();
+        }
+    }
+    state
+        .runtime
+        .lock()
+        .map_err(|_| "Siri voice state lock was poisoned".to_string())?
+        .resolved_voice = Some(ResolvedSiriVoice {
+        configured: settings.selected_voice.clone(),
+        effective: resolved_selection_installed
+            .then(|| resolved_selection.clone())
+            .flatten(),
+    });
     Ok(SiriVoiceStatus {
         supported: cfg!(target_os = "macos"),
         available_languages,
@@ -740,16 +790,22 @@ fn status(app: &AppHandle, language_prefix: &str) -> Result<SiriVoiceStatus, Str
 #[tauri::command]
 pub async fn get_siri_voice_status(
     app: AppHandle,
+    state: tauri::State<'_, SiriVoiceState>,
     language_prefix: Option<String>,
 ) -> Result<SiriVoiceStatus, String> {
     let prefix = language_prefix.unwrap_or_default();
-    tauri::async_runtime::spawn_blocking(move || status(&app, prefix.trim()))
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || status(&app, &state, prefix.trim()))
         .await
         .map_err(|error| format!("Siri voice catalog task failed: {error}"))?
 }
 
 #[tauri::command]
-pub async fn select_siri_voice(app: AppHandle, voice: SiriVoiceSelection) -> Result<(), String> {
+pub async fn select_siri_voice(
+    app: AppHandle,
+    state: tauri::State<'_, SiriVoiceState>,
+    voice: SiriVoiceSelection,
+) -> Result<(), String> {
     let prefix = voice.language.clone();
     let candidate = voice.clone();
     let installed = tauri::async_runtime::spawn_blocking(move || {
@@ -765,10 +821,18 @@ pub async fn select_siri_voice(app: AppHandle, voice: SiriVoiceSelection) -> Res
         ));
     }
     update_settings(&settings_path(&app)?, |settings| {
-        settings.selected_voice = Some(voice);
+        settings.selected_voice = Some(voice.clone());
         true
-    })
-    .map(|_| ())
+    })?;
+    state
+        .runtime
+        .lock()
+        .map_err(|_| "Siri voice state lock was poisoned".to_string())?
+        .resolved_voice = Some(ResolvedSiriVoice {
+        configured: Some(voice.clone()),
+        effective: Some(voice),
+    });
+    Ok(())
 }
 
 #[tauri::command]
@@ -1063,10 +1127,16 @@ pub fn start_siri_voice_stream(
             return Err("Siri voice stream id cannot be empty".to_string());
         }
         let settings = read_settings(&settings_path(&app)?);
-        let voices = discover_voices("")?;
-        let (selection, selection_installed) =
-            resolve_voice_selection(&voices, settings.selected_voice.as_ref(), || Ok(Vec::new()))?;
-        let selection = selection.filter(|_| selection_installed).ok_or_else(|| {
+        let selection = voice_for_playback(
+            settings.selected_voice.as_ref(),
+            state
+                .runtime
+                .lock()
+                .map_err(|_| "Siri voice state lock was poisoned".to_string())?
+                .resolved_voice
+                .as_ref(),
+        )
+        .ok_or_else(|| {
             "Select an installed Siri voice in Voice settings before using Siri TTS".to_string()
         })?;
         let active = begin_playback(&state, webview_window.label())?;
@@ -1494,6 +1564,40 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_selection_uses_the_same_global_fallback_for_every_filter() {
+        let selected = SiriVoiceSelection {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+        };
+        let preferred_voices = vec![SiriVoice {
+            name: "Samantha".to_string(),
+            language: "en-US".to_string(),
+            size_bytes: 10,
+            installed: true,
+        }];
+        let all_voices = vec![
+            SiriVoice {
+                name: "Catherine".to_string(),
+                language: "en-AU".to_string(),
+                size_bytes: 10,
+                installed: true,
+            },
+            preferred_voices[0].clone(),
+        ];
+
+        assert_eq!(
+            resolve_voice_selection(&preferred_voices, Some(&selected), || Ok(all_voices)),
+            Ok((
+                Some(SiriVoiceSelection {
+                    name: "Catherine".to_string(),
+                    language: "en-AU".to_string(),
+                }),
+                true,
+            ))
+        );
+    }
+
+    #[test]
     fn unavailable_selection_is_preserved_when_no_siri_voice_is_installed() {
         let selected = SiriVoiceSelection {
             name: "Aaron".to_string(),
@@ -1509,6 +1613,45 @@ mod tests {
         assert_eq!(
             resolve_voice_selection(&voices, Some(&selected), || Ok(voices.clone())),
             Ok((Some(selected), false))
+        );
+    }
+
+    #[test]
+    fn playback_uses_only_a_fallback_resolved_for_the_current_preference() {
+        let configured = SiriVoiceSelection {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+        };
+        let fallback = SiriVoiceSelection {
+            name: "Samantha".to_string(),
+            language: "en-US".to_string(),
+        };
+        let resolved = ResolvedSiriVoice {
+            configured: Some(configured.clone()),
+            effective: Some(fallback.clone()),
+        };
+
+        assert_eq!(
+            voice_for_playback(Some(&configured), Some(&resolved)),
+            Some(fallback)
+        );
+
+        let newer_preference = SiriVoiceSelection {
+            name: "Nora".to_string(),
+            language: "en-US".to_string(),
+        };
+        assert_eq!(
+            voice_for_playback(Some(&newer_preference), Some(&resolved)),
+            Some(newer_preference)
+        );
+
+        let unavailable = ResolvedSiriVoice {
+            configured: Some(configured.clone()),
+            effective: None,
+        };
+        assert_eq!(
+            voice_for_playback(Some(&configured), Some(&unavailable)),
+            None
         );
     }
 
