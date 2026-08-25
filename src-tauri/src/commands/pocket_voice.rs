@@ -64,6 +64,8 @@ const AIRPLAY_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2
 const UNKNOWN_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2);
 #[cfg(any(test, target_os = "macos"))]
 const POCKET_SOURCE_COMPLETION_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(any(test, target_os = "macos"))]
+const MIN_POCKET_PLAYBACK_SPEED: f32 = 0.75;
 
 #[cfg(target_os = "macos")]
 fn playback_latency_safety_duration_for_transport(transport: Option<u32>) -> Duration {
@@ -2345,10 +2347,12 @@ fn run_pocket_voice_stream(
                         delivery: Some(delivery),
                     });
                 }
+                // Playback speed can change while buffers drain. Use the slowest
+                // supported rate so a later slowdown cannot truncate valid audio.
                 let drain_timeout = pocket_native_drain_timeout(
                     delivery_ledger.total_frames(),
                     player.completed_source_frames(),
-                    f32::from_bits(applied_rate_bits),
+                    MIN_POCKET_PLAYBACK_SPEED,
                 );
                 let drain_started = Instant::now();
                 let mut completion_timed_out = false;
@@ -3384,6 +3388,19 @@ mod tests {
         assert_eq!(
             pocket_native_drain_status(true, timeout, timeout),
             PocketNativeDrainStatus::Drained
+        );
+    }
+
+    #[test]
+    fn native_drain_timeout_covers_a_live_slowdown() {
+        let fastest_timeout = pocket_native_drain_timeout(72_000, 24_000, 2.0);
+        let live_rate_timeout =
+            pocket_native_drain_timeout(72_000, 24_000, MIN_POCKET_PLAYBACK_SPEED);
+        assert!(live_rate_timeout > fastest_timeout);
+        assert_eq!(
+            live_rate_timeout,
+            Duration::from_secs_f64(2.0 / f64::from(MIN_POCKET_PLAYBACK_SPEED))
+                .saturating_add(POCKET_SOURCE_COMPLETION_TIMEOUT)
         );
     }
 
