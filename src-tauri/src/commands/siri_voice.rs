@@ -720,16 +720,37 @@ fn resolve_voice_selection(
 fn status(app: &AppHandle, language_prefix: &str) -> Result<SiriVoiceStatus, String> {
     let voices = discover_voices(language_prefix)?;
     let available_languages = discover_languages()?;
-    let settings = read_settings(&settings_path(app)?);
+    let path = settings_path(app)?;
+    let previous_selection = read_settings(&path).selected_voice;
     let (resolved_selection, resolved_selection_installed) =
-        resolve_voice_selection(&voices, settings.selected_voice.as_ref(), || {
-            discover_voices("")
-        })?;
+        resolve_voice_selection(&voices, previous_selection.as_ref(), || discover_voices(""))?;
+    let settings = update_settings(&path, |settings| {
+        if resolved_selection_installed
+            && settings.selected_voice == previous_selection
+            && settings.selected_voice != resolved_selection
+        {
+            settings.selected_voice = resolved_selection.clone();
+            true
+        } else {
+            false
+        }
+    })?;
+    let selected_voice_installed = if settings.selected_voice == resolved_selection {
+        resolved_selection_installed
+    } else {
+        settings.selected_voice.as_ref().is_some_and(|selection| {
+            find_voice(&voices, selection).is_some_and(|voice| voice.installed)
+                || discover_voices(&selection.language)
+                    .ok()
+                    .and_then(|selected| find_voice(&selected, selection).cloned())
+                    .is_some_and(|voice| voice.installed)
+        })
+    };
     Ok(SiriVoiceStatus {
         supported: cfg!(target_os = "macos"),
         available_languages,
-        selected_voice: resolved_selection,
-        selected_voice_installed: resolved_selection_installed,
+        selected_voice: settings.selected_voice,
+        selected_voice_installed,
         playback_speed: settings
             .playback_speed
             .clamp(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED),
@@ -1063,10 +1084,7 @@ pub fn start_siri_voice_stream(
             return Err("Siri voice stream id cannot be empty".to_string());
         }
         let settings = read_settings(&settings_path(&app)?);
-        let voices = discover_voices("")?;
-        let (selection, selection_installed) =
-            resolve_voice_selection(&voices, settings.selected_voice.as_ref(), || Ok(Vec::new()))?;
-        let selection = selection.filter(|_| selection_installed).ok_or_else(|| {
+        let selection = settings.selected_voice.ok_or_else(|| {
             "Select an installed Siri voice in Voice settings before using Siri TTS".to_string()
         })?;
         let active = begin_playback(&state, webview_window.label())?;
