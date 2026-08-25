@@ -1087,10 +1087,10 @@ describe("voice transcript delivery coordination", () => {
     const stop = vi.fn().mockImplementation(async () => {
       useVoiceConversationStore.setState({
         status: stopped,
-        uiState: "off",
-        error: null,
+        uiState: "error",
+        error: "The backend already stopped",
       });
-      return stopped;
+      throw new Error("The backend already stopped");
     });
     useVoiceConversationStore.setState({
       status: stopped,
@@ -1128,7 +1128,11 @@ describe("voice transcript delivery coordination", () => {
 
     expect(stop).toHaveBeenCalledOnce();
     expect(onVoiceSetupRequired).toHaveBeenCalledOnce();
-    expect(useVoiceConversationStore.getState().status).toEqual(stopped);
+    expect(useVoiceConversationStore.getState()).toMatchObject({
+      status: stopped,
+      uiState: "off",
+      error: null,
+    });
   });
 
   it("does not activate speech when a non-owner mounts an already-running session", () => {

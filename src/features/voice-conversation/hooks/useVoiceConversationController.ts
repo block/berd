@@ -783,12 +783,28 @@ export function useVoiceConversationController({
           activeSendRoute = null;
         }
         addErrorNotification(sessionId, errorText(startError));
+        let cleanupError: unknown = null;
         if (exactOwnerLifecycleSurvived) {
           try {
             await stop();
           } catch (stopError) {
-            addErrorNotification(sessionId, errorText(stopError));
+            cleanupError = stopError;
           }
+        }
+        const settledStatus = useVoiceConversationStore.getState().status;
+        const captureLifecycleStopped =
+          settledStatus.sessionId === null &&
+          (settledStatus.lifecycle === "stopped" ||
+            settledStatus.lifecycle === "unavailable");
+        if (captureLifecycleStopped) {
+          useVoiceConversationStore.setState((state) =>
+            state.status.revision === settledStatus.revision &&
+            state.status.sessionId === null
+              ? { uiState: "off", error: null }
+              : state,
+          );
+        } else if (cleanupError) {
+          addErrorNotification(sessionId, errorText(cleanupError));
         }
         onPocketSetupRequired();
         return;
