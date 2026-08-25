@@ -20,6 +20,7 @@ import {
 } from "../lib/nativeAssistantSpeech";
 import {
   confirmVoiceConversationForegroundSession,
+  isVoiceMicrophoneCaptureError,
   setVoiceConversationControlsSuppressed,
   type PendingVoiceTranscript,
 } from "../api/voiceConversation";
@@ -820,9 +821,19 @@ export function useVoiceConversationController({
           activeSendRoute = null;
         }
         addErrorNotification(sessionId, errorText(startError));
+        if (isVoiceMicrophoneCaptureError(startError)) {
+          onPocketSetupRequired();
+        }
       }
     }
-  }, [inputBackend, onSend, sessionId, start, startAssistantSpeech]);
+  }, [
+    inputBackend,
+    onPocketSetupRequired,
+    onSend,
+    sessionId,
+    start,
+    startAssistantSpeech,
+  ]);
 
   useEffect(() => {
     if (

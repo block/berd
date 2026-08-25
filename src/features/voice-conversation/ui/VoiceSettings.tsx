@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { getPlatform } from "@/shared/lib/platform";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
+import { Button } from "@/shared/ui/button";
 import { RadioGroup, RadioGroupCard } from "@/shared/ui/radio-group";
 import { SettingsRow } from "@/shared/ui/settings-row";
 import {
@@ -15,6 +16,7 @@ import {
 } from "@/shared/ui/select";
 import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "../hooks/useMacSpeechSetup";
+import { useMicrophonePermission } from "../hooks/useMicrophonePermission";
 import { useSiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import {
@@ -73,6 +75,7 @@ export function VoiceSettings() {
   const interruption = useVoiceInterruptionPreference();
   const siriSetup = useSiriVoiceSetup(output.backend === "siri");
   const siriSupported = getPlatform() === "mac";
+  const microphonePermission = useMicrophonePermission(siriSupported);
   const inputHeadingId = useId();
   const inputDescriptionId = useId();
   const outputHeadingId = useId();
@@ -123,6 +126,26 @@ export function VoiceSettings() {
       description={t("voice.settingsDescription")}
       contentClassName="space-y-6"
     >
+      {microphonePermission.status === "denied" ? (
+        <Alert variant="destructive">
+          <CircleAlert />
+          <AlertTitle>{t("voice.microphonePermissionTitle")}</AlertTitle>
+          <AlertDescription>
+            <p>{t("voice.microphonePermissionDenied")}</p>
+            <Button
+              type="button"
+              variant="alert"
+              size="sm"
+              onClick={() => void microphonePermission.openSettings()}
+            >
+              {t("voice.openMicrophoneSettings")}
+            </Button>
+            {microphonePermission.error ? (
+              <p>{t("voice.openMicrophoneSettingsError")}</p>
+            ) : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {readinessKey ? (
         <Alert variant="destructive">
           <CircleAlert />

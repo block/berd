@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
+import { VoiceMicrophoneCaptureError } from "../api/voiceConversation";
 
 const nativeAssistantSpeechMocks = vi.hoisted(() => ({
   capture: vi.fn(() => []),
@@ -1063,6 +1064,50 @@ describe("voice transcript delivery coordination", () => {
     expect(useChatStore.getState().messagesBySession["session-a"]).toHaveLength(
       1,
     );
+  });
+
+  it("opens Voice settings when microphone capture cannot start", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const onVoiceSetupRequired = vi.fn();
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi.fn().mockResolvedValue(stopped),
+      drainPendingTranscripts: vi.fn().mockResolvedValue(undefined),
+      start: vi
+        .fn()
+        .mockRejectedValue(
+          new VoiceMicrophoneCaptureError(
+            new DOMException("Permission denied", "NotAllowedError"),
+          ),
+        ),
+    });
+    const { result } = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-a",
+        onSend: vi.fn().mockResolvedValue(true),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: onVoiceSetupRequired,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.onToggle();
+    });
+
+    expect(onVoiceSetupRequired).toHaveBeenCalledOnce();
   });
 
   it("does not activate speech when a non-owner mounts an already-running session", () => {

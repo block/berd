@@ -45,6 +45,7 @@ import {
   setVoiceConversationForegroundSession,
   setVoiceConversationMicrophoneMuted,
   startVoiceConversation,
+  VoiceMicrophoneCaptureError,
   showVoiceConversationControls,
   stopActiveMicrophoneForTest,
   stopVoiceConversationFromBuddy,
@@ -362,9 +363,9 @@ describe("voice conversation API", () => {
     });
     mocks.startMicrophone.mockRejectedValueOnce(new Error("capture failed"));
 
-    await expect(startVoiceConversation("session-1")).rejects.toThrow(
-      "capture failed",
-    );
+    const request = startVoiceConversation("session-1");
+    await expect(request).rejects.toThrow("capture failed");
+    await expect(request).rejects.toBeInstanceOf(VoiceMicrophoneCaptureError);
 
     expect(mocks.invoke).toHaveBeenNthCalledWith(
       2,
