@@ -37,7 +37,7 @@ const TELEMETRY_BOOTSTRAP_PATH: &str = "/v1/bootstrap";
 // lost because the renderer's `BatchLogRecordProcessor` drops it.
 // `/v1/bootstrap` does not read it.
 const TELEMETRY_SCHEMA_VERSION_HEADER: &str = "x-berd-schema-version";
-const TELEMETRY_SCHEMA_VERSION: &str = "berd-otlp-logs-v1";
+const TELEMETRY_SCHEMA_VERSION: &str = "berd-otlp-logs-v2";
 
 // Telemetry-gateway host allowlist. The renderer's OTLP endpoint is
 // build-injected from VITE_OTLP_LOGS_ENDPOINT (see vite.config.ts) and must
@@ -1199,7 +1199,7 @@ mod tests {
             // comma-joined, which it rejects like a missing one.
             assert_eq!(
                 request.header_values(TELEMETRY_SCHEMA_VERSION_HEADER),
-                vec!["berd-otlp-logs-v1"]
+                vec!["berd-otlp-logs-v2"]
             );
             assert_eq!(request.header("content-type"), Some("application/json"));
             // The gateway hands the raw request bytes to its JSON parser, so a

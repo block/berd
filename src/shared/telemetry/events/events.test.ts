@@ -14,6 +14,7 @@ import {
   berdProjectDeleteCompleted,
   berdProjectEditCompleted,
 } from "./berd_project";
+import { berdVoiceConversationStarted } from "./berd_voice";
 
 // The vendored set is a curated subset of the schema repo (see ./index.ts): the
 // port excluded every *Initiated* variant, so a factory for one has no call
@@ -33,6 +34,15 @@ describe("vendored event surface", () => {
   // re-vendoring it is a decision someone makes on purpose.
   it("exposes no factory for the retired feedback event", () => {
     expect(Object.keys(events)).not.toContain("berdAppFeedbackSubmitted");
+  });
+});
+
+describe("voice events", () => {
+  it("keeps successful voice startup as a privacy-safe bare counter", () => {
+    expect(berdVoiceConversationStarted()).toEqual({
+      name: "berd_voice_conversation_started",
+      parameters: {},
+    });
   });
 });
 

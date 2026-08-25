@@ -18,6 +18,7 @@ import {
   type VoiceConversationStatus,
 } from "../api/voiceConversation";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
+import { trackVoiceConversationStarted } from "../lib/voiceTelemetry";
 
 export type VoiceConversationUiState =
   | "off"
@@ -644,6 +645,7 @@ export const useVoiceConversationStore = create<VoiceConversationStore>(
             inputBackend,
             foregroundGeneration,
           );
+          trackVoiceConversationStarted();
           set((state) =>
             shouldApplyResponseRevision(state.status, status.revision) ||
             (status.revision === state.status.revision &&
