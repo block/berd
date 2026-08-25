@@ -689,45 +689,84 @@ fn first_installed_voice(voices: &[SiriVoice]) -> Option<SiriVoiceSelection> {
         })
 }
 
-fn choose_installed_voice(
+fn resolve_voice_selection(
     preferred_voices: &[SiriVoice],
+    selected_voice: Option<&SiriVoiceSelection>,
     load_all_voices: impl FnOnce() -> Result<Vec<SiriVoice>, String>,
-) -> Result<Option<SiriVoiceSelection>, String> {
-    if let Some(selection) = first_installed_voice(preferred_voices) {
-        return Ok(Some(selection));
+) -> Result<(Option<SiriVoiceSelection>, bool), String> {
+    if let Some(selection) = selected_voice {
+        if find_voice(preferred_voices, selection).is_some_and(|voice| voice.installed) {
+            return Ok((Some(selection.clone()), true));
+        }
+    } else if let Some(selection) = first_installed_voice(preferred_voices) {
+        return Ok((Some(selection), true));
     }
 
-    Ok(first_installed_voice(&load_all_voices()?))
+    let all_voices = load_all_voices()?;
+    if let Some(selection) = selected_voice {
+        if find_voice(&all_voices, selection).is_some_and(|voice| voice.installed) {
+            return Ok((Some(selection.clone()), true));
+        }
+    }
+
+    let fallback = first_installed_voice(&all_voices);
+    Ok(match fallback {
+        Some(selection) => (Some(selection), true),
+        None => (selected_voice.cloned(), false),
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn resolve_stream_voice(
+    selection: &SiriVoiceSelection,
+    load_all_voices: impl FnOnce() -> Result<Vec<SiriVoice>, String>,
+) -> Result<SiriVoiceSelection, String> {
+    let voices = load_all_voices()?;
+    if find_voice(&voices, selection).is_some_and(|voice| voice.installed) {
+        return Ok(selection.clone());
+    }
+
+    first_installed_voice(&voices).ok_or_else(|| {
+        "No installed Siri voice is available. Open Voice settings to download one.".to_string()
+    })
 }
 
 fn status(app: &AppHandle, language_prefix: &str) -> Result<SiriVoiceStatus, String> {
     let voices = discover_voices(language_prefix)?;
     let available_languages = discover_languages()?;
     let path = settings_path(app)?;
-    let automatic_selection = if read_settings(&path).selected_voice.is_none() {
-        choose_installed_voice(&voices, || discover_voices(""))?
-    } else {
-        None
-    };
+    let previous_selection = read_settings(&path).selected_voice;
+    let (resolved_selection, resolved_selection_installed) =
+        resolve_voice_selection(&voices, previous_selection.as_ref(), || discover_voices(""))?;
     let settings = update_settings(&path, |settings| {
-        if settings.selected_voice.is_none() && automatic_selection.is_some() {
-            settings.selected_voice = automatic_selection;
+        if previous_selection.is_none()
+            && resolved_selection_installed
+            && settings.selected_voice == previous_selection
+            && settings.selected_voice != resolved_selection
+        {
+            settings.selected_voice = resolved_selection.clone();
             true
         } else {
             false
         }
     })?;
-    let selected_voice_installed = settings.selected_voice.as_ref().is_some_and(|selection| {
-        find_voice(&voices, selection).is_some_and(|voice| voice.installed)
-            || discover_voices(&selection.language)
-                .ok()
-                .and_then(|selected| find_voice(&selected, selection).cloned())
-                .is_some_and(|voice| voice.installed)
-    });
+    let (selected_voice, selected_voice_installed) =
+        if settings.selected_voice == previous_selection {
+            (resolved_selection, resolved_selection_installed)
+        } else {
+            let installed = settings.selected_voice.as_ref().is_some_and(|selection| {
+                find_voice(&voices, selection).is_some_and(|voice| voice.installed)
+                    || discover_voices(&selection.language)
+                        .ok()
+                        .and_then(|selected| find_voice(&selected, selection).cloned())
+                        .is_some_and(|voice| voice.installed)
+            });
+            (settings.selected_voice.clone(), installed)
+        };
     Ok(SiriVoiceStatus {
         supported: cfg!(target_os = "macos"),
         available_languages,
-        selected_voice: settings.selected_voice,
+        selected_voice,
         selected_voice_installed,
         playback_speed: settings
             .playback_speed
@@ -1033,12 +1072,14 @@ fn run_siri_stream(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects four runtime dependencies beside the stream payload.
 pub fn start_siri_voice_stream(
     app: AppHandle,
     webview_window: tauri::WebviewWindow,
     state: tauri::State<'_, SiriVoiceState>,
     native_voice: tauri::State<'_, NativeVoiceState>,
     stream_id: String,
+    voice: SiriVoiceSelection,
     interruption_mode: VoiceInterruptionMode,
     interruption_sensitivity: InterruptionSensitivity,
 ) -> Result<(), String> {
@@ -1050,6 +1091,7 @@ pub fn start_siri_voice_stream(
             state,
             native_voice,
             stream_id,
+            voice,
             interruption_mode,
             interruption_sensitivity,
         );
@@ -1061,10 +1103,8 @@ pub fn start_siri_voice_stream(
         if stream_id.trim().is_empty() {
             return Err("Siri voice stream id cannot be empty".to_string());
         }
+        let voice = resolve_stream_voice(&voice, || discover_voices(""))?;
         let settings = read_settings(&settings_path(&app)?);
-        let selection = settings.selected_voice.ok_or_else(|| {
-            "Select an installed Siri voice in Voice settings before using Siri TTS".to_string()
-        })?;
         let active = begin_playback(&state, webview_window.label())?;
         let effective_output_device = effective_output_device_name(None);
         let suppress_capture =
@@ -1089,7 +1129,7 @@ pub fn start_siri_voice_stream(
             let result = run_siri_stream(
                 app.clone(),
                 stream_id.clone(),
-                selection,
+                voice,
                 settings
                     .playback_speed
                     .clamp(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED),
@@ -1415,11 +1455,14 @@ mod tests {
         ];
 
         assert_eq!(
-            first_installed_voice(&voices),
-            Some(SiriVoiceSelection {
-                name: "Aaron".to_string(),
-                language: "en-US".to_string(),
-            })
+            resolve_voice_selection(&voices, None, || Ok(Vec::new())),
+            Ok((
+                Some(SiriVoiceSelection {
+                    name: "Aaron".to_string(),
+                    language: "en-US".to_string(),
+                }),
+                true,
+            ))
         );
     }
 
@@ -1433,7 +1476,7 @@ mod tests {
         }];
 
         assert_eq!(
-            choose_installed_voice(&filtered_voices, || {
+            resolve_voice_selection(&filtered_voices, None, || {
                 Ok(vec![SiriVoice {
                     name: "Catherine".to_string(),
                     language: "en-AU".to_string(),
@@ -1441,10 +1484,134 @@ mod tests {
                     installed: true,
                 }])
             }),
-            Ok(Some(SiriVoiceSelection {
+            Ok((
+                Some(SiriVoiceSelection {
+                    name: "Catherine".to_string(),
+                    language: "en-AU".to_string(),
+                }),
+                true,
+            ))
+        );
+    }
+
+    #[test]
+    fn unavailable_selection_falls_back_to_an_installed_siri_voice() {
+        let selected = SiriVoiceSelection {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+        };
+        let preferred_voices = vec![
+            SiriVoice {
+                name: "Aaron".to_string(),
+                language: "en-US".to_string(),
+                size_bytes: 10,
+                installed: false,
+            },
+            SiriVoice {
+                name: "Samantha".to_string(),
+                language: "en-US".to_string(),
+                size_bytes: 10,
+                installed: true,
+            },
+        ];
+
+        assert_eq!(
+            resolve_voice_selection(&preferred_voices, Some(&selected), || {
+                Ok(vec![
+                    SiriVoice {
+                        name: "Catherine".to_string(),
+                        language: "en-AU".to_string(),
+                        size_bytes: 10,
+                        installed: true,
+                    },
+                    preferred_voices[1].clone(),
+                ])
+            }),
+            Ok((
+                Some(SiriVoiceSelection {
+                    name: "Catherine".to_string(),
+                    language: "en-AU".to_string(),
+                }),
+                true,
+            ))
+        );
+    }
+
+    #[test]
+    fn unavailable_selection_is_preserved_when_no_siri_voice_is_installed() {
+        let selected = SiriVoiceSelection {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+        };
+        let voices = vec![SiriVoice {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+            size_bytes: 10,
+            installed: false,
+        }];
+
+        assert_eq!(
+            resolve_voice_selection(&voices, Some(&selected), || Ok(voices.clone())),
+            Ok((Some(selected), false))
+        );
+    }
+
+    #[test]
+    fn stream_voice_ingress_re_resolves_a_voice_removed_after_status() {
+        let selected = SiriVoiceSelection {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+        };
+        let status_catalog = vec![SiriVoice {
+            name: selected.name.clone(),
+            language: selected.language.clone(),
+            size_bytes: 10,
+            installed: true,
+        }];
+        assert!(find_voice(&status_catalog, &selected).is_some_and(|voice| voice.installed));
+
+        let current_catalog = vec![
+            SiriVoice {
+                installed: false,
+                ..status_catalog[0].clone()
+            },
+            SiriVoice {
                 name: "Catherine".to_string(),
                 language: "en-AU".to_string(),
-            }))
+                size_bytes: 10,
+                installed: true,
+            },
+        ];
+
+        assert_eq!(
+            resolve_stream_voice(&selected, || Ok(current_catalog)),
+            Ok(SiriVoiceSelection {
+                name: "Catherine".to_string(),
+                language: "en-AU".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn stream_voice_ingress_rejects_when_no_siri_voice_is_installed() {
+        let selected = SiriVoiceSelection {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+        };
+
+        assert_eq!(
+            resolve_stream_voice(&selected, || {
+                Ok(vec![SiriVoice {
+                    name: selected.name.clone(),
+                    language: selected.language.clone(),
+                    size_bytes: 10,
+                    installed: false,
+                }])
+            }),
+            Err(
+                "No installed Siri voice is available. Open Voice settings to download one."
+                    .to_string()
+            )
         );
     }
 

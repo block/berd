@@ -70,11 +70,13 @@ export interface SiriVoiceStreamEvent {
 
 export function startSiriVoiceStream(
   streamId: string,
+  voice: SiriVoiceSelection,
   interruptionMode: VoiceInterruptionMode,
   interruptionSensitivity: VoiceInterruptionSensitivity,
 ): Promise<void> {
   return invoke("start_siri_voice_stream", {
     streamId,
+    voice,
     interruptionMode,
     interruptionSensitivity,
   });

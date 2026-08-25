@@ -22,6 +22,7 @@ import {
   startSiriVoiceStream,
   stopSiriVoice,
   type SiriVoiceStreamEvent,
+  type SiriVoiceSelection,
 } from "../api/siriVoice";
 import { setVoiceConversationAssistantSpeaking } from "../api/voiceConversation";
 import {
@@ -103,6 +104,7 @@ let activeSpeechSessionId: string | null = null;
 let activeSpeechRevision: number | null = null;
 let activeUtterance: ActiveUtterance | null = null;
 let stopActiveVoice: () => Promise<boolean> = stopPocketVoice;
+let activeSiriVoice: SiriVoiceSelection | null = null;
 let activityReportQueue = Promise.resolve();
 let startRequestGeneration = 0;
 const pendingNotices = new Map<string, Map<string, string>>();
@@ -807,6 +809,7 @@ export function stopNativeAssistantSpeech(awaitTerminalDelivery = false): void {
   }
   activeSpeechSessionId = null;
   activeSpeechRevision = null;
+  activeSiriVoice = null;
 }
 
 export function captureNativeAssistantSpeechHistory(
@@ -819,8 +822,12 @@ export function startNativeAssistantSpeech(
   sessionId: string,
   onFailure: SpeechFailureHandler,
   initialMessages: Message[] = captureNativeAssistantSpeechHistory(sessionId),
+  siriVoice?: SiriVoiceSelection,
 ): void {
-  if (activeSpeechSessionId === sessionId) return;
+  if (activeSpeechSessionId === sessionId) {
+    if (siriVoice) activeSiriVoice = siriVoice;
+    return;
+  }
   const startRequest = ++startRequestGeneration;
   const interruptedUtterance = activeUtterance;
   if (
@@ -842,19 +849,41 @@ export function startNativeAssistantSpeech(
         ) {
           return;
         }
-        startNativeAssistantSpeech(sessionId, onFailure, initialMessages);
+        startNativeAssistantSpeech(
+          sessionId,
+          onFailure,
+          initialMessages,
+          siriVoice,
+        );
       });
     };
     return;
   }
   stopNativeAssistantSpeech();
+  activeSiriVoice = siriVoice ?? null;
   activeSpeechSessionId = sessionId;
   activeSpeechRevision = useVoiceConversationStore.getState().status.revision;
   const activeGeneration = generation;
   const streamBackend =
     getVoiceOutputBackend() === "siri"
       ? {
-          start: startSiriVoiceStream,
+          start: (
+            streamId: string,
+            interruptionMode: VoiceInterruptionMode,
+            interruptionSensitivity: VoiceInterruptionSensitivity,
+          ) => {
+            if (!activeSiriVoice) {
+              return Promise.reject(
+                new Error("No installed Siri voice is available for playback"),
+              );
+            }
+            return startSiriVoiceStream(
+              streamId,
+              activeSiriVoice,
+              interruptionMode,
+              interruptionSensitivity,
+            );
+          },
           append: appendSiriVoiceStream,
           flush: flushSiriVoiceStream,
           finish: finishSiriVoiceStream,

@@ -26,6 +26,7 @@ import {
 } from "../api/voiceConversation";
 import { getMicrophonePermissionStatus } from "../api/microphonePermission";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
+import type { SiriVoiceSelection } from "../api/siriVoice";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -589,6 +590,7 @@ export interface UseVoiceConversationControllerOptions {
   isGooseSession: boolean;
   pocketReady: boolean;
   inputBackend?: VoiceInputBackend | null;
+  siriVoice?: SiriVoiceSelection | null;
   onPocketSetupRequired: () => void;
   readOnly?: boolean;
   disabled?: boolean;
@@ -601,11 +603,14 @@ export function useVoiceConversationController({
   isGooseSession,
   pocketReady,
   inputBackend = "parakeet",
+  siriVoice = null,
   onPocketSetupRequired,
   readOnly = false,
   disabled = false,
 }: UseVoiceConversationControllerOptions): ChatInputVoiceConversation {
   const { t } = useTranslation("chat");
+  const siriVoiceRef = useRef(siriVoice);
+  siriVoiceRef.current = siriVoice;
   const status = useVoiceConversationStore((state) => state.status);
   const uiState = useVoiceConversationStore((state) => state.uiState);
   const error = useVoiceConversationStore((state) => state.error);
@@ -735,24 +740,31 @@ export function useVoiceConversationController({
   const startAssistantSpeech = useCallback(
     (
       initialMessages?: ReturnType<typeof captureNativeAssistantSpeechHistory>,
+      resolvedSiriVoice = siriVoiceRef.current,
     ) => {
-      startNativeAssistantSpeech(
-        sessionId,
-        (text, playbackError) => {
-          addErrorNotification(
-            sessionId,
-            `Pocket TTS could not speak the assistant response: ${errorText(
-              playbackError,
-            )}`,
-          );
-          console.error("Native Pocket playback failed", {
-            sessionId,
-            textLength: text.length,
-            error: playbackError,
-          });
-        },
-        initialMessages,
-      );
+      const onFailure = (text: string, playbackError: unknown) => {
+        addErrorNotification(
+          sessionId,
+          `Pocket TTS could not speak the assistant response: ${errorText(
+            playbackError,
+          )}`,
+        );
+        console.error("Native Pocket playback failed", {
+          sessionId,
+          textLength: text.length,
+          error: playbackError,
+        });
+      };
+      if (resolvedSiriVoice) {
+        startNativeAssistantSpeech(
+          sessionId,
+          onFailure,
+          initialMessages,
+          resolvedSiriVoice,
+        );
+      } else {
+        startNativeAssistantSpeech(sessionId, onFailure, initialMessages);
+      }
     },
     [sessionId],
   );
@@ -885,9 +897,10 @@ export function useVoiceConversationController({
     // The initiating operation captured the pre-start history boundary and
     // activates speech after native startup succeeds.
     if (operationInFlightBySession.has(sessionId)) return;
-    startAssistantSpeech();
+    startAssistantSpeech(undefined, siriVoice);
   }, [
     sessionId,
+    siriVoice,
     startAssistantSpeech,
     status.lifecycle,
     status.ownerWindowLabel,
