@@ -209,7 +209,62 @@ describe("Siri voice locales", () => {
     });
   });
 
-  it("applies a manual selection after an in-flight auto-selection fails", async () => {
+  it("applies a manual selection without waiting for in-flight auto-selection", async () => {
+    const pendingAutoSelection = deferred<void>();
+    apiMocks.getSiriVoiceStatus.mockResolvedValue(status("en-US", "Aaron"));
+    apiMocks.selectSiriVoice.mockImplementation(
+      (selection: { name: string }) =>
+        selection.name === "Quinn"
+          ? pendingAutoSelection.promise
+          : Promise.resolve(),
+    );
+    const { result } = renderHook(() => useSiriVoiceSetup(true));
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    let downloadPromise!: Promise<void>;
+    act(() => {
+      downloadPromise = result.current.downloadVoice({
+        name: "Quinn",
+        language: "en-US",
+        sizeBytes: 310_500_000,
+        installed: false,
+      });
+    });
+    await waitFor(() =>
+      expect(apiMocks.selectSiriVoice).toHaveBeenCalledWith({
+        name: "Quinn",
+        language: "en-US",
+      }),
+    );
+
+    await act(async () => {
+      await result.current.selectVoice({
+        name: "Aaron",
+        language: "en-US",
+        sizeBytes: 1,
+        installed: true,
+      });
+    });
+
+    expect(apiMocks.selectSiriVoice).toHaveBeenCalledTimes(2);
+    expect(apiMocks.selectSiriVoice.mock.calls[1]?.[0]).toEqual({
+      name: "Aaron",
+      language: "en-US",
+    });
+    expect(result.current.error).toBeNull();
+
+    pendingAutoSelection.resolve();
+    await act(async () => {
+      await downloadPromise;
+    });
+    expect(apiMocks.selectSiriVoice).toHaveBeenCalledTimes(3);
+    expect(apiMocks.selectSiriVoice.mock.calls[2]?.[0]).toEqual({
+      name: "Aaron",
+      language: "en-US",
+    });
+  });
+
+  it("ignores an in-flight auto-selection failure after a manual selection", async () => {
     const pendingAutoSelection = deferred<void>();
     apiMocks.getSiriVoiceStatus.mockResolvedValue(status("en-US", "Aaron"));
     apiMocks.selectSiriVoice.mockImplementation(
@@ -246,7 +301,7 @@ describe("Siri voice locales", () => {
         installed: true,
       });
     });
-    expect(apiMocks.selectSiriVoice).toHaveBeenCalledTimes(1);
+    expect(apiMocks.selectSiriVoice).toHaveBeenCalledTimes(2);
 
     pendingAutoSelection.reject(new Error("Auto-selection failed"));
     await act(async () => {
