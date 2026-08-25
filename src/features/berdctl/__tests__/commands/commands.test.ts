@@ -4163,6 +4163,34 @@ describe("info", () => {
       voice_session_active: true,
     });
   });
+
+  it("get_context ignores renderer activity older than native voice state", async () => {
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-2",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 3,
+      },
+      uiState: "listening",
+    });
+    mocks.getVoiceConversationStatus.mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped",
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 4,
+    });
+
+    await expect(
+      dispatchCommand("info", { action: "get_context" }, ctx),
+    ).resolves.toMatchObject({ voice_session_active: false });
+  });
 });
 
 describe("feedback schemas", () => {

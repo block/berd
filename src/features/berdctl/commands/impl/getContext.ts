@@ -12,14 +12,18 @@ interface GetContextResult {
   app_version: string;
 }
 
-function rendererVoiceSessionActive(voice: {
-  status: { sessionId: string | null };
-  uiState: string;
-}): boolean {
+function rendererVoiceSessionActive(
+  voice: {
+    status: { sessionId: string | null; revision: number };
+    uiState: string;
+  },
+  nativeRevision: number,
+): boolean {
   return (
-    voice.status.sessionId !== null ||
-    voice.uiState === "starting" ||
-    voice.uiState === "stopping"
+    voice.status.revision >= nativeRevision &&
+    (voice.status.sessionId !== null ||
+      voice.uiState === "starting" ||
+      voice.uiState === "stopping")
   );
 }
 
@@ -62,8 +66,14 @@ Result:
       active_project_id: context.activeProjectId,
       voice_session_active:
         nativeVoiceStatus.sessionId !== null ||
-        rendererVoiceSessionActive(voiceBeforeRefresh) ||
-        rendererVoiceSessionActive(voiceAfterRefresh),
+        rendererVoiceSessionActive(
+          voiceBeforeRefresh,
+          nativeVoiceStatus.revision,
+        ) ||
+        rendererVoiceSessionActive(
+          voiceAfterRefresh,
+          nativeVoiceStatus.revision,
+        ),
       // Match telemetry's resolution: prefer the build-injected version
       // (git-derived for non-release builds), fall back to package.json.
       app_version: import.meta.env.VITE_APP_VERSION ?? packageJson.version,
