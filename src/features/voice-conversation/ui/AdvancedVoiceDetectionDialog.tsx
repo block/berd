@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/shared/ui/button";
 import {
   Dialog,
+  DialogBody,
   DialogClose,
   DialogContent,
   DialogDescription,
@@ -20,6 +21,7 @@ import {
 } from "@/shared/ui/select";
 import type { VoiceInterruptionSensitivity } from "../lib/voiceInterruptionPreference";
 import { useVoiceInterruptionPreference } from "../lib/voiceInterruptionPreference";
+import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
 const SENSITIVITIES: VoiceInterruptionSensitivity[] = [
   "less",
@@ -30,6 +32,9 @@ const SENSITIVITIES: VoiceInterruptionSensitivity[] = [
 export function AdvancedVoiceDetectionDialog() {
   const { t } = useTranslation("settings");
   const interruption = useVoiceInterruptionPreference();
+  const conversationActive = useVoiceConversationStore(
+    (state) => state.status.lifecycle === "running",
+  );
   const speechHeadingId = useId();
   const speechDescriptionId = useId();
   const interruptionHeadingId = useId();
@@ -55,7 +60,7 @@ export function AdvancedVoiceDetectionDialog() {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5 py-2">
+        <DialogBody className="space-y-5">
           <div className="space-y-2">
             <div>
               <h3 id={speechHeadingId} className="text-sm font-medium">
@@ -65,11 +70,16 @@ export function AdvancedVoiceDetectionDialog() {
                 id={speechDescriptionId}
                 className="mt-0.5 text-xs text-muted-foreground"
               >
-                {t("voice.advancedDetection.speechSensitivityDescription")}
+                {t(
+                  conversationActive
+                    ? "voice.advancedDetection.speechSensitivityActiveDescription"
+                    : "voice.advancedDetection.speechSensitivityDescription",
+                )}
               </p>
             </div>
             <Select
               value={interruption.speechSensitivity}
+              disabled={conversationActive}
               onValueChange={(value) =>
                 interruption.setSpeechSensitivity(
                   value as VoiceInterruptionSensitivity,
@@ -137,7 +147,7 @@ export function AdvancedVoiceDetectionDialog() {
               </Select>
             </div>
           ) : null}
-        </div>
+        </DialogBody>
 
         <DialogFooter>
           <Button
@@ -145,6 +155,7 @@ export function AdvancedVoiceDetectionDialog() {
             variant="ghost"
             flush
             className="sm:mr-auto"
+            disabled={conversationActive}
             onClick={reset}
           >
             {t("voice.advancedDetection.reset")}

@@ -9,6 +9,10 @@ import type { MacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import type { SiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
+import {
+  useVoiceConversationStore,
+  VOICE_CONVERSATION_OFF_STATUS,
+} from "../stores/voiceConversationStore";
 import { VoiceSettings } from "./VoiceSettings";
 
 const setupState = vi.hoisted(() => ({
@@ -192,6 +196,9 @@ describe("VoiceSettings", () => {
     interruptionState.setSensitivity.mockReset();
     interruptionState.setSpeechSensitivity.mockReset();
     interruptionState.resetSensitivities.mockReset();
+    useVoiceConversationStore.setState({
+      status: VOICE_CONVERSATION_OFF_STATUS,
+    });
     siriSetupState.current = siriSetup();
   });
 
@@ -228,9 +235,13 @@ describe("VoiceSettings", () => {
       screen.queryByText("Interruption sensitivity"),
     ).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Advanced…" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "Advanced voice detection",
+    });
+    expect(dialog).toHaveClass("max-w-lg");
     expect(
-      screen.getByRole("dialog", { name: "Advanced voice detection" }),
-    ).toHaveClass("max-w-lg");
+      dialog.querySelector('[data-slot="dialog-body"]'),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("combobox", { name: "Interruption sensitivity" }),
     ).toBeInTheDocument();
@@ -247,6 +258,34 @@ describe("VoiceSettings", () => {
     expect(interruptionState.resetSensitivities).toHaveBeenCalledOnce();
 
     view.unmount();
+  });
+
+  it("defers speech sensitivity changes until an active conversation stops", async () => {
+    const user = userEvent.setup();
+    setupState.current = setup(pocketStatus());
+    useVoiceConversationStore.setState({
+      status: {
+        ...VOICE_CONVERSATION_OFF_STATUS,
+        available: true,
+        lifecycle: "running",
+        sessionId: "session-1",
+        ownerWindowLabel: "main",
+        revision: 1,
+      },
+    });
+    renderWithProviders(<VoiceSettings />);
+
+    await user.click(screen.getByRole("button", { name: "Advanced…" }));
+
+    expect(
+      screen.getByRole("combobox", { name: "Speech detection sensitivity" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByText("Stop Voice Conversation to change this setting."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Reset to defaults" }),
+    ).toBeDisabled();
   });
 
   it("localizes the advanced detection dialog close control", async () => {

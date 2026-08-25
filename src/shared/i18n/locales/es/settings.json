@@ -883,6 +883,7 @@
         "more": "Más sensible · umbral 0,50"
       },
       "speechSensitivity": "Sensibilidad de detección de voz",
+      "speechSensitivityActiveDescription": "Detén la conversación por voz para cambiar esta configuración.",
       "speechSensitivityDescription": "Con qué facilidad Berd reconoce que empezaste a hablar.",
       "title": "Detección de voz avanzada"
     },

@@ -880,6 +880,7 @@
         "more": "More sensitive · 0.50 threshold"
       },
       "speechSensitivity": "Speech detection sensitivity",
+      "speechSensitivityActiveDescription": "Stop Voice Conversation to change this setting.",
       "speechSensitivityDescription": "How easily Berd recognizes that you started speaking.",
       "title": "Advanced voice detection"
     },

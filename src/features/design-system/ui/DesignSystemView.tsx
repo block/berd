@@ -4829,13 +4829,17 @@ function RadioGroupPage() {
             textIcon: disabled ? "foreground / 50% opacity" : "foreground",
             border: selected ? "primary" : "border",
           },
-          {
-            anatomy: "Card surface",
-            state: "Focus visible",
-            background: selected ? "muted" : "transparent",
-            textIcon: "foreground",
-            border: "ring + ring / 50%",
-          },
+          ...(!disabled
+            ? [
+                {
+                  anatomy: "Card surface",
+                  state: "Focus visible",
+                  background: selected ? "muted" : "transparent",
+                  textIcon: "foreground",
+                  border: "ring + ring / 50%",
+                } satisfies TokenColorRow,
+              ]
+            : []),
           {
             anatomy: "Description",
             state: stateLabel,
@@ -4852,13 +4856,17 @@ function RadioGroupPage() {
             textIcon: selected ? "background" : "primary-foreground",
             border: selected ? "none" : "input",
           },
-          {
-            anatomy: "Radio control",
-            state: "Focus visible",
-            background: selected ? "primary" : "transparent",
-            textIcon: selected ? "background" : "primary-foreground",
-            border: "ring + ring / 50%",
-          },
+          ...(!disabled
+            ? [
+                {
+                  anatomy: "Radio control",
+                  state: "Focus visible",
+                  background: selected ? "primary" : "transparent",
+                  textIcon: selected ? "background" : "primary-foreground",
+                  border: "ring + ring / 50%",
+                } satisfies TokenColorRow,
+              ]
+            : []),
         ];
 
   return (
