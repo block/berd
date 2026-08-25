@@ -6,16 +6,23 @@ import { VoicePickerDialog } from "./VoicePickerDialog";
 
 describe("VoicePickerDialog", () => {
   it.each([
-    ["the selected voice", "Aaron", "Aaron", "Aaron"],
-    ["the empty selection", null, "Choose…", "No voice selected"],
-  ])("exposes %s to the trigger", (_case, selectedVoice, visibleValue, description) => {
+    ["the selected voice", "Aaron", "Aaron", "Choose a voice: Aaron", "Aaron"],
+    [
+      "the empty selection",
+      null,
+      "Choose…",
+      "Choose a voice: Choose…",
+      "No voice selected",
+    ],
+  ])("exposes %s to the trigger", (_case, selectedVoice, visibleValue, accessibleName, description) => {
     renderWithProviders(
       <VoicePickerDialog selectedVoice={selectedVoice}>
         <div>Voice choices</div>
       </VoicePickerDialog>,
     );
 
-    const trigger = screen.getByRole("button", { name: "Choose a voice" });
+    const trigger = screen.getByRole("button", { name: accessibleName });
+    expect(trigger).toHaveAccessibleName(new RegExp(visibleValue));
     expect(trigger).toHaveTextContent(visibleValue);
     expect(trigger).toHaveAccessibleDescription(description);
     expect(
@@ -39,7 +46,7 @@ describe("VoicePickerDialog", () => {
     );
 
     await userEvent.click(
-      screen.getByRole("button", { name: "Choose a voice" }),
+      screen.getByRole("button", { name: "Choose a voice: Aaron" }),
     );
     await waitFor(() =>
       expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" }),

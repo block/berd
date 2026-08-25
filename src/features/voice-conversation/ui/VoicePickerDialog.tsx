@@ -25,6 +25,7 @@ export function VoicePickerDialog({
   const [open, setOpen] = useState(false);
   const selectedVoiceId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
+  const visibleVoice = selectedVoice ?? t("voice.chooseVoice");
 
   useEffect(() => {
     if (!open) return;
@@ -48,12 +49,12 @@ export function VoicePickerDialog({
               size="compact"
               variant="ghost"
               flush
-              aria-label={t("voice.chooseVoiceTitle")}
+              aria-label={t("voice.chooseVoiceLabel", {
+                voice: visibleVoice,
+              })}
               aria-describedby={selectedVoiceId}
             >
-              <span className="max-w-48 truncate">
-                {selectedVoice ?? t("voice.chooseVoice")}
-              </span>
+              <span className="max-w-48 truncate">{visibleVoice}</span>
               <span id={selectedVoiceId} className="sr-only">
                 {selectedVoice ?? t("voice.noVoiceSelected")}
               </span>

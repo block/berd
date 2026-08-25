@@ -53,7 +53,7 @@ describe("SiriVoiceSettings", () => {
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
     await userEvent.click(
-      screen.getByRole("button", { name: "Choose a voice" }),
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
     );
     await userEvent.click(screen.getByRole("combobox", { name: "Language" }));
     expect(
@@ -84,7 +84,7 @@ describe("SiriVoiceSettings", () => {
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
     await userEvent.click(
-      screen.getByRole("button", { name: "Choose a voice" }),
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
     );
     expect(
       screen.queryByRole("heading", { name: "English (United States)" }),
@@ -144,7 +144,7 @@ describe("SiriVoiceSettings", () => {
       renderWithProviders(<SiriVoiceSettings setup={value} />);
 
       await userEvent.click(
-        screen.getByRole("button", { name: "Elige una voz" }),
+        screen.getByRole("button", { name: /^Elige una voz:/ }),
       );
       const displayNames = new Intl.DisplayNames(["es"], {
         type: "language",
@@ -182,7 +182,7 @@ describe("SiriVoiceSettings", () => {
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
     await userEvent.click(
-      screen.getByRole("button", { name: "Choose a voice" }),
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
     );
     await userEvent.click(
       screen.getByRole("button", { name: "Preview Quinn" }),
@@ -221,7 +221,7 @@ describe("SiriVoiceSettings", () => {
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
     await userEvent.click(
-      screen.getByRole("button", { name: "Choose a voice" }),
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
     );
     expect(
       screen.getByRole("button", { name: "Preview Aaron" }),
@@ -251,7 +251,7 @@ describe("SiriVoiceSettings", () => {
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
     await userEvent.click(
-      screen.getByRole("button", { name: "Choose a voice" }),
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
     );
     expect(
       screen.getByRole("button", { name: "Playing preview for Quinn" }),

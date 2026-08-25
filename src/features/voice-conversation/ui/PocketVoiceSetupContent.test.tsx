@@ -262,7 +262,7 @@ describe("PocketVoiceSetupContent", () => {
     await userEvent.click(screen.getByRole("option", { name: "2×" }));
     expect(setPlaybackSpeed).toHaveBeenCalledWith(2);
     await userEvent.click(
-      screen.getByRole("button", { name: "Choose a voice" }),
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
     );
     expect(screen.getAllByRole("radio")).toHaveLength(12);
     await userEvent.click(screen.getByText("Anna"));
@@ -288,7 +288,7 @@ describe("PocketVoiceSetupContent", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("Voice preview failed");
     await userEvent.click(
-      screen.getByRole("button", { name: "Choose a voice" }),
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
     );
     expect(
       within(screen.getByRole("dialog")).getByRole("alert"),

@@ -873,6 +873,7 @@
     "backendPocket": "Pocket TTS",
     "backendSiri": "Voces de Siri",
     "chooseVoice": "Elegir…",
+    "chooseVoiceLabel": "Elige una voz: {{voice}}",
     "chooseVoiceTitle": "Elige una voz",
     "download": "Descargar modelo",
     "downloadVoice": "Descargar {{voice}}",
