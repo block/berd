@@ -2281,6 +2281,7 @@ fn run_pocket_voice_stream(
                     }
                     player.ensure_healthy()?;
                     if player.is_empty() {
+                        player.ensure_healthy()?;
                         break;
                     }
                     std::thread::sleep(Duration::from_millis(10));
@@ -2543,6 +2544,7 @@ fn synthesize_and_stream(
         }
         player.ensure_healthy()?;
         if player.is_empty() {
+            player.ensure_healthy()?;
             break;
         }
         std::thread::sleep(Duration::from_millis(10));
