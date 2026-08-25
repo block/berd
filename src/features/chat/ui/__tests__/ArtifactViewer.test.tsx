@@ -27,14 +27,21 @@ vi.mock("@/shared/lib/fileManager", () => ({
   revealInFileManager: (path: string) => mockRevealInFileManager(path),
 }));
 
-vi.mock("@/shared/api/system", () => ({
-  readTextFile: (path: string) => mockReadTextFile(path),
-  statFile: (path: string) => mockStatFile(path),
-}));
+// Keep the real `fileStatErrorKind` narrowing helper so these tests exercise
+// the same "missing" vs "other" classification the app ships.
+vi.mock("@/shared/api/system", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/api/system")>();
+  return {
+    ...actual,
+    readTextFile: (path: string) => mockReadTextFile(path),
+    statFile: (path: string) => mockStatFile(path),
+  };
+});
 
 // jsdom has no Tauri internals, so the real asset-URL converter throws.
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => `asset://localhost/${path}`,
+  invoke: vi.fn(),
 }));
 
 function artifact(path = "/p/report.md", revision = 0) {
@@ -180,7 +187,7 @@ describe("ArtifactViewer header actions", () => {
     expect(
       screen.getByRole("heading", { name: "Updated externally" }),
     ).toBeInTheDocument();
-    expect(screen.queryByText(/out of date/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("slows polling to ten seconds while the app is not foregrounded", async () => {
@@ -307,17 +314,22 @@ describe("ArtifactViewer header actions", () => {
       await Promise.resolve();
     });
 
+    // Two consecutive failed cycles: the first is inside the grace period.
     changed = true;
     await act(async () => {
       vi.advanceTimersByTime(1_500);
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushAsyncWork();
+    });
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await flushAsyncWork();
     });
 
     expect(
       screen.getByRole("heading", { name: "Last good copy" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent(/out of date/i);
+    expect(screen.getByRole("status")).toHaveTextContent(/can't be read/i);
     expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument();
 
     // A later unchanged stat must not silently clear the warning: the viewer
@@ -325,10 +337,9 @@ describe("ArtifactViewer header actions", () => {
     mockStatFile.mockResolvedValue({ byteSize: "20", modifiedAtNs: "2" });
     await act(async () => {
       vi.advanceTimersByTime(1_500);
-      await Promise.resolve();
-      await Promise.resolve();
+      await flushAsyncWork();
     });
-    expect(screen.getByRole("status")).toHaveTextContent(/out of date/i);
+    expect(screen.getByRole("status")).toHaveTextContent(/can't be read/i);
   });
 
   it("recovers an initially failed empty text file to loaded state", async () => {
@@ -403,7 +414,9 @@ describe("ArtifactViewer header actions", () => {
     initialStat.resolve({ byteSize: "20", modifiedAtNs: "1" });
     await act(flushAsyncWork);
     // A late successful stat must not overwrite the earlier decode failure.
-    expect(screen.getByRole("status")).toHaveTextContent(/out of date/i);
+    // A rendered decode failure is already visibly broken, so it flags
+    // immediately with the unreadable copy — no grace period.
+    expect(screen.getByRole("status")).toHaveTextContent(/can't be read/i);
 
     rerender(
       <ArtifactViewer
@@ -417,13 +430,13 @@ describe("ArtifactViewer header actions", () => {
       "src",
       "asset://localhost//p/shot.png?rev=5",
     );
-    expect(screen.getByRole("status")).toHaveTextContent(/out of date/i);
+    expect(screen.getByRole("status")).toHaveTextContent(/can't be read/i);
 
     fireEvent.load(refreshedImage);
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("rejects a preloaded image when its fingerprint changes during decode", async () => {
+  it("rejects a preloaded image whose fingerprint changed during decode and heals next cycle", async () => {
     vi.useFakeTimers();
     let version = "1";
     mockStatFile.mockImplementation(async () => ({
@@ -463,11 +476,31 @@ describe("ArtifactViewer header actions", () => {
       await flushAsyncWork();
     });
 
+    // Torn write: the decoded bytes belong to no settled file version. The
+    // rendered image is untouched and no warning appears — the view is not
+    // wrong, only mid-transition.
     expect(renderedImage).toHaveAttribute(
       "src",
       "asset://localhost//p/shot.png?rev=4",
     );
-    expect(screen.getByRole("status")).toHaveTextContent(/out of date/i);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    // The next cycle sees a settled file and swaps the fresh image in.
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await flushAsyncWork();
+    });
+    await act(async () => {
+      finishPreload?.();
+      await flushAsyncWork();
+    });
+    const refreshedImage = screen.getByRole("img");
+    expect(refreshedImage).toHaveAttribute(
+      "src",
+      "asset://localhost//p/shot.png?rev=5",
+    );
+    fireEvent.load(refreshedImage);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("preloads and renders the same image URL after a polled change", async () => {
@@ -508,6 +541,194 @@ describe("ArtifactViewer header actions", () => {
     expect(screen.getByRole("img")).toHaveAttribute("src", expectedSrc);
 
     fireEvent.load(screen.getByRole("img"));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});
+
+describe("ArtifactViewer divergence grace period", () => {
+  beforeEach(() => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.useFakeTimers();
+    mockReadTextFile.mockReset();
+    mockReadTextFile.mockResolvedValue({ contents: "# Loaded fine" });
+    mockStatFile.mockReset();
+    mockStatFile.mockResolvedValue({ byteSize: "20", modifiedAtNs: "1" });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function contentBody() {
+    // The scroll container wrapping the markdown/raw/image body is what dims.
+    return screen
+      .getByRole("heading", { name: "Loaded fine" })
+      .closest(".overflow-auto") as HTMLElement;
+  }
+
+  async function renderLoadedViewer() {
+    render(<ArtifactViewer artifact={artifact()} onClose={vi.fn()} />);
+    await act(flushAsyncWork);
+    expect(
+      screen.getByRole("heading", { name: "Loaded fine" }),
+    ).toBeInTheDocument();
+  }
+
+  async function advancePollCycle() {
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await flushAsyncWork();
+    });
+  }
+
+  it("keeps the view clean through a single transient stat failure", async () => {
+    await renderLoadedViewer();
+
+    mockStatFile.mockRejectedValueOnce({
+      kind: "other",
+      message: "transient I/O",
+    });
+    await advancePollCycle();
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(contentBody().className).not.toMatch(/\bopacity-60\b/);
+
+    // The next cycle succeeds, so the streak resets and no warning ever shows.
+    await advancePollCycle();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(contentBody().className).not.toMatch(/\bopacity-60\b/);
+  });
+
+  it("shows the warning strip and dims the body after two consecutive failures", async () => {
+    await renderLoadedViewer();
+
+    mockStatFile.mockRejectedValue({ kind: "other", message: "io error" });
+    await advancePollCycle();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    await advancePollCycle();
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "File changed but can't be read.",
+    );
+    expect(contentBody().className).toMatch(/\bopacity-60\b/);
+  });
+
+  it("treats a torn-write fingerprint mismatch as no verdict and heals next cycle", async () => {
+    let phase: "settled" | "torn" | "updated" = "settled";
+    let statCalls = 0;
+    mockStatFile.mockImplementation(async () => {
+      statCalls += 1;
+      if (phase === "settled") return { byteSize: "20", modifiedAtNs: "1" };
+      if (phase === "torn") {
+        // The confirm stat (even call) disagrees with the cycle's first stat.
+        return statCalls % 2 === 0
+          ? { byteSize: "30", modifiedAtNs: "3" }
+          : { byteSize: "25", modifiedAtNs: "2" };
+      }
+      return { byteSize: "30", modifiedAtNs: "3" };
+    });
+    mockReadTextFile.mockImplementation(async () => ({
+      contents: phase === "settled" ? "# Loaded fine" : "# Settled rewrite",
+    }));
+    await renderLoadedViewer();
+
+    phase = "torn";
+    statCalls = 0;
+    await advancePollCycle();
+    // No flag, no strike consumed toward the threshold: torn reads carry no
+    // information about whether the view is actually stale.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(contentBody().className).not.toMatch(/\bopacity-60\b/);
+
+    phase = "updated";
+    await advancePollCycle();
+    expect(
+      screen.getByRole("heading", { name: "Settled rewrite" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("reports a deleted file without offering a pointless reload", async () => {
+    await renderLoadedViewer();
+
+    mockStatFile.mockRejectedValue({
+      kind: "missing",
+      message: "no such file",
+    });
+    await advancePollCycle();
+    await advancePollCycle();
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "File deleted from disk.",
+    );
+    expect(
+      screen.queryByRole("button", { name: /reload/i }),
+    ).not.toBeInTheDocument();
+    expect(contentBody().className).toMatch(/\bopacity-60\b/);
+  });
+
+  it("reports an unreadable file with a reload action", async () => {
+    await renderLoadedViewer();
+
+    mockStatFile.mockRejectedValue({ kind: "other", message: "EACCES" });
+    await advancePollCycle();
+    await advancePollCycle();
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "File changed but can't be read.",
+    );
+    expect(screen.getByRole("button", { name: /reload/i })).toBeInTheDocument();
+  });
+
+  it("flags a failed user-initiated reload immediately, bypassing the grace period", async () => {
+    // Fail the initial load so the strip shows the "other" copy with a Reload
+    // button while the strike counter sits at zero. A reload failure inside a
+    // grace period would then be strike one of two and change nothing; the
+    // bypass instead answers the user on the very first failure.
+    mockStatFile.mockRejectedValueOnce({ kind: "other", message: "EACCES" });
+    render(<ArtifactViewer artifact={artifact()} onClose={vi.fn()} />);
+    await act(flushAsyncWork);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "File changed but can't be read.",
+    );
+
+    // The user presses Reload; by now the file has been deleted outright.
+    mockStatFile.mockRejectedValue({
+      kind: "missing",
+      message: "no such file",
+    });
+    fireEvent.click(screen.getByRole("button", { name: /reload/i }));
+    await act(flushAsyncWork);
+
+    // One failure, immediate verdict: the strip re-describes the divergence
+    // as a deletion and drops the now-pointless Reload button.
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "File deleted from disk.",
+    );
+    expect(
+      screen.queryByRole("button", { name: /reload/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("clears the strip and dim on recovery and re-arms the full grace period", async () => {
+    await renderLoadedViewer();
+
+    mockStatFile.mockRejectedValue({ kind: "other", message: "io error" });
+    await advancePollCycle();
+    await advancePollCycle();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    expect(contentBody().className).toMatch(/\bopacity-60\b/);
+
+    mockStatFile.mockResolvedValue({ byteSize: "20", modifiedAtNs: "1" });
+    await advancePollCycle();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(contentBody().className).not.toMatch(/\bopacity-60\b/);
+
+    // Strikes reset on recovery: a later single failure is back inside the
+    // grace period rather than continuing the old streak.
+    mockStatFile.mockRejectedValueOnce({ kind: "other", message: "blip" });
+    await advancePollCycle();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });

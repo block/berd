@@ -176,6 +176,30 @@ export interface FileStatPayload {
   changedAtNs?: string;
 }
 
+export type FileStatErrorKind = "missing" | "other";
+
+export interface FileStatError {
+  kind: FileStatErrorKind;
+  message: string;
+}
+
+/**
+ * Narrow a `statFile` rejection to its structured kind. The Tauri command
+ * rejects with the serialized `FileStatError`; anything else (IPC failures,
+ * mocked rejections) counts as "other".
+ */
+export function fileStatErrorKind(error: unknown): FileStatErrorKind {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "kind" in error &&
+    (error as { kind: unknown }).kind === "missing"
+  ) {
+    return "missing";
+  }
+  return "other";
+}
+
 export async function statFile(path: string): Promise<FileStatPayload> {
   return invoke("stat_file", { path });
 }

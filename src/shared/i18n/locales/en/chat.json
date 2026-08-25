@@ -689,7 +689,8 @@
     "viewCode": "Code",
     "loading": "Loading file…",
     "loadError": "Couldn't load this file.",
-    "diskDiverged": "This preview may be out of date because the file changed or is unavailable on disk.",
+    "fileDeleted": "File deleted from disk.",
+    "fileUnreadable": "File changed but can't be read.",
     "reload": "Reload",
     "imageAlt": "Preview of {{filename}}"
   },

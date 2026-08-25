@@ -857,6 +857,42 @@ pub struct FileStatPayload {
     pub changed_at_ns: Option<String>,
 }
 
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FileStatErrorKind {
+    /// The path does not exist. Deleted artifacts get distinct messaging in
+    /// the viewer, so this case must survive the IPC boundary.
+    Missing,
+    /// Any other metadata failure (permissions, transient I/O, not a file).
+    Other,
+}
+
+/// Structured `stat_file` failure. Tauri serializes the command's `Err`
+/// payload into the JavaScript rejection value, so the renderer can
+/// distinguish a deleted file from other metadata failures.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileStatError {
+    pub kind: FileStatErrorKind,
+    pub message: String,
+}
+
+impl FileStatError {
+    fn missing(message: String) -> Self {
+        Self {
+            kind: FileStatErrorKind::Missing,
+            message,
+        }
+    }
+
+    fn other(message: String) -> Self {
+        Self {
+            kind: FileStatErrorKind::Other,
+            message,
+        }
+    }
+}
+
 fn signed_unix_timestamp_ns(time: SystemTime) -> String {
     match time.duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_nanos().to_string(),
@@ -902,23 +938,32 @@ fn windows_file_change_time_ns(path: &Path) -> Result<String, String> {
     Ok((i128::from(info.ChangeTime) * 100).to_string())
 }
 
-fn stat_file_blocking(path: String) -> Result<FileStatPayload, String> {
+fn stat_file_blocking(path: String) -> Result<FileStatPayload, FileStatError> {
     let target = Path::new(&path);
-    let metadata = fs::metadata(target)
-        .map_err(|error| format!("Failed to inspect '{}': {}", target.display(), error))?;
+    let metadata = fs::metadata(target).map_err(|error| {
+        let message = format!("Failed to inspect '{}': {}", target.display(), error);
+        if error.kind() == io::ErrorKind::NotFound {
+            FileStatError::missing(message)
+        } else {
+            FileStatError::other(message)
+        }
+    })?;
     if !metadata.is_file() {
-        return Err(format!("Path is not a file: {}", target.display()));
+        return Err(FileStatError::other(format!(
+            "Path is not a file: {}",
+            target.display()
+        )));
     }
 
     let modified_at_ns = metadata
         .modified()
         .map(signed_unix_timestamp_ns)
         .map_err(|error| {
-            format!(
+            FileStatError::other(format!(
                 "Failed to read modification time for '{}': {}",
                 target.display(),
                 error
-            )
+            ))
         })?;
 
     #[cfg(unix)]
@@ -929,7 +974,7 @@ fn stat_file_blocking(path: String) -> Result<FileStatPayload, String> {
         Some(nanoseconds.to_string())
     };
     #[cfg(windows)]
-    let changed_at_ns = Some(windows_file_change_time_ns(target)?);
+    let changed_at_ns = Some(windows_file_change_time_ns(target).map_err(FileStatError::other)?);
     #[cfg(not(any(unix, windows)))]
     let changed_at_ns = None;
 
@@ -940,13 +985,15 @@ fn stat_file_blocking(path: String) -> Result<FileStatPayload, String> {
     })
 }
 
-async fn stat_file_with<F>(path: String, operation: F) -> Result<FileStatPayload, String>
+async fn stat_file_with<F>(path: String, operation: F) -> Result<FileStatPayload, FileStatError>
 where
-    F: FnOnce(String) -> Result<FileStatPayload, String> + Send + 'static,
+    F: FnOnce(String) -> Result<FileStatPayload, FileStatError> + Send + 'static,
 {
     tokio::task::spawn_blocking(move || operation(path))
         .await
-        .map_err(|error| format!("Failed to inspect file metadata: {error}"))?
+        .map_err(|error| {
+            FileStatError::other(format!("Failed to inspect file metadata: {error}"))
+        })?
 }
 
 /// Return the metadata identity used by open artifact viewers to detect writes
@@ -954,7 +1001,7 @@ where
 /// calls are blocking and may wait on remote or removable filesystems, so keep
 /// them off Tauri's async command thread.
 #[tauri::command]
-pub async fn stat_file(path: String) -> Result<FileStatPayload, String> {
+pub async fn stat_file(path: String) -> Result<FileStatPayload, FileStatError> {
     stat_file_with(path, stat_file_blocking).await
 }
 
@@ -2110,7 +2157,7 @@ mod tests {
         read_directory_entries, read_image_attachment, read_text_file,
         search_file_mentions_blocking, signed_unix_timestamp_ns, stat_file_blocking,
         stat_file_with, write_agent_image_atomically, write_sibling_then_replace,
-        FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
+        FileMentionIndexCache, FileStatErrorKind, MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
     };
     use base64::Engine;
     use std::fs;
@@ -3008,7 +3055,25 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let error = stat_file_blocking(dir.path().to_string_lossy().into_owned())
             .expect_err("directory should error");
-        assert!(error.contains("not a file"), "unexpected error: {error}");
+        assert_eq!(error.kind, FileStatErrorKind::Other);
+        assert!(
+            error.message.contains("not a file"),
+            "unexpected error: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn stat_file_reports_missing_files_with_the_missing_kind() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("deleted.md");
+        let error = stat_file_blocking(path.to_string_lossy().into_owned())
+            .expect_err("missing file should error");
+        assert_eq!(error.kind, FileStatErrorKind::Missing);
+        // The kind must cross the IPC boundary as the exact discriminant the
+        // renderer matches on.
+        let serialized = serde_json::to_value(&error).expect("serialize");
+        assert_eq!(serialized["kind"], "missing");
     }
 
     #[test]

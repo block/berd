@@ -28,7 +28,13 @@ import {
 } from "@/shared/ui/dropdown-menu";
 import { Spinner } from "@/shared/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/toggle-group";
-import { readTextFile, statFile } from "@/shared/api/system";
+import {
+  fileStatErrorKind,
+  readTextFile,
+  statFile,
+  type FileStatErrorKind,
+} from "@/shared/api/system";
+import { cn } from "@/shared/lib/cn";
 import { revealInFileManager } from "@/shared/lib/fileManager";
 import { getPlatform } from "@/shared/lib/platform";
 import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
@@ -62,6 +68,10 @@ interface FileFingerprint {
 
 const FOREGROUND_ARTIFACT_POLL_INTERVAL_MS = 1_500;
 const BACKGROUND_ARTIFACT_POLL_INTERVAL_MS = 10_000;
+// Consecutive failed poll cycles tolerated before the stale warning shows. A
+// single failure is routinely a file mid-rewrite or a transient I/O hiccup;
+// two in a row is a real divergence worth surfacing.
+const DIVERGENCE_STRIKE_THRESHOLD = 2;
 
 function sameFingerprint(
   left: FileFingerprint,
@@ -91,6 +101,8 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
   const fingerprintRef = useRef<FileFingerprint | null>(null);
   const [diskStatus, setDiskStatus] = useState<DiskStatus>("checking");
   const diskStatusRef = useRef<DiskStatus>(diskStatus);
+  const [divergedKind, setDivergedKind] = useState<FileStatErrorKind>("other");
+  const divergenceStrikesRef = useRef(0);
   const [imageDiskRevision, setImageDiskRevision] = useState(0);
   const imageDiskRevisionRef = useRef(0);
   const [retryRevision, setRetryRevision] = useState(0);
@@ -124,7 +136,29 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
   const updateDiskStatus = useCallback((next: DiskStatus) => {
     diskStatusRef.current = next;
     setDiskStatus(next);
+    // Any non-diverged outcome ends the current failure streak, so recovery
+    // both clears the warning and re-arms the full grace period.
+    if (next !== "diverged") divergenceStrikesRef.current = 0;
   }, []);
+  const flagDiverged = useCallback(
+    (kind: FileStatErrorKind) => {
+      setDivergedKind(kind);
+      updateDiskStatus("diverged");
+    },
+    [updateDiskStatus],
+  );
+  // Polling failures get a grace period: one failed cycle is routinely a file
+  // mid-rewrite or a transient I/O error, so only consecutive failures flag
+  // the view as diverged. User-initiated reloads bypass this via flagDiverged.
+  const recordDivergenceStrike = useCallback(
+    (kind: FileStatErrorKind) => {
+      divergenceStrikesRef.current += 1;
+      if (divergenceStrikesRef.current >= DIVERGENCE_STRIKE_THRESHOLD) {
+        flagDiverged(kind);
+      }
+    },
+    [flagDiverged],
+  );
 
   // Escape closes the viewer — but only when nothing closer to the event
   // already handled it (open menus, dialogs, transcript search, etc.).
@@ -174,6 +208,11 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
     if (pathChanged || diskStatusRef.current !== "diverged") {
       updateDiskStatus("checking");
     }
+    // An unconsumed retry revision means the user pressed Reload. That intent
+    // matters on failure: the user asked "is the file back?", so the answer is
+    // immediate rather than smoothed over by the polling grace period.
+    const userReloadRequested =
+      retryRevision !== consumedRetryRevisionRef.current;
 
     // Reading this value makes the ACP-driven revision an explicit input to
     // this request even though only its change, not its numeric value, matters.
@@ -184,8 +223,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
         if (!isCurrentRefresh()) return;
 
         if (viewMode === "image") {
-          const shouldBustImageCache =
-            retryRevision !== consumedRetryRevisionRef.current;
+          const shouldBustImageCache = userReloadRequested;
           const candidateDiskRevision = shouldBustImageCache
             ? imageDiskRevisionRef.current + 1
             : imageDiskRevisionRef.current;
@@ -198,11 +236,11 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             await preloadArtifactImage(candidateSrc);
             if (!isCurrentRefresh()) return;
             confirmedFingerprint = await statFile(artifact.resolvedPath);
-            if (
-              !isCurrentRefresh() ||
-              !sameFingerprint(before, confirmedFingerprint)
-            ) {
-              updateDiskStatus("diverged");
+            if (!isCurrentRefresh()) return;
+            if (!sameFingerprint(before, confirmedFingerprint)) {
+              // Torn write: the file changed while the image was decoding.
+              // Leave the current state alone and let the next cycle retry
+              // against the settled file.
               return;
             }
             imageDiskRevisionRef.current = candidateDiskRevision;
@@ -225,7 +263,9 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
         const after = await statFile(artifact.resolvedPath);
         if (!isCurrentRefresh()) return;
         if (!sameFingerprint(before, after)) {
-          updateDiskStatus("diverged");
+          // Torn write: the file changed underneath the read, so neither the
+          // fetched contents nor a divergence verdict is trustworthy. Keep the
+          // current state and let the next poll cycle retry the settled file.
           return;
         }
 
@@ -236,14 +276,30 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
         ) {
           updateTextState({ status: "loaded", contents: payload.contents });
         }
+        consumedRetryRevisionRef.current = retryRevision;
         updateDiskStatus("current");
-      } catch {
+      } catch (error) {
         if (!isCurrentRefresh()) return;
-        if (textStateRef.current.status === "loaded") {
-          updateDiskStatus("diverged");
-        } else {
+        const kind = fileStatErrorKind(error);
+        const hasLastGoodView = textStateRef.current.status === "loaded";
+        if (!hasLastGoodView) {
           updateTextState({ status: "error", contents: "" });
-          updateDiskStatus("diverged");
+        }
+        if (userReloadRequested) {
+          // The user explicitly asked whether the file is back, so answer
+          // immediately instead of smoothing the failure over with the
+          // polling grace period.
+          consumedRetryRevisionRef.current = retryRevision;
+          flagDiverged(kind);
+        } else if (hasLastGoodView) {
+          // ACP-driven re-open of already-rendered content: tool writes
+          // routinely race the re-read, so give the failure the same grace
+          // as a polling failure.
+          recordDivergenceStrike(kind);
+        } else {
+          // Initial load (or path change) failure: there is no last-good view
+          // to protect, so the error state and warning show immediately.
+          flagDiverged(kind);
         }
       } finally {
         finishRefresh();
@@ -261,6 +317,8 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
     artifact.resolvedPath,
     artifact.revision,
     contentReadRevision,
+    flagDiverged,
+    recordDivergenceStrike,
     retryRevision,
     updateDiskStatus,
     updateTextState,
@@ -314,11 +372,11 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
           await preloadArtifactImage(candidateSrc);
           if (!isCurrentPoll()) return;
           const confirmedFingerprint = await statFile(artifact.resolvedPath);
-          if (
-            !isCurrentPoll() ||
-            !sameFingerprint(fingerprint, confirmedFingerprint)
-          ) {
-            updateDiskStatus("diverged");
+          if (!isCurrentPoll()) return;
+          if (!sameFingerprint(fingerprint, confirmedFingerprint)) {
+            // Torn write: the file changed while the image was decoding, so
+            // the decoded bytes are already stale. Neither flag nor strike —
+            // the next cycle retries against the settled file.
             return;
           }
           pendingImageRef.current = {
@@ -333,11 +391,11 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
         const payload = await readTextFile(artifact.resolvedPath);
         if (!isCurrentPoll()) return;
         const confirmedFingerprint = await statFile(artifact.resolvedPath);
-        if (
-          !isCurrentPoll() ||
-          !sameFingerprint(fingerprint, confirmedFingerprint)
-        ) {
-          updateDiskStatus("diverged");
+        if (!isCurrentPoll()) return;
+        if (!sameFingerprint(fingerprint, confirmedFingerprint)) {
+          // Torn write: the fingerprint moved during the read, so the fetched
+          // contents describe no settled file version. Neither flag nor
+          // strike — the next cycle retries.
           return;
         }
         fingerprintRef.current = confirmedFingerprint;
@@ -348,8 +406,8 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
           updateTextState({ status: "loaded", contents: payload.contents });
         }
         updateDiskStatus("current");
-      } catch {
-        if (isCurrentPoll()) updateDiskStatus("diverged");
+      } catch (error) {
+        if (isCurrentPoll()) recordDivergenceStrike(fileStatErrorKind(error));
       } finally {
         checkInFlight = false;
       }
@@ -403,6 +461,7 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
   }, [
     artifact.resolvedPath,
     artifact.revision,
+    recordDivergenceStrike,
     updateDiskStatus,
     updateTextState,
     viewMode,
@@ -494,19 +553,36 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
           role="status"
           className="flex items-center justify-between gap-3 border-b border-border bg-muted/60 px-4 py-2 text-xs text-muted-foreground"
         >
-          <span>{t("artifactViewer.diskDiverged")}</span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 shrink-0"
-            onClick={() => setRetryRevision((revision) => revision + 1)}
-          >
-            {t("artifactViewer.reload")}
-          </Button>
+          <span>
+            {divergedKind === "missing"
+              ? t("artifactViewer.fileDeleted")
+              : t("artifactViewer.fileUnreadable")}
+          </span>
+          {/* A deleted file has nothing to reload; the strip is the whole
+              answer. Polling keeps retrying, so if the file reappears the
+              view heals without user action. */}
+          {divergedKind !== "missing" ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 shrink-0"
+              onClick={() => setRetryRevision((revision) => revision + 1)}
+            >
+              {t("artifactViewer.reload")}
+            </Button>
+          ) : null}
         </div>
       ) : null}
 
-      <div className="flex-1 overflow-auto">
+      {/* Dim the stale body while diverged so the warning strip reads as
+          describing the content, not competing with it. "checking" stays at
+          full opacity — routine polls must not flicker the view. */}
+      <div
+        className={cn(
+          "flex-1 overflow-auto",
+          diskStatus === "diverged" && "opacity-60",
+        )}
+      >
         {viewMode === "image" ? (
           <ImageBody
             artifact={artifact}
@@ -524,7 +600,10 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
               if (failedSrc !== imageSrc) return;
               loadedImageSrcRef.current = null;
               pendingImageRef.current = null;
-              updateDiskStatus("diverged");
+              // The rendered image failed to decode, so the view is already
+              // visibly broken — no grace period applies. The file may still
+              // exist (truncated, corrupt), so this is "other", not "missing".
+              flagDiverged("other");
             }}
           />
         ) : (
