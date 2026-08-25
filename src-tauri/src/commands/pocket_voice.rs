@@ -748,7 +748,7 @@ pub(crate) fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
 
     #[cfg(target_os = "macos")]
     {
-        return output_device_is_builtin_speaker(output_device);
+        output_device_is_builtin_speaker(output_device)
     }
 
     #[cfg(not(target_os = "macos"))]
