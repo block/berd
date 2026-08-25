@@ -7,7 +7,7 @@ const STORAGE_KEY = "goose:voice-output-backend";
 const CHANGED_EVENT = "goose:voice-output-backend-changed";
 let inMemoryBackend: VoiceOutputBackend | null = null;
 export function getDefaultVoiceOutputBackend(): VoiceOutputBackend {
-  return getPlatform() === "mac" ? "siri" : "pocket";
+  return "pocket";
 }
 
 function normalize(value: unknown): VoiceOutputBackend {
