@@ -104,9 +104,8 @@ const appVersion = import.meta.env.VITE_APP_VERSION ?? "0.0.0";
 const TELEMETRY_DEBUG_STORAGE_KEY = "berd.telemetry.debug";
 
 // OTel instrumentation scope for every emitted log record. The gateway's
-// `berd-otlp-logs-v2` schema pins this exact literal (renamed from
-// `goose-internal.telemetry` before any client shipped), so it moves in
-// lockstep with the gateway schema, not with local naming.
+// `berd-otlp-logs-v2` schema pins this exact literal, so it moves in lockstep
+// with the gateway schema, not with local naming.
 const TELEMETRY_SCOPE_NAME = "berd.telemetry";
 // `deployment.environment` is an incubating semantic convention; inline the key
 // to avoid importing the large `/incubating` module for a single constant.
