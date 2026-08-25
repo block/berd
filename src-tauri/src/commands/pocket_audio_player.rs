@@ -33,6 +33,7 @@ pub(super) struct PocketAudioPlayer {
     raw: *mut c_void,
     sample_rate: u32,
     delivery_safety_frames: Cell<u64>,
+    reported_played_frames: Cell<u64>,
 }
 
 impl PocketAudioPlayer {
@@ -61,6 +62,7 @@ impl PocketAudioPlayer {
             raw,
             sample_rate,
             delivery_safety_frames: Cell::new(delivery_safety_frames(sample_rate, rate)),
+            reported_played_frames: Cell::new(0),
         })
     }
 
@@ -106,10 +108,13 @@ impl PocketAudioPlayer {
     pub(super) fn played_frames(&self) -> u64 {
         // SAFETY: `self.raw` is a live retained player. The bridge counts only
         // source buffers confirmed played back, so idle queue gaps add nothing.
-        apply_delivery_safety(
+        let played_frames = monotonic_played_frames(
+            self.reported_played_frames.get(),
             self.completed_source_frames(),
             self.delivery_safety_frames.get(),
-        )
+        );
+        self.reported_played_frames.set(played_frames);
+        played_frames
     }
 
     pub(super) fn completed_source_frames(&self) -> u64 {
@@ -145,6 +150,17 @@ fn apply_delivery_safety(completed_source_frames: u64, safety_frames: u64) -> u6
     completed_source_frames.saturating_sub(safety_frames)
 }
 
+fn monotonic_played_frames(
+    reported_played_frames: u64,
+    completed_source_frames: u64,
+    safety_frames: u64,
+) -> u64 {
+    reported_played_frames.max(apply_delivery_safety(
+        completed_source_frames,
+        safety_frames,
+    ))
+}
+
 fn playback_health(failed: bool) -> Result<(), String> {
     if failed {
         Err("Pocket audio output stopped unexpectedly".to_string())
@@ -176,7 +192,7 @@ fn take_error(error: *mut c_char, fallback: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_delivery_safety, delivery_safety_frames, playback_health,
+        apply_delivery_safety, delivery_safety_frames, monotonic_played_frames, playback_health,
         updated_delivery_safety_frames,
     };
 
@@ -211,6 +227,20 @@ mod tests {
         assert_eq!(
             updated_delivery_safety_frames(accelerated, 24_000, 1.0),
             4_800
+        );
+    }
+
+    #[test]
+    fn live_rate_changes_do_not_move_reported_delivery_backward() {
+        let previously_reported = apply_delivery_safety(10_000, 2_400);
+        assert_eq!(previously_reported, 7_600);
+        assert_eq!(
+            monotonic_played_frames(previously_reported, 10_000, 4_800),
+            7_600
+        );
+        assert_eq!(
+            monotonic_played_frames(previously_reported, 13_000, 4_800),
+            8_200
         );
     }
 
