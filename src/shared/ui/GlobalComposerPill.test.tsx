@@ -559,6 +559,35 @@ describe("GlobalComposerPill", () => {
     await waitFor(() => expect(input).toHaveValue(""));
   });
 
+  it("keeps an empty centered composer stable and starts voice on its first click", async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn().mockResolvedValue(true);
+    renderGlobalComposer(vi.fn(), {
+      placement: "centered",
+      voiceConversation: { enabled: true, ready: true, onStart },
+    });
+
+    await user.click(screen.getByRole("textbox"));
+    expect(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    ).toHaveAttribute("tabindex", "0");
+
+    const button = screen.getByRole("button", {
+      name: "Start voice conversation",
+    });
+    const mouseDown = createEvent.mouseDown(button, {
+      button: 0,
+      cancelable: true,
+    });
+    fireEvent(button, mouseDown);
+
+    expect(mouseDown.defaultPrevented).toBe(true);
+
+    await user.click(button);
+
+    expect(onStart).toHaveBeenCalledOnce();
+  });
+
   it("blocks Voice Conversation while dictation owns the microphone", async () => {
     const user = userEvent.setup();
     const onStart = vi.fn().mockResolvedValue(true);
