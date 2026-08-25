@@ -6,6 +6,7 @@ import { cn } from "@/shared/lib/cn";
 import { MessageAction, MessageActions } from "@/shared/ui/ai-elements/message";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { Button } from "@/shared/ui/button";
+import { ResponseFeedbackControls } from "../response-feedback/ResponseFeedbackControls";
 
 interface MessageBubbleActionsProps {
   isUser: boolean;
@@ -19,6 +20,11 @@ interface MessageBubbleActionsProps {
   onJumpToResponseStart?: (messageId: string) => void;
   onForkFromMessage?: (messageId: string) => void;
   showJumpToResponseStartHint?: boolean;
+  responseFeedback?: {
+    sessionId: string;
+    messageId: string;
+    persistentlyVisible: boolean;
+  };
   onJumpToResponseStartHintClose?: (messageId: string) => void;
   onJumpToResponseStartHintDismiss?: (messageId: string) => void;
 }
@@ -35,6 +41,7 @@ export function MessageBubbleActions({
   onJumpToResponseStart,
   onForkFromMessage,
   showJumpToResponseStartHint,
+  responseFeedback,
   onJumpToResponseStartHintClose,
   onJumpToResponseStartHintDismiss,
 }: MessageBubbleActionsProps) {
@@ -163,6 +170,13 @@ export function MessageBubbleActions({
           <Pencil className="size-3.5" />
         </MessageAction>
       )}
+      {!isUser && responseFeedback ? (
+        <ResponseFeedbackControls
+          sessionId={responseFeedback.sessionId}
+          messageId={responseFeedback.messageId}
+          persistentlyVisible={responseFeedback.persistentlyVisible}
+        />
+      ) : null}
       {!isUser && timestamp}
     </MessageActions>
   );

@@ -45,6 +45,7 @@ interface VirtualTranscriptRowProps {
   settleAgentWorkOnMount?: boolean;
   actionsAlwaysVisible?: boolean;
   showJumpToResponseStartHint?: boolean;
+  feedbackSessionId?: string;
   isPulsing?: boolean;
   rowStateProvider?: TranscriptVirtualRowStateProviderConfig;
   bubbleCallbacks?: MessageBubbleCallbacks;
@@ -70,6 +71,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
   settleAgentWorkOnMount,
   actionsAlwaysVisible,
   showJumpToResponseStartHint,
+  feedbackSessionId,
   isPulsing,
   rowStateProvider,
   bubbleCallbacks,
@@ -300,9 +302,11 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           message={message}
           animateEntry={false}
           contentOverride={row.fragment.content}
+          actionMessageId={row.responseStartMessageId ?? row.messageId}
           fragmentRole={row.fragment.role}
           isStreaming={row.fragment.isStreamingTail && isStreaming}
           actionsAlwaysVisible={actionsAlwaysVisible}
+          feedbackSessionId={feedbackSessionId}
           showJumpToResponseStartHint={showJumpToResponseStartHint}
           onRetryMessage={
             row.fragment.role === "end" || row.fragment.role === "single"
@@ -383,6 +387,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           actionMessageId={row.responseStartMessageId ?? row.messageId}
           isStreaming={isStreaming}
           actionsAlwaysVisible={actionsAlwaysVisible}
+          feedbackSessionId={feedbackSessionId}
           showJumpToResponseStartHint={showJumpToResponseStartHint}
           onRetryMessage={
             message.role === "assistant" ? onRetryMessage : undefined
@@ -447,6 +452,7 @@ function areVirtualTranscriptRowPropsEqual(
     previous.settleAgentWorkOnMount === next.settleAgentWorkOnMount &&
     previous.actionsAlwaysVisible === next.actionsAlwaysVisible &&
     previous.showJumpToResponseStartHint === next.showJumpToResponseStartHint &&
+    previous.feedbackSessionId === next.feedbackSessionId &&
     previous.isPulsing === next.isPulsing &&
     previous.rowStateProvider === next.rowStateProvider &&
     previous.bubbleCallbacks === next.bubbleCallbacks &&

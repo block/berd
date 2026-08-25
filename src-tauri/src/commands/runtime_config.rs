@@ -166,6 +166,8 @@ pub struct RuntimeFeedbackConfig {
     pub enabled: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub project_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub response_rating_enabled: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1194,6 +1196,7 @@ mod tests {
             feedback: Some(RuntimeFeedbackConfig {
                 enabled: Some(true),
                 project_key: Some("BOT".to_string()),
+                response_rating_enabled: Some(true),
             }),
             kgoose: Some(RuntimeKgooseConfig {
                 base_url: Some("https://kgoose.example.test".to_string()),

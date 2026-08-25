@@ -282,6 +282,7 @@ export const runtimeFeedbackConfigSchema = z
   .object({
     enabled: z.boolean().optional(),
     projectKey: nonEmptyString("feedback projectKey").optional(),
+    responseRatingEnabled: z.boolean().optional(),
   })
   .strict();
 

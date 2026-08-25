@@ -19,6 +19,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
 import type { Message } from "@/shared/types/messages";
+import { selectResponseFeedbackRowIds } from "../response-feedback/responseFeedbackRows";
 import { ASSISTIVE_UX_RULES } from "@/shared/assistive-ux/registry";
 import {
   hasAssistiveMomentBeenShown,
@@ -1112,6 +1113,10 @@ function VirtualMessageTimelineSession({
     ],
   );
   const stableRows = useStableTranscriptRows(snapshot.rows);
+  const responseFeedbackRowIds = useMemo(
+    () => selectResponseFeedbackRowIds(stableRows),
+    [stableRows],
+  );
   const [settlingAgentWorkMessageId, setSettlingAgentWorkMessageId] = useState<
     string | null
   >(null);
@@ -3521,6 +3526,9 @@ function VirtualMessageTimelineSession({
       actionsAlwaysVisible={
         row.messageId === latestAssistantMessageId &&
         (row.responseStartMessageId ?? row.messageId) !== streamingMessageId
+      }
+      feedbackSessionId={
+        responseFeedbackRowIds.has(row.rowId) ? sessionId : undefined
       }
       showJumpToResponseStartHint={
         row.messageId === responseStartHintMessageId &&

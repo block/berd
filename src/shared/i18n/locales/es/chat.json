@@ -401,6 +401,8 @@
     "mcpAppLoading": "Cargando MCP App…",
     "mcpAppRenderError": "No se pudo renderizar MCP App en línea.",
     "redactedThinking": "(pensamiento redactado)",
+    "responseFeedbackGood": "Buena respuesta",
+    "responseFeedbackBad": "Mala respuesta",
     "providerError": {
       "anthropicThinkingHistory": "Este chat no puede continuar con un modelo Claude porque su historial de razonamiento previo ya no tiene una forma que Claude acepte. Inicia un chat nuevo o cambia este chat a un modelo que no sea Claude para continuar."
     },

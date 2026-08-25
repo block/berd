@@ -540,6 +540,7 @@ mod tests {
         let disabled = runtime_config_with_feedback(Some(RuntimeFeedbackConfig {
             enabled: Some(false),
             project_key: Some("CUSTOM".to_string()),
+            response_rating_enabled: None,
         }));
         assert!(!feedback_enabled(&disabled));
         assert_eq!(feedback_project_key(&disabled), "CUSTOM");
