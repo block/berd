@@ -75,6 +75,8 @@ enum PocketPlaybackEvent {
     SourceFinished,
     ShutdownImmediately,
     ShutdownAfterPlayback,
+    #[cfg(test)]
+    Probe(mpsc::Sender<()>),
 }
 
 #[cfg(target_os = "macos")]
@@ -97,6 +99,10 @@ fn run_pocket_playback_monitor(
                             generation = completed_generation.load(Ordering::Acquire);
                             grace_started = Instant::now();
                         }
+                        #[cfg(test)]
+                        Ok(PocketPlaybackEvent::Probe(sender)) => {
+                            let _ = sender.send(());
+                        }
                         Ok(PocketPlaybackEvent::ShutdownImmediately)
                         | Err(mpsc::RecvTimeoutError::Disconnected) => return,
                         Ok(PocketPlaybackEvent::ShutdownAfterPlayback) => {
@@ -111,14 +117,30 @@ fn run_pocket_playback_monitor(
                             return;
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => {
+                            let latest_generation = completed_generation.load(Ordering::Acquire);
+                            if latest_generation != generation {
+                                generation = latest_generation;
+                                grace_started = Instant::now();
+                                continue;
+                            }
                             release_completed_pocket_assistant_speech(
                                 generation,
                                 &assistant_speech,
                             );
+                            let latest_generation = completed_generation.load(Ordering::Acquire);
+                            if latest_generation != generation {
+                                generation = latest_generation;
+                                grace_started = Instant::now();
+                                continue;
+                            }
                             break;
                         }
                     }
                 }
+            }
+            #[cfg(test)]
+            PocketPlaybackEvent::Probe(sender) => {
+                let _ = sender.send(());
             }
             PocketPlaybackEvent::ShutdownImmediately
             | PocketPlaybackEvent::ShutdownAfterPlayback => break,
@@ -3417,6 +3439,52 @@ mod tests {
             Ok(PocketPlaybackEvent::SourceFinished)
         ));
         assert_eq!(receiver.try_iter().count(), 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn playback_monitor_rechecks_generation_after_a_lost_completion_wakeup() {
+        let native_voice = NativeVoiceState::default();
+        let assistant_speech = Arc::new(Mutex::new(Some((
+            3,
+            native_voice.begin_assistant_speech(InterruptionSensitivity::More, false),
+        ))));
+        let completed_generation = Arc::new(AtomicU64::new(1));
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let monitor = spawn_pocket_playback_monitor(
+            receiver,
+            Arc::clone(&assistant_speech),
+            Arc::clone(&completed_generation),
+            Duration::from_millis(10),
+        )
+        .expect("spawn playback monitor");
+
+        sender
+            .send(PocketPlaybackEvent::SourceFinished)
+            .expect("send initial completion");
+        let (probe_sender, probe_receiver) = mpsc::channel();
+        sender
+            .send(PocketPlaybackEvent::Probe(probe_sender))
+            .expect("send monitor probe");
+        probe_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("monitor entered completion grace");
+
+        // A full capacity-one channel can drop this generation's wakeup after
+        // the atomic state advances. The monitor must still observe the latest
+        // generation when its current grace expires.
+        completed_generation.store(3, Ordering::Release);
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while assistant_speech.lock().expect("assistant speech").is_some() {
+            assert!(Instant::now() < deadline, "latest guard was not released");
+            std::thread::yield_now();
+        }
+
+        sender
+            .send(PocketPlaybackEvent::ShutdownImmediately)
+            .expect("stop playback monitor");
+        monitor.join().expect("join playback monitor");
     }
 
     #[cfg(target_os = "macos")]
