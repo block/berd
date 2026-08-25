@@ -573,70 +573,23 @@ typedef void (^BerdAudioHandler)(
 @property(nonatomic, strong) AVAudioUnitTimePitch *timePitch;
 @property(nonatomic, strong) AVAudioFormat *format;
 @property(nonatomic, assign) uint64_t pendingBuffers;
+@property(nonatomic, assign) uint64_t completedSourceFrames;
 @property(nonatomic, assign) BOOL stopped;
 - (instancetype)initWithSampleRate:(double)sampleRate
                               rate:(float)rate
-                  outputDeviceName:(NSString *_Nullable)outputDeviceName
+                    outputDeviceID:(AudioDeviceID)outputDeviceID
                              error:(NSError **)error;
 - (BOOL)enqueueSamples:(const float *)samples
             frameCount:(AVAudioFrameCount)frameCount
                  error:(NSError **)error;
-- (uint64_t)playedFrames;
+- (uint64_t)completedSourceFramesSnapshot;
 - (void)stop;
 @end
-
-static AudioDeviceID BerdAudioDeviceNamed(NSString *name) {
-    AudioObjectPropertyAddress address = {
-        kAudioHardwarePropertyDevices,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain,
-    };
-    UInt32 size = 0;
-    if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &address, 0, NULL, &size) != noErr) {
-        return kAudioObjectUnknown;
-    }
-    UInt32 count = size / sizeof(AudioDeviceID);
-    AudioDeviceID *devices = calloc(count, sizeof(AudioDeviceID));
-    if (!devices) return kAudioObjectUnknown;
-    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &address, 0, NULL, &size, devices) != noErr) {
-        free(devices);
-        return kAudioObjectUnknown;
-    }
-
-    AudioDeviceID match = kAudioObjectUnknown;
-    AudioObjectPropertyAddress nameAddress = {
-        kAudioObjectPropertyName,
-        kAudioObjectPropertyScopeGlobal,
-        kAudioObjectPropertyElementMain,
-    };
-    for (UInt32 index = 0; index < count; index++) {
-        AudioObjectPropertyAddress streamsAddress = {
-            kAudioDevicePropertyStreams,
-            kAudioDevicePropertyScopeOutput,
-            kAudioObjectPropertyElementMain,
-        };
-        UInt32 streamsSize = 0;
-        if (AudioObjectGetPropertyDataSize(devices[index], &streamsAddress, 0, NULL,
-                                           &streamsSize) != noErr || streamsSize == 0) {
-            continue;
-        }
-        CFStringRef deviceName = NULL;
-        UInt32 nameSize = sizeof(deviceName);
-        if (AudioObjectGetPropertyData(devices[index], &nameAddress, 0, NULL, &nameSize,
-                                       &deviceName) == noErr && deviceName) {
-            if ([(__bridge NSString *)deviceName isEqualToString:name]) match = devices[index];
-            CFRelease(deviceName);
-        }
-        if (match != kAudioObjectUnknown) break;
-    }
-    free(devices);
-    return match;
-}
 
 @implementation BerdPocketAudioPlayer
 - (instancetype)initWithSampleRate:(double)sampleRate
                               rate:(float)rate
-                  outputDeviceName:(NSString *)outputDeviceName
+                    outputDeviceID:(AudioDeviceID)outputDeviceID
                              error:(NSError **)error {
     self = [super init];
     if (!self) return nil;
@@ -673,24 +626,16 @@ static AudioDeviceID BerdAudioDeviceNamed(NSString *name) {
         [_engine connect:_player to:_engine.mainMixerNode format:_format];
     }
 
-    if (outputDeviceName.length) {
-        AudioDeviceID device = BerdAudioDeviceNamed(outputDeviceName);
-        if (device == kAudioObjectUnknown) {
-            if (error) {
-                *error = BerdError(32, [NSString stringWithFormat:@"Audio output not found: %@",
-                                                                  outputDeviceName]);
-            }
-            return nil;
-        }
+    if (outputDeviceID != kAudioObjectUnknown) {
         AudioUnit outputUnit = _engine.outputNode.audioUnit;
         OSStatus status = AudioUnitSetProperty(outputUnit,
                                                kAudioOutputUnitProperty_CurrentDevice,
                                                kAudioUnitScope_Global,
                                                0,
-                                               &device,
-                                               sizeof(device));
+                                               &outputDeviceID,
+                                               sizeof(outputDeviceID));
         if (status != noErr) {
-            if (error) *error = BerdError(33, @"Could not select the configured audio output.");
+            if (error) *error = BerdError(32, @"Could not select the configured audio output.");
             return nil;
         }
     }
@@ -726,6 +671,9 @@ static AudioDeviceID BerdAudioDeviceNamed(NSString *name) {
                   BerdPocketAudioPlayer *strongSelf = weakSelf;
                   if (!strongSelf) return;
                   @synchronized (strongSelf) {
+                      if (!strongSelf.stopped) {
+                          strongSelf.completedSourceFrames += frameCount;
+                      }
                       strongSelf.pendingBuffers = strongSelf.pendingBuffers > 0
                           ? strongSelf.pendingBuffers - 1
                           : 0;
@@ -735,16 +683,8 @@ static AudioDeviceID BerdAudioDeviceNamed(NSString *name) {
     return YES;
 }
 
-- (uint64_t)playedFrames {
-    AVAudioTime *renderTime = self.player.lastRenderTime;
-    if (!renderTime) return 0;
-    AVAudioTime *playerTime = [self.player playerTimeForNodeTime:renderTime];
-    if (!playerTime || playerTime.sampleTime <= 0) return 0;
-    uint64_t frames = (uint64_t)playerTime.sampleTime;
-    double rate = self.timePitch ? self.timePitch.rate : 1.0;
-    uint64_t effectLatency =
-        (uint64_t)llround(self.timePitch.latency * self.format.sampleRate * rate);
-    return frames > effectLatency ? frames - effectLatency : 0;
+- (uint64_t)completedSourceFramesSnapshot {
+    @synchronized (self) { return self.completedSourceFrames; }
 }
 
 - (void)stop {
@@ -1341,19 +1281,16 @@ bool berd_siri_tts_speak(
 void *berd_pocket_audio_player_create(
     uint32_t sampleRate,
     float rate,
-    const char *outputDeviceNameValue,
+    uint32_t outputDeviceID,
     char **errorOut
 ) {
     @autoreleasepool {
         if (errorOut) *errorOut = NULL;
-        NSString *outputDeviceName = outputDeviceNameValue
-            ? [NSString stringWithUTF8String:outputDeviceNameValue]
-            : nil;
         NSError *error = nil;
         BerdPocketAudioPlayer *player = [[BerdPocketAudioPlayer alloc]
             initWithSampleRate:sampleRate
                          rate:rate
-             outputDeviceName:outputDeviceName
+               outputDeviceID:outputDeviceID
                         error:&error];
         if (!player) {
             BerdSetError(errorOut, error ?: BerdError(35, @"Could not start Pocket playback."));
@@ -1383,11 +1320,9 @@ bool berd_pocket_audio_player_enqueue(
     }
 }
 
-uint64_t berd_pocket_audio_player_played_frames(void *playerValue) {
-    @autoreleasepool {
-        if (!playerValue) return 0;
-        return [(__bridge BerdPocketAudioPlayer *)playerValue playedFrames];
-    }
+uint64_t berd_pocket_audio_player_completed_source_frames(void *playerValue) {
+    if (!playerValue) return 0;
+    return [(__bridge BerdPocketAudioPlayer *)playerValue completedSourceFramesSnapshot];
 }
 
 uint64_t berd_pocket_audio_player_pending_buffers(void *playerValue) {

@@ -78,7 +78,7 @@ bool berd_siri_tts_speak(
 void *berd_pocket_audio_player_create(
     uint32_t sample_rate,
     float rate,
-    const char *output_device_name,
+    uint32_t output_device_id,
     char **error_out
 );
 bool berd_pocket_audio_player_enqueue(
@@ -87,7 +87,7 @@ bool berd_pocket_audio_player_enqueue(
     uint32_t frame_count,
     char **error_out
 );
-uint64_t berd_pocket_audio_player_played_frames(void *player);
+uint64_t berd_pocket_audio_player_completed_source_frames(void *player);
 uint64_t berd_pocket_audio_player_pending_buffers(void *player);
 void berd_pocket_audio_player_stop(void *player);
 void berd_pocket_audio_player_release(void *player);

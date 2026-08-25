@@ -1,12 +1,12 @@
 //! Safe ownership wrapper for the macOS AVAudioUnitTimePitch Pocket player.
 
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{c_char, c_void, CStr};
 
 unsafe extern "C" {
     fn berd_pocket_audio_player_create(
         sample_rate: u32,
         rate: f32,
-        output_device_name: *const c_char,
+        output_device_id: u32,
         error_out: *mut *mut c_char,
     ) -> *mut c_void;
     fn berd_pocket_audio_player_enqueue(
@@ -15,7 +15,7 @@ unsafe extern "C" {
         frame_count: u32,
         error_out: *mut *mut c_char,
     ) -> bool;
-    fn berd_pocket_audio_player_played_frames(player: *mut c_void) -> u64;
+    fn berd_pocket_audio_player_completed_source_frames(player: *mut c_void) -> u64;
     fn berd_pocket_audio_player_pending_buffers(player: *mut c_void) -> u64;
     fn berd_pocket_audio_player_stop(player: *mut c_void);
     fn berd_pocket_audio_player_release(player: *mut c_void);
@@ -33,22 +33,18 @@ impl PocketAudioPlayer {
         rate: f32,
         output_device_name: Option<&str>,
     ) -> Result<Self, String> {
-        let output_device_name = output_device_name
-            .map(CString::new)
-            .transpose()
-            .map_err(|_| "Pocket output device name cannot contain NUL bytes".to_string())?;
+        let output_device_id = output_device_name
+            .map(|name| {
+                coreaudio::audio_unit::macos_helpers::get_device_id_from_name(name, false)
+                    .ok_or_else(|| format!("audio output not found: {name}"))
+            })
+            .transpose()?
+            .unwrap_or(0);
         let mut error = std::ptr::null_mut();
-        // SAFETY: The bridge copies the optional name synchronously and returns
-        // an owned opaque player retained until `Drop`.
+        // SAFETY: The bridge receives a resolved CoreAudio device ID and
+        // returns an owned opaque player retained until `Drop`.
         let raw = unsafe {
-            berd_pocket_audio_player_create(
-                sample_rate,
-                rate,
-                output_device_name
-                    .as_ref()
-                    .map_or(std::ptr::null(), |name| name.as_ptr()),
-                &mut error,
-            )
+            berd_pocket_audio_player_create(sample_rate, rate, output_device_id, &mut error)
         };
         if raw.is_null() {
             return Err(take_error(error, "Could not start native Pocket playback"));
@@ -79,9 +75,12 @@ impl PocketAudioPlayer {
     }
 
     pub(super) fn played_frames(&self) -> u64 {
-        // SAFETY: `self.raw` is a live retained player.
-        unsafe { berd_pocket_audio_player_played_frames(self.raw) }
-            .saturating_sub(self.delivery_safety_frames)
+        // SAFETY: `self.raw` is a live retained player. The bridge counts only
+        // source buffers confirmed played back, so idle queue gaps add nothing.
+        apply_delivery_safety(
+            unsafe { berd_pocket_audio_player_completed_source_frames(self.raw) },
+            self.delivery_safety_frames,
+        )
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -97,6 +96,10 @@ impl PocketAudioPlayer {
 
 fn delivery_safety_frames(sample_rate: u32, rate: f32) -> u64 {
     (f64::from(sample_rate) * 0.1 * f64::from(rate)).ceil() as u64
+}
+
+fn apply_delivery_safety(completed_source_frames: u64, safety_frames: u64) -> u64 {
+    completed_source_frames.saturating_sub(safety_frames)
 }
 
 impl Drop for PocketAudioPlayer {
@@ -121,12 +124,28 @@ fn take_error(error: *mut c_char, fallback: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::delivery_safety_frames;
+    use super::{apply_delivery_safety, delivery_safety_frames};
 
     #[test]
     fn delivery_safety_tracks_playback_rate_in_source_frames() {
         assert_eq!(delivery_safety_frames(24_000, 0.75), 1_800);
         assert_eq!(delivery_safety_frames(24_000, 1.0), 2_400);
         assert_eq!(delivery_safety_frames(24_000, 2.0), 4_800);
+    }
+
+    #[test]
+    fn silent_queue_gaps_do_not_advance_delivery() {
+        let safety = delivery_safety_frames(24_000, 1.0);
+        let first_buffer_completed = 4_800;
+        assert_eq!(apply_delivery_safety(first_buffer_completed, safety), 2_400);
+
+        let after_silent_gap = first_buffer_completed;
+        assert_eq!(apply_delivery_safety(after_silent_gap, safety), 2_400);
+
+        let second_buffer_completed = 9_600;
+        assert_eq!(
+            apply_delivery_safety(second_buffer_completed, safety),
+            7_200
+        );
     }
 }
