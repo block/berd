@@ -12,6 +12,17 @@ interface GetContextResult {
   app_version: string;
 }
 
+function rendererVoiceSessionActive(voice: {
+  status: { sessionId: string | null };
+  uiState: string;
+}): boolean {
+  return (
+    voice.status.sessionId !== null ||
+    voice.uiState === "starting" ||
+    voice.uiState === "stopping"
+  );
+}
+
 export const getContextCommand = defineCommand({
   effect: "read",
   visibility: "none",
@@ -42,16 +53,17 @@ Result:
       import("@/features/voice-conversation/stores/voiceConversationStore"),
     ]);
     const context = getAppNavigationController().getAppContext();
+    const voiceBeforeRefresh = useVoiceConversationStore.getState();
     const nativeVoiceStatus = await getVoiceConversationStatus();
-    const voice = useVoiceConversationStore.getState();
+    const voiceAfterRefresh = useVoiceConversationStore.getState();
     return {
       view: context.view,
       active_session_id: context.activeSessionId,
       active_project_id: context.activeProjectId,
       voice_session_active:
         nativeVoiceStatus.sessionId !== null ||
-        voice.uiState === "starting" ||
-        voice.uiState === "stopping",
+        rendererVoiceSessionActive(voiceBeforeRefresh) ||
+        rendererVoiceSessionActive(voiceAfterRefresh),
       // Match telemetry's resolution: prefer the build-injected version
       // (git-derived for non-release builds), fall back to package.json.
       app_version: import.meta.env.VITE_APP_VERSION ?? packageJson.version,

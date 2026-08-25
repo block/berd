@@ -4112,6 +4112,57 @@ describe("info", () => {
     expect(result.voice_session_active).toBe(true);
     expect(result.app_version.length).toBeGreaterThan(0);
   });
+
+  it("get_context preserves voice activity that starts during native refresh", async () => {
+    let resolveStatus!: (status: {
+      available: boolean;
+      unavailableReason: null;
+      lifecycle: "stopped";
+      sessionId: null;
+      ownerWindowLabel: null;
+      microphoneMuted: boolean;
+      revision: number;
+    }) => void;
+    mocks.getVoiceConversationStatus.mockReturnValue(
+      new Promise((resolve) => {
+        resolveStatus = resolve;
+      }),
+    );
+
+    const contextRequest = dispatchCommand(
+      "info",
+      { action: "get_context" },
+      ctx,
+    );
+    await vi.waitFor(() => {
+      expect(mocks.getVoiceConversationStatus).toHaveBeenCalledOnce();
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-2",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 5,
+      },
+      uiState: "listening",
+    });
+    resolveStatus({
+      available: false,
+      unavailableReason: null,
+      lifecycle: "stopped",
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 4,
+    });
+
+    await expect(contextRequest).resolves.toMatchObject({
+      voice_session_active: true,
+    });
+  });
 });
 
 describe("feedback schemas", () => {
