@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { useChatSessionStore } from "./chatSessionStore";
 import type { QueuedMessagePayload, QueuedMessageRecord } from "./chatStore";
 import {
   isAdmittedQueuedMessagePayload,
@@ -186,6 +187,13 @@ export function loadCachedMessageQueues(): PersistedQueues {
   }
 }
 
+// A session still creating (or failed to create) only exists under a
+// client-local draft id that no restart can resolve, so persisting its queue
+// would strand unreachable records; quitting mid-creation drops the message.
+function isSessionPersistable(sessionId: string): boolean {
+  return !useChatSessionStore.getState().getSession(sessionId)?.creationState;
+}
+
 export function persistMessageQueues(
   queues: PersistedQueues,
   changedSessionIds: string[],
@@ -194,7 +202,9 @@ export function persistMessageQueues(
   const updates = Object.fromEntries(
     changedSessionIds.map((sessionId) => [
       sessionId,
-      queues[sessionId]?.length ? queues[sessionId] : null,
+      queues[sessionId]?.length && isSessionPersistable(sessionId)
+        ? queues[sessionId]
+        : null,
     ]),
   );
   if (window.__TAURI_INTERNALS__) {

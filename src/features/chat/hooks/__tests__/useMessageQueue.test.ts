@@ -1279,7 +1279,10 @@ describe("useMessageQueue", () => {
     expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
   });
 
-  it("retries a retained pre-commit failure once while the session stays ready", async () => {
+  it("keeps retrying a retained pre-commit failure with backoff while the session stays ready", async () => {
+    // LAWS/CHAT.md: the queue must resume sending when the session is ready.
+    // Pre-commit rejections are silent and leave no store transition behind,
+    // so abandoning the record after a fixed retry count strands it forever.
     vi.useFakeTimers();
     const sendMessage = vi.fn().mockResolvedValue(false);
     useChatStore.getState().enqueueTransportReadyMessage("s1", {
@@ -1297,12 +1300,21 @@ describe("useMessageQueue", () => {
     expect(sendMessage).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(2_000);
     });
-    expect(sendMessage).toHaveBeenCalledTimes(2);
-    expect(
-      useChatStore.getState().queuedMessageBySession.s1?.[0]?.payload,
-    ).toMatchObject({ text: "queued" });
+    expect(sendMessage).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_000);
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(4);
+
+    sendMessage.mockResolvedValue(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(5);
+    expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
     vi.useRealTimers();
   });
 
@@ -1428,7 +1440,7 @@ describe("useMessageQueue", () => {
     });
   });
 
-  it("restores one automatic retry on every later readiness transition", async () => {
+  it("resets the retry backoff on every later readiness transition", async () => {
     vi.useFakeTimers();
     const sendMessage = vi.fn().mockReturnValue(false);
     useChatStore.getState().enqueueTransportReadyMessage("s1", {
@@ -1441,23 +1453,23 @@ describe("useMessageQueue", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(sendMessage).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(3);
 
     act(() => {
       useChatStore.getState().setChatState("s1", "streaming");
       useChatStore.getState().setChatState("s1", "idle");
     });
-    expect(sendMessage).toHaveBeenCalledTimes(3);
+    expect(sendMessage).toHaveBeenCalledTimes(4);
 
+    // The idle transition cleared the backoff, so the next automatic retry
+    // fires at the initial one-second delay again.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(sendMessage).toHaveBeenCalledTimes(4);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
-    });
-    expect(sendMessage).toHaveBeenCalledTimes(4);
+    expect(sendMessage).toHaveBeenCalledTimes(5);
     expect(
       useChatStore.getState().queuedMessageBySession.s1?.[0]?.payload,
     ).toMatchObject({ text: "queued" });

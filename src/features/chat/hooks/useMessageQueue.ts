@@ -40,6 +40,12 @@ interface QueueAttemptLease {
 // the replacement owner from overlapping the still-live attempt.
 const queueAttemptLeaseBySession = new Map<string, QueueAttemptLease>();
 
+// LAWS/CHAT.md: the queue must resume sending when the session becomes ready.
+// Rejected attempts back off but never abandon the record — a rejection can be
+// silent (pre-commit ownership/readiness races around draft promotion) with no
+// follow-up store transition to re-trigger the drain.
+const MAX_AUTO_RETRY_DELAY_MS = 30_000;
+
 function getQueuedMessageKey(
   queuedMessage: QueuedMessageRecord | null,
 ): string | null {
@@ -96,9 +102,10 @@ export function useMessageQueue(
   const dispatchReleasePayloadRef = useRef<
     QueuedMessageRecord["payload"] | null
   >(null);
-  const automaticallyRetriedPayloadRef = useRef<
-    QueuedMessageRecord["payload"] | null
-  >(null);
+  const autoRetryRef = useRef<{
+    payload: QueuedMessageRecord["payload"];
+    attempts: number;
+  } | null>(null);
   const suppressNextRenderIdleCycleRef = useRef(false);
   const dismissedRecordIdRef = useRef<string | null>(null);
   const queuedMessageKey = useMemo(
@@ -277,31 +284,52 @@ export function useMessageQueue(
                 retryPayload,
               );
           }
-          if (
-            retryTimerRef.current === null &&
-            automaticallyRetriedPayloadRef.current !== retryPayload
-          ) {
+          if (autoRetryRef.current?.payload !== retryPayload) {
+            autoRetryRef.current = { payload: retryPayload, attempts: 0 };
+          }
+          const scheduleAutoRetry = () => {
+            if (retryTimerRef.current !== null) return;
+            const attempts = autoRetryRef.current?.attempts ?? 0;
+            const delayMs = Math.min(
+              1_000 * 2 ** attempts,
+              MAX_AUTO_RETRY_DELAY_MS,
+            );
             retryTimerRef.current = setTimeout(() => {
               retryTimerRef.current = null;
               const state = useChatStore.getState();
               const runtime = state.getSessionRuntime(sessionId);
               const retryHead = state.queuedMessageBySession[sessionId]?.[0];
               if (
-                !isQueuedSessionReady(runtime, isPreparationReadyRef.current) ||
                 getQueuedMessageKey(retryHead) !== key ||
                 retryHead?.payload !== retryPayload
               ) {
                 return;
               }
-              automaticallyRetriedPayloadRef.current = retryPayload;
+              if (
+                !isQueuedSessionReady(runtime, isPreparationReadyRef.current)
+              ) {
+                // Readiness can return without a transition this hook
+                // observes; keep the retry armed instead of abandoning the
+                // record.
+                lastAttemptRef.current = null;
+                scheduleAutoRetry();
+                return;
+              }
+              if (autoRetryRef.current?.payload === retryPayload) {
+                autoRetryRef.current = {
+                  payload: retryPayload,
+                  attempts: autoRetryRef.current.attempts + 1,
+                };
+              }
               idleCycleRef.current += 1;
               tryDrainQueuedMessage(retryHead);
-            }, 1_000);
-          }
+            }, delayMs);
+          };
+          scheduleAutoRetry();
           return;
         }
 
-        automaticallyRetriedPayloadRef.current = null;
+        autoRetryRef.current = null;
         lastAttemptRef.current = null;
         useChatStore
           .getState()
@@ -375,7 +403,7 @@ export function useMessageQueue(
       }
 
       if (editedCurrentRecord || advancedToNextRecord) {
-        automaticallyRetriedPayloadRef.current = null;
+        autoRetryRef.current = null;
         if (retryTimerRef.current !== null) {
           clearTimeout(retryTimerRef.current);
           retryTimerRef.current = null;
@@ -383,7 +411,7 @@ export function useMessageQueue(
       }
 
       if (becameIdle || becameReadyWhileIdle) {
-        automaticallyRetriedPayloadRef.current = null;
+        autoRetryRef.current = null;
         if (retryTimerRef.current !== null) {
           clearTimeout(retryTimerRef.current);
           retryTimerRef.current = null;
@@ -434,7 +462,7 @@ export function useMessageQueue(
     }
     if (queuedMessageKey !== lastAttemptRef.current?.key) {
       lastAttemptRef.current = null;
-      automaticallyRetriedPayloadRef.current = null;
+      autoRetryRef.current = null;
       if (retryTimerRef.current !== null) {
         clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;
