@@ -93,15 +93,19 @@ fn run_pocket_playback_monitor(
     completed_generation: Arc<AtomicU64>,
     playback_latency_safety_duration: Duration,
 ) {
+    let mut shutdown_after_playback = false;
     while let Ok(event) = playback_completion_receiver.recv() {
         match event {
-            PocketPlaybackEvent::SourceFinished => {
+            event @ (PocketPlaybackEvent::SourceFinished
+            | PocketPlaybackEvent::ShutdownAfterPlayback) => {
+                shutdown_after_playback |=
+                    matches!(event, PocketPlaybackEvent::ShutdownAfterPlayback);
                 let mut generation = completed_generation.load(Ordering::Acquire);
                 let mut grace_started = Instant::now();
                 loop {
-                    match playback_completion_receiver
-                        .recv_timeout(playback_latency_safety_duration)
-                    {
+                    let grace_remaining =
+                        playback_latency_safety_duration.saturating_sub(grace_started.elapsed());
+                    match playback_completion_receiver.recv_timeout(grace_remaining) {
                         Ok(PocketPlaybackEvent::SourceFinished) => {
                             generation = completed_generation.load(Ordering::Acquire);
                             grace_started = Instant::now();
@@ -113,15 +117,7 @@ fn run_pocket_playback_monitor(
                         Ok(PocketPlaybackEvent::ShutdownImmediately)
                         | Err(mpsc::RecvTimeoutError::Disconnected) => return,
                         Ok(PocketPlaybackEvent::ShutdownAfterPlayback) => {
-                            std::thread::sleep(
-                                playback_latency_safety_duration
-                                    .saturating_sub(grace_started.elapsed()),
-                            );
-                            release_completed_pocket_assistant_speech(
-                                completed_generation.load(Ordering::Acquire),
-                                &assistant_speech,
-                            );
-                            return;
+                            shutdown_after_playback = true;
                         }
                         Err(mpsc::RecvTimeoutError::Timeout) => {
                             let latest_generation = completed_generation.load(Ordering::Acquire);
@@ -140,6 +136,9 @@ fn run_pocket_playback_monitor(
                                 grace_started = Instant::now();
                                 continue;
                             }
+                            if shutdown_after_playback {
+                                return;
+                            }
                             break;
                         }
                     }
@@ -149,8 +148,7 @@ fn run_pocket_playback_monitor(
             PocketPlaybackEvent::Probe(sender) => {
                 let _ = sender.send(());
             }
-            PocketPlaybackEvent::ShutdownImmediately
-            | PocketPlaybackEvent::ShutdownAfterPlayback => break,
+            PocketPlaybackEvent::ShutdownImmediately => break,
         }
     }
 }
@@ -3622,6 +3620,89 @@ mod tests {
             .send(PocketPlaybackEvent::ShutdownImmediately)
             .expect("stop playback monitor");
         monitor.join().expect("join playback monitor");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn playback_monitor_preserves_grace_when_shutdown_precedes_source_completion() {
+        let native_voice = NativeVoiceState::default();
+        let assistant_speech = Arc::new(Mutex::new(Some((
+            7,
+            native_voice.begin_assistant_speech(InterruptionSensitivity::More, false),
+        ))));
+        let completed_generation = Arc::new(AtomicU64::new(0));
+        let (sender, receiver) = mpsc::sync_channel(4);
+        let monitor = spawn_pocket_playback_monitor(
+            receiver,
+            Arc::clone(&assistant_speech),
+            Arc::clone(&completed_generation),
+            Duration::from_millis(20),
+        )
+        .expect("spawn playback monitor");
+
+        sender
+            .send(PocketPlaybackEvent::ShutdownAfterPlayback)
+            .expect("send graceful shutdown");
+        let (first_probe_sender, first_probe_receiver) = mpsc::channel();
+        sender
+            .send(PocketPlaybackEvent::Probe(first_probe_sender))
+            .expect("probe shutdown grace");
+        first_probe_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("monitor remains alive during shutdown grace");
+
+        completed_generation.store(7, Ordering::Release);
+        sender
+            .send(PocketPlaybackEvent::SourceFinished)
+            .expect("send delayed source completion");
+        let (second_probe_sender, second_probe_receiver) = mpsc::channel();
+        sender
+            .send(PocketPlaybackEvent::Probe(second_probe_sender))
+            .expect("probe restarted source grace");
+        second_probe_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("monitor observes delayed source completion");
+        assert!(assistant_speech.lock().expect("assistant speech").is_some());
+
+        monitor.join().expect("join playback monitor");
+        assert!(assistant_speech.lock().expect("assistant speech").is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn playback_monitor_preserves_grace_when_source_completion_precedes_shutdown() {
+        let native_voice = NativeVoiceState::default();
+        let assistant_speech = Arc::new(Mutex::new(Some((
+            9,
+            native_voice.begin_assistant_speech(InterruptionSensitivity::More, false),
+        ))));
+        let completed_generation = Arc::new(AtomicU64::new(9));
+        let (sender, receiver) = mpsc::sync_channel(3);
+        let monitor = spawn_pocket_playback_monitor(
+            receiver,
+            Arc::clone(&assistant_speech),
+            Arc::clone(&completed_generation),
+            Duration::from_millis(20),
+        )
+        .expect("spawn playback monitor");
+
+        sender
+            .send(PocketPlaybackEvent::SourceFinished)
+            .expect("send source completion");
+        let (probe_sender, probe_receiver) = mpsc::channel();
+        sender
+            .send(PocketPlaybackEvent::Probe(probe_sender))
+            .expect("probe source grace");
+        probe_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("monitor entered source grace");
+        assert!(assistant_speech.lock().expect("assistant speech").is_some());
+
+        sender
+            .send(PocketPlaybackEvent::ShutdownAfterPlayback)
+            .expect("send graceful shutdown");
+        monitor.join().expect("join playback monitor");
+        assert!(assistant_speech.lock().expect("assistant speech").is_none());
     }
 
     #[cfg(target_os = "macos")]

@@ -68,5 +68,9 @@ describe("RadioGroupCard", () => {
     expect(automatic).toBeChecked();
     expect(prevent).not.toBeChecked();
     expect(prevent).toHaveClass("disabled:opacity-100");
+    expect(prevent.closest('[data-slot="radio-group-card"]')).toHaveClass(
+      "has-[[data-slot=radio-group-item][data-disabled][data-state=unchecked]]:hover:bg-transparent",
+      "has-[[data-slot=radio-group-item][data-disabled][data-state=checked]]:hover:bg-muted",
+    );
   });
 });

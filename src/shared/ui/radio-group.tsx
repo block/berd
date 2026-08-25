@@ -68,7 +68,7 @@ function RadioGroupCard({
       data-slot="radio-group-card"
       htmlFor={id}
       className={cn(
-        "has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-muted has-[[data-slot=radio-group-item]:focus-visible]:border-ring has-[[data-slot=radio-group-item]:focus-visible]:ring-ring/50 flex cursor-pointer items-start gap-3 rounded-md border border-border px-3 py-3 transition-[color,box-shadow] outline-none hover:bg-muted/50 has-[[data-slot=radio-group-item]:focus-visible]:ring-[3px] has-[[data-slot=radio-group-item][data-disabled]]:cursor-not-allowed has-[[data-slot=radio-group-item][data-disabled]]:opacity-50 has-[[data-slot=radio-group-item][data-disabled]]:hover:bg-transparent",
+        "has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-muted has-[[data-slot=radio-group-item]:focus-visible]:border-ring has-[[data-slot=radio-group-item]:focus-visible]:ring-ring/50 flex cursor-pointer items-start gap-3 rounded-md border border-border px-3 py-3 transition-[color,box-shadow] outline-none hover:bg-muted/50 has-[[data-slot=radio-group-item]:focus-visible]:ring-[3px] has-[[data-slot=radio-group-item][data-disabled]]:cursor-not-allowed has-[[data-slot=radio-group-item][data-disabled]]:opacity-50 has-[[data-slot=radio-group-item][data-disabled][data-state=unchecked]]:hover:bg-transparent has-[[data-slot=radio-group-item][data-disabled][data-state=checked]]:hover:bg-muted",
         className,
       )}
       {...props}
