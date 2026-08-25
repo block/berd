@@ -109,24 +109,22 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
 
   const applySelection = useCallback(
     async (selection: SiriVoiceSelection, generation: number) => {
-      try {
-        await selectSiriVoice(selection);
-      } catch (nextError) {
-        if (latestSelectionRef.current?.generation === generation) {
-          throw nextError;
-        }
-        return;
-      }
+      let pending = { generation, selection };
 
-      const latest = latestSelectionRef.current;
-      if (!latest || latest.generation === generation) return;
-
-      try {
-        await selectSiriVoice(latest.selection);
-      } catch (nextError) {
-        if (latestSelectionRef.current?.generation === latest.generation) {
-          throw nextError;
+      while (true) {
+        try {
+          await selectSiriVoice(pending.selection);
+        } catch (nextError) {
+          if (latestSelectionRef.current?.generation === pending.generation) {
+            throw nextError;
+          }
+          return;
         }
+
+        const latest = latestSelectionRef.current;
+        if (!latest || latest.generation === pending.generation) return;
+
+        pending = latest;
       }
     },
     [],

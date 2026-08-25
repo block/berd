@@ -264,6 +264,74 @@ describe("Siri voice locales", () => {
     });
   });
 
+  it("reapplies the latest selection after a stale repair finishes", async () => {
+    const pendingAutoSelection = deferred<void>();
+    const pendingStaleRepair = deferred<void>();
+    apiMocks.getSiriVoiceStatus.mockResolvedValue(status("en-US", "Aaron"));
+    apiMocks.selectSiriVoice
+      .mockReturnValueOnce(pendingAutoSelection.promise)
+      .mockResolvedValueOnce(undefined)
+      .mockReturnValueOnce(pendingStaleRepair.promise)
+      .mockResolvedValue(undefined);
+    const { result } = renderHook(() => useSiriVoiceSetup(true));
+    await waitFor(() => expect(result.current.status).not.toBeNull());
+
+    let downloadPromise!: Promise<void>;
+    act(() => {
+      downloadPromise = result.current.downloadVoice({
+        name: "Quinn",
+        language: "en-US",
+        sizeBytes: 310_500_000,
+        installed: false,
+      });
+    });
+    await waitFor(() =>
+      expect(apiMocks.selectSiriVoice).toHaveBeenCalledTimes(1),
+    );
+
+    await act(async () => {
+      await result.current.selectVoice({
+        name: "Aaron",
+        language: "en-US",
+        sizeBytes: 1,
+        installed: true,
+      });
+    });
+
+    pendingAutoSelection.resolve();
+    await waitFor(() =>
+      expect(apiMocks.selectSiriVoice).toHaveBeenCalledTimes(3),
+    );
+    expect(apiMocks.selectSiriVoice.mock.calls[2]?.[0]).toEqual({
+      name: "Aaron",
+      language: "en-US",
+    });
+
+    await act(async () => {
+      await result.current.selectVoice({
+        name: "Samantha",
+        language: "en-US",
+        sizeBytes: 1,
+        installed: true,
+      });
+    });
+    expect(apiMocks.selectSiriVoice.mock.calls[3]?.[0]).toEqual({
+      name: "Samantha",
+      language: "en-US",
+    });
+
+    pendingStaleRepair.resolve();
+    await act(async () => {
+      await downloadPromise;
+    });
+
+    expect(apiMocks.selectSiriVoice).toHaveBeenCalledTimes(5);
+    expect(apiMocks.selectSiriVoice.mock.calls[4]?.[0]).toEqual({
+      name: "Samantha",
+      language: "en-US",
+    });
+  });
+
   it("ignores an in-flight auto-selection failure after a manual selection", async () => {
     const pendingAutoSelection = deferred<void>();
     apiMocks.getSiriVoiceStatus.mockResolvedValue(status("en-US", "Aaron"));
