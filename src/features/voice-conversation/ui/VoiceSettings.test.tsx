@@ -1,6 +1,7 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { i18n } from "@/shared/i18n";
 import { renderWithProviders } from "@/test/render";
 import type { PocketVoiceStatus } from "../api/pocketVoice";
 import type { PocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
@@ -164,7 +165,8 @@ function siriSetup(): SiriVoiceSetup {
 }
 
 describe("VoiceSettings", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("en");
     inputState.backend = "parakeet";
     outputState.backend = "pocket";
     macSpeechSetupState.current = {
@@ -228,7 +230,7 @@ describe("VoiceSettings", () => {
     await user.click(screen.getByRole("button", { name: "Advanced…" }));
     expect(
       screen.getByRole("dialog", { name: "Advanced voice detection" }),
-    ).toBeInTheDocument();
+    ).toHaveClass("max-w-lg");
     expect(
       screen.getByRole("combobox", { name: "Interruption sensitivity" }),
     ).toBeInTheDocument();
@@ -237,10 +239,25 @@ describe("VoiceSettings", () => {
         name: "Speech detection sensitivity",
       }),
     ).toHaveTextContent("More sensitive · 0.50 threshold");
-    await user.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    const resetButton = screen.getByRole("button", {
+      name: "Reset to defaults",
+    });
+    expect(resetButton).toHaveClass("sm:mr-auto");
+    await user.click(resetButton);
     expect(interruptionState.resetSensitivities).toHaveBeenCalledOnce();
 
     view.unmount();
+  });
+
+  it("localizes the advanced detection dialog close control", async () => {
+    const user = userEvent.setup();
+    setupState.current = setup(pocketStatus());
+    await i18n.changeLanguage("es");
+    renderWithProviders(<VoiceSettings />);
+
+    await user.click(screen.getByRole("button", { name: "Avanzado…" }));
+
+    expect(screen.getByRole("button", { name: "Cerrar" })).toBeInTheDocument();
   });
 
   it("hides interruption sensitivity when interruptions are prevented", async () => {

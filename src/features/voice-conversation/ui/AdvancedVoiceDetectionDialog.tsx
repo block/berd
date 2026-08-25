@@ -44,7 +44,10 @@ export function AdvancedVoiceDetectionDialog() {
           {t("voice.advancedDetection.open")}
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent
+        size="lg"
+        closeLabel={t("actions.close", { ns: "common" })}
+      >
         <DialogHeader>
           <DialogTitle>{t("voice.advancedDetection.title")}</DialogTitle>
           <DialogDescription>
@@ -136,8 +139,14 @@ export function AdvancedVoiceDetectionDialog() {
           ) : null}
         </div>
 
-        <DialogFooter className="sm:justify-between">
-          <Button type="button" variant="ghost" onClick={reset}>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            flush
+            className="sm:mr-auto"
+            onClick={reset}
+          >
             {t("voice.advancedDetection.reset")}
           </Button>
           <DialogClose asChild>

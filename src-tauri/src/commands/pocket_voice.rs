@@ -167,15 +167,16 @@ fn playback_latency_safety_duration_for_transport(transport: Option<u32>) -> Dur
     // beyond the local hardware callback, while an unknown/virtual route has
     // no trustworthy upper bound. Keep capture protected conservatively for
     // those routes instead of promising feedback prevention on a 100 ms guess.
+    const BUILT_IN: u32 = 0x626c_746e;
     const BLUETOOTH: u32 = 0x626c_7565;
     const BLUETOOTH_LE: u32 = 0x626c_6561;
     const AIRPLAY: u32 = 0x6169_7270;
 
     match transport {
+        Some(BUILT_IN) => LOCAL_PLAYBACK_LATENCY_SAFETY_DURATION,
         Some(BLUETOOTH) | Some(BLUETOOTH_LE) => BLUETOOTH_PLAYBACK_LATENCY_SAFETY_DURATION,
         Some(AIRPLAY) => AIRPLAY_PLAYBACK_LATENCY_SAFETY_DURATION,
-        Some(_) => LOCAL_PLAYBACK_LATENCY_SAFETY_DURATION,
-        None => UNKNOWN_PLAYBACK_LATENCY_SAFETY_DURATION,
+        Some(_) | None => UNKNOWN_PLAYBACK_LATENCY_SAFETY_DURATION,
     }
 }
 
@@ -3424,6 +3425,7 @@ mod tests {
         const BUILT_IN: u32 = 0x626c_746e;
         const BLUETOOTH: u32 = 0x626c_7565;
         const AIRPLAY: u32 = 0x6169_7270;
+        const VIRTUAL: u32 = 0x7669_7274;
 
         assert_eq!(
             playback_latency_safety_duration_for_transport(Some(BUILT_IN)),
@@ -3435,6 +3437,14 @@ mod tests {
         );
         assert_eq!(
             playback_latency_safety_duration_for_transport(Some(AIRPLAY)),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            playback_latency_safety_duration_for_transport(Some(VIRTUAL)),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            playback_latency_safety_duration_for_transport(Some(0x3f3f_3f3f)),
             Duration::from_secs(2)
         );
         assert_eq!(

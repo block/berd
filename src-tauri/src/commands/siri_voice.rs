@@ -7,13 +7,11 @@ use std::fs;
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-#[cfg(target_os = "macos")]
+#[cfg(any(test, target_os = "macos"))]
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 #[cfg(any(test, target_os = "macos"))]
-use std::time::Duration;
-#[cfg(target_os = "macos")]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
@@ -231,31 +229,78 @@ impl<T> SiriPlaybackLifetime<T> {
 }
 
 #[cfg(any(test, target_os = "macos"))]
-fn schedule_siri_playback_release<T: Send + 'static>(
-    lifetime: &Arc<SiriPlaybackLifetime<T>>,
-    generation: u64,
-    delay: Duration,
-) -> std::thread::JoinHandle<()> {
-    schedule_siri_playback_release_after(lifetime, generation, move || {
-        std::thread::sleep(delay);
-    })
+enum SiriPlaybackMonitorEvent {
+    Started,
+    Drain(u64),
+    Shutdown,
 }
 
 #[cfg(any(test, target_os = "macos"))]
-fn schedule_siri_playback_release_after<T, F>(
-    lifetime: &Arc<SiriPlaybackLifetime<T>>,
-    generation: u64,
-    wait: F,
-) -> std::thread::JoinHandle<()>
+fn run_siri_playback_monitor<T>(
+    receiver: mpsc::Receiver<SiriPlaybackMonitorEvent>,
+    lifetime: Arc<SiriPlaybackLifetime<T>>,
+    playback_latency_safety_duration: Duration,
+) {
+    let mut pending_release: Option<(u64, Instant)> = None;
+    loop {
+        let event = if let Some((_, deadline)) = pending_release {
+            match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(event) => Some(event),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if let Some((generation, _)) = pending_release.take() {
+                        lifetime.release_if_current(generation);
+                    }
+                    continue;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+        } else {
+            match receiver.recv() {
+                Ok(event) => Some(event),
+                Err(mpsc::RecvError) => return,
+            }
+        };
+
+        match event {
+            Some(SiriPlaybackMonitorEvent::Started) => pending_release = None,
+            Some(SiriPlaybackMonitorEvent::Drain(generation)) => {
+                pending_release = Some((
+                    generation,
+                    Instant::now() + playback_latency_safety_duration,
+                ));
+            }
+            Some(SiriPlaybackMonitorEvent::Shutdown) | None => return,
+        }
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn spawn_siri_playback_monitor_with<F>(
+    task: impl FnOnce() + Send + 'static,
+    spawn: F,
+) -> std::io::Result<std::thread::JoinHandle<()>>
 where
-    T: Send + 'static,
-    F: FnOnce() + Send + 'static,
+    F: FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<std::thread::JoinHandle<()>>,
 {
-    let lifetime = Arc::clone(lifetime);
-    std::thread::spawn(move || {
-        wait();
-        lifetime.release_if_current(generation);
-    })
+    spawn(Box::new(task))
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_siri_playback_monitor<T: Send + 'static>(
+    receiver: mpsc::Receiver<SiriPlaybackMonitorEvent>,
+    lifetime: Arc<SiriPlaybackLifetime<T>>,
+    playback_latency_safety_duration: Duration,
+) -> std::io::Result<std::thread::JoinHandle<()>> {
+    spawn_siri_playback_monitor_with(
+        move || {
+            run_siri_playback_monitor(receiver, lifetime, playback_latency_safety_duration);
+        },
+        |task| {
+            std::thread::Builder::new()
+                .name("siri-playback-monitor".to_string())
+                .spawn(task)
+        },
+    )
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -504,9 +549,9 @@ struct SiriStreamCallbackContext {
     native_voice: NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
-    playback_latency_safety_duration: Duration,
     playback_started: AtomicBool,
     playback_lifetime: Arc<SiriPlaybackLifetime<AssistantSpeechGuard>>,
+    playback_monitor_sender: mpsc::Sender<SiriPlaybackMonitorEvent>,
 }
 
 #[cfg(target_os = "macos")]
@@ -522,6 +567,9 @@ unsafe extern "C" fn siri_playback_started(context: *mut std::ffi::c_void) {
             .native_voice
             .begin_assistant_speech(context.interruption_sensitivity, context.suppress_capture)
     });
+    let _ = context
+        .playback_monitor_sender
+        .send(SiriPlaybackMonitorEvent::Started);
     if !context.playback_started.swap(true, Ordering::AcqRel) {
         let _ = context.app.emit(
             SIRI_STREAM_EVENT,
@@ -546,11 +594,9 @@ unsafe extern "C" fn siri_playback_stopped(context: *mut std::ffi::c_void) {
     let Some(generation) = context.playback_lifetime.begin_drain() else {
         return;
     };
-    let _release = schedule_siri_playback_release(
-        &context.playback_lifetime,
-        generation,
-        context.playback_latency_safety_duration,
-    );
+    let _ = context
+        .playback_monitor_sender
+        .send(SiriPlaybackMonitorEvent::Drain(generation));
 }
 
 #[cfg(target_os = "macos")]
@@ -794,15 +840,22 @@ fn run_siri_stream(
     let name = CString::new(selection.name)
         .map_err(|_| "Siri voice name cannot contain NUL bytes".to_string())?;
     let playback_lifetime = Arc::new(SiriPlaybackLifetime::default());
+    let (playback_monitor_sender, playback_monitor_receiver) = mpsc::channel();
+    let playback_monitor = spawn_siri_playback_monitor(
+        playback_monitor_receiver,
+        Arc::clone(&playback_lifetime),
+        playback_latency_safety_duration,
+    )
+    .map_err(|error| format!("Could not start Siri playback monitor: {error}"))?;
     let callback_context = Box::new(SiriStreamCallbackContext {
         app: app.clone(),
         stream_id: stream_id.clone(),
         native_voice,
         interruption_sensitivity,
         suppress_capture,
-        playback_latency_safety_duration,
         playback_started: AtomicBool::new(false),
         playback_lifetime: Arc::clone(&playback_lifetime),
+        playback_monitor_sender: playback_monitor_sender.clone(),
     });
     let callback_context = Box::into_raw(callback_context);
     let mut error = std::ptr::null_mut();
@@ -822,6 +875,9 @@ fn run_siri_stream(
     if stream.is_null() {
         // SAFETY: Native creation failed, so no callback retained the box.
         unsafe { drop(Box::from_raw(callback_context)) };
+        playback_lifetime.cancel();
+        let _ = playback_monitor_sender.send(SiriPlaybackMonitorEvent::Shutdown);
+        let _ = playback_monitor.join();
         return Err(bridge_error(error, "Could not start Siri voice stream").into());
     }
 
@@ -949,10 +1005,12 @@ fn run_siri_stream(
     });
 
     unsafe { berd_siri_tts_stream_release(stream) };
-    playback_lifetime.cancel();
     unsafe {
         drop(Box::from_raw(callback_context));
     }
+    playback_lifetime.cancel();
+    let _ = playback_monitor_sender.send(SiriPlaybackMonitorEvent::Shutdown);
+    let _ = playback_monitor.join();
     result
 }
 
@@ -1388,45 +1446,55 @@ mod tests {
     }
 
     #[test]
-    fn siri_playback_guard_spans_drain_grace_and_resumed_buffering() {
-        struct DropCounter(Arc<AtomicU64>);
-        impl Drop for DropCounter {
+    fn siri_playback_monitor_reschedules_many_drain_gaps_on_one_thread() {
+        struct DropSignal(mpsc::SyncSender<()>);
+        impl Drop for DropSignal {
             fn drop(&mut self) {
-                self.0.fetch_add(1, Ordering::SeqCst);
+                let _ = self.0.send(());
             }
         }
 
-        let drops = Arc::new(AtomicU64::new(0));
+        let (drop_sender, drop_receiver) = mpsc::sync_channel(1);
         let lifetime = Arc::new(SiriPlaybackLifetime::default());
-        lifetime.start(|| DropCounter(Arc::clone(&drops)));
+        lifetime.start(|| DropSignal(drop_sender));
+        let (event_sender, event_receiver) = mpsc::channel();
+        let monitor_lifetime = Arc::clone(&lifetime);
+        let monitor = std::thread::Builder::new()
+            .name("siri-playback-monitor-test".to_string())
+            .spawn(move || {
+                run_siri_playback_monitor(
+                    event_receiver,
+                    monitor_lifetime,
+                    Duration::from_millis(20),
+                );
+            })
+            .expect("start monitor");
 
-        let first_drain = lifetime.begin_drain().expect("first drain");
-        let (release_pending_sender, release_pending_receiver) = std::sync::mpsc::sync_channel(1);
-        let (continue_sender, continue_receiver) = std::sync::mpsc::sync_channel(1);
-        let first_release =
-            schedule_siri_playback_release_after(&lifetime, first_drain, move || {
-                release_pending_sender
-                    .send(())
-                    .expect("signal pending release");
-                continue_receiver.recv().expect("continue release");
-            });
-        release_pending_receiver
-            .recv()
-            .expect("release task reached barrier");
-        assert!(lifetime.is_active());
-
-        lifetime.start(|| panic!("resumed buffering must retain the existing guard"));
-        continue_sender.send(()).expect("release barrier");
-        first_release.join().expect("first release task");
-        assert!(lifetime.is_active());
-        assert_eq!(drops.load(Ordering::SeqCst), 0);
+        for _ in 0..100 {
+            let generation = lifetime.begin_drain().expect("drain active guard");
+            event_sender
+                .send(SiriPlaybackMonitorEvent::Drain(generation))
+                .expect("schedule drain");
+            lifetime.start(|| panic!("resumed buffering must retain the existing guard"));
+            event_sender
+                .send(SiriPlaybackMonitorEvent::Started)
+                .expect("cancel pending drain");
+        }
 
         let final_drain = lifetime.begin_drain().expect("final drain");
-        schedule_siri_playback_release(&lifetime, final_drain, Duration::from_millis(1))
-            .join()
-            .expect("final release task");
+        event_sender
+            .send(SiriPlaybackMonitorEvent::Drain(final_drain))
+            .expect("schedule final drain");
+        drop_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("final drain releases guard");
         assert!(!lifetime.is_active());
-        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        assert!(drop_receiver.try_recv().is_err());
+
+        event_sender
+            .send(SiriPlaybackMonitorEvent::Shutdown)
+            .expect("stop monitor");
+        monitor.join().expect("join monitor");
     }
 
     #[test]
@@ -1442,24 +1510,46 @@ mod tests {
         let lifetime = Arc::new(SiriPlaybackLifetime::default());
         lifetime.start(|| DropCounter(Arc::clone(&drops)));
         let drain = lifetime.begin_drain().expect("drain before cancellation");
-        let (release_pending_sender, release_pending_receiver) = std::sync::mpsc::sync_channel(1);
-        let (continue_sender, continue_receiver) = std::sync::mpsc::sync_channel(1);
-        let pending_release = schedule_siri_playback_release_after(&lifetime, drain, move || {
-            release_pending_sender
-                .send(())
-                .expect("signal pending release");
-            continue_receiver.recv().expect("continue release");
-        });
-        release_pending_receiver
-            .recv()
-            .expect("release task reached barrier");
+        let (event_sender, event_receiver) = mpsc::channel();
+        let monitor_lifetime = Arc::clone(&lifetime);
+        let monitor = std::thread::Builder::new()
+            .name("siri-playback-cancel-test".to_string())
+            .spawn(move || {
+                run_siri_playback_monitor(
+                    event_receiver,
+                    monitor_lifetime,
+                    Duration::from_secs(60),
+                );
+            })
+            .expect("start monitor");
+        event_sender
+            .send(SiriPlaybackMonitorEvent::Drain(drain))
+            .expect("schedule drain");
 
         lifetime.cancel();
         assert!(!lifetime.is_active());
         assert_eq!(drops.load(Ordering::SeqCst), 1);
-        continue_sender.send(()).expect("release barrier");
-        pending_release.join().expect("pending release task");
+        event_sender
+            .send(SiriPlaybackMonitorEvent::Shutdown)
+            .expect("stop monitor");
+        monitor.join().expect("join monitor");
         assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn siri_playback_monitor_spawn_failure_is_reported_without_running_the_task() {
+        let ran = Arc::new(AtomicBool::new(false));
+        let task_ran = Arc::clone(&ran);
+        let result = spawn_siri_playback_monitor_with(
+            move || task_ran.store(true, Ordering::SeqCst),
+            |_task| Err(std::io::Error::other("injected spawn failure")),
+        );
+
+        assert_eq!(
+            result.expect_err("spawn must fail").to_string(),
+            "injected spawn failure"
+        );
+        assert!(!ran.load(Ordering::SeqCst));
     }
 
     #[cfg(target_os = "macos")]

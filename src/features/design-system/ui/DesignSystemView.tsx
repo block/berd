@@ -4839,7 +4839,9 @@ function RadioGroupPage() {
           {
             anatomy: "Description",
             state: stateLabel,
-            textIcon: "muted-foreground",
+            textIcon: disabled
+              ? "muted-foreground / 50% opacity"
+              : "muted-foreground",
           },
         ]
       : [
