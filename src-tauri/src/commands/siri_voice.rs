@@ -702,6 +702,9 @@ fn resolve_voice_selection(
         return Ok((Some(selection), true));
     }
 
+    // A successful unfiltered discovery is a complete snapshot of the local
+    // Siri catalog. Discovery errors return above, before a fallback can be
+    // selected or persisted.
     let all_voices = load_all_voices()?;
     if let Some(selection) = selected_voice {
         if find_voice(&all_voices, selection).is_some_and(|voice| voice.installed) {
@@ -1527,6 +1530,27 @@ mod tests {
         assert_eq!(
             resolve_voice_selection(&voices, Some(&selected), || Ok(voices.clone())),
             Ok((Some(selected), false))
+        );
+    }
+
+    #[test]
+    fn unavailable_selection_does_not_fallback_when_catalog_discovery_fails() {
+        let selected = SiriVoiceSelection {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+        };
+        let filtered_voices = vec![SiriVoice {
+            name: "Samantha".to_string(),
+            language: "en-US".to_string(),
+            size_bytes: 10,
+            installed: true,
+        }];
+
+        assert_eq!(
+            resolve_voice_selection(&filtered_voices, Some(&selected), || {
+                Err("catalog unavailable".to_string())
+            }),
+            Err("catalog unavailable".to_string())
         );
     }
 
