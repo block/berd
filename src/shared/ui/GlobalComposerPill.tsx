@@ -1547,6 +1547,11 @@ export function GlobalComposerPill({
                 attachmentWorkPending ||
                 dictationOwnsMicrophone
               }
+              onMouseDown={(event) => {
+                if (voiceConversation.ready) {
+                  event.preventDefault();
+                }
+              }}
               onClick={() => void handleStartVoiceConversation()}
               size="icon-pill-sm"
               aria-label={t("globalPill.startVoiceConversation")}
