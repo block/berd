@@ -143,7 +143,6 @@ const SIRI_STREAM_EVENT: &str = "siri-voice:stream-event";
 const SIRI_STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 #[cfg(target_os = "macos")]
 const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
-#[cfg(target_os = "macos")]
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
 static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
