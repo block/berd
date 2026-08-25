@@ -1,5 +1,6 @@
 //! Safe ownership wrapper for the macOS AVAudioUnitTimePitch Pocket player.
 
+use std::cell::Cell;
 use std::ffi::{c_char, c_void, CStr};
 
 unsafe extern "C" {
@@ -15,6 +16,11 @@ unsafe extern "C" {
         frame_count: u32,
         error_out: *mut *mut c_char,
     ) -> bool;
+    fn berd_pocket_audio_player_set_rate(
+        player: *mut c_void,
+        rate: f32,
+        error_out: *mut *mut c_char,
+    ) -> bool;
     fn berd_pocket_audio_player_completed_source_frames(player: *mut c_void) -> u64;
     fn berd_pocket_audio_player_pending_buffers(player: *mut c_void) -> u64;
     fn berd_pocket_audio_player_failed(player: *mut c_void) -> bool;
@@ -25,7 +31,8 @@ unsafe extern "C" {
 
 pub(super) struct PocketAudioPlayer {
     raw: *mut c_void,
-    delivery_safety_frames: u64,
+    sample_rate: u32,
+    delivery_safety_frames: Cell<u64>,
 }
 
 impl PocketAudioPlayer {
@@ -52,8 +59,29 @@ impl PocketAudioPlayer {
         }
         Ok(Self {
             raw,
-            delivery_safety_frames: delivery_safety_frames(sample_rate, rate),
+            sample_rate,
+            delivery_safety_frames: Cell::new(delivery_safety_frames(sample_rate, rate)),
         })
+    }
+
+    pub(super) fn set_rate(&self, rate: f32) -> Result<(), String> {
+        let mut error = std::ptr::null_mut();
+        // SAFETY: `self.raw` is a live retained player and the bridge validates
+        // the rate before updating the connected time-pitch unit.
+        let updated = unsafe { berd_pocket_audio_player_set_rate(self.raw, rate, &mut error) };
+        if !updated {
+            return Err(take_error(
+                error,
+                "Could not update native Pocket playback speed",
+            ));
+        }
+        self.delivery_safety_frames
+            .set(updated_delivery_safety_frames(
+                self.delivery_safety_frames.get(),
+                self.sample_rate,
+                rate,
+            ));
+        Ok(())
     }
 
     pub(super) fn enqueue(&self, samples: &[f32]) -> Result<(), String> {
@@ -78,7 +106,10 @@ impl PocketAudioPlayer {
     pub(super) fn played_frames(&self) -> u64 {
         // SAFETY: `self.raw` is a live retained player. The bridge counts only
         // source buffers confirmed played back, so idle queue gaps add nothing.
-        apply_delivery_safety(self.completed_source_frames(), self.delivery_safety_frames)
+        apply_delivery_safety(
+            self.completed_source_frames(),
+            self.delivery_safety_frames.get(),
+        )
     }
 
     pub(super) fn completed_source_frames(&self) -> u64 {
@@ -104,6 +135,10 @@ impl PocketAudioPlayer {
 
 fn delivery_safety_frames(sample_rate: u32, rate: f32) -> u64 {
     (f64::from(sample_rate) * 0.1 * f64::from(rate)).ceil() as u64
+}
+
+fn updated_delivery_safety_frames(current: u64, sample_rate: u32, rate: f32) -> u64 {
+    current.max(delivery_safety_frames(sample_rate, rate))
 }
 
 fn apply_delivery_safety(completed_source_frames: u64, safety_frames: u64) -> u64 {
@@ -140,7 +175,10 @@ fn take_error(error: *mut c_char, fallback: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_delivery_safety, delivery_safety_frames, playback_health};
+    use super::{
+        apply_delivery_safety, delivery_safety_frames, playback_health,
+        updated_delivery_safety_frames,
+    };
 
     #[test]
     fn delivery_safety_tracks_playback_rate_in_source_frames() {
@@ -162,6 +200,17 @@ mod tests {
         assert_eq!(
             apply_delivery_safety(second_buffer_completed, safety),
             7_200
+        );
+    }
+
+    #[test]
+    fn live_rate_changes_keep_delivery_safety_conservative() {
+        let initial = delivery_safety_frames(24_000, 0.75);
+        let accelerated = updated_delivery_safety_frames(initial, 24_000, 2.0);
+        assert_eq!(accelerated, 4_800);
+        assert_eq!(
+            updated_delivery_safety_frames(accelerated, 24_000, 1.0),
+            4_800
         );
     }
 

@@ -87,6 +87,7 @@ bool berd_pocket_audio_player_enqueue(
     uint32_t frame_count,
     char **error_out
 );
+bool berd_pocket_audio_player_set_rate(void *player, float rate, char **error_out);
 uint64_t berd_pocket_audio_player_completed_source_frames(void *player);
 uint64_t berd_pocket_audio_player_pending_buffers(void *player);
 bool berd_pocket_audio_player_failed(void *player);
