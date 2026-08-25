@@ -1076,7 +1076,22 @@ describe("voice transcript delivery coordination", () => {
       microphoneMuted: false,
       revision: 1,
     };
+    const running = {
+      ...stopped,
+      lifecycle: "running" as const,
+      sessionId: "session-a",
+      ownerWindowLabel: "main",
+      revision: 2,
+    };
     const onVoiceSetupRequired = vi.fn();
+    const stop = vi.fn().mockImplementation(async () => {
+      useVoiceConversationStore.setState({
+        status: stopped,
+        uiState: "off",
+        error: null,
+      });
+      return stopped;
+    });
     useVoiceConversationStore.setState({
       status: stopped,
       uiState: "off",
@@ -1084,13 +1099,17 @@ describe("voice transcript delivery coordination", () => {
       init: vi.fn().mockResolvedValue(undefined),
       refreshStatus: vi.fn().mockResolvedValue(stopped),
       drainPendingTranscripts: vi.fn().mockResolvedValue(undefined),
-      start: vi
-        .fn()
-        .mockRejectedValue(
-          new VoiceMicrophoneCaptureError(
-            new DOMException("Permission denied", "NotAllowedError"),
-          ),
-        ),
+      start: vi.fn().mockImplementation(async () => {
+        useVoiceConversationStore.setState({
+          status: running,
+          uiState: "error",
+          error: "Permission denied",
+        });
+        throw new VoiceMicrophoneCaptureError(
+          new DOMException("Permission denied", "NotAllowedError"),
+        );
+      }),
+      stop,
     });
     const { result } = renderHook(() =>
       useVoiceConversationController({
@@ -1107,7 +1126,9 @@ describe("voice transcript delivery coordination", () => {
       await result.current.onToggle();
     });
 
+    expect(stop).toHaveBeenCalledOnce();
     expect(onVoiceSetupRequired).toHaveBeenCalledOnce();
+    expect(useVoiceConversationStore.getState().status).toEqual(stopped);
   });
 
   it("does not activate speech when a non-owner mounts an already-running session", () => {

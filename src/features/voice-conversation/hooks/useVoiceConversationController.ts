@@ -778,6 +778,21 @@ export function useVoiceConversationController({
         backendStatus.lifecycle === "running" &&
         backendStatus.sessionId === sessionId &&
         backendStatus.ownerWindowLabel === currentWindowLabel;
+      if (isVoiceMicrophoneCaptureError(startError)) {
+        if (activeSendRoute?.sessionId === route.sessionId) {
+          activeSendRoute = null;
+        }
+        addErrorNotification(sessionId, errorText(startError));
+        if (exactOwnerLifecycleSurvived) {
+          try {
+            await stop();
+          } catch (stopError) {
+            addErrorNotification(sessionId, errorText(stopError));
+          }
+        }
+        onPocketSetupRequired();
+        return;
+      }
       let conversationStarted = false;
       if (exactOwnerLifecycleSurvived) {
         try {
@@ -821,9 +836,6 @@ export function useVoiceConversationController({
           activeSendRoute = null;
         }
         addErrorNotification(sessionId, errorText(startError));
-        if (isVoiceMicrophoneCaptureError(startError)) {
-          onPocketSetupRequired();
-        }
       }
     }
   }, [
@@ -833,6 +845,7 @@ export function useVoiceConversationController({
     sessionId,
     start,
     startAssistantSpeech,
+    stop,
   ]);
 
   useEffect(() => {
