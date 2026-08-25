@@ -38,6 +38,15 @@ afterEach(async () => {
   );
 });
 
+describe("shared Cargo package cache", () => {
+  it("keeps Cargo dependency source paths stable across worktrees", async () => {
+    const hermitConfig = await readFile(join(repo, "bin/hermit.hcl"), "utf8");
+
+    expect(hermitConfig).toMatch(
+      /"CARGO_HOME": "\$\{HOME\}\/\.cache\/berd\/cargo-home"/,
+    );
+  });
+});
 describe("managed Goose build profile", () => {
   it("defaults development to debug and makes release selection profile-aware", async () => {
     const script = await readFile(
