@@ -30,18 +30,19 @@ export function VoicePickerDialog({
         label={t("voice.voice")}
         description={selectedVoice ?? t("voice.noVoiceSelected")}
         density="compact"
-        action={
+        action={({ descriptionId }) => (
           <DialogTrigger asChild>
             <Button
               type="button"
               size="sm"
               variant="outline"
               aria-label={t("voice.chooseVoiceTitle")}
+              aria-describedby={descriptionId}
             >
               {t("voice.chooseVoice")}
             </Button>
           </DialogTrigger>
-        }
+        )}
       />
       <DialogContent
         size="lg"
