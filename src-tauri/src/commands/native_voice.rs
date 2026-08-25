@@ -205,6 +205,7 @@ struct Runtime {
     controls_ready: bool,
     controls_suppressed: bool,
     controls_visibility_generation: u64,
+    controls_window_revision: Option<u64>,
     native_microphone_mute_control: bool,
 }
 
@@ -1766,6 +1767,46 @@ fn refresh_microphone_claim(
 }
 
 impl NativeVoiceState {
+    pub(crate) fn register_controls_window(
+        &self,
+        session_id: &str,
+        expected_revision: u64,
+    ) -> Result<(), String> {
+        let mut runtime = self
+            .runtime
+            .lock()
+            .map_err(|_| "native voice state lock was poisoned".to_string())?;
+        if runtime.session_id.as_deref() != Some(session_id)
+            || runtime.revision != expected_revision
+        {
+            return Err("The voice conversation changed while its controls were opening.".into());
+        }
+        runtime.controls_window_revision = Some(expected_revision);
+        Ok(())
+    }
+
+    pub(crate) fn controls_window_revision(&self) -> Option<u64> {
+        self.runtime
+            .lock()
+            .ok()
+            .and_then(|runtime| runtime.controls_window_revision)
+    }
+
+    pub(crate) fn controls_window_matches_active_lifecycle(&self) -> bool {
+        self.runtime.lock().ok().is_some_and(|runtime| {
+            runtime.session_id.is_some()
+                && runtime.controls_window_revision == Some(runtime.revision)
+        })
+    }
+
+    pub(crate) fn clear_controls_window_if_revision(&self, expected_revision: Option<u64>) {
+        if let Ok(mut runtime) = self.runtime.lock() {
+            if runtime.controls_window_revision == expected_revision {
+                runtime.controls_window_revision = None;
+            }
+        }
+    }
+
     async fn target_lifecycle_guard<F>(
         &self,
         validate_target: F,
@@ -3391,6 +3432,35 @@ mod tests {
         assert!(state
             .set_controls_suppressed("other-window", "session-1", 4, true)
             .is_err());
+    }
+
+    #[test]
+    fn floating_controls_window_registration_is_lifecycle_bound() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.revision = 4;
+        }
+
+        state
+            .register_controls_window("session-1", 4)
+            .expect("register current controls window");
+        assert_eq!(state.controls_window_revision(), Some(4));
+        assert!(state.controls_window_matches_active_lifecycle());
+        assert!(state.register_controls_window("session-1", 3).is_err());
+
+        state.clear_controls_window_if_revision(Some(3));
+        assert_eq!(state.controls_window_revision(), Some(4));
+        state
+            .runtime
+            .lock()
+            .expect("lock native runtime")
+            .session_id = None;
+        assert!(!state.controls_window_matches_active_lifecycle());
+
+        state.clear_controls_window_if_revision(Some(4));
+        assert_eq!(state.controls_window_revision(), None);
     }
 
     #[test]

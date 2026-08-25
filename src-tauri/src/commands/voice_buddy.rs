@@ -21,19 +21,6 @@ fn controls_url(revision: u64) -> String {
     format!("index.html?voiceBuddy=1&voiceRevision={revision}")
 }
 
-fn controls_revision_from_url(url: &str) -> Option<u64> {
-    url.split_once('?')?
-        .1
-        .split('#')
-        .next()?
-        .split('&')
-        .find_map(|pair| pair.strip_prefix("voiceRevision=")?.parse().ok())
-}
-
-fn controls_window_matches_revision(url: &str, controls_revision: u64) -> bool {
-    controls_revision_from_url(url) == Some(controls_revision)
-}
-
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OpenSessionPayload {
@@ -182,13 +169,16 @@ fn show_controls_without_activation(window: &WebviewWindow) -> Result<(), String
 }
 
 pub fn install(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<NativeVoiceState>();
     if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
+        let stale_revision = state.controls_window_revision();
         window
             .destroy()
             .map_err(|error| format!("Could not replace stale floating voice controls: {error}"))?;
         if app.get_webview_window(WINDOW_LABEL).is_some() {
             return Err("Stale floating voice controls could not be replaced.".to_string());
         }
+        state.clear_controls_window_if_revision(stale_revision);
     }
     let (session_id, owner_window_label, revision) = app
         .state::<NativeVoiceState>()
@@ -216,7 +206,14 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     let builder = builder.transparent(true);
     let window = builder.build().map_err(|error| error.to_string())?;
-    make_macos_transparent(&window)?;
+    if let Err(error) = make_macos_transparent(&window) {
+        let _ = window.destroy();
+        return Err(error);
+    }
+    if let Err(error) = state.register_controls_window(&session_id, revision) {
+        let _ = window.destroy();
+        return Err(error);
+    }
     window.on_window_event(|event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
@@ -254,26 +251,25 @@ pub fn install(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-fn active_controls_match(active_revision: Option<u64>, controls_url: Option<&str>) -> bool {
-    active_revision.is_some_and(|revision| {
-        controls_url.is_some_and(|url| controls_window_matches_revision(url, revision))
-    })
+fn active_controls_match(active_revision: Option<u64>, controls_revision: Option<u64>) -> bool {
+    active_revision.is_some() && active_revision == controls_revision
 }
 
 fn should_destroy_stale_candidate(
-    candidate_url: Option<&str>,
+    candidate_revision: Option<u64>,
     active_revision: Option<u64>,
 ) -> bool {
-    candidate_url.is_some_and(|url| !active_controls_match(active_revision, Some(url)))
+    candidate_revision
+        .is_some_and(|revision| !active_controls_match(active_revision, Some(revision)))
 }
 
 fn verify_stale_candidate_removed(
-    candidate_url: &str,
-    current_url: Result<Option<&str>, String>,
+    candidate_revision: u64,
+    current_revision: Result<Option<u64>, String>,
     destroy_result: Result<(), String>,
 ) -> Result<(), String> {
-    let current_url = current_url?;
-    if current_url != Some(candidate_url) {
+    let current_revision = current_revision?;
+    if current_revision != Some(candidate_revision) {
         return Ok(());
     }
     destroy_result?;
@@ -281,17 +277,10 @@ fn verify_stale_candidate_removed(
 }
 
 pub fn matches_active_lifecycle(app: &AppHandle) -> bool {
-    let controls_url = app
-        .get_webview_window(WINDOW_LABEL)
-        .and_then(|window| window.url().ok());
-    let active_revision = app
-        .state::<NativeVoiceState>()
-        .active_session_lifecycle_target()
-        .map(|(_, _, revision)| revision);
-    active_controls_match(
-        active_revision,
-        controls_url.as_ref().map(|url| url.as_str()),
-    )
+    app.get_webview_window(WINDOW_LABEL).is_some()
+        && app
+            .state::<NativeVoiceState>()
+            .controls_window_matches_active_lifecycle()
 }
 
 pub fn should_preserve_main_for_voice(
@@ -305,27 +294,29 @@ pub fn destroy_stale_for_main_close(app: &AppHandle) -> Result<(), String> {
     let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
         return Ok(());
     };
-    let candidate_url = window.url().map_err(|error| error.to_string())?;
-    let active_revision = app
-        .state::<NativeVoiceState>()
+    let state = app.state::<NativeVoiceState>();
+    let candidate_revision = state.controls_window_revision();
+    let active_revision = state
         .active_session_lifecycle_target()
         .map(|(_, _, revision)| revision);
-    if !should_destroy_stale_candidate(Some(candidate_url.as_str()), active_revision) {
+    if !should_destroy_stale_candidate(candidate_revision, active_revision) {
         return Ok(());
     }
     let destroy_result = window
         .destroy()
         .map_err(|error| format!("Could not remove stale floating voice controls: {error}"));
-    let current_window = app.get_webview_window(WINDOW_LABEL);
-    let current_url = current_window
-        .as_ref()
-        .map(|current| current.url().map_err(|error| error.to_string()))
-        .transpose();
-    let current_url = current_url
-        .as_ref()
-        .map(|url| url.as_ref().map(|url| url.as_str()))
-        .map_err(Clone::clone);
-    verify_stale_candidate_removed(candidate_url.as_str(), current_url, destroy_result)
+    let current_revision = Ok(app
+        .get_webview_window(WINDOW_LABEL)
+        .and_then(|_| state.controls_window_revision()));
+    let result = verify_stale_candidate_removed(
+        candidate_revision.expect("stale candidates have a registered revision"),
+        current_revision,
+        destroy_result,
+    );
+    if result.is_ok() {
+        state.clear_controls_window_if_revision(candidate_revision);
+    }
+    result
 }
 
 fn reconcile_terminal_controls(
@@ -350,20 +341,20 @@ pub fn dismiss_after_terminal_event<T: Clone + Serialize>(
     let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
         return;
     };
-    let window_matches_lifecycle = window
-        .url()
-        .ok()
-        .is_some_and(|url| controls_window_matches_revision(url.as_str(), controls_revision));
+    let state = app.state::<NativeVoiceState>();
+    let window_matches_lifecycle = state.controls_window_revision() == Some(controls_revision);
     reconcile_terminal_controls(
         || {
             let _ = window.emit(super::native_voice::EVENT_NAME, payload);
         },
         || {
             if window_matches_lifecycle {
-                window.destroy().map_err(|error| error.to_string())
+                window.destroy().map_err(|error| error.to_string())?;
+                state.clear_controls_window_if_revision(Some(controls_revision));
             } else {
-                Ok(())
+                return Ok(());
             }
+            Ok(())
         },
         || {
             if window_matches_lifecycle {
@@ -379,6 +370,8 @@ pub fn dismiss_stale_after_terminal(app: &AppHandle, terminal_revision: u64) {
     let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
         return;
     };
+    let state = app.state::<NativeVoiceState>();
+    let candidate_revision = state.controls_window_revision();
     reconcile_terminal_controls(
         || {
             let _ = window.emit(
@@ -388,7 +381,11 @@ pub fn dismiss_stale_after_terminal(app: &AppHandle, terminal_revision: u64) {
                 },
             );
         },
-        || window.destroy().map_err(|error| error.to_string()),
+        || {
+            window.destroy().map_err(|error| error.to_string())?;
+            state.clear_controls_window_if_revision(candidate_revision);
+            Ok(())
+        },
         || window.hide().map_err(|error| error.to_string()),
     );
 }
@@ -563,10 +560,9 @@ mod tests {
 
     #[test]
     fn stale_controls_do_not_match_an_inactive_or_replacement_lifecycle() {
-        let controls = controls_url(4);
-        assert!(active_controls_match(Some(4), Some(&controls)));
-        assert!(!active_controls_match(None, Some(&controls)));
-        assert!(!active_controls_match(Some(6), Some(&controls)));
+        assert!(active_controls_match(Some(4), Some(4)));
+        assert!(!active_controls_match(None, Some(4)));
+        assert!(!active_controls_match(Some(6), Some(4)));
         assert!(!active_controls_match(Some(4), None));
     }
 
@@ -574,24 +570,21 @@ mod tests {
     fn stale_cleanup_never_targets_controls_created_after_candidate_capture() {
         assert!(!should_destroy_stale_candidate(None, Some(4)));
         assert!(!should_destroy_stale_candidate(None, None));
-        assert!(should_destroy_stale_candidate(
-            Some(&controls_url(3)),
-            Some(4),
-        ));
+        assert!(should_destroy_stale_candidate(Some(3), Some(4)));
         assert!(verify_stale_candidate_removed(
-            &controls_url(3),
-            Ok(Some(&controls_url(4))),
+            3,
+            Ok(Some(4)),
             Err("old handle is gone".to_string()),
         )
         .is_ok());
         assert!(verify_stale_candidate_removed(
-            &controls_url(3),
-            Ok(Some(&controls_url(3))),
+            3,
+            Ok(Some(3)),
             Err("old handle is stuck".to_string()),
         )
         .is_err());
         assert!(verify_stale_candidate_removed(
-            &controls_url(3),
+            3,
             Err("could not inspect current controls".to_string()),
             Err("old handle is stuck".to_string()),
         )
@@ -628,17 +621,5 @@ mod tests {
 
         assert!(emitted.get());
         assert!(hidden.get());
-    }
-
-    #[test]
-    fn floating_controls_match_active_revision_not_terminal_revision() {
-        let url = format!("tauri://localhost/{}", controls_url(42));
-        assert_eq!(controls_revision_from_url(&url), Some(42));
-        assert!(controls_window_matches_revision(&url, 42));
-        assert!(!controls_window_matches_revision(&url, 43));
-        assert_eq!(
-            controls_revision_from_url("tauri://localhost/index.html?voiceBuddy=1"),
-            None
-        );
     }
 }
