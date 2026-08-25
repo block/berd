@@ -311,6 +311,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           actionsAlwaysVisible={actionsAlwaysVisible}
           feedbackSessionId={feedbackSessionId}
           sessionFeedbackSurvey={sessionFeedbackSurvey}
+          sessionFeedbackSurveyMeasurementOnly={isOffscreenRealMeasurement}
           showJumpToResponseStartHint={showJumpToResponseStartHint}
           onRetryMessage={
             row.fragment.role === "end" || row.fragment.role === "single"
@@ -393,6 +394,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           actionsAlwaysVisible={actionsAlwaysVisible}
           feedbackSessionId={feedbackSessionId}
           sessionFeedbackSurvey={sessionFeedbackSurvey}
+          sessionFeedbackSurveyMeasurementOnly={isOffscreenRealMeasurement}
           showJumpToResponseStartHint={showJumpToResponseStartHint}
           onRetryMessage={
             message.role === "assistant" ? onRetryMessage : undefined

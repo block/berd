@@ -346,6 +346,7 @@ interface MessageBubbleProps {
   actionMessageId?: string;
   feedbackSessionId?: string;
   sessionFeedbackSurvey?: ActiveSessionFeedbackSurvey;
+  sessionFeedbackSurveyMeasurementOnly?: boolean;
   fragmentRole?: "single" | "start" | "middle" | "end";
   onCopy?: () => void;
   onRetryMessage?: (messageId: string) => void;
@@ -703,6 +704,7 @@ export const MessageBubble = memo(function MessageBubble({
   actionMessageId = message.id,
   feedbackSessionId,
   sessionFeedbackSurvey,
+  sessionFeedbackSurveyMeasurementOnly = false,
   fragmentRole,
   onRetryMessage,
   onEditMessage,
@@ -1133,6 +1135,7 @@ export const MessageBubble = memo(function MessageBubble({
           <SessionFeedbackSurvey
             sessionId={feedbackSessionId}
             survey={sessionFeedbackSurvey}
+            measurementOnly={sessionFeedbackSurveyMeasurementOnly}
           />
         ) : null}
 

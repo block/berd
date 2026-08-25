@@ -12,9 +12,11 @@ import {
 export function SessionFeedbackSurvey({
   sessionId,
   survey,
+  measurementOnly = false,
 }: {
   sessionId: string;
   survey: ActiveSessionFeedbackSurvey;
+  measurementOnly?: boolean;
 }) {
   const { t } = useTranslation("chat");
   const targetRef = useRef<HTMLFieldSetElement>(null);
@@ -26,6 +28,7 @@ export function SessionFeedbackSurvey({
   );
 
   useEffect(() => {
+    if (measurementOnly) return;
     const target = targetRef.current;
     if (!target || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver((entries) => {
@@ -41,7 +44,7 @@ export function SessionFeedbackSurvey({
     });
     observer.observe(target);
     return () => observer.disconnect();
-  }, [sessionId, survey.appearanceId]);
+  }, [measurementOnly, sessionId, survey.appearanceId]);
 
   const respond = useCallback(
     (response: SessionFeedbackSurveyResponse) => {
@@ -56,6 +59,7 @@ export function SessionFeedbackSurvey({
   );
 
   useEffect(() => {
+    if (measurementOnly) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (
         event.key === "Escape" &&
@@ -68,7 +72,7 @@ export function SessionFeedbackSurvey({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [respond]);
+  }, [measurementOnly, respond]);
 
   if (!visible) return null;
   return (
@@ -91,7 +95,8 @@ export function SessionFeedbackSurvey({
             key={response}
             size="sm"
             variant="outline"
-            onClick={() => respond(response)}
+            tabIndex={measurementOnly ? -1 : undefined}
+            onClick={measurementOnly ? undefined : () => respond(response)}
           >
             {label}
           </Button>
@@ -100,7 +105,8 @@ export function SessionFeedbackSurvey({
           ref={dismissRef}
           size="sm"
           variant="ghost"
-          onClick={() => respond("dismissed")}
+          tabIndex={measurementOnly ? -1 : undefined}
+          onClick={measurementOnly ? undefined : () => respond("dismissed")}
         >
           {t("message.sessionFeedbackDismiss")}
         </Button>

@@ -56,6 +56,25 @@ describe("SessionFeedbackSurvey", () => {
     );
   });
 
+  it("renders without interaction while measuring offscreen", () => {
+    render(
+      <SessionFeedbackSurvey
+        sessionId="session"
+        survey={{ appearanceId: "appearance", messageId: "message" }}
+        measurementOnly
+      />,
+    );
+
+    const dismiss = screen.getByRole("button", { name: "Dismiss" });
+    expect(dismiss).not.toHaveFocus();
+    expect(dismiss).toHaveAttribute("tabindex", "-1");
+    expect(markSessionFeedbackSurveyAppeared).not.toHaveBeenCalled();
+
+    fireEvent.click(dismiss);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(recordSessionFeedbackSurveyResponse).not.toHaveBeenCalled();
+  });
+
   it("treats Escape as dismiss", () => {
     render(
       <SessionFeedbackSurvey

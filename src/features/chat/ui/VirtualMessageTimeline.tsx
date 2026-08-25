@@ -3498,6 +3498,13 @@ function VirtualMessageTimelineSession({
     ],
   );
 
+  const sessionFeedbackSurveyForRow = (row: TranscriptRowDescriptor) =>
+    sessionFeedbackSurvey &&
+    responseFeedbackRowIds.has(row.rowId) &&
+    (row.responseStartMessageId ?? row.messageId) ===
+      sessionFeedbackSurvey.messageId
+      ? sessionFeedbackSurvey
+      : undefined;
   const renderRow = (
     row: TranscriptRowDescriptor,
     index: number,
@@ -3533,14 +3540,7 @@ function VirtualMessageTimelineSession({
       feedbackSessionId={
         responseFeedbackRowIds.has(row.rowId) ? sessionId : undefined
       }
-      sessionFeedbackSurvey={
-        sessionFeedbackSurvey &&
-        responseFeedbackRowIds.has(row.rowId) &&
-        (row.responseStartMessageId ?? row.messageId) ===
-          sessionFeedbackSurvey.messageId
-          ? sessionFeedbackSurvey
-          : undefined
-      }
+      sessionFeedbackSurvey={sessionFeedbackSurveyForRow(row)}
       showJumpToResponseStartHint={
         row.messageId === responseStartHintMessageId &&
         responseStartHintIsActive
@@ -3574,6 +3574,10 @@ function VirtualMessageTimelineSession({
       })}
       message={row.messageId ? stableMessageByRowId.get(row.rowId) : undefined}
       isStreaming={false}
+      feedbackSessionId={
+        responseFeedbackRowIds.has(row.rowId) ? sessionId : undefined
+      }
+      sessionFeedbackSurvey={sessionFeedbackSurveyForRow(row)}
       rowStateProvider={
         virtualTimeline.rowStateProvider
           ? {
