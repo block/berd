@@ -33,20 +33,23 @@ Result:
     const [
       { default: packageJson },
       { getAppNavigationController },
+      { getVoiceConversationStatus },
       { useVoiceConversationStore },
     ] = await Promise.all([
       import("../../../../../package.json"),
       import("../../navigation"),
+      import("@/features/voice-conversation/api/voiceConversation"),
       import("@/features/voice-conversation/stores/voiceConversationStore"),
     ]);
     const context = getAppNavigationController().getAppContext();
     const voice = useVoiceConversationStore.getState();
+    const nativeVoiceStatus = await getVoiceConversationStatus();
     return {
       view: context.view,
       active_session_id: context.activeSessionId,
       active_project_id: context.activeProjectId,
       voice_session_active:
-        voice.status.sessionId !== null ||
+        nativeVoiceStatus.sessionId !== null ||
         voice.uiState === "starting" ||
         voice.uiState === "stopping",
       // Match telemetry's resolution: prefer the build-injected version

@@ -72,6 +72,7 @@ const mocks = vi.hoisted(() => ({
   listPersonas: vi.fn(),
   createSkill: vi.fn(),
   listSkills: vi.fn(),
+  getVoiceConversationStatus: vi.fn(),
 }));
 
 vi.mock("@/shared/api/acp", () => ({
@@ -98,6 +99,21 @@ vi.mock("@/shared/api/acp", () => ({
   discoverAcpProviders: (...args: unknown[]) =>
     mocks.discoverAcpProviders(...args),
 }));
+
+vi.mock(
+  "@/features/voice-conversation/api/voiceConversation",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/features/voice-conversation/api/voiceConversation")
+      >();
+    return {
+      ...actual,
+      getVoiceConversationStatus: (...args: unknown[]) =>
+        mocks.getVoiceConversationStatus(...args),
+    };
+  },
+);
 
 vi.mock("@/features/chat/lib/sessionActivation", () => ({
   loadSessionMessages: (...args: unknown[]) =>
@@ -416,6 +432,15 @@ beforeEach(() => {
   mocks.listProjects.mockResolvedValue([]);
   mocks.listPersonas.mockResolvedValue([]);
   mocks.listSkills.mockResolvedValue([]);
+  mocks.getVoiceConversationStatus.mockResolvedValue({
+    available: false,
+    unavailableReason: null,
+    lifecycle: "stopped",
+    sessionId: null,
+    ownerWindowLabel: null,
+    microphoneMuted: false,
+    revision: 0,
+  });
   mocks.updateSessionTitle.mockResolvedValue(undefined);
   mocks.moveSessionToProject.mockResolvedValue(undefined);
   mocks.updateProject.mockImplementation(
@@ -4059,17 +4084,14 @@ describe("info", () => {
       activeSessionId: "session-2",
       activeProjectId: "project-9",
     });
-    useVoiceConversationStore.setState({
-      status: {
-        available: true,
-        unavailableReason: null,
-        lifecycle: "running",
-        sessionId: "session-2",
-        ownerWindowLabel: "main",
-        microphoneMuted: false,
-        revision: 4,
-      },
-      uiState: "listening",
+    mocks.getVoiceConversationStatus.mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running",
+      sessionId: "session-2",
+      ownerWindowLabel: "main",
+      microphoneMuted: false,
+      revision: 4,
     });
 
     const result = (await dispatchCommand(
