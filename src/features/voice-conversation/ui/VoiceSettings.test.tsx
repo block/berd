@@ -1,4 +1,5 @@
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n } from "@/shared/i18n";
 import { renderWithProviders } from "@/test/render";
@@ -44,6 +45,11 @@ const outputState = vi.hoisted(() => ({
 const interruptionState = vi.hoisted(() => ({
   mode: "automatic" as "automatic" | "allowInterruptions" | "preventFeedback",
 }));
+const microphonePermissionState = vi.hoisted(() => ({
+  status: "authorized" as "notDetermined" | "denied" | "authorized" | "unknown",
+  openSettingsError: false,
+  openSettings: vi.fn(),
+}));
 
 vi.mock("../hooks/usePocketVoiceSetup", () => ({
   usePocketVoiceSetup: () => setupState.current,
@@ -55,6 +61,9 @@ vi.mock("../hooks/useSiriVoiceSetup", () => ({
   useSiriVoiceSetup: () => siriSetupState.current,
   voiceKey: (voice: { name: string; language: string }) =>
     `${voice.name.toLowerCase()}|${voice.language.toLowerCase()}`,
+}));
+vi.mock("../hooks/useMicrophonePermission", () => ({
+  useMicrophonePermission: () => microphonePermissionState,
 }));
 vi.mock("../lib/voiceOutputPreference", () => ({
   useVoiceOutputPreference: () => ({
@@ -158,6 +167,9 @@ function siriSetup(): SiriVoiceSetup {
 describe("VoiceSettings", () => {
   beforeEach(async () => {
     await i18n.changeLanguage("en");
+    microphonePermissionState.status = "authorized";
+    microphonePermissionState.openSettingsError = false;
+    microphonePermissionState.openSettings.mockReset();
     inputState.backend = "parakeet";
     outputState.backend = "pocket";
     macSpeechSetupState.current = {
@@ -215,6 +227,42 @@ describe("VoiceSettings", () => {
     expect(
       screen.queryByRole("button", { name: "Advanced…" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not warn before macOS has requested microphone access", () => {
+    microphonePermissionState.status = "notDetermined";
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.queryByRole("button", { name: "Open Microphone Settings" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens macOS settings when microphone access was denied", async () => {
+    microphonePermissionState.status = "denied";
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByText(/Microphone access is turned off for Berd/),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Open Microphone Settings" }),
+    );
+
+    expect(microphonePermissionState.openSettings).toHaveBeenCalledOnce();
+  });
+
+  it("shows localized guidance when microphone settings cannot open", () => {
+    microphonePermissionState.status = "denied";
+    microphonePermissionState.openSettingsError = true;
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByText(/Couldn't open Microphone Settings/),
+    ).toBeInTheDocument();
   });
 
   it("uses one accessible speech output heading for the backend picker", () => {

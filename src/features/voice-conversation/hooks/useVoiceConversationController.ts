@@ -20,9 +20,11 @@ import {
 } from "../lib/nativeAssistantSpeech";
 import {
   confirmVoiceConversationForegroundSession,
+  isVoiceMicrophoneCaptureError,
   setVoiceConversationControlsSuppressed,
   type PendingVoiceTranscript,
 } from "../api/voiceConversation";
+import { getMicrophonePermissionStatus } from "../api/microphonePermission";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 
 interface VoiceSendRoute {
@@ -757,6 +759,16 @@ export function useVoiceConversationController({
 
   const startCurrentConversation = useCallback(async () => {
     if (inputBackend === null) return;
+    try {
+      if ((await getMicrophonePermissionStatus()) === "denied") {
+        onPocketSetupRequired();
+        return;
+      }
+    } catch {
+      // Permission inspection is an optimization. Capture remains the source
+      // of truth and provides the recovery path for unsupported platforms,
+      // stale permission state, and other audio startup failures.
+    }
     // Do not rely on the mount effect racing ahead of the user's first
     // click. The native recognizer can finalize quickly, so its delivery
     // subscriber must exist before the microphone lifecycle starts.
@@ -777,6 +789,37 @@ export function useVoiceConversationController({
         backendStatus.lifecycle === "running" &&
         backendStatus.sessionId === sessionId &&
         backendStatus.ownerWindowLabel === currentWindowLabel;
+      if (isVoiceMicrophoneCaptureError(startError)) {
+        if (activeSendRoute?.sessionId === route.sessionId) {
+          activeSendRoute = null;
+        }
+        addErrorNotification(sessionId, errorText(startError));
+        let cleanupError: unknown = null;
+        if (exactOwnerLifecycleSurvived) {
+          try {
+            await stop();
+          } catch (stopError) {
+            cleanupError = stopError;
+          }
+        }
+        const settledStatus = useVoiceConversationStore.getState().status;
+        const captureLifecycleStopped =
+          settledStatus.sessionId === null &&
+          (settledStatus.lifecycle === "stopped" ||
+            settledStatus.lifecycle === "unavailable");
+        if (captureLifecycleStopped) {
+          useVoiceConversationStore.setState((state) =>
+            state.status.revision === settledStatus.revision &&
+            state.status.sessionId === null
+              ? { uiState: "off", error: null }
+              : state,
+          );
+        } else if (cleanupError) {
+          addErrorNotification(sessionId, errorText(cleanupError));
+        }
+        onPocketSetupRequired();
+        return;
+      }
       let conversationStarted = false;
       if (exactOwnerLifecycleSurvived) {
         try {
@@ -822,7 +865,15 @@ export function useVoiceConversationController({
         addErrorNotification(sessionId, errorText(startError));
       }
     }
-  }, [inputBackend, onSend, sessionId, start, startAssistantSpeech]);
+  }, [
+    inputBackend,
+    onPocketSetupRequired,
+    onSend,
+    sessionId,
+    start,
+    startAssistantSpeech,
+    stop,
+  ]);
 
   useEffect(() => {
     if (

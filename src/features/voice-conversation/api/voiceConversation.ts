@@ -26,6 +26,20 @@ let foregroundSessionClaim: {
   supersede: () => void;
 } | null = null;
 
+export class VoiceMicrophoneCaptureError extends Error {
+  override readonly name = "VoiceMicrophoneCaptureError";
+
+  constructor(error: unknown) {
+    super(error instanceof Error ? error.message : String(error));
+  }
+}
+
+export function isVoiceMicrophoneCaptureError(
+  error: unknown,
+): error is VoiceMicrophoneCaptureError {
+  return error instanceof VoiceMicrophoneCaptureError;
+}
+
 function resetMicrophoneMuteState(): void {
   microphoneMuteIntent += 1;
   microphoneMuteObservationVersion += 1;
@@ -48,6 +62,9 @@ async function ensureActiveMicrophone(): Promise<void> {
     return microphoneStart.promise;
   }
   const promise = startNativeMicrophone()
+    .catch((error) => {
+      throw new VoiceMicrophoneCaptureError(error);
+    })
     .then((microphone) => {
       if (generation !== microphoneGeneration) {
         microphone.stop();
