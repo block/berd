@@ -69,11 +69,26 @@ export const PromptPinWidget = memo(function PromptPinWidget({
     setText(savedText);
   }, [savedTitle, savedText]);
 
+  // Read through a ref so the unmount-only cleanup below cannot flush through a
+  // first-render copy of the callback.
+  const onUpdateStateRef = useRef(onUpdateState);
+  onUpdateStateRef.current = onUpdateState;
+
   useEffect(
     () => () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
+      if (!saveTimeoutRef.current) {
+        return;
       }
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+      // Removing a focused element does not fire blur, so leaving Home mid-edit
+      // would drop the debounced save and reopen the pin with the old text.
+      // Flushing after a removal is harmless: updateWidgetState no-ops once the
+      // instance is gone, so an abandoned draft still does not come back.
+      onUpdateStateRef.current({
+        title: titleRef.current,
+        text: textRef.current,
+      });
     },
     [],
   );

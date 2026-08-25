@@ -303,6 +303,43 @@ describe("PromptPinWidget", () => {
     }
   });
 
+  it("flushes a pending edit when the widget unmounts before the debounce", () => {
+    vi.useFakeTimers();
+    try {
+      const onUpdateState = vi.fn();
+      const { unmount } = renderPin({ onUpdateState });
+
+      fireEvent.change(
+        screen.getByPlaceholderText("Write a prompt to run..."),
+        { target: { value: "Summarize my inbox" } },
+      );
+      expect(onUpdateState).not.toHaveBeenCalled();
+
+      // Leaving Home mid-edit unmounts the widget without firing blur, so the
+      // debounce is the only thing holding the edit.
+      unmount();
+
+      expect(onUpdateState).toHaveBeenCalledWith({
+        title: "",
+        text: "Summarize my inbox",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not flush on unmount when nothing is pending", () => {
+    const onUpdateState = vi.fn();
+    const { unmount } = renderPin({
+      widgetState: readyState({ text: "Summarize my inbox" }),
+      onUpdateState,
+    });
+
+    unmount();
+
+    expect(onUpdateState).not.toHaveBeenCalled();
+  });
+
   it("saves and shows the ready tile when Done is pressed", () => {
     const onUpdateState = vi.fn();
     renderPin({ onUpdateState });
