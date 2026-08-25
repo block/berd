@@ -24,6 +24,7 @@ import {
   setVoiceConversationControlsSuppressed,
   type PendingVoiceTranscript,
 } from "../api/voiceConversation";
+import { getMicrophonePermissionStatus } from "../api/microphonePermission";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 
 interface VoiceSendRoute {
@@ -758,6 +759,16 @@ export function useVoiceConversationController({
 
   const startCurrentConversation = useCallback(async () => {
     if (inputBackend === null) return;
+    try {
+      if ((await getMicrophonePermissionStatus()) === "denied") {
+        onPocketSetupRequired();
+        return;
+      }
+    } catch {
+      // Permission inspection is an optimization. Capture remains the source
+      // of truth and provides the recovery path for unsupported platforms,
+      // stale permission state, and other audio startup failures.
+    }
     // Do not rely on the mount effect racing ahead of the user's first
     // click. The native recognizer can finalize quickly, so its delivery
     // subscriber must exist before the microphone lifecycle starts.

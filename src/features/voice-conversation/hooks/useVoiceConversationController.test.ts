@@ -14,6 +14,9 @@ const tauriWindowMocks = vi.hoisted(() => ({ label: "main" }));
 const voiceApiMocks = vi.hoisted(() => ({
   confirmForegroundSession: vi.fn<() => Promise<number>>(),
 }));
+const microphonePermissionMocks = vi.hoisted(() => ({
+  getStatus: vi.fn<() => Promise<"authorized" | "denied">>(),
+}));
 
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ label: tauriWindowMocks.label }),
@@ -30,6 +33,10 @@ vi.mock("../api/voiceConversation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../api/voiceConversation")>()),
   confirmVoiceConversationForegroundSession:
     voiceApiMocks.confirmForegroundSession,
+}));
+
+vi.mock("../api/microphonePermission", () => ({
+  getMicrophonePermissionStatus: microphonePermissionMocks.getStatus,
 }));
 
 import {
@@ -206,6 +213,8 @@ describe("voice transcript delivery coordination", () => {
     nativeAssistantSpeechMocks.takeNotices.mockClear();
     voiceApiMocks.confirmForegroundSession.mockReset();
     voiceApiMocks.confirmForegroundSession.mockResolvedValue(1);
+    microphonePermissionMocks.getStatus.mockReset();
+    microphonePermissionMocks.getStatus.mockResolvedValue("authorized");
     useChatStore.setState({ messagesBySession: {}, sessionStateById: {} });
   });
   it("serializes deliveries for the same session and re-evaluates in order", async () => {
@@ -1064,6 +1073,47 @@ describe("voice transcript delivery coordination", () => {
     expect(useChatStore.getState().messagesBySession["session-a"]).toHaveLength(
       1,
     );
+  });
+
+  it("opens Voice settings without starting when microphone access is denied", async () => {
+    const stopped = {
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped" as const,
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 1,
+    };
+    const start = vi.fn();
+    const onVoiceSetupRequired = vi.fn();
+    microphonePermissionMocks.getStatus.mockResolvedValue("denied");
+    useVoiceConversationStore.setState({
+      status: stopped,
+      uiState: "off",
+      hydrated: true,
+      init: vi.fn().mockResolvedValue(undefined),
+      refreshStatus: vi.fn().mockResolvedValue(stopped),
+      drainPendingTranscripts: vi.fn().mockResolvedValue(undefined),
+      start,
+    });
+    const { result } = renderHook(() =>
+      useVoiceConversationController({
+        sessionId: "session-a",
+        onSend: vi.fn().mockResolvedValue(true),
+        enabled: true,
+        isGooseSession: true,
+        pocketReady: true,
+        onPocketSetupRequired: onVoiceSetupRequired,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.onToggle();
+    });
+
+    expect(start).not.toHaveBeenCalled();
+    expect(onVoiceSetupRequired).toHaveBeenCalledOnce();
   });
 
   it("opens Voice settings when microphone capture cannot start", async () => {
