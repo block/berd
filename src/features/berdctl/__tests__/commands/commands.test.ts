@@ -35,6 +35,7 @@ import { getModelProviders } from "@/features/providers/providerCatalog";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import { resolveSkillPillTone } from "@/features/skills/lib/resolveSkillPillTone";
+import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import type { AcpSessionInfo, AcpSessionsPage } from "@/shared/api/acp";
 import { createUserMessage, getTextContent } from "@/shared/types/messages";
 
@@ -359,6 +360,18 @@ beforeEach(() => {
   useProviderModelCacheStore.setState({
     providers: emptyModelProviderCache(),
     refreshingProviderIds: new Set(),
+  });
+  useVoiceConversationStore.setState({
+    status: {
+      available: false,
+      unavailableReason: null,
+      lifecycle: "stopped",
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 0,
+    },
+    uiState: "off",
   });
 
   window.localStorage.clear();
@@ -4040,11 +4053,23 @@ describe("info", () => {
     );
   });
 
-  it("get_context reports the app context from the navigation controller", async () => {
+  it("get_context reports app and active voice context", async () => {
     controller.getAppContext.mockReturnValue({
       view: "chat",
       activeSessionId: "session-2",
       activeProjectId: "project-9",
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-2",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 4,
+      },
+      uiState: "listening",
     });
 
     const result = (await dispatchCommand(
@@ -4055,12 +4080,14 @@ describe("info", () => {
       view: string;
       active_session_id: string | null;
       active_project_id: string | null;
+      voice_session_active: boolean;
       app_version: string;
     };
 
     expect(result.view).toBe("chat");
     expect(result.active_session_id).toBe("session-2");
     expect(result.active_project_id).toBe("project-9");
+    expect(result.voice_session_active).toBe(true);
     expect(result.app_version.length).toBeGreaterThan(0);
   });
 });
