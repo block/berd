@@ -24,6 +24,7 @@ import {
   type PendingVoiceTranscript,
 } from "../api/voiceConversation";
 import type { VoiceInputBackend } from "../lib/voiceInputPreference";
+import type { SiriVoiceSelection } from "../api/siriVoice";
 
 interface VoiceSendRoute {
   sessionId: string;
@@ -587,6 +588,7 @@ export interface UseVoiceConversationControllerOptions {
   isGooseSession: boolean;
   pocketReady: boolean;
   inputBackend?: VoiceInputBackend | null;
+  siriVoice?: SiriVoiceSelection | null;
   onPocketSetupRequired: () => void;
   readOnly?: boolean;
   disabled?: boolean;
@@ -599,6 +601,7 @@ export function useVoiceConversationController({
   isGooseSession,
   pocketReady,
   inputBackend = "parakeet",
+  siriVoice = null,
   onPocketSetupRequired,
   readOnly = false,
   disabled = false,
@@ -734,25 +737,31 @@ export function useVoiceConversationController({
     (
       initialMessages?: ReturnType<typeof captureNativeAssistantSpeechHistory>,
     ) => {
-      startNativeAssistantSpeech(
-        sessionId,
-        (text, playbackError) => {
-          addErrorNotification(
-            sessionId,
-            `Pocket TTS could not speak the assistant response: ${errorText(
-              playbackError,
-            )}`,
-          );
-          console.error("Native Pocket playback failed", {
-            sessionId,
-            textLength: text.length,
-            error: playbackError,
-          });
-        },
-        initialMessages,
-      );
+      const onFailure = (text: string, playbackError: unknown) => {
+        addErrorNotification(
+          sessionId,
+          `Pocket TTS could not speak the assistant response: ${errorText(
+            playbackError,
+          )}`,
+        );
+        console.error("Native Pocket playback failed", {
+          sessionId,
+          textLength: text.length,
+          error: playbackError,
+        });
+      };
+      if (siriVoice) {
+        startNativeAssistantSpeech(
+          sessionId,
+          onFailure,
+          initialMessages,
+          siriVoice,
+        );
+      } else {
+        startNativeAssistantSpeech(sessionId, onFailure, initialMessages);
+      }
     },
-    [sessionId],
+    [sessionId, siriVoice],
   );
 
   const startCurrentConversation = useCallback(async () => {

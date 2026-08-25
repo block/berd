@@ -250,6 +250,10 @@ export function ChatView({
     isGooseSession: controller.selectedProvider === "goose",
     pocketReady: voiceReady,
     inputBackend: voiceInput.backend,
+    siriVoice:
+      siriVoiceSetup.status?.selectedVoiceInstalled === true
+        ? siriVoiceSetup.status.selectedVoice
+        : null,
     onPocketSetupRequired: () => {
       requestOpenSettings("voice", {
         returnTarget: { type: "voice-setup", sessionId },

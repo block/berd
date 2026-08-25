@@ -38,6 +38,7 @@ const mocks = vi.hoisted(() => ({
     vi.fn<
       (
         streamId: string,
+        voice: { name: string; language: string },
         interruptionMode:
           | "automatic"
           | "allowInterruptions"
@@ -77,9 +78,11 @@ vi.mock("../api/pocketVoice", () => ({
 vi.mock("../api/siriVoice", () => ({
   startSiriVoiceStream: (
     streamId: string,
+    voice: { name: string; language: string },
     interruptionMode: typeof mocks.interruptionMode,
     interruptionSensitivity: "less" | "balanced" | "more",
-  ) => mocks.siriStart(streamId, interruptionMode, interruptionSensitivity),
+  ) =>
+    mocks.siriStart(streamId, voice, interruptionMode, interruptionSensitivity),
   appendSiriVoiceStream: (streamId: string, text: string) =>
     mocks.siriAppend(streamId, text),
   flushSiriVoiceStream: (streamId: string) => mocks.siriFlush(streamId),
@@ -242,7 +245,8 @@ describe("native assistant speech stream", () => {
   it("routes the complete utterance stream through Siri when selected", async () => {
     mocks.backend = "siri";
     mocks.interruptionMode = "allowInterruptions";
-    startNativeAssistantSpeech("session-1", vi.fn());
+    const siriVoice = { name: "Samantha", language: "en-US" };
+    startNativeAssistantSpeech("session-1", vi.fn(), undefined, siriVoice);
     useChatStore
       .getState()
       .setMessages("session-1", [
@@ -252,6 +256,7 @@ describe("native assistant speech stream", () => {
     await vi.waitFor(() => {
       expect(mocks.siriStart).toHaveBeenCalledWith(
         expect.any(String),
+        siriVoice,
         "allowInterruptions",
         "less",
       );
@@ -271,7 +276,12 @@ describe("native assistant speech stream", () => {
   ] as const)("preserves partial delivery when a %s stream fails", async (backend) => {
     mocks.backend = backend;
     const onFailure = vi.fn();
-    startNativeAssistantSpeech("session-1", onFailure);
+    startNativeAssistantSpeech(
+      "session-1",
+      onFailure,
+      undefined,
+      backend === "siri" ? { name: "Samantha", language: "en-US" } : undefined,
+    );
     useChatStore
       .getState()
       .setMessages("session-1", [
@@ -773,7 +783,10 @@ describe("native assistant speech stream", () => {
   it("resumes a false-positive interruption before native startup is invoked", async () => {
     vi.useFakeTimers();
     try {
-      startNativeAssistantSpeech("session-1", vi.fn());
+      startNativeAssistantSpeech("session-1", vi.fn(), undefined, {
+        name: "Samantha",
+        language: "en-US",
+      });
       useChatStore
         .getState()
         .setMessages("session-1", [
@@ -2621,7 +2634,10 @@ describe("native assistant speech stream", () => {
     vi.useFakeTimers();
     try {
       mocks.backend = "siri";
-      startNativeAssistantSpeech("session-1", vi.fn());
+      startNativeAssistantSpeech("session-1", vi.fn(), undefined, {
+        name: "Samantha",
+        language: "en-US",
+      });
       useChatStore
         .getState()
         .setMessages("session-1", [

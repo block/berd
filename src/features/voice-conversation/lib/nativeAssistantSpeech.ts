@@ -22,6 +22,7 @@ import {
   startSiriVoiceStream,
   stopSiriVoice,
   type SiriVoiceStreamEvent,
+  type SiriVoiceSelection,
 } from "../api/siriVoice";
 import { setVoiceConversationAssistantSpeaking } from "../api/voiceConversation";
 import {
@@ -819,6 +820,7 @@ export function startNativeAssistantSpeech(
   sessionId: string,
   onFailure: SpeechFailureHandler,
   initialMessages: Message[] = captureNativeAssistantSpeechHistory(sessionId),
+  siriVoice: SiriVoiceSelection | null = null,
 ): void {
   if (activeSpeechSessionId === sessionId) return;
   const startRequest = ++startRequestGeneration;
@@ -842,7 +844,12 @@ export function startNativeAssistantSpeech(
         ) {
           return;
         }
-        startNativeAssistantSpeech(sessionId, onFailure, initialMessages);
+        startNativeAssistantSpeech(
+          sessionId,
+          onFailure,
+          initialMessages,
+          siriVoice,
+        );
       });
     };
     return;
@@ -854,7 +861,23 @@ export function startNativeAssistantSpeech(
   const streamBackend =
     getVoiceOutputBackend() === "siri"
       ? {
-          start: startSiriVoiceStream,
+          start: (
+            streamId: string,
+            interruptionMode: VoiceInterruptionMode,
+            interruptionSensitivity: VoiceInterruptionSensitivity,
+          ) => {
+            if (!siriVoice) {
+              return Promise.reject(
+                new Error("No installed Siri voice is available for playback"),
+              );
+            }
+            return startSiriVoiceStream(
+              streamId,
+              siriVoice,
+              interruptionMode,
+              interruptionSensitivity,
+            );
+          },
           append: appendSiriVoiceStream,
           flush: flushSiriVoiceStream,
           finish: finishSiriVoiceStream,
