@@ -744,7 +744,7 @@ fn effective_output_device_name(configured: Option<&str>) -> Option<String> {
 pub(crate) fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
     if output_device.is_some_and(|name| {
         let normalized = name.to_lowercase();
-        ["speaker", "altavoces"]
+        ["speaker", "altavo"]
             .iter()
             .any(|keyword| normalized.contains(keyword))
     }) {
@@ -861,12 +861,8 @@ pub(crate) fn should_suppress_capture(
     output_device: Option<&str>,
 ) -> bool {
     match mode {
-        // Automatic is deliberately best-effort, using built-in speaker metadata plus a
-        // bounded name heuristic for Berd's supported UI languages. macOS exposes no reliable
-        // public classification for every external speaker/headphone route, so this mode does
-        // not promise exhaustive feedback detection. Do not grow this into a broader device
-        // catalog or add acoustic echo detection without revisiting this product boundary.
-        // Users who experience feedback can select Prevent feedback to disable interruptions.
+        // Automatic is best-effort because macOS cannot classify every external route.
+        // Prevent feedback remains the reliable fallback when this heuristic misses one.
         VoiceInterruptionMode::Automatic => output_device_uses_speakers(output_device),
         VoiceInterruptionMode::AllowInterruptions => false,
         VoiceInterruptionMode::PreventFeedback => true,
@@ -3440,6 +3436,7 @@ mod tests {
             "Studio SPEAKERS",
             "Living Room Speaker",
             "Altavoces del MacBook Pro",
+            "Altavoz del salón",
         ] {
             assert!(output_device_uses_speakers(Some(name)), "{name}");
         }
