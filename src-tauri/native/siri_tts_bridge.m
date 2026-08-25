@@ -574,6 +574,7 @@ typedef void (^BerdAudioHandler)(
 @property(nonatomic, strong) AVAudioFormat *format;
 @property(nonatomic, assign) uint64_t pendingBuffers;
 @property(nonatomic, assign) uint64_t completedSourceFrames;
+@property(nonatomic, assign) BOOL playbackFailed;
 @property(nonatomic, assign) BOOL stopped;
 - (instancetype)initWithSampleRate:(double)sampleRate
                               rate:(float)rate
@@ -671,8 +672,11 @@ typedef void (^BerdAudioHandler)(
                   BerdPocketAudioPlayer *strongSelf = weakSelf;
                   if (!strongSelf) return;
                   @synchronized (strongSelf) {
-                      if (!strongSelf.stopped) {
+                      BOOL playing = strongSelf.engine.isRunning && strongSelf.player.isPlaying;
+                      if (!strongSelf.stopped && playing) {
                           strongSelf.completedSourceFrames += frameCount;
+                      } else if (!strongSelf.stopped) {
+                          strongSelf.playbackFailed = YES;
                       }
                       strongSelf.pendingBuffers = strongSelf.pendingBuffers > 0
                           ? strongSelf.pendingBuffers - 1
@@ -1329,6 +1333,14 @@ uint64_t berd_pocket_audio_player_pending_buffers(void *playerValue) {
     if (!playerValue) return 0;
     BerdPocketAudioPlayer *player = (__bridge BerdPocketAudioPlayer *)playerValue;
     @synchronized (player) { return player.pendingBuffers; }
+}
+
+bool berd_pocket_audio_player_failed(void *playerValue) {
+    if (!playerValue) return true;
+    BerdPocketAudioPlayer *player = (__bridge BerdPocketAudioPlayer *)playerValue;
+    @synchronized (player) {
+        return player.playbackFailed || (!player.stopped && !player.engine.isRunning);
+    }
 }
 
 void berd_pocket_audio_player_stop(void *playerValue) {

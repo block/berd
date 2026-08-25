@@ -2180,6 +2180,7 @@ fn run_pocket_voice_stream(
                 delivery: Some(delivery),
             });
         }
+        player.ensure_healthy()?;
         let command = receiver.recv_timeout(Duration::from_millis(20));
         match command {
             Ok(PocketStreamCommand::Append(text)) => {
@@ -2269,7 +2270,7 @@ fn run_pocket_voice_stream(
                         delivery: Some(delivery),
                     });
                 }
-                while !player.is_empty() {
+                loop {
                     if !active.load(Ordering::SeqCst) {
                         let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
                         player.stop();
@@ -2277,6 +2278,10 @@ fn run_pocket_voice_stream(
                             state: PocketStreamEventState::Interrupted,
                             delivery: Some(delivery),
                         });
+                    }
+                    player.ensure_healthy()?;
+                    if player.is_empty() {
+                        break;
                     }
                     std::thread::sleep(Duration::from_millis(10));
                 }
@@ -2415,6 +2420,10 @@ fn synthesize_pocket_stream_ready(
                 if samples.is_empty() {
                     return true;
                 }
+                if let Err(error) = player.ensure_healthy() {
+                    callback_error = Some(error);
+                    return false;
+                }
                 if let Err(error) = mark_pocket_playback_started(
                     app,
                     stream_id,
@@ -2489,6 +2498,12 @@ fn synthesize_and_stream(
         if samples.is_empty() {
             return true;
         }
+        if let Err(error) = player.ensure_healthy() {
+            if let Ok(mut callback_error) = callback_error_slot.lock() {
+                *callback_error = Some(error);
+            }
+            return false;
+        }
         if let Err(error) = player.enqueue(&samples) {
             if let Ok(mut callback_error) = callback_error_slot.lock() {
                 *callback_error = Some(error);
@@ -2521,9 +2536,13 @@ fn synthesize_and_stream(
         player.stop();
         return Ok(());
     }
-    while !player.is_empty() {
+    loop {
         if !active.load(Ordering::SeqCst) {
             player.stop();
+            break;
+        }
+        player.ensure_healthy()?;
+        if player.is_empty() {
             break;
         }
         std::thread::sleep(Duration::from_millis(10));

@@ -17,6 +17,7 @@ unsafe extern "C" {
     ) -> bool;
     fn berd_pocket_audio_player_completed_source_frames(player: *mut c_void) -> u64;
     fn berd_pocket_audio_player_pending_buffers(player: *mut c_void) -> u64;
+    fn berd_pocket_audio_player_failed(player: *mut c_void) -> bool;
     fn berd_pocket_audio_player_stop(player: *mut c_void);
     fn berd_pocket_audio_player_release(player: *mut c_void);
     fn berd_siri_tts_free_string(value: *mut c_char);
@@ -88,6 +89,11 @@ impl PocketAudioPlayer {
         unsafe { berd_pocket_audio_player_pending_buffers(self.raw) == 0 }
     }
 
+    pub(super) fn ensure_healthy(&self) -> Result<(), String> {
+        // SAFETY: `self.raw` is a live retained player.
+        playback_health(unsafe { berd_pocket_audio_player_failed(self.raw) })
+    }
+
     pub(super) fn stop(&self) {
         // SAFETY: `self.raw` is a live retained player and stop is idempotent.
         unsafe { berd_pocket_audio_player_stop(self.raw) };
@@ -100,6 +106,14 @@ fn delivery_safety_frames(sample_rate: u32, rate: f32) -> u64 {
 
 fn apply_delivery_safety(completed_source_frames: u64, safety_frames: u64) -> u64 {
     completed_source_frames.saturating_sub(safety_frames)
+}
+
+fn playback_health(failed: bool) -> Result<(), String> {
+    if failed {
+        Err("Pocket audio output stopped unexpectedly".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 impl Drop for PocketAudioPlayer {
@@ -124,7 +138,7 @@ fn take_error(error: *mut c_char, fallback: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_delivery_safety, delivery_safety_frames};
+    use super::{apply_delivery_safety, delivery_safety_frames, playback_health};
 
     #[test]
     fn delivery_safety_tracks_playback_rate_in_source_frames() {
@@ -146,6 +160,15 @@ mod tests {
         assert_eq!(
             apply_delivery_safety(second_buffer_completed, safety),
             7_200
+        );
+    }
+
+    #[test]
+    fn unexpected_output_stops_fail_playback() {
+        assert!(playback_health(false).is_ok());
+        assert_eq!(
+            playback_health(true).expect_err("unexpected stop must fail"),
+            "Pocket audio output stopped unexpectedly"
         );
     }
 }
