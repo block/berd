@@ -859,8 +859,9 @@ pub(crate) fn should_suppress_capture(
         // Automatic is deliberately best-effort, using built-in speaker metadata plus the
         // device-name heuristic above. macOS exposes no reliable public classification for
         // every external speaker/headphone route, so this mode does not promise exhaustive
-        // feedback detection. Users who experience feedback can select Prevent feedback to
-        // disable interruptions during assistant speech.
+        // feedback detection. Do not add localized device-name catalogs or acoustic echo
+        // detection without revisiting this product boundary. Users who experience feedback
+        // can select Prevent feedback to disable interruptions during assistant speech.
         VoiceInterruptionMode::Automatic => output_device_uses_speakers(output_device),
         VoiceInterruptionMode::AllowInterruptions => false,
         VoiceInterruptionMode::PreventFeedback => true,
