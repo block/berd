@@ -41,6 +41,7 @@ $oldGooseRepo = $env:GOOSE_DEV_REPO
 $oldGooseTarget = $env:GOOSE_DEV_CARGO_TARGET_DIR
 $oldGooseStamp = $env:GOOSE_DEV_STAMP_FILE
 $oldGooseBuildProfile = $env:GOOSE_BUILD_PROFILE
+$oldBerdTauriCargoTargetDir = $env:BERD_TAURI_CARGO_TARGET_DIR
 $oldLocalAppData = $env:LOCALAPPDATA
 $oldUserProfile = $env:USERPROFILE
 $oldAppData = $env:APPDATA
@@ -680,6 +681,13 @@ try {
     $env:APPDATA = Join-Path $temp "Roaming"
     $env:FNM_DIR = ""
 
+    $env:BERD_TAURI_CARGO_TARGET_DIR = ""
+    Assert-Equal "Tauri cargo target defaults to this checkout" `
+        (Get-TauriCargoTargetDir) (Join-Path (Get-BerdRepoRoot) "src-tauri\target")
+    $env:BERD_TAURI_CARGO_TARGET_DIR = Join-Path $temp "explicit-tauri-target"
+    Assert-Equal "Tauri cargo target honors explicit override" `
+        (Get-TauriCargoTargetDir) $env:BERD_TAURI_CARGO_TARGET_DIR
+
     # Cleanup honors the same env overrides setup/dev use.
     $env:BERD_TAURI_CARGO_TARGET_DIR = Join-Path $temp "override-target"
     $overriddenPaths = Resolve-WindowsCleanupPaths
@@ -690,7 +698,7 @@ try {
 
     $cleanupPaths = Resolve-WindowsCleanupPaths
     Assert-Equal "cleanup Berd dev root" $cleanupPaths.BerdDevRoot (Join-Path $env:LOCALAPPDATA "berd-dev")
-    Assert-Equal "cleanup Tauri root" $cleanupPaths.BerdTauriRoot (Join-Path $env:LOCALAPPDATA "berd-tauri")
+    Assert-Equal "cleanup Tauri root" $cleanupPaths.BerdTauriRoot (Join-Path (Get-BerdRepoRoot) "src-tauri\target")
     Assert-Equal "Block npm cert file" $cleanupPaths.BlockCertFile (Join-Path $env:USERPROFILE ".block-certs\root-certs.pem")
     Assert-Equal "cleanup Corepack pnpm dir" $cleanupPaths.CorepackPnpmVersionDir (Join-Path $env:LOCALAPPDATA "node\corepack\v1\pnpm\$(Get-RequiredPnpmVersion)")
     Assert-Equal "cleanup fnm Node dir" $cleanupPaths.FnmNodeVersionDir (Join-Path $env:APPDATA "fnm\node-versions\v$(Get-RequiredNodeVersion)")
@@ -719,6 +727,7 @@ try {
     $env:GOOSE_DEV_CARGO_TARGET_DIR = $oldGooseTarget
     $env:GOOSE_DEV_STAMP_FILE = $oldGooseStamp
     $env:GOOSE_BUILD_PROFILE = $oldGooseBuildProfile
+    $env:BERD_TAURI_CARGO_TARGET_DIR = $oldBerdTauriCargoTargetDir
     $env:LOCALAPPDATA = $oldLocalAppData
     $env:USERPROFILE = $oldUserProfile
     $env:APPDATA = $oldAppData

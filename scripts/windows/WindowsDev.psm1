@@ -607,7 +607,7 @@ function Resolve-WindowsCleanupPaths {
     # the state that setup/dev actually created. A BERD_TAURI_CARGO_TARGET_DIR
     # override points directly at a cargo target dir; only that dir is
     # Berd-owned, not its parent.
-    $berdTauriRoot = Join-Path $localAppData "berd-tauri"
+    $berdTauriRoot = Join-Path $repoRoot "src-tauri\target"
     if (-not [string]::IsNullOrWhiteSpace($env:BERD_TAURI_CARGO_TARGET_DIR)) {
         $berdTauriRoot = $env:BERD_TAURI_CARGO_TARGET_DIR
     }
@@ -674,7 +674,8 @@ function Get-TauriCargoTargetDir {
     if (-not [string]::IsNullOrWhiteSpace($env:BERD_TAURI_CARGO_TARGET_DIR)) {
         return $env:BERD_TAURI_CARGO_TARGET_DIR
     }
-    return (Join-Path (Get-LocalAppDataRoot) "berd-tauri\cargo-target")
+    # Isolate Cargo's writer lock and incremental state to this checkout.
+    return (Join-Path (Get-BerdRepoRoot) "src-tauri\target")
 }
 
 function Read-JsonFile {

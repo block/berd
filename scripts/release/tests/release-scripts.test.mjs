@@ -38,6 +38,28 @@ afterEach(async () => {
   );
 });
 
+describe("Tauri Cargo target isolation", () => {
+  it("defaults to the current checkout's ignored Cargo target", () => {
+    const result = run("bash", ["scripts/resolve-tauri-cargo-target-dir.sh"], {
+      BERD_TAURI_CARGO_TARGET_DIR: "",
+      XDG_CACHE_HOME: join(tmpdir(), "unrelated-xdg-cache"),
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(join(repo, "src-tauri/target"));
+  });
+
+  it("preserves the explicit target directory override", async () => {
+    const override = join(await tempDir(), "cargo-target");
+    const result = run("bash", ["scripts/resolve-tauri-cargo-target-dir.sh"], {
+      BERD_TAURI_CARGO_TARGET_DIR: override,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(override);
+  });
+});
+
 describe("managed Goose build profile", () => {
   it("defaults development to debug and makes release selection profile-aware", async () => {
     const script = await readFile(
