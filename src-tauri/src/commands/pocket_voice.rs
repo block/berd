@@ -98,6 +98,29 @@ fn run_pocket_playback_monitor(
         match event {
             event @ (PocketPlaybackEvent::SourceFinished
             | PocketPlaybackEvent::ShutdownAfterPlayback) => {
+                if matches!(event, PocketPlaybackEvent::ShutdownAfterPlayback) {
+                    let target_generation = assistant_speech
+                        .lock()
+                        .expect("assistant speech")
+                        .as_ref()
+                        .map(|(generation, _)| *generation);
+                    let Some(target_generation) = target_generation else {
+                        return;
+                    };
+                    while completed_generation.load(Ordering::Acquire) != target_generation {
+                        match playback_completion_receiver.recv_timeout(Duration::from_millis(10)) {
+                            Ok(PocketPlaybackEvent::SourceFinished)
+                            | Ok(PocketPlaybackEvent::ShutdownAfterPlayback)
+                            | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                            #[cfg(test)]
+                            Ok(PocketPlaybackEvent::Probe(sender)) => {
+                                let _ = sender.send(());
+                            }
+                            Ok(PocketPlaybackEvent::ShutdownImmediately)
+                            | Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                        }
+                    }
+                }
                 shutdown_after_playback |=
                     matches!(event, PocketPlaybackEvent::ShutdownAfterPlayback);
                 let mut generation = completed_generation.load(Ordering::Acquire);
@@ -3649,7 +3672,17 @@ mod tests {
             .expect("probe shutdown grace");
         first_probe_receiver
             .recv_timeout(Duration::from_secs(1))
-            .expect("monitor remains alive during shutdown grace");
+            .expect("monitor waits for source completion");
+
+        std::thread::sleep(Duration::from_millis(40));
+        let (late_probe_sender, late_probe_receiver) = mpsc::channel();
+        sender
+            .send(PocketPlaybackEvent::Probe(late_probe_sender))
+            .expect("probe after an elapsed route interval");
+        late_probe_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("monitor still waits after an elapsed route interval");
+        assert!(assistant_speech.lock().expect("assistant speech").is_some());
 
         completed_generation.store(7, Ordering::Release);
         sender

@@ -97,9 +97,9 @@ describe("PocketVoiceSetupContent", () => {
     );
 
     expect(screen.getByText("52.2 MB of 104.3 MB")).toBeInTheDocument();
-    expect(
-      screen.getByRole("progressbar", { name: "Parakeet STT" }),
-    ).toBeInTheDocument();
+    const progress = screen.getByRole("progressbar", { name: "Parakeet STT" });
+    expect(progress).toHaveAttribute("aria-valuenow");
+    expect(Number(progress.getAttribute("aria-valuenow"))).toBeCloseTo(50, 5);
     expect(
       screen.getByRole("button", { name: "Download model · Pocket TTS" }),
     ).toBeEnabled();
