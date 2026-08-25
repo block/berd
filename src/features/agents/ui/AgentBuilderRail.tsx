@@ -126,6 +126,8 @@ export function AgentBuilderRail({
       onWritePersisted: handleWritePersisted,
     });
   const [isPromoting, setIsPromoting] = useState(false);
+  const saveAttemptKey = `${sessionId}:${targetAgentPath ?? "pending"}`;
+  const [attemptedSaveKey, setAttemptedSaveKey] = useState<string | null>(null);
   const [avatarPanel, setAvatarPanel] = useState<"closed" | "library">(
     "closed",
   );
@@ -296,14 +298,24 @@ export function AgentBuilderRail({
     contentFieldValue !== PLACEHOLDER_AGENT_BODY;
   const missingRequiredFields = [
     requiresNewDraftFields && !avatarRequired
-      ? t("builderRail.requiredAvatar")
+      ? { label: t("builderRail.requiredAvatar"), blocksSaveAttempt: true }
       : null,
-    !nameRequired ? t("builderRail.requiredName") : null,
-    !descriptionRequired ? t("builderRail.requiredDescription") : null,
+    !nameRequired
+      ? { label: t("builderRail.requiredName"), blocksSaveAttempt: true }
+      : null,
+    !descriptionRequired
+      ? {
+          label: t("builderRail.requiredDescription"),
+          blocksSaveAttempt: false,
+        }
+      : null,
     requiresNewDraftFields && !instructionsRequired
-      ? t("builderRail.requiredInstructions")
+      ? {
+          label: t("builderRail.requiredInstructions"),
+          blocksSaveAttempt: true,
+        }
       : null,
-  ].filter((field): field is string => field !== null);
+  ].filter((field) => field !== null);
   useEffect(() => {
     if (!data) {
       onSaveDraftHandlerChange?.(null);
@@ -385,6 +397,7 @@ export function AgentBuilderRail({
         : "idle";
 
   const handleSaveChanges = useCallback(async () => {
+    setAttemptedSaveKey(saveAttemptKey);
     if (!canPromoteDraft) {
       return;
     }
@@ -425,13 +438,18 @@ export function AgentBuilderRail({
     defaultAvatarId,
     onDraftPromoted,
     requiresNewDraftFields,
+    saveAttemptKey,
     saveNow,
     sessionId,
     trimmedAvatar.length,
     update,
   ]);
 
-  const saveButtonUnavailable = !canPromoteDraft;
+  const saveButtonUnavailable =
+    missingRequiredFields.some((field) => field.blocksSaveAttempt) ||
+    saveStatus === "saving" ||
+    isPromoting ||
+    blockingError;
   const footerNode = data ? (
     <div className="mt-4 border-t border-border/70 pt-4">
       <Button
@@ -459,7 +477,9 @@ export function AgentBuilderRail({
       >
         {missingRequiredFields.length > 0
           ? t("builderRail.completeRequiredFields", {
-              fields: missingRequiredFields.join(", "),
+              fields: missingRequiredFields
+                .map((field) => field.label)
+                .join(", "),
             })
           : saveStatus === "unsaved"
             ? t("builderRail.unsavedChanges")
@@ -677,7 +697,9 @@ export function AgentBuilderRail({
           id="builder-rail-description"
           value={descriptionFieldValue}
           required
-          aria-invalid={!descriptionRequired}
+          aria-invalid={
+            attemptedSaveKey === saveAttemptKey && !descriptionRequired
+          }
           placeholder={t("builderRail.descriptionPlaceholder")}
           onChange={(event) => update({ description: event.target.value })}
           className={FIELD_CLASS}
