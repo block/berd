@@ -742,7 +742,12 @@ fn effective_output_device_name(configured: Option<&str>) -> Option<String> {
 }
 
 pub(crate) fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
-    if output_device.is_some_and(|name| name.to_lowercase().contains("speaker")) {
+    if output_device.is_some_and(|name| {
+        let normalized = name.to_lowercase();
+        ["speaker", "altavoces"]
+            .iter()
+            .any(|keyword| normalized.contains(keyword))
+    }) {
         return true;
     }
 
@@ -856,12 +861,12 @@ pub(crate) fn should_suppress_capture(
     output_device: Option<&str>,
 ) -> bool {
     match mode {
-        // Automatic is deliberately best-effort, using built-in speaker metadata plus the
-        // device-name heuristic above. macOS exposes no reliable public classification for
-        // every external speaker/headphone route, so this mode does not promise exhaustive
-        // feedback detection. Do not add localized device-name catalogs or acoustic echo
-        // detection without revisiting this product boundary. Users who experience feedback
-        // can select Prevent feedback to disable interruptions during assistant speech.
+        // Automatic is deliberately best-effort, using built-in speaker metadata plus a
+        // bounded name heuristic for Berd's supported UI languages. macOS exposes no reliable
+        // public classification for every external speaker/headphone route, so this mode does
+        // not promise exhaustive feedback detection. Do not grow this into a broader device
+        // catalog or add acoustic echo detection without revisiting this product boundary.
+        // Users who experience feedback can select Prevent feedback to disable interruptions.
         VoiceInterruptionMode::Automatic => output_device_uses_speakers(output_device),
         VoiceInterruptionMode::AllowInterruptions => false,
         VoiceInterruptionMode::PreventFeedback => true,
@@ -3434,10 +3439,17 @@ mod tests {
             "MacBook Pro Speakers",
             "Studio SPEAKERS",
             "Living Room Speaker",
+            "Altavoces del MacBook Pro",
         ] {
             assert!(output_device_uses_speakers(Some(name)), "{name}");
         }
-        for name in ["AirPods Pro", "USB Headphones", "BlackHole 16ch", ""] {
+        for name in [
+            "AirPods Pro",
+            "USB Headphones",
+            "Auriculares externos",
+            "BlackHole 16ch",
+            "",
+        ] {
             assert!(!output_device_uses_speakers(Some(name)), "{name}");
         }
         assert!(!output_device_uses_speakers(None));
@@ -3446,9 +3458,6 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn localized_builtin_speaker_metadata_is_distinct_from_headphones() {
-        assert!(!"Altavoces del MacBook Pro"
-            .to_lowercase()
-            .contains("speaker"));
         assert!(output_metadata_uses_builtin_speakers(
             Some(kAudioDeviceTransportTypeBuiltIn),
             kAudioStreamTerminalTypeSpeaker,
