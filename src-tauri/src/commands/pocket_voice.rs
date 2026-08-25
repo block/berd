@@ -2169,11 +2169,19 @@ fn run_pocket_voice_stream(
     let mut first_chunk_pending = true;
     let mut playback_started = false;
     let mut assistant_speech = None::<AssistantSpeechGuard>;
+    let mut playback_drained_at = None;
+    let output_latency_grace = playback_latency_safety_duration(output_device);
     let mut delivery_ledger = PlaybackDeliveryLedger::default();
     let mut last_progress_emit = Instant::now();
 
     let result: Result<PocketStreamOutcome, String> = (|| loop {
-        update_pocket_assistant_speech(&player, &mut assistant_speech);
+        update_pocket_assistant_speech(
+            &player,
+            &mut assistant_speech,
+            &mut playback_drained_at,
+            output_latency_grace,
+            Instant::now(),
+        );
         if !active.load(Ordering::SeqCst) {
             let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
             player.stop();
@@ -2284,11 +2292,19 @@ fn run_pocket_voice_stream(
                     player.ensure_healthy()?;
                     if player.is_empty() {
                         player.ensure_healthy()?;
-                        break;
+                        update_pocket_assistant_speech(
+                            &player,
+                            &mut assistant_speech,
+                            &mut playback_drained_at,
+                            output_latency_grace,
+                            Instant::now(),
+                        );
+                        if assistant_speech.is_none() {
+                            break;
+                        }
                     }
                     std::thread::sleep(Duration::from_millis(10));
                 }
-                assistant_speech.take();
                 return Ok(PocketStreamOutcome {
                     state: PocketStreamEventState::Completed,
                     delivery: None,
@@ -2352,10 +2368,35 @@ fn capture_before_stop(
 fn update_pocket_assistant_speech(
     player: &PocketAudioPlayer,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
+    playback_drained_at: &mut Option<Instant>,
+    output_latency_grace: Duration,
+    now: Instant,
 ) {
-    if player.is_empty() {
+    if pocket_assistant_speech_grace_elapsed(
+        player.is_empty(),
+        assistant_speech.is_some(),
+        playback_drained_at,
+        output_latency_grace,
+        now,
+    ) {
         assistant_speech.take();
     }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn pocket_assistant_speech_grace_elapsed(
+    playback_drained: bool,
+    guard_active: bool,
+    playback_drained_at: &mut Option<Instant>,
+    output_latency_grace: Duration,
+    now: Instant,
+) -> bool {
+    if !guard_active || !playback_drained {
+        *playback_drained_at = None;
+        return false;
+    }
+    let drained_at = *playback_drained_at.get_or_insert(now);
+    now.saturating_duration_since(drained_at) >= output_latency_grace
 }
 
 #[cfg(target_os = "macos")]
@@ -3070,6 +3111,60 @@ mod tests {
             playback_latency_safety_duration_for_transport(None),
             Duration::from_secs(2)
         );
+    }
+
+    #[test]
+    fn playback_drain_grace_restarts_when_a_new_burst_is_enqueued() {
+        let started = Instant::now();
+        let grace = Duration::from_millis(500);
+        let mut drained_at = None;
+
+        assert!(!pocket_assistant_speech_grace_elapsed(
+            true,
+            true,
+            &mut drained_at,
+            grace,
+            started,
+        ));
+        assert!(!pocket_assistant_speech_grace_elapsed(
+            false,
+            true,
+            &mut drained_at,
+            grace,
+            started + Duration::from_millis(300),
+        ));
+        assert_eq!(drained_at, None);
+
+        assert!(!pocket_assistant_speech_grace_elapsed(
+            true,
+            true,
+            &mut drained_at,
+            grace,
+            started + Duration::from_millis(400),
+        ));
+        assert!(!pocket_assistant_speech_grace_elapsed(
+            true,
+            true,
+            &mut drained_at,
+            grace,
+            started + Duration::from_millis(600),
+        ));
+        assert!(pocket_assistant_speech_grace_elapsed(
+            true,
+            true,
+            &mut drained_at,
+            grace,
+            started + Duration::from_millis(900),
+        ));
+
+        assert!(!pocket_assistant_speech_grace_elapsed(
+            true,
+            false,
+            &mut drained_at,
+            grace,
+            started + Duration::from_secs(1),
+        ));
+        assert_eq!(drained_at, None);
     }
 
     #[test]
