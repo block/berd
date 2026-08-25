@@ -290,10 +290,23 @@ fn spawn_siri_playback_monitor<T: Send + 'static>(
     receiver: mpsc::Receiver<SiriPlaybackMonitorEvent>,
     lifetime: Arc<SiriPlaybackLifetime<T>>,
     playback_latency_safety_duration: Duration,
+    failed: Arc<AtomicBool>,
 ) -> std::io::Result<std::thread::JoinHandle<()>> {
     spawn_siri_playback_monitor_with(
         move || {
-            run_siri_playback_monitor(receiver, lifetime, playback_latency_safety_duration);
+            let monitor_lifetime = Arc::clone(&lifetime);
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_siri_playback_monitor(
+                    receiver,
+                    monitor_lifetime,
+                    playback_latency_safety_duration,
+                );
+            }))
+            .is_err()
+            {
+                failed.store(true, Ordering::SeqCst);
+                lifetime.cancel();
+            }
         },
         |task| {
             std::thread::Builder::new()
@@ -840,11 +853,13 @@ fn run_siri_stream(
     let name = CString::new(selection.name)
         .map_err(|_| "Siri voice name cannot contain NUL bytes".to_string())?;
     let playback_lifetime = Arc::new(SiriPlaybackLifetime::default());
+    let playback_monitor_failed = Arc::new(AtomicBool::new(false));
     let (playback_monitor_sender, playback_monitor_receiver) = mpsc::channel();
     let playback_monitor = spawn_siri_playback_monitor(
         playback_monitor_receiver,
         Arc::clone(&playback_lifetime),
         playback_latency_safety_duration,
+        Arc::clone(&playback_monitor_failed),
     )
     .map_err(|error| format!("Could not start Siri playback monitor: {error}"))?;
     let callback_context = Box::new(SiriStreamCallbackContext {
@@ -889,6 +904,9 @@ fn run_siri_stream(
         let mut last_progress_emit = Instant::now();
         let mut last_delivery_json = String::new();
         loop {
+            if playback_monitor_failed.load(Ordering::SeqCst) {
+                return Err("Siri playback monitor failed".to_string());
+            }
             if !active.load(Ordering::SeqCst) {
                 let delivery = siri_delivery_progress(stream);
                 unsafe { berd_siri_tts_stream_cancel(stream) };
@@ -1550,6 +1568,42 @@ mod tests {
             "injected spawn failure"
         );
         assert!(!ran.load(Ordering::SeqCst));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn siri_playback_monitor_panic_cancels_the_lifetime_and_reports_failure() {
+        struct DropSignal(mpsc::SyncSender<()>);
+        impl Drop for DropSignal {
+            fn drop(&mut self) {
+                let _ = self.0.send(());
+            }
+        }
+
+        let (drop_sender, drop_receiver) = mpsc::sync_channel(1);
+        let lifetime = Arc::new(SiriPlaybackLifetime::default());
+        lifetime.start(|| DropSignal(drop_sender));
+        let drain = lifetime.begin_drain().expect("drain active guard");
+        let failed = Arc::new(AtomicBool::new(false));
+        let (event_sender, event_receiver) = mpsc::channel();
+        let monitor = spawn_siri_playback_monitor(
+            event_receiver,
+            Arc::clone(&lifetime),
+            Duration::MAX,
+            Arc::clone(&failed),
+        )
+        .expect("start monitor");
+
+        event_sender
+            .send(SiriPlaybackMonitorEvent::Drain(drain))
+            .expect("trigger monitor overflow panic");
+        drop_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("monitor panic cancels playback lifetime");
+        monitor.join().expect("panic is contained by monitor");
+
+        assert!(failed.load(Ordering::SeqCst));
+        assert!(!lifetime.is_active());
     }
 
     #[cfg(target_os = "macos")]

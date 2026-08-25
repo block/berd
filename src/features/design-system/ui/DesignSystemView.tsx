@@ -4853,7 +4853,7 @@ function RadioGroupPage() {
             anatomy: "Radio control",
             state: stateLabel,
             background: selected ? "primary" : "transparent",
-            textIcon: selected ? "background" : "primary-foreground",
+            textIcon: selected ? "background" : "none",
             border: selected ? "none" : "input",
           },
           ...(!disabled
@@ -4862,7 +4862,7 @@ function RadioGroupPage() {
                   anatomy: "Radio control",
                   state: "Focus visible",
                   background: selected ? "primary" : "transparent",
-                  textIcon: selected ? "background" : "primary-foreground",
+                  textIcon: selected ? "background" : "none",
                   border: "ring + ring / 50%",
                 } satisfies TokenColorRow,
               ]
