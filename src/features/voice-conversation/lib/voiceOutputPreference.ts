@@ -5,8 +5,9 @@ export type VoiceOutputBackend = "pocket" | "siri";
 
 const STORAGE_KEY = "goose:voice-output-backend";
 const CHANGED_EVENT = "goose:voice-output-backend-changed";
+let inMemoryBackend: VoiceOutputBackend | null = null;
 export function getDefaultVoiceOutputBackend(): VoiceOutputBackend {
-  return "pocket";
+  return getPlatform() === "mac" ? "siri" : "pocket";
 }
 
 function normalize(value: unknown): VoiceOutputBackend {
@@ -18,8 +19,10 @@ function normalize(value: unknown): VoiceOutputBackend {
 
 export function getVoiceOutputBackend(): VoiceOutputBackend {
   if (typeof window === "undefined") return getDefaultVoiceOutputBackend();
+  if (inMemoryBackend) return inMemoryBackend;
   try {
-    return normalize(window.localStorage.getItem(STORAGE_KEY));
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    return stored === null ? getDefaultVoiceOutputBackend() : normalize(stored);
   } catch {
     return getDefaultVoiceOutputBackend();
   }
@@ -37,7 +40,10 @@ function subscribe(listener: () => void) {
   listeners.add(listener);
   if (!removeWindowListeners) {
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === STORAGE_KEY || event.key === null) notify();
+      if (event.key === STORAGE_KEY || event.key === null) {
+        inMemoryBackend = null;
+        notify();
+      }
     };
     window.addEventListener(CHANGED_EVENT, notify);
     window.addEventListener("storage", handleStorage);
@@ -60,8 +66,9 @@ export function setVoiceOutputBackend(backend: VoiceOutputBackend): void {
   const value = normalize(backend);
   try {
     window.localStorage.setItem(STORAGE_KEY, value);
+    inMemoryBackend = null;
   } catch {
-    // Keep the current in-memory renderer usable when storage is unavailable.
+    inMemoryBackend = value;
   }
   window.dispatchEvent(new CustomEvent(CHANGED_EVENT, { detail: { value } }));
 }
