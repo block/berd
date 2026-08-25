@@ -1318,6 +1318,93 @@ describe("useMessageQueue", () => {
     vi.useRealTimers();
   });
 
+  it("stops automatic retries for a persistently rejected payload despite readiness churn", async () => {
+    // A failed auto-compaction returns false, appends an error notification,
+    // and sets the session back to idle. That idle edge re-triggers the drain,
+    // so without a ceiling the send loops as fast as compaction can fail and
+    // grows the transcript every pass.
+    vi.useFakeTimers();
+    const sendMessage = vi.fn().mockResolvedValue(false);
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "queued",
+    });
+
+    renderHook(() => useMessageQueue("s1", "idle", sendMessage));
+    await act(async () => Promise.resolve());
+
+    for (let pass = 0; pass < 12; pass += 1) {
+      await act(async () => {
+        useChatStore.getState().setChatState("s1", "compacting");
+        useChatStore.getState().setChatState("s1", "idle");
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+    }
+
+    expect(sendMessage).toHaveBeenCalledTimes(5);
+    expect(
+      useChatStore.getState().queuedMessageBySession.s1?.[0]?.payload,
+    ).toMatchObject({ text: "queued" });
+    vi.useRealTimers();
+  });
+
+  it("backs off the readiness wait instead of re-arming every second", async () => {
+    vi.useFakeTimers();
+    const sendMessage = vi.fn().mockResolvedValue(false);
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "queued",
+    });
+
+    const { rerender } = renderHook(
+      ({ ready }: { ready: boolean }) =>
+        useMessageQueue(
+          "s1",
+          ready ? "idle" : "thinking",
+          sendMessage,
+          false,
+          false,
+          ready,
+        ),
+      { initialProps: { ready: true } },
+    );
+    await act(async () => Promise.resolve());
+    expect(sendMessage).toHaveBeenCalledOnce();
+
+    // Capture re-arm delays only; installing this earlier would intercept the
+    // scheduling that produces the first attempt.
+    const delays: number[] = [];
+    const fakeSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((
+      fn: Parameters<typeof fakeSetTimeout>[0],
+      ms?: number,
+      ...rest: unknown[]
+    ) => {
+      if (typeof ms === "number" && ms >= 1_000) delays.push(ms);
+      return (
+        fakeSetTimeout as unknown as (
+          ...args: unknown[]
+        ) => ReturnType<typeof fakeSetTimeout>
+      )(fn, ms, ...rest);
+    }) as unknown as typeof globalThis.setTimeout;
+
+    try {
+      rerender({ ready: false });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600_000);
+      });
+    } finally {
+      globalThis.setTimeout = fakeSetTimeout;
+    }
+
+    expect(sendMessage).toHaveBeenCalledOnce();
+    expect(delays.slice(0, 5)).toEqual([2_000, 4_000, 8_000, 16_000, 30_000]);
+    expect(Math.max(...delays)).toBe(30_000);
+    // Flat one-second re-arming would be 600 wakeups over the same window.
+    expect(delays.length).toBeLessThan(40);
+    vi.useRealTimers();
+  });
+
   it("waits for preparation readiness before a timed retry", async () => {
     vi.useFakeTimers();
     const sendMessage = vi.fn().mockResolvedValue(false);
