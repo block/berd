@@ -123,6 +123,7 @@ pub enum LayoutItemKind {
     Photo,
     Automation,
     Skill,
+    Prompt,
 }
 
 impl LayoutItemKind {
@@ -137,6 +138,7 @@ impl LayoutItemKind {
             Self::Photo => "photo",
             Self::Automation => "automation",
             Self::Skill => "skill",
+            Self::Prompt => "prompt",
         }
     }
 }
@@ -155,6 +157,7 @@ impl TryFrom<&str> for LayoutItemKind {
             "photo" => Ok(Self::Photo),
             "automation" => Ok(Self::Automation),
             "skill" => Ok(Self::Skill),
+            "prompt" => Ok(Self::Prompt),
             _ => Err(format!("Unknown layout item kind: {value}")),
         }
     }
@@ -993,6 +996,7 @@ mod tests {
             LayoutItemKind::Checklist,
             LayoutItemKind::Automation,
             LayoutItemKind::Skill,
+            LayoutItemKind::Prompt,
         ]
     }
 
@@ -2178,6 +2182,15 @@ mod tests {
         let mut unknown_kind = base;
         unknown_kind["kind"] = json!("agent");
         assert!(serde_json::from_value::<LayoutItem>(unknown_kind).is_err());
+    }
+
+    #[test]
+    fn layout_item_kind_round_trips_every_known_kind() {
+        for kind in all_known_kinds() {
+            let parsed = LayoutItemKind::try_from(kind.as_str()).expect("known kind parses");
+            assert_eq!(parsed, kind);
+        }
+        assert_eq!(LayoutItemKind::Prompt.as_str(), "prompt");
     }
 
     #[test]

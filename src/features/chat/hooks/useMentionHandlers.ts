@@ -337,7 +337,7 @@ function removeMentionQuery(
   };
 }
 
-function replaceMentionQuery(
+export function replaceMentionQuery(
   text: string,
   mentionStartIndex: number,
   mentionQuery: string,

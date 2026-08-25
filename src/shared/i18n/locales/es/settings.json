@@ -231,6 +231,10 @@
       "resetAllSuccess": "Se restablecieron todas las experiencias de incorporación.",
       "title": "Incorporación"
     },
+    "promptPins": {
+      "description": "Fija prompts guardados en Inicio que se ejecutan con un clic, opcionalmente con un agente adjunto.",
+      "title": "Pins de prompts"
+    },
     "resetToAuto": "Restablecer a automático",
     "saveError": "No se pudo guardar el ajuste del experimento. Inténtalo de nuevo.",
     "skillDiscovery": {

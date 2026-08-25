@@ -267,6 +267,19 @@
         "peach": "Durazno"
       }
     },
+    "promptPin": {
+      "label": "Prompt",
+      "description": "Un prompt guardado que se ejecuta con un clic",
+      "runAria": "Ejecutar prompt: {{title}}",
+      "editAria": "Editar prompt",
+      "dismiss": "Eliminar prompt",
+      "titlePlaceholder": "Título (opcional)",
+      "textPlaceholder": "Escribe un prompt para ejecutar...",
+      "agentLabel": "Agente",
+      "done": "Listo",
+      "emptyText": "Prompt sin título",
+      "agentUnavailable": "El agente adjunto ya no está disponible. Edita el prompt para elegir otro."
+    },
     "unpin": {
       "label": "Desanclar"
     },

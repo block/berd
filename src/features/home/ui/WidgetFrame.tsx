@@ -88,6 +88,7 @@ export function WidgetFrame({
   onSelectSession,
   onStartProjectChat,
   onOpenAutomation,
+  onRunPrompt,
   onCreatePersona,
   onCreateProject,
   onWorkspaceNameRequest,
@@ -233,6 +234,7 @@ export function WidgetFrame({
           onSelectSession={onSelectSession}
           onStartProjectChat={onStartProjectChat}
           onOpenAutomation={onOpenAutomation}
+          onRunPrompt={onRunPrompt}
           onCreatePersona={onCreatePersona}
           onCreateProject={onCreateProject}
           onWorkspaceNameRequest={onWorkspaceNameRequest}

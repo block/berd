@@ -99,6 +99,7 @@ import { useAppStartup } from "./hooks/useAppStartup";
 import { useCompletionNotifications } from "@/shared/hooks/useCompletionNotifications";
 import { useHomeSessionStateSync } from "./hooks/useHomeSessionStateSync";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
+import { runPinnedPrompt } from "@/features/home/lib/runPinnedPrompt";
 import { useProjectDialog } from "./hooks/useProjectDialog";
 import { useResizableSidebar } from "./hooks/useResizableSidebar";
 import {
@@ -1412,6 +1413,11 @@ export function AppShell({
         ? (homeSession.executionTarget ?? null)
         : undefined
       : globalComposerExecutionTarget;
+  const currentGlobalComposerExecutionTargetRef = useRef(
+    currentGlobalComposerExecutionTarget,
+  );
+  currentGlobalComposerExecutionTargetRef.current =
+    currentGlobalComposerExecutionTarget;
   const targetLocation = useMemo(
     () =>
       getAppNavigationLocation(
@@ -3090,6 +3096,43 @@ export function AppShell({
       workspaceRepository,
       enqueueWorkspaceNameRequest,
     ],
+  );
+
+  const handleRunPinnedPrompt = useCallback(
+    async (args: { text: string; agentId?: string }) => {
+      const agentState = useAgentStore.getState();
+      await runPinnedPrompt(args, {
+        personas: agentState.personas,
+        resolveExecutionTarget: (persona) => {
+          const cachedModels = [
+            ...useProviderModelCacheStore.getState().providers,
+          ].flatMap(([providerId, entry]) =>
+            entry.models.map((model) => ({
+              ...model,
+              providerId: model.providerId ?? providerId,
+            })),
+          );
+          return personaExecutionTarget(persona, {
+            providers: agentState.providers,
+            models: cachedModels,
+            catalogEntries: getProviderCatalog(),
+          });
+        },
+        resolveFallbackExecutionTarget: () =>
+          currentGlobalComposerExecutionTargetRef.current ?? undefined,
+        // Resolves on onSettled so the widget's launch guard holds until the
+        // session is created (or fails), not just until dispatch.
+        compose: (text, options) =>
+          new Promise<void>((resolve) => {
+            handleGlobalCompose(text, options, {
+              onSettled: () => resolve(),
+            });
+          }),
+        onAgentUnavailable: () =>
+          toast.error(t("home:widgets.promptPin.agentUnavailable")),
+      });
+    },
+    [handleGlobalCompose, t],
   );
 
   const handleResolveBerdyAgent = useCallback(async (): Promise<
@@ -5421,6 +5464,7 @@ export function AppShell({
               onTagHomeComposerAgent={handleTagHomeComposerAgent}
               onTagHomeComposerProject={handleTagHomeComposerProject}
               onTagHomeComposerSkill={handleTagHomeComposerSkill}
+              onRunPinnedPrompt={handleRunPinnedPrompt}
               onHydratePinnedChatSessions={hydratePinnedChatSessions}
               onLoggedOut={onLoggedOut}
               onStartProviderTroubleshootingChat={

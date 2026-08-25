@@ -65,6 +65,10 @@ export interface HomeViewProps {
   onSelectSession?: (sessionId: string) => void;
   onStartProjectChat?: (projectId: string) => void;
   onOpenAutomation?: (automationId: string) => void;
+  onRunPrompt?: (args: {
+    text: string;
+    agentId?: string;
+  }) => Promise<void> | void;
   onCreatePersona?: () => void;
   onCreateProject?: () => void;
   onWorkspaceNameRequest?: (request: WorkspaceNameRequest) => void;
@@ -85,6 +89,7 @@ export function HomeView({
   onSelectSession,
   onStartProjectChat,
   onOpenAutomation,
+  onRunPrompt,
   onCreatePersona,
   onCreateProject,
   onWorkspaceNameRequest,
@@ -514,6 +519,7 @@ export function HomeView({
           onSelectSession={onSelectSession}
           onStartProjectChat={onStartProjectChat}
           onOpenAutomation={onOpenAutomation}
+          onRunPrompt={onRunPrompt}
           onCreatePersona={onCreatePersona}
           onCreateProject={onCreateProject}
           onWorkspaceNameRequest={onWorkspaceNameRequest}

@@ -20,6 +20,7 @@ export const HOME_LAYOUT_REPLACE_KINDS = [
   "project",
   "automation",
   "skill",
+  "prompt",
 ] as const satisfies LayoutItemKind[];
 
 type HomeLayoutKind = (typeof HOME_LAYOUT_REPLACE_KINDS)[number];
@@ -41,6 +42,7 @@ const KIND_TO_WIDGET_TYPE = {
   project: "projectArtifactPin",
   automation: "automationOutputPin",
   skill: "skillPin",
+  prompt: "promptPin",
 } as const satisfies Record<HomeLayoutKind, string>;
 
 const WIDGET_TYPE_TO_KIND: Partial<Record<string, HomeLayoutKind>> = {
@@ -55,6 +57,7 @@ const WIDGET_TYPE_TO_KIND: Partial<Record<string, HomeLayoutKind>> = {
   projectArtifactPin: "project",
   automationOutputPin: "automation",
   skillPin: "skill",
+  promptPin: "prompt",
 };
 
 function isHomeLayoutKind(kind: LayoutItemKind): kind is HomeLayoutKind {
@@ -68,6 +71,7 @@ function isHomeLayoutKind(kind: LayoutItemKind): kind is HomeLayoutKind {
     case "project":
     case "automation":
     case "skill":
+    case "prompt":
       return true;
     default: {
       const exhaustive: never = kind;
@@ -286,6 +290,46 @@ function persistedPhotoStateFromItem(
     : undefined;
 }
 
+// Matches the send pipeline's prompt bound (berdctl session create).
+const PROMPT_PIN_TEXT_MAX_LENGTH = 50_000;
+const PROMPT_PIN_TITLE_MAX_LENGTH = 200;
+
+function sanitizePromptPinState(
+  value: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const state: Record<string, unknown> = {};
+  if (typeof value.title === "string" && value.title.trim()) {
+    state.title = value.title.slice(0, PROMPT_PIN_TITLE_MAX_LENGTH);
+  }
+  if (typeof value.text === "string" && value.text.trim()) {
+    state.text = value.text.slice(0, PROMPT_PIN_TEXT_MAX_LENGTH);
+  }
+  const agentId = nonEmptyStateString(value.agentId);
+  if (agentId) {
+    state.agentId = agentId;
+  }
+  if (value.mode === "edit" || value.mode === "ready") {
+    state.mode = value.mode;
+  }
+  const sizeByProfile = readSizeByProfile(value);
+  if (sizeByProfile) {
+    state[SIZE_BY_PROFILE_STATE_KEY] = sizeByProfile;
+  }
+  return Object.keys(state).length > 0 ? state : undefined;
+}
+
+function persistedPromptPinStateFromItem(
+  item: LayoutItem,
+): Record<string, unknown> | undefined {
+  return typeof item.widgetState === "object" && item.widgetState !== null
+    ? sanitizePromptPinState(item.widgetState)
+    : undefined;
+}
+
 function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
   if (item.kind !== "clock" && isSyntheticTarget(item.targetId)) {
     if (item.kind === "stickyNote") {
@@ -296,6 +340,9 @@ function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
     }
     if (item.kind === "photo") {
       return persistedPhotoStateFromItem(item);
+    }
+    if (item.kind === "prompt") {
+      return persistedPromptPinStateFromItem(item);
     }
     return undefined;
   }
@@ -339,6 +386,8 @@ function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
       return persistedPhotoStateFromItem(item);
     case "skill":
       return { skillId: item.targetId };
+    case "prompt":
+      return persistedPromptPinStateFromItem(item);
     default: {
       const exhaustive: never = item.kind;
       return exhaustive;
@@ -420,6 +469,8 @@ function widgetStateForLayoutItem(
       }
       return Object.keys(state).length > 0 ? state : undefined;
     }
+    case "prompt":
+      return sanitizePromptPinState(instance.state);
     case "persona":
     case "project":
     case "automation":
@@ -453,6 +504,7 @@ function targetIdForWidget(
       return nonEmptyStateString(state.noteId) ?? syntheticTarget(instance.id);
     case "checklist":
     case "photo":
+    case "prompt":
       return syntheticTarget(instance.id);
     case "persona":
       return nonEmptyStateString(state.agentId) ?? syntheticTarget(instance.id);
