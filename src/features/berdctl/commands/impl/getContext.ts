@@ -42,8 +42,8 @@ Result:
       import("@/features/voice-conversation/stores/voiceConversationStore"),
     ]);
     const context = getAppNavigationController().getAppContext();
-    const voice = useVoiceConversationStore.getState();
     const nativeVoiceStatus = await getVoiceConversationStatus();
+    const voice = useVoiceConversationStore.getState();
     return {
       view: context.view,
       active_session_id: context.activeSessionId,
