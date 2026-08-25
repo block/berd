@@ -8,8 +8,11 @@ use tauri_plugin_opener::OpenerExt;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum MicrophonePermissionStatus {
+    #[cfg(target_os = "macos")]
     NotDetermined,
+    #[cfg(target_os = "macos")]
     Denied,
+    #[cfg(target_os = "macos")]
     Authorized,
     Unknown,
 }
@@ -60,11 +63,10 @@ pub fn open_microphone_privacy_settings(app: AppHandle) -> Result<(), String> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn maps_av_audio_record_permission_values() {
         assert_eq!(
