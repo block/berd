@@ -892,7 +892,7 @@
     "interruptionMode": "Interruptions",
     "interruptionModeDescriptions": {
       "allowInterruptions": "Berd keeps listening on every audio device. You can interrupt, but speaker audio may be mistaken for your voice.",
-      "automatic": "Allows interruptions on most audio devices. If the device name contains “speaker,” Berd pauses listening to prevent feedback.",
+      "automatic": "Allows interruptions on most audio devices. Berd pauses listening on built-in Mac speakers or when the device name contains “speaker.”",
       "preventFeedback": "Berd pauses listening on every audio device. This prevents feedback, but you can’t interrupt."
     },
     "interruptionModes": {

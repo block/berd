@@ -758,15 +758,12 @@ pub(crate) fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
 #[cfg(target_os = "macos")]
 fn output_device_is_builtin_speaker(output_device: Option<&str>) -> bool {
     use coreaudio::audio_unit::macos_helpers::{
-        get_default_device_id, get_device_id_from_name, get_device_transport_type,
+        get_device_id_from_name, get_device_transport_type,
     };
     use std::mem;
     use std::ptr::{null, NonNull};
 
-    let device_id = match output_device {
-        Some(name) => get_device_id_from_name(name, false),
-        None => get_default_device_id(false),
-    };
+    let device_id = output_device.and_then(|name| get_device_id_from_name(name, false));
     let Some(device_id) = device_id else {
         return false;
     };

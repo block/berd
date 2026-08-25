@@ -196,7 +196,7 @@ describe("VoiceSettings", () => {
     expect(screen.getByRole("radio", { name: /^Automatic/ })).toBeChecked();
     expect(
       screen.getByText(
-        "Allows interruptions on most audio devices. If the device name contains “speaker,” Berd pauses listening to prevent feedback.",
+        "Allows interruptions on most audio devices. Berd pauses listening on built-in Mac speakers or when the device name contains “speaker.”",
       ),
     ).toBeInTheDocument();
     expect(
