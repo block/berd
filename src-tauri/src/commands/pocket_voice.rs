@@ -62,6 +62,8 @@ const BLUETOOTH_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_mill
 const AIRPLAY_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2);
 #[cfg(target_os = "macos")]
 const UNKNOWN_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2);
+#[cfg(any(test, target_os = "macos"))]
+const POCKET_SOURCE_COMPLETION_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[cfg(target_os = "macos")]
 fn playback_latency_safety_duration_for_transport(transport: Option<u32>) -> Duration {
@@ -275,6 +277,13 @@ impl PlaybackDeliveryLedger {
             *total = (*total).max(final_total_frames);
             *synthesis_complete = true;
         }
+    }
+
+    fn total_frames(&self) -> u64 {
+        self.segments
+            .iter()
+            .map(|(_, total_frames, _)| *total_frames)
+            .sum()
     }
 
     fn snapshot_consumed_frames(&self, consumed_frames: u64) -> VoiceDeliveryProgress {
@@ -2176,7 +2185,7 @@ fn run_pocket_voice_stream(
 
     let result: Result<PocketStreamOutcome, String> = (|| loop {
         update_pocket_assistant_speech(
-            &player,
+            player.is_empty(),
             &mut assistant_speech,
             &mut playback_drained_at,
             output_latency_grace,
@@ -2283,6 +2292,13 @@ fn run_pocket_voice_stream(
                         delivery: Some(delivery),
                     });
                 }
+                let drain_timeout = pocket_native_drain_timeout(
+                    delivery_ledger.total_frames(),
+                    player.completed_source_frames(),
+                    speed,
+                );
+                let drain_started = Instant::now();
+                let mut completion_timed_out = false;
                 loop {
                     if !active.load(Ordering::SeqCst) {
                         let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
@@ -2292,11 +2308,29 @@ fn run_pocket_voice_stream(
                             delivery: Some(delivery),
                         });
                     }
-                    player.ensure_healthy()?;
-                    if player.is_empty() {
+                    if !completion_timed_out {
                         player.ensure_healthy()?;
+                        match pocket_native_drain_status(
+                            player.is_empty(),
+                            drain_started.elapsed(),
+                            drain_timeout,
+                        ) {
+                            PocketNativeDrainStatus::Waiting => {}
+                            PocketNativeDrainStatus::Drained => {
+                                player.ensure_healthy()?;
+                            }
+                            PocketNativeDrainStatus::TimedOut => {
+                                log::warn!("Pocket native buffer completion bookkeeping timed out");
+                                player.stop();
+                                reset_pocket_drain_grace(&mut playback_drained_at);
+                                completion_timed_out = true;
+                            }
+                        }
+                    }
+                    let playback_drained = completion_timed_out || player.is_empty();
+                    if playback_drained {
                         update_pocket_assistant_speech(
-                            &player,
+                            playback_drained,
                             &mut assistant_speech,
                             &mut playback_drained_at,
                             output_latency_grace,
@@ -2369,14 +2403,14 @@ fn capture_before_stop(
 
 #[cfg(target_os = "macos")]
 fn update_pocket_assistant_speech(
-    player: &PocketAudioPlayer,
+    playback_drained: bool,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
     playback_drained_at: &mut Option<Instant>,
     output_latency_grace: Duration,
     now: Instant,
 ) {
     if pocket_assistant_speech_grace_elapsed(
-        player.is_empty(),
+        playback_drained,
         assistant_speech.is_some(),
         playback_drained_at,
         output_latency_grace,
@@ -2403,8 +2437,44 @@ fn pocket_assistant_speech_grace_elapsed(
 }
 
 #[cfg(any(test, target_os = "macos"))]
-fn note_pocket_audio_enqueued(playback_drained_at: &mut Option<Instant>) {
+fn reset_pocket_drain_grace(playback_drained_at: &mut Option<Instant>) {
     *playback_drained_at = None;
+}
+
+#[cfg(any(test, target_os = "macos"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PocketNativeDrainStatus {
+    Waiting,
+    Drained,
+    TimedOut,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn pocket_native_drain_status(
+    playback_drained: bool,
+    elapsed: Duration,
+    timeout: Duration,
+) -> PocketNativeDrainStatus {
+    if playback_drained {
+        PocketNativeDrainStatus::Drained
+    } else if elapsed >= timeout {
+        PocketNativeDrainStatus::TimedOut
+    } else {
+        PocketNativeDrainStatus::Waiting
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn pocket_native_drain_timeout(
+    total_source_frames: u64,
+    completed_source_frames: u64,
+    rate: f32,
+) -> Duration {
+    let remaining_source_frames = total_source_frames.saturating_sub(completed_source_frames);
+    let remaining_playback_seconds =
+        remaining_source_frames as f64 / f64::from(berd_voice::SAMPLE_RATE) / f64::from(rate);
+    Duration::from_secs_f64(remaining_playback_seconds)
+        .saturating_add(POCKET_SOURCE_COMPLETION_TIMEOUT)
 }
 
 #[cfg(target_os = "macos")]
@@ -2493,7 +2563,7 @@ fn synthesize_pocket_stream_ready(
                     callback_error = Some(error);
                     return false;
                 }
-                note_pocket_audio_enqueued(playback_drained_at);
+                reset_pocket_drain_grace(playback_drained_at);
                 segment_frames = segment_frames.saturating_add(samples.len() as u64);
                 delivery_ledger.append_frames(samples.len());
                 if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
@@ -3136,7 +3206,7 @@ mod tests {
             grace,
             started,
         ));
-        note_pocket_audio_enqueued(&mut drained_at);
+        reset_pocket_drain_grace(&mut drained_at);
         assert_eq!(drained_at, None);
 
         assert!(!pocket_assistant_speech_grace_elapsed(
@@ -3169,6 +3239,58 @@ mod tests {
             started + Duration::from_secs(1),
         ));
         assert_eq!(drained_at, None);
+    }
+
+    #[test]
+    fn native_drain_times_out_after_expected_remaining_audio() {
+        let timeout = pocket_native_drain_timeout(72_000, 24_000, 2.0);
+        assert_eq!(timeout, Duration::from_secs(3));
+        assert_eq!(
+            pocket_native_drain_status(false, timeout - Duration::from_millis(1), timeout),
+            PocketNativeDrainStatus::Waiting
+        );
+        assert_eq!(
+            pocket_native_drain_status(false, timeout, timeout),
+            PocketNativeDrainStatus::TimedOut
+        );
+        assert_eq!(
+            pocket_native_drain_status(true, timeout, timeout),
+            PocketNativeDrainStatus::Drained
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_drain_timeout_releases_guard_after_route_grace() {
+        let native_voice = NativeVoiceState::default();
+        let mut assistant_speech =
+            Some(native_voice.begin_assistant_speech(InterruptionSensitivity::More, false));
+        let mut drained_at = Some(Instant::now());
+        let timed_out_at = Instant::now();
+        let route_grace = Duration::from_millis(500);
+
+        reset_pocket_drain_grace(&mut drained_at);
+        update_pocket_assistant_speech(
+            true,
+            &mut assistant_speech,
+            &mut drained_at,
+            route_grace,
+            timed_out_at,
+        );
+        assert!(assistant_speech.is_some());
+
+        update_pocket_assistant_speech(
+            true,
+            &mut assistant_speech,
+            &mut drained_at,
+            route_grace,
+            timed_out_at + route_grace,
+        );
+        assert!(assistant_speech.is_none());
+
+        assistant_speech =
+            Some(native_voice.begin_assistant_speech(InterruptionSensitivity::More, false));
+        assert!(assistant_speech.is_some());
     }
 
     #[test]

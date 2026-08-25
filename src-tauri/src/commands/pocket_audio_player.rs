@@ -78,10 +78,12 @@ impl PocketAudioPlayer {
     pub(super) fn played_frames(&self) -> u64 {
         // SAFETY: `self.raw` is a live retained player. The bridge counts only
         // source buffers confirmed played back, so idle queue gaps add nothing.
-        apply_delivery_safety(
-            unsafe { berd_pocket_audio_player_completed_source_frames(self.raw) },
-            self.delivery_safety_frames,
-        )
+        apply_delivery_safety(self.completed_source_frames(), self.delivery_safety_frames)
+    }
+
+    pub(super) fn completed_source_frames(&self) -> u64 {
+        // SAFETY: `self.raw` is a live retained player.
+        unsafe { berd_pocket_audio_player_completed_source_frames(self.raw) }
     }
 
     pub(super) fn is_empty(&self) -> bool {
