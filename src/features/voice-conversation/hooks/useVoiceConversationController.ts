@@ -607,6 +607,8 @@ export function useVoiceConversationController({
   disabled = false,
 }: UseVoiceConversationControllerOptions): ChatInputVoiceConversation {
   const { t } = useTranslation("chat");
+  const siriVoiceRef = useRef(siriVoice);
+  siriVoiceRef.current = siriVoice;
   const status = useVoiceConversationStore((state) => state.status);
   const uiState = useVoiceConversationStore((state) => state.uiState);
   const error = useVoiceConversationStore((state) => state.error);
@@ -736,6 +738,7 @@ export function useVoiceConversationController({
   const startAssistantSpeech = useCallback(
     (
       initialMessages?: ReturnType<typeof captureNativeAssistantSpeechHistory>,
+      resolvedSiriVoice = siriVoiceRef.current,
     ) => {
       const onFailure = (text: string, playbackError: unknown) => {
         addErrorNotification(
@@ -750,18 +753,18 @@ export function useVoiceConversationController({
           error: playbackError,
         });
       };
-      if (siriVoice) {
+      if (resolvedSiriVoice) {
         startNativeAssistantSpeech(
           sessionId,
           onFailure,
           initialMessages,
-          siriVoice,
+          resolvedSiriVoice,
         );
       } else {
         startNativeAssistantSpeech(sessionId, onFailure, initialMessages);
       }
     },
-    [sessionId, siriVoice],
+    [sessionId],
   );
 
   const startCurrentConversation = useCallback(async () => {
@@ -843,9 +846,10 @@ export function useVoiceConversationController({
     // The initiating operation captured the pre-start history boundary and
     // activates speech after native startup succeeds.
     if (operationInFlightBySession.has(sessionId)) return;
-    startAssistantSpeech();
+    startAssistantSpeech(undefined, siriVoice);
   }, [
     sessionId,
+    siriVoice,
     startAssistantSpeech,
     status.lifecycle,
     status.ownerWindowLabel,
