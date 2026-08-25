@@ -24,6 +24,7 @@ unsafe extern "C" {
 
 pub(super) struct PocketAudioPlayer {
     raw: *mut c_void,
+    delivery_safety_frames: u64,
 }
 
 impl PocketAudioPlayer {
@@ -52,7 +53,10 @@ impl PocketAudioPlayer {
         if raw.is_null() {
             return Err(take_error(error, "Could not start native Pocket playback"));
         }
-        Ok(Self { raw })
+        Ok(Self {
+            raw,
+            delivery_safety_frames: delivery_safety_frames(sample_rate, rate),
+        })
     }
 
     pub(super) fn enqueue(&self, samples: &[f32]) -> Result<(), String> {
@@ -77,6 +81,7 @@ impl PocketAudioPlayer {
     pub(super) fn played_frames(&self) -> u64 {
         // SAFETY: `self.raw` is a live retained player.
         unsafe { berd_pocket_audio_player_played_frames(self.raw) }
+            .saturating_sub(self.delivery_safety_frames)
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -88,6 +93,10 @@ impl PocketAudioPlayer {
         // SAFETY: `self.raw` is a live retained player and stop is idempotent.
         unsafe { berd_pocket_audio_player_stop(self.raw) };
     }
+}
+
+fn delivery_safety_frames(sample_rate: u32, rate: f32) -> u64 {
+    (f64::from(sample_rate) * 0.1 * f64::from(rate)).ceil() as u64
 }
 
 impl Drop for PocketAudioPlayer {
@@ -108,4 +117,16 @@ fn take_error(error: *mut c_char, fallback: &str) -> String {
         .into_owned();
     unsafe { berd_siri_tts_free_string(error) };
     message
+}
+
+#[cfg(test)]
+mod tests {
+    use super::delivery_safety_frames;
+
+    #[test]
+    fn delivery_safety_tracks_playback_rate_in_source_frames() {
+        assert_eq!(delivery_safety_frames(24_000, 0.75), 1_800);
+        assert_eq!(delivery_safety_frames(24_000, 1.0), 2_400);
+        assert_eq!(delivery_safety_frames(24_000, 2.0), 4_800);
+    }
 }

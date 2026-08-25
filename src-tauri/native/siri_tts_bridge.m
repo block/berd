@@ -741,7 +741,9 @@ static AudioDeviceID BerdAudioDeviceNamed(NSString *name) {
     AVAudioTime *playerTime = [self.player playerTimeForNodeTime:renderTime];
     if (!playerTime || playerTime.sampleTime <= 0) return 0;
     uint64_t frames = (uint64_t)playerTime.sampleTime;
-    uint64_t effectLatency = (uint64_t)llround(self.timePitch.latency * self.format.sampleRate);
+    double rate = self.timePitch ? self.timePitch.rate : 1.0;
+    uint64_t effectLatency =
+        (uint64_t)llround(self.timePitch.latency * self.format.sampleRate * rate);
     return frames > effectLatency ? frames - effectLatency : 0;
 }
 
@@ -1382,8 +1384,10 @@ bool berd_pocket_audio_player_enqueue(
 }
 
 uint64_t berd_pocket_audio_player_played_frames(void *playerValue) {
-    if (!playerValue) return 0;
-    return [(__bridge BerdPocketAudioPlayer *)playerValue playedFrames];
+    @autoreleasepool {
+        if (!playerValue) return 0;
+        return [(__bridge BerdPocketAudioPlayer *)playerValue playedFrames];
+    }
 }
 
 uint64_t berd_pocket_audio_player_pending_buffers(void *playerValue) {

@@ -60,6 +60,7 @@ const BLUETOOTH_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_mill
 const AIRPLAY_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2);
 #[cfg(target_os = "macos")]
 const UNKNOWN_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2);
+
 #[cfg(target_os = "macos")]
 fn playback_latency_safety_duration_for_transport(transport: Option<u32>) -> Duration {
     // CoreAudio transport FOURCC values. Bluetooth and AirPlay routes buffer
@@ -93,9 +94,6 @@ pub(crate) fn playback_latency_safety_duration(output_device: Option<&str>) -> D
         device_id.and_then(|id| get_device_transport_type(id).ok()),
     )
 }
-
-#[cfg(any(test, target_os = "macos"))]
-const PLAYBACK_LATENCY_SAFETY_FRAMES: u64 = SAMPLE_RATE as u64 / 10;
 const PARAKEET_ARCHIVE: Artifact = Artifact {
     filename: "parakeet.tar.bz2",
     size: 104_337_827,
@@ -250,7 +248,6 @@ struct VoiceDeliveryProgress {
 #[derive(Debug, Default)]
 struct PlaybackDeliveryLedger {
     segments: Vec<(String, u64, bool)>,
-    pieces: Vec<u64>,
 }
 
 #[cfg(any(test, target_os = "macos"))]
@@ -268,7 +265,6 @@ impl PlaybackDeliveryLedger {
             if !*synthesis_complete {
                 *total = total.saturating_add(frames);
             }
-            self.pieces.push(frames);
         }
     }
 
@@ -279,44 +275,7 @@ impl PlaybackDeliveryLedger {
         }
     }
 
-    #[cfg(test)]
-    fn snapshot(&self, queued_pieces: usize, current_piece_frames: u64) -> VoiceDeliveryProgress {
-        let completed_pieces = self.pieces.len().saturating_sub(queued_pieces);
-        let completed_frames = self
-            .pieces
-            .iter()
-            .take(completed_pieces)
-            .copied()
-            .sum::<u64>();
-        let current_total = self.pieces.get(completed_pieces).copied().unwrap_or(0);
-        let consumed_frames = completed_frames
-            .saturating_add(current_piece_frames.min(current_total))
-            .saturating_sub(PLAYBACK_LATENCY_SAFETY_FRAMES);
-        let mut segment_start = 0_u64;
-        let segments = self
-            .segments
-            .iter()
-            .map(|(text, total_frames, synthesis_complete)| {
-                let played_frames = consumed_frames
-                    .saturating_sub(segment_start)
-                    .min(*total_frames);
-                segment_start = segment_start.saturating_add(*total_frames);
-                VoiceDeliverySegment {
-                    text: text.clone(),
-                    played_frames,
-                    total_frames: *total_frames,
-                    synthesis_complete: *synthesis_complete,
-                }
-            })
-            .collect();
-        VoiceDeliveryProgress {
-            sample_rate: berd_voice::SAMPLE_RATE,
-            segments,
-        }
-    }
-
     fn snapshot_consumed_frames(&self, consumed_frames: u64) -> VoiceDeliveryProgress {
-        let consumed_frames = consumed_frames.saturating_sub(PLAYBACK_LATENCY_SAFETY_FRAMES);
         let mut segment_start = 0_u64;
         let segments = self
             .segments
@@ -2208,12 +2167,11 @@ fn run_pocket_voice_stream(
     let mut first_chunk_pending = true;
     let mut playback_started = false;
     let mut assistant_speech = None::<AssistantSpeechGuard>;
-    let mut playback_empty_since = None::<Instant>;
-    let playback_latency_safety_duration = playback_latency_safety_duration(output_device);
     let mut delivery_ledger = PlaybackDeliveryLedger::default();
     let mut last_progress_emit = Instant::now();
 
     let result: Result<PocketStreamOutcome, String> = (|| loop {
+        update_pocket_assistant_speech(&player, &mut assistant_speech);
         if !active.load(Ordering::SeqCst) {
             let delivery = pocket_delivery_snapshot(&delivery_ledger, &player);
             player.stop();
@@ -2240,7 +2198,6 @@ fn run_pocket_voice_stream(
                     interruption_sensitivity,
                     suppress_capture,
                     &mut assistant_speech,
-                    &mut playback_empty_since,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     false,
@@ -2270,7 +2227,6 @@ fn run_pocket_voice_stream(
                     interruption_sensitivity,
                     suppress_capture,
                     &mut assistant_speech,
-                    &mut playback_empty_since,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
@@ -2300,7 +2256,6 @@ fn run_pocket_voice_stream(
                     interruption_sensitivity,
                     suppress_capture,
                     &mut assistant_speech,
-                    &mut playback_empty_since,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
@@ -2325,7 +2280,6 @@ fn run_pocket_voice_stream(
                     }
                     std::thread::sleep(Duration::from_millis(10));
                 }
-                std::thread::sleep(playback_latency_safety_duration);
                 assistant_speech.take();
                 return Ok(PocketStreamOutcome {
                     state: PocketStreamEventState::Completed,
@@ -2342,12 +2296,6 @@ fn run_pocket_voice_stream(
                 });
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {
-                update_pocket_assistant_speech(
-                    &player,
-                    &mut assistant_speech,
-                    &mut playback_empty_since,
-                    playback_latency_safety_duration,
-                );
                 if playback_started
                     && last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL
                 {
@@ -2396,15 +2344,8 @@ fn capture_before_stop(
 fn update_pocket_assistant_speech(
     player: &PocketAudioPlayer,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
-    playback_empty_since: &mut Option<Instant>,
-    playback_latency_safety_duration: Duration,
 ) {
-    if !player.is_empty() {
-        *playback_empty_since = None;
-        return;
-    }
-    let empty_since = playback_empty_since.get_or_insert_with(Instant::now);
-    if empty_since.elapsed() >= playback_latency_safety_duration {
+    if player.is_empty() {
         assistant_speech.take();
     }
 }
@@ -2451,7 +2392,6 @@ fn synthesize_pocket_stream_ready(
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
-    playback_empty_since: &mut Option<Instant>,
     delivery_ledger: &mut PlaybackDeliveryLedger,
     last_progress_emit: &mut Instant,
     flush: bool,
@@ -2475,11 +2415,6 @@ fn synthesize_pocket_stream_ready(
                 if samples.is_empty() {
                     return true;
                 }
-                if let Err(error) = player.enqueue(&samples) {
-                    callback_error = Some(error);
-                    return false;
-                }
-                *playback_empty_since = None;
                 if let Err(error) = mark_pocket_playback_started(
                     app,
                     stream_id,
@@ -2489,6 +2424,10 @@ fn synthesize_pocket_stream_ready(
                     playback_started,
                     assistant_speech,
                 ) {
+                    callback_error = Some(error);
+                    return false;
+                }
+                if let Err(error) = player.enqueue(&samples) {
                     callback_error = Some(error);
                     return false;
                 }
@@ -2613,16 +2552,13 @@ mod tests {
         let mut ledger = PlaybackDeliveryLedger::default();
         ledger.begin_segment("First sentence.".to_string());
         ledger.append_frames(4_800);
-        assert!(!ledger.snapshot(1, 0).segments[0].synthesis_complete);
+        assert!(!ledger.snapshot_consumed_frames(0).segments[0].synthesis_complete);
         ledger.complete_segment(4_800);
         ledger.begin_segment("Second sentence.".to_string());
         ledger.append_frames(4_800);
         ledger.complete_segment(4_800);
 
-        // One source has completed and the next is 50 ms in. The 100 ms
-        // output-latency allowance leaves 3,600 safely delivered frames in
-        // the first segment and none in the second.
-        let progress = ledger.snapshot(1, 1_200);
+        let progress = ledger.snapshot_consumed_frames(3_600);
         assert_eq!(progress.segments[0].played_frames, 3_600);
         assert_eq!(progress.segments[0].total_frames, 4_800);
         assert!(progress.segments[0].synthesis_complete);
@@ -2643,7 +2579,7 @@ mod tests {
 
         let progress = ledger.snapshot_consumed_frames(7_200);
         assert_eq!(progress.segments[0].played_frames, 4_800);
-        assert_eq!(progress.segments[1].played_frames, 0);
+        assert_eq!(progress.segments[1].played_frames, 2_400);
     }
 
     #[test]
@@ -2663,7 +2599,7 @@ mod tests {
         let delivery = capture_before_stop(
             || {
                 calls.borrow_mut().push("snapshot");
-                ledger.snapshot(2, 1_200)
+                ledger.snapshot_consumed_frames(3_600)
             },
             || calls.borrow_mut().push("stop"),
         );
