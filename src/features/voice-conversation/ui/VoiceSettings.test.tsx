@@ -333,9 +333,11 @@ describe("VoiceSettings", () => {
     });
     view.rerender(<VoiceSettings />);
 
-    expect(screen.getByText("Voice")).toBeInTheDocument();
-    expect(screen.getByText(/173.8 MB on disk/)).toBeInTheDocument();
-    expect(screen.getByText(/131.7 MB on disk/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Voice" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/173.8 MB · Installed/)).toBeInTheDocument();
+    expect(screen.getByText(/131.7 MB · Installed/)).toBeInTheDocument();
     expect(screen.queryByText("Preparing model")).not.toBeInTheDocument();
   });
 

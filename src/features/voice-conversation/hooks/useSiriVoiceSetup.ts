@@ -82,7 +82,7 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     ),
   );
   const [loading, setLoading] = useState(enabled);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [downloadingVoiceKey, setDownloadingVoiceKey] = useState<string | null>(
     null,
@@ -92,6 +92,12 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
   );
   const languageRef = useRef(language);
   const statusRequestGenerationRef = useRef(0);
+  const selectionActionGenerationRef = useRef(0);
+  const selectionGenerationRef = useRef(0);
+  const latestSelectionRef = useRef<{
+    generation: number;
+    selection: SiriVoiceSelection;
+  } | null>(null);
   const initialSelectedLocaleAppliedRef = useRef(false);
   const languageSelectedByUserRef = useRef(false);
   languageRef.current = language;
@@ -100,6 +106,29 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     languageSelectedByUserRef.current = true;
     setLanguage(canonicalLocale(nextLanguage));
   }, []);
+
+  const applySelection = useCallback(
+    async (selection: SiriVoiceSelection, generation: number) => {
+      let pending = { generation, selection };
+
+      while (true) {
+        try {
+          await selectSiriVoice(pending.selection);
+        } catch (nextError) {
+          if (latestSelectionRef.current?.generation === pending.generation) {
+            throw nextError;
+          }
+          return;
+        }
+
+        const latest = latestSelectionRef.current;
+        if (!latest || latest.generation === pending.generation) return;
+
+        pending = latest;
+      }
+    },
+    [],
+  );
 
   const refresh = useCallback(async (prefix: string) => {
     const generation = ++statusRequestGenerationRef.current;
@@ -110,7 +139,6 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
         canonicalLocale(languageRef.current) === canonicalLocale(prefix)
       ) {
         setStatus(next);
-        setError(null);
         setStatusError(null);
       }
       return next;
@@ -119,7 +147,6 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
         statusRequestGenerationRef.current === generation &&
         canonicalLocale(languageRef.current) === canonicalLocale(prefix)
       ) {
-        setError(String(nextError));
         setStatusError(String(nextError));
       }
       return null;
@@ -135,7 +162,7 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     let active = true;
     const generation = ++statusRequestGenerationRef.current;
     setLoading(true);
-    setError(null);
+    setActionError(null);
     setStatusError(null);
     void getSiriVoiceStatus(language, { coalesce: true })
       .then((next) => {
@@ -145,7 +172,6 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
       })
       .catch((nextError) => {
         if (active && statusRequestGenerationRef.current === generation) {
-          setError(String(nextError));
           setStatusError(String(nextError));
         }
       })
@@ -212,30 +238,42 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
 
   const downloadVoice = useCallback(
     async (voice: SiriVoice) => {
+      const actionGeneration = ++selectionActionGenerationRef.current;
       const selection = { name: voice.name, language: voice.language };
-      setError(null);
+      const selectionGeneration = selectionGenerationRef.current;
+      setActionError(null);
       setDownloadingVoiceKey(voiceKey(selection));
       try {
         await downloadSiriVoice(selection);
-        window.dispatchEvent(new Event(SIRI_VOICE_SETTINGS_CHANGED));
-        await refresh(language);
+        try {
+          if (selectionGenerationRef.current === selectionGeneration) {
+            const generation = ++selectionGenerationRef.current;
+            latestSelectionRef.current = { generation, selection };
+            await applySelection(selection, generation);
+          }
+        } finally {
+          window.dispatchEvent(new Event(SIRI_VOICE_SETTINGS_CHANGED));
+          await refresh(language);
+        }
       } catch (nextError) {
-        setError(String(nextError));
+        if (selectionActionGenerationRef.current === actionGeneration) {
+          setActionError(String(nextError));
+        }
       } finally {
         setDownloadingVoiceKey(null);
       }
     },
-    [language, refresh],
+    [applySelection, language, refresh],
   );
 
   const previewVoice = useCallback(async (voice: SiriVoice) => {
     const selection = { name: voice.name, language: voice.language };
-    setError(null);
+    setActionError(null);
     setPreviewingVoiceKey(voiceKey(selection));
     try {
       await previewSiriVoice(selection);
     } catch (nextError) {
-      setError(String(nextError));
+      setActionError(String(nextError));
     } finally {
       setPreviewingVoiceKey(null);
     }
@@ -243,27 +281,37 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
 
   const selectVoice = useCallback(
     async (voice: SiriVoice) => {
-      setError(null);
+      const actionGeneration = ++selectionActionGenerationRef.current;
+      const selection = {
+        name: voice.name,
+        language: voice.language,
+      };
+      const generation = ++selectionGenerationRef.current;
+      latestSelectionRef.current = { generation, selection };
+      setActionError(null);
       try {
-        await selectSiriVoice({ name: voice.name, language: voice.language });
+        await applySelection(selection, generation);
+        if (selectionGenerationRef.current !== generation) return;
         window.dispatchEvent(new Event(SIRI_VOICE_SETTINGS_CHANGED));
         await refresh(language);
       } catch (nextError) {
-        setError(String(nextError));
+        if (selectionActionGenerationRef.current === actionGeneration) {
+          setActionError(String(nextError));
+        }
       }
     },
-    [language, refresh],
+    [applySelection, language, refresh],
   );
 
   const setPlaybackSpeed = useCallback(
     async (speed: number) => {
-      setError(null);
+      setActionError(null);
       try {
         await setSiriPlaybackSpeed(speed);
         window.dispatchEvent(new Event(SIRI_VOICE_SETTINGS_CHANGED));
         await refresh(language);
       } catch (nextError) {
-        setError(String(nextError));
+        setActionError(String(nextError));
       }
     },
     [language, refresh],
@@ -274,7 +322,7 @@ export function useSiriVoiceSetup(enabled = true): SiriVoiceSetup {
     language,
     languages,
     loading,
-    error,
+    error: actionError ?? statusError,
     statusError,
     downloadingVoiceKey,
     previewingVoiceKey,

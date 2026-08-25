@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
@@ -52,6 +52,9 @@ describe("SiriVoiceSettings", () => {
     const value = setup();
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
+    );
     await userEvent.click(screen.getByRole("combobox", { name: "Language" }));
     expect(
       screen.getByRole("option", { name: "English (United States)" }),
@@ -76,18 +79,23 @@ describe("SiriVoiceSettings", () => {
     expect(value.setLanguage).toHaveBeenCalledWith("en-AU");
   });
 
-  it("uses the same regional label for voice groups", () => {
+  it("does not repeat the selected locale above a single voice group", async () => {
     const value = setup();
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
+    );
     expect(
-      screen.getByRole("heading", { name: "English (United States)" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("heading", { name: "English (United States)" }),
+    ).toBeNull();
   });
 
   it("sorts language options and groups with the active Berd locale", async () => {
     const nativeCollator = Intl.Collator;
-    await i18n.changeLanguage("es");
+    await act(async () => {
+      await i18n.changeLanguage("es");
+    });
     try {
       const voices = [
         {
@@ -135,6 +143,9 @@ describe("SiriVoiceSettings", () => {
 
       renderWithProviders(<SiriVoiceSettings setup={value} />);
 
+      await userEvent.click(
+        screen.getByRole("button", { name: /^Elige una voz:/ }),
+      );
       const displayNames = new Intl.DisplayNames(["es"], {
         type: "language",
         languageDisplay: "standard",
@@ -160,7 +171,9 @@ describe("SiriVoiceSettings", () => {
         screen.getAllByRole("option").map((option) => option.textContent),
       ).toEqual(expected);
     } finally {
-      await i18n.changeLanguage("en");
+      await act(async () => {
+        await i18n.changeLanguage("en");
+      });
     }
   });
 
@@ -168,6 +181,9 @@ describe("SiriVoiceSettings", () => {
     const value = setup();
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
+    );
     await userEvent.click(
       screen.getByRole("button", { name: "Preview Quinn" }),
     );
@@ -204,6 +220,9 @@ describe("SiriVoiceSettings", () => {
     });
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
+    );
     expect(
       screen.getByRole("button", { name: "Preview Aaron" }),
     ).toBeInTheDocument();
@@ -213,7 +232,7 @@ describe("SiriVoiceSettings", () => {
     expect(
       screen.getByRole("button", { name: "Download Quinn" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Installed · 0.0 MB on disk")).toBeInTheDocument();
+    expect(screen.getByText("0.0 MB · Installed")).toBeInTheDocument();
     expect(screen.getByText("310.5 MB")).toBeInTheDocument();
     expect(screen.queryByText("Use voice")).not.toBeInTheDocument();
     expect(screen.queryByText("Download model")).not.toBeInTheDocument();
@@ -224,13 +243,16 @@ describe("SiriVoiceSettings", () => {
     );
   });
 
-  it("exposes preview and download progress in accessible names", () => {
+  it("exposes preview and download progress in accessible names", async () => {
     const value = setup({
       previewingVoiceKey: "quinn|en-us",
       downloadingVoiceKey: "quinn|en-us",
     });
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
+    );
     expect(
       screen.getByRole("button", { name: "Playing preview for Quinn" }),
     ).toBeInTheDocument();

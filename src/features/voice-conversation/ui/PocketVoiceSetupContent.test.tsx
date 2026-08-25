@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -8,6 +8,10 @@ import type { PocketVoiceStatus } from "../api/pocketVoice";
 
 if (!HTMLElement.prototype.hasPointerCapture) {
   HTMLElement.prototype.hasPointerCapture = () => false;
+}
+
+if (!HTMLElement.prototype.scrollIntoView) {
+  HTMLElement.prototype.scrollIntoView = () => {};
 }
 
 describe("PocketVoiceSetupContent", () => {
@@ -185,8 +189,8 @@ describe("PocketVoiceSetupContent", () => {
 
     expect(screen.getByTestId("voice-model-pocket")).toBeInTheDocument();
     expect(screen.getByTestId("voice-model-parakeet")).toBeInTheDocument();
-    expect(screen.getByText(/173.8 MB on disk/)).toBeInTheDocument();
-    expect(screen.getByText(/131.7 MB on disk/)).toBeInTheDocument();
+    expect(screen.getByText(/173.8 MB · Installed/)).toBeInTheDocument();
+    expect(screen.getByText(/131.7 MB · Installed/)).toBeInTheDocument();
   });
 
   it("shows partial-cache disk usage and inline retry without hiding the other model", () => {
@@ -201,7 +205,7 @@ describe("PocketVoiceSetupContent", () => {
       />,
     );
 
-    expect(screen.getByText(/173.8 MB on disk/)).toBeInTheDocument();
+    expect(screen.getByText(/173.8 MB · Installed/)).toBeInTheDocument();
     expect(screen.getByText("network failed")).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
@@ -252,13 +256,43 @@ describe("PocketVoiceSetupContent", () => {
       />,
     );
 
-    expect(screen.getAllByRole("radio")).toHaveLength(12);
-    await userEvent.click(screen.getByRole("button", { name: "2×" }));
+    await userEvent.click(
+      screen.getByRole("combobox", { name: "Playback speed" }),
+    );
+    await userEvent.click(screen.getByRole("option", { name: "2×" }));
     expect(setPlaybackSpeed).toHaveBeenCalledWith(2);
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
+    );
+    expect(screen.getAllByRole("radio")).toHaveLength(12);
     await userEvent.click(screen.getByText("Anna"));
     expect(selectVoice).toHaveBeenCalledWith("anna");
     await userEvent.click(screen.getByRole("button", { name: "Preview Anna" }));
     expect(previewVoice).toHaveBeenCalledWith("anna");
+  });
+
+  it("keeps voice errors visible inside the open picker", async () => {
+    renderWithProviders(
+      <PocketVoiceSetupContent
+        setup={setup(
+          {
+            ...baseStatus,
+            installed: true,
+            pocketInstalled: true,
+            voices: [{ id: "mary", name: "Mary" }],
+          },
+          { error: "Voice preview failed" },
+        )}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Voice preview failed");
+    await userEvent.click(
+      screen.getByRole("button", { name: /^Choose a voice:/ }),
+    );
+    expect(
+      within(screen.getByRole("dialog")).getByRole("alert"),
+    ).toHaveTextContent("Voice preview failed");
   });
 
   it("confirms independent model removal", async () => {

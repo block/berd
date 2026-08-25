@@ -868,7 +868,10 @@
     "backendMacSpeech": "Apple speech recognition",
     "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
-    "backendSiri": "Siri voices (macOS)",
+    "backendSiri": "Siri voices",
+    "chooseVoice": "Choose…",
+    "chooseVoiceLabel": "Choose a voice: {{voice}}",
+    "chooseVoiceTitle": "Choose a voice",
     "download": "Download model",
     "downloadVoice": "Download {{voice}}",
     "downloadingVoice": "Downloading {{voice}}",
@@ -901,7 +904,7 @@
       "preventFeedback": "Prevent feedback"
     },
     "modelInstalled": "Installed",
-    "modelInstalledSize": "Installed · {{size}} on disk",
+    "modelInstalledSize": "{{size}} · Installed",
     "modelMissingSize": "Not installed · {{size}} download",
     "modelNotInstalled": "Not installed",
     "notReadyInput": "Parakeet STT is not installed. Download it below to use Voice Conversation.",
@@ -913,6 +916,7 @@
     "notReadyPocketOutput": "Pocket TTS is not installed. Download it below to use Voice Conversation.",
     "notReadySiriOutput": "No installed Siri voice is selected. Download or select one below to use Voice Conversation.",
     "notReadyTitle": "Voice Conversation isn't ready",
+    "noVoiceSelected": "No voice selected",
     "outputBackendDescription": "Choose how Berd speaks assistant responses.",
     "playbackSpeed": "Playback speed",
     "playing": "Playing",
@@ -927,7 +931,6 @@
     "retryDownload": "Retry model download",
     "settingsDescription": "Choose how Berd speaks, install speech recognition, and preview available voices.",
     "siriLanguage": "Language",
-    "siriLanguageDescription": "Choose the exact language and regional voice you want to use.",
     "siriLoading": "Loading Siri voices…",
     "siriNoVoices": "No Siri voices are available for this language.",
     "siriUnsupported": "Siri voices are available on macOS only.",
@@ -935,6 +938,7 @@
     "speechOutput": "Speech output",
     "selectedVoice": "Selected voice: {{voice}}",
     "useVoice": "Use {{voice}}",
+    "voice": "Voice",
     "voiceLabel": "Pocket TTS voice"
   }
 }
