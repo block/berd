@@ -716,6 +716,7 @@ fn resolve_voice_selection(
     })
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn resolve_stream_voice(
     selection: &SiriVoiceSelection,
     load_all_voices: impl FnOnce() -> Result<Vec<SiriVoice>, String>,
