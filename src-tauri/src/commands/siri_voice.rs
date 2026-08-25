@@ -1057,6 +1057,7 @@ fn run_siri_stream(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects four runtime dependencies beside the stream payload.
 pub fn start_siri_voice_stream(
     app: AppHandle,
     webview_window: tauri::WebviewWindow,
