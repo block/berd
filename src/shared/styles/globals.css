@@ -1918,6 +1918,17 @@ html[data-window-kind="voice-buddy"] #root {
   padding-block-end: var(--streamdown-table-scrollbar-block-size, 0px);
 }
 
+[data-streamdown="table"] th {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1rem;
+  white-space: normal;
+}
+
+[data-streamdown="table"] td {
+  font-size: 0.8125rem;
+}
+
 /* Streamdown paints its table scroll container with bg-background. Keep the
  * table chrome transparent so rows match whatever container hosts them
  * (doc viewer card, chat card); the muted header band and row borders carry
