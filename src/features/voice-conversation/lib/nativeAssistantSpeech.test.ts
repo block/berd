@@ -246,12 +246,7 @@ describe("native assistant speech stream", () => {
     mocks.backend = "siri";
     mocks.interruptionMode = "allowInterruptions";
     const siriVoice = { name: "Samantha", language: "en-US" };
-    startNativeAssistantSpeech(
-      "session-1",
-      vi.fn(),
-      undefined,
-      () => siriVoice,
-    );
+    startNativeAssistantSpeech("session-1", vi.fn(), undefined, siriVoice);
     useChatStore
       .getState()
       .setMessages("session-1", [
@@ -285,9 +280,7 @@ describe("native assistant speech stream", () => {
       "session-1",
       onFailure,
       undefined,
-      backend === "siri"
-        ? () => ({ name: "Samantha", language: "en-US" })
-        : undefined,
+      backend === "siri" ? { name: "Samantha", language: "en-US" } : undefined,
     );
     useChatStore
       .getState()
@@ -884,14 +877,17 @@ describe("native assistant speech stream", () => {
   });
 
   it("preserves terminal delivery before activating a replacement session", async () => {
-    startNativeAssistantSpeech("session-1", vi.fn());
+    mocks.backend = "siri";
+    const initialVoice = { name: "Samantha", language: "en-US" };
+    const replacementVoice = { name: "Eddy", language: "en-GB" };
+    startNativeAssistantSpeech("session-1", vi.fn(), undefined, initialVoice);
     useChatStore
       .getState()
       .setMessages("session-1", [
         assistant([{ type: "text", text: "One. Two. Three." }]),
       ]);
-    await vi.waitFor(() => expect(mocks.append).toHaveBeenCalled());
-    const firstStreamId = mocks.start.mock.calls[0]?.[0] as string;
+    await vi.waitFor(() => expect(mocks.siriAppend).toHaveBeenCalled());
+    const firstStreamId = mocks.siriStart.mock.calls[0]?.[0] as string;
 
     useVoiceConversationStore.setState((voice) => ({
       status: {
@@ -901,12 +897,17 @@ describe("native assistant speech stream", () => {
         revision: voice.status.revision + 1,
       },
     }));
-    await vi.waitFor(() => expect(mocks.stop).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mocks.siriStop).toHaveBeenCalled());
 
-    startNativeAssistantSpeech("session-2", vi.fn());
-    expect(mocks.start).toHaveBeenCalledTimes(1);
+    startNativeAssistantSpeech(
+      "session-2",
+      vi.fn(),
+      undefined,
+      replacementVoice,
+    );
+    expect(mocks.siriStart).toHaveBeenCalledTimes(1);
 
-    mocks.streamHandler?.({
+    mocks.siriStreamHandler?.({
       streamId: firstStreamId,
       state: "interrupted",
       error: null,
@@ -941,7 +942,8 @@ describe("native assistant speech stream", () => {
           "assistant-2",
         ),
       ]);
-    await vi.waitFor(() => expect(mocks.start).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(mocks.siriStart).toHaveBeenCalledTimes(2));
+    expect(mocks.siriStart.mock.calls[1]?.[1]).toEqual(replacementVoice);
   });
 
   it("cancels a deferred replacement when its voice lifecycle stops", async () => {
@@ -2646,7 +2648,7 @@ describe("native assistant speech stream", () => {
         "session-1",
         vi.fn(),
         undefined,
-        () => initialSiriVoice,
+        initialSiriVoice,
       );
       useChatStore
         .getState()
@@ -2676,7 +2678,7 @@ describe("native assistant speech stream", () => {
         "session-1",
         vi.fn(),
         undefined,
-        () => refreshedSiriVoice,
+        refreshedSiriVoice,
       );
       useVoiceConversationStore.setState({ userSpeaking: false });
       await vi.advanceTimersByTimeAsync(250);

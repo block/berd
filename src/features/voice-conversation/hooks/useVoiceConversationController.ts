@@ -607,8 +607,6 @@ export function useVoiceConversationController({
   disabled = false,
 }: UseVoiceConversationControllerOptions): ChatInputVoiceConversation {
   const { t } = useTranslation("chat");
-  const siriVoiceRef = useRef(siriVoice);
-  siriVoiceRef.current = siriVoice;
   const status = useVoiceConversationStore((state) => state.status);
   const uiState = useVoiceConversationStore((state) => state.uiState);
   const error = useVoiceConversationStore((state) => state.error);
@@ -757,7 +755,7 @@ export function useVoiceConversationController({
           sessionId,
           onFailure,
           initialMessages,
-          () => siriVoiceRef.current,
+          siriVoice,
         );
       } else {
         startNativeAssistantSpeech(sessionId, onFailure, initialMessages);
