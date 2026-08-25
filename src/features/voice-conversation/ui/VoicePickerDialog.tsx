@@ -1,11 +1,11 @@
-import { useState, type ReactNode } from "react";
+import { ChevronRight } from "lucide-react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/shared/ui/button";
 import {
   Dialog,
   DialogBody,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -23,36 +23,53 @@ export function VoicePickerDialog({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const [open, setOpen] = useState(false);
+  const selectedVoiceId = useId();
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => {
+      contentRef.current
+        ?.querySelector<HTMLElement>('[data-voice-selected="true"]')
+        ?.scrollIntoView({ block: "nearest" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <SettingsRow
         label={t("voice.voice")}
-        description={selectedVoice ?? t("voice.noVoiceSelected")}
         density="compact"
-        action={({ descriptionId }) => (
+        action={() => (
           <DialogTrigger asChild>
             <Button
               type="button"
-              size="sm"
-              variant="outline"
+              size="compact"
+              variant="ghost"
+              flush
               aria-label={t("voice.chooseVoiceTitle")}
-              aria-describedby={descriptionId}
+              aria-describedby={selectedVoiceId}
             >
-              {t("voice.chooseVoice")}
+              <span className="max-w-48 truncate">
+                {selectedVoice ?? t("voice.chooseVoice")}
+              </span>
+              <span id={selectedVoiceId} className="sr-only">
+                {selectedVoice ?? t("voice.noVoiceSelected")}
+              </span>
+              <ChevronRight aria-hidden="true" />
             </Button>
           </DialogTrigger>
         )}
       />
       <DialogContent
+        ref={contentRef}
         size="lg"
+        aria-describedby={undefined}
         closeLabel={t("actions.close", { ns: "common" })}
       >
         <DialogHeader>
           <DialogTitle>{t("voice.chooseVoiceTitle")}</DialogTitle>
-          <DialogDescription>
-            {t("voice.chooseVoiceDescription")}
-          </DialogDescription>
         </DialogHeader>
         <DialogBody>
           {dialogError ? (

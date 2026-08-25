@@ -79,7 +79,7 @@ describe("SiriVoiceSettings", () => {
     expect(value.setLanguage).toHaveBeenCalledWith("en-AU");
   });
 
-  it("uses the same regional label for voice groups", async () => {
+  it("does not repeat the selected locale above a single voice group", async () => {
     const value = setup();
     renderWithProviders(<SiriVoiceSettings setup={value} />);
 
@@ -87,8 +87,8 @@ describe("SiriVoiceSettings", () => {
       screen.getByRole("button", { name: "Choose a voice" }),
     );
     expect(
-      screen.getByRole("heading", { name: "English (United States)" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("heading", { name: "English (United States)" }),
+    ).toBeNull();
   });
 
   it("sorts language options and groups with the active Berd locale", async () => {
@@ -232,7 +232,7 @@ describe("SiriVoiceSettings", () => {
     expect(
       screen.getByRole("button", { name: "Download Quinn" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Installed · 0.0 MB on disk")).toBeInTheDocument();
+    expect(screen.getByText("0.0 MB · Installed")).toBeInTheDocument();
     expect(screen.getByText("310.5 MB")).toBeInTheDocument();
     expect(screen.queryByText("Use voice")).not.toBeInTheDocument();
     expect(screen.queryByText("Download model")).not.toBeInTheDocument();

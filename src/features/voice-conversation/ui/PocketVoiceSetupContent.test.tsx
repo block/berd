@@ -189,8 +189,8 @@ describe("PocketVoiceSetupContent", () => {
 
     expect(screen.getByTestId("voice-model-pocket")).toBeInTheDocument();
     expect(screen.getByTestId("voice-model-parakeet")).toBeInTheDocument();
-    expect(screen.getByText(/173.8 MB on disk/)).toBeInTheDocument();
-    expect(screen.getByText(/131.7 MB on disk/)).toBeInTheDocument();
+    expect(screen.getByText(/173.8 MB · Installed/)).toBeInTheDocument();
+    expect(screen.getByText(/131.7 MB · Installed/)).toBeInTheDocument();
   });
 
   it("shows partial-cache disk usage and inline retry without hiding the other model", () => {
@@ -205,7 +205,7 @@ describe("PocketVoiceSetupContent", () => {
       />,
     );
 
-    expect(screen.getByText(/173.8 MB on disk/)).toBeInTheDocument();
+    expect(screen.getByText(/173.8 MB · Installed/)).toBeInTheDocument();
     expect(screen.getByText("network failed")).toBeInTheDocument();
     expect(
       screen.getByRole("button", {

@@ -121,9 +121,6 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
-              {t("voice.siriLanguageDescription")}
-            </p>
           </div>
 
           {setup.loading ? (
@@ -138,9 +135,11 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
             <div className="space-y-5">
               {groups.map((group) => (
                 <section key={group.locale} className="space-y-2">
-                  <h3 className="text-sm font-medium">
-                    {localeLabel(group.locale, displayLocale)}
-                  </h3>
+                  {groups.length > 1 ? (
+                    <h3 className="text-sm font-medium">
+                      {localeLabel(group.locale, displayLocale)}
+                    </h3>
+                  ) : null}
                   <div className="divide-y divide-border rounded-md border border-border">
                     {group.voices.map((voice) => {
                       const key = voiceKey(voice);
@@ -166,6 +165,7 @@ export function SiriVoiceSettings({ setup }: { setup: SiriVoiceSetup }) {
                           key={key}
                           className="flex min-h-12 items-center gap-3 px-3 py-2"
                           data-testid={`siri-voice-${key}`}
+                          data-voice-selected={selected || undefined}
                         >
                           {voice.installed ? (
                             <Button

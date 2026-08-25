@@ -227,6 +227,9 @@ export function PocketVoiceSetupContent({
                     <div
                       key={voice.id}
                       data-testid={`pocket-voice-${voice.id}`}
+                      data-voice-selected={
+                        voice.id === status.selectedVoice || undefined
+                      }
                       className="flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm"
                     >
                       <label
