@@ -8,6 +8,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
+use std::sync::atomic::{AtomicU64, AtomicUsize};
+#[cfg(target_os = "macos")]
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
@@ -18,16 +20,28 @@ use berd_voice::SAMPLE_RATE;
 use berd_voice::{load_text_to_speech, load_voice_style, PocketTts, VoiceStyle};
 use futures_util::StreamExt;
 #[cfg(target_os = "macos")]
+use objc2_core_audio::{
+    kAudioDevicePropertyScopeOutput, kAudioDevicePropertyStreams, kAudioDeviceTransportTypeBuiltIn,
+    kAudioHardwareNoError, kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
+    kAudioStreamPropertyTerminalType, kAudioStreamTerminalTypeSpeaker, AudioObjectGetPropertyData,
+    AudioObjectGetPropertyDataSize, AudioObjectID, AudioObjectPropertyAddress,
+};
+#[cfg(target_os = "macos")]
 use rodio::buffer::SamplesBuffer;
 #[cfg(target_os = "macos")]
-use rodio::{DeviceTrait, Player};
+use rodio::{ChannelCount, DeviceTrait, Player, SampleRate, Source};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 #[cfg(target_os = "macos")]
+use super::native_voice::AssistantSpeechGuard;
+#[cfg(target_os = "macos")]
 use super::pocket_playback_speed_dsp::StreamingSpeedProcessor;
-use super::{native_voice::NativeVoiceState, voice_capture::VoiceCaptureState};
+use super::{
+    native_voice::{InterruptionSensitivity, NativeVoiceState},
+    voice_capture::VoiceCaptureState,
+};
 use tokio::io::AsyncWriteExt;
 
 const CACHE_VERSION: &str = "native-voice-v2";
@@ -44,6 +58,311 @@ const DOWNLOAD_TOTAL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const STREAMING_EMIT_FRAMES: usize = 12;
 #[cfg(target_os = "macos")]
 const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
+#[cfg(target_os = "macos")]
+const LOCAL_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_millis(100);
+#[cfg(target_os = "macos")]
+const BLUETOOTH_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_millis(500);
+#[cfg(target_os = "macos")]
+const AIRPLAY_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2);
+#[cfg(target_os = "macos")]
+const UNKNOWN_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_secs(2);
+#[cfg(target_os = "macos")]
+const POCKET_SOURCE_COMPLETION_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[cfg(target_os = "macos")]
+struct PocketPlaybackSource<I> {
+    input: I,
+    generation: u64,
+    pending_audio_sources: Arc<AtomicUsize>,
+    completed_generation: Arc<AtomicU64>,
+    completion_sender: mpsc::SyncSender<PocketPlaybackEvent>,
+    completion_sent: bool,
+}
+
+#[cfg(target_os = "macos")]
+enum PocketPlaybackEvent {
+    SourceFinished,
+    ShutdownImmediately,
+    ShutdownAfterPlayback,
+    #[cfg(test)]
+    Probe(mpsc::Sender<()>),
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PocketPlaybackMonitorOutcome {
+    Completed,
+    SourceCompletionTimedOut,
+}
+
+#[cfg(target_os = "macos")]
+fn apply_pocket_playback_monitor_outcome(
+    result: Result<PocketStreamOutcome, PocketStreamFailure>,
+    outcome: PocketPlaybackMonitorOutcome,
+) -> Result<PocketStreamOutcome, PocketStreamFailure> {
+    if outcome == PocketPlaybackMonitorOutcome::SourceCompletionTimedOut {
+        log::warn!(
+            "Pocket playback source completion bookkeeping timed out after the player drained"
+        );
+    }
+    result
+}
+
+#[cfg(target_os = "macos")]
+fn run_pocket_playback_monitor(
+    playback_completion_receiver: mpsc::Receiver<PocketPlaybackEvent>,
+    assistant_speech: Arc<Mutex<Option<(u64, AssistantSpeechGuard)>>>,
+    completed_generation: Arc<AtomicU64>,
+    source_completion_timeout: Duration,
+    playback_latency_safety_duration: Duration,
+) -> PocketPlaybackMonitorOutcome {
+    let mut shutdown_after_playback = false;
+    while let Ok(event) = playback_completion_receiver.recv() {
+        match event {
+            event @ (PocketPlaybackEvent::SourceFinished
+            | PocketPlaybackEvent::ShutdownAfterPlayback) => {
+                if matches!(event, PocketPlaybackEvent::ShutdownAfterPlayback) {
+                    let target_generation = assistant_speech
+                        .lock()
+                        .expect("assistant speech")
+                        .as_ref()
+                        .map(|(generation, _)| *generation);
+                    let Some(target_generation) = target_generation else {
+                        return PocketPlaybackMonitorOutcome::Completed;
+                    };
+                    let source_completion_deadline = Instant::now() + source_completion_timeout;
+                    while completed_generation.load(Ordering::Acquire) != target_generation {
+                        let source_wait_remaining =
+                            source_completion_deadline.saturating_duration_since(Instant::now());
+                        if source_wait_remaining.is_zero() {
+                            assistant_speech.lock().expect("assistant speech").take();
+                            return PocketPlaybackMonitorOutcome::SourceCompletionTimedOut;
+                        }
+                        match playback_completion_receiver
+                            .recv_timeout(source_wait_remaining.min(Duration::from_millis(10)))
+                        {
+                            Ok(PocketPlaybackEvent::SourceFinished)
+                            | Ok(PocketPlaybackEvent::ShutdownAfterPlayback)
+                            | Err(mpsc::RecvTimeoutError::Timeout) => {}
+                            #[cfg(test)]
+                            Ok(PocketPlaybackEvent::Probe(sender)) => {
+                                let _ = sender.send(());
+                            }
+                            Ok(PocketPlaybackEvent::ShutdownImmediately)
+                            | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                                return PocketPlaybackMonitorOutcome::Completed;
+                            }
+                        }
+                    }
+                }
+                shutdown_after_playback |=
+                    matches!(event, PocketPlaybackEvent::ShutdownAfterPlayback);
+                let mut generation = completed_generation.load(Ordering::Acquire);
+                let mut grace_started = Instant::now();
+                loop {
+                    let grace_remaining =
+                        playback_latency_safety_duration.saturating_sub(grace_started.elapsed());
+                    match playback_completion_receiver.recv_timeout(grace_remaining) {
+                        Ok(PocketPlaybackEvent::SourceFinished) => {
+                            generation = completed_generation.load(Ordering::Acquire);
+                            grace_started = Instant::now();
+                        }
+                        #[cfg(test)]
+                        Ok(PocketPlaybackEvent::Probe(sender)) => {
+                            let _ = sender.send(());
+                        }
+                        Ok(PocketPlaybackEvent::ShutdownImmediately)
+                        | Err(mpsc::RecvTimeoutError::Disconnected) => {
+                            return PocketPlaybackMonitorOutcome::Completed;
+                        }
+                        Ok(PocketPlaybackEvent::ShutdownAfterPlayback) => {
+                            shutdown_after_playback = true;
+                        }
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            let latest_generation = completed_generation.load(Ordering::Acquire);
+                            if latest_generation != generation {
+                                generation = latest_generation;
+                                grace_started = Instant::now();
+                                continue;
+                            }
+                            release_completed_pocket_assistant_speech(
+                                generation,
+                                &assistant_speech,
+                            );
+                            let latest_generation = completed_generation.load(Ordering::Acquire);
+                            if latest_generation != generation {
+                                generation = latest_generation;
+                                grace_started = Instant::now();
+                                continue;
+                            }
+                            if shutdown_after_playback {
+                                return PocketPlaybackMonitorOutcome::Completed;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            #[cfg(test)]
+            PocketPlaybackEvent::Probe(sender) => {
+                let _ = sender.send(());
+            }
+            PocketPlaybackEvent::ShutdownImmediately => break,
+        }
+    }
+    PocketPlaybackMonitorOutcome::Completed
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_pocket_playback_monitor_with<F>(
+    task: impl FnOnce() -> PocketPlaybackMonitorOutcome + Send + 'static,
+    spawn: F,
+) -> std::io::Result<std::thread::JoinHandle<PocketPlaybackMonitorOutcome>>
+where
+    F: FnOnce(
+        Box<dyn FnOnce() -> PocketPlaybackMonitorOutcome + Send>,
+    ) -> std::io::Result<std::thread::JoinHandle<PocketPlaybackMonitorOutcome>>,
+{
+    spawn(Box::new(task))
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_pocket_playback_monitor(
+    playback_completion_receiver: mpsc::Receiver<PocketPlaybackEvent>,
+    assistant_speech: Arc<Mutex<Option<(u64, AssistantSpeechGuard)>>>,
+    completed_generation: Arc<AtomicU64>,
+    source_completion_timeout: Duration,
+    playback_latency_safety_duration: Duration,
+) -> std::io::Result<std::thread::JoinHandle<PocketPlaybackMonitorOutcome>> {
+    spawn_pocket_playback_monitor_with(
+        move || {
+            run_pocket_playback_monitor(
+                playback_completion_receiver,
+                assistant_speech,
+                completed_generation,
+                source_completion_timeout,
+                playback_latency_safety_duration,
+            )
+        },
+        |task| {
+            std::thread::Builder::new()
+                .name("pocket-playback-monitor".to_string())
+                .spawn(task)
+        },
+    )
+}
+
+#[cfg(target_os = "macos")]
+fn playback_latency_safety_duration_for_transport(transport: Option<u32>) -> Duration {
+    // CoreAudio transport FOURCC values. Bluetooth and AirPlay routes buffer
+    // beyond the local hardware callback, while an unknown/virtual route has
+    // no trustworthy upper bound. Keep capture protected conservatively for
+    // those routes instead of promising feedback prevention on a 100 ms guess.
+    const BUILT_IN: u32 = 0x626c_746e;
+    const BLUETOOTH: u32 = 0x626c_7565;
+    const BLUETOOTH_LE: u32 = 0x626c_6561;
+    const AIRPLAY: u32 = 0x6169_7270;
+
+    match transport {
+        Some(BUILT_IN) => LOCAL_PLAYBACK_LATENCY_SAFETY_DURATION,
+        Some(BLUETOOTH) | Some(BLUETOOTH_LE) => BLUETOOTH_PLAYBACK_LATENCY_SAFETY_DURATION,
+        Some(AIRPLAY) => AIRPLAY_PLAYBACK_LATENCY_SAFETY_DURATION,
+        Some(_) | None => UNKNOWN_PLAYBACK_LATENCY_SAFETY_DURATION,
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn playback_latency_safety_duration(output_device: Option<&str>) -> Duration {
+    use coreaudio::audio_unit::macos_helpers::{
+        get_default_device_id, get_device_id_from_name, get_device_transport_type,
+    };
+
+    let device_id = match output_device {
+        Some(name) => get_device_id_from_name(name, false),
+        None => get_default_device_id(false),
+    };
+    playback_latency_safety_duration_for_transport(
+        device_id.and_then(|id| get_device_transport_type(id).ok()),
+    )
+}
+
+#[cfg(target_os = "macos")]
+impl<I> PocketPlaybackSource<I> {
+    fn new(
+        input: I,
+        generation: u64,
+        pending_audio_sources: Arc<AtomicUsize>,
+        completed_generation: Arc<AtomicU64>,
+        completion_sender: mpsc::SyncSender<PocketPlaybackEvent>,
+    ) -> Self {
+        Self {
+            input,
+            generation,
+            pending_audio_sources,
+            completed_generation,
+            completion_sender,
+            completion_sent: false,
+        }
+    }
+
+    fn finish(&mut self) {
+        if std::mem::replace(&mut self.completion_sent, true) {
+            return;
+        }
+        let previous = self.pending_audio_sources.fetch_sub(1, Ordering::AcqRel);
+        debug_assert!(previous > 0, "Pocket playback source count underflow");
+        if previous == 1 {
+            self.completed_generation
+                .store(self.generation, Ordering::Release);
+            let _ = self
+                .completion_sender
+                .try_send(PocketPlaybackEvent::SourceFinished);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl<I: Source> Iterator for PocketPlaybackSource<I> {
+    type Item = I::Item;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.input.next();
+        if next.is_none() {
+            self.finish();
+        }
+        next
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.input.size_hint()
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl<I> Drop for PocketPlaybackSource<I> {
+    fn drop(&mut self) {
+        self.finish();
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl<I: Source> Source for PocketPlaybackSource<I> {
+    fn current_span_len(&self) -> Option<usize> {
+        self.input.current_span_len()
+    }
+
+    fn channels(&self) -> ChannelCount {
+        self.input.channels()
+    }
+
+    fn sample_rate(&self) -> SampleRate {
+        self.input.sample_rate()
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        self.input.total_duration()
+    }
+}
 #[cfg(any(test, target_os = "macos"))]
 const PLAYBACK_LATENCY_SAFETY_FRAMES: u64 = SAMPLE_RATE as u64 / 10;
 const PARAKEET_ARCHIVE: Artifact = Artifact {
@@ -486,7 +805,131 @@ fn effective_output_device_name(configured: Option<&str>) -> Option<String> {
 }
 
 pub(crate) fn output_device_uses_speakers(output_device: Option<&str>) -> bool {
-    output_device.is_some_and(|name| name.to_lowercase().contains("speaker"))
+    if output_device.is_some_and(|name| {
+        let normalized = name.to_lowercase();
+        ["speaker", "altavo"]
+            .iter()
+            .any(|keyword| normalized.contains(keyword))
+    }) {
+        return true;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        output_device_is_builtin_speaker(output_device)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn output_device_is_builtin_speaker(output_device: Option<&str>) -> bool {
+    use coreaudio::audio_unit::macos_helpers::{
+        get_device_id_from_name, get_device_transport_type,
+    };
+    use std::mem;
+    use std::ptr::{null, NonNull};
+
+    let device_id = output_device.and_then(|name| get_device_id_from_name(name, false));
+    let Some(device_id) = device_id else {
+        return false;
+    };
+    let transport_type = get_device_transport_type(device_id).ok();
+
+    let streams_address = AudioObjectPropertyAddress {
+        mSelector: kAudioDevicePropertyStreams,
+        mScope: kAudioDevicePropertyScopeOutput,
+        mElement: kAudioObjectPropertyElementMain,
+    };
+    let mut streams_size = 0;
+    // SAFETY: Core Audio writes only the property byte count into the valid stack value.
+    let status = unsafe {
+        AudioObjectGetPropertyDataSize(
+            device_id,
+            NonNull::from(&streams_address),
+            0,
+            null(),
+            NonNull::from(&mut streams_size),
+        )
+    };
+    if status != kAudioHardwareNoError || streams_size == 0 {
+        return false;
+    }
+
+    let mut streams =
+        vec![0 as AudioObjectID; streams_size as usize / mem::size_of::<AudioObjectID>()];
+    // SAFETY: The buffer is sized from Core Audio's preceding property-size query.
+    let status = unsafe {
+        AudioObjectGetPropertyData(
+            device_id,
+            NonNull::from(&streams_address),
+            0,
+            null(),
+            NonNull::from(&mut streams_size),
+            NonNull::new(streams.as_mut_ptr())
+                .expect("non-empty stream buffer")
+                .cast(),
+        )
+    };
+    if status != kAudioHardwareNoError {
+        return false;
+    }
+
+    streams.into_iter().any(|stream_id| {
+        let terminal_address = AudioObjectPropertyAddress {
+            mSelector: kAudioStreamPropertyTerminalType,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain,
+        };
+        let mut terminal_type = 0;
+        let mut terminal_size = mem::size_of::<u32>() as u32;
+        // SAFETY: Core Audio writes one u32 into the valid terminal_type stack value.
+        let status = unsafe {
+            AudioObjectGetPropertyData(
+                stream_id,
+                NonNull::from(&terminal_address),
+                0,
+                null(),
+                NonNull::from(&mut terminal_size),
+                NonNull::from(&mut terminal_type).cast(),
+            )
+        };
+        status == kAudioHardwareNoError
+            && output_metadata_uses_builtin_speakers(transport_type, terminal_type)
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn output_metadata_uses_builtin_speakers(transport_type: Option<u32>, terminal_type: u32) -> bool {
+    // Apple's built-in Mac speaker stream currently reports the USB Audio
+    // speaker terminal code, while other Core Audio devices may report 'spkr'.
+    const USB_AUDIO_SPEAKER_TERMINAL: u32 = 0x0301;
+    transport_type == Some(kAudioDeviceTransportTypeBuiltIn)
+        && (terminal_type == kAudioStreamTerminalTypeSpeaker
+            || terminal_type == USB_AUDIO_SPEAKER_TERMINAL)
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum VoiceInterruptionMode {
+    Automatic,
+    AllowInterruptions,
+    PreventFeedback,
+}
+
+#[cfg_attr(not(any(test, target_os = "macos")), allow(dead_code))]
+pub(crate) fn should_suppress_capture(
+    mode: VoiceInterruptionMode,
+    output_device: Option<&str>,
+) -> bool {
+    match mode {
+        // Automatic is best-effort because macOS cannot classify every external route.
+        // Prevent feedback remains the reliable fallback when this heuristic misses one.
+        VoiceInterruptionMode::Automatic => output_device_uses_speakers(output_device),
+        VoiceInterruptionMode::AllowInterruptions => false,
+        VoiceInterruptionMode::PreventFeedback => true,
+    }
 }
 
 fn file_has_size(path: &Path, size: u64) -> bool {
@@ -823,10 +1266,19 @@ pub fn start_pocket_voice_stream(
     state: State<'_, PocketVoiceState>,
     native_voice: State<'_, NativeVoiceState>,
     stream_id: String,
+    interruption_mode: VoiceInterruptionMode,
+    interruption_sensitivity: InterruptionSensitivity,
 ) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, state, native_voice, stream_id);
+        let _ = (
+            app,
+            state,
+            native_voice,
+            stream_id,
+            interruption_mode,
+            interruption_sensitivity,
+        );
         Err("Pocket voice playback is currently supported on macOS only".to_string())
     }
 
@@ -849,11 +1301,8 @@ pub fn start_pocket_voice_stream(
         let speed = playback_speed(&base);
         let output_device = selected_output_device();
         let effective_output_device = effective_output_device_name(output_device.as_deref());
-        let capture_suppression = output_device_uses_speakers(effective_output_device.as_deref())
-            .then(|| {
-                log::info!("[voice-echo-guard] speaker output detected");
-                native_voice.suppress_capture()
-            });
+        let suppress_capture =
+            should_suppress_capture(interruption_mode, effective_output_device.as_deref());
         let (sender, receiver) = mpsc::channel();
         {
             let mut playback = state
@@ -868,18 +1317,23 @@ pub fn start_pocket_voice_stream(
 
         let playback = state.playback.clone();
         let playback_active = active.clone();
+        let native_voice_state = native_voice.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
-            let _capture_suppression = capture_suppression;
-            let result = run_pocket_voice_stream(
-                &app,
-                &stream_id,
-                &base,
-                voice,
-                output_device.as_deref(),
-                active.clone(),
-                speed,
-                receiver,
-            );
+            let result = run_with_playback_cleanup(&playback, &playback_active, || {
+                run_pocket_voice_stream(
+                    &app,
+                    &stream_id,
+                    &base,
+                    voice,
+                    output_device.as_deref(),
+                    active.clone(),
+                    speed,
+                    receiver,
+                    native_voice_state,
+                    interruption_sensitivity,
+                    suppress_capture,
+                )
+            });
             let (event_state, error, delivery) = match result {
                 Ok(outcome) => (outcome.state, None, outcome.delivery),
                 Err(failure) if !active.load(Ordering::SeqCst) => {
@@ -892,7 +1346,6 @@ pub fn start_pocket_voice_stream(
                     failure.delivery,
                 ),
             };
-            finish_playback(&playback, &playback_active);
             // A terminal event hands stream ownership back to the renderer,
             // which may immediately start a replacement stream. Release the
             // backend playback token before publishing that handoff.
@@ -1209,6 +1662,13 @@ fn begin_playback(
     state: &State<'_, PocketVoiceState>,
     already_active: &str,
 ) -> Result<Arc<AtomicBool>, String> {
+    begin_playback_runtime(state.inner(), already_active)
+}
+
+fn begin_playback_runtime(
+    state: &PocketVoiceState,
+    already_active: &str,
+) -> Result<Arc<AtomicBool>, String> {
     let install = state
         .install
         .lock()
@@ -1263,6 +1723,17 @@ fn finish_playback(playback: &std::sync::Mutex<PlaybackRuntime>, completed: &Arc
             }
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+fn run_with_playback_cleanup<T>(
+    playback: &std::sync::Mutex<PlaybackRuntime>,
+    active: &Arc<AtomicBool>,
+    run: impl FnOnce() -> T,
+) -> T {
+    let result = run();
+    finish_playback(playback, active);
+    result
 }
 
 #[tauri::command]
@@ -1964,6 +2435,9 @@ fn run_pocket_voice_stream(
     active: Arc<AtomicBool>,
     speed: f32,
     receiver: mpsc::Receiver<PocketStreamCommand>,
+    native_voice: NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
+    suppress_capture: bool,
 ) -> Result<PocketStreamOutcome, PocketStreamFailure> {
     use std::num::NonZero;
 
@@ -2010,6 +2484,19 @@ fn run_pocket_voice_stream(
     let mut pending = String::new();
     let mut first_chunk_pending = true;
     let mut playback_started = false;
+    let assistant_speech = Arc::new(Mutex::new(None::<(u64, AssistantSpeechGuard)>));
+    let pending_audio_sources = Arc::new(AtomicUsize::new(0));
+    let completed_generation = Arc::new(AtomicU64::new(0));
+    let (playback_completion_sender, playback_completion_receiver) = mpsc::sync_channel(1);
+    let mut playback_generation = 0_u64;
+    let playback_monitor = spawn_pocket_playback_monitor(
+        playback_completion_receiver,
+        Arc::clone(&assistant_speech),
+        Arc::clone(&completed_generation),
+        POCKET_SOURCE_COMPLETION_TIMEOUT,
+        playback_latency_safety_duration(output_device),
+    )
+    .map_err(|error| format!("start Pocket playback monitor: {error}"))?;
     let mut delivery_ledger = PlaybackDeliveryLedger::default();
     let mut last_progress_emit = Instant::now();
 
@@ -2022,7 +2509,8 @@ fn run_pocket_voice_stream(
                 delivery: Some(delivery),
             });
         }
-        match receiver.recv_timeout(Duration::from_millis(20)) {
+        let command = receiver.recv_timeout(Duration::from_millis(20));
+        match command {
             Ok(PocketStreamCommand::Append(text)) => {
                 pending.push_str(&text);
                 if !synthesize_pocket_stream_ready(
@@ -2038,6 +2526,14 @@ fn run_pocket_voice_stream(
                     &mut pending,
                     &mut first_chunk_pending,
                     &mut playback_started,
+                    &native_voice,
+                    interruption_sensitivity,
+                    suppress_capture,
+                    &assistant_speech,
+                    &pending_audio_sources,
+                    &completed_generation,
+                    &playback_completion_sender,
+                    &mut playback_generation,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     false,
@@ -2066,6 +2562,14 @@ fn run_pocket_voice_stream(
                     &mut pending,
                     &mut first_chunk_pending,
                     &mut playback_started,
+                    &native_voice,
+                    interruption_sensitivity,
+                    suppress_capture,
+                    &assistant_speech,
+                    &pending_audio_sources,
+                    &completed_generation,
+                    &playback_completion_sender,
+                    &mut playback_generation,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
@@ -2081,22 +2585,25 @@ fn run_pocket_voice_stream(
                 }
                 let tail = speed_processor.drain_and_reset()?;
                 if !tail.is_empty() {
-                    delivery_ledger.append_frames(tail.len());
-                    player.append(SamplesBuffer::new(channels, rate, tail));
-                    if !playback_started {
-                        playback_started = true;
-                        emit_pocket_stream_event(
-                            app,
-                            stream_id,
-                            PocketStreamEventState::Started,
-                            None,
-                            None,
-                        );
-                        println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
-                        std::io::stdout()
-                            .flush()
-                            .map_err(|error| format!("signal Pocket playback start: {error}"))?;
-                    }
+                    let tail_len = tail.len();
+                    append_pocket_samples(
+                        app,
+                        stream_id,
+                        &player,
+                        channels,
+                        rate,
+                        tail,
+                        &native_voice,
+                        interruption_sensitivity,
+                        suppress_capture,
+                        &mut playback_started,
+                        &assistant_speech,
+                        &pending_audio_sources,
+                        &completed_generation,
+                        &playback_completion_sender,
+                        &mut playback_generation,
+                    )?;
+                    delivery_ledger.append_frames(tail_len);
                 }
             }
             Ok(PocketStreamCommand::Finish) => {
@@ -2113,6 +2620,14 @@ fn run_pocket_voice_stream(
                     &mut pending,
                     &mut first_chunk_pending,
                     &mut playback_started,
+                    &native_voice,
+                    interruption_sensitivity,
+                    suppress_capture,
+                    &assistant_speech,
+                    &pending_audio_sources,
+                    &completed_generation,
+                    &playback_completion_sender,
+                    &mut playback_generation,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
@@ -2128,17 +2643,25 @@ fn run_pocket_voice_stream(
                 }
                 let tail = speed_processor.finish()?;
                 if !tail.is_empty() {
-                    delivery_ledger.append_frames(tail.len());
-                    player.append(SamplesBuffer::new(channels, rate, tail));
-                    if !playback_started {
-                        emit_pocket_stream_event(
-                            app,
-                            stream_id,
-                            PocketStreamEventState::Started,
-                            None,
-                            None,
-                        );
-                    }
+                    let tail_len = tail.len();
+                    append_pocket_samples(
+                        app,
+                        stream_id,
+                        &player,
+                        channels,
+                        rate,
+                        tail,
+                        &native_voice,
+                        interruption_sensitivity,
+                        suppress_capture,
+                        &mut playback_started,
+                        &assistant_speech,
+                        &pending_audio_sources,
+                        &completed_generation,
+                        &playback_completion_sender,
+                        &mut playback_generation,
+                    )?;
+                    delivery_ledger.append_frames(tail_len);
                 }
                 while !player.empty() {
                     if !active.load(Ordering::SeqCst) {
@@ -2182,13 +2705,41 @@ fn run_pocket_voice_stream(
         }
     })();
 
-    result.map_err(|error| {
+    let wait_for_output_latency = matches!(
+        &result,
+        Ok(PocketStreamOutcome {
+            state: PocketStreamEventState::Completed,
+            ..
+        })
+    );
+    let result = result.map_err(|error| {
         let delivery = delivery_with_played_audio(capture_before_stop(
             || pocket_delivery_snapshot(&delivery_ledger, &player),
             || player.stop(),
         ));
         PocketStreamFailure { error, delivery }
-    })
+    });
+
+    let shutdown = if wait_for_output_latency {
+        PocketPlaybackEvent::ShutdownAfterPlayback
+    } else {
+        PocketPlaybackEvent::ShutdownImmediately
+    };
+    let _ = playback_completion_sender.send(shutdown);
+    let playback_monitor_outcome = playback_monitor.join();
+    if let Ok(mut assistant_speech) = assistant_speech.lock() {
+        assistant_speech.take();
+    }
+    match playback_monitor_outcome {
+        Ok(outcome) => apply_pocket_playback_monitor_outcome(result, outcome),
+        Err(_) => Err(PocketStreamFailure {
+            error: "Pocket playback monitor panicked".to_string(),
+            delivery: delivery_with_played_audio(pocket_delivery_snapshot(
+                &delivery_ledger,
+                &player,
+            )),
+        }),
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -2216,6 +2767,104 @@ fn capture_before_stop(
 }
 
 #[cfg(target_os = "macos")]
+fn release_completed_pocket_assistant_speech(
+    completed_generation: u64,
+    assistant_speech: &Mutex<Option<(u64, AssistantSpeechGuard)>>,
+) {
+    if let Ok(mut assistant_speech) = assistant_speech.lock() {
+        if assistant_speech
+            .as_ref()
+            .is_some_and(|(generation, _)| *generation == completed_generation)
+        {
+            assistant_speech.take();
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
+fn mark_pocket_playback_started(
+    app: &AppHandle,
+    stream_id: &str,
+    native_voice: &NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
+    suppress_capture: bool,
+    playback_started: &mut bool,
+    generation: u64,
+    assistant_speech: &Mutex<Option<(u64, AssistantSpeechGuard)>>,
+) -> Result<(), String> {
+    let mut assistant_speech = assistant_speech
+        .lock()
+        .map_err(|_| "Pocket assistant speech guard lock was poisoned".to_string())?;
+    if assistant_speech
+        .as_ref()
+        .is_some_and(|(active_generation, _)| *active_generation == generation)
+    {
+        return Ok(());
+    }
+    *assistant_speech = Some((
+        generation,
+        native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture),
+    ));
+    if !*playback_started {
+        *playback_started = true;
+        emit_pocket_stream_event(app, stream_id, PocketStreamEventState::Started, None, None);
+        println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
+        std::io::stdout()
+            .flush()
+            .map_err(|error| format!("signal Pocket playback start: {error}"))?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
+fn append_pocket_samples(
+    app: &AppHandle,
+    stream_id: &str,
+    player: &Player,
+    channels: std::num::NonZero<u16>,
+    rate: std::num::NonZero<u32>,
+    samples: Vec<f32>,
+    native_voice: &NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
+    suppress_capture: bool,
+    playback_started: &mut bool,
+    assistant_speech: &Mutex<Option<(u64, AssistantSpeechGuard)>>,
+    pending_audio_sources: &Arc<AtomicUsize>,
+    completed_generation: &Arc<AtomicU64>,
+    playback_completion_sender: &mpsc::SyncSender<PocketPlaybackEvent>,
+    playback_generation: &mut u64,
+) -> Result<(), String> {
+    let previous_sources = pending_audio_sources.fetch_add(1, Ordering::AcqRel);
+    if previous_sources == 0 {
+        *playback_generation = playback_generation.wrapping_add(1).max(1);
+    }
+    let generation = *playback_generation;
+    if let Err(error) = mark_pocket_playback_started(
+        app,
+        stream_id,
+        native_voice,
+        interruption_sensitivity,
+        suppress_capture,
+        playback_started,
+        generation,
+        assistant_speech,
+    ) {
+        pending_audio_sources.fetch_sub(1, Ordering::AcqRel);
+        return Err(error);
+    }
+    player.append(PocketPlaybackSource::new(
+        SamplesBuffer::new(channels, rate, samples),
+        generation,
+        Arc::clone(pending_audio_sources),
+        Arc::clone(completed_generation),
+        playback_completion_sender.clone(),
+    ));
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 #[allow(clippy::too_many_arguments)]
 fn synthesize_pocket_stream_ready(
     app: &AppHandle,
@@ -2230,6 +2879,14 @@ fn synthesize_pocket_stream_ready(
     pending: &mut String,
     first_chunk_pending: &mut bool,
     playback_started: &mut bool,
+    native_voice: &NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
+    suppress_capture: bool,
+    assistant_speech: &Mutex<Option<(u64, AssistantSpeechGuard)>>,
+    pending_audio_sources: &Arc<AtomicUsize>,
+    completed_generation: &Arc<AtomicU64>,
+    playback_completion_sender: &mpsc::SyncSender<PocketPlaybackEvent>,
+    playback_generation: &mut u64,
     delivery_ledger: &mut PlaybackDeliveryLedger,
     last_progress_emit: &mut Instant,
     flush: bool,
@@ -2263,23 +2920,28 @@ fn synthesize_pocket_stream_ready(
                 if delta.is_empty() {
                     return true;
                 }
-                delivery_ledger.append_frames(delta.len());
-                player.append(SamplesBuffer::new(channels, rate, delta));
-                if !*playback_started {
-                    *playback_started = true;
-                    emit_pocket_stream_event(
-                        app,
-                        stream_id,
-                        PocketStreamEventState::Started,
-                        None,
-                        None,
-                    );
-                    println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
-                    if let Err(error) = std::io::stdout().flush() {
-                        callback_error = Some(format!("signal Pocket playback start: {error}"));
-                        return false;
-                    }
+                let delta_len = delta.len();
+                if let Err(error) = append_pocket_samples(
+                    app,
+                    stream_id,
+                    player,
+                    channels,
+                    rate,
+                    delta,
+                    native_voice,
+                    interruption_sensitivity,
+                    suppress_capture,
+                    playback_started,
+                    assistant_speech,
+                    pending_audio_sources,
+                    completed_generation,
+                    playback_completion_sender,
+                    playback_generation,
+                ) {
+                    callback_error = Some(error);
+                    return false;
                 }
+                delivery_ledger.append_frames(delta_len);
                 if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
                     emit_pocket_stream_event(
                         app,
@@ -2846,13 +3508,398 @@ mod tests {
             "MacBook Pro Speakers",
             "Studio SPEAKERS",
             "Living Room Speaker",
+            "Altavoces del MacBook Pro",
+            "Altavoz del salón",
         ] {
             assert!(output_device_uses_speakers(Some(name)), "{name}");
         }
-        for name in ["AirPods Pro", "USB Headphones", "BlackHole 16ch", ""] {
+        for name in [
+            "AirPods Pro",
+            "USB Headphones",
+            "Auriculares externos",
+            "BlackHole 16ch",
+            "",
+        ] {
             assert!(!output_device_uses_speakers(Some(name)), "{name}");
         }
         assert!(!output_device_uses_speakers(None));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn localized_builtin_speaker_metadata_is_distinct_from_headphones() {
+        assert!(output_metadata_uses_builtin_speakers(
+            Some(kAudioDeviceTransportTypeBuiltIn),
+            kAudioStreamTerminalTypeSpeaker,
+        ));
+        assert!(output_metadata_uses_builtin_speakers(
+            Some(kAudioDeviceTransportTypeBuiltIn),
+            0x0301,
+        ));
+        assert!(!output_metadata_uses_builtin_speakers(
+            Some(kAudioDeviceTransportTypeBuiltIn),
+            0x0302,
+        ));
+    }
+
+    #[test]
+    fn interruption_mode_selects_capture_suppression_policy() {
+        assert!(should_suppress_capture(
+            VoiceInterruptionMode::Automatic,
+            Some("MacBook Pro Speakers"),
+        ));
+        assert!(!should_suppress_capture(
+            VoiceInterruptionMode::Automatic,
+            Some("AirPods Pro"),
+        ));
+        assert!(!should_suppress_capture(
+            VoiceInterruptionMode::Automatic,
+            Some("USB Headphones"),
+        ));
+        assert!(!should_suppress_capture(
+            VoiceInterruptionMode::Automatic,
+            Some("Studio Display Audio"),
+        ));
+        assert!(!should_suppress_capture(
+            VoiceInterruptionMode::Automatic,
+            None,
+        ));
+        assert!(!should_suppress_capture(
+            VoiceInterruptionMode::AllowInterruptions,
+            Some("MacBook Pro Speakers"),
+        ));
+        assert!(should_suppress_capture(
+            VoiceInterruptionMode::PreventFeedback,
+            Some("AirPods Pro"),
+        ));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn stale_playback_completion_does_not_release_a_new_burst() {
+        let native_voice = NativeVoiceState::default();
+        let assistant_speech = Mutex::new(Some((
+            2,
+            native_voice.begin_assistant_speech(InterruptionSensitivity::More, false),
+        )));
+
+        release_completed_pocket_assistant_speech(1, &assistant_speech);
+        assert!(assistant_speech.lock().expect("assistant speech").is_some());
+
+        release_completed_pocket_assistant_speech(2, &assistant_speech);
+        assert!(assistant_speech.lock().expect("assistant speech").is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn dropped_pocket_source_finishes_pending_playback_once() {
+        let pending = Arc::new(AtomicUsize::new(1));
+        let completed_generation = Arc::new(AtomicU64::new(0));
+        let (sender, receiver) = mpsc::sync_channel(2);
+        let source = PocketPlaybackSource::new(
+            SamplesBuffer::new(
+                std::num::NonZeroU16::new(1).expect("channels"),
+                std::num::NonZeroU32::new(SAMPLE_RATE).expect("sample rate"),
+                vec![0.0],
+            ),
+            7,
+            Arc::clone(&pending),
+            Arc::clone(&completed_generation),
+            sender,
+        );
+
+        drop(source);
+
+        assert_eq!(pending.load(Ordering::Acquire), 0);
+        assert_eq!(completed_generation.load(Ordering::Acquire), 7);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PocketPlaybackEvent::SourceFinished)
+        ));
+        assert_eq!(receiver.try_iter().count(), 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn exhausted_pocket_source_does_not_finish_again_when_dropped() {
+        let pending = Arc::new(AtomicUsize::new(1));
+        let completed_generation = Arc::new(AtomicU64::new(0));
+        let (sender, receiver) = mpsc::sync_channel(2);
+        let mut source = PocketPlaybackSource::new(
+            SamplesBuffer::new(
+                std::num::NonZeroU16::new(1).expect("channels"),
+                std::num::NonZeroU32::new(SAMPLE_RATE).expect("sample rate"),
+                vec![0.0],
+            ),
+            9,
+            Arc::clone(&pending),
+            Arc::clone(&completed_generation),
+            sender,
+        );
+
+        assert!(source.next().is_some());
+        assert!(source.next().is_none());
+        drop(source);
+
+        assert_eq!(pending.load(Ordering::Acquire), 0);
+        assert_eq!(completed_generation.load(Ordering::Acquire), 9);
+        assert!(matches!(
+            receiver.try_recv(),
+            Ok(PocketPlaybackEvent::SourceFinished)
+        ));
+        assert_eq!(receiver.try_iter().count(), 0);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn playback_monitor_rechecks_generation_after_a_lost_completion_wakeup() {
+        let native_voice = NativeVoiceState::default();
+        let assistant_speech = Arc::new(Mutex::new(Some((
+            3,
+            native_voice.begin_assistant_speech(InterruptionSensitivity::More, false),
+        ))));
+        let completed_generation = Arc::new(AtomicU64::new(1));
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let monitor = spawn_pocket_playback_monitor(
+            receiver,
+            Arc::clone(&assistant_speech),
+            Arc::clone(&completed_generation),
+            Duration::from_secs(1),
+            Duration::from_millis(10),
+        )
+        .expect("spawn playback monitor");
+
+        sender
+            .send(PocketPlaybackEvent::SourceFinished)
+            .expect("send initial completion");
+        let (probe_sender, probe_receiver) = mpsc::channel();
+        sender
+            .send(PocketPlaybackEvent::Probe(probe_sender))
+            .expect("send monitor probe");
+        probe_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("monitor entered completion grace");
+
+        // A full capacity-one channel can drop this generation's wakeup after
+        // the atomic state advances. The monitor must still observe the latest
+        // generation when its current grace expires.
+        completed_generation.store(3, Ordering::Release);
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while assistant_speech.lock().expect("assistant speech").is_some() {
+            assert!(Instant::now() < deadline, "latest guard was not released");
+            std::thread::yield_now();
+        }
+
+        sender
+            .send(PocketPlaybackEvent::ShutdownImmediately)
+            .expect("stop playback monitor");
+        monitor.join().expect("join playback monitor");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn playback_monitor_preserves_grace_when_shutdown_precedes_source_completion() {
+        let native_voice = NativeVoiceState::default();
+        let assistant_speech = Arc::new(Mutex::new(Some((
+            7,
+            native_voice.begin_assistant_speech(InterruptionSensitivity::More, false),
+        ))));
+        let completed_generation = Arc::new(AtomicU64::new(0));
+        let (sender, receiver) = mpsc::sync_channel(4);
+        let monitor = spawn_pocket_playback_monitor(
+            receiver,
+            Arc::clone(&assistant_speech),
+            Arc::clone(&completed_generation),
+            Duration::from_secs(1),
+            Duration::from_millis(20),
+        )
+        .expect("spawn playback monitor");
+
+        sender
+            .send(PocketPlaybackEvent::ShutdownAfterPlayback)
+            .expect("send graceful shutdown");
+        let (first_probe_sender, first_probe_receiver) = mpsc::channel();
+        sender
+            .send(PocketPlaybackEvent::Probe(first_probe_sender))
+            .expect("probe shutdown grace");
+        first_probe_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("monitor waits for source completion");
+
+        std::thread::sleep(Duration::from_millis(40));
+        let (late_probe_sender, late_probe_receiver) = mpsc::channel();
+        sender
+            .send(PocketPlaybackEvent::Probe(late_probe_sender))
+            .expect("probe after an elapsed route interval");
+        late_probe_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("monitor still waits after an elapsed route interval");
+        assert!(assistant_speech.lock().expect("assistant speech").is_some());
+
+        completed_generation.store(7, Ordering::Release);
+        sender
+            .send(PocketPlaybackEvent::SourceFinished)
+            .expect("send delayed source completion");
+        let (second_probe_sender, second_probe_receiver) = mpsc::channel();
+        sender
+            .send(PocketPlaybackEvent::Probe(second_probe_sender))
+            .expect("probe restarted source grace");
+        second_probe_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("monitor observes delayed source completion");
+        assert!(assistant_speech.lock().expect("assistant speech").is_some());
+
+        monitor.join().expect("join playback monitor");
+        assert!(assistant_speech.lock().expect("assistant speech").is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn playback_monitor_preserves_grace_when_source_completion_precedes_shutdown() {
+        let native_voice = NativeVoiceState::default();
+        let assistant_speech = Arc::new(Mutex::new(Some((
+            9,
+            native_voice.begin_assistant_speech(InterruptionSensitivity::More, false),
+        ))));
+        let completed_generation = Arc::new(AtomicU64::new(9));
+        let (sender, receiver) = mpsc::sync_channel(3);
+        let monitor = spawn_pocket_playback_monitor(
+            receiver,
+            Arc::clone(&assistant_speech),
+            Arc::clone(&completed_generation),
+            Duration::from_secs(1),
+            Duration::from_millis(20),
+        )
+        .expect("spawn playback monitor");
+
+        sender
+            .send(PocketPlaybackEvent::SourceFinished)
+            .expect("send source completion");
+        let (probe_sender, probe_receiver) = mpsc::channel();
+        sender
+            .send(PocketPlaybackEvent::Probe(probe_sender))
+            .expect("probe source grace");
+        probe_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("monitor entered source grace");
+        assert!(assistant_speech.lock().expect("assistant speech").is_some());
+
+        sender
+            .send(PocketPlaybackEvent::ShutdownAfterPlayback)
+            .expect("send graceful shutdown");
+        monitor.join().expect("join playback monitor");
+        assert!(assistant_speech.lock().expect("assistant speech").is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn playback_monitor_times_out_a_missing_source_completion_and_releases_ownership() {
+        let state = PocketVoiceState::default();
+        let active = begin_playback_runtime(&state, "already active").expect("first playback");
+        let native_voice = NativeVoiceState::default();
+        let assistant_speech = Arc::new(Mutex::new(Some((
+            11,
+            native_voice.begin_assistant_speech(InterruptionSensitivity::More, true),
+        ))));
+        let completed_generation = Arc::new(AtomicU64::new(0));
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let monitor = spawn_pocket_playback_monitor(
+            receiver,
+            Arc::clone(&assistant_speech),
+            completed_generation,
+            Duration::from_millis(20),
+            Duration::from_millis(10),
+        )
+        .expect("spawn playback monitor");
+
+        let outcome = run_with_playback_cleanup(&state.playback, &active, || {
+            sender
+                .send(PocketPlaybackEvent::ShutdownAfterPlayback)
+                .expect("send graceful shutdown");
+            monitor.join().expect("join playback monitor")
+        });
+
+        assert_eq!(
+            outcome,
+            PocketPlaybackMonitorOutcome::SourceCompletionTimedOut
+        );
+        assert!(matches!(
+            apply_pocket_playback_monitor_outcome(
+                Ok(PocketStreamOutcome {
+                    state: PocketStreamEventState::Completed,
+                    delivery: None,
+                }),
+                outcome,
+            ),
+            Ok(PocketStreamOutcome {
+                state: PocketStreamEventState::Completed,
+                ..
+            })
+        ));
+        assert!(assistant_speech.lock().expect("assistant speech").is_none());
+        assert!(begin_playback_runtime(&state, "still active").is_ok());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn playback_drain_grace_covers_high_latency_transports() {
+        const BUILT_IN: u32 = 0x626c_746e;
+        const BLUETOOTH: u32 = 0x626c_7565;
+        const AIRPLAY: u32 = 0x6169_7270;
+        const VIRTUAL: u32 = 0x7669_7274;
+
+        assert_eq!(
+            playback_latency_safety_duration_for_transport(Some(BUILT_IN)),
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            playback_latency_safety_duration_for_transport(Some(BLUETOOTH)),
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            playback_latency_safety_duration_for_transport(Some(AIRPLAY)),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            playback_latency_safety_duration_for_transport(Some(VIRTUAL)),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            playback_latency_safety_duration_for_transport(Some(0x3f3f_3f3f)),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            playback_latency_safety_duration_for_transport(None),
+            Duration::from_secs(2)
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn pocket_monitor_spawn_failure_releases_playback_for_a_new_stream() {
+        let state = PocketVoiceState::default();
+        let active = begin_playback_runtime(&state, "already active").expect("first playback");
+        let ran = Arc::new(AtomicBool::new(false));
+        let task_ran = Arc::clone(&ran);
+        let result = run_with_playback_cleanup(&state.playback, &active, || {
+            spawn_pocket_playback_monitor_with(
+                move || {
+                    task_ran.store(true, Ordering::SeqCst);
+                    PocketPlaybackMonitorOutcome::Completed
+                },
+                |_task| Err(std::io::Error::other("injected spawn failure")),
+            )
+        });
+
+        assert_eq!(
+            result
+                .expect_err("spawn failure must propagate")
+                .to_string(),
+            "injected spawn failure"
+        );
+        assert!(!ran.load(Ordering::SeqCst));
+        assert!(begin_playback_runtime(&state, "still active").is_ok());
     }
 
     #[test]

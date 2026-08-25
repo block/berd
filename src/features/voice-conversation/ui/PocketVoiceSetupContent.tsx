@@ -35,10 +35,11 @@ export function PocketVoiceSetupContent({
   const pocketInstalled = status?.pocketInstalled ?? status?.installed ?? false;
   const parakeetInstalled =
     status?.parakeetInstalled ?? status?.installed ?? false;
+  const modelName = (model: VoiceModelKind) =>
+    t(model === "pocket" ? "voice.backendPocket" : "voice.backendParakeet");
   const models = [
     {
       model: "pocket" as const,
-      label: "Pocket TTS",
       installed: pocketInstalled,
       diskBytes: status?.pocketSizeBytes ?? null,
       downloadBytes: status?.pocketDownloadBytes ?? 0,
@@ -52,7 +53,6 @@ export function PocketVoiceSetupContent({
     },
     {
       model: "parakeet" as const,
-      label: "Parakeet STT",
       installed: parakeetInstalled,
       diskBytes: status?.parakeetSizeBytes ?? null,
       downloadBytes: status?.parakeetDownloadBytes ?? 0,
@@ -72,7 +72,6 @@ export function PocketVoiceSetupContent({
         {models.map(
           ({
             model,
-            label,
             installed,
             diskBytes,
             downloadBytes,
@@ -83,16 +82,30 @@ export function PocketVoiceSetupContent({
             <SettingsRow
               key={model}
               data-testid={`voice-model-${model}`}
-              label={label}
-              description={
-                installed
-                  ? t("voice.modelInstalledSize", {
-                      size: formatBytes(diskBytes ?? 0),
-                    })
-                  : t("voice.modelMissingSize", {
-                      size: formatBytes(downloadBytes),
-                    })
+              label={
+                visibleModels
+                  ? installed
+                    ? t("voice.modelInstalledSize", {
+                        size: formatBytes(diskBytes ?? 0),
+                      })
+                    : t("voice.modelMissingSize", {
+                        size: formatBytes(downloadBytes),
+                      })
+                  : modelName(model)
               }
+              description={
+                visibleModels
+                  ? undefined
+                  : installed
+                    ? t("voice.modelInstalledSize", {
+                        size: formatBytes(diskBytes ?? 0),
+                      })
+                    : t("voice.modelMissingSize", {
+                        size: formatBytes(downloadBytes),
+                      })
+              }
+              density="compact"
+              className="rounded-md bg-muted/40 pl-3.5"
               action={
                 inProgress ? undefined : installed ? (
                   <Button
@@ -101,6 +114,14 @@ export function PocketVoiceSetupContent({
                     destructive
                     size="sm"
                     data-testid={`voice-model-${model}-remove`}
+                    aria-label={`${
+                      setup.removingModel === model ||
+                      status?.removing === model
+                        ? status?.removalQueued
+                          ? t("voice.removeModelQueued")
+                          : t("voice.removingModel")
+                        : t("voice.removeModel")
+                    } · ${modelName(model)}`}
                     leftIcon={<Trash2 />}
                     disabled={
                       setup.removingModel !== null || status?.removing !== null
@@ -119,6 +140,11 @@ export function PocketVoiceSetupContent({
                     variant="outline"
                     size="sm"
                     data-testid={`voice-model-${model}-download`}
+                    aria-label={`${
+                      modelError
+                        ? t("voice.retryDownload")
+                        : t("voice.download")
+                    } · ${modelName(model)}`}
                     leftIcon={<Download />}
                     disabled={setup.loading || setup.removingModel !== null}
                     onClick={() => void setup.installModel(model)}
@@ -133,6 +159,7 @@ export function PocketVoiceSetupContent({
                 inProgress && modelProgress ? (
                   <div className="space-y-1" aria-live="polite">
                     <Progress
+                      aria-label={modelName(model)}
                       value={
                         modelProgress.totalBytes > 0
                           ? (modelProgress.downloadedBytes /

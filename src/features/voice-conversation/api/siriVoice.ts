@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { VoiceDeliveryProgress } from "./pocketVoice";
+import type {
+  VoiceInterruptionMode,
+  VoiceInterruptionSensitivity,
+} from "../lib/voiceInterruptionPreference";
 
 export interface SiriVoice {
   name: string;
@@ -64,8 +68,16 @@ export interface SiriVoiceStreamEvent {
   delivery?: VoiceDeliveryProgress | null;
 }
 
-export function startSiriVoiceStream(streamId: string): Promise<void> {
-  return invoke("start_siri_voice_stream", { streamId });
+export function startSiriVoiceStream(
+  streamId: string,
+  interruptionMode: VoiceInterruptionMode,
+  interruptionSensitivity: VoiceInterruptionSensitivity,
+): Promise<void> {
+  return invoke("start_siri_voice_stream", {
+    streamId,
+    interruptionMode,
+    interruptionSensitivity,
+  });
 }
 
 export function appendSiriVoiceStream(

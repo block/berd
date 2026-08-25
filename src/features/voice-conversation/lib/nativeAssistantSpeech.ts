@@ -24,6 +24,12 @@ import {
   type SiriVoiceStreamEvent,
 } from "../api/siriVoice";
 import { setVoiceConversationAssistantSpeaking } from "../api/voiceConversation";
+import {
+  FIXED_INTERRUPTION_SENSITIVITY,
+  getVoiceInterruptionPreference,
+  type VoiceInterruptionMode,
+  type VoiceInterruptionSensitivity,
+} from "./voiceInterruptionPreference";
 import { getVoiceOutputBackend } from "./voiceOutputPreference";
 import { useVoiceConversationStore } from "../stores/voiceConversationStore";
 
@@ -46,6 +52,8 @@ type ActiveUtterance = {
   id: string;
   sessionId: string;
   voiceRevision: number;
+  interruptionMode: VoiceInterruptionMode;
+  interruptionSensitivity: VoiceInterruptionSensitivity;
   targets: SpeechTarget[];
   targetSpans: SpeechTargetSpan[];
   text: string;
@@ -1133,12 +1141,15 @@ export function startNativeAssistantSpeech(
       }
       return activeUtterance;
     }
+    const interruptionPreference = getVoiceInterruptionPreference();
     const utterance: ActiveUtterance = {
       id: crypto.randomUUID(),
       sessionId,
       voiceRevision:
         activeSpeechRevision ??
         useVoiceConversationStore.getState().status.revision,
+      interruptionMode: interruptionPreference.mode,
+      interruptionSensitivity: FIXED_INTERRUPTION_SENSITIVITY,
       targets: [target],
       targetSpans: [],
       text: "",
@@ -1200,7 +1211,11 @@ export function startNativeAssistantSpeech(
           return;
         }
         utterance.nativeStartInvoked = true;
-        await streamBackend.start(utterance.id);
+        await streamBackend.start(
+          utterance.id,
+          utterance.interruptionMode,
+          utterance.interruptionSensitivity,
+        );
         if (
           utterance.interruptionRequested ||
           activeUtterance?.id !== utterance.id

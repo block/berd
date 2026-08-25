@@ -891,6 +891,18 @@
     "macSpeechModel": "Dictado en el dispositivo",
     "macSpeechNotInstalled": "No instalado para {{locale}}",
     "macSpeechSystemLocale": "el idioma del sistema",
+    "interruptionDescription": "Elige qué ocurre cuando hablas mientras Berd habla.",
+    "interruptionMode": "Interrupciones",
+    "interruptionModeDescriptions": {
+      "allowInterruptions": "Berd sigue escuchando en todos los dispositivos de audio. Puedes interrumpirlo, pero el audio de los altavoces podría confundirse con tu voz.",
+      "automatic": "Permite interrupciones en la mayoría de los dispositivos de audio. Berd deja de escuchar con los altavoces integrados del Mac o si el nombre del dispositivo contiene «speaker» o «altavoces».",
+      "preventFeedback": "Berd deja de escuchar en todos los dispositivos de audio. Esto evita la retroalimentación, pero no puedes interrumpirlo."
+    },
+    "interruptionModes": {
+      "allowInterruptions": "Permitir interrupciones",
+      "automatic": "Automático",
+      "preventFeedback": "Evitar retroalimentación"
+    },
     "modelInstalled": "Instalado",
     "modelInstalledSize": "Instalado · {{size}} en disco",
     "modelMissingSize": "No instalado · descarga de {{size}}",

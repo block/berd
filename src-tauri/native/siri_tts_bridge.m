@@ -300,6 +300,7 @@ typedef void (^BerdAudioHandler)(
 @property(nonatomic, assign) uint64_t progressGeneration;
 @property(nonatomic, assign) double playbackSampleRate;
 @property(nonatomic, assign) BerdSiriTTSPlaybackStarted startedCallback;
+@property(nonatomic, assign) BerdSiriTTSPlaybackStarted stoppedCallback;
 @property(nonatomic, assign) void *callbackContext;
 @property(nonatomic, copy) NSString *language;
 @property(nonatomic, copy) NSString *voiceName;
@@ -443,14 +444,18 @@ typedef void (^BerdAudioHandler)(
                completionHandler:^(__unused AVAudioPlayerNodeCompletionCallbackType type) {
         dispatch_async(self.queue, ^{
             self.pendingBuffers = MAX(0, self.pendingBuffers - 1);
+            if (self.pendingBuffers == 0 && self.playbackStarted) {
+                self.playbackStarted = NO;
+                if (self.stoppedCallback) self.stoppedCallback(self.callbackContext);
+            }
             self.progressGeneration += 1;
             [self finishIfReady];
         });
     }];
     if (!self.playbackStarted) {
         self.playbackStarted = YES;
-        [self.player play];
         if (self.startedCallback) self.startedCallback(self.callbackContext);
+        [self.player play];
     }
 }
 - (void)startNextSynthesis {
@@ -545,13 +550,17 @@ typedef void (^BerdAudioHandler)(
 }
 - (void)cancel {
     void (^cancelWork)(void) = ^{
-        if (self.finished) return;
         self.startedCallback = NULL;
+        self.stoppedCallback = NULL;
         self.callbackContext = NULL;
-        [self.session cancel];
+        BOOL wasFinished = self.finished;
+        if (!wasFinished) [self.session cancel];
         [self.player stop];
         [self.engine stop];
-        [self finish:BerdError(NSUserCancelledError, @"Siri playback cancelled.")];
+        self.playbackStarted = NO;
+        if (!wasFinished) {
+            [self finish:BerdError(NSUserCancelledError, @"Siri playback cancelled.")];
+        }
     };
     if (dispatch_get_specific(BerdSiriSpeechQueueKey)) cancelWork();
     else dispatch_sync(self.queue, cancelWork);
@@ -1005,6 +1014,7 @@ void *berd_siri_tts_stream_create(
     const char *voiceNameValue,
     float rate,
     BerdSiriTTSPlaybackStarted playbackStarted,
+    BerdSiriTTSPlaybackStarted playbackStopped,
     void *context,
     char **errorOut
 ) {
@@ -1028,6 +1038,7 @@ void *berd_siri_tts_stream_create(
         player.voiceName = voiceName;
         player.rate = MAX(0.25f, MIN(4.0f, rate));
         player.startedCallback = playbackStarted;
+        player.stoppedCallback = playbackStopped;
         player.callbackContext = context;
         return (__bridge_retained void *)player;
     }
@@ -1110,7 +1121,7 @@ bool berd_siri_tts_speak(
             return false;
         }
         void *stream = berd_siri_tts_stream_create(
-            languageValue, voiceNameValue, rate, playbackStarted, context, errorOut);
+            languageValue, voiceNameValue, rate, playbackStarted, NULL, context, errorOut);
         if (!stream) return false;
         if (!berd_siri_tts_stream_enqueue(stream, textValue, errorOut)) {
             berd_siri_tts_stream_release(stream);

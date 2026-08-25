@@ -1,5 +1,6 @@
 import { screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { i18n } from "@/shared/i18n";
 import { renderWithProviders } from "@/test/render";
 import type { PocketVoiceStatus } from "../api/pocketVoice";
 import type { PocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
@@ -40,6 +41,9 @@ const inputState = vi.hoisted(() => ({
 const outputState = vi.hoisted(() => ({
   backend: "pocket" as VoiceOutputBackend,
 }));
+const interruptionState = vi.hoisted(() => ({
+  mode: "automatic" as "automatic" | "allowInterruptions" | "preventFeedback",
+}));
 
 vi.mock("../hooks/usePocketVoiceSetup", () => ({
   usePocketVoiceSetup: () => setupState.current,
@@ -63,6 +67,12 @@ vi.mock("../lib/voiceInputPreference", async (importOriginal) => ({
   useVoiceInputPreference: () => ({
     backend: inputState.backend,
     setBackend: vi.fn(),
+  }),
+}));
+vi.mock("../lib/voiceInterruptionPreference", () => ({
+  useVoiceInterruptionPreference: () => ({
+    ...interruptionState,
+    setMode: vi.fn(),
   }),
 }));
 
@@ -146,7 +156,8 @@ function siriSetup(): SiriVoiceSetup {
 }
 
 describe("VoiceSettings", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("en");
     inputState.backend = "parakeet";
     outputState.backend = "pocket";
     macSpeechSetupState.current = {
@@ -166,7 +177,44 @@ describe("VoiceSettings", () => {
       refresh: vi.fn(),
       install: vi.fn(),
     };
+    interruptionState.mode = "automatic";
     siriSetupState.current = siriSetup();
+  });
+
+  it("shows interruption modes without VAD controls", () => {
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByRole("radiogroup", { name: "Interruptions" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Choose what happens when you speak while Berd is talking.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /^Automatic/ })).toBeChecked();
+    expect(
+      screen.getByText(
+        "Allows interruptions on most audio devices. Berd pauses listening on built-in Mac speakers or when the device name contains “speaker” or “altavoces.”",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Berd keeps listening on every audio device. You can interrupt, but speaker audio may be mistaken for your voice.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Berd pauses listening on every audio device. This prevents feedback, but you can’t interrupt.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Interruption sensitivity"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Advanced…" }),
+    ).not.toBeInTheDocument();
   });
 
   it("uses one accessible speech output heading for the backend picker", () => {
@@ -213,8 +261,10 @@ describe("VoiceSettings", () => {
     expect(outputPicker).toHaveClass("w-full", "sm:w-auto");
     expect(
       screen.getByRole("heading", { name: "Speech output" }).parentElement
-        ?.parentElement,
+        ?.parentElement?.parentElement,
     ).toHaveClass("flex-col", "sm:flex-row");
+    expect(screen.getAllByText("Pocket TTS")).toHaveLength(1);
+    expect(screen.getAllByText("Parakeet STT")).toHaveLength(1);
   });
 
   it("keeps the Voice settings page open while Parakeet completes in place", () => {
@@ -257,12 +307,12 @@ describe("VoiceSettings", () => {
     expect(modelList).toHaveClass("divide-y", "divide-border");
     expect(modelList).not.toHaveClass("border", "rounded-md");
     expect(screen.getByTestId("voice-model-pocket")).toHaveClass(
-      "pr-4",
-      "py-4",
+      "py-2.5",
+      "pl-3.5",
+      "bg-muted/40",
     );
-    expect(screen.getByTestId("voice-model-pocket")).not.toHaveClass(
-      "pl-4",
-      "px-4",
+    expect(screen.getByTestId("voice-model-pocket")).not.toHaveTextContent(
+      "Pocket TTS",
     );
 
     setupState.current = setup({
