@@ -39,7 +39,7 @@ pub mod notifications;
 pub mod openai_realtime;
 pub mod path_resolver;
 #[cfg(target_os = "macos")]
-mod pocket_playback_speed_dsp;
+mod pocket_audio_player;
 pub mod pocket_voice;
 pub mod project_icons;
 pub mod pull_requests;

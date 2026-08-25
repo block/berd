@@ -71,7 +71,6 @@ tar = "0.4"
 # 1.13.5 and reintroduces the CI failure; re-pin it with
 # `cargo update -p sherpa-onnx-sys --precise 1.12.40`.
 sherpa-onnx = "~1.12.40"
-ssstretch = "0.1.0"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
