@@ -2611,6 +2611,7 @@ fn synthesize_and_stream(
     let player = PocketAudioPlayer::new(SAMPLE_RATE, speed, output_device)?;
     let callback_error = Arc::new(Mutex::new(None::<String>));
     let playback_started = Arc::new(AtomicBool::new(false));
+    let mut total_source_frames = 0_u64;
 
     let callback_active = active.clone();
     let callback_error_slot = callback_error.clone();
@@ -2634,6 +2635,7 @@ fn synthesize_and_stream(
             }
             return false;
         }
+        total_source_frames = total_source_frames.saturating_add(samples.len() as u64);
         if !callback_started.swap(true, Ordering::SeqCst) {
             println!("VOICE_CONVERSATION_PLAYBACK_STARTED");
             if let Err(error) = std::io::stdout().flush() {
@@ -2660,15 +2662,27 @@ fn synthesize_and_stream(
         player.stop();
         return Ok(());
     }
+    let drain_timeout =
+        pocket_native_drain_timeout(total_source_frames, player.completed_source_frames(), speed);
+    let drain_started = Instant::now();
     loop {
         if !active.load(Ordering::SeqCst) {
             player.stop();
             break;
         }
         player.ensure_healthy()?;
-        if player.is_empty() {
-            player.ensure_healthy()?;
-            break;
+        match pocket_native_drain_status(player.is_empty(), drain_started.elapsed(), drain_timeout)
+        {
+            PocketNativeDrainStatus::Waiting => {}
+            PocketNativeDrainStatus::Drained => {
+                player.ensure_healthy()?;
+                break;
+            }
+            PocketNativeDrainStatus::TimedOut => {
+                log::warn!("Pocket one-shot native buffer completion bookkeeping timed out");
+                player.stop();
+                break;
+            }
         }
         std::thread::sleep(Duration::from_millis(10));
     }
