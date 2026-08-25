@@ -11,6 +11,19 @@
 static NSString *const BerdSiriTTSErrorDomain = @"com.block.berd.sirittsd";
 static void *BerdSiriSpeechQueueKey = &BerdSiriSpeechQueueKey;
 
+static AVAudioFormat *BerdSiriPlaybackFormat(void) {
+    static AVAudioFormat *format;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        format = [[AVAudioFormat alloc]
+            initWithCommonFormat:AVAudioPCMFormatFloat32
+                      sampleRate:48000
+                        channels:1
+                     interleaved:NO];
+    });
+    return format;
+}
+
 @protocol BerdSiriTTSAvailabilityProtocol <NSObject>
 - (void)downloadedVoicesMatching:(id)voice
                            reply:(void (^)(NSArray *voices))reply;
@@ -287,7 +300,10 @@ typedef void (^BerdAudioHandler)(
 @property(nonatomic, strong) dispatch_queue_t queue;
 @property(nonatomic, strong) AVAudioEngine *engine;
 @property(nonatomic, strong) AVAudioPlayerNode *player;
-@property(nonatomic, strong) AVAudioConverter *converter;
+@property(nonatomic, strong) AVAudioConverter *opusConverter;
+@property(nonatomic, strong) AVAudioFormat *opusSourceFormat;
+@property(nonatomic, strong) AVAudioConverter *pcmConverter;
+@property(nonatomic, strong) AVAudioFormat *pcmSourceFormat;
 @property(nonatomic, strong) BerdSiriSynthesisSession *session;
 @property(nonatomic, strong) NSMutableArray<BerdSiriDeliverySegment *> *pendingTexts;
 @property(nonatomic, strong) NSMutableArray<BerdSiriDeliverySegment *> *deliverySegments;
@@ -349,25 +365,66 @@ typedef void (^BerdAudioHandler)(
         }
         AVAudioFormat *format = [[AVAudioFormat alloc] initWithStreamDescription:&description];
         AVAudioFrameCount count = (AVAudioFrameCount)(data.length / description.mBytesPerFrame);
-        AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc]
+        AVAudioPCMBuffer *sourceBuffer = [[AVAudioPCMBuffer alloc]
             initWithPCMFormat:format frameCapacity:count];
-        buffer.frameLength = count;
-        AudioBuffer *destination = &buffer.mutableAudioBufferList->mBuffers[0];
-        memcpy(destination->mData, data.bytes, MIN(data.length, destination->mDataByteSize));
-        return buffer;
+        sourceBuffer.frameLength = count;
+        AudioBuffer *sourceDestination = &sourceBuffer.mutableAudioBufferList->mBuffers[0];
+        memcpy(sourceDestination->mData, data.bytes,
+               MIN(data.length, sourceDestination->mDataByteSize));
+
+        AVAudioFormat *playbackFormat = BerdSiriPlaybackFormat();
+        if ([format isEqual:playbackFormat]) return sourceBuffer;
+
+        if (!self.pcmConverter || ![self.pcmSourceFormat isEqual:format]) {
+            self.pcmSourceFormat = format;
+            self.pcmConverter = [[AVAudioConverter alloc]
+                initFromFormat:format toFormat:playbackFormat];
+        }
+        if (!self.pcmConverter) {
+            if (error) *error = BerdError(20, @"Could not create a Siri PCM converter.");
+            return nil;
+        }
+        double sampleRateRatio = playbackFormat.sampleRate / MAX(format.sampleRate, 1);
+        AVAudioFrameCount capacity = (AVAudioFrameCount)ceil(count * sampleRateRatio) + 32;
+        AVAudioPCMBuffer *normalized = [[AVAudioPCMBuffer alloc]
+            initWithPCMFormat:playbackFormat frameCapacity:capacity];
+        __block BOOL supplied = NO;
+        NSError *conversionError = nil;
+        AVAudioConverterOutputStatus status = [self.pcmConverter
+            convertToBuffer:normalized error:&conversionError
+            withInputFromBlock:^AVAudioBuffer *(__unused AVAudioPacketCount requested,
+                                                 AVAudioConverterInputStatus *inputStatus) {
+                if (supplied) {
+                    *inputStatus = AVAudioConverterInputStatus_NoDataNow;
+                    return nil;
+                }
+                supplied = YES;
+                *inputStatus = AVAudioConverterInputStatus_HaveData;
+                return sourceBuffer;
+            }];
+        if (conversionError || status == AVAudioConverterOutputStatus_Error) {
+            if (error) {
+                *error = conversionError ?: BerdError(21, @"Could not normalize Siri PCM audio.");
+            }
+            return nil;
+        }
+        return normalized.frameLength ? normalized : nil;
     }
     if (description.mFormatID != kAudioFormatOpus) {
         if (error) *error = BerdError(17, @"Siri returned an unsupported audio format.");
         return nil;
     }
     AVAudioFormat *source = [[AVAudioFormat alloc] initWithStreamDescription:&description];
-    AVAudioFormat *destination = [[AVAudioFormat alloc]
-        initWithCommonFormat:AVAudioPCMFormatFloat32
-                  sampleRate:description.mSampleRate
-                    channels:description.mChannelsPerFrame
-                 interleaved:NO];
-    if (!self.converter) self.converter = [[AVAudioConverter alloc] initFromFormat:source
-                                                                         toFormat:destination];
+    AVAudioFormat *destination = BerdSiriPlaybackFormat();
+    if (!self.opusConverter || ![self.opusSourceFormat isEqual:source]) {
+        self.opusSourceFormat = source;
+        self.opusConverter = [[AVAudioConverter alloc] initFromFormat:source
+                                                             toFormat:destination];
+    }
+    if (!self.opusConverter) {
+        if (error) *error = BerdError(22, @"Could not create a Siri Opus converter.");
+        return nil;
+    }
     UInt32 count = MAX(packetCount, 1);
     AVAudioCompressedBuffer *compressed = [[AVAudioCompressedBuffer alloc]
         initWithFormat:source packetCapacity:count maximumPacketSize:MAX((UInt32)data.length, 1)];
@@ -386,11 +443,13 @@ typedef void (^BerdAudioHandler)(
         if (error) *error = BerdError(18, @"Siri omitted Opus packet descriptions.");
         return nil;
     }
+    double sampleRateRatio = destination.sampleRate / MAX(source.sampleRate, 1);
+    AVAudioFrameCount capacity = (AVAudioFrameCount)ceil(count * 5760 * sampleRateRatio) + 32;
     AVAudioPCMBuffer *pcm = [[AVAudioPCMBuffer alloc]
-        initWithPCMFormat:destination frameCapacity:count * 5760];
+        initWithPCMFormat:destination frameCapacity:capacity];
     __block BOOL supplied = NO;
     NSError *conversionError = nil;
-    AVAudioConverterOutputStatus status = [self.converter
+    AVAudioConverterOutputStatus status = [self.opusConverter
         convertToBuffer:pcm error:&conversionError
         withInputFromBlock:^AVAudioBuffer *(AVAudioPacketCount requested,
                                              AVAudioConverterInputStatus *inputStatus) {
@@ -409,29 +468,63 @@ typedef void (^BerdAudioHandler)(
     }
     return pcm.frameLength ? pcm : nil;
 }
-- (BOOL)ensurePlayer:(AVAudioFormat *)format error:(NSError **)error {
+- (NSArray<AVAudioPCMBuffer *> *)finishConversion:(NSError **)error {
+    NSMutableArray<AVAudioPCMBuffer *> *buffers = [NSMutableArray array];
+    NSMutableArray<AVAudioConverter *> *converters = [NSMutableArray array];
+    if (self.pcmConverter) [converters addObject:self.pcmConverter];
+    if (self.opusConverter) [converters addObject:self.opusConverter];
+    for (AVAudioConverter *converter in converters) {
+        for (;;) {
+            AVAudioPCMBuffer *buffer = [[AVAudioPCMBuffer alloc]
+                initWithPCMFormat:BerdSiriPlaybackFormat() frameCapacity:16384];
+            NSError *conversionError = nil;
+            AVAudioConverterOutputStatus status = [converter
+                convertToBuffer:buffer error:&conversionError
+                withInputFromBlock:^AVAudioBuffer *(__unused AVAudioPacketCount requested,
+                                                     AVAudioConverterInputStatus *inputStatus) {
+                    *inputStatus = AVAudioConverterInputStatus_EndOfStream;
+                    return nil;
+                }];
+            if (conversionError || status == AVAudioConverterOutputStatus_Error) {
+                if (error) {
+                    *error = conversionError ?:
+                        BerdError(24, @"Could not finish converting Siri audio.");
+                }
+                return nil;
+            }
+            if (buffer.frameLength) [buffers addObject:buffer];
+            if (status == AVAudioConverterOutputStatus_EndOfStream ||
+                status == AVAudioConverterOutputStatus_InputRanDry || !buffer.frameLength) {
+                break;
+            }
+        }
+    }
+    self.pcmConverter = nil;
+    self.pcmSourceFormat = nil;
+    self.opusConverter = nil;
+    self.opusSourceFormat = nil;
+    return buffers;
+}
+- (BOOL)ensurePlayer:(NSError **)error {
     if (self.player) return YES;
     self.engine = [AVAudioEngine new];
     self.player = [AVAudioPlayerNode new];
     [self.engine attachNode:self.player];
-    [self.engine connect:self.player to:self.engine.mainMixerNode format:format];
+    [self.engine connect:self.player
+                      to:self.engine.mainMixerNode
+                  format:BerdSiriPlaybackFormat()];
     [self.engine prepare];
     if (![self.engine startAndReturnError:error]) return NO;
     return YES;
 }
-- (void)enqueueData:(NSData *)data format:(AudioStreamBasicDescription)format
-         packetCount:(UInt32)packetCount packetDescriptions:(NSData *)packetDescriptions
-         deliverySegment:(BerdSiriDeliverySegment *)deliverySegment {
-    if (self.finished || !data.length) return;
-    self.progressGeneration += 1;
-    NSError *error = nil;
-    AVAudioPCMBuffer *buffer = [self decodeData:data format:format packetCount:packetCount
-                            packetDescriptions:packetDescriptions error:&error];
-    if (error || !buffer) {
-        if (error) [self finish:error];
+- (void)scheduleBuffer:(AVAudioPCMBuffer *)buffer
+       deliverySegment:(BerdSiriDeliverySegment *)deliverySegment {
+    if (![buffer.format isEqual:BerdSiriPlaybackFormat()]) {
+        [self finish:BerdError(23, @"Siri audio did not match the playback format.")];
         return;
     }
-    if (![self ensurePlayer:buffer.format error:&error]) {
+    NSError *error = nil;
+    if (![self ensurePlayer:&error]) {
         [self finish:error];
         return;
     }
@@ -457,6 +550,20 @@ typedef void (^BerdAudioHandler)(
         if (self.startedCallback) self.startedCallback(self.callbackContext);
         [self.player play];
     }
+}
+- (void)enqueueData:(NSData *)data format:(AudioStreamBasicDescription)format
+         packetCount:(UInt32)packetCount packetDescriptions:(NSData *)packetDescriptions
+         deliverySegment:(BerdSiriDeliverySegment *)deliverySegment {
+    if (self.finished || !data.length) return;
+    self.progressGeneration += 1;
+    NSError *error = nil;
+    AVAudioPCMBuffer *buffer = [self decodeData:data format:format packetCount:packetCount
+                            packetDescriptions:packetDescriptions error:&error];
+    if (error || !buffer) {
+        if (error) [self finish:error];
+        return;
+    }
+    [self scheduleBuffer:buffer deliverySegment:deliverySegment];
 }
 - (void)startNextSynthesis {
     if (self.finished || self.session || self.pendingTexts.count == 0) {
@@ -485,7 +592,20 @@ typedef void (^BerdAudioHandler)(
                 [weakSelf finish:error];
                 return;
             }
-            if (!error) deliverySegment.synthesisComplete = YES;
+            if (!error) {
+                NSError *conversionError = nil;
+                NSArray<AVAudioPCMBuffer *> *buffers =
+                    [weakSelf finishConversion:&conversionError];
+                if (!buffers) {
+                    [weakSelf finish:conversionError];
+                    return;
+                }
+                for (AVAudioPCMBuffer *buffer in buffers) {
+                    [weakSelf scheduleBuffer:buffer deliverySegment:deliverySegment];
+                    if (weakSelf.finished) return;
+                }
+                deliverySegment.synthesisComplete = YES;
+            }
             [weakSelf startNextSynthesis];
         });
     }];
