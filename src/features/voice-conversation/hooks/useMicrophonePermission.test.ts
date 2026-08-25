@@ -41,7 +41,7 @@ describe("useMicrophonePermission", () => {
     const { result } = renderHook(() => useMicrophonePermission());
 
     await waitFor(() => expect(result.current.status).toBe("denied"));
-    expect(result.current.error).toBe(false);
+    expect(result.current.openSettingsError).toBe(false);
   });
 
   it("refreshes permission when the window regains focus", async () => {
@@ -97,9 +97,30 @@ describe("useMicrophonePermission", () => {
 
     await act(() => result.current.openSettings());
 
-    expect(result.current.error).toBe(true);
+    expect(result.current.openSettingsError).toBe(true);
     expect(consoleError).toHaveBeenCalledWith(
       "Failed to open microphone settings",
+      cause,
+    );
+  });
+
+  it("does not report a settings-open error when a focus refresh fails", async () => {
+    const cause = { message: "status unavailable" };
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    mocks.getStatus
+      .mockResolvedValueOnce("denied")
+      .mockRejectedValueOnce(cause);
+    const { result } = renderHook(() => useMicrophonePermission());
+    await waitFor(() => expect(result.current.status).toBe("denied"));
+
+    act(() => window.dispatchEvent(new Event("focus")));
+
+    await waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(2));
+    expect(result.current.openSettingsError).toBe(false);
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to read microphone permission",
       cause,
     );
   });

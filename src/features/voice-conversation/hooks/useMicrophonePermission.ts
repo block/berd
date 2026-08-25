@@ -7,13 +7,13 @@ import {
 
 export interface MicrophonePermission {
   status: MicrophonePermissionStatus | null;
-  error: boolean;
+  openSettingsError: boolean;
   openSettings: () => Promise<void>;
 }
 
 export function useMicrophonePermission(enabled = true): MicrophonePermission {
   const [status, setStatus] = useState<MicrophonePermissionStatus | null>(null);
-  const [error, setError] = useState(false);
+  const [openSettingsError, setOpenSettingsError] = useState(false);
   const refreshId = useRef(0);
 
   const refresh = useCallback(async () => {
@@ -22,11 +22,9 @@ export function useMicrophonePermission(enabled = true): MicrophonePermission {
       const next = await getMicrophonePermissionStatus();
       if (id !== refreshId.current) return;
       setStatus(next);
-      setError(false);
     } catch (cause) {
       if (id !== refreshId.current) return;
       console.error("Failed to read microphone permission", cause);
-      setError(true);
     }
   }, []);
 
@@ -34,7 +32,7 @@ export function useMicrophonePermission(enabled = true): MicrophonePermission {
     if (!enabled || !window.__TAURI_INTERNALS__) {
       refreshId.current += 1;
       setStatus(null);
-      setError(false);
+      setOpenSettingsError(false);
       return;
     }
     void refresh();
@@ -49,14 +47,14 @@ export function useMicrophonePermission(enabled = true): MicrophonePermission {
   }, [enabled, refresh]);
 
   const openSettings = useCallback(async () => {
-    setError(false);
+    setOpenSettingsError(false);
     try {
       await openMicrophonePrivacySettings();
     } catch (cause) {
       console.error("Failed to open microphone settings", cause);
-      setError(true);
+      setOpenSettingsError(true);
     }
   }, []);
 
-  return { status, error, openSettings };
+  return { status, openSettingsError, openSettings };
 }

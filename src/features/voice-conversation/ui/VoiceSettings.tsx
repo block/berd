@@ -140,7 +140,7 @@ export function VoiceSettings() {
             >
               {t("voice.openMicrophoneSettings")}
             </Button>
-            {microphonePermission.error ? (
+            {microphonePermission.openSettingsError ? (
               <p>{t("voice.openMicrophoneSettingsError")}</p>
             ) : null}
           </AlertDescription>

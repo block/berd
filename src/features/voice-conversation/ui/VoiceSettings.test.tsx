@@ -47,7 +47,7 @@ const interruptionState = vi.hoisted(() => ({
 }));
 const microphonePermissionState = vi.hoisted(() => ({
   status: "authorized" as "notDetermined" | "denied" | "authorized" | "unknown",
-  error: false,
+  openSettingsError: false,
   openSettings: vi.fn(),
 }));
 
@@ -168,7 +168,7 @@ describe("VoiceSettings", () => {
   beforeEach(async () => {
     await i18n.changeLanguage("en");
     microphonePermissionState.status = "authorized";
-    microphonePermissionState.error = false;
+    microphonePermissionState.openSettingsError = false;
     microphonePermissionState.openSettings.mockReset();
     inputState.backend = "parakeet";
     outputState.backend = "pocket";
@@ -256,7 +256,7 @@ describe("VoiceSettings", () => {
 
   it("shows localized guidance when microphone settings cannot open", () => {
     microphonePermissionState.status = "denied";
-    microphonePermissionState.error = true;
+    microphonePermissionState.openSettingsError = true;
     setupState.current = setup(pocketStatus());
     renderWithProviders(<VoiceSettings />);
 
