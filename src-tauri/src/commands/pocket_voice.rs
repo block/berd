@@ -12,7 +12,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
-#[cfg(any(test, target_os = "macos"))]
+#[cfg(target_os = "macos")]
 use berd_voice::SAMPLE_RATE;
 #[cfg(target_os = "macos")]
 use berd_voice::{load_text_to_speech, load_voice_style, PocketTts, VoiceStyle};
@@ -32,8 +32,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 #[cfg(target_os = "macos")]
 use super::pocket_audio_player::PocketAudioPlayer;
+#[cfg(target_os = "macos")]
+use super::native_voice::AssistantSpeechGuard;
 use super::{
-    native_voice::{AssistantSpeechGuard, InterruptionSensitivity, NativeVoiceState},
+    native_voice::{InterruptionSensitivity, NativeVoiceState},
     voice_capture::VoiceCaptureState,
 };
 use tokio::io::AsyncWriteExt;
