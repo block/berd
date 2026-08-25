@@ -2445,6 +2445,7 @@ export const designSystemComponentManifest = [
       "data-[state=checked]:bg-primary",
       "data-[state=checked]:border-none",
       "disabled:cursor-not-allowed",
+      "disabled:opacity-100",
       "disabled:opacity-50",
       "focus-visible:border-ring",
       "focus-visible:ring-[1px]",

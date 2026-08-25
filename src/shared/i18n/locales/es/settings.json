@@ -868,6 +868,24 @@
     }
   },
   "voice": {
+    "advancedDetection": {
+      "description": "Ajusta cómo Berd detecta tu voz.",
+      "done": "Listo",
+      "interruptionSensitivity": "Sensibilidad de interrupción",
+      "interruptionSensitivityDescription": "Con qué facilidad tu voz interrumpe a Berd mientras habla.",
+      "open": "Avanzado…",
+      "reset": "Restablecer valores predeterminados",
+      "rowDescription": "Ajusta los umbrales de detección de voz e interrupción.",
+      "rowTitle": "Detección de voz",
+      "sensitivityOptions": {
+        "balanced": "Equilibrada · umbral 0,65",
+        "less": "Menos sensible · umbral 0,80",
+        "more": "Más sensible · umbral 0,50"
+      },
+      "speechSensitivity": "Sensibilidad de detección de voz",
+      "speechSensitivityDescription": "Con qué facilidad Berd reconoce que empezaste a hablar.",
+      "title": "Detección de voz avanzada"
+    },
     "backendMacSpeech": "Reconocimiento de voz de Apple",
     "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
@@ -903,13 +921,6 @@
       "automatic": "Automático",
       "preventFeedback": "Evitar retroalimentación"
     },
-    "interruptionSensitivities": {
-      "balanced": "Equilibrada",
-      "less": "Menor",
-      "more": "Mayor"
-    },
-    "interruptionSensitivity": "Sensibilidad de interrupción",
-    "interruptionSensitivityDescription": "Elige con qué facilidad tu voz interrumpe a Berd mientras habla.",
     "modelInstalled": "Instalado",
     "modelInstalledSize": "Instalado · {{size}} en disco",
     "modelMissingSize": "No instalado · descarga de {{size}}",

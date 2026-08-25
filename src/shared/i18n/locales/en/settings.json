@@ -865,6 +865,24 @@
     }
   },
   "voice": {
+    "advancedDetection": {
+      "description": "Tune how Berd detects your speech.",
+      "done": "Done",
+      "interruptionSensitivity": "Interruption sensitivity",
+      "interruptionSensitivityDescription": "How easily your voice interrupts Berd while it is speaking.",
+      "open": "Advanced…",
+      "reset": "Reset to defaults",
+      "rowDescription": "Tune speech detection and interruption thresholds.",
+      "rowTitle": "Voice detection",
+      "sensitivityOptions": {
+        "balanced": "Balanced · 0.65 threshold",
+        "less": "Less sensitive · 0.80 threshold",
+        "more": "More sensitive · 0.50 threshold"
+      },
+      "speechSensitivity": "Speech detection sensitivity",
+      "speechSensitivityDescription": "How easily Berd recognizes that you started speaking.",
+      "title": "Advanced voice detection"
+    },
     "backendMacSpeech": "Apple speech recognition",
     "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
@@ -900,13 +918,6 @@
       "automatic": "Automatic",
       "preventFeedback": "Prevent feedback"
     },
-    "interruptionSensitivities": {
-      "balanced": "Balanced",
-      "less": "Less",
-      "more": "More"
-    },
-    "interruptionSensitivity": "Interruption sensitivity",
-    "interruptionSensitivityDescription": "Choose how easily your voice interrupts Berd while it is speaking.",
     "modelInstalled": "Installed",
     "modelInstalledSize": "Installed · {{size}} on disk",
     "modelMissingSize": "Not installed · {{size}} download",

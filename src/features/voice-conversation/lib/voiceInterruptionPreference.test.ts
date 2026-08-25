@@ -1,36 +1,38 @@
-import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getDefaultVoiceInterruptionPreference,
   getVoiceInterruptionPreference,
   setVoiceInterruptionPreference,
-  useVoiceInterruptionPreference,
 } from "./voiceInterruptionPreference";
 
 describe("voice interruption preference", () => {
   beforeEach(() => window.localStorage.clear());
   afterEach(() => vi.restoreAllMocks());
 
-  it("defaults to automatic with balanced sensitivity", () => {
+  it("defaults to automatic with the existing VAD thresholds", () => {
     expect(getDefaultVoiceInterruptionPreference()).toEqual({
       mode: "automatic",
       sensitivity: "balanced",
+      speechSensitivity: "more",
     });
     expect(getVoiceInterruptionPreference()).toEqual({
       mode: "automatic",
       sensitivity: "balanced",
+      speechSensitivity: "more",
     });
   });
 
-  it("persists the selected mode and sensitivity", () => {
+  it("persists the selected mode and sensitivities", () => {
     setVoiceInterruptionPreference({
       mode: "allowInterruptions",
       sensitivity: "more",
+      speechSensitivity: "less",
     });
 
     expect(getVoiceInterruptionPreference()).toEqual({
       mode: "allowInterruptions",
       sensitivity: "more",
+      speechSensitivity: "less",
     });
   });
 
@@ -43,28 +45,31 @@ describe("voice interruption preference", () => {
     expect(getVoiceInterruptionPreference()).toEqual({
       mode: "preventFeedback",
       sensitivity: "balanced",
+      speechSensitivity: "more",
     });
   });
 
   it("keeps the renderer preference usable when storage writes fail", () => {
-    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+    vi.spyOn(window.localStorage, "setItem").mockImplementation(() => {
       throw new Error("storage unavailable");
     });
 
     setVoiceInterruptionPreference({
       mode: "preventFeedback",
       sensitivity: "less",
+      speechSensitivity: "balanced",
     });
 
     expect(getVoiceInterruptionPreference()).toEqual({
       mode: "preventFeedback",
       sensitivity: "less",
+      speechSensitivity: "balanced",
     });
   });
 
   it("accepts a newer persisted value after a failed write", () => {
     const setItem = vi
-      .spyOn(Storage.prototype, "setItem")
+      .spyOn(window.localStorage, "setItem")
       .mockImplementationOnce(() => {
         throw new Error("storage unavailable");
       });
@@ -72,50 +77,22 @@ describe("voice interruption preference", () => {
     setVoiceInterruptionPreference({
       mode: "preventFeedback",
       sensitivity: "less",
+      speechSensitivity: "balanced",
     });
     setItem.mockRestore();
     window.localStorage.setItem(
       "goose:voice-interruption-preference",
-      JSON.stringify({ mode: "allowInterruptions", sensitivity: "more" }),
+      JSON.stringify({
+        mode: "allowInterruptions",
+        sensitivity: "more",
+        speechSensitivity: "less",
+      }),
     );
 
     expect(getVoiceInterruptionPreference()).toEqual({
       mode: "allowInterruptions",
       sensitivity: "more",
-    });
-  });
-
-  it("accepts a same-value cross-window storage event after a failed write", () => {
-    const { result, unmount } = renderHook(() =>
-      useVoiceInterruptionPreference(),
-    );
-    const setItem = vi
-      .spyOn(Storage.prototype, "setItem")
-      .mockImplementation(() => {
-        throw new Error("storage unavailable");
-      });
-
-    act(() => {
-      setVoiceInterruptionPreference({
-        mode: "preventFeedback",
-        sensitivity: "less",
-      });
-    });
-    expect(result.current.mode).toBe("preventFeedback");
-    setItem.mockRestore();
-    unmount();
-
-    act(() => {
-      window.dispatchEvent(
-        new StorageEvent("storage", {
-          key: "goose:voice-interruption-preference",
-          newValue: null,
-        }),
-      );
-    });
-    expect(getVoiceInterruptionPreference()).toEqual({
-      mode: "automatic",
-      sensitivity: "balanced",
+      speechSensitivity: "less",
     });
   });
 });

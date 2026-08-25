@@ -26,7 +26,8 @@ use super::native_voice::{InterruptionSensitivity, NativeVoiceState};
 use super::pocket_voice::VoiceInterruptionMode;
 #[cfg(target_os = "macos")]
 use super::pocket_voice::{
-    effective_output_device_name, output_device_uses_speakers, should_suppress_capture,
+    effective_output_device_name, output_device_uses_speakers, playback_latency_safety_duration,
+    should_suppress_capture,
 };
 
 #[derive(Clone, Debug, Default)]
@@ -143,7 +144,6 @@ const SIRI_STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 #[cfg(target_os = "macos")]
 const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 #[cfg(target_os = "macos")]
-const SIRI_PLAYBACK_LATENCY_SAFETY_DURATION: Duration = Duration::from_millis(100);
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
 static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
@@ -505,6 +505,7 @@ struct SiriStreamCallbackContext {
     native_voice: NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
+    playback_latency_safety_duration: Duration,
     playback_started: AtomicBool,
     playback_lifetime: Arc<SiriPlaybackLifetime<AssistantSpeechGuard>>,
 }
@@ -549,7 +550,7 @@ unsafe extern "C" fn siri_playback_stopped(context: *mut std::ffi::c_void) {
     let _release = schedule_siri_playback_release(
         &context.playback_lifetime,
         generation,
-        SIRI_PLAYBACK_LATENCY_SAFETY_DURATION,
+        context.playback_latency_safety_duration,
     );
 }
 
@@ -787,6 +788,7 @@ fn run_siri_stream(
     native_voice: NativeVoiceState,
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
+    playback_latency_safety_duration: Duration,
 ) -> Result<SiriStreamOutcome, SiriStreamFailure> {
     let language = CString::new(selection.language)
         .map_err(|_| "Siri voice language cannot contain NUL bytes".to_string())?;
@@ -799,6 +801,7 @@ fn run_siri_stream(
         native_voice,
         interruption_sensitivity,
         suppress_capture,
+        playback_latency_safety_duration,
         playback_started: AtomicBool::new(false),
         playback_lifetime: Arc::clone(&playback_lifetime),
     });
@@ -988,10 +991,11 @@ pub fn start_siri_voice_stream(
             "Select an installed Siri voice in Voice settings before using Siri TTS".to_string()
         })?;
         let active = begin_playback(&state, webview_window.label())?;
-        let suppress_capture = should_suppress_capture(
-            interruption_mode,
-            effective_output_device_name(None).as_deref(),
-        );
+        let effective_output_device = effective_output_device_name(None);
+        let suppress_capture =
+            should_suppress_capture(interruption_mode, effective_output_device.as_deref());
+        let playback_latency_safety_duration =
+            playback_latency_safety_duration(effective_output_device.as_deref());
         let (sender, receiver) = mpsc::channel();
         {
             let mut runtime = state
@@ -1019,6 +1023,7 @@ pub fn start_siri_voice_stream(
                 native_voice_state,
                 interruption_sensitivity,
                 suppress_capture,
+                playback_latency_safety_duration,
             );
             let (event_state, error, delivery) = match result {
                 Ok(outcome) => (outcome.state, None, outcome.delivery),

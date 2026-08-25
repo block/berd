@@ -67,5 +67,6 @@ describe("RadioGroupCard", () => {
 
     expect(automatic).toBeChecked();
     expect(prevent).not.toBeChecked();
+    expect(prevent).toHaveClass("disabled:opacity-100");
   });
 });

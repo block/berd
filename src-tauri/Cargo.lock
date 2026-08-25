@@ -16,6 +16,7 @@ dependencies = [
  "bzip2 0.6.1",
  "cc",
  "chrono",
+ "coreaudio-rs",
  "dirs",
  "doctor",
  "dunce",

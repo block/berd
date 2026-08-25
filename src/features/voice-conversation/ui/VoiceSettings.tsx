@@ -21,16 +21,14 @@ import {
   isMacSpeechAvailable,
   useVoiceInputPreference,
 } from "../lib/voiceInputPreference";
-import type {
-  VoiceInterruptionMode,
-  VoiceInterruptionSensitivity,
-} from "../lib/voiceInterruptionPreference";
+import type { VoiceInterruptionMode } from "../lib/voiceInterruptionPreference";
 import { useVoiceInterruptionPreference } from "../lib/voiceInterruptionPreference";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
 import { useVoiceOutputPreference } from "../lib/voiceOutputPreference";
 import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
 import { MacSpeechSettings } from "./MacSpeechSettings";
 import { SiriVoiceSettings } from "./SiriVoiceSettings";
+import { AdvancedVoiceDetectionDialog } from "./AdvancedVoiceDetectionDialog";
 
 const INTERRUPTION_MODES: VoiceInterruptionMode[] = [
   "automatic",
@@ -82,8 +80,6 @@ export function VoiceSettings() {
   const outputDescriptionId = useId();
   const interruptionHeadingId = useId();
   const interruptionDescriptionId = useId();
-  const sensitivityHeadingId = useId();
-  const sensitivityDescriptionId = useId();
   const inputReady =
     input.backend === "macos"
       ? Boolean(
@@ -259,50 +255,19 @@ export function VoiceSettings() {
             );
           })}
         </RadioGroup>
-        {interruption.mode !== "preventFeedback" ? (
-          <div className="flex min-w-0 flex-col gap-4 pt-2 sm:flex-row sm:items-center">
-            <div className="min-w-0 flex-1">
-              <h2 id={sensitivityHeadingId} className="text-sm font-medium">
-                {t("voice.interruptionSensitivity")}
-              </h2>
-              <p
-                id={sensitivityDescriptionId}
-                className="mt-0.5 text-xs text-muted-foreground"
-              >
-                {t("voice.interruptionSensitivityDescription")}
-              </p>
-            </div>
-            <div className="w-full min-w-0 sm:w-auto sm:shrink-0">
-              <Select
-                value={interruption.sensitivity}
-                onValueChange={(value) =>
-                  interruption.setSensitivity(
-                    value as VoiceInterruptionSensitivity,
-                  )
-                }
-              >
-                <SelectTrigger
-                  className="w-full sm:w-auto"
-                  aria-labelledby={sensitivityHeadingId}
-                  aria-describedby={sensitivityDescriptionId}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="less">
-                    {t("voice.interruptionSensitivities.less")}
-                  </SelectItem>
-                  <SelectItem value="balanced">
-                    {t("voice.interruptionSensitivities.balanced")}
-                  </SelectItem>
-                  <SelectItem value="more">
-                    {t("voice.interruptionSensitivities.more")}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+        <div className="flex min-w-0 flex-col gap-4 pt-2 sm:flex-row sm:items-center">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-medium">
+              {t("voice.advancedDetection.rowTitle")}
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t("voice.advancedDetection.rowDescription")}
+            </p>
           </div>
-        ) : null}
+          <div className="w-full min-w-0 sm:w-auto sm:shrink-0">
+            <AdvancedVoiceDetectionDialog />
+          </div>
+        </div>
       </section>
     </SettingsPage>
   );

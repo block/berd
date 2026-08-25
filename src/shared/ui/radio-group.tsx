@@ -79,7 +79,7 @@ function RadioGroupCard({
         disabled={disabled}
         aria-labelledby={labelId}
         aria-describedby={descriptionId}
-        className="mt-0.5"
+        className="mt-0.5 disabled:opacity-100"
       />
       <span className="min-w-0">
         <span

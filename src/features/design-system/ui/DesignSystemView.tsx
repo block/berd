@@ -4812,7 +4812,135 @@ function ProgressPage() {
 }
 
 function RadioGroupPage() {
-  return <GenericComponentPage name="Radio Group" />;
+  const [presentation, setPresentation] = useState<"item" | "card">("card");
+  const [selected, setSelected] = useState(true);
+  const [disabled, setDisabled] = useState(false);
+  const value = selected ? "option" : "";
+  const stateLabel = `${selected ? "Selected" : "Unselected"}${
+    disabled ? ", disabled" : ""
+  }`;
+  const colorRows: TokenColorRow[] =
+    presentation === "card"
+      ? [
+          {
+            anatomy: "Card surface",
+            state: stateLabel,
+            background: selected ? "muted" : "transparent",
+            textIcon: disabled ? "foreground / 50% opacity" : "foreground",
+            border: selected ? "primary" : "border",
+          },
+          {
+            anatomy: "Card surface",
+            state: "Focus visible",
+            background: selected ? "muted" : "transparent",
+            textIcon: "foreground",
+            border: "ring + ring / 50%",
+          },
+          {
+            anatomy: "Description",
+            state: stateLabel,
+            textIcon: "muted-foreground",
+          },
+        ]
+      : [
+          {
+            anatomy: "Radio control",
+            state: stateLabel,
+            background: selected ? "primary" : "transparent",
+            textIcon: selected ? "background" : "primary-foreground",
+            border: selected ? "none" : "input",
+          },
+          {
+            anatomy: "Radio control",
+            state: "Focus visible",
+            background: selected ? "primary" : "transparent",
+            textIcon: selected ? "background" : "primary-foreground",
+            border: "ring + ring / 50%",
+          },
+        ];
+
+  return (
+    <>
+      <PageIntro
+        title="Radio Group"
+        description="Choose between compact radio items and full-row selectable cards with shared selected, hover, focus-visible, and disabled semantics."
+      />
+      <ComponentSpec name="Radio Group" />
+      <ComponentPlayground
+        description="Switch presentation and state to inspect the exact anatomy and semantic tokens used by the shared primitive."
+        preview={
+          <RadioGroup value={value} className="w-full max-w-sm">
+            {presentation === "card" ? (
+              <RadioGroupCard
+                id="radio-group-playground-option"
+                value="option"
+                label="Allow interruptions"
+                description="Listen while Berd is speaking."
+                disabled={disabled}
+              />
+            ) : (
+              <div className="flex items-center gap-2">
+                <RadioGroupItem
+                  id="radio-group-playground-option"
+                  value="option"
+                  disabled={disabled}
+                />
+                <Label htmlFor="radio-group-playground-option">Option</Label>
+              </div>
+            )}
+          </RadioGroup>
+        }
+        controls={[
+          {
+            id: "radio-group-presentation",
+            label: "Presentation",
+            type: "select",
+            value: presentation,
+            options: [
+              { label: "Card", value: "card" },
+              { label: "Item", value: "item" },
+            ],
+            onChange: (value) => setPresentation(value as "item" | "card"),
+          },
+          {
+            id: "radio-group-selected",
+            label: "Selected",
+            type: "switch",
+            checked: selected,
+            onChange: setSelected,
+          },
+          {
+            id: "radio-group-disabled",
+            label: "Disabled",
+            type: "switch",
+            checked: disabled,
+            onChange: setDisabled,
+          },
+        ]}
+        details={
+          <ComponentTokenDetails
+            colorRows={colorRows}
+            textRows={[
+              {
+                anatomy: presentation === "card" ? "Card label" : "Item label",
+                size: "text-sm",
+                weight: "font-medium",
+              },
+              ...(presentation === "card"
+                ? [
+                    {
+                      anatomy: "Card description",
+                      size: "text-xs",
+                      weight: "font-normal",
+                    } satisfies TokenTextRow,
+                  ]
+                : []),
+            ]}
+          />
+        }
+      />
+    </>
+  );
 }
 
 function ResizableHandlePage() {
