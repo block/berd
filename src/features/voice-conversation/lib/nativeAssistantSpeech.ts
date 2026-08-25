@@ -820,7 +820,7 @@ export function startNativeAssistantSpeech(
   sessionId: string,
   onFailure: SpeechFailureHandler,
   initialMessages: Message[] = captureNativeAssistantSpeechHistory(sessionId),
-  siriVoice: SiriVoiceSelection | null = null,
+  getSiriVoice: () => SiriVoiceSelection | null = () => null,
 ): void {
   if (activeSpeechSessionId === sessionId) return;
   const startRequest = ++startRequestGeneration;
@@ -848,7 +848,7 @@ export function startNativeAssistantSpeech(
           sessionId,
           onFailure,
           initialMessages,
-          siriVoice,
+          getSiriVoice,
         );
       });
     };
@@ -866,6 +866,7 @@ export function startNativeAssistantSpeech(
             interruptionMode: VoiceInterruptionMode,
             interruptionSensitivity: VoiceInterruptionSensitivity,
           ) => {
+            const siriVoice = getSiriVoice();
             if (!siriVoice) {
               return Promise.reject(
                 new Error("No installed Siri voice is available for playback"),

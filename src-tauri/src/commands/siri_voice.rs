@@ -709,8 +709,7 @@ fn resolve_voice_selection(
         }
     }
 
-    let fallback =
-        first_installed_voice(preferred_voices).or_else(|| first_installed_voice(&all_voices));
+    let fallback = first_installed_voice(&all_voices);
     Ok(match fallback {
         Some(selection) => (Some(selection), true),
         None => (selected_voice.cloned(), false),
@@ -1501,12 +1500,20 @@ mod tests {
 
         assert_eq!(
             resolve_voice_selection(&preferred_voices, Some(&selected), || {
-                Ok(preferred_voices.clone())
+                Ok(vec![
+                    SiriVoice {
+                        name: "Catherine".to_string(),
+                        language: "en-AU".to_string(),
+                        size_bytes: 10,
+                        installed: true,
+                    },
+                    preferred_voices[1].clone(),
+                ])
             }),
             Ok((
                 Some(SiriVoiceSelection {
-                    name: "Samantha".to_string(),
-                    language: "en-US".to_string(),
+                    name: "Catherine".to_string(),
+                    language: "en-AU".to_string(),
                 }),
                 true,
             ))

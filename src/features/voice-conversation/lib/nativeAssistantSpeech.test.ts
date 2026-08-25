@@ -246,7 +246,12 @@ describe("native assistant speech stream", () => {
     mocks.backend = "siri";
     mocks.interruptionMode = "allowInterruptions";
     const siriVoice = { name: "Samantha", language: "en-US" };
-    startNativeAssistantSpeech("session-1", vi.fn(), undefined, siriVoice);
+    startNativeAssistantSpeech(
+      "session-1",
+      vi.fn(),
+      undefined,
+      () => siriVoice,
+    );
     useChatStore
       .getState()
       .setMessages("session-1", [
@@ -280,7 +285,9 @@ describe("native assistant speech stream", () => {
       "session-1",
       onFailure,
       undefined,
-      backend === "siri" ? { name: "Samantha", language: "en-US" } : undefined,
+      backend === "siri"
+        ? () => ({ name: "Samantha", language: "en-US" })
+        : undefined,
     );
     useChatStore
       .getState()
@@ -783,10 +790,7 @@ describe("native assistant speech stream", () => {
   it("resumes a false-positive interruption before native startup is invoked", async () => {
     vi.useFakeTimers();
     try {
-      startNativeAssistantSpeech("session-1", vi.fn(), undefined, {
-        name: "Samantha",
-        language: "en-US",
-      });
+      startNativeAssistantSpeech("session-1", vi.fn());
       useChatStore
         .getState()
         .setMessages("session-1", [
@@ -2634,10 +2638,16 @@ describe("native assistant speech stream", () => {
     vi.useFakeTimers();
     try {
       mocks.backend = "siri";
-      startNativeAssistantSpeech("session-1", vi.fn(), undefined, {
+      let siriVoice = {
         name: "Samantha",
         language: "en-US",
-      });
+      };
+      startNativeAssistantSpeech(
+        "session-1",
+        vi.fn(),
+        undefined,
+        () => siriVoice,
+      );
       useChatStore
         .getState()
         .setMessages("session-1", [
@@ -2661,11 +2671,13 @@ describe("native assistant speech stream", () => {
         error: null,
         delivery: { segments: [] },
       });
+      siriVoice = { name: "Eddy", language: "en-GB" };
       useVoiceConversationStore.setState({ userSpeaking: false });
       await vi.advanceTimersByTimeAsync(250);
       await vi.runAllTimersAsync();
 
       expect(mocks.siriStart).toHaveBeenCalledTimes(2);
+      expect(mocks.siriStart.mock.calls[1]?.[1]).toEqual(siriVoice);
       expect(mocks.siriAppend).toHaveBeenCalledWith(
         mocks.siriStart.mock.calls[1]?.[0],
         "Siri resumes.",
