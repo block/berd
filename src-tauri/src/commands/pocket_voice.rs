@@ -2209,6 +2209,7 @@ fn run_pocket_voice_stream(
                     interruption_sensitivity,
                     suppress_capture,
                     &mut assistant_speech,
+                    &mut playback_drained_at,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     false,
@@ -2238,6 +2239,7 @@ fn run_pocket_voice_stream(
                     interruption_sensitivity,
                     suppress_capture,
                     &mut assistant_speech,
+                    &mut playback_drained_at,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
@@ -2267,6 +2269,7 @@ fn run_pocket_voice_stream(
                     interruption_sensitivity,
                     suppress_capture,
                     &mut assistant_speech,
+                    &mut playback_drained_at,
                     &mut delivery_ledger,
                     &mut last_progress_emit,
                     true,
@@ -2399,6 +2402,11 @@ fn pocket_assistant_speech_grace_elapsed(
     now.saturating_duration_since(drained_at) >= output_latency_grace
 }
 
+#[cfg(any(test, target_os = "macos"))]
+fn note_pocket_audio_enqueued(playback_drained_at: &mut Option<Instant>) {
+    *playback_drained_at = None;
+}
+
 #[cfg(target_os = "macos")]
 #[allow(clippy::too_many_arguments)]
 fn mark_pocket_playback_started(
@@ -2441,6 +2449,7 @@ fn synthesize_pocket_stream_ready(
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
+    playback_drained_at: &mut Option<Instant>,
     delivery_ledger: &mut PlaybackDeliveryLedger,
     last_progress_emit: &mut Instant,
     flush: bool,
@@ -2484,6 +2493,7 @@ fn synthesize_pocket_stream_ready(
                     callback_error = Some(error);
                     return false;
                 }
+                note_pocket_audio_enqueued(playback_drained_at);
                 segment_frames = segment_frames.saturating_add(samples.len() as u64);
                 delivery_ledger.append_frames(samples.len());
                 if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
@@ -3126,13 +3136,7 @@ mod tests {
             grace,
             started,
         ));
-        assert!(!pocket_assistant_speech_grace_elapsed(
-            false,
-            true,
-            &mut drained_at,
-            grace,
-            started + Duration::from_millis(300),
-        ));
+        note_pocket_audio_enqueued(&mut drained_at);
         assert_eq!(drained_at, None);
 
         assert!(!pocket_assistant_speech_grace_elapsed(
@@ -3140,21 +3144,21 @@ mod tests {
             true,
             &mut drained_at,
             grace,
-            started + Duration::from_millis(400),
+            started + Duration::from_millis(600),
         ));
         assert!(!pocket_assistant_speech_grace_elapsed(
             true,
             true,
             &mut drained_at,
             grace,
-            started + Duration::from_millis(600),
+            started + Duration::from_millis(900),
         ));
         assert!(pocket_assistant_speech_grace_elapsed(
             true,
             true,
             &mut drained_at,
             grace,
-            started + Duration::from_millis(900),
+            started + Duration::from_millis(1_100),
         ));
 
         assert!(!pocket_assistant_speech_grace_elapsed(
