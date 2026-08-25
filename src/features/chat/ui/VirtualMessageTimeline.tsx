@@ -20,6 +20,7 @@ import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
 import type { Message } from "@/shared/types/messages";
 import { selectResponseFeedbackRowIds } from "../response-feedback/responseFeedbackRows";
+import type { ActiveSessionFeedbackSurvey } from "../response-feedback/sessionFeedbackSurveyState";
 import { ASSISTIVE_UX_RULES } from "@/shared/assistive-ux/registry";
 import {
   hasAssistiveMomentBeenShown,
@@ -231,6 +232,7 @@ interface VirtualMessageTimelineProps extends MessageTimelineBubbleCallbacks {
   sessionId: string;
   messages: Message[];
   streamingMessageId?: string | null;
+  sessionFeedbackSurvey?: ActiveSessionFeedbackSurvey | null;
   scrollTargetMessageId?: string | null;
   scrollTargetQuery?: string | null;
   onScrollTargetHandled?: (messageId: string) => void;
@@ -982,6 +984,7 @@ function VirtualMessageTimelineSession({
   sessionId,
   messages,
   streamingMessageId,
+  sessionFeedbackSurvey,
   scrollTargetMessageId,
   scrollTargetQuery,
   onScrollTargetHandled,
@@ -3529,6 +3532,14 @@ function VirtualMessageTimelineSession({
       }
       feedbackSessionId={
         responseFeedbackRowIds.has(row.rowId) ? sessionId : undefined
+      }
+      sessionFeedbackSurvey={
+        sessionFeedbackSurvey &&
+        responseFeedbackRowIds.has(row.rowId) &&
+        (row.responseStartMessageId ?? row.messageId) ===
+          sessionFeedbackSurvey.messageId
+          ? sessionFeedbackSurvey
+          : undefined
       }
       showJumpToResponseStartHint={
         row.messageId === responseStartHintMessageId &&

@@ -8,6 +8,7 @@ import {
 } from "react";
 import { cn } from "@/shared/lib/cn";
 import type { Message } from "@/shared/types/messages";
+import type { ActiveSessionFeedbackSurvey } from "../response-feedback/sessionFeedbackSurveyState";
 import {
   VIRTUAL_ROW_LAYOUT_PENDING_ATTRIBUTE,
   VIRTUAL_ROW_RESERVED_BLOCK_SIZE_ATTRIBUTE,
@@ -46,6 +47,7 @@ interface VirtualTranscriptRowProps {
   actionsAlwaysVisible?: boolean;
   showJumpToResponseStartHint?: boolean;
   feedbackSessionId?: string;
+  sessionFeedbackSurvey?: ActiveSessionFeedbackSurvey;
   isPulsing?: boolean;
   rowStateProvider?: TranscriptVirtualRowStateProviderConfig;
   bubbleCallbacks?: MessageBubbleCallbacks;
@@ -72,6 +74,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
   actionsAlwaysVisible,
   showJumpToResponseStartHint,
   feedbackSessionId,
+  sessionFeedbackSurvey,
   isPulsing,
   rowStateProvider,
   bubbleCallbacks,
@@ -307,6 +310,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           isStreaming={row.fragment.isStreamingTail && isStreaming}
           actionsAlwaysVisible={actionsAlwaysVisible}
           feedbackSessionId={feedbackSessionId}
+          sessionFeedbackSurvey={sessionFeedbackSurvey}
           showJumpToResponseStartHint={showJumpToResponseStartHint}
           onRetryMessage={
             row.fragment.role === "end" || row.fragment.role === "single"
@@ -388,6 +392,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           isStreaming={isStreaming}
           actionsAlwaysVisible={actionsAlwaysVisible}
           feedbackSessionId={feedbackSessionId}
+          sessionFeedbackSurvey={sessionFeedbackSurvey}
           showJumpToResponseStartHint={showJumpToResponseStartHint}
           onRetryMessage={
             message.role === "assistant" ? onRetryMessage : undefined
@@ -453,6 +458,7 @@ function areVirtualTranscriptRowPropsEqual(
     previous.actionsAlwaysVisible === next.actionsAlwaysVisible &&
     previous.showJumpToResponseStartHint === next.showJumpToResponseStartHint &&
     previous.feedbackSessionId === next.feedbackSessionId &&
+    previous.sessionFeedbackSurvey === next.sessionFeedbackSurvey &&
     previous.isPulsing === next.isPulsing &&
     previous.rowStateProvider === next.rowStateProvider &&
     previous.bubbleCallbacks === next.bubbleCallbacks &&

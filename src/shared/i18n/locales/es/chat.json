@@ -403,6 +403,11 @@
     "redactedThinking": "(pensamiento redactado)",
     "responseFeedbackGood": "Buena respuesta",
     "responseFeedbackBad": "Mala respuesta",
+    "sessionFeedbackQuestion": "¿Cómo va tu sesión de Berd?",
+    "sessionFeedbackGood": "Bien",
+    "sessionFeedbackFine": "Regular",
+    "sessionFeedbackBad": "Mal",
+    "sessionFeedbackDismiss": "Descartar",
     "providerError": {
       "anthropicThinkingHistory": "Este chat no puede continuar con un modelo Claude porque su historial de razonamiento previo ya no tiene una forma que Claude acepte. Inicia un chat nuevo o cambia este chat a un modelo que no sea Claude para continuar."
     },

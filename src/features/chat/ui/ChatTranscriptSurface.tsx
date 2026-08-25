@@ -13,6 +13,7 @@ import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { ArtifactPolicyProvider } from "@/features/chat/hooks/ArtifactPolicyContext";
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
+import { useSessionFeedbackSurvey } from "../response-feedback/useSessionFeedbackSurvey";
 import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
 import { ConversationEmptyAvatar } from "./ConversationEmptyAvatar";
 import {
@@ -33,7 +34,10 @@ type TimelineCallbacks = Pick<
 export interface ChatTranscriptSurfaceProps extends TimelineCallbacks {
   sessionId: string;
   messages: Message[];
+  sessionCreatedAt?: string;
+  sessionSurveySamplingRateBasisPoints?: number;
   streamingMessageId?: string | null;
+  responsePending?: boolean;
   isLoadingHistory: boolean;
   selectedPersona?: Persona | null;
   sessionCwd?: string | null;
@@ -64,7 +68,10 @@ function shouldStageInitialTranscript(
 export function ChatTranscriptSurface({
   sessionId,
   messages,
+  sessionCreatedAt,
+  sessionSurveySamplingRateBasisPoints = 0,
   streamingMessageId,
+  responsePending = false,
   isLoadingHistory,
   selectedPersona,
   sessionCwd,
@@ -93,6 +100,14 @@ export function ChatTranscriptSurface({
     initialGate.sessionId === sessionId ? initialGate.pending : shouldStage;
   const showLoading = isLoadingHistory || isPreparing;
   const timelineMessages = isPreparing ? [] : messages;
+  const sessionFeedbackSurvey = useSessionFeedbackSurvey({
+    sessionId,
+    sessionCreatedAt,
+    messages: timelineMessages,
+    streamingMessageId,
+    responsePending,
+    samplingRateBasisPoints: sessionSurveySamplingRateBasisPoints,
+  });
 
   useEffect(
     () => retainMountedTranscript(sessionId),
@@ -157,6 +172,7 @@ export function ChatTranscriptSurface({
         sessionId={sessionId}
         messages={timelineMessages}
         streamingMessageId={streamingMessageId}
+        sessionFeedbackSurvey={sessionFeedbackSurvey}
         scrollTargetMessageId={scrollTargetMessageId}
         scrollTargetQuery={scrollTargetQuery}
         onScrollTargetHandled={onScrollTargetHandled}

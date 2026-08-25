@@ -168,6 +168,8 @@ pub struct RuntimeFeedbackConfig {
     pub project_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub response_rating_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub session_survey_sampling_rate_basis_points: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -774,6 +776,11 @@ fn validate_runtime_config(config: &RuntimeConfig) -> Result<(), String> {
     }
     if let Some(feedback) = &config.feedback {
         validate_optional_non_empty(feedback.project_key.as_deref(), "feedback.projectKey")?;
+        if feedback.session_survey_sampling_rate_basis_points > Some(10_000) {
+            return Err(
+                "feedback.sessionSurveySamplingRateBasisPoints must be at most 10000".to_string(),
+            );
+        }
     }
     if let Some(kgoose) = &config.kgoose {
         validate_kgoose(kgoose)?;
@@ -1197,6 +1204,7 @@ mod tests {
                 enabled: Some(true),
                 project_key: Some("BOT".to_string()),
                 response_rating_enabled: Some(true),
+                session_survey_sampling_rate_basis_points: Some(250),
             }),
             kgoose: Some(RuntimeKgooseConfig {
                 base_url: Some("https://kgoose.example.test".to_string()),

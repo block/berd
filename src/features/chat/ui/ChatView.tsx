@@ -28,6 +28,7 @@ import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 import { perfLog } from "@/shared/lib/perfLog";
 import { Badge } from "@/shared/ui/badge";
 import { cn } from "@/shared/lib/cn";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import type { WorkspaceNameRequest } from "../hooks/useChatSessionController";
 import {
   ConversationComposerCapability,
@@ -224,6 +225,9 @@ export function ChatView({
   const { fallbackCwd: terminalFallbackCwd } =
     useTerminalFallbackCwdPreference();
   const capabilities = useProfileCapabilities();
+  const sessionSurveySamplingRateBasisPoints = useRuntimeConfigStore(
+    (state) => state.config.feedback?.sessionSurveySamplingRateBasisPoints ?? 0,
+  );
   const pocketVoiceSetup = usePocketVoiceSetup(capabilities.voiceConversation);
   const macSpeechSetup = useMacSpeechSetup(capabilities.voiceConversation);
   const voiceInput = useVoiceInputPreference(
@@ -689,7 +693,14 @@ export function ChatView({
     <ChatTranscriptSurface
       sessionId={timelineSessionId}
       messages={controller.messages}
+      sessionCreatedAt={effectiveSession?.createdAt}
+      sessionSurveySamplingRateBasisPoints={
+        isReadOnly || !capabilities.feedback
+          ? 0
+          : sessionSurveySamplingRateBasisPoints
+      }
       streamingMessageId={controller.streamingMessageId}
+      responsePending={shouldShowLoadingIndicator}
       isLoadingHistory={controller.isLoadingHistory}
       selectedPersona={controller.selectedPersona}
       sessionCwd={controller.sessionArtifactCwd}

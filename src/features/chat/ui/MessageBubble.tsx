@@ -61,6 +61,8 @@ import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStor
 import { MessageBubbleActions } from "./MessageBubbleActions";
 import { MessageMetadataChip } from "./MessageMetadataChip";
 import { isResponseFeedbackEligible } from "../response-feedback/responseFeedbackState";
+import { SessionFeedbackSurvey } from "../response-feedback/SessionFeedbackSurvey";
+import type { ActiveSessionFeedbackSurvey } from "../response-feedback/sessionFeedbackSurveyState";
 import {
   couldOverflowUserMessagePreview,
   UserMessageClamp,
@@ -343,6 +345,7 @@ interface MessageBubbleProps {
   contentContext?: readonly MessageContent[];
   actionMessageId?: string;
   feedbackSessionId?: string;
+  sessionFeedbackSurvey?: ActiveSessionFeedbackSurvey;
   fragmentRole?: "single" | "start" | "middle" | "end";
   onCopy?: () => void;
   onRetryMessage?: (messageId: string) => void;
@@ -699,6 +702,7 @@ export const MessageBubble = memo(function MessageBubble({
   contentContext,
   actionMessageId = message.id,
   feedbackSessionId,
+  sessionFeedbackSurvey,
   fragmentRole,
   onRetryMessage,
   onEditMessage,
@@ -1120,6 +1124,17 @@ export const MessageBubble = memo(function MessageBubble({
             </p>
           )}
         </div>
+
+        {feedbackSessionId &&
+        sessionFeedbackSurvey &&
+        (!fragmentRole ||
+          fragmentRole === "single" ||
+          fragmentRole === "end") ? (
+          <SessionFeedbackSurvey
+            sessionId={feedbackSessionId}
+            survey={sessionFeedbackSurvey}
+          />
+        ) : null}
 
         {showMessageActions ? (
           <div

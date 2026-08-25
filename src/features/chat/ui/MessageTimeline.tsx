@@ -17,6 +17,7 @@ import { TranscriptSearchSkip } from "./TranscriptSearchSkip";
 import { MessageTimelineScrollContainer } from "./MessageTimelineScrollContainer";
 import { selectResponseFeedbackRowIds } from "../response-feedback/responseFeedbackRows";
 import type { Message } from "@/shared/types/messages";
+import type { ActiveSessionFeedbackSurvey } from "../response-feedback/sessionFeedbackSurveyState";
 import {
   createTranscriptProjectionCache,
   toDateBucket,
@@ -70,6 +71,7 @@ const GUTTER_RESPONSE_START_THRESHOLD_PX = 16;
 interface MessageTimelineProps extends MessageTimelineBubbleCallbacks {
   messages: Message[];
   feedbackSessionId?: string;
+  sessionFeedbackSurvey?: ActiveSessionFeedbackSurvey | null;
   streamingMessageId?: string | null;
   scrollTargetMessageId?: string | null;
   scrollTargetQuery?: string | null;
@@ -120,6 +122,7 @@ function formatRowDateSeparator(
 export function MessageTimeline({
   messages,
   feedbackSessionId,
+  sessionFeedbackSurvey,
   streamingMessageId,
   scrollTargetMessageId,
   scrollTargetQuery,
@@ -1485,6 +1488,14 @@ export function MessageTimeline({
           feedbackSessionId={
             responseFeedbackRowIds.has(row.rowId)
               ? feedbackSessionId
+              : undefined
+          }
+          sessionFeedbackSurvey={
+            sessionFeedbackSurvey &&
+            responseFeedbackRowIds.has(row.rowId) &&
+            (row.responseStartMessageId ?? row.messageId) ===
+              sessionFeedbackSurvey.messageId
+              ? sessionFeedbackSurvey
               : undefined
           }
           showJumpToResponseStartHint={
