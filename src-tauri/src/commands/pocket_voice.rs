@@ -1122,19 +1122,21 @@ pub fn start_pocket_voice_stream(
         let playback_active = active.clone();
         let native_voice_state = native_voice.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
-            let result = run_pocket_voice_stream(
-                &app,
-                &stream_id,
-                &base,
-                voice,
-                output_device.as_deref(),
-                active.clone(),
-                speed,
-                receiver,
-                native_voice_state,
-                interruption_sensitivity,
-                suppress_capture,
-            );
+            let result = run_with_playback_cleanup(&playback, &playback_active, || {
+                run_pocket_voice_stream(
+                    &app,
+                    &stream_id,
+                    &base,
+                    voice,
+                    output_device.as_deref(),
+                    active.clone(),
+                    speed,
+                    receiver,
+                    native_voice_state,
+                    interruption_sensitivity,
+                    suppress_capture,
+                )
+            });
             let (event_state, error, delivery) = match result {
                 Ok(outcome) => (outcome.state, None, outcome.delivery),
                 Err(failure) if !active.load(Ordering::SeqCst) => {
@@ -1147,7 +1149,6 @@ pub fn start_pocket_voice_stream(
                     failure.delivery,
                 ),
             };
-            finish_playback(&playback, &playback_active);
             // A terminal event hands stream ownership back to the renderer,
             // which may immediately start a replacement stream. Release the
             // backend playback token before publishing that handoff.
@@ -1464,6 +1465,13 @@ fn begin_playback(
     state: &State<'_, PocketVoiceState>,
     already_active: &str,
 ) -> Result<Arc<AtomicBool>, String> {
+    begin_playback_runtime(state.inner(), already_active)
+}
+
+fn begin_playback_runtime(
+    state: &PocketVoiceState,
+    already_active: &str,
+) -> Result<Arc<AtomicBool>, String> {
     let install = state
         .install
         .lock()
@@ -1518,6 +1526,16 @@ fn finish_playback(playback: &std::sync::Mutex<PlaybackRuntime>, completed: &Arc
             }
         }
     }
+}
+
+fn run_with_playback_cleanup<T>(
+    playback: &std::sync::Mutex<PlaybackRuntime>,
+    active: &Arc<AtomicBool>,
+    run: impl FnOnce() -> T,
+) -> T {
+    let result = run();
+    finish_playback(playback, active);
+    result
 }
 
 #[tauri::command]
@@ -3426,15 +3444,19 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn pocket_monitor_spawn_failure_is_propagated_without_running_task() {
+    fn pocket_monitor_spawn_failure_releases_playback_for_a_new_stream() {
+        let state = PocketVoiceState::default();
+        let active = begin_playback_runtime(&state, "already active").expect("first playback");
         let ran = Arc::new(AtomicBool::new(false));
         let task_ran = Arc::clone(&ran);
-        let result = spawn_pocket_playback_monitor_with(
-            move || {
-                task_ran.store(true, Ordering::SeqCst);
-            },
-            |_task| Err(std::io::Error::other("injected spawn failure")),
-        );
+        let result = run_with_playback_cleanup(&state.playback, &active, || {
+            spawn_pocket_playback_monitor_with(
+                move || {
+                    task_ran.store(true, Ordering::SeqCst);
+                },
+                |_task| Err(std::io::Error::other("injected spawn failure")),
+            )
+        });
 
         assert_eq!(
             result
@@ -3443,6 +3465,7 @@ mod tests {
             "injected spawn failure"
         );
         assert!(!ran.load(Ordering::SeqCst));
+        assert!(begin_playback_runtime(&state, "still active").is_ok());
     }
 
     #[test]
