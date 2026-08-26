@@ -2957,7 +2957,7 @@ describe("native assistant speech stream", () => {
     });
   });
 
-  it("preserves an unresolved recognition segment across repeated VAD edges", async () => {
+  it("preserves the recognition deadline across repeated VAD edges", async () => {
     vi.useFakeTimers();
     try {
       startNativeAssistantSpeech("session-1", vi.fn());
@@ -2986,9 +2986,9 @@ describe("native assistant speech stream", () => {
       await vi.advanceTimersByTimeAsync(199);
       expect(mocks.start).toHaveBeenCalledTimes(1);
 
-      finalizeVoiceTranscript("delayed-final-after-second-edge");
+      await vi.advanceTimersByTimeAsync(1);
       await vi.runAllTimersAsync();
-      expect(mocks.start).toHaveBeenCalledTimes(1);
+      expect(mocks.start).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
