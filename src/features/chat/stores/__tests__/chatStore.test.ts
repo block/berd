@@ -310,6 +310,103 @@ describe("chatStore", () => {
     expect(useChatStore.getState().sessionStateById.s1).toBe(afterRuntime);
   });
 
+  it("inserts a continuation assistant after a contiguous delivered steer batch", () => {
+    const store = useChatStore.getState();
+    store.setMessages("s1", [
+      makeMessage({
+        id: "assistant-before-steer",
+        role: "assistant",
+        created: 1,
+        content: [{ type: "text", text: "First answer" }],
+        metadata: {
+          userVisible: true,
+          agentVisible: true,
+          completionStatus: "inProgress",
+        },
+      }),
+      makeMessage({
+        id: "steer-1",
+        role: "user",
+        created: 2,
+        content: [{ type: "text", text: "first steer" }],
+        metadata: { userVisible: true, delivery: "steer" },
+      }),
+      makeMessage({
+        id: "steer-2",
+        role: "user",
+        created: 2,
+        content: [{ type: "text", text: "second steer" }],
+        metadata: { userVisible: true, delivery: "steer" },
+      }),
+    ]);
+    store.setStreamingMessageId("s1", "assistant-before-steer");
+    store.setPendingInterventionBoundary("s1", {
+      interventionMessageId: "steer-1",
+    });
+
+    store.startAssistantStreamAfterIntervention("s1");
+    store.updateStreamingText("s1", "Second answer");
+
+    const messages = useChatStore.getState().messagesBySession.s1;
+    expect(messages.map((message) => message.id)).toEqual([
+      "assistant-before-steer",
+      "steer-1",
+      "steer-2",
+      messages[3].id,
+    ]);
+    expect(messages[0].metadata?.completionStatus).toBe("completed");
+    expect(messages[3]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Second answer" }],
+      metadata: { completionStatus: "inProgress" },
+    });
+    expect(getRuntime("s1").streamingMessageId).toBe(messages[3].id);
+    expect(getRuntime("s1").pendingInterventionBoundary).toBeNull();
+  });
+
+  it("does not cross a steering message that has not been delivered", () => {
+    const store = useChatStore.getState();
+    store.setMessages("s1", [
+      makeMessage({ id: "assistant-before-steer", role: "assistant" }),
+      makeMessage({
+        id: "steer-1",
+        role: "user",
+        metadata: { userVisible: true, delivery: "steer" },
+      }),
+      makeMessage({
+        id: "steer-2",
+        role: "user",
+        metadata: { userVisible: true, delivery: "steering" },
+      }),
+      makeMessage({
+        id: "assistant-after-steers",
+        role: "assistant",
+        metadata: { userVisible: true, completionStatus: "inProgress" },
+      }),
+    ]);
+    store.setStreamingMessageId("s1", "assistant-before-steer");
+    store.setPendingInterventionBoundary("s1", {
+      interventionMessageId: "steer-1",
+    });
+
+    store.startAssistantStreamAfterIntervention("s1");
+
+    const messages = useChatStore.getState().messagesBySession.s1;
+    expect(messages.map((m) => m.id)).toEqual([
+      "assistant-before-steer",
+      "steer-1",
+      messages[2].id,
+      "steer-2",
+      "assistant-after-steers",
+    ]);
+    expect(messages[2]).toMatchObject({
+      role: "assistant",
+      metadata: { completionStatus: "inProgress" },
+    });
+    expect(getRuntime("s1").streamingMessageId).toBe(messages[2].id);
+    expect(getRuntime("s1").pendingInterventionBoundary).toBeNull();
+  });
+
   it("appends streamed thinking only within the targeted session", () => {
     const streaming = makeMessage({
       id: "stream-1",

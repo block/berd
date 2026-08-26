@@ -575,6 +575,95 @@ describe("acpNotificationHandler", () => {
     ).toBeNull();
   });
 
+  it("keeps assistant responses in canonical order when multiple steers arrive before the next response", async () => {
+    useChatStore.getState().setMessages("acp-session", [
+      {
+        id: "assistant-before-steers",
+        role: "assistant",
+        created: 1,
+        content: [{ type: "text", text: "Browser-level echo cancellation" }],
+        metadata: {
+          userVisible: true,
+          agentVisible: true,
+          completionStatus: "inProgress",
+          personaId: "persona-a",
+        },
+      },
+      {
+        id: "steer-1",
+        role: "user",
+        created: 2,
+        content: [{ type: "text", text: "is it based on the browser?" }],
+        metadata: {
+          userVisible: true,
+          agentVisible: true,
+          delivery: "steer",
+        },
+      },
+      {
+        id: "steer-2",
+        role: "user",
+        created: 2,
+        content: [{ type: "text", text: "are we using a browser?" }],
+        metadata: {
+          userVisible: true,
+          agentVisible: true,
+          delivery: "steer",
+        },
+      },
+    ]);
+    useChatStore
+      .getState()
+      .setStreamingMessageId("acp-session", "assistant-before-steers");
+    useChatStore.getState().setPendingInterventionBoundary("acp-session", {
+      interventionMessageId: "steer-1",
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "steer-1",
+        content: { type: "text", text: "is it based on the browser?" },
+        _meta: { goose: { steer: true } },
+      },
+    } as never);
+
+    const continuationMessageId =
+      useChatStore.getState().getSessionRuntime("acp-session")
+        .streamingMessageId ?? "";
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-after-steers",
+        content: { type: "text", text: "Tauri desktop app" },
+      },
+    } as never);
+
+    flushBufferedStreamingUpdatesForSession("acp-session", {
+      flushSubtitle: true,
+    });
+
+    const messages = useChatStore.getState().messagesBySession["acp-session"];
+    expect(messages).toMatchObject([
+      { id: "assistant-before-steers", role: "assistant" },
+      { id: "steer-1", role: "user" },
+      { id: "steer-2", role: "user" },
+      {
+        id: continuationMessageId,
+        role: "assistant",
+        content: [{ type: "text", text: "Tauri desktop app" }],
+      },
+    ]);
+    expect(messages[0].metadata?.completionStatus).toBe("completed");
+    expect(
+      useChatStore.getState().getSessionRuntime("acp-session")
+        .streamingMessageId,
+    ).toBe(continuationMessageId);
+  });
+
   it("correlates delivery that arrives before the steer acknowledgement", async () => {
     useChatStore.getState().setMessages("acp-session", [
       {
