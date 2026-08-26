@@ -568,6 +568,7 @@ export function WidgetPicker({
             pickerMessage={pickerMessage}
             onSelectClock={() => onSelect("clock")}
             onSelectStickyNote={() => onSelect("stickyNote")}
+            onSelectLabel={() => onSelect("label")}
             onSelectChecklist={() => onSelect("checklist")}
             onSelectPhoto={() => onSelect("photo")}
             onRestoreStarterTasks={onRestoreStarterTasks}
@@ -576,6 +577,7 @@ export function WidgetPicker({
               (instance) => instance.type === "clock",
             )}
             stickyNoteLabel={t("widgets.stickyNote.label")}
+            labelLabel={t("widgets.label.label")}
             checklistLabel={t("widgets.checklist.label")}
             photoLabel={t("widgets.photo.label")}
             starterTasksLabel={t("widgets.stickyNote.starterTasks")}
@@ -654,12 +656,14 @@ interface PanelStageTwoProps {
   pickerMessage: string | null;
   onSelectClock: () => void;
   onSelectStickyNote: () => void;
+  onSelectLabel: () => void;
   onSelectChecklist: () => void;
   onSelectPhoto: () => void;
   onRestoreStarterTasks: () => void;
   clockLabel: string;
   clockPinned: boolean;
   stickyNoteLabel: string;
+  labelLabel: string;
   checklistLabel: string;
   photoLabel: string;
   starterTasksLabel: string;
@@ -683,12 +687,14 @@ function PanelStageTwo({
   pickerMessage,
   onSelectClock,
   onSelectStickyNote,
+  onSelectLabel,
   onSelectChecklist,
   onSelectPhoto,
   onRestoreStarterTasks,
   clockLabel,
   clockPinned,
   stickyNoteLabel,
+  labelLabel,
   checklistLabel,
   photoLabel,
   starterTasksLabel,
@@ -724,6 +730,11 @@ function PanelStageTwo({
               label={stickyNoteLabel}
               pinned={false}
               onSelect={onSelectStickyNote}
+            />
+            <WidgetOptionRow
+              label={labelLabel}
+              pinned={false}
+              onSelect={onSelectLabel}
             />
             <WidgetOptionRow
               label={checklistLabel}

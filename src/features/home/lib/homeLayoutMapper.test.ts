@@ -278,6 +278,71 @@ describe("homeLayoutMapper", () => {
     });
   });
 
+  it("round-trips labels as their own frontend type through sticky-note persistence", () => {
+    const [item] = homeWidgetsToLayoutItems([
+      {
+        id: "label-1",
+        type: "label",
+        x: 24,
+        y: 40,
+        z: 3,
+        width: 280,
+        height: 56,
+        state: {
+          text: "Weekly automations",
+          fontSizePx: 24,
+          fontFamily: "serif",
+        },
+      },
+    ]);
+
+    expect(item).toMatchObject({
+      kind: "stickyNote",
+      targetId: "widget:label-1",
+      widgetState: {
+        variant: "label",
+        text: "Weekly automations",
+        fontSizePx: 24,
+        fontFamily: "serif",
+      },
+    });
+
+    const [restored] = layoutItemsToHomeWidgets([item]);
+    expect(restored).toMatchObject({
+      id: "label-1",
+      type: "label",
+      x: 24,
+      y: 40,
+      width: 280,
+      height: 56,
+      state: {
+        variant: "label",
+        text: "Weekly automations",
+        fontSizePx: 24,
+        fontFamily: "serif",
+      },
+    });
+  });
+
+  it("upgrades legacy label tones into standalone labels", () => {
+    const [restored] = layoutItemsToHomeWidgets([
+      layoutItem({
+        id: "legacy-label",
+        kind: "stickyNote",
+        targetId: "widget:legacy-label",
+        width: 280,
+        height: 56,
+        widgetState: { tone: "label", text: "ANZ" },
+      }),
+    ]);
+
+    expect(restored).toMatchObject({
+      type: "label",
+      state: { variant: "label", text: "ANZ" },
+    });
+    expect(restored.state).not.toHaveProperty("tone");
+  });
+
   it("round-trips photo path and shape through widget state", () => {
     const [item] = homeWidgetsToLayoutItems([
       {

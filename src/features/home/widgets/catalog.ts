@@ -8,6 +8,7 @@ import { photoAspectRatioOf, photoShapeOf, PhotoWidget } from "./PhotoWidget";
 import { ProjectArtifactWidget } from "./ProjectArtifactWidget";
 import { SkillPinWidget } from "./SkillPinWidget";
 import { StickyNoteWidget } from "./StickyNoteWidget";
+import { LABEL_DEFAULT_SIZE } from "./labelWidgetModel";
 import { clockModeOf } from "./clockWidgetMode";
 import type {
   WidgetCatalogEntry,
@@ -123,26 +124,43 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
       minHeight: 156,
       maxHeight: 320,
     },
-    resolveProfile: (instance) =>
-      instance.state?.noteId === "onboarding:starter-tasks"
-        ? {
-            defaultSize: { width: 224, height: 196 },
-            sizeBounds: {
-              minWidth: 224,
-              maxWidth: 360,
-              minHeight: 156,
-              maxHeight: 320,
-            },
-          }
-        : {
-            defaultSize: { width: 224, height: 196 },
-            sizeBounds: {
-              minWidth: 184,
-              maxWidth: 360,
-              minHeight: 156,
-              maxHeight: 320,
-            },
+    resolveProfile: (instance) => {
+      if (instance.state?.noteId === "onboarding:starter-tasks") {
+        return {
+          defaultSize: { width: 224, height: 196 },
+          sizeBounds: {
+            minWidth: 224,
+            maxWidth: 360,
+            minHeight: 156,
+            maxHeight: 320,
           },
+        };
+      }
+      return {
+        defaultSize: { width: 224, height: 196 },
+        sizeBounds: {
+          minWidth: 184,
+          maxWidth: 360,
+          minHeight: 156,
+          maxHeight: 320,
+        },
+      };
+    },
+    Component: StickyNoteWidget,
+  },
+  {
+    id: "label",
+    category: "note",
+    labelKey: "widgets.label.label",
+    descriptionKey: "widgets.label.description",
+    defaultSize: LABEL_DEFAULT_SIZE,
+    sizeBounds: {
+      minWidth: LABEL_DEFAULT_SIZE.width,
+      maxWidth: LABEL_DEFAULT_SIZE.width,
+      minHeight: LABEL_DEFAULT_SIZE.height,
+      maxHeight: LABEL_DEFAULT_SIZE.height,
+    },
+    hideResizeHandle: true,
     Component: StickyNoteWidget,
   },
   {

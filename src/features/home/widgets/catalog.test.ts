@@ -67,6 +67,23 @@ describe("onboarding tour size profiles", () => {
   });
 });
 
+describe("sticky note size profiles", () => {
+  it("uses a short wide profile for label tone", () => {
+    const label: WidgetInstance = {
+      id: "note-1",
+      type: "label",
+      x: 0,
+      y: 0,
+      z: 1,
+    };
+
+    expect(widgetSizeForInstance(label)).toEqual({ width: 280, height: 56 });
+    expect(
+      clampWidgetSizeForInstance(label, { width: 999, height: 999 }),
+    ).toEqual({ width: 280, height: 56 });
+  });
+});
+
 describe("clock size profiles", () => {
   it("uses the analog (square) profile by default", () => {
     expect(widgetSizeForInstance(baseClock)).toEqual({

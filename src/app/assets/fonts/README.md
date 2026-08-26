@@ -13,6 +13,34 @@ a frozen display-oriented fork that is too tight for body copy.)
 
 Licensed under the SIL Open Font License 1.1 — see `INTER_OFL.txt`.
 
+## Fraunces
+
+`Fraunces[SOFT,WONK,opsz,wght].ttf` and
+`Fraunces-Italic[SOFT,WONK,opsz,wght].ttf` are the variable fonts from the
+Google Fonts repository at https://github.com/google/fonts/tree/main/ofl/fraunces.
+
+Fraunces is an expressive serif option for Home canvas labels. It is
+self-hosted so saved labels render consistently offline.
+
+Licensed under the SIL Open Font License 1.1 — see `FRAUNCES_OFL.txt`.
+
+## Comic Relief
+
+`ComicRelief-Regular.ttf` and `ComicRelief-Bold.ttf` come from the Google Fonts
+repository at https://github.com/google/fonts/tree/main/ofl/comicrelief.
+Comic Relief is a free, metrically compatible alternative to Comic Sans MS for
+nostalgic Home canvas labels.
+
+Licensed under the SIL Open Font License 1.1 — see `COMIC_RELIEF_OFL.txt`.
+
+## Permanent Marker
+
+`PermanentMarker-Regular.ttf` comes from the Google Fonts repository at
+https://github.com/google/fonts/tree/main/apache/permanentmarker. It provides a
+bold handwritten option for Home canvas labels.
+
+Licensed under the Apache License 2.0 — see `PERMANENT_MARKER_LICENSE.txt`.
+
 ## Geist Mono
 
 `GeistMono[wght].ttf` is the variable font (weight axis 100–900) from the
