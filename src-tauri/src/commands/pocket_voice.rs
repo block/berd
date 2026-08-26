@@ -2769,8 +2769,11 @@ fn synthesize_and_stream(
         player.stop();
         return Ok(());
     }
-    let drain_timeout =
-        pocket_native_drain_timeout(total_source_frames, player.completed_source_frames(), speed);
+    let drain_timeout = pocket_native_drain_timeout(
+        total_source_frames,
+        player.completed_source_frames(),
+        MIN_POCKET_PLAYBACK_SPEED,
+    );
     let drain_started = Instant::now();
     loop {
         sync_pocket_playback_rate(&player, &playback_rate, &mut applied_rate_bits)?;
