@@ -2,6 +2,8 @@
 
 use std::ffi::{c_char, c_void, CStr};
 
+const MAX_POCKET_PLAYBACK_SPEED: f32 = 2.0;
+
 unsafe extern "C" {
     fn berd_pocket_audio_player_create(
         sample_rate: u32,
@@ -13,6 +15,11 @@ unsafe extern "C" {
         player: *mut c_void,
         samples: *const f32,
         frame_count: u32,
+        error_out: *mut *mut c_char,
+    ) -> bool;
+    fn berd_pocket_audio_player_set_rate(
+        player: *mut c_void,
+        rate: f32,
         error_out: *mut *mut c_char,
     ) -> bool;
     fn berd_pocket_audio_player_completed_source_frames(player: *mut c_void) -> u64;
@@ -52,8 +59,23 @@ impl PocketAudioPlayer {
         }
         Ok(Self {
             raw,
-            delivery_safety_frames: delivery_safety_frames(sample_rate, rate),
+            delivery_safety_frames: delivery_safety_frames(sample_rate, MAX_POCKET_PLAYBACK_SPEED),
         })
+    }
+
+    pub(super) fn set_rate(&self, rate: f32) -> Result<(), String> {
+        let mut error = std::ptr::null_mut();
+        // SAFETY: `self.raw` is a live retained player and the bridge validates
+        // the rate before updating the connected time-pitch unit.
+        let updated = unsafe { berd_pocket_audio_player_set_rate(self.raw, rate, &mut error) };
+        if updated {
+            Ok(())
+        } else {
+            Err(take_error(
+                error,
+                "Could not update native Pocket playback speed",
+            ))
+        }
     }
 
     pub(super) fn enqueue(&self, samples: &[f32]) -> Result<(), String> {
@@ -140,7 +162,9 @@ fn take_error(error: *mut c_char, fallback: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_delivery_safety, delivery_safety_frames, playback_health};
+    use super::{
+        apply_delivery_safety, delivery_safety_frames, playback_health, MAX_POCKET_PLAYBACK_SPEED,
+    };
 
     #[test]
     fn delivery_safety_tracks_playback_rate_in_source_frames() {
@@ -163,6 +187,13 @@ mod tests {
             apply_delivery_safety(second_buffer_completed, safety),
             7_200
         );
+    }
+
+    #[test]
+    fn live_rate_changes_reserve_maximum_delivery_safety() {
+        let safety = delivery_safety_frames(24_000, MAX_POCKET_PLAYBACK_SPEED);
+        assert_eq!(safety, 4_800);
+        assert_eq!(apply_delivery_safety(10_000, safety), 5_200);
     }
 
     #[test]

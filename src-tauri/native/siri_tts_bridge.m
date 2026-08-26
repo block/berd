@@ -703,6 +703,7 @@ typedef void (^BerdAudioHandler)(
 - (BOOL)enqueueSamples:(const float *)samples
             frameCount:(AVAudioFrameCount)frameCount
                  error:(NSError **)error;
+- (BOOL)setPlaybackRate:(float)rate error:(NSError **)error;
 - (uint64_t)completedSourceFramesSnapshot;
 - (void)stop;
 @end
@@ -721,11 +722,10 @@ typedef void (^BerdAudioHandler)(
 
     _engine = [AVAudioEngine new];
     _player = [AVAudioPlayerNode new];
-    if (fabsf(rate - 1.0f) > 0.0001f) {
-        _timePitch = [AVAudioUnitTimePitch new];
-        _timePitch.rate = rate;
-        _timePitch.pitch = 0.0f;
-    }
+    _timePitch = [AVAudioUnitTimePitch new];
+    _timePitch.rate = rate;
+    _timePitch.pitch = 0.0f;
+    _timePitch.bypass = fabsf(rate - 1.0f) <= 0.0001f;
     _format = [[AVAudioFormat alloc] initWithCommonFormat:AVAudioPCMFormatFloat32
                                               sampleRate:sampleRate
                                                 channels:1
@@ -736,13 +736,9 @@ typedef void (^BerdAudioHandler)(
     }
 
     [_engine attachNode:_player];
-    if (_timePitch) {
-        [_engine attachNode:_timePitch];
-        [_engine connect:_player to:_timePitch format:_format];
-        [_engine connect:_timePitch to:_engine.mainMixerNode format:_format];
-    } else {
-        [_engine connect:_player to:_engine.mainMixerNode format:_format];
-    }
+    [_engine attachNode:_timePitch];
+    [_engine connect:_player to:_timePitch format:_format];
+    [_engine connect:_timePitch to:_engine.mainMixerNode format:_format];
 
     if (outputDeviceID != kAudioObjectUnknown) {
         AudioUnit outputUnit = _engine.outputNode.audioUnit;
@@ -801,6 +797,22 @@ typedef void (^BerdAudioHandler)(
                   }
               }];
     if (!self.player.isPlaying) [self.player play];
+    return YES;
+}
+
+- (BOOL)setPlaybackRate:(float)rate error:(NSError **)error {
+    if (!isfinite(rate) || rate < 0.75f || rate > 2.0f) {
+        if (error) *error = BerdError(38, @"Pocket playback speed is invalid.");
+        return NO;
+    }
+    @synchronized (self) {
+        if (self.stopped) {
+            if (error) *error = BerdError(NSUserCancelledError, @"Pocket playback stopped.");
+            return NO;
+        }
+        self.timePitch.rate = rate;
+        self.timePitch.bypass = fabsf(rate - 1.0f) <= 0.0001f;
+    }
     return YES;
 }
 
@@ -1438,6 +1450,21 @@ bool berd_pocket_audio_player_enqueue(
             enqueueSamples:samples frameCount:frameCount error:&error];
         if (!enqueued) BerdSetError(errorOut, error ?: BerdError(37, @"Could not queue Pocket audio."));
         return enqueued;
+    }
+}
+
+bool berd_pocket_audio_player_set_rate(void *playerValue, float rate, char **errorOut) {
+    @autoreleasepool {
+        if (errorOut) *errorOut = NULL;
+        if (!playerValue) {
+            BerdSetError(errorOut, BerdError(36, @"Pocket playback is unavailable."));
+            return false;
+        }
+        NSError *error = nil;
+        BOOL updated = [(__bridge BerdPocketAudioPlayer *)playerValue
+            setPlaybackRate:rate error:&error];
+        if (!updated) BerdSetError(errorOut, error ?: BerdError(38, @"Could not update Pocket playback speed."));
+        return updated;
     }
 }
 
