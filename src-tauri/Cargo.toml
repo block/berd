@@ -101,6 +101,8 @@ tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
 time = { version = "0.3", features = ["formatting"] }
 tokio = { version = "1.50.0", features = ["full"] }
+tokio-tungstenite = { version = "0.27", features = ["rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
 url = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }

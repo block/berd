@@ -526,7 +526,7 @@ export function rejectVoiceConversationTranscript(
 
 export async function startVoiceConversation(
   sessionId: string,
-  inputBackend: "parakeet" | "macos" = "parakeet",
+  inputBackend: "parakeet" | "macos" | "openai" = "parakeet",
   foregroundGeneration = 0,
 ): Promise<VoiceConversationStatus> {
   resetMicrophoneMuteState();

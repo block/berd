@@ -230,13 +230,19 @@ describe("VoiceSettings", () => {
     openAiApiMocks.clearTtsApiKey.mockClear();
   });
 
-  it("renders selected OpenAI output settings", async () => {
+  it("renders independently selected OpenAI input and output settings", async () => {
+    inputState.backend = "openai";
     outputState.backend = "openai";
     setupState.current = setup(pocketStatus());
     renderWithProviders(<VoiceSettings />);
 
     expect(
-      await screen.findByText(/gpt-4o-mini-tts.*marin voice/),
+      await screen.findByText(
+        "Uses Berd’s configured OpenAI credential with gpt-live-transcribe.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/gpt-4o-mini-tts.*marin voice/),
     ).toBeInTheDocument();
     expect(screen.getByText("Playback speed")).toBeInTheDocument();
   });

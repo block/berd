@@ -561,7 +561,8 @@ export function ChatInputToolbar({
               }
               tooltip={voiceConversationTooltip}
             >
-              {ownsActiveVoiceConversation ? (
+              {ownsActiveVoiceConversation ||
+              voiceConversationState === "error" ? (
                 <PhoneOff aria-hidden="true" />
               ) : (
                 <Phone aria-hidden="true" />

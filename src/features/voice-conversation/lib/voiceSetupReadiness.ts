@@ -15,13 +15,15 @@ export function isVoiceSetupReady(
 ): boolean {
   if (inputBackend === null) return false;
   const inputReady =
-    inputBackend === "macos"
-      ? Boolean(
-          macSpeech?.supported &&
-            macSpeech.localeSupported &&
-            macSpeech.modelInstalled,
-        )
-      : Boolean(pocket?.parakeetInstalled);
+    inputBackend === "openai"
+      ? Boolean(openAi?.configured)
+      : inputBackend === "macos"
+        ? Boolean(
+            macSpeech?.supported &&
+              macSpeech.localeSupported &&
+              macSpeech.modelInstalled,
+          )
+        : Boolean(pocket?.parakeetInstalled);
   if (!inputReady) return false;
   if (outputBackend === "openai")
     return Boolean(openAi?.ttsConfigured && openAi.ttsAvailable);

@@ -53,10 +53,10 @@ describe("voice setup readiness", () => {
     ).toBe(false);
   });
 
-  it("requires the dedicated OpenAI text-to-speech key for OpenAI output", () => {
+  it("requires the configured OpenAI voice key for either OpenAI backend", () => {
     const configured = { ttsConfigured: true, ttsAvailable: true } as never;
     expect(
-      isVoiceSetupReady(pocket, null, null, "parakeet", "openai", configured),
+      isVoiceSetupReady(null, null, null, "openai", "openai", configured),
     ).toBe(true);
     expect(isVoiceSetupReady(pocket, null, null, "parakeet", "openai")).toBe(
       false,

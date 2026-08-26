@@ -1,4 +1,4 @@
-//! OpenAI streaming speech playback for voice conversations.
+//! OpenAI realtime transcription configuration and streaming speech playback.
 
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -37,6 +37,8 @@ use std::time::Instant;
 
 #[cfg(target_os = "macos")]
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
+const DEFAULT_REALTIME_SESSION_MODEL: &str = "gpt-realtime-2.1";
+const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-live-transcribe";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
 const BASE_URL_ENV: &str = "BERD_OPENAI_VOICE_BASE_URL";
@@ -103,6 +105,7 @@ enum OpenAiStreamCommand {
 pub struct OpenAiVoiceStatus {
     tts_configured: bool,
     tts_configuration_source: OpenAiVoiceConfigurationSource,
+    transcription_model: String,
     speech_model: String,
     speech_voice: String,
     playback_speed: f32,
@@ -196,6 +199,30 @@ fn base_url() -> Result<String, String> {
         return normalize_openai_base_url(base_url);
     }
     Ok(DEFAULT_BASE_URL.to_string())
+}
+
+pub(crate) fn realtime_endpoint() -> Result<String, String> {
+    let mut url = reqwest::Url::parse(&endpoint("realtime")?)
+        .map_err(|error| format!("OpenAI realtime endpoint is invalid: {error}"))?;
+    url.query_pairs_mut()
+        .append_pair("model", DEFAULT_REALTIME_SESSION_MODEL);
+    match url.scheme() {
+        "http" => url.set_scheme("ws").expect("compatible scheme"),
+        "https" => url.set_scheme("wss").expect("compatible scheme"),
+        "ws" | "wss" => {}
+        scheme => {
+            return Err(format!(
+                "OpenAI realtime endpoint has unsupported scheme: {scheme}"
+            ))
+        }
+    }
+    Ok(url.to_string())
+}
+
+pub(crate) fn transcription_model() -> String {
+    env_trimmed("OPENAI_TRANSCRIPTION_MODEL")
+        .or_else(|| env_trimmed("OPENAI_STT_MODEL"))
+        .unwrap_or_else(|| DEFAULT_TRANSCRIPTION_MODEL.to_string())
 }
 
 fn speech_model() -> String {
@@ -304,6 +331,7 @@ pub async fn get_openai_voice_status(
     Ok(OpenAiVoiceStatus {
         tts_configured,
         tts_configuration_source: tts_configuration_source(),
+        transcription_model: transcription_model(),
         speech_model: speech_model(),
         speech_voice: speech_voice(),
         playback_speed,

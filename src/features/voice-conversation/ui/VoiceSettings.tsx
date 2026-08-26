@@ -54,6 +54,9 @@ function readinessDescriptionKey(
 ): string | null {
   if (inputReady && outputReady) return null;
   if (!inputReady && !outputReady) {
+    if (inputBackend === "openai") {
+      return "voice.notReadyOpenAi";
+    }
     if (backend === "openai") {
       return inputBackend === "macos"
         ? "voice.notReadyMacInputAndOpenAiOutput"
@@ -104,13 +107,15 @@ export function VoiceSettings() {
   const interruptionHeadingId = useId();
   const interruptionDescriptionId = useId();
   const inputReady =
-    input.backend === "macos"
-      ? Boolean(
-          macSpeechSetup.status?.supported &&
-            macSpeechSetup.status.localeSupported &&
-            macSpeechSetup.status.modelInstalled,
-        )
-      : (setup.status?.parakeetInstalled ?? false);
+    input.backend === "openai"
+      ? (openAiStatus?.configured ?? false)
+      : input.backend === "macos"
+        ? Boolean(
+            macSpeechSetup.status?.supported &&
+              macSpeechSetup.status.localeSupported &&
+              macSpeechSetup.status.modelInstalled,
+          )
+        : (setup.status?.parakeetInstalled ?? false);
   const outputReady =
     output.backend === "openai"
       ? Boolean(openAiStatus?.ttsConfigured && openAiStatus.ttsAvailable)
@@ -204,6 +209,9 @@ export function VoiceSettings() {
                 <SelectItem value="parakeet">
                   {t("voice.backendParakeet")}
                 </SelectItem>
+                <SelectItem value="openai">
+                  {t("voice.backendOpenAiStt")}
+                </SelectItem>
                 {macSpeechSetup.status?.supported &&
                 macSpeechSetup.status.localeSupported ? (
                   <SelectItem value="macos">
@@ -214,7 +222,17 @@ export function VoiceSettings() {
             </Select>
           )}
           details={
-            input.backend === "macos" ? (
+            input.backend === "openai" ? (
+              <p className="text-xs text-muted-foreground">
+                {openAiError ??
+                  openAiStatus?.unavailableReason ??
+                  (openAiStatus
+                    ? t("voice.openAiSttConfigured", {
+                        model: openAiStatus.transcriptionModel,
+                      })
+                    : t("voice.openAiChecking"))}
+              </p>
+            ) : input.backend === "macos" ? (
               <MacSpeechSettings setup={macSpeechSetup} />
             ) : input.backend === "parakeet" ? (
               <PocketVoiceSetupContent
