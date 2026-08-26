@@ -41,6 +41,9 @@ const SILENCE_FLUSH_FRAMES: usize = 75;
 const FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS: u64 = 5;
 const FINAL_TRANSCRIPT_DELIVERY_TIMEOUT: Duration =
     Duration::from_secs(FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS);
+const OPENAI_NETWORK_OPERATION_TIMEOUT: Duration = Duration::from_secs(5);
+const OPENAI_FINAL_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+const OPENAI_PRE_ROLL_CHUNKS: usize = 15;
 const STT_WORKER_SHUTDOWN_TIMEOUT_SECONDS: u64 =
     mac_speech::RECOGNITION_FINISH_TIMEOUT_SECONDS + FINAL_TRANSCRIPT_DELIVERY_TIMEOUT_SECONDS + 1;
 
@@ -2541,6 +2544,46 @@ struct OpenAiCommittedTurn {
     mute_epoch: u64,
 }
 
+fn block_on_openai_operation<F, T, E>(
+    runtime: &tokio::runtime::Runtime,
+    shutdown: &AtomicBool,
+    future: F,
+    action: &str,
+) -> Result<Option<T>, String>
+where
+    F: std::future::Future<Output = Result<T, E>>,
+    E: std::fmt::Display,
+{
+    runtime.block_on(async {
+        let wait_for_shutdown = async {
+            while !shutdown.load(Ordering::Acquire) {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        };
+        tokio::select! {
+            result = tokio::time::timeout(OPENAI_NETWORK_OPERATION_TIMEOUT, future) => {
+                match result {
+                    Ok(Ok(value)) => Ok(Some(value)),
+                    Ok(Err(error)) => Err(format!("{action}: {error}")),
+                    Err(_) => Err(format!("{action}: operation timed out")),
+                }
+            }
+            () = wait_for_shutdown => Ok(None),
+        }
+    })
+}
+
+fn push_openai_pre_roll(pre_roll: &mut VecDeque<Vec<u8>>, pcm: Vec<u8>) {
+    pre_roll.push_back(pcm);
+    while pre_roll.len() > OPENAI_PRE_ROLL_CHUNKS {
+        pre_roll.pop_front();
+    }
+}
+
+fn openai_turn_reached_limit(samples_16k: usize) -> bool {
+    samples_16k >= MAX_SPEECH_SAMPLES
+}
+
 fn record_openai_transcription_event(
     value: &serde_json::Value,
     current_mute_epoch: u64,
@@ -2655,28 +2698,52 @@ fn openai_stt_worker(
         // Another dependency may have installed the same process-wide provider first.
         drop(existing);
     }
-    let connection = runtime.block_on(async {
-        let mut request = endpoint
-            .into_client_request()
-            .map_err(|error| format!("prepare OpenAI realtime connection: {error}"))?;
-        request.headers_mut().insert(
-            "Authorization",
-            format!("Bearer {key}")
-                .parse()
-                .map_err(|_| "OpenAI API key is not a valid header value".to_string())?,
-        );
-        tokio_tungstenite::connect_async(request)
-            .await
-            .map(|(socket, _)| socket)
-            .map_err(|error| format!("connect to OpenAI realtime transcription: {error}"))
-    });
+    let mut request = match endpoint.into_client_request() {
+        Ok(request) => request,
+        Err(error) => {
+            let _ = event_tx.blocking_send(SttMessage::Failed(format!(
+                "prepare OpenAI realtime connection: {error}"
+            )));
+            return;
+        }
+    };
+    let authorization = match format!("Bearer {key}").parse() {
+        Ok(authorization) => authorization,
+        Err(_) => {
+            let _ = event_tx.blocking_send(SttMessage::Failed(
+                "OpenAI API key is not a valid header value".to_string(),
+            ));
+            return;
+        }
+    };
+    request.headers_mut().insert("Authorization", authorization);
+    let connection = block_on_openai_operation(
+        &runtime,
+        &shutdown,
+        tokio_tungstenite::connect_async(request),
+        "connect to OpenAI realtime transcription",
+    );
     let mut socket = match connection {
-        Ok(socket) => socket,
+        Ok(Some((socket, _))) => socket,
+        Ok(None) => return,
         Err(error) => {
             let _ = event_tx.blocking_send(SttMessage::Failed(error));
             return;
         }
     };
+
+    macro_rules! send_openai_message {
+        ($message:expr, $action:literal) => {
+            match block_on_openai_operation(&runtime, &shutdown, socket.send($message), $action) {
+                Ok(Some(())) => {}
+                Ok(None) => return,
+                Err(error) => {
+                    let _ = event_tx.blocking_send(SttMessage::Failed(error));
+                    return;
+                }
+            }
+        };
+    }
     let session_update = serde_json::json!({
         "type": "session.update",
         "session": {
@@ -2688,14 +2755,10 @@ fn openai_stt_worker(
             }}
         }
     });
-    if let Err(error) =
-        runtime.block_on(socket.send(Message::Text(session_update.to_string().into())))
-    {
-        let _ = event_tx.blocking_send(SttMessage::Failed(format!(
-            "configure OpenAI realtime transcription: {error}"
-        )));
-        return;
-    }
+    send_openai_message!(
+        Message::Text(session_update.to_string().into()),
+        "configure OpenAI realtime transcription"
+    );
 
     let mut resampler = match Fft::<f32>::new(48_000, 24_000, 960, 2, 1, FixedSync::Input) {
         Ok(resampler) => resampler,
@@ -2713,6 +2776,8 @@ fn openai_stt_worker(
     let mut silence_frames = 0_usize;
     let mut in_speech = false;
     let mut turn_has_audio = false;
+    let mut turn_samples_16k = 0_usize;
+    let mut pre_roll = VecDeque::<Vec<u8>>::new();
     let mut observed_mute_epoch = input_mute_epoch.load(Ordering::Acquire);
     let mut pending_commit_epochs = VecDeque::<u64>::new();
     let mut committed_turns = VecDeque::<OpenAiCommittedTurn>::new();
@@ -2770,29 +2835,35 @@ fn openai_stt_worker(
         };
         let (shutting_down, current_mute_epoch) =
             sample_effective_mute_epoch(&input_mute_epoch, &shutdown, &shutdown_mute_epoch);
+        // Stop consuming queued microphone batches as soon as shutdown begins.
+        // The bounded finalization below commits only audio already accepted by
+        // this worker, so network backpressure cannot extend the owner timeout.
+        if shutting_down {
+            break;
+        }
         if current_mute_epoch != observed_mute_epoch {
             observed_mute_epoch = current_mute_epoch;
             input_48k.clear();
             vad_16k.clear();
             silence_frames = 0;
             turn_has_audio = false;
+            turn_samples_16k = 0;
+            pre_roll.clear();
             committed_turns.clear();
             completed_turns.clear();
             if std::mem::take(&mut in_speech) {
                 let _ = event_tx.blocking_send(SttMessage::Speaking(false));
             }
-            let _ = runtime.block_on(
-                socket.send(Message::Text(
+            send_openai_message!(
+                Message::Text(
                     serde_json::json!({"type":"input_audio_buffer.clear"})
                         .to_string()
-                        .into(),
-                )),
+                        .into()
+                ),
+                "clear muted OpenAI transcription audio"
             );
         }
-        if shutting_down && (discard_on_shutdown.load(Ordering::Acquire) || batch.is_none()) {
-            break;
-        }
-        if !shutting_down && input_muted.load(Ordering::Acquire) {
+        if input_muted.load(Ordering::Acquire) {
             continue;
         }
         let Some(batch) = batch else { continue };
@@ -2814,21 +2885,10 @@ fn openai_stt_worker(
                     ((sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16).to_le_bytes()
                 })
                 .collect();
-            let append = serde_json::json!({
-                "type": "input_audio_buffer.append",
-                "audio": BASE64.encode(pcm_bytes)
-            });
-            if let Err(error) =
-                runtime.block_on(socket.send(Message::Text(append.to_string().into())))
-            {
-                let _ = event_tx.blocking_send(SttMessage::Failed(format!(
-                    "stream audio to OpenAI realtime transcription: {error}"
-                )));
-                return;
-            }
-            turn_has_audio = true;
             // Earshot requires 16 kHz; use every third 48 kHz source sample for activity only.
             vad_16k.extend(chunk.iter().step_by(3).copied());
+            let mut speech_started = false;
+            let mut should_commit = false;
             while vad_16k.len() >= VAD_FRAME_SAMPLES {
                 let frame: Vec<f32> = vad_16k.drain(..VAD_FRAME_SAMPLES).collect();
                 let threshold = active_vad_threshold_for_speech(
@@ -2840,26 +2900,68 @@ fn openai_stt_worker(
                     silence_frames = 0;
                     if !in_speech {
                         in_speech = true;
+                        speech_started = true;
                         let _ = event_tx.blocking_send(SttMessage::Speaking(true));
                     }
                 } else if in_speech {
                     silence_frames += 1;
                     if silence_frames >= SILENCE_FLUSH_FRAMES {
-                        let commit = serde_json::json!({"type":"input_audio_buffer.commit"});
-                        pending_commit_epochs.push_back(observed_mute_epoch);
-                        if let Err(error) =
-                            runtime.block_on(socket.send(Message::Text(commit.to_string().into())))
-                        {
-                            let _ = event_tx.blocking_send(SttMessage::Failed(format!(
-                                "commit OpenAI transcription turn: {error}"
-                            )));
-                            return;
-                        }
-                        turn_has_audio = false;
+                        should_commit = true;
                         silence_frames = 0;
                         in_speech = false;
-                        let _ = event_tx.blocking_send(SttMessage::Speaking(false));
                     }
+                }
+            }
+
+            if speech_started {
+                while let Some(pre_roll_bytes) = pre_roll.pop_front() {
+                    send_openai_message!(
+                        Message::Text(
+                            serde_json::json!({
+                                "type": "input_audio_buffer.append",
+                                "audio": BASE64.encode(pre_roll_bytes)
+                            })
+                            .to_string()
+                            .into()
+                        ),
+                        "stream OpenAI transcription pre-roll"
+                    );
+                }
+            }
+
+            if speech_started || in_speech || should_commit {
+                send_openai_message!(
+                    Message::Text(
+                        serde_json::json!({
+                            "type": "input_audio_buffer.append",
+                            "audio": BASE64.encode(pcm_bytes)
+                        })
+                        .to_string()
+                        .into()
+                    ),
+                    "stream audio to OpenAI realtime transcription"
+                );
+                turn_has_audio = true;
+                turn_samples_16k = turn_samples_16k.saturating_add(chunk.len() / 3);
+            } else {
+                push_openai_pre_roll(&mut pre_roll, pcm_bytes);
+            }
+
+            if should_commit || openai_turn_reached_limit(turn_samples_16k) {
+                pending_commit_epochs.push_back(observed_mute_epoch);
+                send_openai_message!(
+                    Message::Text(
+                        serde_json::json!({"type":"input_audio_buffer.commit"})
+                            .to_string()
+                            .into()
+                    ),
+                    "commit OpenAI transcription turn"
+                );
+                turn_has_audio = false;
+                turn_samples_16k = 0;
+                silence_frames = 0;
+                if std::mem::take(&mut in_speech) || should_commit {
+                    let _ = event_tx.blocking_send(SttMessage::Speaking(false));
                 }
             }
         }
@@ -2876,10 +2978,11 @@ fn openai_stt_worker(
         final_delivered = Some(delivered_rx);
         pending_commit_epochs.push_back(observed_mute_epoch);
         let commit = serde_json::json!({"type":"input_audio_buffer.commit"});
-        if runtime
-            .block_on(socket.send(Message::Text(commit.to_string().into())))
-            .is_err()
-        {
+        let final_write = runtime.block_on(tokio::time::timeout(
+            OPENAI_FINAL_WRITE_TIMEOUT,
+            socket.send(Message::Text(commit.to_string().into())),
+        ));
+        if !matches!(final_write, Ok(Ok(()))) {
             return;
         }
     }
@@ -4452,6 +4555,157 @@ mod tests {
     }
 
     #[test]
+    fn openai_transcripts_are_delivered_in_commit_order() {
+        let mut pending_epochs = VecDeque::from([7, 7]);
+        let mut committed = VecDeque::new();
+        let mut completed = HashMap::new();
+        for item_id in ["first", "second"] {
+            record_openai_transcription_event(
+                &serde_json::json!({
+                    "type": "input_audio_buffer.committed",
+                    "item_id": item_id,
+                }),
+                7,
+                &mut pending_epochs,
+                &mut committed,
+                &mut completed,
+            )
+            .expect("commit event");
+        }
+        for (item_id, transcript) in [("second", "two"), ("first", "one")] {
+            record_openai_transcription_event(
+                &serde_json::json!({
+                    "type": "conversation.item.input_audio_transcription.completed",
+                    "item_id": item_id,
+                    "transcript": transcript,
+                }),
+                7,
+                &mut pending_epochs,
+                &mut committed,
+                &mut completed,
+            )
+            .expect("completion event");
+        }
+        let (event_tx, mut event_rx) = tokio_mpsc::channel(4);
+
+        deliver_completed_openai_turns(&mut committed, &mut completed, &event_tx, None, &mut None);
+
+        let texts = [event_rx.try_recv(), event_rx.try_recv()].map(|event| match event {
+            Ok(SttMessage::Final { text, .. }) => text,
+            _ => panic!("expected finalized transcript"),
+        });
+        assert_eq!(texts, ["one", "two"]);
+    }
+
+    #[test]
+    fn openai_transcription_ignores_commits_from_stale_mute_epochs() {
+        let mut pending_epochs = VecDeque::from([1]);
+        let mut committed = VecDeque::new();
+        let mut completed = HashMap::new();
+
+        let turn = record_openai_transcription_event(
+            &serde_json::json!({
+                "type": "input_audio_buffer.committed",
+                "item_id": "stale",
+            }),
+            2,
+            &mut pending_epochs,
+            &mut committed,
+            &mut completed,
+        )
+        .expect("commit event")
+        .expect("recorded commit");
+
+        assert_eq!(turn.mute_epoch, 1);
+        assert!(committed.is_empty());
+    }
+
+    #[test]
+    fn openai_transcription_surfaces_protocol_failures() {
+        let error = record_openai_transcription_event(
+            &serde_json::json!({
+                "type": "conversation.item.input_audio_transcription.failed",
+                "error": { "message": "bad audio" },
+            }),
+            0,
+            &mut VecDeque::new(),
+            &mut VecDeque::new(),
+            &mut HashMap::new(),
+        )
+        .expect_err("failure event");
+
+        assert_eq!(error, "bad audio");
+    }
+
+    #[test]
+    fn empty_openai_final_acknowledges_shutdown_delivery() {
+        let mut committed = VecDeque::from([OpenAiCommittedTurn {
+            item_id: "final".to_string(),
+            mute_epoch: 3,
+        }]);
+        let mut completed = HashMap::from([("final".to_string(), String::new())]);
+        let (event_tx, mut event_rx) = tokio_mpsc::channel(1);
+        let (delivered_tx, delivered_rx) = mpsc::sync_channel(1);
+        let mut final_delivery = Some(delivered_tx);
+
+        deliver_completed_openai_turns(
+            &mut committed,
+            &mut completed,
+            &event_tx,
+            Some("final"),
+            &mut final_delivery,
+        );
+
+        assert!(delivered_rx.try_recv().is_ok());
+        assert!(event_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn stalled_openai_operation_observes_shutdown() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("runtime");
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let shutdown_for_thread = shutdown.clone();
+        let signal = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            shutdown_for_thread.store(true, Ordering::Release);
+        });
+
+        let result = block_on_openai_operation(
+            &runtime,
+            shutdown.as_ref(),
+            std::future::pending::<Result<(), std::io::Error>>(),
+            "stalled operation",
+        )
+        .expect("shutdown is not an error");
+
+        signal.join().expect("shutdown signal");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn openai_idle_audio_keeps_only_bounded_pre_roll() {
+        let mut pre_roll = VecDeque::new();
+        for index in 0..(OPENAI_PRE_ROLL_CHUNKS * 4) {
+            push_openai_pre_roll(&mut pre_roll, vec![index as u8]);
+        }
+
+        assert_eq!(pre_roll.len(), OPENAI_PRE_ROLL_CHUNKS);
+        assert_eq!(
+            pre_roll.front(),
+            Some(&vec![(OPENAI_PRE_ROLL_CHUNKS * 3) as u8])
+        );
+    }
+
+    #[test]
+    fn openai_continuous_speech_has_a_turn_limit() {
+        assert!(!openai_turn_reached_limit(MAX_SPEECH_SAMPLES - 1));
+        assert!(openai_turn_reached_limit(MAX_SPEECH_SAMPLES));
+    }
+
+    #[test]
     fn native_voice_events_use_renderer_field_names() {
         let event = NativeVoiceEvent::User {
             session_id: "session-1".to_string(),
@@ -4496,6 +4750,11 @@ mod tests {
             serde_json::from_str::<VoiceInputBackend>("\"macos\"")
                 .expect("deserialize macOS backend"),
             VoiceInputBackend::Macos,
+        );
+        assert_eq!(
+            serde_json::from_str::<VoiceInputBackend>("\"openai\"")
+                .expect("deserialize OpenAI backend"),
+            VoiceInputBackend::Openai,
         );
     }
 }

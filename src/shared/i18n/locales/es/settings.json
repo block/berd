@@ -873,6 +873,7 @@
   },
   "voice": {
     "backendMacSpeech": "Reconocimiento de voz de Apple",
+    "backendOpenAiStt": "Voz a texto de OpenAI",
     "backendOpenAiTts": "Texto a voz de OpenAI",
     "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
@@ -937,6 +938,7 @@
     "openAiApiKeySaved": "Clave API guardada",
     "openAiChecking": "Comprobando los ajustes de voz de OpenAI…",
     "openAiEnvironmentOverride": "La configuración de desarrollo está reemplazada por el entorno del proceso de Berd.",
+    "openAiSttConfigured": "Usa {{model}}.",
     "openAiTtsApiKey": "Clave API de texto a voz de OpenAI",
     "openAiTtsConfigured": "Usa {{model}} y la voz {{voice}}. Las voces de OpenAI son generadas por IA.",
     "openAiTtsNeedsKey": "Añade una clave API de texto a voz de OpenAI para usar esta voz.",

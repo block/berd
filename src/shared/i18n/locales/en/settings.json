@@ -870,6 +870,7 @@
   },
   "voice": {
     "backendMacSpeech": "Apple speech recognition",
+    "backendOpenAiStt": "OpenAI speech-to-text",
     "backendOpenAiTts": "OpenAI text-to-speech",
     "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
@@ -934,6 +935,7 @@
     "openAiApiKeySaved": "API key saved",
     "openAiChecking": "Checking OpenAI voice settings…",
     "openAiEnvironmentOverride": "Development configuration is overridden by the Berd process environment.",
+    "openAiSttConfigured": "Uses {{model}}.",
     "openAiTtsApiKey": "OpenAI text-to-speech API key",
     "openAiTtsConfigured": "Uses {{model}} and the {{voice}} voice. OpenAI voices are AI-generated.",
     "openAiTtsNeedsKey": "Add an OpenAI text-to-speech API key to use this voice.",

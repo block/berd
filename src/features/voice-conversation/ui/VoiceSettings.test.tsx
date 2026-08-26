@@ -278,6 +278,50 @@ describe("VoiceSettings", () => {
     expect(openAiApiMocks.setTtsApiKey).toHaveBeenCalledWith("tts-secret");
   });
 
+  it("uses OpenAI guidance when only the selected OpenAI input is not ready", async () => {
+    inputState.backend = "openai";
+    outputState.backend = "pocket";
+    openAiStatusState.current = {
+      ...openAiStatusState.current,
+      configured: false,
+      unavailableReason:
+        "Configure the OpenAI provider in Berd to use OpenAI voice.",
+    };
+    setupState.current = setup(pocketStatus({ pocketInstalled: true }));
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      await screen.findByText(
+        "OpenAI voice is not ready. Configure the OpenAI provider in Berd, then try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Parakeet STT is not installed/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not show the TTS platform restriction for configured OpenAI input", async () => {
+    inputState.backend = "openai";
+    outputState.backend = "pocket";
+    openAiStatusState.current = {
+      ...openAiStatusState.current,
+      ttsAvailable: false,
+      unavailableReason:
+        "OpenAI voice playback is currently supported on macOS only.",
+    };
+    setupState.current = setup(pocketStatus({ pocketInstalled: true }));
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      await screen.findByText(
+        "Uses Berd’s configured OpenAI credential with gpt-live-transcribe.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/playback is currently supported on macOS only/),
+    ).not.toBeInTheDocument();
+  });
+
   it("uses OpenAI guidance when the selected OpenAI output is not ready", async () => {
     outputState.backend = "openai";
     openAiStatusState.current = {

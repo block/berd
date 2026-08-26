@@ -72,6 +72,7 @@ function readinessDescriptionKey(
       : "voice.notReadyInputAndPocketOutput";
   }
   if (!inputReady) {
+    if (inputBackend === "openai") return "voice.notReadyOpenAi";
     return inputBackend === "macos"
       ? "voice.notReadyMacInput"
       : "voice.notReadyInput";
@@ -225,11 +226,12 @@ export function VoiceSettings() {
             input.backend === "openai" ? (
               <p className="text-xs text-muted-foreground">
                 {openAiError ??
-                  openAiStatus?.unavailableReason ??
                   (openAiStatus
-                    ? t("voice.openAiSttConfigured", {
-                        model: openAiStatus.transcriptionModel,
-                      })
+                    ? openAiStatus.configured
+                      ? t("voice.openAiSttConfigured", {
+                          model: openAiStatus.transcriptionModel,
+                        })
+                      : openAiStatus.unavailableReason
                     : t("voice.openAiChecking"))}
               </p>
             ) : input.backend === "macos" ? (
