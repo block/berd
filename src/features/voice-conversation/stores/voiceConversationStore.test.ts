@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   start: vi.fn(),
   stop: vi.fn(),
   stopForReplacement: vi.fn(),
+  trackStarted: vi.fn(),
 }));
 
 vi.mock("../api/voiceConversation", () => ({
@@ -33,6 +34,10 @@ vi.mock("../api/voiceConversation", () => ({
   startVoiceConversation: mocks.start,
   stopVoiceConversation: mocks.stop,
   stopVoiceConversationForReplacement: mocks.stopForReplacement,
+}));
+
+vi.mock("../lib/voiceTelemetry", () => ({
+  trackVoiceConversationStarted: mocks.trackStarted,
 }));
 
 function status(
@@ -73,6 +78,7 @@ describe("voice conversation store lifecycle ordering", () => {
     mocks.start.mockReset();
     mocks.stop.mockReset();
     mocks.stopForReplacement.mockReset();
+    mocks.trackStarted.mockReset();
     mocks.listen.mockReset().mockImplementation(async (callback) => {
       emit = callback;
       return vi.fn();
@@ -483,6 +489,18 @@ describe("voice conversation store lifecycle ordering", () => {
     await expect(
       useVoiceConversationStore.getState().start("session-1"),
     ).resolves.toMatchObject({ lifecycle: "running", sessionId: "session-1" });
+    expect(mocks.trackStarted).toHaveBeenCalledOnce();
+  });
+
+  it("does not track voice usage when native startup fails", async () => {
+    const store = await loadStore();
+    mocks.start.mockRejectedValue(new Error("microphone unavailable"));
+
+    await expect(store.getState().start("session-1")).rejects.toThrow(
+      "microphone unavailable",
+    );
+
+    expect(mocks.trackStarted).not.toHaveBeenCalled();
   });
 
   it("waits for an existing start before granting an archive lease", async () => {

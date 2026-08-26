@@ -228,7 +228,7 @@ describe("TauriOtlpLogExporter", () => {
 });
 
 /**
- * The ingestion gateway validates every upload against the `berd-otlp-logs-v1`
+ * The ingestion gateway validates every upload against the `berd-otlp-logs-v2`
  * body schema, which is strict/closed at every level: exactly one
  * `resourceLogs` entry, exactly one `scopeLogs` entry, an exact key set on
  * every object, a closed set of resource attributes, and only string/bool
@@ -246,7 +246,7 @@ describe("TauriOtlpLogExporter", () => {
  * `version` appearing, a `severityNumber`/`flags` key on the record, or
  * `timeUnixNano` switching from a JSON string to a number.
  */
-describe("berd-otlp-logs-v1 body contract", () => {
+describe("berd-otlp-logs-v2 body contract", () => {
   // The gateway's whole accepted resource-attribute set. `service.name` must be
   // the literal `berd` (it, and the scope, were renamed from `goose-internal`
   // before any client shipped), and `distribution.channel` must carry one of
