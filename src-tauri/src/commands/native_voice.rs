@@ -991,7 +991,22 @@ async fn shutdown_pipeline(mut pipeline: SttPipeline) {
     }
 }
 
-async fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
+async fn status_with_availability(
+    state: &NativeVoiceState,
+    parakeet_available: bool,
+    macos_status: impl std::future::Future<Output = bool>,
+) -> NativeVoiceStatus {
+    let session_active = state
+        .runtime
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .session_id
+        .is_some();
+    let macos_available = if needs_macos_status(session_active, parakeet_available) {
+        macos_status.await
+    } else {
+        false
+    };
     let (session_id, owner_window_label, revision) = {
         let runtime = state
             .runtime
@@ -1006,18 +1021,6 @@ async fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus 
             runtime.revision,
         )
     };
-    let parakeet_available = parakeet_model_dir(app).is_ok();
-    #[cfg(target_os = "macos")]
-    let macos_available = if needs_macos_status(session_id.is_some(), parakeet_available) {
-        mac_speech::status_async()
-            .await
-            .map(|status| status.model_installed)
-            .unwrap_or(false)
-    } else {
-        false
-    };
-    #[cfg(not(target_os = "macos"))]
-    let macos_available = false;
     let (available, unavailable_reason) =
         if session_id.is_some() || parakeet_available || macos_available {
             (true, None)
@@ -1042,7 +1045,20 @@ async fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus 
     }
 }
 
-#[cfg(any(target_os = "macos", test))]
+async fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
+    let parakeet_available = parakeet_model_dir(app).is_ok();
+    #[cfg(target_os = "macos")]
+    let macos_status = async {
+        mac_speech::status_async()
+            .await
+            .map(|status| status.model_installed)
+            .unwrap_or(false)
+    };
+    #[cfg(not(target_os = "macos"))]
+    let macos_status = async { false };
+    status_with_availability(state, parakeet_available, macos_status).await
+}
+
 fn needs_macos_status(session_active: bool, parakeet_available: bool) -> bool {
     !session_active && !parakeet_available
 }
@@ -2805,6 +2821,40 @@ mod tests {
         assert!(!needs_macos_status(true, false));
         assert!(!needs_macos_status(false, true));
         assert!(needs_macos_status(false, false));
+    }
+
+    #[tokio::test]
+    async fn status_resamples_runtime_after_availability_check() {
+        let state = NativeVoiceState::default();
+        let (availability_tx, availability_rx) = tokio::sync::oneshot::channel();
+        let status = status_with_availability(&state, false, async {
+            availability_rx.await.expect("finish availability refresh")
+        });
+        tokio::pin!(status);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), status.as_mut())
+                .await
+                .is_err()
+        );
+
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+            runtime.revision = 7;
+        }
+
+        availability_tx
+            .send(false)
+            .expect("availability refresh is still pending");
+        let status = status.await;
+        assert!(status.available);
+        assert!(matches!(status.lifecycle, Lifecycle::Running));
+        assert_eq!(status.session_id.as_deref(), Some("session-1"));
+        assert_eq!(status.owner_window_label.as_deref(), Some("main"));
+        assert_eq!(status.revision, 7);
     }
 
     #[cfg(target_os = "macos")]
