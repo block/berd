@@ -23,13 +23,20 @@ export { isBerdctlCrossSessionQueuedMessage } from "@/features/chat/lib/queuedMe
 export const BERDCTL_CROSS_SESSION_ORIGIN =
   "berdctl_cross_session" satisfies NonNullable<MessageMetadata["origin"]>;
 
-export function berdctlCrossSessionSendOptions(): ChatSendOptions {
+export function berdctlCrossSessionSendOptions(
+  options: { senderLabel?: string } = {},
+): ChatSendOptions {
+  const senderMetadata = options.senderLabel
+    ? { berdSenderLabel: options.senderLabel }
+    : {};
   return {
     userMessageMetadata: {
       origin: BERDCTL_CROSS_SESSION_ORIGIN,
+      ...senderMetadata,
     },
     acpGooseMetadata: {
       origin: BERDCTL_CROSS_SESSION_ORIGIN,
+      ...senderMetadata,
     },
   };
 }
@@ -38,7 +45,10 @@ export async function sendPromptToExistingSessionInBackground(
   sessionId: string,
   prompt: string,
   beforeUserMessageCommitted?: () => void,
-  options: { returnOnDispatch?: boolean } = {},
+  options: {
+    returnOnDispatch?: boolean;
+    sendOptions?: ChatSendOptions;
+  } = {},
 ): Promise<void> {
   const acquisition = await acquireExistingSessionForBackgroundSend(sessionId);
   if (acquisition.status === "contended") {
@@ -77,7 +87,7 @@ export async function sendPromptToExistingSessionInBackground(
         providerId,
         persona,
         {
-          ...berdctlCrossSessionSendOptions(),
+          ...(options.sendOptions ?? berdctlCrossSessionSendOptions()),
           systemPrompt: session
             ? formatIncludedWorkspacesPrompt(session)
             : undefined,

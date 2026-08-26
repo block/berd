@@ -14,7 +14,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 # <plugin> --features ...` only works for workspace members. app-test-driver
 # stays excluded (a plain path dependency, as before this workspace existed).
 [workspace]
-members = ["crates/berd-voice", "crates/berdctl", "plugins/berdctl"]
+members = [
+  "crates/berd-monitor",
+  "crates/berd-voice",
+  "crates/berdctl",
+  "plugins/berdctl",
+]
 exclude = ["plugins/app-test-driver"]
 
 [build-dependencies]

@@ -13,6 +13,7 @@ export type ReplayUserMetadata = Pick<
   MessageMetadata,
   | "delivery"
   | "origin"
+  | "berdSenderLabel"
   | "voiceUtteranceId"
   | "voiceConversationLifecycleId"
   | "voiceConversationRevision"
@@ -75,6 +76,10 @@ export function getReplayUserMetadata(
       : goose.origin === "voice_conversation"
         ? "voice_conversation"
         : undefined;
+  const berdSenderLabel =
+    origin === "berdctl_cross_session"
+      ? boundedSingleLineString(goose.berdSenderLabel, 120)
+      : undefined;
   const voiceUtteranceId =
     origin === "voice_conversation"
       ? nonEmptyString(goose.voiceUtteranceId)
@@ -97,12 +102,26 @@ export function getReplayUserMetadata(
   return {
     ...(delivery ? { delivery } : {}),
     ...(origin ? { origin } : {}),
+    ...(berdSenderLabel ? { berdSenderLabel } : {}),
     ...(voiceUtteranceId ? { voiceUtteranceId } : {}),
     ...(voiceConversationLifecycleId ? { voiceConversationLifecycleId } : {}),
     ...(voiceConversationRevision !== undefined
       ? { voiceConversationRevision }
       : {}),
   };
+}
+
+function boundedSingleLineString(
+  value: unknown,
+  maxLength: number,
+): string | undefined {
+  const normalized = nonEmptyString(value);
+  return normalized &&
+    normalized.length <= maxLength &&
+    !normalized.includes("\n") &&
+    !normalized.includes("\r")
+    ? normalized
+    : undefined;
 }
 
 function getGooseReplayMeta(

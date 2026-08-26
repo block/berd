@@ -13,7 +13,7 @@
         "send": {
           "action": "send",
           "about": "Send a prompt into an existing chat session",
-          "afterHelp": "Example:\n  berdctl session send --session-id <session-id> \\\n    --prompt \"Check the latest CI failure\" --if-running queue --json\n\nResult:\n  {\"session_id\": \"...\", \"send_status\": \"dispatched\"|\"steered\"|\"queued\"}\n  The user's current view does not change."
+          "afterHelp": "Example:\n  berdctl session send --session-id <session-id> \\\n    --prompt \"Check the latest CI failure\" --if-running queue \\\n    --from \"the Berd session handling CI\" --json\n\nResult:\n  {\"session_id\": \"...\", \"send_status\": \"dispatched\"|\"steered\"|\"queued\"}\n  The user's current view does not change."
         },
         "open": {
           "action": "open",

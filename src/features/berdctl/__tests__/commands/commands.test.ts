@@ -1683,6 +1683,59 @@ describe("sessions.send", () => {
         ),
     ).toEqual(["next prompt", "another prompt"]);
   });
+
+  it("preserves a visible sender label on queued prompts", async () => {
+    mockSessionFound();
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "[monitor: checks] complete",
+        if_running: "queue",
+        from: "the Berd session handling berd-monitor implementation",
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({ session_id: "session-1", send_status: "queued" });
+    expect(
+      useChatStore.getState().queuedMessageBySession["session-1"]?.[0]?.payload
+        .sendOptions,
+    ).toEqual({
+      userMessageMetadata: {
+        origin: "berdctl_cross_session",
+        berdSenderLabel:
+          "the Berd session handling berd-monitor implementation",
+      },
+      acpGooseMetadata: {
+        origin: "berdctl_cross_session",
+        berdSenderLabel:
+          "the Berd session handling berd-monitor implementation",
+      },
+    });
+  });
+
+  it("rejects multiline sender labels before dispatch", async () => {
+    const error = await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "send",
+          session_id: "session-1",
+          prompt: "monitor update",
+          if_running: "queue",
+          from: "first line\nsecond line",
+        },
+        ctx,
+      ),
+      "invalid_args",
+    );
+
+    expect(error.message).toContain("single line");
+  });
 });
 
 describe("sessions.open", () => {

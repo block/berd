@@ -137,6 +137,22 @@ describe("getReplayUserMetadata", () => {
     ).toEqual({ origin: "berdctl_cross_session" });
   });
 
+  it("restores sender attribution on cross-session messages", () => {
+    expect(
+      getReplayUserMetadata({
+        _meta: {
+          goose: {
+            origin: "berdctl_cross_session",
+            berdSenderLabel: "berd-monitor",
+          },
+        },
+      }),
+    ).toEqual({
+      origin: "berdctl_cross_session",
+      berdSenderLabel: "berd-monitor",
+    });
+  });
+
   it("restores voice conversation origin metadata", () => {
     expect(
       getReplayUserMetadata({

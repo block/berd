@@ -110,7 +110,13 @@ function drainQueuedMessage(queuedSessionId: string, ownerId: string): void {
       );
       assertQueuedSessionReady(state.getSessionRuntime(queuedSessionId));
     },
-    { returnOnDispatch: true },
+    {
+      returnOnDispatch: true,
+      ...(queuedMessage.payload.sendOptions?.userMessageMetadata
+        ?.berdSenderLabel
+        ? { sendOptions: queuedMessage.payload.sendOptions }
+        : {}),
+    },
   );
   let sendSucceeded = false;
   let shouldResumeDrain = false;

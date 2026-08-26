@@ -39,6 +39,16 @@ const sendSessionSchema = z
       .describe(
         "What to do if the target session is running: refuse, steer, or queue.",
       ),
+    from: z
+      .string()
+      .trim()
+      .min(1)
+      .max(120)
+      .regex(/^[^\r\n]*$/, "Sender label must be a single line.")
+      .optional()
+      .describe(
+        "Optional visible sender label for this message (1-120 chars).",
+      ),
   })
   .strict();
 
@@ -61,10 +71,12 @@ export const sendSessionCommand = defineCommand({
     "Idle sends are fire-and-forget and visibly add a user message marked as sent " +
     "by Berd from another session. Running sessions are refused by default; use " +
     "--if-running steer to add context to the active run, or --if-running queue " +
-    "to send one follow-up after the current run finishes.",
+    "to send one follow-up after the current run finishes. Use --from to give " +
+    "the sending session or tool a concise visible label in the transcript.",
   helpFooter: `Example:
   berdctl session send --session-id <session-id> \\
-    --prompt "Check the latest CI failure" --if-running queue --json
+    --prompt "Check the latest CI failure" --if-running queue \\
+    --from "the Berd session handling CI" --json
 
 Result:
   {"session_id": "...", "send_status": "dispatched"|"steered"|"queued"}
@@ -88,6 +100,9 @@ Result:
       import("../runtime/projects"),
       import("../runtime/sessionSend"),
     ]);
+    const sendOptions = berdctlCrossSessionSendOptions({
+      senderLabel: args.from,
+    });
 
     await loadSessionForBerdctl(args.session_id);
     const session = requireSession(args.session_id);
@@ -130,7 +145,7 @@ Result:
             args.session_id,
             args.prompt,
             undefined,
-            berdctlCrossSessionSendOptions(),
+            sendOptions,
             { throwOnError: true },
           );
           return { session_id: session.id, send_status: "steered" };
@@ -140,7 +155,7 @@ Result:
             args.session_id,
             admitSystemInheritedQueuedMessage({
               text: args.prompt,
-              sendOptions: berdctlCrossSessionSendOptions(),
+              sendOptions,
             }),
           );
           return { session_id: session.id, send_status: "queued" };
@@ -160,7 +175,7 @@ Result:
       createDeferredQueuedMessagePayload({
         text: args.prompt,
         persona: { kind: "inherit" },
-        sendOptions: berdctlCrossSessionSendOptions(),
+        sendOptions,
       }),
       { startupName: args.startup_name, project },
     );
@@ -178,7 +193,7 @@ Result:
         args.session_id,
         admitSystemInheritedQueuedMessage({
           text: args.prompt,
-          sendOptions: berdctlCrossSessionSendOptions(),
+          sendOptions,
         }),
       );
       return { session_id: session.id, send_status: "queued" };
@@ -196,7 +211,10 @@ Result:
               0) === 0,
           );
         },
-        { returnOnDispatch: true },
+        {
+          returnOnDispatch: true,
+          sendOptions,
+        },
       );
     } catch (error) {
       if (error instanceof SessionDispatchContentionError) {
@@ -205,7 +223,7 @@ Result:
             args.session_id,
             admitSystemInheritedQueuedMessage({
               text: args.prompt,
-              sendOptions: berdctlCrossSessionSendOptions(),
+              sendOptions,
             }),
           );
           return { session_id: session.id, send_status: "queued" };
@@ -224,7 +242,7 @@ Result:
             args.session_id,
             admitSystemInheritedQueuedMessage({
               text: args.prompt,
-              sendOptions: berdctlCrossSessionSendOptions(),
+              sendOptions,
             }),
           );
           return { session_id: session.id, send_status: "queued" };

@@ -439,6 +439,7 @@ try {
     $windowsExternalBin = @(Get-ObjectValue (Get-ObjectValue $windowsConf "bundle") "externalBin")
     Assert-Equal "Windows externalBin stages goosed" ($windowsExternalBin -contains "binaries/goosed") $true
     Assert-Equal "Windows externalBin stages berdctl" ($windowsExternalBin -contains "binaries/berdctl") $true
+    Assert-Equal "Windows externalBin stages berd-monitor" ($windowsExternalBin -contains "binaries/berd-monitor") $true
     Assert-Equal "Windows externalBin excludes catch" ($windowsExternalBin -contains "binaries/catch") $false
 
     # Tauri merges platform overlays into the base config with json_patch (RFC
@@ -454,6 +455,7 @@ try {
     $mergedExternalBin = if ($null -ne $windowsExternalBin) { $windowsExternalBin } else { $baseExternalBin }
     Assert-Equal "merged Windows externalBin stages goosed" ($mergedExternalBin -contains "binaries/goosed") $true
     Assert-Equal "merged Windows externalBin stages berdctl" ($mergedExternalBin -contains "binaries/berdctl") $true
+    Assert-Equal "merged Windows externalBin stages berd-monitor" ($mergedExternalBin -contains "binaries/berd-monitor") $true
     Assert-Equal "merged Windows externalBin drops catch" ($mergedExternalBin -contains "binaries/catch") $false
 
     # ── Windows bundle recipes route through native staging ──────

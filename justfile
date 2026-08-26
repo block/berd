@@ -498,16 +498,18 @@ dev:
     export VITE_APP_VERSION="$BERD_APP_VERSION_RICH"
     echo "Using app version: ${BERD_APP_VERSION} (${BERD_APP_VERSION_RICH})"
 
-    # tauri dev only builds the root package; the berdctl CLI workspace
-    # member needs an explicit build, resolved at runtime via BERDCTL_BIN
-    # because tauri.dev.conf.json blanks externalBin.
+    # tauri dev only builds the root package; the agent-facing CLI workspace
+    # members need explicit builds because tauri.dev.conf.json blanks externalBin.
     BERDCTL_FEATURES=()
     [[ "${VITE_FEEDBACK:-0}" == "1" ]] && BERDCTL_FEATURES+=(--features block-feedback)
     # ${arr[@]+...} guards the empty-array expansion, which bash 3.2 (stock
     # macOS) treats as an unbound variable under `set -u`.
     (cd src-tauri && cargo build -p berdctl ${BERDCTL_FEATURES[@]+"${BERDCTL_FEATURES[@]}"})
+    (cd src-tauri && cargo build -p berd-monitor)
     export BERDCTL_BIN="${CARGO_TARGET_DIR}/debug/berdctl"
+    export BERD_MONITOR_BIN="${CARGO_TARGET_DIR}/debug/berd-monitor"
     echo "Using berdctl CLI: ${BERDCTL_BIN}"
+    echo "Using berd-monitor CLI: ${BERD_MONITOR_BIN}"
 
     if [[ "${VITE_AGENT_TOOLS:-0}" == "1" ]]; then
         ./scripts/prepare-bb-cli-resource.sh

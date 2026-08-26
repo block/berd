@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build and stage the berdctl CLI for Tauri's externalBin bundling.
+# Build and stage the berdctl and berd-monitor CLIs for Tauri externalBin bundling.
 #
 # Tauri expects external binaries to be present at build time with the target
 # triple appended to the configured stem. For config
@@ -13,8 +13,9 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/prepare-berdctl-sidecar.sh [target-triple]
 
-Builds the berdctl workspace crate in release mode and copies the binary
-into src-tauri/binaries with the target triple suffix required by Tauri.
+Builds the berdctl and berd-monitor workspace crates in release mode and
+copies both binaries into src-tauri/binaries with the target triple suffix
+required by Tauri.
 
 The triple defaults to the rustc host. Pass it explicitly (or set
 BERDCTL_TRIPLE) when the Tauri build itself uses an explicit --target, so
@@ -29,9 +30,9 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 
 EXPLICIT_TRIPLE="${1:-${BERDCTL_TRIPLE:-}}"
-CARGO_ARGS=(build -p berdctl --release)
+CARGO_ARGS=(build -p berdctl -p berd-monitor --release)
 if [[ "${VITE_FEEDBACK:-0}" == "1" ]]; then
-  CARGO_ARGS+=(--features block-feedback)
+  CARGO_ARGS+=(--features berdctl/block-feedback)
 fi
 if [[ -n "$EXPLICIT_TRIPLE" ]]; then
   TRIPLE="$EXPLICIT_TRIPLE"
@@ -75,3 +76,19 @@ mkdir -p "$OUT_DIR"
 cp "$BUILT" "$OUT"
 chmod +x "$OUT"
 echo "Staged berdctl sidecar: $OUT"
+
+if [[ -n "$EXPLICIT_TRIPLE" ]]; then
+  MONITOR_BUILT="$TARGET_DIR/$TRIPLE/release/berd-monitor"
+else
+  MONITOR_BUILT="$TARGET_DIR/release/berd-monitor"
+fi
+
+if [[ ! -x "$MONITOR_BUILT" ]]; then
+  echo "Built berd-monitor binary not found at: $MONITOR_BUILT" >&2
+  exit 1
+fi
+
+MONITOR_OUT="$OUT_DIR/berd-monitor-$TRIPLE"
+cp "$MONITOR_BUILT" "$MONITOR_OUT"
+chmod +x "$MONITOR_OUT"
+echo "Staged berd-monitor sidecar: $MONITOR_OUT"
