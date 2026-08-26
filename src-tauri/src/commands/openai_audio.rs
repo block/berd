@@ -126,6 +126,32 @@ fn goose_openai_api_key() -> Result<Option<String>, String> {
     if let Some(value) = env_trimmed("OPENAI_API_KEY") {
         return Ok(Some(value));
     }
+    #[cfg(target_os = "macos")]
+    {
+        let entry = keyring::Entry::new("goose", "secrets").map_err(|error| {
+            format!("Could not access Goose's secure credential store: {error}")
+        })?;
+        match entry.get_password() {
+            Ok(payload) => {
+                let secrets: serde_json::Value =
+                    serde_json::from_str(&payload).map_err(|error| {
+                        format!("Goose's secure credential store is not valid JSON: {error}")
+                    })?;
+                return Ok(secrets
+                    .get("OPENAI_API_KEY")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(ToString::to_string));
+            }
+            Err(keyring::Error::NoEntry) => {}
+            Err(error) => {
+                return Err(format!(
+                    "Could not read Goose's OpenAI credential from secure storage: {error}"
+                ));
+            }
+        }
+    }
     let config_path = crate::services::goose_config::config_path()?;
     let secrets_path = config_path
         .parent()
@@ -671,11 +697,25 @@ fn speak_pending(
                 if initial_samples.len() >= INITIAL_PLAYBACK_BUFFER_FRAMES {
                     player.enqueue(&initial_samples)?;
                     initial_samples.clear();
+                    *started = true;
+                    emit_openai_stream_event(
+                        app,
+                        stream_id,
+                        OpenAiStreamEventState::Started,
+                        None,
+                        None,
+                    );
                 }
             }
             segment_frames = segment_frames.saturating_add(samples.len() as u64);
             upsert_delivery_segment(delivery, chunk, segment_frames, false);
-            if !*started && segment_frames > 0 {
+        }
+        if !pcm_remainder.is_empty() {
+            return Err("OpenAI speech returned an incomplete PCM sample".to_string());
+        }
+        if !initial_samples.is_empty() {
+            player.enqueue(&initial_samples)?;
+            if !*started {
                 *started = true;
                 emit_openai_stream_event(
                     app,
@@ -685,12 +725,6 @@ fn speak_pending(
                     None,
                 );
             }
-        }
-        if !pcm_remainder.is_empty() {
-            return Err("OpenAI speech returned an incomplete PCM sample".to_string());
-        }
-        if !initial_samples.is_empty() {
-            player.enqueue(&initial_samples)?;
         }
         upsert_delivery_segment(delivery, chunk, segment_frames, true);
     }

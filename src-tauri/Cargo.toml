@@ -47,6 +47,7 @@ hex = "0.4"
 ignore = "0.4.25"
 fern = "0.7"
 infer = "0.19.0"
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
 libc = "0.2"
 log = "0.4.29"
 mime_guess = "2"
