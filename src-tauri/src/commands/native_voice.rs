@@ -2873,7 +2873,6 @@ fn openai_stt_worker(
         }
     }
     if discard_on_shutdown.load(Ordering::Acquire) {
-        let _ = runtime.block_on(socket.close(None));
         return;
     }
     let mut final_item_id = None::<String>;
@@ -2889,7 +2888,6 @@ fn openai_stt_worker(
             .block_on(socket.send(Message::Text(commit.to_string().into())))
             .is_err()
         {
-            let _ = runtime.block_on(socket.close(None));
             return;
         }
     }
@@ -2957,7 +2955,10 @@ fn openai_stt_worker(
             break;
         }
     }
-    let _ = runtime.block_on(socket.close(None));
+    // Do not await the peer's WebSocket close handshake here. OpenAI may leave
+    // it pending beyond the bounded voice-stop window; dropping the socket
+    // closes the connection after final transcript delivery has been drained.
+    drop(socket);
 }
 
 #[allow(clippy::too_many_arguments)] // Worker boundary keeps channel and mute lifecycle inputs explicit.
