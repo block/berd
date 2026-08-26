@@ -130,7 +130,7 @@ objc2-user-notifications = "0.3.2"
 rodio = { version = "0.22", default-features = false, features = ["playback"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service"] }
+keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service", "vendored"] }
 
 
 [features]
