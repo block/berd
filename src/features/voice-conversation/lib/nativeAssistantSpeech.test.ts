@@ -2514,7 +2514,7 @@ describe("native assistant speech stream", () => {
         },
       });
       useVoiceConversationStore.setState({ userSpeaking: false });
-      await vi.advanceTimersByTimeAsync(250);
+      await vi.advanceTimersByTimeAsync(500);
       await vi.runAllTimersAsync();
 
       const secondStreamId = mocks.start.mock.calls[1]?.[0] as string;
@@ -2550,7 +2550,7 @@ describe("native assistant speech stream", () => {
         },
       });
       useVoiceConversationStore.setState({ userSpeaking: false });
-      await vi.advanceTimersByTimeAsync(250);
+      await vi.advanceTimersByTimeAsync(500);
       await vi.runAllTimersAsync();
 
       const thirdStreamId = mocks.start.mock.calls[2]?.[0] as string;
@@ -2618,7 +2618,7 @@ describe("native assistant speech stream", () => {
         ]);
 
       useVoiceConversationStore.setState({ userSpeaking: false });
-      await vi.advanceTimersByTimeAsync(250);
+      await vi.advanceTimersByTimeAsync(500);
       await vi.runAllTimersAsync();
 
       const resumedStreamId = mocks.start.mock.calls[1]?.[0] as string;
@@ -2764,7 +2764,7 @@ describe("native assistant speech stream", () => {
         refreshedSiriVoice,
       );
       useVoiceConversationStore.setState({ userSpeaking: false });
-      await vi.advanceTimersByTimeAsync(250);
+      await vi.advanceTimersByTimeAsync(500);
       await vi.runAllTimersAsync();
 
       expect(mocks.siriStart).toHaveBeenCalledTimes(2);
