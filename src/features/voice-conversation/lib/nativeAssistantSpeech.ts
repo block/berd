@@ -1535,7 +1535,7 @@ export function startNativeAssistantSpeech(
   let wasUserSpeaking = initialVoice.userSpeaking;
   let wasMicrophoneMuted = initialVoice.microphoneMuted;
   let latestObservedFinalizedTranscriptKey =
-    initialVoice.latestFinalizedTranscriptKey;
+    useVoiceConversationStore.getState().latestFinalizedTranscriptKey;
   const resolvePendingRecognitionSegment = (releaseSpeech = true) => {
     if (recognitionSegmentTimer !== null) {
       window.clearTimeout(recognitionSegmentTimer);
@@ -1546,6 +1546,17 @@ export function startNativeAssistantSpeech(
     heldReleaseReady = heldSpeech !== null;
     interruptionReleaseReady = true;
     releaseResumableInterruption();
+  };
+  const markHeldTargetsNotSpoken = (held: HeldSpeech) => {
+    for (const { target } of held.targets.values()) {
+      setTargetSpeech(sessionId, target, { status: "notSpoken" });
+    }
+  };
+  const discardResolvedHeldSpeech = (finalizedTranscriptKey: string | null) => {
+    const held = heldSpeech;
+    discardInvalidHeldSpeech(finalizedTranscriptKey);
+    if (held && heldSpeech === null) markHeldTargetsNotSpoken(held);
+    return held;
   };
   const unsubscribeVoice = useVoiceConversationStore.subscribe((voice) => {
     const runningForSession =
@@ -1588,28 +1599,10 @@ export function startNativeAssistantSpeech(
         window.clearTimeout(heldReleaseTimer);
         heldReleaseTimer = null;
       }
-      const currentMessages =
-        useChatStore.getState().messagesBySession[sessionId] ?? [];
-      holdAssistantChanges(currentMessages);
-      const hadHeldSpeech = heldSpeech !== null;
-      discardInvalidHeldSpeech(voice.latestFinalizedTranscriptKey);
-      if (hadHeldSpeech && heldSpeech === null) {
-        for (const message of currentMessages) {
-          if (message.role !== "assistant") continue;
-          let textOrdinal = 0;
-          for (const content of message.content) {
-            if (content.type !== "text") continue;
-            setTargetSpeech(
-              sessionId,
-              { messageId: message.id, textOrdinal },
-              {
-                status: "notSpoken",
-              },
-            );
-            textOrdinal += 1;
-          }
-        }
-      }
+      holdAssistantChanges(
+        useChatStore.getState().messagesBySession[sessionId] ?? [],
+      );
+      discardResolvedHeldSpeech(voice.latestFinalizedTranscriptKey);
       inspect();
       return;
     }
@@ -1630,34 +1623,16 @@ export function startNativeAssistantSpeech(
       return;
     }
     if (finalizedTranscriptChanged && pendingUserRecognitionSegment) {
-      const currentMessages =
-        useChatStore.getState().messagesBySession[sessionId] ?? [];
-      holdAssistantChanges(currentMessages);
-      const hadHeldSpeech = heldSpeech !== null;
+      holdAssistantChanges(
+        useChatStore.getState().messagesBySession[sessionId] ?? [],
+      );
       const hadResumableInterruption = resumableInterruption !== null;
       resolvePendingRecognitionSegment(false);
       if (hadResumableInterruption) {
         discardResumableInterruption();
-        discardInvalidHeldSpeech(voice.latestFinalizedTranscriptKey);
+        discardResolvedHeldSpeech(voice.latestFinalizedTranscriptKey);
       } else {
         discardHeldAndResumableSpeech();
-      }
-      if (hadHeldSpeech && !hadResumableInterruption) {
-        for (const message of currentMessages) {
-          if (message.role !== "assistant") continue;
-          let textOrdinal = 0;
-          for (const content of message.content) {
-            if (content.type !== "text") continue;
-            setTargetSpeech(
-              sessionId,
-              { messageId: message.id, textOrdinal },
-              {
-                status: "notSpoken",
-              },
-            );
-            textOrdinal += 1;
-          }
-        }
       }
       inspect();
       return;
