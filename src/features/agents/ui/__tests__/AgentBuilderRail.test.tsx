@@ -283,8 +283,52 @@ describe("AgentBuilderRail", () => {
     ).toBeInTheDocument();
   });
 
-  it("disables save changes until required fields are complete", () => {
-    mockHook();
+  it("only marks an empty description invalid after a save attempt", () => {
+    const { saveNow } = mockHook({
+      data: {
+        ...baseSource,
+        name: "Reviewer",
+        content: "Review code carefully.",
+        properties: {
+          ...baseSource.properties,
+          avatar: "app-avatar:gloopy-1",
+        },
+      },
+    });
+    renderWithProviders(
+      <AgentBuilderRail
+        sessionId="s1"
+        targetAgentPath={baseSource.path}
+        targetAgentSlug="draft-1"
+      />,
+    );
+
+    const saveButton = screen.getByRole("button", { name: /save changes/i });
+    const description = screen.getByLabelText(/description/i);
+
+    expect(saveButton).not.toHaveAttribute("aria-disabled");
+    expect(description).toBeRequired();
+    expect(description).toHaveAttribute("aria-invalid", "false");
+
+    fireEvent.click(saveButton);
+
+    expect(description).toHaveAttribute("aria-invalid", "true");
+    expect(saveNow).not.toHaveBeenCalled();
+    expect(promoteDraft).not.toHaveBeenCalled();
+  });
+
+  it("keeps save unavailable when another required field is missing", () => {
+    mockHook({
+      data: {
+        ...baseSource,
+        description: "Reviews code carefully.",
+        content: "Review code carefully.",
+        properties: {
+          ...baseSource.properties,
+          avatar: "app-avatar:gloopy-1",
+        },
+      },
+    });
     renderWithProviders(
       <AgentBuilderRail
         sessionId="s1"
@@ -296,13 +340,6 @@ describe("AgentBuilderRail", () => {
     expect(
       screen.getByRole("button", { name: /save changes/i }),
     ).toHaveAttribute("aria-disabled", "true");
-    expect(screen.getByText(/required:/i)).toHaveTextContent(/avatar/i);
-    expect(screen.getByText(/required:/i)).toHaveTextContent(/description/i);
-    expect(screen.getByLabelText(/description/i)).toBeRequired();
-    expect(screen.getByLabelText(/description/i)).toHaveAttribute(
-      "aria-invalid",
-      "true",
-    );
   });
 
   it("does not persist a default avatar when the draft opens", async () => {
