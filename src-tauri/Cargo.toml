@@ -47,7 +47,6 @@ hex = "0.4"
 ignore = "0.4.25"
 fern = "0.7"
 infer = "0.19.0"
-keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
 libc = "0.2"
 log = "0.4.29"
 mime_guess = "2"
@@ -108,6 +107,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(windows)'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["windows-native"] }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Globalization",
@@ -120,6 +120,7 @@ windows-sys = { version = "0.59", features = [
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
 coreaudio-rs = "0.14.2"
+keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSRunningApplication", "NSImage", "NSMenu", "NSMenuItem", "NSAlert", "NSButton", "NSControl", "NSCell", "NSResponder", "NSView"] }
 objc2-avf-audio = { version = "0.3.2", features = ["AVAudioApplication", "block2"] }
@@ -127,6 +128,9 @@ objc2-core-audio = "0.3.2"
 objc2-foundation = { version = "0.3.2", features = ["NSDictionary", "NSError", "NSFileManager", "NSObject", "NSProcessInfo", "NSString", "NSURL"] }
 objc2-user-notifications = "0.3.2"
 rodio = { version = "0.22", default-features = false, features = ["playback"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3.6.3", default-features = false, features = ["sync-secret-service"] }
 
 
 [features]
