@@ -91,7 +91,6 @@ enum OpenAiStreamCommand {
     Stop,
 }
 
-#[cfg(target_os = "macos")]
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiVoiceStatus {
@@ -103,6 +102,7 @@ pub struct OpenAiVoiceStatus {
     unavailable_reason: Option<String>,
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OpenAiVoiceStreamEvent {
