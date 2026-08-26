@@ -41,16 +41,25 @@ describe("security explanation inference", () => {
       goose: {
         GooseUnstableSessionExtensionsList: vi.fn().mockResolvedValue({
           extensions: [
-            { type: "builtin", name: "developer" },
-            { type: "platform", name: "computercontroller" },
             {
-              type: "mcp",
-              server: {
-                name: "github",
-                command: "github-mcp-server",
-                args: [],
-                env: [],
+              extension: { type: "builtin", name: "developer" },
+              extensionKey: "builtin:developer",
+            },
+            {
+              extension: { type: "platform", name: "computercontroller" },
+              extensionKey: "platform:computercontroller",
+            },
+            {
+              extension: {
+                type: "mcp",
+                server: {
+                  name: "github",
+                  command: "github-mcp-server",
+                  args: [],
+                  env: [],
+                },
               },
+              extensionKey: "mcp:github",
             },
           ],
         }),
@@ -121,19 +130,19 @@ describe("security explanation inference", () => {
       client.goose.GooseUnstableSessionExtensionsRemove,
     ).toHaveBeenCalledWith({
       sessionId: "inference-session",
-      name: "developer",
+      extensionKey: "builtin:developer",
     });
     expect(
       client.goose.GooseUnstableSessionExtensionsRemove,
     ).toHaveBeenCalledWith({
       sessionId: "inference-session",
-      name: "computercontroller",
+      extensionKey: "platform:computercontroller",
     });
     expect(
       client.goose.GooseUnstableSessionExtensionsRemove,
     ).toHaveBeenCalledWith({
       sessionId: "inference-session",
-      name: "github",
+      extensionKey: "mcp:github",
     });
   });
 

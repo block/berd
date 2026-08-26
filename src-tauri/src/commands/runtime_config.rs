@@ -99,6 +99,10 @@ pub struct RuntimeGooseModelProvider {
     pub endpoint_env: Option<HashMap<String, String>>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub model_inventory_mode: Option<String>,
+    /// Optional allowlist for provider-discovered model IDs. Runtime-declared
+    /// models remain available regardless of this discovery policy.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub allowed_model_id_prefixes: Option<Vec<String>>,
     /// Model Goose's lightweight "fast" tasks run on (exported to `goose
     /// serve` as GOOSE_FAST_MODEL). A served endpoint id the provider must be
     /// able to route (databricks_v2 routes by model-name substring, e.g. a
@@ -634,7 +638,7 @@ fn runtime_config_load_result_for_local_byo_dev(
                 ) =>
             {
                 let mut config = *config;
-                clear_default_databricks_provider_env(&mut config);
+                clear_default_databricks_distribution_config(&mut config);
                 RuntimeConfigLoadResult::Ready {
                     source,
                     config: Box::new(config),
@@ -647,16 +651,12 @@ fn runtime_config_load_result_for_local_byo_dev(
     result
 }
 
-/// Strip the default provider's `goose serve` env contributions (the
-/// databricks endpoint and the fast-model override) so BYO-key dev sessions
-/// keep their own provider's endpoint and models. Stock defaults declare no
-/// fastModelId, but this also runs on bundled-file configs, which a release
-/// distribution may have injected one into — keep the clear so the BYO
-/// exclusion holds regardless of the loaded source. This covers dev only
-/// (`cfg(debug_assertions)`); the release-build twin is the BYO strip jq in
-/// scripts/release/build-macos.sh, which deletes the same two fields.
+/// Strip the default provider's distribution-owned endpoint, fast-model, and
+/// model-discovery policy so BYO-key dev sessions keep their own provider's
+/// endpoint and models. This covers dev only (`cfg(debug_assertions)`); the
+/// release-build twin is the BYO strip jq in scripts/release/build-macos.sh.
 #[cfg(debug_assertions)]
-pub(crate) fn clear_default_databricks_provider_env(config: &mut RuntimeConfig) {
+pub(crate) fn clear_default_databricks_distribution_config(config: &mut RuntimeConfig) {
     let Some(default_provider_id) = config.goose.default_model_provider_id.as_deref() else {
         return;
     };
@@ -669,6 +669,7 @@ pub(crate) fn clear_default_databricks_provider_env(config: &mut RuntimeConfig) 
         return;
     };
     provider.fast_model_id = None;
+    provider.allowed_model_id_prefixes = None;
     let Some(endpoint_env) = provider.endpoint_env.as_mut() else {
         return;
     };
@@ -845,6 +846,31 @@ fn validate_goose_config(goose: &RuntimeGooseConfig) -> Result<(), String> {
         )?;
         if let Some(mode) = provider.model_inventory_mode.as_deref() {
             validate_model_inventory_mode(mode)?;
+        }
+        if let Some(prefixes) = &provider.allowed_model_id_prefixes {
+            if provider.id != "databricks_v2" {
+                return Err(
+                    "goose.modelProviders.allowedModelIdPrefixes is supported only for databricks_v2"
+                        .to_string(),
+                );
+            }
+            if prefixes.is_empty() {
+                return Err(
+                    "goose.modelProviders.allowedModelIdPrefixes must not be empty".to_string(),
+                );
+            }
+            let mut seen_prefixes = HashSet::new();
+            for prefix in prefixes {
+                validate_runtime_id(
+                    prefix,
+                    "goose.modelProviders.allowedModelIdPrefixes entries",
+                )?;
+                if !seen_prefixes.insert(prefix) {
+                    return Err(format!(
+                        "goose.modelProviders.allowedModelIdPrefixes must not contain duplicate entry '{prefix}'"
+                    ));
+                }
+            }
         }
         validate_optional_runtime_id(
             provider.fast_model_id.as_deref(),
@@ -1134,6 +1160,7 @@ mod tests {
                 custom_provider: None,
                 endpoint_env: None,
                 model_inventory_mode: Some("refreshable".to_string()),
+                allowed_model_id_prefixes: None,
                 fast_model_id: None,
                 models: vec![RuntimeGooseModel {
                     id: TEST_RUNTIME_MODEL_ID.to_string(),
@@ -1317,22 +1344,38 @@ mod tests {
         assert_eq!(parsed, config);
     }
 
-    // BYO-key dev must not inherit the default provider's goose-serve env:
-    // both the databricks endpoint and the fast-model override are cleared.
-    // Stock defaults declare no fastModelId, so set one to mimic a bundled
-    // config a distribution injected one into.
+    #[test]
+    fn allowed_model_id_prefixes_validate_and_round_trip() {
+        let mut config = default_runtime_config();
+        config.goose = managed_goose_config();
+        config.goose.model_providers[0].allowed_model_id_prefixes =
+            Some(vec!["goose-".to_string(), "team.approved.".to_string()]);
+        validate_runtime_config(&config).expect("allowedModelIdPrefixes must validate");
+
+        let serialized = serde_json::to_string(&config).expect("serialize config");
+        assert!(serialized.contains(r#""allowedModelIdPrefixes":["goose-","team.approved."]"#));
+        let parsed = serde_json::from_str::<RuntimeConfig>(&serialized).expect("parse config");
+        assert_eq!(parsed, config);
+    }
+
+    // BYO-key dev must not inherit the default provider's distribution config:
+    // the databricks endpoint, fast-model override, and discovery allowlist are
+    // cleared. Set optional fields to mimic a distribution-injected config.
     #[cfg(debug_assertions)]
     #[test]
-    fn clear_default_databricks_provider_env_clears_endpoint_env_and_fast_model() {
+    fn clear_default_databricks_distribution_config_clears_provider_policy() {
         let mut config = default_runtime_config();
         config.goose = managed_goose_config();
         config.goose.model_providers[0].fast_model_id = Some("goose-fast-model".to_string());
+        config.goose.model_providers[0].allowed_model_id_prefixes =
+            Some(vec!["goose-".to_string()]);
 
-        clear_default_databricks_provider_env(&mut config);
+        clear_default_databricks_distribution_config(&mut config);
 
         let provider = &config.goose.model_providers[0];
         assert_eq!(provider.endpoint_env, None);
         assert_eq!(provider.fast_model_id, None);
+        assert_eq!(provider.allowed_model_id_prefixes, None);
     }
 
     #[test]
@@ -1634,6 +1677,7 @@ mod tests {
             custom_provider: None,
             endpoint_env: None,
             model_inventory_mode: None,
+            allowed_model_id_prefixes: None,
             fast_model_id: None,
             models: vec![],
         });
@@ -1693,6 +1737,27 @@ mod tests {
             .contains("modelInventoryMode has unsupported value"));
 
         let mut goose = managed_goose_config();
+        goose.model_providers[0].allowed_model_id_prefixes = Some(vec![]);
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("allowedModelIdPrefixes must not be empty"));
+
+        let mut goose = managed_goose_config();
+        goose.model_providers[0].allowed_model_id_prefixes =
+            Some(vec!["goose-".to_string(), "goose-".to_string()]);
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("allowedModelIdPrefixes must not contain duplicate"));
+
+        let mut goose = managed_goose_config();
+        goose.model_providers[0].id = "other-managed".to_string();
+        goose.default_model_provider_id = Some("other-managed".to_string());
+        goose.model_providers[0].allowed_model_id_prefixes = Some(vec!["team.".to_string()]);
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("allowedModelIdPrefixes is supported only for databricks_v2"));
+
+        let mut goose = managed_goose_config();
         goose.model_providers[0].custom_provider = Some(custom_provider());
         goose.model_providers[0].id = "other_provider".to_string();
         goose.default_model_provider_id = Some("other_provider".to_string());
@@ -1732,6 +1797,13 @@ mod tests {
         goose.model_providers[0].fast_model_id = Some("goose-fast-model ".to_string());
         assert!(validate_goose_config(&goose).unwrap_err().contains(
             "goose.modelProviders.fastModelId must not have leading or trailing whitespace"
+        ));
+
+        let mut goose = managed_goose_config();
+        goose.model_providers[0].allowed_model_id_prefixes =
+            Some(vec![" team.approved.".to_string()]);
+        assert!(validate_goose_config(&goose).unwrap_err().contains(
+            "goose.modelProviders.allowedModelIdPrefixes entries must not have leading or trailing whitespace"
         ));
 
         let mut goose = managed_goose_config();

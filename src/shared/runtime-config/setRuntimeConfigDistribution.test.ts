@@ -158,10 +158,10 @@ describe("applyDistributionValues", () => {
 });
 
 // build-macos.sh has no other automated coverage, and the BYO strip is the one
-// place where a distribution-injected value could leak into a bundle that must
-// not carry it. Pin both del() clauses so removing one fails here.
+// place where distribution-owned policy could leak into a bundle that must not
+// carry it. Pin both del() clauses so removing one fails here.
 describe("build-macos.sh BYO strip", () => {
-  it("deletes the injected host and fast model", () => {
+  it("deletes the injected host, fast model, and model prefix policy", () => {
     const script = readFileSync("scripts/release/build-macos.sh", "utf8");
     const byoStripStart = script.indexOf(
       'VITE_BYO_KEY_PROVIDERS_VALUE" == "1"',
@@ -170,6 +170,6 @@ describe("build-macos.sh BYO strip", () => {
 
     const byoStrip = script.slice(byoStripStart);
     expect(byoStrip).toContain("del(.DATABRICKS_HOST)");
-    expect(byoStrip).toContain("del(.fastModelId)");
+    expect(byoStrip).toContain("del(.fastModelId, .allowedModelIdPrefixes)");
   });
 });

@@ -199,7 +199,5 @@ export function providerModelOptionsFromIds(
     return markGenericProviderModels(options);
   }
 
-  return markRecommendedGooseModels(
-    options.filter((model) => model.id.startsWith("goose-")),
-  );
+  return markRecommendedGooseModels(options);
 }

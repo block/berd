@@ -1414,7 +1414,7 @@ mod tests {
     #[cfg(debug_assertions)]
     #[test]
     fn apply_runtime_goose_provider_env_exports_nothing_for_byo_stripped_config() {
-        use crate::commands::runtime_config::clear_default_databricks_provider_env;
+        use crate::commands::runtime_config::clear_default_databricks_distribution_config;
 
         let mut command = Command::new("goose");
         let mut config = default_runtime_config();
@@ -1428,7 +1428,7 @@ mod tests {
             DATABRICKS_HOST_ENV.to_string(),
             "https://example.databricks.com".to_string(),
         )]));
-        clear_default_databricks_provider_env(&mut config);
+        clear_default_databricks_distribution_config(&mut config);
 
         apply_runtime_goose_provider_env(&mut command, &config);
 
