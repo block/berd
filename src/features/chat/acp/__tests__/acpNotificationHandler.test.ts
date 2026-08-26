@@ -787,8 +787,8 @@ describe("acpNotificationHandler", () => {
       useChatStore.getState().messagesBySession["acp-session"],
     ).toMatchObject([
       { id: "backend-steer-1", metadata: { delivery: "steer" } },
-      { id: "local-steer-2", metadata: { delivery: "steering" } },
       { role: "assistant" },
+      { id: "local-steer-2", metadata: { delivery: "steering" } },
     ]);
     expect(
       useChatStore.getState().getSessionRuntime("acp-session")

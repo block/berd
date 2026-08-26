@@ -353,12 +353,8 @@ function findLatestInterventionMessageId(messages: Message[]): string | null {
   return null;
 }
 
-function isInterventionMessage(message: Message | undefined): boolean {
-  return (
-    message?.role === "user" &&
-    (message.metadata?.delivery === "steer" ||
-      message.metadata?.delivery === "steering")
-  );
+function isDeliveredInterventionMessage(message: Message | undefined): boolean {
+  return message?.role === "user" && message.metadata?.delivery === "steer";
 }
 
 function findInterventionInsertionAnchorIndex(
@@ -368,7 +364,7 @@ function findInterventionInsertionAnchorIndex(
   let anchorIndex = interventionIndex;
   for (
     let index = interventionIndex + 1;
-    index < messages.length && isInterventionMessage(messages[index]);
+    index < messages.length && isDeliveredInterventionMessage(messages[index]);
     index += 1
   ) {
     anchorIndex = index;

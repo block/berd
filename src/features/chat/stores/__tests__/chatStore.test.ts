@@ -310,7 +310,7 @@ describe("chatStore", () => {
     expect(useChatStore.getState().sessionStateById.s1).toBe(afterRuntime);
   });
 
-  it("inserts a continuation assistant after a contiguous steer batch", () => {
+  it("inserts a continuation assistant after a contiguous delivered steer batch", () => {
     const store = useChatStore.getState();
     store.setMessages("s1", [
       makeMessage({
@@ -336,7 +336,7 @@ describe("chatStore", () => {
         role: "user",
         created: 2,
         content: [{ type: "text", text: "second steer" }],
-        metadata: { userVisible: true, delivery: "steering" },
+        metadata: { userVisible: true, delivery: "steer" },
       }),
     ]);
     store.setStreamingMessageId("s1", "assistant-before-steer");
@@ -364,7 +364,7 @@ describe("chatStore", () => {
     expect(getRuntime("s1").pendingInterventionBoundary).toBeNull();
   });
 
-  it("reuses an existing continuation assistant after a contiguous steer batch", () => {
+  it("does not cross a steering message that has not been delivered", () => {
     const store = useChatStore.getState();
     store.setMessages("s1", [
       makeMessage({ id: "assistant-before-steer", role: "assistant" }),
@@ -391,15 +391,19 @@ describe("chatStore", () => {
 
     store.startAssistantStreamAfterIntervention("s1");
 
-    expect(
-      useChatStore.getState().messagesBySession.s1.map((m) => m.id),
-    ).toEqual([
+    const messages = useChatStore.getState().messagesBySession.s1;
+    expect(messages.map((m) => m.id)).toEqual([
       "assistant-before-steer",
       "steer-1",
+      messages[2].id,
       "steer-2",
       "assistant-after-steers",
     ]);
-    expect(getRuntime("s1").streamingMessageId).toBe("assistant-after-steers");
+    expect(messages[2]).toMatchObject({
+      role: "assistant",
+      metadata: { completionStatus: "inProgress" },
+    });
+    expect(getRuntime("s1").streamingMessageId).toBe(messages[2].id);
     expect(getRuntime("s1").pendingInterventionBoundary).toBeNull();
   });
 
