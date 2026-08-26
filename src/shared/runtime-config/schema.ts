@@ -194,6 +194,15 @@ export const runtimeGooseConfigSchema = z
       }
       providerIds.add(providerId);
 
+      if (provider.allowedModelIdPrefixes && providerId !== "databricks_v2") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["modelProviders", providerIndex, "allowedModelIdPrefixes"],
+          message:
+            "goose modelProvider allowedModelIdPrefixes is supported only for databricks_v2",
+        });
+      }
+
       if (
         provider.customProvider &&
         provider.customProvider.providerId !== providerId

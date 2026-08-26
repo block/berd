@@ -7,7 +7,7 @@ import { notifyProviderModelInventoryInvalidated } from "../lib/providerModelInv
 import { filterDiscoveredModelIds } from "@/shared/runtime-config/modelProviderPolicy";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 
-const MODEL_CACHE_STORAGE_KEY = "goose:providerModelCache:v1";
+const MODEL_CACHE_STORAGE_KEY = "goose:providerModelCache:v2";
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const inFlightRefreshes = new Map<string, Promise<void>>();
 const queuedForceRefreshes = new Map<string, Promise<void>>();
@@ -126,10 +126,7 @@ async function fetchProviderSupportedModels(
 export function isCachedModelInventoryAuthoritative(
   entry: CachedProviderModels | undefined,
 ): boolean {
-  return (
-    entry != null &&
-    (entry.runtimeManaged || (entry.models.length > 0 && entry.fetchedAt > 0))
-  );
+  return entry != null && (entry.runtimeManaged || entry.fetchedAt > 0);
 }
 
 function isStale(entry: CachedProviderModels | undefined): boolean {

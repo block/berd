@@ -229,6 +229,18 @@ describe("runtimeConfigSchema", () => {
     ).not.toThrow();
   });
 
+  it("rejects a model id prefix allowlist on another provider", () => {
+    expect(() =>
+      runtimeConfigSchema.parse(
+        configWithProvider({
+          ...managedProvider,
+          id: "other-managed",
+          allowedModelIdPrefixes: ["team."],
+        }),
+      ),
+    ).toThrow(/supported only for databricks_v2/);
+  });
+
   it.each([
     ["empty", []],
     ["duplicate", ["goose-", "goose-"]],

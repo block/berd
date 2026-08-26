@@ -1,10 +1,5 @@
 import { getClient } from "@/shared/api/acpConnection";
-import type {
-  GooseExtension,
-  GooseExtensionEntry,
-  McpServer,
-  McpServerAcp,
-} from "@aaif/goose-sdk";
+import type { GooseExtension, GooseExtensionEntry } from "@aaif/goose-sdk";
 import type { ExtensionConfig, ExtensionEntry } from "../types";
 
 function envArrayToRecord(
@@ -27,10 +22,6 @@ function recordToArray(
   return Object.entries(record ?? {}).map(([name, value]) => ({ name, value }));
 }
 
-function isAcpMcpServer(server: McpServer): server is McpServerAcp {
-  return "serverId" in server && typeof server.serverId === "string";
-}
-
 function toExtensionEntry(entry: GooseExtensionEntry): ExtensionEntry {
   const { extension } = entry;
   const extensionName =
@@ -51,18 +42,6 @@ function toExtensionEntry(entry: GooseExtensionEntry): ExtensionEntry {
         ...(envs ? { envs } : {}),
         ...(extension.envKeys?.length ? { env_keys: extension.envKeys } : {}),
         ...(extension.timeout != null ? { timeout: extension.timeout } : {}),
-        ...(extension.bundled != null ? { bundled: extension.bundled } : {}),
-        config_key: configKey,
-        enabled: entry.enabled,
-      };
-    }
-
-    if (isAcpMcpServer(extension.server)) {
-      return {
-        type: "acp",
-        name: extension.server.name,
-        description,
-        id: extension.server.serverId,
         ...(extension.bundled != null ? { bundled: extension.bundled } : {}),
         config_key: configKey,
         enabled: entry.enabled,
@@ -144,19 +123,6 @@ function toGooseExtension(extensionConfig: ExtensionConfig): GooseExtension {
       },
       socket: extensionConfig.socket,
       timeout: extensionConfig.timeout,
-      bundled: extensionConfig.bundled,
-    };
-  }
-
-  if (extensionConfig.type === "acp") {
-    const server: McpServerAcp = {
-      name: extensionConfig.name,
-      serverId: extensionConfig.id,
-    };
-    return {
-      type: "mcp",
-      description: extensionConfig.description,
-      server,
       bundled: extensionConfig.bundled,
     };
   }

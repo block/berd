@@ -170,7 +170,7 @@ describe("providerModelCacheStore", () => {
       ...(error ? { error } : {}),
     };
     window.localStorage.setItem(
-      "goose:providerModelCache:v1",
+      "goose:providerModelCache:v2",
       JSON.stringify([cachedEntry]),
     );
     useProviderModelCacheStore.getState().loadPersisted();
@@ -189,7 +189,7 @@ describe("providerModelCacheStore", () => {
     ).toEqual(retryableEntry);
     expect(
       JSON.parse(
-        window.localStorage.getItem("goose:providerModelCache:v1") ?? "[]",
+        window.localStorage.getItem("goose:providerModelCache:v2") ?? "[]",
       ),
     ).toEqual([retryableEntry]);
     expect(useProviderModelCacheStore.getState().getError("openrouter")).toBe(
@@ -280,7 +280,7 @@ describe("providerModelCacheStore", () => {
     ).toEqual(["openrouter-model"]);
   });
 
-  it("recovers from a persisted fresh-empty cache entry", async () => {
+  it("ignores legacy fresh-empty cache entries", async () => {
     window.localStorage.setItem(
       "goose:providerModelCache:v1",
       JSON.stringify([
@@ -358,6 +358,46 @@ describe("providerModelCacheStore", () => {
         .getModelsForProvider("databricks_v2")
         .map((model) => model.id),
     ).toEqual(["goose-gpt-5-5", "team.approved.chat-model"]);
+  });
+
+  it("caches a successful inventory when every discovered model is filtered", async () => {
+    const config: RuntimeConfig = {
+      schemaVersion: 1,
+      goose: {
+        defaultModelProviderId: "databricks_v2",
+        modelProviders: [
+          {
+            id: "databricks_v2",
+            displayName: "Databricks",
+            allowedModelIdPrefixes: ["goose-"],
+            models: [],
+          },
+        ],
+      },
+    };
+    useRuntimeConfigStore.setState({ config });
+    mocks.supportedModelsList.mockResolvedValue({
+      models: ["other.schema.chat-model"],
+    });
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2");
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2");
+
+    expect(mocks.supportedModelsList).toHaveBeenCalledTimes(1);
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .isModelInventoryAuthoritative("databricks_v2"),
+    ).toBe(true);
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .getModelsForProvider("databricks_v2"),
+    ).toEqual([]);
   });
 
   it("preserves bundled metadata while refreshing the available model list", async () => {

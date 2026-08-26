@@ -848,6 +848,12 @@ fn validate_goose_config(goose: &RuntimeGooseConfig) -> Result<(), String> {
             validate_model_inventory_mode(mode)?;
         }
         if let Some(prefixes) = &provider.allowed_model_id_prefixes {
+            if provider.id != "databricks_v2" {
+                return Err(
+                    "goose.modelProviders.allowedModelIdPrefixes is supported only for databricks_v2"
+                        .to_string(),
+                );
+            }
             if prefixes.is_empty() {
                 return Err(
                     "goose.modelProviders.allowedModelIdPrefixes must not be empty".to_string(),
@@ -1742,6 +1748,14 @@ mod tests {
         assert!(validate_goose_config(&goose)
             .unwrap_err()
             .contains("allowedModelIdPrefixes must not contain duplicate"));
+
+        let mut goose = managed_goose_config();
+        goose.model_providers[0].id = "other-managed".to_string();
+        goose.default_model_provider_id = Some("other-managed".to_string());
+        goose.model_providers[0].allowed_model_id_prefixes = Some(vec!["team.".to_string()]);
+        assert!(validate_goose_config(&goose)
+            .unwrap_err()
+            .contains("allowedModelIdPrefixes is supported only for databricks_v2"));
 
         let mut goose = managed_goose_config();
         goose.model_providers[0].custom_provider = Some(custom_provider());

@@ -60,13 +60,7 @@ async function validatedModelIds(
         await client.goose.GooseUnstableProvidersSupportedModelsList({
           providerId,
         });
-      const modelIds = new Set(
-        filterDiscoveredModelIds(
-          useRuntimeConfigStore.getState().config,
-          providerId,
-          response.models as string[],
-        ),
-      );
+      const modelIds = new Set(response.models as string[]);
       if (generationAtStart !== inventoryGeneration(providerId)) {
         return validatedModelIds(providerId);
       }
@@ -106,14 +100,44 @@ export async function repairManagedGooseModelSelection(
     };
   }
 
-  const config = useRuntimeConfigStore.getState().config;
-  const initial = resolveManagedGooseProviderSelection(config, selection);
+  const initialConfig = useRuntimeConfigStore.getState().config;
+  const initial = resolveManagedGooseProviderSelection(
+    initialConfig,
+    selection,
+  );
   if (!initial) return null;
 
-  const targetModelIds =
+  const discoveredIds =
     initial.providerId === DATABRICKS_V2_PROVIDER_ID && selection.modelId
       ? await validatedModelIds(initial.providerId)
       : null;
+  const config = useRuntimeConfigStore.getState().config;
+  const current = resolveManagedGooseProviderSelection(config, selection);
+  if (!current) return null;
+
+  const targetModelIds =
+    discoveredIds && current.providerId === initial.providerId
+      ? new Set(
+          filterDiscoveredModelIds(config, current.providerId, [
+            ...discoveredIds,
+          ]),
+        )
+      : null;
+  const provider = config.goose.modelProviders.find(
+    (candidate) => candidate.id === current.providerId,
+  );
+  for (const model of provider?.models ?? []) {
+    targetModelIds?.add(model.id);
+  }
+  if (
+    targetModelIds &&
+    selection.modelId &&
+    provider?.allowedModelIdPrefixes?.some((prefix) =>
+      selection.modelId?.startsWith(prefix),
+    )
+  ) {
+    targetModelIds.add(selection.modelId);
+  }
   const repaired = resolveManagedGooseProviderSelection(config, selection, {
     ...(targetModelIds ? { targetModelIds } : {}),
     targetInventoryValidated: targetModelIds !== null,
