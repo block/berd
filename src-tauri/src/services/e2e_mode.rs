@@ -174,6 +174,10 @@ impl E2eMode {
         self.goose_root.join(".agents")
     }
 
+    pub(crate) fn goose_data_dir(&self) -> PathBuf {
+        self.goose_root.join("data")
+    }
+
     pub(crate) fn goose_agents_dir(&self) -> PathBuf {
         self.goose_agents_root().join("agents")
     }

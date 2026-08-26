@@ -43,6 +43,7 @@ pub mod path_resolver;
 mod pocket_audio_player;
 pub mod pocket_voice;
 pub mod project_icons;
+pub mod projects;
 pub mod pull_requests;
 pub mod renderer;
 pub mod runtime_config;

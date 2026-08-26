@@ -1,16 +1,12 @@
-use chrono::Utc;
+use crate::persistence::BerdPersistenceState;
+#[cfg(test)]
+use crate::persistence::DATABASE_FILENAME;
 use serde::{Deserialize, Serialize, Serializer};
 use sqlx::pool::PoolConnection;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{FromRow, Row, Sqlite, SqlitePool};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
-use std::io::Read;
-use std::path::{Path, PathBuf};
-use std::time::Duration;
 use uuid::Uuid;
 
-const DATABASE_FILENAME: &str = "berd.sqlite";
 const MIN_CENTER: f64 = -1_000_000.0;
 const MAX_CENTER: f64 = 1_000_000.0;
 const MIN_SIZE: f64 = 1.0;
@@ -22,57 +18,7 @@ const MAX_TITLE_OVERRIDE_LENGTH: usize = 200;
 const MAX_ITEMS: usize = 500;
 pub const HOME_LAYOUT_ID: &str = "home";
 
-#[derive(Clone, Debug)]
-pub struct LayoutState {
-    pool: SqlitePool,
-}
-
-impl LayoutState {
-    pub async fn new(app_data_dir: PathBuf) -> Result<Self, String> {
-        fs::create_dir_all(&app_data_dir)
-            .map_err(|error| format!("Failed to create app data directory: {error}"))?;
-
-        Self::new_for_path(app_data_dir.join(DATABASE_FILENAME)).await
-    }
-
-    #[cfg(test)]
-    async fn new_for_tests(db_path: PathBuf) -> Result<Self, String> {
-        Self::new_for_path(db_path).await
-    }
-
-    async fn new_for_path(db_path: PathBuf) -> Result<Self, String> {
-        if database_file_has_invalid_header(&db_path)? {
-            rename_corrupt_database_files(&db_path)?;
-        }
-        match open_migrated_pool(&db_path).await {
-            Ok(pool) => Ok(Self { pool }),
-            Err(error) if is_sqlite_corruption_error(&error) => {
-                rename_corrupt_database_files(&db_path)?;
-                let pool = open_migrated_pool(&db_path).await.map_err(|retry_error| {
-                    format!("Failed to recreate layout database: {retry_error}")
-                })?;
-                Ok(Self { pool })
-            }
-            Err(error) => Err(format!("Failed to initialize layout database: {error}")),
-        }
-    }
-}
-
-fn database_file_has_invalid_header(db_path: &Path) -> Result<bool, String> {
-    const SQLITE_HEADER: &[u8] = b"SQLite format 3\0";
-
-    if !db_path.exists() {
-        return Ok(false);
-    }
-
-    let mut file = File::open(db_path)
-        .map_err(|error| format!("Failed to inspect layout database header: {error}"))?;
-    let mut header = [0; SQLITE_HEADER.len()];
-    let bytes_read = file
-        .read(&mut header)
-        .map_err(|error| format!("Failed to inspect layout database header: {error}"))?;
-    Ok(bytes_read != 0 && (bytes_read < SQLITE_HEADER.len() || header.as_slice() != SQLITE_HEADER))
-}
+pub type LayoutState = BerdPersistenceState;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -299,102 +245,6 @@ pub async fn reset_layout(
     request: ResetLayoutRequest,
 ) -> Result<LayoutMutationResult, String> {
     reset_layout_in_pool(&state.pool, request).await
-}
-
-async fn open_migrated_pool(db_path: &Path) -> Result<SqlitePool, sqlx::Error> {
-    let options = SqliteConnectOptions::new()
-        .filename(db_path)
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)
-        .busy_timeout(Duration::from_millis(5_000));
-    let pool = SqlitePoolOptions::new()
-        .max_connections(5)
-        .connect_with(options)
-        .await?;
-
-    if let Err(error) = sqlx::migrate!("./migrations").run(&pool).await {
-        pool.close().await;
-        return Err(error.into());
-    }
-    if let Err(error) = read_initial_state(&pool).await {
-        pool.close().await;
-        return Err(error);
-    }
-    Ok(pool)
-}
-
-async fn read_initial_state(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    sqlx::query("SELECT layout_id FROM layout_state WHERE layout_id = ?")
-        .bind(HOME_LAYOUT_ID)
-        .fetch_one(pool)
-        .await?;
-    Ok(())
-}
-
-fn is_sqlite_corruption_error(error: &sqlx::Error) -> bool {
-    let mut current: Option<&(dyn std::error::Error + 'static)> = Some(error);
-    while let Some(error) = current {
-        if let Some(database_error) = error.downcast_ref::<sqlx::Error>().and_then(|error| {
-            if let sqlx::Error::Database(database_error) = error {
-                Some(database_error)
-            } else {
-                None
-            }
-        }) {
-            if is_sqlite_corruption_code(database_error.code().as_deref()) {
-                return true;
-            }
-        }
-        current = error.source();
-    }
-    false
-}
-
-fn is_sqlite_corruption_code(code: Option<&str>) -> bool {
-    code.and_then(|code| code.parse::<i32>().ok())
-        .is_some_and(|code| matches!(code & 0xff, 11 | 26))
-}
-
-fn rename_corrupt_database_files(db_path: &Path) -> Result<(), String> {
-    let suffix = format!(".corrupt-{}", Utc::now().format("%Y%m%dT%H%M%SZ"));
-    let mut renamed = Vec::new();
-    let mut errors = Vec::new();
-
-    for path in [
-        db_path.to_path_buf(),
-        PathBuf::from(format!("{}-wal", db_path.display())),
-        PathBuf::from(format!("{}-shm", db_path.display())),
-    ] {
-        if path.exists() {
-            let file_name = path
-                .file_name()
-                .ok_or_else(|| format!("Invalid database path: {}", path.display()))?
-                .to_string_lossy();
-            let renamed_path = path.with_file_name(format!("{file_name}{suffix}"));
-            match fs::rename(&path, &renamed_path) {
-                Ok(()) => renamed.push((path, renamed_path)),
-                Err(error) => errors.push(format!(
-                    "Failed to preserve corrupt database file {} as {}: {error}",
-                    path.display(),
-                    renamed_path.display()
-                )),
-            }
-        }
-    }
-
-    for (path, renamed_path) in &renamed {
-        log::warn!(
-            "Preserved corrupt layout database file {} as {}",
-            path.display(),
-            renamed_path.display()
-        );
-    }
-
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors.join("; "))
-    }
 }
 
 fn require_supported_layout_id(layout_id: String) -> Result<String, String> {
@@ -912,49 +762,9 @@ fn db_error(error: sqlx::Error) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
-    use sqlx::error::{DatabaseError, ErrorKind};
-    use std::borrow::Cow;
-    use std::fmt;
+    use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+    use std::time::Duration;
     use tempfile::{tempdir, TempDir};
-
-    #[derive(Debug)]
-    struct FakeDatabaseError {
-        code: &'static str,
-    }
-
-    impl fmt::Display for FakeDatabaseError {
-        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            write!(formatter, "fake sqlite error {}", self.code)
-        }
-    }
-
-    impl std::error::Error for FakeDatabaseError {}
-
-    impl DatabaseError for FakeDatabaseError {
-        fn message(&self) -> &str {
-            "fake sqlite error"
-        }
-
-        fn code(&self) -> Option<Cow<'_, str>> {
-            Some(Cow::Borrowed(self.code))
-        }
-
-        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
-            self
-        }
-
-        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
-            self
-        }
-
-        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
-            self
-        }
-
-        fn kind(&self) -> ErrorKind {
-            ErrorKind::Other
-        }
-    }
 
     struct TestState {
         state: LayoutState,
@@ -1144,86 +954,6 @@ mod tests {
         assert_eq!(layout.items.len(), 1);
         assert_eq!(layout.items[0].kind, LayoutItemKind::Session);
         assert_eq!(layout.items[0].target_id, "session-1");
-    }
-
-    #[tokio::test]
-    async fn corrupt_database_files_are_renamed_with_matching_suffix() {
-        let dir = tempdir().expect("tempdir");
-        let db_path = dir.path().join(DATABASE_FILENAME);
-        fs::write(&db_path, "not sqlite").expect("db");
-        fs::write(format!("{}-wal", db_path.display()), "wal").expect("wal");
-        fs::write(format!("{}-shm", db_path.display()), "shm").expect("shm");
-
-        let state = LayoutState::new_for_tests(db_path.clone())
-            .await
-            .expect("recovered state");
-        assert_eq!(
-            read_layout(&state.pool, HOME_LAYOUT_ID)
-                .await
-                .expect("layout")
-                .camera
-                .zoom_bps,
-            DEFAULT_ZOOM_BPS
-        );
-
-        let renamed: Vec<String> = fs::read_dir(dir.path())
-            .expect("read dir")
-            .filter_map(Result::ok)
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.contains(".corrupt-"))
-            .collect();
-        assert_eq!(renamed.len(), 3);
-        let suffixes: HashSet<String> = renamed
-            .iter()
-            .map(|name| name.split(".corrupt-").nth(1).unwrap().to_string())
-            .collect();
-        assert_eq!(suffixes.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn non_corruption_open_errors_do_not_rename_database_path() {
-        let dir = tempdir().expect("tempdir");
-        let db_path = dir.path().join(DATABASE_FILENAME);
-        fs::create_dir(&db_path).expect("db path directory");
-
-        let error = LayoutState::new_for_tests(db_path.clone())
-            .await
-            .expect_err("directory path should not be recoverable corruption");
-
-        assert!(error.contains("Failed to inspect layout database header"));
-        assert!(db_path.is_dir());
-        let renamed: Vec<String> = fs::read_dir(dir.path())
-            .expect("read dir")
-            .filter_map(Result::ok)
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .filter(|name| name.contains(".corrupt-"))
-            .collect();
-        assert!(renamed.is_empty());
-    }
-
-    #[test]
-    fn corruption_detector_matches_migration_errors_and_extended_codes() {
-        let top_level_corruption = sqlx::Error::database(FakeDatabaseError { code: "11" });
-        assert!(is_sqlite_corruption_error(&top_level_corruption));
-
-        let extended_corruption = sqlx::Error::database(FakeDatabaseError { code: "267" });
-        assert!(is_sqlite_corruption_error(&extended_corruption));
-
-        let migration_corruption =
-            sqlx::Error::Migrate(Box::new(sqlx::migrate::MigrateError::ExecuteMigration(
-                sqlx::Error::database(FakeDatabaseError { code: "267" }),
-                20260519180000,
-            )));
-        assert!(is_sqlite_corruption_error(&migration_corruption));
-
-        let migration_not_a_database =
-            sqlx::Error::Migrate(Box::new(sqlx::migrate::MigrateError::Execute(
-                sqlx::Error::database(FakeDatabaseError { code: "26" }),
-            )));
-        assert!(is_sqlite_corruption_error(&migration_not_a_database));
-
-        let constraint_error = sqlx::Error::database(FakeDatabaseError { code: "2067" });
-        assert!(!is_sqlite_corruption_error(&constraint_error));
     }
 
     #[tokio::test]
