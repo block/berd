@@ -4,6 +4,7 @@ import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStor
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
 import { subscribeToProviderModelInventoryInvalidation } from "./providerModelInventoryEvents";
 import {
+  filterDiscoveredModelIds,
   resolveManagedGooseProviderSelection,
   type GooseProviderSelection,
   type ManagedGooseProviderSelection,
@@ -59,7 +60,13 @@ async function validatedModelIds(
         await client.goose.GooseUnstableProvidersSupportedModelsList({
           providerId,
         });
-      const modelIds = new Set<string>(response.models as string[]);
+      const modelIds = new Set(
+        filterDiscoveredModelIds(
+          useRuntimeConfigStore.getState().config,
+          providerId,
+          response.models as string[],
+        ),
+      );
       if (generationAtStart !== inventoryGeneration(providerId)) {
         return validatedModelIds(providerId);
       }

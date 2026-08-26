@@ -1,6 +1,11 @@
 import { waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelOption } from "@/features/chat/types";
+import {
+  DEFAULT_RUNTIME_CONFIG,
+  type RuntimeConfig,
+} from "@/shared/runtime-config/schema";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { useProviderModelCacheStore } from "./providerModelCacheStore";
 
 const mocks = vi.hoisted(() => ({
@@ -34,6 +39,7 @@ describe("providerModelCacheStore", () => {
       refreshingProviderIds: new Set(),
       runtimeManagedProviderIds: new Set(),
     });
+    useRuntimeConfigStore.setState({ config: DEFAULT_RUNTIME_CONFIG });
     mocks.getClient.mockResolvedValue({
       goose: {
         GooseUnstableProvidersSupportedModelsList: mocks.supportedModelsList,
@@ -316,6 +322,42 @@ describe("providerModelCacheStore", () => {
         .getModelsForProvider("openrouter")
         .map((model) => model.id),
     ).toEqual(["openrouter-model"]);
+  });
+
+  it("applies the runtime model id prefix allowlist to discovery", async () => {
+    const config: RuntimeConfig = {
+      schemaVersion: 1,
+      goose: {
+        defaultModelProviderId: "databricks_v2",
+        modelProviders: [
+          {
+            id: "databricks_v2",
+            displayName: "Databricks",
+            allowedModelIdPrefixes: ["goose-", "team.approved."],
+            models: [],
+          },
+        ],
+      },
+    };
+    useRuntimeConfigStore.setState({ config });
+    mocks.supportedModelsList.mockResolvedValueOnce({
+      models: [
+        "goose-gpt-5-5",
+        "team.approved.chat-model",
+        "other.schema.chat-model",
+      ],
+    });
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2");
+
+    expect(
+      useProviderModelCacheStore
+        .getState()
+        .getModelsForProvider("databricks_v2")
+        .map((model) => model.id),
+    ).toEqual(["goose-gpt-5-5", "team.approved.chat-model"]);
   });
 
   it("preserves bundled metadata while refreshing the available model list", async () => {

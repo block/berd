@@ -47,6 +47,7 @@ describe("modelRecommendations", () => {
     expect(options.map((option) => option.id)).toEqual([
       "goose-gpt-5-5",
       "goose-claude-opus-4-8",
+      "claude-opus-4-8",
       "goose-gpt-5-5-mini",
     ]);
     expect(
@@ -55,6 +56,9 @@ describe("modelRecommendations", () => {
     expect(
       options.filter((option) => option.recommended).map((option) => option.id),
     ).toEqual(["goose-gpt-5-5", "goose-claude-opus-4-8", "goose-gpt-5-5-mini"]);
+    expect(options.find((option) => option.id === "claude-opus-4-8")).toEqual(
+      expect.objectContaining({ recommended: false, featured: false }),
+    );
   });
 
   it("does not feature or rank generic custom provider models", () => {

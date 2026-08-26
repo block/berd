@@ -82,6 +82,49 @@ describe("repairManagedGooseModelSelection", () => {
     });
   });
 
+  it("repairs a model excluded by the runtime prefix allowlist", async () => {
+    const filteredConfig: RuntimeConfig = {
+      ...managedConfig,
+      goose: {
+        ...managedConfig.goose,
+        modelProviders: [
+          {
+            ...managedConfig.goose.modelProviders[0],
+            allowedModelIdPrefixes: ["goose-", "team.approved."],
+          },
+        ],
+      },
+    };
+    useRuntimeConfigStore.setState({
+      config: filteredConfig,
+      result: {
+        status: "ready",
+        source: "endpoint",
+        config: filteredConfig,
+      },
+    });
+    vi.mocked(getClient).mockResolvedValue({
+      goose: {
+        GooseUnstableProvidersSupportedModelsList: vi.fn().mockResolvedValue({
+          models: ["goose-gpt-5-5", "other.schema.chat-model"],
+        }),
+      },
+    } as never);
+
+    await expect(
+      repairManagedGooseModelSelection(
+        {
+          providerId: "databricks_v2",
+          modelId: "other.schema.chat-model",
+        },
+        "session",
+      ),
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+    });
+  });
+
   it("drops its cached inventory when the provider inventory refreshes", async () => {
     const supportedModelsList = vi
       .fn()
