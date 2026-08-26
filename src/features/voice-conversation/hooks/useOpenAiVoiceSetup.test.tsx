@@ -6,6 +6,7 @@ import { useOpenAiVoiceSetup } from "./useOpenAiVoiceSetup";
 const mocks = vi.hoisted(() => ({
   getStatus: vi.fn<() => Promise<OpenAiVoiceStatus>>(),
   configChanged: null as ((providerId: string) => void) | null,
+  finishListening: null as (() => void) | null,
 }));
 
 vi.mock("../api/openAiVoice", () => ({
@@ -15,7 +16,9 @@ vi.mock("../api/openAiVoice", () => ({
 vi.mock("@/features/providers/api/credentials", () => ({
   onProviderConfigChanged: (listener: (providerId: string) => void) => {
     mocks.configChanged = listener;
-    return Promise.resolve(vi.fn());
+    return new Promise<() => void>((resolve) => {
+      mocks.finishListening = () => resolve(() => undefined);
+    });
   },
 }));
 
@@ -43,6 +46,7 @@ describe("useOpenAiVoiceSetup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.configChanged = null;
+    mocks.finishListening = null;
   });
 
   it("keeps the latest credential refresh when responses resolve out of order", async () => {
@@ -53,6 +57,8 @@ describe("useOpenAiVoiceSetup", () => {
       .mockReturnValueOnce(refreshed.promise);
     const { result } = renderHook(() => useOpenAiVoiceSetup());
     await waitFor(() => expect(mocks.configChanged).not.toBeNull());
+    act(() => mocks.finishListening?.());
+    await waitFor(() => expect(mocks.getStatus).toHaveBeenCalledTimes(1));
 
     act(() => mocks.configChanged?.("openai"));
     refreshed.resolve(status(true));
@@ -62,5 +68,17 @@ describe("useOpenAiVoiceSetup", () => {
     await act(async () => Promise.resolve());
 
     expect(result.current.status?.configured).toBe(true);
+  });
+
+  it("refreshes after listener registration captures credential changes", async () => {
+    mocks.getStatus.mockResolvedValue(status(true));
+    const { result } = renderHook(() => useOpenAiVoiceSetup());
+
+    await waitFor(() => expect(mocks.finishListening).not.toBeNull());
+    expect(mocks.getStatus).not.toHaveBeenCalled();
+
+    act(() => mocks.finishListening?.());
+
+    await waitFor(() => expect(result.current.status?.configured).toBe(true));
   });
 });

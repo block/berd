@@ -26,10 +26,12 @@ export interface OpenAiVoiceStreamEvent {
 
 export async function getOpenAiVoiceStatus(): Promise<OpenAiVoiceStatus> {
   const fields = await getProviderConfig("openai");
-  const configured = fields.some(
+  const providerConfigured = fields.some(
     (field) => field.key === "OPENAI_API_KEY" && field.isSecret && field.isSet,
   );
-  return invoke<OpenAiVoiceStatus>("get_openai_voice_status", { configured });
+  return invoke<OpenAiVoiceStatus>("get_openai_voice_status", {
+    providerConfigured,
+  });
 }
 
 export function startOpenAiVoiceStream(

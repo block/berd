@@ -15,11 +15,7 @@ import {
   SelectValue,
 } from "@/shared/ui/select";
 import { useEffect, useState } from "react";
-import {
-  getOpenAiVoiceStatus,
-  setOpenAiPlaybackSpeed,
-  type OpenAiVoiceStatus,
-} from "../api/openAiVoice";
+import { setOpenAiPlaybackSpeed } from "../api/openAiVoice";
 import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import { useMicrophonePermission } from "../hooks/useMicrophonePermission";
@@ -37,6 +33,7 @@ import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
 import { MacSpeechSettings } from "./MacSpeechSettings";
 import { SiriVoiceSettings } from "./SiriVoiceSettings";
 import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
+import { useOpenAiVoiceSetup } from "../hooks/useOpenAiVoiceSetup";
 
 const INTERRUPTION_MODES: VoiceInterruptionMode[] = [
   "automatic",
@@ -79,31 +76,11 @@ export function VoiceSettings() {
   const { t } = useTranslation("settings");
   const setup = usePocketVoiceSetup();
   const macSpeechSetup = useMacSpeechSetup();
-  const [openAiStatus, setOpenAiStatus] = useState<OpenAiVoiceStatus | null>(
-    null,
-  );
-  const [openAiError, setOpenAiError] = useState<string | null>(null);
+  const { status: openAiStatus, error: openAiError } = useOpenAiVoiceSetup();
   const [openAiSpeed, setOpenAiSpeed] = useState(1);
   useEffect(() => {
-    let active = true;
-    void getOpenAiVoiceStatus().then(
-      (status) => {
-        if (active) {
-          setOpenAiStatus(status);
-          setOpenAiSpeed(status.playbackSpeed);
-        }
-      },
-      (error) => {
-        if (active)
-          setOpenAiError(
-            error instanceof Error ? error.message : String(error),
-          );
-      },
-    );
-    return () => {
-      active = false;
-    };
-  }, []);
+    if (openAiStatus) setOpenAiSpeed(openAiStatus.playbackSpeed);
+  }, [openAiStatus]);
   const input = useVoiceInputPreference(
     isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );

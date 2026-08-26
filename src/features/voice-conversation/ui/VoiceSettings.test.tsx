@@ -63,7 +63,13 @@ const openAiStatusState = vi.hoisted(() => ({
 }));
 
 vi.mock("../api/openAiVoice", () => ({
-  getOpenAiVoiceStatus: vi.fn(() => Promise.resolve(openAiStatusState.current)),
+  setOpenAiPlaybackSpeed: vi.fn(() => Promise.resolve()),
+}));
+vi.mock("../hooks/useOpenAiVoiceSetup", () => ({
+  useOpenAiVoiceSetup: () => ({
+    status: openAiStatusState.current,
+    error: null,
+  }),
 }));
 vi.mock("../hooks/usePocketVoiceSetup", () => ({
   usePocketVoiceSetup: () => setupState.current,

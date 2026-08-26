@@ -213,28 +213,40 @@ pub(crate) fn api_key() -> Result<String, String> {
     })
 }
 
-fn openai_host_base_url(host: String) -> String {
-    let host = host.trim_end_matches('/');
-    if host.ends_with("/v1") {
-        host.to_string()
-    } else {
-        format!("{host}/v1")
+fn normalize_openai_base_url(raw_url: String, assume_v1: bool) -> Result<String, String> {
+    let mut url = reqwest::Url::parse(&raw_url)
+        .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("OpenAI voice endpoint must use HTTP or HTTPS".to_string());
     }
+    let path = url.path().trim_end_matches('/').to_string();
+    if assume_v1 || path.is_empty() {
+        let path = if path.ends_with("/v1") {
+            path
+        } else {
+            format!("{path}/v1")
+        };
+        url.set_path(&path);
+    } else {
+        url.set_path(&path);
+    }
+    url.set_fragment(None);
+    Ok(url.to_string().trim_end_matches('/').to_string())
 }
 
 fn base_url() -> Result<String, String> {
     if let Some(host) = env_trimmed("OPENAI_HOST") {
-        return Ok(openai_host_base_url(host));
+        return normalize_openai_base_url(host, true);
     }
     if let Some(base_url) = env_trimmed("OPENAI_BASE_URL") {
-        return Ok(base_url);
+        return normalize_openai_base_url(base_url, false);
     }
     let config_path = crate::services::goose_config::config_path()?;
     if let Some(base_url) = goose_yaml_value(&config_path, "OPENAI_BASE_URL")? {
-        return Ok(base_url);
+        return normalize_openai_base_url(base_url, false);
     }
     if let Some(host) = goose_yaml_value(&config_path, "OPENAI_HOST")? {
-        return Ok(openai_host_base_url(host));
+        return normalize_openai_base_url(host, true);
     }
     Ok(DEFAULT_BASE_URL.to_string())
 }
@@ -248,15 +260,19 @@ fn speech_voice() -> String {
 }
 
 fn endpoint(path: &str) -> Result<String, String> {
-    let mut url = base_url()?;
-    while url.ends_with('/') {
-        url.pop();
-    }
-    let path = path.trim_start_matches('/');
-    let full = format!("{url}/{path}");
-    reqwest::Url::parse(&full)
-        .map(|_| full)
-        .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))
+    endpoint_for_base_url(&base_url()?, path)
+}
+
+fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
+    let mut url = reqwest::Url::parse(base_url)
+        .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
+    let base_path = url.path().trim_end_matches('/');
+    url.set_path(&format!("{base_path}/{}", path.trim_start_matches('/')));
+    Ok(url.to_string())
+}
+
+fn openai_voice_configured(provider_configured: bool, environment_key: Option<&str>) -> bool {
+    provider_configured || environment_key.is_some_and(|key| !key.trim().is_empty())
 }
 
 fn authorized_headers(key: &str) -> Result<HeaderMap, String> {
@@ -311,8 +327,13 @@ fn client() -> Result<reqwest::Client, String> {
 #[tauri::command]
 pub fn get_openai_voice_status(
     state: State<'_, OpenAiVoiceState>,
-    configured: bool,
+    provider_configured: bool,
 ) -> Result<OpenAiVoiceStatus, String> {
+    // Provider metadata avoids a passive Keychain read; the environment is
+    // safe to inspect directly and has the same highest-priority semantics as
+    // the credential resolver used when a stream starts.
+    let environment_key = env_trimmed("OPENAI_API_KEY");
+    let configured = openai_voice_configured(provider_configured, environment_key.as_deref());
     let playback_speed = state
         .playback
         .lock()
@@ -683,8 +704,17 @@ fn run_openai_voice_stream(
                     output_latency_grace,
                     speed,
                 )?;
-                while active.load(Ordering::SeqCst) && !player.is_empty() {
+                while active.load(Ordering::SeqCst)
+                    && (!player.is_empty() || assistant_speech.is_some())
+                {
                     player.ensure_healthy()?;
+                    update_openai_assistant_speech(
+                        player.is_empty(),
+                        &mut assistant_speech,
+                        &mut playback_drained_at,
+                        output_latency_grace,
+                        Instant::now(),
+                    );
                     if last_progress.elapsed() >= Duration::from_millis(100) {
                         emit_openai_stream_event(
                             app,
@@ -811,6 +841,10 @@ fn speak_pending(
             let samples = pcm16le_to_f32(&pcm_remainder[..sample_bytes]);
             pcm_remainder.drain(..sample_bytes);
             if *started {
+                assistant_speech.get_or_insert_with(|| {
+                    native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture)
+                });
+                *playback_drained_at = None;
                 player.enqueue(&samples)?;
             } else {
                 initial_samples.extend_from_slice(&samples);
@@ -1091,13 +1125,37 @@ mod tests {
     #[test]
     fn openai_host_configuration_resolves_to_the_v1_api_root() {
         assert_eq!(
-            openai_host_base_url("https://proxy.example".to_string()),
+            normalize_openai_base_url("https://proxy.example".to_string(), true).unwrap(),
             "https://proxy.example/v1"
         );
         assert_eq!(
-            openai_host_base_url("https://proxy.example/v1/".to_string()),
+            normalize_openai_base_url("https://proxy.example/v1/".to_string(), true).unwrap(),
             "https://proxy.example/v1"
         );
+    }
+
+    #[test]
+    fn openai_base_url_preserves_custom_paths_and_query_parameters() {
+        assert_eq!(
+            normalize_openai_base_url("https://proxy.example".to_string(), false).unwrap(),
+            "https://proxy.example/v1"
+        );
+        let base = normalize_openai_base_url(
+            "https://proxy.example/openai?api-version=2026-01-01".to_string(),
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            endpoint_for_base_url(&base, "audio/speech").unwrap(),
+            "https://proxy.example/openai/audio/speech?api-version=2026-01-01"
+        );
+    }
+
+    #[test]
+    fn environment_credential_makes_openai_voice_ready() {
+        assert!(openai_voice_configured(false, Some("environment-key")));
+        assert!(!openai_voice_configured(false, None));
+        assert!(!openai_voice_configured(false, Some("  ")));
     }
 
     #[test]
