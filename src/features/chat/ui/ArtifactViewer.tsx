@@ -72,6 +72,51 @@ const BACKGROUND_ARTIFACT_POLL_INTERVAL_MS = 10_000;
 // single failure is routinely a file mid-rewrite or a transient I/O hiccup;
 // two in a row is a real divergence worth surfacing.
 const DIVERGENCE_STRIKE_THRESHOLD = 2;
+// Upper bound on any single stat/read/decode step of a freshness cycle. These
+// awaits cross IPC into filesystem calls that can hang indefinitely (stalled
+// network mounts, yanked removable media — the Rust side uses spawn_blocking
+// for exactly this reason), and an unbounded await here wedges the viewer: a
+// stuck forced refresh suppresses all polling via forcedRefreshInFlightRef,
+// and a stuck poll never reaches scheduleNextPoll. Ten seconds is comfortably
+// beyond any healthy local operation while still funneling a genuine hang
+// into the existing failure paths (error state, divergence strikes) before
+// the viewer reads as dead.
+const PRESENTATION_TIMEOUT_MS = 10_000;
+
+class PresentationTimeoutError extends Error {
+  constructor() {
+    super("Artifact presentation timed out");
+    this.name = "PresentationTimeoutError";
+  }
+}
+
+// Bounds one stat/read/decode step. On timeout the wrapper rejects with
+// PresentationTimeoutError so the caller's catch/finally blocks run — clearing
+// the in-flight flags and letting polling continue. A later settlement of the
+// underlying promise only re-settles the already-rejected wrapper, which is a
+// no-op per the Promise spec: the awaiting effect code never resumes, so a
+// timed-out operation cannot deliver stale bytes over newer state. (The
+// generation guards remain in place as an independent second line of
+// defense.) Attaching the rejection handler here also keeps a late failure of
+// the underlying promise from surfacing as an unhandled rejection.
+function withPresentationTimeout<T>(promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timerId = window.setTimeout(
+      () => reject(new PresentationTimeoutError()),
+      PRESENTATION_TIMEOUT_MS,
+    );
+    promise.then(
+      (value) => {
+        window.clearTimeout(timerId);
+        resolve(value);
+      },
+      (error: unknown) => {
+        window.clearTimeout(timerId);
+        reject(error);
+      },
+    );
+  });
+}
 
 function sameFingerprint(
   left: FileFingerprint,
@@ -219,7 +264,9 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
     void contentReadRevision;
     void (async () => {
       try {
-        const before = await statFile(artifact.resolvedPath);
+        const before = await withPresentationTimeout(
+          statFile(artifact.resolvedPath),
+        );
         if (!isCurrentRefresh()) return;
 
         if (viewMode === "image") {
@@ -233,9 +280,11 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
           );
           let confirmedFingerprint = before;
           if (shouldBustImageCache) {
-            await preloadArtifactImage(candidateSrc);
+            await withPresentationTimeout(preloadArtifactImage(candidateSrc));
             if (!isCurrentRefresh()) return;
-            confirmedFingerprint = await statFile(artifact.resolvedPath);
+            confirmedFingerprint = await withPresentationTimeout(
+              statFile(artifact.resolvedPath),
+            );
             if (!isCurrentRefresh()) return;
             if (!sameFingerprint(before, confirmedFingerprint)) {
               // Torn write: the file changed while the image was decoding.
@@ -259,8 +308,12 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
           return;
         }
 
-        const payload = await readTextFile(artifact.resolvedPath);
-        const after = await statFile(artifact.resolvedPath);
+        const payload = await withPresentationTimeout(
+          readTextFile(artifact.resolvedPath),
+        );
+        const after = await withPresentationTimeout(
+          statFile(artifact.resolvedPath),
+        );
         if (!isCurrentRefresh()) return;
         if (!sameFingerprint(before, after)) {
           // Torn write: the file changed underneath the read, so neither the
@@ -349,7 +402,9 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
         !forcedRefreshInFlightRef.current;
       checkInFlight = true;
       try {
-        const fingerprint = await statFile(artifact.resolvedPath);
+        const fingerprint = await withPresentationTimeout(
+          statFile(artifact.resolvedPath),
+        );
         if (!isCurrentPoll()) return;
         const previous = fingerprintRef.current;
         if (
@@ -369,9 +424,11 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
             artifact.resolvedPath,
             artifact.revision + candidateDiskRevision,
           );
-          await preloadArtifactImage(candidateSrc);
+          await withPresentationTimeout(preloadArtifactImage(candidateSrc));
           if (!isCurrentPoll()) return;
-          const confirmedFingerprint = await statFile(artifact.resolvedPath);
+          const confirmedFingerprint = await withPresentationTimeout(
+            statFile(artifact.resolvedPath),
+          );
           if (!isCurrentPoll()) return;
           if (!sameFingerprint(fingerprint, confirmedFingerprint)) {
             // Torn write: the file changed while the image was decoding, so
@@ -388,9 +445,13 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
           return;
         }
 
-        const payload = await readTextFile(artifact.resolvedPath);
+        const payload = await withPresentationTimeout(
+          readTextFile(artifact.resolvedPath),
+        );
         if (!isCurrentPoll()) return;
-        const confirmedFingerprint = await statFile(artifact.resolvedPath);
+        const confirmedFingerprint = await withPresentationTimeout(
+          statFile(artifact.resolvedPath),
+        );
         if (!isCurrentPoll()) return;
         if (!sameFingerprint(fingerprint, confirmedFingerprint)) {
           // Torn write: the fingerprint moved during the read, so the fetched

@@ -732,3 +732,158 @@ describe("ArtifactViewer divergence grace period", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 });
+
+describe("ArtifactViewer presentation timeout", () => {
+  // Mirrors PRESENTATION_TIMEOUT_MS in ArtifactViewer.tsx: the bound on any
+  // single stat/read/decode step before it is treated as a failure.
+  const PRESENTATION_TIMEOUT_MS = 10_000;
+
+  beforeEach(() => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.useFakeTimers();
+    mockReadTextFile.mockReset();
+    mockReadTextFile.mockResolvedValue({ contents: "# Loaded fine" });
+    mockStatFile.mockReset();
+    mockStatFile.mockResolvedValue({ byteSize: "20", modifiedAtNs: "1" });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  function contentBody() {
+    return screen
+      .getByRole("heading", { name: "Loaded fine" })
+      .closest(".overflow-auto") as HTMLElement;
+  }
+
+  async function renderLoadedViewer() {
+    render(<ArtifactViewer artifact={artifact()} onClose={vi.fn()} />);
+    await act(flushAsyncWork);
+    expect(
+      screen.getByRole("heading", { name: "Loaded fine" }),
+    ).toBeInTheDocument();
+  }
+
+  // One poll cycle where the read hangs: the poll timer fires, stat resolves,
+  // the read never settles, and the presentation timeout converts the hang
+  // into an ordinary cycle failure.
+  async function advanceHangingPollCycle() {
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await flushAsyncWork();
+      vi.advanceTimersByTime(PRESENTATION_TIMEOUT_MS);
+      await flushAsyncWork();
+    });
+  }
+
+  it("times out a hung initial load into the error state and lets polling proceed", async () => {
+    const hungStat = deferred<{ byteSize: string; modifiedAtNs: string }>();
+    mockStatFile
+      .mockReturnValueOnce(hungStat.promise)
+      .mockResolvedValue({ byteSize: "20", modifiedAtNs: "1" });
+
+    render(<ArtifactViewer artifact={artifact()} onClose={vi.fn()} />);
+    await act(flushAsyncWork);
+    // Still hung: the loading spinner is up and nothing has been flagged yet.
+    // (Query by strip copy — the spinner itself carries role="status".)
+    expect(screen.queryByText(/can't be read/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/loading file/i)).toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(PRESENTATION_TIMEOUT_MS);
+      await flushAsyncWork();
+    });
+    // No last-good content exists, so the timeout shows the error state and
+    // flags immediately — same as any other initial-load failure.
+    expect(screen.getByText(/couldn't load/i)).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/can't be read/i);
+
+    // The timed-out forced refresh must have cleared its in-flight flag:
+    // the next poll cycle runs, reads the now-healthy file, and heals.
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await flushAsyncWork();
+    });
+    expect(
+      screen.getByRole("heading", { name: "Loaded fine" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("gives hung reads the same two-strike grace period as failed reads", async () => {
+    await renderLoadedViewer();
+
+    // The file changed on disk, but every re-read hangs forever.
+    const hungRead = deferred<{ contents: string }>();
+    mockStatFile.mockResolvedValue({ byteSize: "21", modifiedAtNs: "2" });
+    mockReadTextFile.mockReturnValue(hungRead.promise);
+
+    await advanceHangingPollCycle();
+    // First timed-out cycle is inside the grace period: last-good content
+    // stays clean.
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    expect(contentBody().className).not.toMatch(/\bopacity-60\b/);
+
+    await advanceHangingPollCycle();
+    // Second consecutive timeout: warning strip plus dimmed last-good body.
+    expect(screen.getByRole("status")).toHaveTextContent(/can't be read/i);
+    expect(contentBody().className).toMatch(/\bopacity-60\b/);
+  });
+
+  it("keeps polling after a timed-out cycle instead of wedging", async () => {
+    await renderLoadedViewer();
+
+    // One cycle hangs; the file itself has settled at a new version.
+    const hungRead = deferred<{ contents: string }>();
+    mockStatFile.mockResolvedValue({ byteSize: "21", modifiedAtNs: "2" });
+    mockReadTextFile
+      .mockReturnValueOnce(hungRead.promise)
+      .mockResolvedValue({ contents: "# Fresh copy" });
+
+    await advanceHangingPollCycle();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+
+    // checkInFlight cleared and scheduleNextPoll ran: the very next cycle
+    // reads the settled file and swaps the fresh contents in.
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await flushAsyncWork();
+    });
+    expect(
+      screen.getByRole("heading", { name: "Fresh copy" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("ignores a late settlement of a timed-out read once newer content landed", async () => {
+    await renderLoadedViewer();
+
+    const hungRead = deferred<{ contents: string }>();
+    mockStatFile.mockResolvedValue({ byteSize: "21", modifiedAtNs: "2" });
+    mockReadTextFile
+      .mockReturnValueOnce(hungRead.promise)
+      .mockResolvedValue({ contents: "# Newer copy" });
+
+    await advanceHangingPollCycle();
+    await act(async () => {
+      vi.advanceTimersByTime(1_500);
+      await flushAsyncWork();
+    });
+    expect(
+      screen.getByRole("heading", { name: "Newer copy" }),
+    ).toBeInTheDocument();
+
+    // The hung read finally settles, long after its cycle was abandoned. The
+    // timed-out wrapper already rejected, so these stale bytes must be inert.
+    hungRead.resolve({ contents: "# Stale bytes" });
+    await act(flushAsyncWork);
+
+    expect(
+      screen.getByRole("heading", { name: "Newer copy" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Stale bytes")).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+});
