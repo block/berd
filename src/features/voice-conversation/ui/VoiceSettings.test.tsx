@@ -51,6 +51,17 @@ const microphonePermissionState = vi.hoisted(() => ({
   openSettings: vi.fn(),
 }));
 
+vi.mock("../api/openAiVoice", () => ({
+  getOpenAiVoiceStatus: vi.fn().mockResolvedValue({
+    configured: true,
+    transcriptionModel: "gpt-live-transcribe",
+    speechModel: "gpt-4o-mini-tts",
+    speechVoice: "marin",
+    playbackSpeed: 1,
+    ttsAvailable: true,
+    unavailableReason: null,
+  }),
+}));
 vi.mock("../hooks/usePocketVoiceSetup", () => ({
   usePocketVoiceSetup: () => setupState.current,
 }));
@@ -191,6 +202,17 @@ describe("VoiceSettings", () => {
     };
     interruptionState.mode = "automatic";
     siriSetupState.current = siriSetup();
+  });
+
+  it("renders selected OpenAI output settings", async () => {
+    outputState.backend = "openai";
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      await screen.findByText(/gpt-4o-mini-tts.*marin voice/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Playback speed")).toBeInTheDocument();
   });
 
   it("shows interruption modes without VAD controls", () => {

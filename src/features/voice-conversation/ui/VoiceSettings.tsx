@@ -14,6 +14,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select";
+import { useEffect, useState } from "react";
+import {
+  getOpenAiVoiceStatus,
+  setOpenAiPlaybackSpeed,
+  type OpenAiVoiceStatus,
+} from "../api/openAiVoice";
 import { usePocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import { useMicrophonePermission } from "../hooks/useMicrophonePermission";
@@ -30,6 +36,7 @@ import { useVoiceOutputPreference } from "../lib/voiceOutputPreference";
 import { PocketVoiceSetupContent } from "./PocketVoiceSetupContent";
 import { MacSpeechSettings } from "./MacSpeechSettings";
 import { SiriVoiceSettings } from "./SiriVoiceSettings";
+import { PlaybackSpeedRow } from "./PlaybackSpeedRow";
 
 const INTERRUPTION_MODES: VoiceInterruptionMode[] = [
   "automatic",
@@ -45,6 +52,9 @@ function readinessDescriptionKey(
 ): string | null {
   if (inputReady && outputReady) return null;
   if (!inputReady && !outputReady) {
+    if (backend === "openai") {
+      return "voice.notReadyOpenAi";
+    }
     if (inputBackend === "macos") {
       return backend === "siri"
         ? "voice.notReadyMacInputAndSiriOutput"
@@ -68,6 +78,31 @@ export function VoiceSettings() {
   const { t } = useTranslation("settings");
   const setup = usePocketVoiceSetup();
   const macSpeechSetup = useMacSpeechSetup();
+  const [openAiStatus, setOpenAiStatus] = useState<OpenAiVoiceStatus | null>(
+    null,
+  );
+  const [openAiError, setOpenAiError] = useState<string | null>(null);
+  const [openAiSpeed, setOpenAiSpeed] = useState(1);
+  useEffect(() => {
+    let active = true;
+    void getOpenAiVoiceStatus().then(
+      (status) => {
+        if (active) {
+          setOpenAiStatus(status);
+          setOpenAiSpeed(status.playbackSpeed);
+        }
+      },
+      (error) => {
+        if (active)
+          setOpenAiError(
+            error instanceof Error ? error.message : String(error),
+          );
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
   const input = useVoiceInputPreference(
     isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
   );
@@ -91,13 +126,15 @@ export function VoiceSettings() {
         )
       : (setup.status?.parakeetInstalled ?? false);
   const outputReady =
-    output.backend === "siri"
-      ? Boolean(
-          siriSetup.status?.supported &&
-            siriSetup.status.selectedVoice &&
-            siriSetup.status.selectedVoiceInstalled,
-        )
-      : (setup.status?.pocketInstalled ?? false);
+    output.backend === "openai"
+      ? Boolean(openAiStatus?.configured && openAiStatus.ttsAvailable)
+      : output.backend === "siri"
+        ? Boolean(
+            siriSetup.status?.supported &&
+              siriSetup.status.selectedVoice &&
+              siriSetup.status.selectedVoiceInstalled,
+          )
+        : (setup.status?.pocketInstalled ?? false);
   const siriOutputLoaded =
     siriSetup.status !== null && siriSetup.statusError === null;
   const pocketStatusLoaded =
@@ -230,6 +267,11 @@ export function VoiceSettings() {
                 <SelectItem value="pocket">
                   {t("voice.backendPocket")}
                 </SelectItem>
+                {openAiStatus?.ttsAvailable ? (
+                  <SelectItem value="openai">
+                    {t("voice.backendOpenAiTts")}
+                  </SelectItem>
+                ) : null}
                 {siriSupported ? (
                   <SelectItem value="siri">{t("voice.backendSiri")}</SelectItem>
                 ) : null}
@@ -237,7 +279,28 @@ export function VoiceSettings() {
             </Select>
           )}
           details={
-            output.backend === "siri" ? (
+            output.backend === "openai" ? (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  {openAiError ??
+                    openAiStatus?.unavailableReason ??
+                    (openAiStatus
+                      ? t("voice.openAiTtsConfigured", {
+                          model: openAiStatus.speechModel,
+                          voice: openAiStatus.speechVoice,
+                        })
+                      : t("voice.openAiChecking"))}
+                </p>
+                <PlaybackSpeedRow
+                  speed={openAiSpeed}
+                  speeds={[0.75, 1, 1.25, 1.5, 2]}
+                  onChange={async (speed) => {
+                    await setOpenAiPlaybackSpeed(speed);
+                    setOpenAiSpeed(speed);
+                  }}
+                />
+              </div>
+            ) : output.backend === "siri" ? (
               <SiriVoiceSettings setup={siriSetup} />
             ) : (
               <PocketVoiceSetupContent setup={setup} models={["pocket"]} />

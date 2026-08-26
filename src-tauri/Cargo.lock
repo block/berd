@@ -28,6 +28,7 @@ dependencies = [
  "hex",
  "ignore",
  "infer",
+ "keyring",
  "libc",
  "log",
  "mime_guess",
@@ -45,6 +46,7 @@ dependencies = [
  "reqwest 0.13.4",
  "rodio",
  "rubato",
+ "rustls",
  "semver",
  "serde",
  "serde_json",
@@ -72,6 +74,7 @@ dependencies = [
  "tempfile",
  "time",
  "tokio",
+ "tokio-tungstenite",
  "toml 1.1.4+spec-1.1.0",
  "url",
  "uuid",
@@ -1426,6 +1429,12 @@ name = "dasp_sample"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c87e182de0887fd5361989c677c4e8f5000cd9491d6d563161a8f3a5519fc7f"
+
+[[package]]
+name = "data-encoding"
+version = "2.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4583a4551df46e2792f82ceeac45e850d2e2d5debba0b91f102385cda5b11f06"
 
 [[package]]
 name = "dbus"
@@ -3205,6 +3214,18 @@ dependencies = [
  "bitflags 2.13.1",
  "serde",
  "unicode-segmentation",
+]
+
+[[package]]
+name = "keyring"
+version = "3.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eebcc3aff044e5944a8fbaf69eb277d11986064cba30c468730e8b9909fb551c"
+dependencies = [
+ "log",
+ "security-framework 2.11.1",
+ "security-framework 3.7.0",
+ "zeroize",
 ]
 
 [[package]]
@@ -5295,7 +5316,7 @@ dependencies = [
  "openssl-probe",
  "rustls-pki-types",
  "schannel",
- "security-framework",
+ "security-framework 3.7.0",
 ]
 
 [[package]]
@@ -5323,7 +5344,7 @@ dependencies = [
  "rustls-native-certs",
  "rustls-platform-verifier-android",
  "rustls-webpki",
- "security-framework",
+ "security-framework 3.7.0",
  "security-framework-sys",
  "webpki-root-certs",
  "windows-sys 0.61.2",
@@ -5433,6 +5454,19 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "security-framework"
+version = "2.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
+dependencies = [
+ "bitflags 2.13.1",
+ "core-foundation 0.9.4",
+ "core-foundation-sys",
+ "libc",
+ "security-framework-sys",
+]
 
 [[package]]
 name = "security-framework"
@@ -7122,6 +7156,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-tungstenite"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "489a59b6730eda1b0171fcfda8b121f4bee2b35cba8645ca35c5f7ba3eb736c1"
+dependencies = [
+ "futures-util",
+ "log",
+ "rustls",
+ "rustls-pki-types",
+ "tokio",
+ "tokio-rustls",
+ "tungstenite",
+ "webpki-roots 0.26.11",
+]
+
+[[package]]
 name = "tokio-util"
 version = "0.7.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7382,6 +7432,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "tungstenite"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eadc29d668c91fcc564941132e17b28a7ceb2f3ebf0b9dae3e03fd7a6748eb0d"
+dependencies = [
+ "bytes",
+ "data-encoding",
+ "http",
+ "httparse",
+ "log",
+ "rand 0.9.5",
+ "rustls",
+ "rustls-pki-types",
+ "sha1",
+ "thiserror 2.0.20",
+ "utf-8",
+]
+
+[[package]]
 name = "typeid"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7589,6 +7658,12 @@ dependencies = [
  "unic-ucd-ident",
  "url",
 ]
+
+[[package]]
+name = "utf-8"
+version = "0.7.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09cc8ee72d2a9becf2f2febe0205bbed8fc6615b7cb429ad062dc7b7ddd036a9"
 
 [[package]]
 name = "utf8-zero"

@@ -15,6 +15,15 @@ import {
   type PocketVoiceStreamEvent,
 } from "../api/pocketVoice";
 import {
+  appendOpenAiVoiceStream,
+  finishOpenAiVoiceStream,
+  flushOpenAiVoiceStream,
+  listenToOpenAiVoiceStream,
+  startOpenAiVoiceStream,
+  stopOpenAiVoice,
+  type OpenAiVoiceStreamEvent,
+} from "../api/openAiVoice";
+import {
   appendSiriVoiceStream,
   finishSiriVoiceStream,
   flushSiriVoiceStream,
@@ -134,7 +143,6 @@ function boundedDeliveryText(
 }
 const MALFORMED_VOICE_TRANSCRIPT_KEY = "\0malformed-voice-transcript";
 const USER_IDLE_TRANSCRIPT_SETTLE_MS = 250;
-const USER_RECOGNITION_SEGMENT_TIMEOUT_MS = 500;
 
 function voiceTranscriptKeyForMessage(
   sessionId: string,
@@ -671,7 +679,7 @@ function queueStreamCommand(
 }
 
 function handleStreamEvent(
-  event: PocketVoiceStreamEvent | SiriVoiceStreamEvent,
+  event: PocketVoiceStreamEvent | SiriVoiceStreamEvent | OpenAiVoiceStreamEvent,
 ) {
   const utterance = activeUtterance;
   if (!utterance || utterance.id !== event.streamId) return;
@@ -865,8 +873,9 @@ export function startNativeAssistantSpeech(
   activeSpeechSessionId = sessionId;
   activeSpeechRevision = useVoiceConversationStore.getState().status.revision;
   const activeGeneration = generation;
+  const outputBackend = getVoiceOutputBackend();
   const streamBackend =
-    getVoiceOutputBackend() === "siri"
+    outputBackend === "siri"
       ? {
           start: (
             streamId: string,
@@ -891,14 +900,23 @@ export function startNativeAssistantSpeech(
           stop: stopSiriVoice,
           listen: listenToSiriVoiceStream,
         }
-      : {
-          start: startPocketVoiceStream,
-          append: appendPocketVoiceStream,
-          flush: flushPocketVoiceStream,
-          finish: finishPocketVoiceStream,
-          stop: stopPocketVoice,
-          listen: listenToPocketVoiceStream,
-        };
+      : outputBackend === "openai"
+        ? {
+            start: startOpenAiVoiceStream,
+            append: appendOpenAiVoiceStream,
+            flush: flushOpenAiVoiceStream,
+            finish: finishOpenAiVoiceStream,
+            stop: stopOpenAiVoice,
+            listen: listenToOpenAiVoiceStream,
+          }
+        : {
+            start: startPocketVoiceStream,
+            append: appendPocketVoiceStream,
+            flush: flushPocketVoiceStream,
+            finish: finishPocketVoiceStream,
+            stop: stopPocketVoice,
+            listen: listenToPocketVoiceStream,
+          };
   stopActiveVoice = streamBackend.stop;
   streamListenerReady = streamBackend
     .listen(handleStreamEvent)
@@ -964,8 +982,7 @@ export function startNativeAssistantSpeech(
   let resumableInterruption: ResumableInterruption | null = null;
   let heldReleaseReady = false;
   let interruptionReleaseReady = false;
-  let pendingUserRecognitionSegment = false;
-  let recognitionSegmentTimer: number | null = null;
+  let idleSettling = false;
   let heldReleaseTimer: number | null = null;
 
   const cacheCausalTranscriptKeys = (
@@ -1270,15 +1287,9 @@ export function startNativeAssistantSpeech(
       return;
     }
     const messages = useChatStore.getState().messagesBySession[sessionId] ?? [];
-    if (
-      heldSpeech ||
-      voice.userSpeaking ||
-      pendingUserRecognitionSegment ||
-      heldReleaseTimer !== null
-    ) {
-      // Text can keep streaming while recognition resolves the user's
-      // interruption segment. Refresh the held snapshot before a finalized
-      // voice message can invalidate it.
+    if (heldSpeech || voice.userSpeaking || idleSettling) {
+      // Text can keep streaming during the idle settling turn. Refresh the
+      // held snapshot before a finalized voice message can invalidate it.
       holdAssistantChanges(messages);
     }
     const finalizedTranscriptKey = voice.latestFinalizedTranscriptKey;
@@ -1299,7 +1310,7 @@ export function startNativeAssistantSpeech(
       interruptActiveUtterance(true, "userSpeaking");
     }
 
-    if (voice.userSpeaking || pendingUserRecognitionSegment) return;
+    if (voice.userSpeaking || idleSettling) return;
     if (heldSpeech && !heldReleaseReady) return;
     if (resumableInterruption) return;
     if (activeUtterance?.interruptionRequested) return;
@@ -1534,19 +1545,6 @@ export function startNativeAssistantSpeech(
   }
   let wasUserSpeaking = initialVoice.userSpeaking;
   let wasMicrophoneMuted = initialVoice.microphoneMuted;
-  let latestObservedFinalizedTranscriptKey =
-    useVoiceConversationStore.getState().latestFinalizedTranscriptKey;
-  const resolvePendingRecognitionSegment = (releaseSpeech = true) => {
-    if (recognitionSegmentTimer !== null) {
-      window.clearTimeout(recognitionSegmentTimer);
-      recognitionSegmentTimer = null;
-    }
-    pendingUserRecognitionSegment = false;
-    if (!releaseSpeech) return;
-    heldReleaseReady = heldSpeech !== null;
-    interruptionReleaseReady = true;
-    releaseResumableInterruption();
-  };
   const unsubscribeVoice = useVoiceConversationStore.subscribe((voice) => {
     const runningForSession =
       voice.status.lifecycle === "running" &&
@@ -1567,90 +1565,34 @@ export function startNativeAssistantSpeech(
     const becameUserSpeaking = voice.userSpeaking && !wasUserSpeaking;
     const becameUserIdle = !voice.userSpeaking && wasUserSpeaking;
     const becameMicrophoneMuted = voice.microphoneMuted && !wasMicrophoneMuted;
-    const finalizedTranscriptChanged =
-      voice.latestFinalizedTranscriptKey !==
-      latestObservedFinalizedTranscriptKey;
-    const hasInterruptedPlaybackHold =
-      activeUtterance?.interruptionRequested || resumableInterruption !== null;
     wasUserSpeaking = voice.userSpeaking;
     wasMicrophoneMuted = voice.microphoneMuted;
-    latestObservedFinalizedTranscriptKey = voice.latestFinalizedTranscriptKey;
     if (activeGeneration !== generation) return;
     if (becameMicrophoneMuted) {
-      resolvePendingRecognitionSegment(false);
+      if (heldReleaseTimer !== null) window.clearTimeout(heldReleaseTimer);
+      heldReleaseTimer = null;
+      idleSettling = false;
       interruptionReleaseReady = false;
       discardHeldAndResumableSpeech();
       inspect();
       return;
     }
-    if (finalizedTranscriptChanged && !pendingUserRecognitionSegment) {
-      if (heldReleaseTimer !== null) {
-        window.clearTimeout(heldReleaseTimer);
-        heldReleaseTimer = null;
-      }
-      holdAssistantChanges(
-        useChatStore.getState().messagesBySession[sessionId] ?? [],
-      );
-      discardInvalidHeldSpeech(voice.latestFinalizedTranscriptKey);
-      inspect();
-      return;
-    }
     if (becameUserSpeaking) {
-      if (heldReleaseTimer !== null) {
-        window.clearTimeout(heldReleaseTimer);
-        heldReleaseTimer = null;
-      }
-      const interrupted = interruptActiveUtterance(true, "userSpeaking");
-      if (interrupted && recognitionSegmentTimer !== null) {
-        window.clearTimeout(recognitionSegmentTimer);
-        recognitionSegmentTimer = null;
-      }
-      pendingUserRecognitionSegment ||= interrupted;
+      if (heldReleaseTimer !== null) window.clearTimeout(heldReleaseTimer);
+      heldReleaseTimer = null;
+      idleSettling = false;
       heldReleaseReady = false;
       interruptionReleaseReady = false;
-      inspect();
-      return;
-    }
-    if (finalizedTranscriptChanged && pendingUserRecognitionSegment) {
-      holdAssistantChanges(
-        useChatStore.getState().messagesBySession[sessionId] ?? [],
-      );
-      const hadResumableInterruption = resumableInterruption !== null;
-      resolvePendingRecognitionSegment(false);
-      if (hadResumableInterruption) {
-        discardResumableInterruption();
-        discardInvalidHeldSpeech(voice.latestFinalizedTranscriptKey);
-      } else {
-        discardHeldAndResumableSpeech();
-      }
+      interruptActiveUtterance(true, "userSpeaking");
       inspect();
       return;
     }
     if (becameUserIdle) {
       if (heldReleaseTimer !== null) window.clearTimeout(heldReleaseTimer);
-      if (pendingUserRecognitionSegment || hasInterruptedPlaybackHold) {
-        pendingUserRecognitionSegment = true;
-        // VAD silence does not imply recognition is idle. Keep interrupted
-        // playback held until a final transcript arrives or the unresolved
-        // user-recognition segment hits a conservative bound.
-        recognitionSegmentTimer ??= window.setTimeout(() => {
-          recognitionSegmentTimer = null;
-          const current = useVoiceConversationStore.getState();
-          if (
-            activeGeneration !== generation ||
-            current.userSpeaking ||
-            current.status.lifecycle !== "running" ||
-            current.status.sessionId !== sessionId ||
-            !pendingUserRecognitionSegment
-          ) {
-            return;
-          }
-          resolvePendingRecognitionSegment(true);
-          inspect();
-        }, USER_RECOGNITION_SEGMENT_TIMEOUT_MS);
-        inspect();
-        return;
-      }
+      idleSettling = true;
+      // VAD can report silence shortly before the recognizer commits its final
+      // transcript. Give that transcript a bounded opportunity to invalidate
+      // causally stale speech before releasing the held reply.
       heldReleaseTimer = window.setTimeout(() => {
         heldReleaseTimer = null;
         const current = useVoiceConversationStore.getState();
@@ -1662,6 +1604,7 @@ export function startNativeAssistantSpeech(
         ) {
           return;
         }
+        idleSettling = false;
         heldReleaseReady = heldSpeech !== null;
         interruptionReleaseReady = true;
         releaseResumableInterruption();
@@ -1672,15 +1615,8 @@ export function startNativeAssistantSpeech(
     inspect();
   });
   stopVoiceSubscription = () => {
-    if (heldReleaseTimer !== null) {
-      window.clearTimeout(heldReleaseTimer);
-    }
-    if (recognitionSegmentTimer !== null) {
-      window.clearTimeout(recognitionSegmentTimer);
-    }
+    if (heldReleaseTimer !== null) window.clearTimeout(heldReleaseTimer);
     heldReleaseTimer = null;
-    recognitionSegmentTimer = null;
-    pendingUserRecognitionSegment = false;
     discardHeldAndResumableSpeech();
     unsubscribeVoice();
   };

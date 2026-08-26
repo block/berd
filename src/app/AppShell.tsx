@@ -236,6 +236,7 @@ import {
 } from "@/features/voice-conversation/api/voiceConversation";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
 import { useMacSpeechSetup } from "@/features/voice-conversation/hooks/useMacSpeechSetup";
+import { useOpenAiVoiceSetup } from "@/features/voice-conversation/hooks/useOpenAiVoiceSetup";
 import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
 import {
   isMacSpeechAvailable,
@@ -743,6 +744,9 @@ export function AppShell({
     ),
   );
   const globalVoiceOutput = useVoiceOutputPreference();
+  const globalOpenAiVoiceSetup = useOpenAiVoiceSetup(
+    capabilities.voiceConversation && globalVoiceOutput.backend === "openai",
+  );
   const globalSiriVoiceSetup = useSiriVoiceSetup(
     capabilities.voiceConversation && globalVoiceOutput.backend === "siri",
   );
@@ -752,6 +756,7 @@ export function AppShell({
     globalSiriVoiceSetup.status,
     globalVoiceInput.backend,
     globalVoiceOutput.backend,
+    globalOpenAiVoiceSetup.status,
   );
   const voiceConversationWasEnabledRef = useRef(capabilities.voiceConversation);
   useEffect(() => {

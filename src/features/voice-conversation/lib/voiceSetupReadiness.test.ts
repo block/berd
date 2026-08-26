@@ -53,6 +53,16 @@ describe("voice setup readiness", () => {
     ).toBe(false);
   });
 
+  it("requires Berd's configured OpenAI credential for OpenAI output", () => {
+    const configured = { configured: true, ttsAvailable: true } as never;
+    expect(
+      isVoiceSetupReady(pocket, null, null, "parakeet", "openai", configured),
+    ).toBe(true);
+    expect(isVoiceSetupReady(pocket, null, null, "parakeet", "openai")).toBe(
+      false,
+    );
+  });
+
   it("uses native macOS speech readiness instead of Parakeet when selected", () => {
     expect(
       isVoiceSetupReady(
