@@ -25,6 +25,9 @@ const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
 const TTS_SAMPLE_RATE: u32 = 24_000;
+// Avoid starting the audio device from a tiny first network chunk that can drain
+// before subsequent streamed PCM arrives.
+const INITIAL_PLAYBACK_BUFFER_FRAMES: usize = TTS_SAMPLE_RATE as usize / 2;
 const TTS_EVENT: &str = "openai-voice:stream-event";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -123,32 +126,6 @@ fn goose_openai_api_key() -> Result<Option<String>, String> {
     if let Some(value) = env_trimmed("OPENAI_API_KEY") {
         return Ok(Some(value));
     }
-    #[cfg(target_os = "macos")]
-    {
-        let entry = keyring::Entry::new("goose", "secrets").map_err(|error| {
-            format!("Could not access Goose's secure credential store: {error}")
-        })?;
-        match entry.get_password() {
-            Ok(payload) => {
-                let secrets: serde_json::Value =
-                    serde_json::from_str(&payload).map_err(|error| {
-                        format!("Goose's secure credential store is not valid JSON: {error}")
-                    })?;
-                return Ok(secrets
-                    .get("OPENAI_API_KEY")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(ToString::to_string));
-            }
-            Err(keyring::Error::NoEntry) => {}
-            Err(error) => {
-                return Err(format!(
-                    "Could not read Goose's OpenAI credential from secure storage: {error}"
-                ));
-            }
-        }
-    }
     let config_path = crate::services::goose_config::config_path()?;
     let secrets_path = config_path
         .parent()
@@ -167,17 +144,6 @@ fn goose_openai_api_key() -> Result<Option<String>, String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string))
-}
-
-pub(crate) fn openai_api_key_available() -> Result<bool, String> {
-    goose_openai_api_key().map(|key| key.is_some())
-}
-
-pub(crate) fn api_key() -> Result<String, String> {
-    goose_openai_api_key()?.ok_or_else(|| {
-        "OpenAI voice is not configured. Configure the OpenAI provider in Berd, then try again."
-            .to_string()
-    })
 }
 
 fn base_url() -> String {
@@ -256,8 +222,8 @@ fn client() -> Result<reqwest::Client, String> {
 #[tauri::command]
 pub fn get_openai_voice_status(
     state: State<'_, OpenAiVoiceState>,
+    configured: bool,
 ) -> Result<OpenAiVoiceStatus, String> {
-    let configured = openai_api_key_available()?;
     let playback_speed = state
         .playback
         .lock()
@@ -675,6 +641,7 @@ fn speak_pending(
         let mut bytes =
             runtime.block_on(openai_speech_stream(client, key, chunk.to_string(), speed))?;
         let mut pcm_remainder = Vec::<u8>::new();
+        let mut initial_samples = Vec::<f32>::new();
         loop {
             if !active.load(Ordering::SeqCst) {
                 return Ok(());
@@ -697,7 +664,15 @@ fn speak_pending(
             let sample_bytes = pcm_remainder.len() / 2 * 2;
             let samples = pcm16le_to_f32(&pcm_remainder[..sample_bytes]);
             pcm_remainder.drain(..sample_bytes);
-            player.enqueue(&samples)?;
+            if *started {
+                player.enqueue(&samples)?;
+            } else {
+                initial_samples.extend_from_slice(&samples);
+                if initial_samples.len() >= INITIAL_PLAYBACK_BUFFER_FRAMES {
+                    player.enqueue(&initial_samples)?;
+                    initial_samples.clear();
+                }
+            }
             segment_frames = segment_frames.saturating_add(samples.len() as u64);
             upsert_delivery_segment(delivery, chunk, segment_frames, false);
             if !*started && segment_frames > 0 {
@@ -713,6 +688,9 @@ fn speak_pending(
         }
         if !pcm_remainder.is_empty() {
             return Err("OpenAI speech returned an incomplete PCM sample".to_string());
+        }
+        if !initial_samples.is_empty() {
+            player.enqueue(&initial_samples)?;
         }
         upsert_delivery_segment(delivery, chunk, segment_frames, true);
     }

@@ -123,7 +123,6 @@ objc2-avf-audio = { version = "0.3.2", features = ["AVAudioApplication", "block2
 objc2-core-audio = "0.3.2"
 objc2-foundation = { version = "0.3.2", features = ["NSDictionary", "NSError", "NSFileManager", "NSObject", "NSProcessInfo", "NSString", "NSURL"] }
 objc2-user-notifications = "0.3.2"
-keyring = { version = "3.6.3", default-features = false, features = ["apple-native"] }
 rodio = { version = "0.22", default-features = false, features = ["playback"] }
 
 
