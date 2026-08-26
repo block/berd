@@ -4,7 +4,6 @@ import { feedbackSurveySink } from "./feedbackSurveySink";
 import {
   getResponseFeedbackSelection,
   isResponseFeedbackEligible,
-  markResponseFeedbackAppeared,
   setResponseFeedbackSelection,
 } from "./responseFeedbackState";
 
@@ -28,22 +27,6 @@ describe("responseFeedbackState", () => {
     sink.mockClear();
   });
 
-  it("emits one appeared event and persists it", () => {
-    expect(markResponseFeedbackAppeared("appeared-session", "message")).toBe(
-      true,
-    );
-    expect(markResponseFeedbackAppeared("appeared-session", "message")).toBe(
-      false,
-    );
-    expect(sink).toHaveBeenCalledTimes(1);
-    expect(sink).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionId: "appeared-session",
-        eventType: "appeared",
-      }),
-    );
-  });
-
   it("emits selections, switches, and clears without duplicate transitions", () => {
     expect(
       setResponseFeedbackSelection("selection-session", "message", "good"),
@@ -61,9 +44,8 @@ describe("responseFeedbackState", () => {
       getResponseFeedbackSelection("selection-session", "message"),
     ).toBeNull();
 
-    expect(sink).toHaveBeenCalledTimes(4);
+    expect(sink).toHaveBeenCalledTimes(3);
     expect(sink.mock.calls.map(([event]) => event)).toEqual([
-      expect.objectContaining({ eventType: "appeared" }),
       expect.objectContaining({ eventType: "responded", response: "good" }),
       expect.objectContaining({ eventType: "responded", response: "bad" }),
       expect.objectContaining({ eventType: "responded", response: "cleared" }),

@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import { MessageAction } from "@/shared/ui/ai-elements/message";
 import {
   getResponseFeedbackSelection,
-  markResponseFeedbackAppeared,
   setResponseFeedbackSelection,
   type ResponseFeedbackSelection,
 } from "./responseFeedbackState";
@@ -13,16 +12,13 @@ import {
 interface ResponseFeedbackControlsProps {
   sessionId: string;
   messageId: string;
-  persistentlyVisible: boolean;
 }
 
 export function ResponseFeedbackControls({
   sessionId,
   messageId,
-  persistentlyVisible,
 }: ResponseFeedbackControlsProps) {
   const { t } = useTranslation("chat");
-  const controlsRef = useRef<HTMLSpanElement>(null);
   const [selection, setSelection] = useState<ResponseFeedbackSelection | null>(
     () => getResponseFeedbackSelection(sessionId, messageId),
   );
@@ -30,25 +26,6 @@ export function ResponseFeedbackControls({
   useEffect(() => {
     setSelection(getResponseFeedbackSelection(sessionId, messageId));
   }, [messageId, sessionId]);
-
-  useEffect(() => {
-    const target = controlsRef.current;
-    if (
-      !persistentlyVisible ||
-      !target ||
-      typeof IntersectionObserver === "undefined"
-    ) {
-      return;
-    }
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        markResponseFeedbackAppeared(sessionId, messageId);
-        observer.disconnect();
-      }
-    });
-    observer.observe(target);
-    return () => observer.disconnect();
-  }, [messageId, persistentlyVisible, sessionId]);
 
   const select = (requested: ResponseFeedbackSelection) => {
     const current = getResponseFeedbackSelection(sessionId, messageId);
@@ -61,12 +38,7 @@ export function ResponseFeedbackControls({
     "bg-accent text-foreground hover:bg-accent active:bg-accent";
 
   return (
-    <span
-      ref={controlsRef}
-      className="inline-flex"
-      onPointerEnter={() => markResponseFeedbackAppeared(sessionId, messageId)}
-      onFocusCapture={() => markResponseFeedbackAppeared(sessionId, messageId)}
-    >
+    <span className="inline-flex">
       <MessageAction
         size="icon-xs"
         variant="ghost"

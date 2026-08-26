@@ -6,7 +6,6 @@ export type ResponseFeedbackSelection = "good" | "bad";
 interface StoredResponseFeedback {
   version: 1;
   appearanceId: string;
-  appeared: boolean;
   response: ResponseFeedbackSelection | null;
 }
 
@@ -28,7 +27,6 @@ function createStoredResponseFeedback(): StoredResponseFeedback {
   return {
     version: 1,
     appearanceId: crypto.randomUUID(),
-    appeared: false,
     response: null,
   };
 }
@@ -44,7 +42,6 @@ function parseStoredResponseFeedback(
     record.version !== 1 ||
     typeof record.appearanceId !== "string" ||
     record.appearanceId.length === 0 ||
-    typeof record.appeared !== "boolean" ||
     (record.response !== null &&
       record.response !== "good" &&
       record.response !== "bad")
@@ -54,7 +51,6 @@ function parseStoredResponseFeedback(
   return {
     version: 1,
     appearanceId: record.appearanceId,
-    appeared: record.appeared,
     response: record.response,
   };
 }
@@ -103,19 +99,15 @@ function emitResponseFeedback(
   sessionId: string,
   messageId: string,
   record: StoredResponseFeedback,
-  event:
-    | { eventType: "appeared" }
-    | {
-        eventType: "responded";
-        response: ResponseFeedbackSelection | "cleared";
-      },
+  response: ResponseFeedbackSelection | "cleared",
 ): void {
   sendFeedbackSurveyEvent({
     sessionId,
     messageId,
     appearanceId: record.appearanceId,
     surveyType: "response",
-    ...event,
+    eventType: "responded",
+    response,
   });
 }
 
@@ -124,20 +116,6 @@ export function getResponseFeedbackSelection(
   messageId: string,
 ): ResponseFeedbackSelection | null {
   return readResponseFeedback(sessionId, messageId).response;
-}
-
-export function markResponseFeedbackAppeared(
-  sessionId: string,
-  messageId: string,
-): boolean {
-  const current = readResponseFeedback(sessionId, messageId);
-  if (current.appeared) {
-    return false;
-  }
-  const next = { ...current, appeared: true };
-  writeResponseFeedback(sessionId, messageId, next);
-  emitResponseFeedback(sessionId, messageId, next, { eventType: "appeared" });
-  return true;
 }
 
 export function setResponseFeedbackSelection(
@@ -150,15 +128,9 @@ export function setResponseFeedbackSelection(
     return current.response;
   }
 
-  const next = { ...current, appeared: true, response: selection };
+  const next = { ...current, response: selection };
   writeResponseFeedback(sessionId, messageId, next);
-  if (!current.appeared) {
-    emitResponseFeedback(sessionId, messageId, next, { eventType: "appeared" });
-  }
-  emitResponseFeedback(sessionId, messageId, next, {
-    eventType: "responded",
-    response: selection ?? "cleared",
-  });
+  emitResponseFeedback(sessionId, messageId, next, selection ?? "cleared");
   return next.response;
 }
 

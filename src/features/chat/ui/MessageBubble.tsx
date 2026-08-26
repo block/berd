@@ -60,10 +60,7 @@ import { useProfileCapability } from "@/shared/profile/capabilities";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { MessageBubbleActions } from "./MessageBubbleActions";
 import { MessageMetadataChip } from "./MessageMetadataChip";
-import {
-  isResponseFeedbackEligible,
-  markResponseFeedbackAppeared,
-} from "../response-feedback/responseFeedbackState";
+import { isResponseFeedbackEligible } from "../response-feedback/responseFeedbackState";
 import {
   couldOverflowUserMessagePreview,
   UserMessageClamp,
@@ -908,7 +905,6 @@ export const MessageBubble = memo(function MessageBubble({
       ? {
           sessionId: feedbackSessionId,
           messageId: actionMessageId,
-          persistentlyVisible: messageActionsArePersistentlyVisible,
         }
       : undefined;
   const outerSpacingClassName =
@@ -992,14 +988,6 @@ export const MessageBubble = memo(function MessageBubble({
             ? "max-w-[var(--chat-user-message-max-width)] items-end"
             : "w-full items-start",
         )}
-        onPointerEnter={() => {
-          if (responseFeedback) {
-            markResponseFeedbackAppeared(
-              responseFeedback.sessionId,
-              responseFeedback.messageId,
-            );
-          }
-        }}
       >
         {showAssistantIdentity ? (
           <div className="mb-0.5 flex items-center gap-1 text-xs">

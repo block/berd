@@ -1,4 +1,3 @@
-export type FeedbackSurveyEventType = "appeared" | "responded";
 export type FeedbackSurveyResponse = "good" | "bad" | "cleared";
 
 export interface FeedbackSurveySinkEvent {
@@ -7,8 +6,8 @@ export interface FeedbackSurveySinkEvent {
   appearanceId: string;
   surveyType: "response";
   eventSequence: number;
-  eventType: FeedbackSurveyEventType;
-  response?: FeedbackSurveyResponse;
+  eventType: "responded";
+  response: FeedbackSurveyResponse;
 }
 
 /** Distribution-owned transport seam; stock Berd intentionally sends nothing. */

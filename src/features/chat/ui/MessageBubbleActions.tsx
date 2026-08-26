@@ -23,7 +23,6 @@ interface MessageBubbleActionsProps {
   responseFeedback?: {
     sessionId: string;
     messageId: string;
-    persistentlyVisible: boolean;
   };
   onJumpToResponseStartHintClose?: (messageId: string) => void;
   onJumpToResponseStartHintDismiss?: (messageId: string) => void;
@@ -174,7 +173,6 @@ export function MessageBubbleActions({
         <ResponseFeedbackControls
           sessionId={responseFeedback.sessionId}
           messageId={responseFeedback.messageId}
-          persistentlyVisible={responseFeedback.persistentlyVisible}
         />
       ) : null}
       {!isUser && timestamp}

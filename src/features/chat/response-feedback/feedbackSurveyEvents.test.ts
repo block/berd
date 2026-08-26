@@ -18,7 +18,8 @@ describe("feedbackSurveyEvents", () => {
       messageId: "message",
       appearanceId: "appearance",
       surveyType: "response",
-      eventType: "appeared",
+      eventType: "responded",
+      response: "good",
     });
     sendFeedbackSurveyEvent({
       sessionId: "session",
@@ -26,7 +27,7 @@ describe("feedbackSurveyEvents", () => {
       appearanceId: "appearance",
       surveyType: "response",
       eventType: "responded",
-      response: "good",
+      response: "bad",
     });
 
     expect(sink).toHaveBeenNthCalledWith(
