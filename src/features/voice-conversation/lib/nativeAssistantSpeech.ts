@@ -1547,17 +1547,6 @@ export function startNativeAssistantSpeech(
     interruptionReleaseReady = true;
     releaseResumableInterruption();
   };
-  const markHeldTargetsNotSpoken = (held: HeldSpeech) => {
-    for (const { target } of held.targets.values()) {
-      setTargetSpeech(sessionId, target, { status: "notSpoken" });
-    }
-  };
-  const discardResolvedHeldSpeech = (finalizedTranscriptKey: string | null) => {
-    const held = heldSpeech;
-    discardInvalidHeldSpeech(finalizedTranscriptKey);
-    if (held && heldSpeech === null) markHeldTargetsNotSpoken(held);
-    return held;
-  };
   const unsubscribeVoice = useVoiceConversationStore.subscribe((voice) => {
     const runningForSession =
       voice.status.lifecycle === "running" &&
@@ -1602,7 +1591,7 @@ export function startNativeAssistantSpeech(
       holdAssistantChanges(
         useChatStore.getState().messagesBySession[sessionId] ?? [],
       );
-      discardResolvedHeldSpeech(voice.latestFinalizedTranscriptKey);
+      discardInvalidHeldSpeech(voice.latestFinalizedTranscriptKey);
       inspect();
       return;
     }
@@ -1630,7 +1619,7 @@ export function startNativeAssistantSpeech(
       resolvePendingRecognitionSegment(false);
       if (hadResumableInterruption) {
         discardResumableInterruption();
-        discardResolvedHeldSpeech(voice.latestFinalizedTranscriptKey);
+        discardInvalidHeldSpeech(voice.latestFinalizedTranscriptKey);
       } else {
         discardHeldAndResumableSpeech();
       }
