@@ -1,7 +1,8 @@
 //! Safe ownership wrapper for the macOS AVAudioUnitTimePitch Pocket player.
 
-use std::cell::Cell;
 use std::ffi::{c_char, c_void, CStr};
+
+const MAX_POCKET_PLAYBACK_SPEED: f32 = 2.0;
 
 unsafe extern "C" {
     fn berd_pocket_audio_player_create(
@@ -31,9 +32,7 @@ unsafe extern "C" {
 
 pub(super) struct PocketAudioPlayer {
     raw: *mut c_void,
-    sample_rate: u32,
-    delivery_safety_frames: Cell<u64>,
-    reported_played_frames: Cell<u64>,
+    delivery_safety_frames: u64,
 }
 
 impl PocketAudioPlayer {
@@ -60,9 +59,7 @@ impl PocketAudioPlayer {
         }
         Ok(Self {
             raw,
-            sample_rate,
-            delivery_safety_frames: Cell::new(delivery_safety_frames(sample_rate, rate)),
-            reported_played_frames: Cell::new(0),
+            delivery_safety_frames: delivery_safety_frames(sample_rate, MAX_POCKET_PLAYBACK_SPEED),
         })
     }
 
@@ -71,19 +68,14 @@ impl PocketAudioPlayer {
         // SAFETY: `self.raw` is a live retained player and the bridge validates
         // the rate before updating the connected time-pitch unit.
         let updated = unsafe { berd_pocket_audio_player_set_rate(self.raw, rate, &mut error) };
-        if !updated {
-            return Err(take_error(
+        if updated {
+            Ok(())
+        } else {
+            Err(take_error(
                 error,
                 "Could not update native Pocket playback speed",
-            ));
+            ))
         }
-        self.delivery_safety_frames
-            .set(updated_delivery_safety_frames(
-                self.delivery_safety_frames.get(),
-                self.sample_rate,
-                rate,
-            ));
-        Ok(())
     }
 
     pub(super) fn enqueue(&self, samples: &[f32]) -> Result<(), String> {
@@ -108,13 +100,7 @@ impl PocketAudioPlayer {
     pub(super) fn played_frames(&self) -> u64 {
         // SAFETY: `self.raw` is a live retained player. The bridge counts only
         // source buffers confirmed played back, so idle queue gaps add nothing.
-        let played_frames = monotonic_played_frames(
-            self.reported_played_frames.get(),
-            self.completed_source_frames(),
-            self.delivery_safety_frames.get(),
-        );
-        self.reported_played_frames.set(played_frames);
-        played_frames
+        apply_delivery_safety(self.completed_source_frames(), self.delivery_safety_frames)
     }
 
     pub(super) fn completed_source_frames(&self) -> u64 {
@@ -142,23 +128,8 @@ fn delivery_safety_frames(sample_rate: u32, rate: f32) -> u64 {
     (f64::from(sample_rate) * 0.1 * f64::from(rate)).ceil() as u64
 }
 
-fn updated_delivery_safety_frames(current: u64, sample_rate: u32, rate: f32) -> u64 {
-    current.max(delivery_safety_frames(sample_rate, rate))
-}
-
 fn apply_delivery_safety(completed_source_frames: u64, safety_frames: u64) -> u64 {
     completed_source_frames.saturating_sub(safety_frames)
-}
-
-fn monotonic_played_frames(
-    reported_played_frames: u64,
-    completed_source_frames: u64,
-    safety_frames: u64,
-) -> u64 {
-    reported_played_frames.max(apply_delivery_safety(
-        completed_source_frames,
-        safety_frames,
-    ))
 }
 
 fn playback_health(failed: bool) -> Result<(), String> {
@@ -192,8 +163,7 @@ fn take_error(error: *mut c_char, fallback: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        apply_delivery_safety, delivery_safety_frames, monotonic_played_frames, playback_health,
-        updated_delivery_safety_frames,
+        apply_delivery_safety, delivery_safety_frames, playback_health, MAX_POCKET_PLAYBACK_SPEED,
     };
 
     #[test]
@@ -220,28 +190,10 @@ mod tests {
     }
 
     #[test]
-    fn live_rate_changes_keep_delivery_safety_conservative() {
-        let initial = delivery_safety_frames(24_000, 0.75);
-        let accelerated = updated_delivery_safety_frames(initial, 24_000, 2.0);
-        assert_eq!(accelerated, 4_800);
-        assert_eq!(
-            updated_delivery_safety_frames(accelerated, 24_000, 1.0),
-            4_800
-        );
-    }
-
-    #[test]
-    fn live_rate_changes_do_not_move_reported_delivery_backward() {
-        let previously_reported = apply_delivery_safety(10_000, 2_400);
-        assert_eq!(previously_reported, 7_600);
-        assert_eq!(
-            monotonic_played_frames(previously_reported, 10_000, 4_800),
-            7_600
-        );
-        assert_eq!(
-            monotonic_played_frames(previously_reported, 13_000, 4_800),
-            8_200
-        );
+    fn live_rate_changes_reserve_maximum_delivery_safety() {
+        let safety = delivery_safety_frames(24_000, MAX_POCKET_PLAYBACK_SPEED);
+        assert_eq!(safety, 4_800);
+        assert_eq!(apply_delivery_safety(10_000, safety), 5_200);
     }
 
     #[test]
