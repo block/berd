@@ -26,6 +26,31 @@ function stateString(
   return typeof value === "string" ? value : "";
 }
 
+type InsertedMention = {
+  personaId: string;
+  start: number;
+  mention: string;
+};
+
+// Where the widget-inserted mention currently sits, or null when it can no
+// longer be identified. Editing earlier in the prompt shifts the recorded
+// range, so fall back to a search — but only when the mention text appears
+// once, since duplicates give no way to tell which occurrence was inserted.
+function findInsertedMention(
+  text: string,
+  tracked: InsertedMention,
+): number | null {
+  const { start, mention } = tracked;
+  if (text.slice(start, start + mention.length) === mention) {
+    return start;
+  }
+  const first = text.indexOf(mention);
+  if (first < 0 || first !== text.lastIndexOf(mention)) {
+    return null;
+  }
+  return first;
+}
+
 export const PromptPinWidget = memo(function PromptPinWidget({
   instance,
   onUpdateState,
@@ -56,12 +81,23 @@ export const PromptPinWidget = memo(function PromptPinWidget({
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const pendingCursorRef = useRef<number | null>(null);
+  // Swapping the attached agent may only rewrite a mention this widget
+  // inserted. Locating it by display name alone deletes authored prose that
+  // happens to name the old agent — including when the agent was attached
+  // through the persona picker and the prompt never had a widget mention.
+  const insertedMentionRef = useRef<InsertedMention | null>(null);
 
   // Adopt external state changes (layout reload) only while not actively
   // editing, so an in-progress edit is never clobbered.
   useEffect(() => {
     if (isFocusedRef.current) {
       return;
+    }
+    if (savedText !== textRef.current) {
+      // The prompt was replaced from outside, so no range in it is ours. A
+      // save round-tripping its own text is not a replacement and must keep
+      // the tracking, or the next swap would strand the previous mention.
+      insertedMentionRef.current = null;
     }
     titleRef.current = savedTitle;
     textRef.current = savedText;
@@ -139,6 +175,13 @@ export const PromptPinWidget = memo(function PromptPinWidget({
     onUpdateState({ agentId: personaId ?? undefined });
   };
 
+  const handleAgentPick = (personaId: string | null) => {
+    // A picker choice inserts no mention, so the prompt holds nothing this
+    // widget may rewrite later.
+    insertedMentionRef.current = null;
+    handleAgentChange(personaId);
+  };
+
   const handleDone = () => {
     saveNow({ mode: "ready" });
     setMode("ready");
@@ -184,12 +227,21 @@ export const PromptPinWidget = memo(function PromptPinWidget({
       : undefined;
     let nextText = currentText;
     let nextMentionStartIndex = mentionStartIndex;
-    if (activePersona && activePersona.id !== persona.id) {
-      const activeMention = `@${activePersona.displayName}`;
-      const activeMentionIndex = currentText.indexOf(activeMention);
-      if (activeMentionIndex >= 0 && activeMentionIndex !== mentionStartIndex) {
+    const tracked = insertedMentionRef.current;
+    // The tracked mention must still be the one the attachment came from;
+    // otherwise the prompt owns that text and only agentId changes.
+    if (
+      activePersona &&
+      activePersona.id !== persona.id &&
+      tracked?.personaId === activePersona.id
+    ) {
+      const activeMentionIndex = findInsertedMention(currentText, tracked);
+      if (
+        activeMentionIndex !== null &&
+        activeMentionIndex !== mentionStartIndex
+      ) {
         let removeStart = activeMentionIndex;
-        let removeEnd = activeMentionIndex + activeMention.length;
+        let removeEnd = activeMentionIndex + tracked.mention.length;
         if (currentText[removeEnd] === " ") {
           removeEnd += 1;
         } else if (removeStart > 0 && currentText[removeStart - 1] === " ") {
@@ -209,6 +261,12 @@ export const PromptPinWidget = memo(function PromptPinWidget({
     );
     pendingCursorRef.current = cursorPosition;
     registerCompletedMention(persona.displayName);
+    // replaceMentionQuery writes the replacement at the query's start index.
+    insertedMentionRef.current = {
+      personaId: persona.id,
+      start: nextMentionStartIndex,
+      mention: `@${persona.displayName}`,
+    };
     textRef.current = newText;
     setText(newText);
     closeMention();
@@ -373,7 +431,7 @@ export const PromptPinWidget = memo(function PromptPinWidget({
               <PersonaPicker
                 personas={personas}
                 selectedPersonaId={agentId}
-                onPersonaChange={handleAgentChange}
+                onPersonaChange={handleAgentPick}
                 className="min-w-0"
               />
             </div>

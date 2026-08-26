@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Persona } from "@/shared/types/agents";
 import type { WidgetInstance, WidgetRenderProps } from "./types";
@@ -77,6 +77,38 @@ function renderPin({
     />,
     { wrapper: Wrapper },
   );
+}
+
+// Agent swaps only behave correctly if the widget sees its own saved agentId
+// come back, which renderPin's fixed instance never does. Mirrors the merge
+// updateWidgetStateMutation performs.
+function renderStatefulPin() {
+  const onUpdateState = vi.fn();
+
+  function Harness() {
+    const [widgetState, setWidgetState] = useState<
+      Record<string, unknown> | undefined
+    >(undefined);
+    return (
+      <PromptPinWidget
+        instance={makeInstance(widgetState)}
+        onUpdateState={(next) => {
+          onUpdateState(next);
+          setWidgetState((current) => ({ ...current, ...next }));
+        }}
+      />
+    );
+  }
+
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  render(<Harness />, {
+    wrapper: ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
+  return { onUpdateState };
 }
 
 describe("PromptPinWidget", () => {
@@ -408,20 +440,64 @@ describe("PromptPinWidget", () => {
     expect(onUpdateState).toHaveBeenCalledWith({ agentId: "agent-1" });
   });
 
-  it("replaces the previous agent mention instead of accumulating agents", async () => {
+  it("replaces a mention it inserted instead of accumulating agents", async () => {
     state.personas = [
       persona(),
       persona({ id: "agent-2", displayName: "Agent Two" }),
     ];
     const user = userEvent.setup();
-    const onUpdateState = vi.fn();
-    renderPin({ onUpdateState, widgetState: { agentId: "agent-1" } });
+    const { onUpdateState } = renderStatefulPin();
 
     const textarea = screen.getByPlaceholderText("Write a prompt to run...");
-    await user.type(textarea, "@Agent One do the thing @Two");
+    await user.type(textarea, "@Age");
+    await user.click(await screen.findByRole("option", { name: /Agent One/ }));
+    await user.type(textarea, "do the thing @Two");
     await user.click(await screen.findByRole("option", { name: /Agent Two/ }));
 
     expect(textarea).toHaveValue("do the thing @Agent Two ");
     expect(onUpdateState).toHaveBeenCalledWith({ agentId: "agent-2" });
+  });
+
+  it("keeps an authored mention of an agent attached from the picker", async () => {
+    state.personas = [
+      persona(),
+      persona({ id: "agent-2", displayName: "Agent Two" }),
+    ];
+    const user = userEvent.setup();
+    const { onUpdateState } = renderStatefulPin();
+
+    await user.click(screen.getByRole("button", { name: /choose assistant/i }));
+    await user.click(screen.getByRole("menuitem", { name: /Agent One/ }));
+
+    const textarea = screen.getByPlaceholderText("Write a prompt to run...");
+    await user.type(textarea, "ask @Agent One to review @Two");
+    await user.click(await screen.findByRole("option", { name: /Agent Two/ }));
+
+    // The picker inserted no mention, so this text is the user's prose.
+    expect(textarea).toHaveValue("ask @Agent One to review @Agent Two ");
+    expect(onUpdateState).toHaveBeenCalledWith({ agentId: "agent-2" });
+  });
+
+  it("removes nothing when the old agent is mentioned more than once", async () => {
+    state.personas = [
+      persona(),
+      persona({ id: "agent-2", displayName: "Agent Two" }),
+    ];
+    const user = userEvent.setup();
+    renderStatefulPin();
+
+    const textarea = screen.getByPlaceholderText("Write a prompt to run...");
+    await user.type(textarea, "@Age");
+    await user.click(await screen.findByRole("option", { name: /Agent One/ }));
+    // Rewrite the prompt so the inserted range no longer resolves and two
+    // identical mentions compete for it.
+    fireEvent.change(textarea, {
+      target: { value: "ask @Agent One and @Agent One again @Two" },
+    });
+    await user.click(await screen.findByRole("option", { name: /Agent Two/ }));
+
+    expect(textarea).toHaveValue(
+      "ask @Agent One and @Agent One again @Agent Two ",
+    );
   });
 });
