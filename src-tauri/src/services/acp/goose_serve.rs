@@ -891,7 +891,6 @@ fn apply_berdctl_env(
     } else {
         log::warn!("Skipping BERDCTL_BIN: could not resolve the berdctl binary path");
     }
-
 }
 
 /// Create or refresh the PATH shim that lets harness children run a bare
