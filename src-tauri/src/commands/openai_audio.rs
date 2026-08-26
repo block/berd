@@ -1,21 +1,23 @@
 //! OpenAI streaming speech playback for voice conversations.
 
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc, Arc, Mutex,
-    },
-    time::Duration,
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Arc, Mutex,
 };
+#[cfg(any(test, target_os = "macos"))]
+use std::time::Duration;
 
 #[cfg(target_os = "macos")]
 use futures_util::StreamExt;
 #[cfg(target_os = "macos")]
 use reqwest::header::CONTENT_TYPE;
+#[cfg(target_os = "macos")]
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::Serialize;
 use serde_json::json;
-use tauri::{AppHandle, Emitter, State};
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
+use tauri::{AppHandle, State};
 
 #[cfg(target_os = "macos")]
 use super::{
@@ -32,16 +34,23 @@ use super::{
 #[cfg(any(test, target_os = "macos"))]
 use std::time::Instant;
 
+#[cfg(target_os = "macos")]
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
+#[cfg(target_os = "macos")]
 const TTS_SAMPLE_RATE: u32 = 24_000;
 // Avoid starting the audio device from a tiny first network chunk that can drain
 // before subsequent streamed PCM arrives.
+#[cfg(target_os = "macos")]
 const INITIAL_PLAYBACK_BUFFER_FRAMES: usize = TTS_SAMPLE_RATE as usize / 5;
+#[cfg(target_os = "macos")]
 const TTS_EVENT: &str = "openai-voice:stream-event";
+#[cfg(target_os = "macos")]
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+#[cfg(target_os = "macos")]
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+#[cfg(target_os = "macos")]
 const MAX_TTS_INPUT_CHARS: usize = 4096;
 
 #[derive(Clone, Debug, Default)]
@@ -73,6 +82,7 @@ struct ActiveOpenAiStream {
     sender: mpsc::Sender<OpenAiStreamCommand>,
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug)]
 enum OpenAiStreamCommand {
     Append(String),
@@ -81,6 +91,7 @@ enum OpenAiStreamCommand {
     Stop,
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiVoiceStatus {
@@ -101,6 +112,7 @@ struct OpenAiVoiceStreamEvent {
     delivery: Option<VoiceDeliveryProgress>,
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
 enum OpenAiStreamEventState {
@@ -111,6 +123,7 @@ enum OpenAiStreamEventState {
     Failed,
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct VoiceDeliveryProgress {
@@ -118,6 +131,7 @@ struct VoiceDeliveryProgress {
     segments: Vec<VoiceDeliverySegment>,
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct VoiceDeliverySegment {
@@ -134,6 +148,7 @@ fn env_trimmed(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+#[cfg(target_os = "macos")]
 fn goose_yaml_value(path: &std::path::Path, name: &str) -> Result<Option<String>, String> {
     if !path.exists() {
         return Ok(None);
@@ -150,6 +165,7 @@ fn goose_yaml_value(path: &std::path::Path, name: &str) -> Result<Option<String>
         .map(ToString::to_string))
 }
 
+#[cfg(target_os = "macos")]
 fn goose_openai_api_key() -> Result<Option<String>, String> {
     if let Some(value) = env_trimmed("OPENAI_API_KEY") {
         return Ok(Some(value));
@@ -206,6 +222,7 @@ fn goose_openai_api_key() -> Result<Option<String>, String> {
     Ok(None)
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn api_key() -> Result<String, String> {
     goose_openai_api_key()?.ok_or_else(|| {
         "OpenAI voice is not configured. Configure the OpenAI provider in Berd, then try again."
@@ -213,6 +230,7 @@ pub(crate) fn api_key() -> Result<String, String> {
     })
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn normalize_openai_base_url(raw_url: String, assume_v1: bool) -> Result<String, String> {
     let mut url = reqwest::Url::parse(&raw_url)
         .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
@@ -234,6 +252,7 @@ fn normalize_openai_base_url(raw_url: String, assume_v1: bool) -> Result<String,
     Ok(url.to_string().trim_end_matches('/').to_string())
 }
 
+#[cfg(target_os = "macos")]
 fn base_url() -> Result<String, String> {
     if let Some(host) = env_trimmed("OPENAI_HOST") {
         return normalize_openai_base_url(host, true);
@@ -259,10 +278,12 @@ fn speech_voice() -> String {
     env_trimmed("OPENAI_TTS_VOICE").unwrap_or_else(|| DEFAULT_TTS_VOICE.to_string())
 }
 
+#[cfg(target_os = "macos")]
 fn endpoint(path: &str) -> Result<String, String> {
     endpoint_for_base_url(&base_url()?, path)
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
     let mut url = reqwest::Url::parse(base_url)
         .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
@@ -275,6 +296,7 @@ fn openai_voice_configured(provider_configured: bool, environment_key: Option<&s
     provider_configured || environment_key.is_some_and(|key| !key.trim().is_empty())
 }
 
+#[cfg(target_os = "macos")]
 fn authorized_headers(key: &str) -> Result<HeaderMap, String> {
     let mut headers = HeaderMap::new();
     let bearer = format!("Bearer {key}");
@@ -316,6 +338,7 @@ fn persist_playback_speed(speed: f32) -> Result<(), String> {
     .map_err(|error| format!("write OpenAI voice settings: {error}"))
 }
 
+#[cfg(target_os = "macos")]
 fn client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .connect_timeout(CONNECT_TIMEOUT)
@@ -1064,6 +1087,7 @@ fn snapshot_delivery(
     }
 }
 
+#[cfg(target_os = "macos")]
 fn emit_openai_stream_event(
     app: &AppHandle,
     stream_id: &str,
@@ -1082,6 +1106,7 @@ fn emit_openai_stream_event(
     );
 }
 
+#[cfg(target_os = "macos")]
 fn format_openai_request_error(action: &str, error: reqwest::Error) -> String {
     if error.is_timeout() {
         format!("OpenAI voice could not {action}: the request timed out")
@@ -1092,6 +1117,7 @@ fn format_openai_request_error(action: &str, error: reqwest::Error) -> String {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn format_openai_response_error(action: &str, status: reqwest::StatusCode, body: &str) -> String {
     let preview: String = body.chars().take(500).collect();
     format!("OpenAI voice could not {action}: HTTP {status}: {preview}")
