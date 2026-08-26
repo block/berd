@@ -35,7 +35,6 @@ use super::{
 #[cfg(any(test, target_os = "macos"))]
 use std::time::Instant;
 
-#[cfg(target_os = "macos")]
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-live-transcribe";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
@@ -177,7 +176,10 @@ fn tts_api_key() -> Result<String, String> {
     openai_voice_credentials::require(OpenAiVoiceCredential::TextToSpeech)
 }
 
-#[cfg(any(test, target_os = "macos"))]
+pub(crate) fn stt_api_key() -> Result<String, String> {
+    openai_voice_credentials::require(OpenAiVoiceCredential::SpeechToText)
+}
+
 fn normalize_openai_base_url(raw_url: String) -> Result<String, String> {
     let mut url = reqwest::Url::parse(&raw_url)
         .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
@@ -199,7 +201,6 @@ fn normalize_openai_base_url(raw_url: String) -> Result<String, String> {
     Ok(url.to_string().trim_end_matches('/').to_string())
 }
 
-#[cfg(target_os = "macos")]
 fn base_url() -> Result<String, String> {
     if let Some(base_url) = env_trimmed(BASE_URL_ENV) {
         return normalize_openai_base_url(base_url);
@@ -249,12 +250,10 @@ fn tts_configuration_source() -> OpenAiVoiceConfigurationSource {
     }
 }
 
-#[cfg(target_os = "macos")]
 fn endpoint(path: &str) -> Result<String, String> {
     endpoint_for_base_url(&base_url()?, path)
 }
 
-#[cfg(any(test, target_os = "macos"))]
 fn endpoint_for_base_url(base_url: &str, path: &str) -> Result<String, String> {
     let mut url = reqwest::Url::parse(base_url)
         .map_err(|error| format!("OpenAI voice endpoint is invalid: {error}"))?;
