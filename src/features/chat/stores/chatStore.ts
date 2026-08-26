@@ -353,6 +353,29 @@ function findLatestInterventionMessageId(messages: Message[]): string | null {
   return null;
 }
 
+function isInterventionMessage(message: Message | undefined): boolean {
+  return (
+    message?.role === "user" &&
+    (message.metadata?.delivery === "steer" ||
+      message.metadata?.delivery === "steering")
+  );
+}
+
+function findInterventionInsertionAnchorIndex(
+  messages: Message[],
+  interventionIndex: number,
+): number {
+  let anchorIndex = interventionIndex;
+  for (
+    let index = interventionIndex + 1;
+    index < messages.length && isInterventionMessage(messages[index]);
+    index += 1
+  ) {
+    anchorIndex = index;
+  }
+  return anchorIndex;
+}
+
 export type { QueuedMessagePayload, AdmittedQueuedMessagePayload };
 
 export type QueuedMessageRecord =
@@ -1216,8 +1239,15 @@ const createChatStore: StateCreator<
       const interventionIndex = messages.findIndex(
         (message) => message.id === interventionMessageId,
       );
+      const insertionAnchorIndex =
+        interventionIndex >= 0
+          ? findInterventionInsertionAnchorIndex(messages, interventionIndex)
+          : -1;
+      const insertionAnchorId = messages[insertionAnchorIndex]?.id;
       const existingContinuationMessage =
-        interventionIndex >= 0 ? messages[interventionIndex + 1] : undefined;
+        insertionAnchorIndex >= 0
+          ? messages[insertionAnchorIndex + 1]
+          : undefined;
       if (
         existingContinuationMessage?.role === "assistant" &&
         existingContinuationMessage.metadata?.completionStatus === "inProgress"
@@ -1250,11 +1280,13 @@ const createChatStore: StateCreator<
       return {
         messagesBySession: {
           ...state.messagesBySession,
-          [sessionId]: insertMessageAfter(
-            completedMessages,
-            interventionMessageId,
-            assistantContinuationMessage,
-          ),
+          [sessionId]: insertionAnchorId
+            ? insertMessageAfter(
+                completedMessages,
+                insertionAnchorId,
+                assistantContinuationMessage,
+              )
+            : [...completedMessages, assistantContinuationMessage],
         },
         sessionStateById: {
           ...state.sessionStateById,
