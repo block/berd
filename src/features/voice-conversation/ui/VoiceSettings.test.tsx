@@ -53,7 +53,6 @@ const microphonePermissionState = vi.hoisted(() => ({
 const openAiStatusState = vi.hoisted(() => ({
   current: {
     configured: true,
-    transcriptionModel: "gpt-live-transcribe",
     speechModel: "gpt-4o-mini-tts",
     speechVoice: "marin",
     playbackSpeed: 1,
@@ -213,7 +212,6 @@ describe("VoiceSettings", () => {
     siriSetupState.current = siriSetup();
     openAiStatusState.current = {
       configured: true,
-      transcriptionModel: "gpt-live-transcribe",
       speechModel: "gpt-4o-mini-tts",
       speechVoice: "marin",
       playbackSpeed: 1,

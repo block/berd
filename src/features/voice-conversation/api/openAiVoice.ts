@@ -9,7 +9,6 @@ import type {
 
 export interface OpenAiVoiceStatus {
   configured: boolean;
-  transcriptionModel: string;
   speechModel: string;
   speechVoice: string;
   playbackSpeed: number;

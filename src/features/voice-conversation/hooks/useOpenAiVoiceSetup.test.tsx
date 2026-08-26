@@ -35,7 +35,6 @@ function deferred<T>() {
 function status(configured: boolean): OpenAiVoiceStatus {
   return {
     configured,
-    transcriptionModel: "gpt-live-transcribe",
     speechModel: "gpt-4o-mini-tts",
     speechVoice: "marin",
     playbackSpeed: 1,
