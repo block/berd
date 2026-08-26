@@ -220,6 +220,12 @@ _tauri-check-windows:
 tauri-test:
     just _tauri-test-{{ os_family() }}
 
+# Exercise two independent Siri requests through the native streaming decoder.
+# This is opt-in because it requires macOS private Siri APIs and an installed voice.
+[macos]
+test-siri-tts-stream-regression:
+    ./scripts/test-siri-tts-stream-regression.sh
+
 [unix]
 _tauri-test-unix:
     just _tauri-cargo-unix test -p tauri-plugin-berdctl --features server
