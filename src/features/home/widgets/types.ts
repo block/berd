@@ -2,6 +2,7 @@ import type React from "react";
 import type { LayoutConstraints } from "@/features/layout/api/layout";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import type { WorkspaceNameRequest } from "@/features/chat/hooks/useChatSessionController";
+import type { PromptPinMode } from "./promptPinMode";
 
 export type WidgetCategory =
   | "clock"
@@ -12,7 +13,8 @@ export type WidgetCategory =
   | "chat"
   | "project"
   | "automation"
-  | "skill";
+  | "skill"
+  | "prompt";
 
 export interface CanvasBounds {
   width: number;
@@ -71,6 +73,10 @@ export interface WidgetRenderProps {
   onSelectSession?: (sessionId: string) => void;
   onStartProjectChat?: (projectId: string) => void;
   onOpenAutomation?: (automationId: string) => void;
+  onRunPrompt?: (args: {
+    text: string;
+    agentId?: string;
+  }) => Promise<void> | void;
   onCreatePersona?: () => void;
   onCreateProject?: () => void;
   onWorkspaceNameRequest?: (request: WorkspaceNameRequest) => void;
@@ -137,6 +143,10 @@ export interface WidgetNavigationHandlers {
   onSelectSession?: (sessionId: string) => void;
   onStartProjectChat?: (projectId: string) => void;
   onOpenAutomation?: (automationId: string) => void;
+  onRunPrompt?: (args: {
+    text: string;
+    agentId?: string;
+  }) => Promise<void> | void;
   onCreatePersona?: () => void;
   onCreateProject?: () => void;
   onOpenSkills?: () => void;
@@ -180,6 +190,14 @@ export type ChatPinState = { sessionId: string };
 export type ProjectArtifactPinState = { projectId: string };
 export type AutomationOutputPinState = { automationId: string };
 export type SkillPinState = { skillId: string };
+export type PromptPinState = {
+  title?: string;
+  text?: string;
+  agentId?: string;
+  // Persisted because the ready card and the editor need different frame
+  // heights, and only persisted state reaches the catalog's resolveProfile.
+  mode?: PromptPinMode;
+};
 export type StickyNoteState = { noteId: string };
 export type PhotoShape = "original" | "square" | "circle";
 export type PhotoState = {

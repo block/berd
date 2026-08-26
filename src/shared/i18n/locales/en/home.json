@@ -267,6 +267,19 @@
         "peach": "Peach"
       }
     },
+    "promptPin": {
+      "label": "Prompt",
+      "description": "A saved prompt that runs with one click",
+      "runAria": "Run prompt: {{title}}",
+      "editAria": "Edit prompt",
+      "dismiss": "Remove prompt",
+      "titlePlaceholder": "Title (optional)",
+      "textPlaceholder": "Write a prompt to run...",
+      "agentLabel": "Agent",
+      "done": "Done",
+      "emptyText": "Untitled prompt",
+      "agentUnavailable": "The attached agent is no longer available. Edit the prompt to choose another."
+    },
     "unpin": {
       "label": "Unpin"
     },

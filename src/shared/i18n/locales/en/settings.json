@@ -231,6 +231,10 @@
       "resetAllSuccess": "All onboarding experiences were reset.",
       "title": "Onboarding"
     },
+    "promptPins": {
+      "description": "Pin saved prompts to Home that run with one click, optionally with an attached agent.",
+      "title": "Prompt pins"
+    },
     "resetToAuto": "Reset to auto",
     "saveError": "Couldn't save the experiment setting. Try again.",
     "skillDiscovery": {

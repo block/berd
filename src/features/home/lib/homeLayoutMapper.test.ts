@@ -75,6 +75,7 @@ describe("homeLayoutMapper", () => {
       layoutItem({ kind: "project", targetId: "project-1" }),
       layoutItem({ kind: "automation", targetId: "automation-1" }),
       layoutItem({ kind: "skill", targetId: "skill-1" }),
+      layoutItem({ kind: "prompt", targetId: "widget:prompt-1" }),
     ]);
 
     expect(widgets.map((widget) => widget.type)).toEqual([
@@ -86,6 +87,7 @@ describe("homeLayoutMapper", () => {
       "projectArtifactPin",
       "automationOutputPin",
       "skillPin",
+      "promptPin",
     ]);
     expect(HOME_LAYOUT_REPLACE_KINDS).toEqual([
       "clock",
@@ -97,6 +99,7 @@ describe("homeLayoutMapper", () => {
       "project",
       "automation",
       "skill",
+      "prompt",
     ]);
   });
 
@@ -448,6 +451,128 @@ describe("homeLayoutMapper", () => {
       y: 30,
       z: 4,
     });
+  });
+
+  it("round-trips prompt pin content through widget state", () => {
+    const [item] = homeWidgetsToLayoutItems([
+      {
+        id: "prompt-1",
+        type: "promptPin",
+        x: 40,
+        y: 60,
+        z: 3,
+        width: 240,
+        height: 200,
+        state: {
+          title: "Daily standup",
+          text: "Summarize yesterday's commits and draft a standup update.",
+          agentId: "agent-1",
+        },
+      },
+    ]);
+
+    expect(item).toMatchObject({
+      kind: "prompt",
+      targetId: "widget:prompt-1",
+      widgetState: {
+        title: "Daily standup",
+        text: "Summarize yesterday's commits and draft a standup update.",
+        agentId: "agent-1",
+      },
+    });
+
+    const [restored] = layoutItemsToHomeWidgets([item]);
+    expect(restored).toMatchObject({
+      id: "prompt-1",
+      type: "promptPin",
+      x: 40,
+      y: 60,
+      z: 3,
+      state: {
+        title: "Daily standup",
+        text: "Summarize yesterday's commits and draft a standup update.",
+        agentId: "agent-1",
+      },
+    });
+  });
+
+  it("sanitizes prompt pin state in both mapper directions", () => {
+    const [item] = homeWidgetsToLayoutItems([
+      {
+        id: "prompt-2",
+        type: "promptPin",
+        x: 0,
+        y: 0,
+        z: 1,
+        state: {
+          title: "   ",
+          text: `${"x".repeat(50_001)}`,
+          agentId: "  agent-2  ",
+          unknownField: "dropped",
+        },
+      },
+    ]);
+
+    expect(item.widgetState).toEqual({
+      text: "x".repeat(50_000),
+      agentId: "agent-2",
+    });
+
+    const [restored] = layoutItemsToHomeWidgets([
+      {
+        ...item,
+        widgetState: { ...item.widgetState, extra: 1, agentId: "" },
+      },
+    ]);
+    expect(restored.state).toEqual({ text: "x".repeat(50_000) });
+  });
+
+  // The mode drives the size profile, and the per-profile size memory rides
+  // along with it, so both have to survive the round trip.
+  it("round-trips prompt pin mode and per-profile size memory", () => {
+    const [item] = homeWidgetsToLayoutItems([
+      {
+        id: "prompt-3",
+        type: "promptPin",
+        x: 0,
+        y: 0,
+        z: 1,
+        state: {
+          text: "Summarize my inbox",
+          mode: "ready",
+          __sizeByProfile: {
+            "280x170": { width: 300, height: 200 },
+          },
+        },
+      },
+    ]);
+
+    expect(item.widgetState).toEqual({
+      text: "Summarize my inbox",
+      mode: "ready",
+      __sizeByProfile: { "280x170": { width: 300, height: 200 } },
+    });
+
+    const [restored] = layoutItemsToHomeWidgets([item]);
+    expect(restored.state).toMatchObject({
+      mode: "ready",
+      __sizeByProfile: { "280x170": { width: 300, height: 200 } },
+    });
+  });
+
+  it("drops an unrecognized prompt pin mode", () => {
+    const [item] = homeWidgetsToLayoutItems([
+      {
+        id: "prompt-4",
+        type: "promptPin",
+        x: 0,
+        y: 0,
+        z: 1,
+        state: { text: "Summarize my inbox", mode: "bogus" },
+      },
+    ]);
+
+    expect(item.widgetState).toEqual({ text: "Summarize my inbox" });
   });
 
   it("round-trips explicit widget width and height", () => {

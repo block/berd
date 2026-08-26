@@ -64,6 +64,9 @@ export const BERDY_ONBOARDING_EXPERIMENT_ID = "berdy-onboarding";
 export const SKILL_DISCOVERY_EXPERIMENT_ID = "skill-discovery";
 
 export const RELATED_PULL_REQUESTS_EXPERIMENT_ID = "related-pull-requests";
+
+export const PROMPT_PINS_EXPERIMENT_ID = "prompt-pins";
+
 export const EXPERIMENT_DEFINITIONS = [
   {
     id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
@@ -113,5 +116,14 @@ export const EXPERIMENT_DEFINITIONS = [
     id: RELATED_PULL_REQUESTS_EXPERIMENT_ID,
     titleKey: "experiments.relatedPullRequests.title",
     descriptionKey: "experiments.relatedPullRequests.description",
+  },
+  {
+    id: PROMPT_PINS_EXPERIMENT_ID,
+    titleKey: "experiments.promptPins.title",
+    descriptionKey: "experiments.promptPins.description",
+    // Gates only the widget picker's "Prompt" row; already-pinned prompts
+    // keep rendering when disabled (user data is never hidden). No explicit
+    // default, so it follows the global auto-enable preference: on in dev
+    // builds, off in production.
   },
 ] as const satisfies readonly ExperimentDefinition[];

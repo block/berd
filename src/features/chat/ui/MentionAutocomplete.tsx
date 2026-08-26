@@ -38,6 +38,8 @@ interface MentionAutocompleteProps {
   listboxId?: string;
   atCategory?: AtMentionCategory;
   onAtCategoryChange?: (category: AtMentionCategory) => void;
+  /** Hide the agents/files/skills tab strip for single-category surfaces. */
+  showCategoryTabs?: boolean;
   pathsLoading?: boolean;
   pathsError?: string | null;
 }
@@ -55,6 +57,7 @@ export function MentionAutocomplete({
   listboxId = "mention-autocomplete-listbox",
   atCategory = "agents",
   onAtCategoryChange,
+  showCategoryTabs = true,
   pathsLoading = false,
   pathsError = null,
 }: MentionAutocompleteProps) {
@@ -162,34 +165,36 @@ export function MentionAutocomplete({
         onDismiss?.();
       }}
     >
-      <Tabs
-        value={atCategory}
-        onValueChange={(value) =>
-          onAtCategoryChange?.(value as AtMentionCategory)
-        }
-        className="gap-0 pb-2"
-      >
-        <TabsList variant="buttons" className="w-full justify-start gap-1">
-          <MentionTabTrigger
-            value="agents"
-            label={t("mention.title")}
-            symbol="@"
-            onSelect={onAtCategoryChange}
-          />
-          <MentionTabTrigger
-            value="files"
-            label={t("mention.filesTitle")}
-            symbol="@"
-            onSelect={onAtCategoryChange}
-          />
-          <MentionTabTrigger
-            value="skills"
-            label={t("mention.skillsTitle")}
-            symbol="/"
-            onSelect={onAtCategoryChange}
-          />
-        </TabsList>
-      </Tabs>
+      {showCategoryTabs ? (
+        <Tabs
+          value={atCategory}
+          onValueChange={(value) =>
+            onAtCategoryChange?.(value as AtMentionCategory)
+          }
+          className="gap-0 pb-2"
+        >
+          <TabsList variant="buttons" className="w-full justify-start gap-1">
+            <MentionTabTrigger
+              value="agents"
+              label={t("mention.title")}
+              symbol="@"
+              onSelect={onAtCategoryChange}
+            />
+            <MentionTabTrigger
+              value="files"
+              label={t("mention.filesTitle")}
+              symbol="@"
+              onSelect={onAtCategoryChange}
+            />
+            <MentionTabTrigger
+              value="skills"
+              label={t("mention.skillsTitle")}
+              symbol="/"
+              onSelect={onAtCategoryChange}
+            />
+          </TabsList>
+        </Tabs>
+      ) : null}
       <div className="h-56 overflow-y-auto overscroll-contain scrollbar-none">
         <div
           role="listbox"

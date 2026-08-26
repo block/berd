@@ -18,6 +18,8 @@ import {
   fetchAutomationTilesList,
 } from "@/features/automations/api/automationTilesQuery";
 import { useProfileCapability } from "@/shared/profile/capabilities";
+import { PROMPT_PINS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
@@ -365,6 +367,8 @@ export function WidgetPicker({
 }: WidgetPickerProps) {
   const { t } = useTranslation("home");
   const automationsEnabled = useProfileCapability("automations");
+  const promptPinsEnabled =
+    useExperiment(PROMPT_PINS_EXPERIMENT_ID)?.enabled === true;
   const visibleWidgetCategories = useMemo(
     () =>
       STAGE_ONE_ORDER.filter(
@@ -571,6 +575,7 @@ export function WidgetPicker({
             onSelectLabel={() => onSelect("label")}
             onSelectChecklist={() => onSelect("checklist")}
             onSelectPhoto={() => onSelect("photo")}
+            onSelectPromptPin={() => onSelect("promptPin")}
             onRestoreStarterTasks={onRestoreStarterTasks}
             clockLabel={t("widgets.clock.label")}
             clockPinned={instances.some(
@@ -580,6 +585,8 @@ export function WidgetPicker({
             labelLabel={t("widgets.label.label")}
             checklistLabel={t("widgets.checklist.label")}
             photoLabel={t("widgets.photo.label")}
+            promptPinLabel={t("widgets.promptPin.label")}
+            promptPinAvailable={promptPinsEnabled}
             starterTasksLabel={t("widgets.stickyNote.starterTasks")}
             starterTasksAvailable={starterTasksAvailable}
             backLabel={t("widgets.picker.back")}
@@ -659,6 +666,7 @@ interface PanelStageTwoProps {
   onSelectLabel: () => void;
   onSelectChecklist: () => void;
   onSelectPhoto: () => void;
+  onSelectPromptPin: () => void;
   onRestoreStarterTasks: () => void;
   clockLabel: string;
   clockPinned: boolean;
@@ -666,6 +674,8 @@ interface PanelStageTwoProps {
   labelLabel: string;
   checklistLabel: string;
   photoLabel: string;
+  promptPinLabel: string;
+  promptPinAvailable: boolean;
   starterTasksLabel: string;
   starterTasksAvailable: boolean;
   backLabel: string;
@@ -690,6 +700,7 @@ function PanelStageTwo({
   onSelectLabel,
   onSelectChecklist,
   onSelectPhoto,
+  onSelectPromptPin,
   onRestoreStarterTasks,
   clockLabel,
   clockPinned,
@@ -697,6 +708,8 @@ function PanelStageTwo({
   labelLabel,
   checklistLabel,
   photoLabel,
+  promptPinLabel,
+  promptPinAvailable,
   starterTasksLabel,
   starterTasksAvailable,
   backLabel,
@@ -746,6 +759,13 @@ function PanelStageTwo({
               pinned={false}
               onSelect={onSelectPhoto}
             />
+            {promptPinAvailable ? (
+              <WidgetOptionRow
+                label={promptPinLabel}
+                pinned={false}
+                onSelect={onSelectPromptPin}
+              />
+            ) : null}
             <WidgetOptionRow
               label={starterTasksLabel}
               pinned={!starterTasksAvailable}

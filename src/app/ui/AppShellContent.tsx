@@ -113,6 +113,10 @@ interface AppShellContentProps {
   onTagHomeComposerAgent: (agentId: string) => void;
   onTagHomeComposerProject: (projectId: string) => void;
   onTagHomeComposerSkill: (skill: SkillInfo) => void;
+  onRunPinnedPrompt: (args: {
+    text: string;
+    agentId?: string;
+  }) => Promise<void> | void;
   onHydratePinnedChatSessions?: (sessionIds: string[]) => void;
   onStartProviderTroubleshootingChat: (
     request: AgentSetupTroubleshootingRequest,
@@ -177,6 +181,7 @@ export function AppShellContent({
   onTagHomeComposerAgent,
   onTagHomeComposerProject,
   onTagHomeComposerSkill,
+  onRunPinnedPrompt,
   onHydratePinnedChatSessions,
   onLoggedOut,
   onStartProviderTroubleshootingChat,
@@ -216,6 +221,7 @@ export function AppShellContent({
       onTagAgentInComposer={onTagHomeComposerAgent}
       onTagProjectInComposer={onTagHomeComposerProject}
       onTagSkillInComposer={onTagHomeComposerSkill}
+      onRunPrompt={onRunPinnedPrompt}
       onSelectSession={onSelectSession}
       onStartProjectChat={onStartProjectChat}
       onCreatePersona={onCreatePersona}
