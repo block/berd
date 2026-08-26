@@ -64,6 +64,13 @@ const MAX_FINAL_PLAYBACK_DRAIN: Duration = Duration::from_secs(600);
 #[derive(Clone, Debug, Default)]
 pub struct OpenAiVoiceState {
     playback: Arc<Mutex<PlaybackRuntime>>,
+    configured: Arc<AtomicBool>,
+}
+
+impl OpenAiVoiceState {
+    pub(crate) fn is_configured(&self) -> bool {
+        self.configured.load(Ordering::Acquire)
+    }
 }
 
 #[derive(Debug)]
@@ -326,6 +333,7 @@ pub async fn get_openai_voice_status(
     } else {
         false
     };
+    state.configured.store(configured, Ordering::Release);
     Ok(OpenAiVoiceStatus {
         tts_configured,
         tts_configuration_source: tts_configuration_source(),
@@ -1260,6 +1268,16 @@ mod tests {
             started + grace,
         ));
         assert_eq!(drained_at, None);
+    }
+
+    #[test]
+    fn configured_readiness_does_not_require_reading_the_secret() {
+        let state = OpenAiVoiceState::default();
+        assert!(!state.is_configured());
+
+        state.configured.store(true, Ordering::Release);
+
+        assert!(state.is_configured());
     }
 
     #[cfg(target_os = "macos")]

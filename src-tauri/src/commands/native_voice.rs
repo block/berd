@@ -835,12 +835,7 @@ impl SttPipeline {
         assistant_vad_threshold: Arc<AtomicU32>,
         speech_vad_threshold: f32,
     ) -> Result<(Self, tokio_mpsc::Receiver<SttMessage>), String> {
-        if !super::openai_audio::openai_api_key_available()? {
-            return Err(
-                "OpenAI speech-to-text is not configured. Configure the OpenAI provider in Berd."
-                    .to_string(),
-            );
-        }
+        let api_key = super::openai_audio::api_key()?;
         let (audio_tx, audio_rx) = mpsc::sync_channel(AUDIO_QUEUE_DEPTH);
         let (event_tx, event_rx) = tokio_mpsc::channel(64);
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -855,6 +850,7 @@ impl SttPipeline {
             .name("berd-openai-stt".into())
             .spawn(move || {
                 openai_stt_worker(
+                    api_key,
                     audio_rx,
                     event_tx,
                     worker_shutdown,
@@ -1130,7 +1126,9 @@ where
 
 async fn status(app: &AppHandle, state: &NativeVoiceState) -> NativeVoiceStatus {
     let parakeet_available = parakeet_model_dir(app).is_ok()
-        || super::openai_audio::openai_api_key_available().unwrap_or(false);
+        || app
+            .state::<super::openai_audio::OpenAiVoiceState>()
+            .is_configured();
     #[cfg(target_os = "macos")]
     let macos_status = || async {
         mac_speech::status_async()
@@ -2616,6 +2614,7 @@ fn deliver_completed_openai_turns(
 
 #[allow(clippy::too_many_arguments)] // Worker boundary keeps channel and mute lifecycle inputs explicit.
 fn openai_stt_worker(
+    key: String,
     audio_rx: Receiver<AudioBatch>,
     event_tx: tokio_mpsc::Sender<SttMessage>,
     shutdown: Arc<AtomicBool>,
@@ -2641,13 +2640,6 @@ fn openai_stt_worker(
             let _ = event_tx.blocking_send(SttMessage::Failed(format!(
                 "Could not initialize OpenAI realtime transcription: {error}"
             )));
-            return;
-        }
-    };
-    let key = match super::openai_audio::api_key() {
-        Ok(key) => key,
-        Err(error) => {
-            let _ = event_tx.blocking_send(SttMessage::Failed(error));
             return;
         }
     };
