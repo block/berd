@@ -5,21 +5,29 @@ use std::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Mutex,
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 
+#[cfg(target_os = "macos")]
 use futures_util::StreamExt;
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
+#[cfg(target_os = "macos")]
+use reqwest::header::CONTENT_TYPE;
+use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
 
-#[cfg(target_os = "macos")]
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
-    pocket_audio_player::PocketAudioPlayer,
-    pocket_voice::{effective_output_device_name, should_suppress_capture, VoiceInterruptionMode},
+    pocket_voice::VoiceInterruptionMode,
 };
+#[cfg(target_os = "macos")]
+use super::{
+    pocket_audio_player::PocketAudioPlayer,
+    pocket_voice::{effective_output_device_name, should_suppress_capture},
+};
+#[cfg(target_os = "macos")]
+use std::time::Instant;
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
@@ -170,6 +178,13 @@ fn goose_openai_api_key() -> Result<Option<String>, String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToString::to_string))
+}
+
+pub(crate) fn api_key() -> Result<String, String> {
+    goose_openai_api_key()?.ok_or_else(|| {
+        "OpenAI voice is not configured. Configure the OpenAI provider in Berd, then try again."
+            .to_string()
+    })
 }
 
 fn base_url() -> String {
