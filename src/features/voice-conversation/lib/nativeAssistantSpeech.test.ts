@@ -2987,8 +2987,8 @@ describe("native assistant speech stream", () => {
       expect(mocks.start).toHaveBeenCalledTimes(1);
 
       await vi.advanceTimersByTimeAsync(1);
-      await vi.runAllTimersAsync();
       expect(mocks.start).toHaveBeenCalledTimes(2);
+      await vi.runAllTimersAsync();
     } finally {
       vi.useRealTimers();
     }
