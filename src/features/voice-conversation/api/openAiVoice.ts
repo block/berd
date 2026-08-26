@@ -9,6 +9,7 @@ import type {
 export interface OpenAiVoiceStatus {
   ttsConfigured: boolean;
   ttsConfigurationSource: "default" | "environment";
+  transcriptionModel: string;
   speechModel: string;
   speechVoice: string;
   playbackSpeed: number;

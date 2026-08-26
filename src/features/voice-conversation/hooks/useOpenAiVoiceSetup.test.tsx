@@ -35,6 +35,7 @@ function status(configured: boolean): OpenAiVoiceStatus {
   return {
     ttsConfigured: configured,
     ttsConfigurationSource: "default",
+    transcriptionModel: "gpt-live-transcribe",
     speechModel: "gpt-4o-mini-tts",
     speechVoice: "marin",
     playbackSpeed: 1,
