@@ -53,12 +53,22 @@ describe("voice setup readiness", () => {
     ).toBe(false);
   });
 
-  it("requires the configured OpenAI voice key for either OpenAI backend", () => {
+  it("requires the configured OpenAI TTS key and TTS availability for OpenAI output", () => {
     const configured = { ttsConfigured: true, ttsAvailable: true } as never;
     expect(
-      isVoiceSetupReady(null, null, null, "openai", "openai", configured),
+      isVoiceSetupReady(pocket, null, null, "parakeet", "openai", configured),
     ).toBe(true);
     expect(isVoiceSetupReady(pocket, null, null, "parakeet", "openai")).toBe(
+      false,
+    );
+  });
+
+  it("allows configured OpenAI input when TTS is unavailable", () => {
+    const configuredStt = { ttsConfigured: true, ttsAvailable: false } as never;
+    expect(
+      isVoiceSetupReady(pocket, null, null, "openai", "pocket", configuredStt),
+    ).toBe(true);
+    expect(isVoiceSetupReady(pocket, null, null, "openai", "pocket")).toBe(
       false,
     );
   });

@@ -607,10 +607,12 @@ impl NativeVoiceState {
             }
             // Native input mute is authoritative when installed so a hardware
             // unmute cannot be masked by a stale renderer fallback latch.
-            self.microphone_muted.store(
-                software_microphone_mute(native_microphone_mute_control, muted),
-                Ordering::SeqCst,
-            );
+            let software_muted = software_microphone_mute(native_microphone_mute_control, muted);
+            let previous_software_muted =
+                self.microphone_muted.swap(software_muted, Ordering::SeqCst);
+            if !native_microphone_mute_control && previous_software_muted != software_muted {
+                self.input_mute_epoch.fetch_add(1, Ordering::AcqRel);
+            }
             owner_window_label
         };
         Ok(Some(owner_window_label))
@@ -2732,7 +2734,7 @@ fn openai_stt_worker(
         }
     };
 
-    macro_rules! send_openai_message {
+    macro_rules! send_openai_startup_message {
         ($message:expr, $action:literal) => {
             match block_on_openai_operation(&runtime, &shutdown, socket.send($message), $action) {
                 Ok(Some(())) => {}
@@ -2755,7 +2757,7 @@ fn openai_stt_worker(
             }}
         }
     });
-    send_openai_message!(
+    send_openai_startup_message!(
         Message::Text(session_update.to_string().into()),
         "configure OpenAI realtime transcription"
     );
@@ -2783,13 +2785,62 @@ fn openai_stt_worker(
     let mut committed_turns = VecDeque::<OpenAiCommittedTurn>::new();
     let mut completed_turns = HashMap::<String, String>::new();
 
-    loop {
+    macro_rules! send_openai_stream_message {
+        ($message:expr, $action:literal, $on_shutdown:block) => {
+            match block_on_openai_operation(&runtime, &shutdown, socket.send($message), $action) {
+                Ok(Some(())) => {}
+                Ok(None) => $on_shutdown
+                Err(error) => {
+                    let _ = event_tx.blocking_send(SttMessage::Failed(error));
+                    return;
+                }
+            }
+        };
+    }
+
+    'worker: loop {
+        let (shutting_down, current_mute_epoch) =
+            sample_effective_mute_epoch(&input_mute_epoch, &shutdown, &shutdown_mute_epoch);
+        if shutting_down {
+            break;
+        }
+        if current_mute_epoch != observed_mute_epoch {
+            observed_mute_epoch = current_mute_epoch;
+            input_48k.clear();
+            vad_16k.clear();
+            silence_frames = 0;
+            turn_has_audio = false;
+            turn_samples_16k = 0;
+            pre_roll.clear();
+            committed_turns.clear();
+            completed_turns.clear();
+            if std::mem::take(&mut in_speech) {
+                let _ = event_tx.blocking_send(SttMessage::Speaking(false));
+            }
+            send_openai_stream_message!(
+                Message::Text(
+                    serde_json::json!({"type":"input_audio_buffer.clear"})
+                        .to_string()
+                        .into()
+                ),
+                "clear muted OpenAI transcription audio",
+                { break 'worker }
+            );
+        }
         while let Some(event) = runtime.block_on(async {
             tokio::time::timeout(Duration::from_millis(1), socket.next())
                 .await
                 .ok()
                 .flatten()
         }) {
+            let (shutting_down, current_mute_epoch) =
+                sample_effective_mute_epoch(&input_mute_epoch, &shutdown, &shutdown_mute_epoch);
+            if shutting_down {
+                break 'worker;
+            }
+            if current_mute_epoch != observed_mute_epoch {
+                continue 'worker;
+            }
             let message = match event {
                 Ok(Message::Text(text)) => text,
                 Ok(Message::Close(_)) => {
@@ -2842,26 +2893,7 @@ fn openai_stt_worker(
             break;
         }
         if current_mute_epoch != observed_mute_epoch {
-            observed_mute_epoch = current_mute_epoch;
-            input_48k.clear();
-            vad_16k.clear();
-            silence_frames = 0;
-            turn_has_audio = false;
-            turn_samples_16k = 0;
-            pre_roll.clear();
-            committed_turns.clear();
-            completed_turns.clear();
-            if std::mem::take(&mut in_speech) {
-                let _ = event_tx.blocking_send(SttMessage::Speaking(false));
-            }
-            send_openai_message!(
-                Message::Text(
-                    serde_json::json!({"type":"input_audio_buffer.clear"})
-                        .to_string()
-                        .into()
-                ),
-                "clear muted OpenAI transcription audio"
-            );
+            continue 'worker;
         }
         if input_muted.load(Ordering::Acquire) {
             continue;
@@ -2915,7 +2947,7 @@ fn openai_stt_worker(
 
             if speech_started {
                 while let Some(pre_roll_bytes) = pre_roll.pop_front() {
-                    send_openai_message!(
+                    send_openai_stream_message!(
                         Message::Text(
                             serde_json::json!({
                                 "type": "input_audio_buffer.append",
@@ -2924,13 +2956,14 @@ fn openai_stt_worker(
                             .to_string()
                             .into()
                         ),
-                        "stream OpenAI transcription pre-roll"
+                        "stream OpenAI transcription pre-roll",
+                        { break 'worker }
                     );
                 }
             }
 
             if speech_started || in_speech || should_commit {
-                send_openai_message!(
+                send_openai_stream_message!(
                     Message::Text(
                         serde_json::json!({
                             "type": "input_audio_buffer.append",
@@ -2939,7 +2972,8 @@ fn openai_stt_worker(
                         .to_string()
                         .into()
                     ),
-                    "stream audio to OpenAI realtime transcription"
+                    "stream audio to OpenAI realtime transcription",
+                    { break 'worker }
                 );
                 turn_has_audio = true;
                 turn_samples_16k = turn_samples_16k.saturating_add(chunk.len() / 3);
@@ -2948,15 +2982,16 @@ fn openai_stt_worker(
             }
 
             if should_commit || openai_turn_reached_limit(turn_samples_16k) {
-                pending_commit_epochs.push_back(observed_mute_epoch);
-                send_openai_message!(
+                send_openai_stream_message!(
                     Message::Text(
                         serde_json::json!({"type":"input_audio_buffer.commit"})
                             .to_string()
                             .into()
                     ),
-                    "commit OpenAI transcription turn"
+                    "commit OpenAI transcription turn",
+                    { break 'worker }
                 );
+                pending_commit_epochs.push_back(observed_mute_epoch);
                 turn_has_audio = false;
                 turn_samples_16k = 0;
                 silence_frames = 0;
@@ -2974,16 +3009,15 @@ fn openai_stt_worker(
     let mut final_delivered = None::<mpsc::Receiver<()>>;
     if turn_has_audio {
         let (delivered_tx, delivered_rx) = mpsc::sync_channel(0);
-        final_delivery = Some(delivered_tx);
-        final_delivered = Some(delivered_rx);
-        pending_commit_epochs.push_back(observed_mute_epoch);
         let commit = serde_json::json!({"type":"input_audio_buffer.commit"});
         let final_write = runtime.block_on(tokio::time::timeout(
             OPENAI_FINAL_WRITE_TIMEOUT,
             socket.send(Message::Text(commit.to_string().into())),
         ));
-        if !matches!(final_write, Ok(Ok(()))) {
-            return;
+        if matches!(final_write, Ok(Ok(()))) {
+            pending_commit_epochs.push_back(observed_mute_epoch);
+            final_delivery = Some(delivered_tx);
+            final_delivered = Some(delivered_rx);
         }
     }
 
@@ -3889,6 +3923,30 @@ mod tests {
             Some("main".to_string()),
         );
         assert!(state.microphone_is_muted());
+    }
+
+    #[test]
+    fn software_microphone_mute_advances_the_audio_epoch() {
+        let state = NativeVoiceState::default();
+        {
+            let mut runtime = state.runtime.lock().expect("lock native runtime");
+            runtime.session_id = Some("session-1".to_string());
+            runtime.revision = 4;
+            runtime.owner = Some(RuntimeOwner {
+                window_label: "main".to_string(),
+            });
+            runtime.native_microphone_mute_control = false;
+        }
+
+        assert_eq!(state.input_mute_epoch.load(Ordering::Acquire), 0);
+        state
+            .set_microphone_muted_target("main", "session-1", 4, true)
+            .expect("mute");
+        assert_eq!(state.input_mute_epoch.load(Ordering::Acquire), 1);
+        state
+            .set_microphone_muted_target("main", "session-1", 4, false)
+            .expect("unmute");
+        assert_eq!(state.input_mute_epoch.load(Ordering::Acquire), 2);
     }
 
     #[test]
