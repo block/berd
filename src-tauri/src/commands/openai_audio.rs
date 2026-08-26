@@ -37,7 +37,6 @@ use std::time::Instant;
 
 #[cfg(target_os = "macos")]
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
-const DEFAULT_REALTIME_SESSION_MODEL: &str = "gpt-realtime-2.1";
 const DEFAULT_TRANSCRIPTION_MODEL: &str = "gpt-live-transcribe";
 const DEFAULT_TTS_MODEL: &str = "gpt-4o-mini-tts";
 const DEFAULT_TTS_VOICE: &str = "marin";
@@ -204,8 +203,7 @@ fn base_url() -> Result<String, String> {
 pub(crate) fn realtime_endpoint() -> Result<String, String> {
     let mut url = reqwest::Url::parse(&endpoint("realtime")?)
         .map_err(|error| format!("OpenAI realtime endpoint is invalid: {error}"))?;
-    url.query_pairs_mut()
-        .append_pair("model", DEFAULT_REALTIME_SESSION_MODEL);
+    url.query_pairs_mut().append_pair("intent", "transcription");
     match url.scheme() {
         "http" => url.set_scheme("ws").expect("compatible scheme"),
         "https" => url.set_scheme("wss").expect("compatible scheme"),
