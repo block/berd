@@ -27,7 +27,7 @@ const DEFAULT_TTS_VOICE: &str = "marin";
 const TTS_SAMPLE_RATE: u32 = 24_000;
 // Avoid starting the audio device from a tiny first network chunk that can drain
 // before subsequent streamed PCM arrives.
-const INITIAL_PLAYBACK_BUFFER_FRAMES: usize = TTS_SAMPLE_RATE as usize / 2;
+const INITIAL_PLAYBACK_BUFFER_FRAMES: usize = TTS_SAMPLE_RATE as usize / 5;
 const TTS_EVENT: &str = "openai-voice:stream-event";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -307,8 +307,11 @@ pub fn start_openai_voice_stream(
                 .playback
                 .lock()
                 .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?;
-            if playback.active.is_some() {
-                return Err("OpenAI voice playback is already active".to_string());
+            if let Some(previous) = playback.active.as_ref() {
+                previous.store(false, Ordering::SeqCst);
+            }
+            if let Some(previous) = playback.stream.as_ref() {
+                let _ = previous.sender.send(OpenAiStreamCommand::Stop);
             }
             playback.active = Some(active.clone());
             playback.stream = Some(ActiveOpenAiStream {
@@ -336,8 +339,14 @@ pub fn start_openai_voice_stream(
                 speed,
             );
             if let Ok(mut playback) = playback.lock() {
-                playback.active = None;
-                playback.stream = None;
+                let still_owns_playback = playback
+                    .active
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &active));
+                if still_owns_playback {
+                    playback.active = None;
+                    playback.stream = None;
+                }
             }
             let (state, error, delivery) = match result {
                 Ok(outcome) => (outcome.state, None, outcome.delivery),
