@@ -15,15 +15,30 @@ const mocks = vi.hoisted(() => ({
   configDelete: vi.fn(),
   configStatus: vi.fn(),
   getClient: vi.fn(),
+  emit: vi.fn(),
+  listen: vi.fn(),
+  providerConfigHandler: null as
+    | ((event: { payload: { providerId: string } }) => void)
+    | null,
 }));
 
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: () => mocks.getClient(),
 }));
+vi.mock("@tauri-apps/api/event", () => ({
+  emit: (...args: unknown[]) => mocks.emit(...args),
+  listen: (event: string, handler: typeof mocks.providerConfigHandler) => {
+    mocks.listen(event, handler);
+    mocks.providerConfigHandler = handler;
+    return Promise.resolve(vi.fn());
+  },
+}));
 
 describe("provider credential API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.emit.mockResolvedValue(undefined);
+    mocks.providerConfigHandler = null;
     mocks.getClient.mockResolvedValue({
       goose: {
         GooseUnstableProvidersConfigRead: mocks.configRead,
@@ -87,9 +102,9 @@ describe("provider credential API", () => {
     });
   });
 
-  it("notifies subscribers after provider credentials change", async () => {
+  it("broadcasts provider credential changes across renderer windows", async () => {
     const listener = vi.fn();
-    const unsubscribe = onProviderConfigChanged(listener);
+    const unsubscribe = await onProviderConfigChanged(listener);
     mocks.configSave.mockResolvedValue({
       status: { providerId: "openai", isConfigured: true },
       refresh: { started: [], skipped: [] },
@@ -97,6 +112,10 @@ describe("provider credential API", () => {
 
     await saveProviderConfig("openai", []);
 
+    expect(mocks.emit).toHaveBeenCalledWith("provider-config:changed", {
+      providerId: "openai",
+    });
+    mocks.providerConfigHandler?.({ payload: { providerId: "openai" } });
     expect(listener).toHaveBeenCalledWith("openai");
     unsubscribe();
   });

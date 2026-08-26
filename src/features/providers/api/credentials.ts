@@ -4,6 +4,7 @@ import type {
   ProviderConfigStatusDto,
   ProviderSecretDto,
 } from "@aaif/goose-sdk";
+import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ProviderFieldValue } from "@/shared/types/providers";
 import { getClient } from "@/shared/api/acpConnection";
 import { shareInFlight } from "@/shared/lib/shareInFlight";
@@ -11,18 +12,19 @@ import { shareInFlight } from "@/shared/lib/shareInFlight";
 export type ProviderStatus = ProviderConfigStatusDto;
 export type ProviderFieldSaveInput = ProviderConfigFieldUpdate;
 
-type ProviderConfigChangedListener = (providerId: string) => void;
-const providerConfigChangedListeners = new Set<ProviderConfigChangedListener>();
+const PROVIDER_CONFIG_CHANGED_EVENT = "provider-config:changed";
 
-function notifyProviderConfigChanged(providerId: string) {
-  for (const listener of providerConfigChangedListeners) listener(providerId);
+async function notifyProviderConfigChanged(providerId: string) {
+  await emit(PROVIDER_CONFIG_CHANGED_EVENT, { providerId });
 }
 
 export function onProviderConfigChanged(
-  listener: ProviderConfigChangedListener,
-): () => void {
-  providerConfigChangedListeners.add(listener);
-  return () => providerConfigChangedListeners.delete(listener);
+  listener: (providerId: string) => void,
+): Promise<UnlistenFn> {
+  return listen<{ providerId: string }>(
+    PROVIDER_CONFIG_CHANGED_EVENT,
+    (event) => listener(event.payload.providerId),
+  );
 }
 
 export async function getProviderConfig(
@@ -44,7 +46,7 @@ export async function saveProviderConfig(
     providerId,
     fields,
   });
-  notifyProviderConfigChanged(providerId);
+  await notifyProviderConfigChanged(providerId);
   return response;
 }
 
@@ -55,7 +57,7 @@ export async function authenticateProviderConfig(
   const response = await client.goose.GooseUnstableProvidersConfigAuthenticate({
     providerId,
   });
-  notifyProviderConfigChanged(providerId);
+  await notifyProviderConfigChanged(providerId);
   return response;
 }
 
@@ -66,7 +68,7 @@ export async function deleteProviderConfig(
   const response = await client.goose.GooseUnstableProvidersConfigDelete({
     providerId,
   });
-  notifyProviderConfigChanged(providerId);
+  await notifyProviderConfigChanged(providerId);
   return response;
 }
 

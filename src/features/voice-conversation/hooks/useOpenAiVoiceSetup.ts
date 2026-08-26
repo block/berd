@@ -12,28 +12,34 @@ export function useOpenAiVoiceSetup(enabled = true) {
   useEffect(() => {
     if (!enabled) return;
     let active = true;
+    let refreshGeneration = 0;
+    let unsubscribe: (() => void) | null = null;
     const refresh = () => {
+      const generation = ++refreshGeneration;
       void getOpenAiVoiceStatus().then(
         (next) => {
-          if (active) {
+          if (active && generation === refreshGeneration) {
             setStatus(next);
             setError(null);
           }
         },
         (cause) => {
-          if (active) {
+          if (active && generation === refreshGeneration) {
             setError(cause instanceof Error ? cause.message : String(cause));
           }
         },
       );
     };
     refresh();
-    const unsubscribe = onProviderConfigChanged((providerId) => {
+    void onProviderConfigChanged((providerId) => {
       if (providerId === "openai") refresh();
+    }).then((nextUnsubscribe) => {
+      if (active) unsubscribe = nextUnsubscribe;
+      else nextUnsubscribe();
     });
     return () => {
       active = false;
-      unsubscribe();
+      unsubscribe?.();
     };
   }, [enabled]);
 

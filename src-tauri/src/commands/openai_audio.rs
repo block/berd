@@ -21,13 +21,15 @@ use tauri::{AppHandle, Emitter, State};
 use super::{
     native_voice::AssistantSpeechGuard,
     pocket_audio_player::PocketAudioPlayer,
-    pocket_voice::{effective_output_device_name, should_suppress_capture},
+    pocket_voice::{
+        effective_output_device_name, playback_latency_safety_duration, should_suppress_capture,
+    },
 };
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     pocket_voice::VoiceInterruptionMode,
 };
-#[cfg(target_os = "macos")]
+#[cfg(any(test, target_os = "macos"))]
 use std::time::Instant;
 
 const DEFAULT_BASE_URL: &str = "https://api.openai.com/v1";
@@ -132,6 +134,22 @@ fn env_trimmed(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
+fn goose_yaml_value(path: &std::path::Path, name: &str) -> Result<Option<String>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let payload = std::fs::read_to_string(path)
+        .map_err(|error| format!("Could not read Goose configuration: {error}"))?;
+    let values: serde_json::Value = yaml_serde::from_str(&payload)
+        .map_err(|error| format!("Goose configuration is invalid: {error}"))?;
+    Ok(values
+        .get(name)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string))
+}
+
 fn goose_openai_api_key() -> Result<Option<String>, String> {
     if let Some(value) = env_trimmed("OPENAI_API_KEY") {
         return Ok(Some(value));
@@ -142,18 +160,23 @@ fn goose_openai_api_key() -> Result<Option<String>, String> {
     {
         match keyring::Entry::new("goose", "secrets") {
             Ok(entry) => match entry.get_password() {
-                Ok(payload) => {
-                    let secrets: serde_json::Value =
-                        serde_json::from_str(&payload).map_err(|error| {
-                            format!("Goose's secure credential store is not valid JSON: {error}")
-                        })?;
-                    return Ok(secrets
-                        .get("OPENAI_API_KEY")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .map(ToString::to_string));
-                }
+                Ok(payload) => match serde_json::from_str::<serde_json::Value>(&payload) {
+                    Ok(secrets) => {
+                        if let Some(key) = secrets
+                            .get("OPENAI_API_KEY")
+                            .and_then(serde_json::Value::as_str)
+                            .map(str::trim)
+                            .filter(|value| !value.is_empty())
+                        {
+                            return Ok(Some(key.to_string()));
+                        }
+                    }
+                    Err(error) => {
+                        secure_store_error = Some(format!(
+                            "Goose's secure credential store is not valid JSON: {error}"
+                        ));
+                    }
+                },
                 Err(keyring::Error::NoEntry) => {}
                 Err(error) => {
                     secure_store_error = Some(format!(
@@ -173,23 +196,14 @@ fn goose_openai_api_key() -> Result<Option<String>, String> {
         .parent()
         .ok_or_else(|| "Could not resolve Goose's credential directory".to_string())?
         .join("secrets.yaml");
-    if !secrets_path.exists() {
-        #[cfg(target_os = "macos")]
-        if let Some(error) = secure_store_error {
-            return Err(error);
-        }
-        return Ok(None);
+    if let Some(key) = goose_yaml_value(&secrets_path, "OPENAI_API_KEY")? {
+        return Ok(Some(key));
     }
-    let payload = std::fs::read_to_string(&secrets_path)
-        .map_err(|error| format!("Could not read Goose's credential file: {error}"))?;
-    let secrets: serde_json::Value = yaml_serde::from_str(&payload)
-        .map_err(|error| format!("Goose's credential file is invalid: {error}"))?;
-    Ok(secrets
-        .get("OPENAI_API_KEY")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string))
+    #[cfg(target_os = "macos")]
+    if let Some(error) = secure_store_error {
+        return Err(error);
+    }
+    Ok(None)
 }
 
 pub(crate) fn api_key() -> Result<String, String> {
@@ -199,8 +213,30 @@ pub(crate) fn api_key() -> Result<String, String> {
     })
 }
 
-fn base_url() -> String {
-    env_trimmed("OPENAI_BASE_URL").unwrap_or_else(|| DEFAULT_BASE_URL.to_string())
+fn openai_host_base_url(host: String) -> String {
+    let host = host.trim_end_matches('/');
+    if host.ends_with("/v1") {
+        host.to_string()
+    } else {
+        format!("{host}/v1")
+    }
+}
+
+fn base_url() -> Result<String, String> {
+    if let Some(host) = env_trimmed("OPENAI_HOST") {
+        return Ok(openai_host_base_url(host));
+    }
+    if let Some(base_url) = env_trimmed("OPENAI_BASE_URL") {
+        return Ok(base_url);
+    }
+    let config_path = crate::services::goose_config::config_path()?;
+    if let Some(base_url) = goose_yaml_value(&config_path, "OPENAI_BASE_URL")? {
+        return Ok(base_url);
+    }
+    if let Some(host) = goose_yaml_value(&config_path, "OPENAI_HOST")? {
+        return Ok(openai_host_base_url(host));
+    }
+    Ok(DEFAULT_BASE_URL.to_string())
 }
 
 fn speech_model() -> String {
@@ -212,7 +248,7 @@ fn speech_voice() -> String {
 }
 
 fn endpoint(path: &str) -> Result<String, String> {
-    let mut url = base_url();
+    let mut url = base_url()?;
     while url.ends_with('/') {
         url.pop();
     }
@@ -547,7 +583,9 @@ fn run_openai_voice_stream(
     let player = PocketAudioPlayer::new(TTS_SAMPLE_RATE, 1.0, None)?;
     let output_device = effective_output_device_name(None);
     let suppress_capture = should_suppress_capture(interruption_mode, output_device.as_deref());
+    let output_latency_grace = playback_latency_safety_duration(output_device.as_deref());
     let mut assistant_speech = None::<AssistantSpeechGuard>;
+    let mut playback_drained_at = None::<Instant>;
     let mut pending = String::new();
     let mut delivery = VoiceDeliveryProgress {
         sample_rate: TTS_SAMPLE_RATE,
@@ -557,6 +595,13 @@ fn run_openai_voice_stream(
     let mut last_progress = Instant::now();
 
     loop {
+        update_openai_assistant_speech(
+            player.is_empty(),
+            &mut assistant_speech,
+            &mut playback_drained_at,
+            output_latency_grace,
+            Instant::now(),
+        );
         if !active.load(Ordering::SeqCst) {
             player.stop();
             return Ok(StreamOutcome {
@@ -583,6 +628,8 @@ fn run_openai_voice_stream(
                         interruption_sensitivity,
                         suppress_capture,
                         &mut assistant_speech,
+                        &mut playback_drained_at,
+                        output_latency_grace,
                         speed,
                     )
                     .map_err(|error| StreamFailure {
@@ -607,6 +654,8 @@ fn run_openai_voice_stream(
                     interruption_sensitivity,
                     suppress_capture,
                     &mut assistant_speech,
+                    &mut playback_drained_at,
+                    output_latency_grace,
                     speed,
                 )
                 .map_err(|error| StreamFailure {
@@ -630,6 +679,8 @@ fn run_openai_voice_stream(
                     interruption_sensitivity,
                     suppress_capture,
                     &mut assistant_speech,
+                    &mut playback_drained_at,
+                    output_latency_grace,
                     speed,
                 )?;
                 while active.load(Ordering::SeqCst) && !player.is_empty() {
@@ -699,6 +750,8 @@ fn speak_pending(
     interruption_sensitivity: InterruptionSensitivity,
     suppress_capture: bool,
     assistant_speech: &mut Option<AssistantSpeechGuard>,
+    playback_drained_at: &mut Option<Instant>,
+    output_latency_grace: Duration,
     speed: f32,
 ) -> Result<(), String> {
     let text = std::mem::take(pending).trim().to_string();
@@ -729,6 +782,13 @@ fn speak_pending(
         let mut pcm_remainder = Vec::<u8>::new();
         let mut initial_samples = Vec::<f32>::new();
         loop {
+            update_openai_assistant_speech(
+                player.is_empty(),
+                assistant_speech,
+                playback_drained_at,
+                output_latency_grace,
+                Instant::now(),
+            );
             if !active.load(Ordering::SeqCst) {
                 return Ok(());
             }
@@ -759,6 +819,7 @@ fn speak_pending(
                         native_voice
                             .begin_assistant_speech(interruption_sensitivity, suppress_capture)
                     });
+                    *playback_drained_at = None;
                     player.enqueue(&initial_samples)?;
                     initial_samples.clear();
                     *started = true;
@@ -781,6 +842,7 @@ fn speak_pending(
             assistant_speech.get_or_insert_with(|| {
                 native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture)
             });
+            *playback_drained_at = None;
             player.enqueue(&initial_samples)?;
             if !*started {
                 *started = true;
@@ -894,6 +956,41 @@ fn pcm16le_to_f32(bytes: &[u8]) -> Vec<f32> {
         .collect()
 }
 
+#[cfg(any(test, target_os = "macos"))]
+fn openai_assistant_speech_grace_elapsed(
+    playback_drained: bool,
+    guard_active: bool,
+    playback_drained_at: &mut Option<Instant>,
+    output_latency_grace: Duration,
+    now: Instant,
+) -> bool {
+    if !guard_active || !playback_drained {
+        *playback_drained_at = None;
+        return false;
+    }
+    let drained_at = *playback_drained_at.get_or_insert(now);
+    now.saturating_duration_since(drained_at) >= output_latency_grace
+}
+
+#[cfg(target_os = "macos")]
+fn update_openai_assistant_speech(
+    playback_drained: bool,
+    assistant_speech: &mut Option<AssistantSpeechGuard>,
+    playback_drained_at: &mut Option<Instant>,
+    output_latency_grace: Duration,
+    now: Instant,
+) {
+    if openai_assistant_speech_grace_elapsed(
+        playback_drained,
+        assistant_speech.is_some(),
+        playback_drained_at,
+        output_latency_grace,
+        now,
+    ) {
+        assistant_speech.take();
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn upsert_delivery_segment(
     delivery: &mut VoiceDeliveryProgress,
@@ -989,6 +1086,48 @@ mod tests {
         assert!(active.load(Ordering::SeqCst));
         assert!(state.stop_for_window_destroyed("session-window"));
         assert!(!active.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn openai_host_configuration_resolves_to_the_v1_api_root() {
+        assert_eq!(
+            openai_host_base_url("https://proxy.example".to_string()),
+            "https://proxy.example/v1"
+        );
+        assert_eq!(
+            openai_host_base_url("https://proxy.example/v1/".to_string()),
+            "https://proxy.example/v1"
+        );
+    }
+
+    #[test]
+    fn capture_suppression_ends_after_playback_drain_grace() {
+        let started = Instant::now();
+        let mut drained_at = None;
+        let grace = Duration::from_millis(100);
+
+        assert!(!openai_assistant_speech_grace_elapsed(
+            true,
+            true,
+            &mut drained_at,
+            grace,
+            started,
+        ));
+        assert!(openai_assistant_speech_grace_elapsed(
+            true,
+            true,
+            &mut drained_at,
+            grace,
+            started + grace,
+        ));
+        assert!(!openai_assistant_speech_grace_elapsed(
+            false,
+            true,
+            &mut drained_at,
+            grace,
+            started + grace,
+        ));
+        assert_eq!(drained_at, None);
     }
 
     #[cfg(target_os = "macos")]
