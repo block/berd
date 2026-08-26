@@ -836,7 +836,6 @@ describe("native assistant speech stream", () => {
 
       useVoiceConversationStore.setState({ userSpeaking: false });
       await vi.advanceTimersByTimeAsync(300);
-      await vi.runAllTimersAsync();
       expect(mocks.start).toHaveBeenCalledTimes(1);
 
       finalizeVoiceTranscript("delayed-final");
