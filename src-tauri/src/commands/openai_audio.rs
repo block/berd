@@ -17,14 +17,15 @@ use serde::Serialize;
 use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
 
+#[cfg(target_os = "macos")]
+use super::{
+    native_voice::AssistantSpeechGuard,
+    pocket_audio_player::PocketAudioPlayer,
+    pocket_voice::{effective_output_device_name, should_suppress_capture},
+};
 use super::{
     native_voice::{InterruptionSensitivity, NativeVoiceState},
     pocket_voice::VoiceInterruptionMode,
-};
-#[cfg(target_os = "macos")]
-use super::{
-    pocket_audio_player::PocketAudioPlayer,
-    pocket_voice::{effective_output_device_name, should_suppress_capture},
 };
 #[cfg(target_os = "macos")]
 use std::time::Instant;
@@ -66,6 +67,7 @@ impl Default for PlaybackRuntime {
 #[derive(Debug)]
 struct ActiveOpenAiStream {
     id: String,
+    owner_window: String,
     sender: mpsc::Sender<OpenAiStreamCommand>,
 }
 
@@ -135,27 +137,33 @@ fn goose_openai_api_key() -> Result<Option<String>, String> {
         return Ok(Some(value));
     }
     #[cfg(target_os = "macos")]
+    let mut secure_store_error = None;
+    #[cfg(target_os = "macos")]
     {
-        let entry = keyring::Entry::new("goose", "secrets").map_err(|error| {
-            format!("Could not access Goose's secure credential store: {error}")
-        })?;
-        match entry.get_password() {
-            Ok(payload) => {
-                let secrets: serde_json::Value =
-                    serde_json::from_str(&payload).map_err(|error| {
-                        format!("Goose's secure credential store is not valid JSON: {error}")
-                    })?;
-                return Ok(secrets
-                    .get("OPENAI_API_KEY")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(ToString::to_string));
-            }
-            Err(keyring::Error::NoEntry) => {}
+        match keyring::Entry::new("goose", "secrets") {
+            Ok(entry) => match entry.get_password() {
+                Ok(payload) => {
+                    let secrets: serde_json::Value =
+                        serde_json::from_str(&payload).map_err(|error| {
+                            format!("Goose's secure credential store is not valid JSON: {error}")
+                        })?;
+                    return Ok(secrets
+                        .get("OPENAI_API_KEY")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(ToString::to_string));
+                }
+                Err(keyring::Error::NoEntry) => {}
+                Err(error) => {
+                    secure_store_error = Some(format!(
+                        "Could not read Goose's OpenAI credential from secure storage: {error}"
+                    ));
+                }
+            },
             Err(error) => {
-                return Err(format!(
-                    "Could not read Goose's OpenAI credential from secure storage: {error}"
+                secure_store_error = Some(format!(
+                    "Could not access Goose's secure credential store: {error}"
                 ));
             }
         }
@@ -166,6 +174,10 @@ fn goose_openai_api_key() -> Result<Option<String>, String> {
         .ok_or_else(|| "Could not resolve Goose's credential directory".to_string())?
         .join("secrets.yaml");
     if !secrets_path.exists() {
+        #[cfg(target_os = "macos")]
+        if let Some(error) = secure_store_error {
+            return Err(error);
+        }
         return Ok(None);
     }
     let payload = std::fs::read_to_string(&secrets_path)
@@ -290,6 +302,7 @@ pub fn get_openai_voice_status(
 #[tauri::command]
 pub fn start_openai_voice_stream(
     app: AppHandle,
+    webview_window: tauri::WebviewWindow,
     state: State<'_, OpenAiVoiceState>,
     native_voice: State<'_, NativeVoiceState>,
     stream_id: String,
@@ -300,6 +313,7 @@ pub fn start_openai_voice_stream(
     {
         let _ = (
             app,
+            webview_window,
             state,
             native_voice,
             stream_id,
@@ -331,6 +345,7 @@ pub fn start_openai_voice_stream(
             playback.active = Some(active.clone());
             playback.stream = Some(ActiveOpenAiStream {
                 id: stream_id.clone(),
+                owner_window: webview_window.label().to_string(),
                 sender,
             });
         }
@@ -425,11 +440,22 @@ pub fn set_openai_playback_speed(
     Ok(())
 }
 
-pub(crate) fn stop_openai_voice_inner(state: &OpenAiVoiceState) -> Result<bool, String> {
+fn stop_openai_voice_for_owner(
+    state: &OpenAiVoiceState,
+    owner_window: Option<&str>,
+) -> Result<bool, String> {
     let playback = state
         .playback
         .lock()
         .map_err(|_| "OpenAI voice playback state lock was poisoned".to_string())?;
+    if owner_window.is_some_and(|owner| {
+        playback
+            .stream
+            .as_ref()
+            .is_none_or(|stream| stream.owner_window != owner)
+    }) {
+        return Ok(false);
+    }
     let Some(active) = playback.active.as_ref() else {
         return Ok(false);
     };
@@ -438,6 +464,19 @@ pub(crate) fn stop_openai_voice_inner(state: &OpenAiVoiceState) -> Result<bool, 
         let _ = stream.sender.send(OpenAiStreamCommand::Stop);
     }
     Ok(true)
+}
+
+pub(crate) fn stop_openai_voice_inner(state: &OpenAiVoiceState) -> Result<bool, String> {
+    stop_openai_voice_for_owner(state, None)
+}
+
+impl OpenAiVoiceState {
+    pub(crate) fn stop_for_window_destroyed(&self, window_label: &str) -> bool {
+        stop_openai_voice_for_owner(self, Some(window_label)).unwrap_or_else(|error| {
+            log::warn!("Failed to stop OpenAI playback for a destroyed window: {error}");
+            false
+        })
+    }
 }
 
 #[tauri::command]
@@ -500,32 +539,6 @@ fn run_openai_voice_stream(
     interruption_sensitivity: InterruptionSensitivity,
     speed: f32,
 ) -> Result<StreamOutcome, StreamFailure> {
-    run_openai_voice_stream_inner(
-        app,
-        stream_id,
-        key,
-        active,
-        receiver,
-        native_voice,
-        interruption_mode,
-        interruption_sensitivity,
-        speed,
-    )
-}
-
-#[cfg(target_os = "macos")]
-#[allow(clippy::too_many_arguments)]
-fn run_openai_voice_stream_inner(
-    app: &AppHandle,
-    stream_id: &str,
-    key: String,
-    active: Arc<AtomicBool>,
-    receiver: mpsc::Receiver<OpenAiStreamCommand>,
-    native_voice: NativeVoiceState,
-    interruption_mode: VoiceInterruptionMode,
-    interruption_sensitivity: InterruptionSensitivity,
-    speed: f32,
-) -> Result<StreamOutcome, StreamFailure> {
     let client = client()?;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -534,8 +547,7 @@ fn run_openai_voice_stream_inner(
     let player = PocketAudioPlayer::new(TTS_SAMPLE_RATE, 1.0, None)?;
     let output_device = effective_output_device_name(None);
     let suppress_capture = should_suppress_capture(interruption_mode, output_device.as_deref());
-    let _assistant_speech =
-        native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture);
+    let mut assistant_speech = None::<AssistantSpeechGuard>;
     let mut pending = String::new();
     let mut delivery = VoiceDeliveryProgress {
         sample_rate: TTS_SAMPLE_RATE,
@@ -567,6 +579,10 @@ fn run_openai_voice_stream_inner(
                         &mut pending,
                         &mut delivery,
                         &mut started,
+                        &native_voice,
+                        interruption_sensitivity,
+                        suppress_capture,
+                        &mut assistant_speech,
                         speed,
                     )
                     .map_err(|error| StreamFailure {
@@ -587,6 +603,10 @@ fn run_openai_voice_stream_inner(
                     &mut pending,
                     &mut delivery,
                     &mut started,
+                    &native_voice,
+                    interruption_sensitivity,
+                    suppress_capture,
+                    &mut assistant_speech,
                     speed,
                 )
                 .map_err(|error| StreamFailure {
@@ -606,6 +626,10 @@ fn run_openai_voice_stream_inner(
                     &mut pending,
                     &mut delivery,
                     &mut started,
+                    &native_voice,
+                    interruption_sensitivity,
+                    suppress_capture,
+                    &mut assistant_speech,
                     speed,
                 )?;
                 while active.load(Ordering::SeqCst) && !player.is_empty() {
@@ -671,6 +695,10 @@ fn speak_pending(
     pending: &mut String,
     delivery: &mut VoiceDeliveryProgress,
     started: &mut bool,
+    native_voice: &NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
+    suppress_capture: bool,
+    assistant_speech: &mut Option<AssistantSpeechGuard>,
     speed: f32,
 ) -> Result<(), String> {
     let text = std::mem::take(pending).trim().to_string();
@@ -688,8 +716,16 @@ fn speak_pending(
             total_frames: 0,
             synthesis_complete: false,
         });
-        let mut bytes =
-            runtime.block_on(openai_speech_stream(client, key, chunk.to_string(), speed))?;
+        let Some(mut bytes) = runtime.block_on(openai_speech_stream_cancellable(
+            client,
+            key,
+            chunk.to_string(),
+            speed,
+            active,
+        ))?
+        else {
+            return Ok(());
+        };
         let mut pcm_remainder = Vec::<u8>::new();
         let mut initial_samples = Vec::<f32>::new();
         loop {
@@ -719,6 +755,10 @@ fn speak_pending(
             } else {
                 initial_samples.extend_from_slice(&samples);
                 if initial_samples.len() >= INITIAL_PLAYBACK_BUFFER_FRAMES {
+                    assistant_speech.get_or_insert_with(|| {
+                        native_voice
+                            .begin_assistant_speech(interruption_sensitivity, suppress_capture)
+                    });
                     player.enqueue(&initial_samples)?;
                     initial_samples.clear();
                     *started = true;
@@ -738,6 +778,9 @@ fn speak_pending(
             return Err("OpenAI speech returned an incomplete PCM sample".to_string());
         }
         if !initial_samples.is_empty() {
+            assistant_speech.get_or_insert_with(|| {
+                native_voice.begin_assistant_speech(interruption_sensitivity, suppress_capture)
+            });
             player.enqueue(&initial_samples)?;
             if !*started {
                 *started = true;
@@ -753,6 +796,39 @@ fn speak_pending(
         upsert_delivery_segment(delivery, chunk, segment_frames, true);
     }
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+async fn run_while_active<F: std::future::Future>(
+    future: F,
+    active: &AtomicBool,
+) -> Option<F::Output> {
+    tokio::pin!(future);
+    loop {
+        tokio::select! {
+            result = &mut future => return Some(result),
+            _ = tokio::time::sleep(Duration::from_millis(20)) => {
+                if !active.load(Ordering::SeqCst) {
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+async fn openai_speech_stream_cancellable(
+    client: &reqwest::Client,
+    key: &str,
+    input: String,
+    speed: f32,
+    active: &AtomicBool,
+) -> Result<Option<impl futures_util::Stream<Item = Result<bytes::Bytes, reqwest::Error>>>, String>
+{
+    match run_while_active(openai_speech_stream(client, key, input, speed), active).await {
+        Some(result) => result.map(Some),
+        None => Ok(None),
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -894,10 +970,54 @@ fn format_openai_response_error(action: &str, status: reqwest::StatusCode, body:
 mod tests {
     use super::*;
 
+    #[test]
+    fn destroyed_window_only_stops_its_openai_stream() {
+        let state = OpenAiVoiceState::default();
+        let active = Arc::new(AtomicBool::new(true));
+        let (sender, _receiver) = mpsc::channel();
+        {
+            let mut playback = state.playback.lock().expect("playback state");
+            playback.active = Some(active.clone());
+            playback.stream = Some(ActiveOpenAiStream {
+                id: "stream-1".to_string(),
+                owner_window: "session-window".to_string(),
+                sender,
+            });
+        }
+
+        assert!(!state.stop_for_window_destroyed("other-window"));
+        assert!(active.load(Ordering::SeqCst));
+        assert!(state.stop_for_window_destroyed("session-window"));
+        assert!(!active.load(Ordering::SeqCst));
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn chunks_tts_text_on_char_boundaries() {
         assert_eq!(chunk_text("hello", 10), vec!["hello"]);
         assert_eq!(chunk_text("ééé", 3), vec!["é", "é", "é"]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn cancels_a_stalled_speech_request() {
+        let active = Arc::new(AtomicBool::new(true));
+        let active_for_thread = active.clone();
+        let cancellation = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(30));
+            active_for_thread.store(false, Ordering::SeqCst);
+        });
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .expect("runtime");
+
+        let result = runtime.block_on(run_while_active(
+            std::future::pending::<()>(),
+            active.as_ref(),
+        ));
+
+        cancellation.join().expect("cancellation thread");
+        assert_eq!(result, None);
     }
 }

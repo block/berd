@@ -69,6 +69,7 @@ function readinessDescriptionKey(
       ? "voice.notReadyMacInput"
       : "voice.notReadyInput";
   }
+  if (backend === "openai") return "voice.notReadyOpenAi";
   return backend === "siri"
     ? "voice.notReadySiriOutput"
     : "voice.notReadyPocketOutput";

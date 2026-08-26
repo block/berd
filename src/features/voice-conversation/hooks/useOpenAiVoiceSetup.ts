@@ -3,6 +3,7 @@ import {
   getOpenAiVoiceStatus,
   type OpenAiVoiceStatus,
 } from "../api/openAiVoice";
+import { onProviderConfigChanged } from "@/features/providers/api/credentials";
 
 export function useOpenAiVoiceSetup(enabled = true) {
   const [status, setStatus] = useState<OpenAiVoiceStatus | null>(null);
@@ -11,18 +12,28 @@ export function useOpenAiVoiceSetup(enabled = true) {
   useEffect(() => {
     if (!enabled) return;
     let active = true;
-    void getOpenAiVoiceStatus().then(
-      (next) => {
-        if (active) setStatus(next);
-      },
-      (cause) => {
-        if (active) {
-          setError(cause instanceof Error ? cause.message : String(cause));
-        }
-      },
-    );
+    const refresh = () => {
+      void getOpenAiVoiceStatus().then(
+        (next) => {
+          if (active) {
+            setStatus(next);
+            setError(null);
+          }
+        },
+        (cause) => {
+          if (active) {
+            setError(cause instanceof Error ? cause.message : String(cause));
+          }
+        },
+      );
+    };
+    refresh();
+    const unsubscribe = onProviderConfigChanged((providerId) => {
+      if (providerId === "openai") refresh();
+    });
     return () => {
       active = false;
+      unsubscribe();
     };
   }, [enabled]);
 

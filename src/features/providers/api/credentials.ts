@@ -11,6 +11,20 @@ import { shareInFlight } from "@/shared/lib/shareInFlight";
 export type ProviderStatus = ProviderConfigStatusDto;
 export type ProviderFieldSaveInput = ProviderConfigFieldUpdate;
 
+type ProviderConfigChangedListener = (providerId: string) => void;
+const providerConfigChangedListeners = new Set<ProviderConfigChangedListener>();
+
+function notifyProviderConfigChanged(providerId: string) {
+  for (const listener of providerConfigChangedListeners) listener(providerId);
+}
+
+export function onProviderConfigChanged(
+  listener: ProviderConfigChangedListener,
+): () => void {
+  providerConfigChangedListeners.add(listener);
+  return () => providerConfigChangedListeners.delete(listener);
+}
+
 export async function getProviderConfig(
   providerId: string,
 ): Promise<ProviderFieldValue[]> {
@@ -30,6 +44,7 @@ export async function saveProviderConfig(
     providerId,
     fields,
   });
+  notifyProviderConfigChanged(providerId);
   return response;
 }
 
@@ -40,6 +55,7 @@ export async function authenticateProviderConfig(
   const response = await client.goose.GooseUnstableProvidersConfigAuthenticate({
     providerId,
   });
+  notifyProviderConfigChanged(providerId);
   return response;
 }
 
@@ -50,6 +66,7 @@ export async function deleteProviderConfig(
   const response = await client.goose.GooseUnstableProvidersConfigDelete({
     providerId,
   });
+  notifyProviderConfigChanged(providerId);
   return response;
 }
 

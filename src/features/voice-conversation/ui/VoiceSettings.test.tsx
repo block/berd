@@ -50,17 +50,20 @@ const microphonePermissionState = vi.hoisted(() => ({
   openSettingsError: false,
   openSettings: vi.fn(),
 }));
-
-vi.mock("../api/openAiVoice", () => ({
-  getOpenAiVoiceStatus: vi.fn().mockResolvedValue({
+const openAiStatusState = vi.hoisted(() => ({
+  current: {
     configured: true,
     transcriptionModel: "gpt-live-transcribe",
     speechModel: "gpt-4o-mini-tts",
     speechVoice: "marin",
     playbackSpeed: 1,
     ttsAvailable: true,
-    unavailableReason: null,
-  }),
+    unavailableReason: null as string | null,
+  },
+}));
+
+vi.mock("../api/openAiVoice", () => ({
+  getOpenAiVoiceStatus: vi.fn(() => Promise.resolve(openAiStatusState.current)),
 }));
 vi.mock("../hooks/usePocketVoiceSetup", () => ({
   usePocketVoiceSetup: () => setupState.current,
@@ -202,6 +205,15 @@ describe("VoiceSettings", () => {
     };
     interruptionState.mode = "automatic";
     siriSetupState.current = siriSetup();
+    openAiStatusState.current = {
+      configured: true,
+      transcriptionModel: "gpt-live-transcribe",
+      speechModel: "gpt-4o-mini-tts",
+      speechVoice: "marin",
+      playbackSpeed: 1,
+      ttsAvailable: true,
+      unavailableReason: null,
+    };
   });
 
   it("renders selected OpenAI output settings", async () => {
@@ -213,6 +225,27 @@ describe("VoiceSettings", () => {
       await screen.findByText(/gpt-4o-mini-tts.*marin voice/),
     ).toBeInTheDocument();
     expect(screen.getByText("Playback speed")).toBeInTheDocument();
+  });
+
+  it("uses OpenAI guidance when the selected OpenAI output is not ready", async () => {
+    outputState.backend = "openai";
+    openAiStatusState.current = {
+      ...openAiStatusState.current,
+      configured: false,
+      unavailableReason:
+        "Configure the OpenAI provider in Berd to use OpenAI voice.",
+    };
+    setupState.current = setup(pocketStatus({ parakeetInstalled: true }));
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      await screen.findByText(
+        "OpenAI voice is not ready. Configure the OpenAI provider in Berd, then try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Pocket TTS is not installed/),
+    ).not.toBeInTheDocument();
   });
 
   it("shows interruption modes without VAD controls", () => {

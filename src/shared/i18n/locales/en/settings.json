@@ -870,7 +870,6 @@
   },
   "voice": {
     "backendMacSpeech": "Apple speech recognition",
-    "backendOpenAiStt": "OpenAI speech-to-text",
     "backendOpenAiTts": "OpenAI text-to-speech",
     "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
@@ -929,7 +928,6 @@
     "openMicrophoneSettings": "Open Microphone Settings",
     "openMicrophoneSettingsError": "Couldn't open Microphone Settings. Open System Settings and select Privacy & Security > Microphone.",
     "openAiChecking": "Checking the OpenAI provider configured in Berd…",
-    "openAiSttConfigured": "Uses Berd’s configured OpenAI credential with {{model}}.",
     "openAiTtsConfigured": "Uses Berd’s configured OpenAI credential with {{model}} and the {{voice}} voice. OpenAI voices are AI-generated.",
     "outputBackendDescription": "Choose how Berd speaks assistant responses.",
     "playbackSpeed": "Playback speed",

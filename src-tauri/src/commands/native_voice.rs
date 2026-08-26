@@ -2178,6 +2178,8 @@ pub fn handle_voice_owner_window_destroyed(app: &AppHandle, window_label: &str) 
     }
     app.state::<super::siri_voice::SiriVoiceState>()
         .stop_for_window_destroyed(window_label);
+    app.state::<super::openai_audio::OpenAiVoiceState>()
+        .stop_for_window_destroyed(window_label);
 }
 
 fn software_microphone_mute(native_microphone_mute_control: bool, muted: bool) -> bool {

@@ -4,6 +4,7 @@ import {
   checkAllProviderStatus,
   deleteProviderConfig,
   getProviderConfig,
+  onProviderConfigChanged,
   saveProviderConfig,
 } from "./credentials";
 
@@ -84,6 +85,20 @@ describe("provider credential API", () => {
       providerId: "anthropic",
       fields,
     });
+  });
+
+  it("notifies subscribers after provider credentials change", async () => {
+    const listener = vi.fn();
+    const unsubscribe = onProviderConfigChanged(listener);
+    mocks.configSave.mockResolvedValue({
+      status: { providerId: "openai", isConfigured: true },
+      refresh: { started: [], skipped: [] },
+    });
+
+    await saveProviderConfig("openai", []);
+
+    expect(listener).toHaveBeenCalledWith("openai");
+    unsubscribe();
   });
 
   it("deletes provider config through ACP", async () => {
