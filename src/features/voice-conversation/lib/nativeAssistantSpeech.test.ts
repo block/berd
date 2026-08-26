@@ -2977,12 +2977,12 @@ describe("native assistant speech stream", () => {
         delivery: { segments: [] },
       });
       useVoiceConversationStore.setState({ userSpeaking: false });
-      useVoiceConversationStore.setState({ userSpeaking: true });
-      useVoiceConversationStore.setState({ userSpeaking: false });
 
       await vi.advanceTimersByTimeAsync(300);
       expect(mocks.start).toHaveBeenCalledTimes(1);
 
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      useVoiceConversationStore.setState({ userSpeaking: false });
       await vi.advanceTimersByTimeAsync(199);
       expect(mocks.start).toHaveBeenCalledTimes(1);
 
