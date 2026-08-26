@@ -1600,11 +1600,11 @@ export function startNativeAssistantSpeech(
         window.clearTimeout(heldReleaseTimer);
         heldReleaseTimer = null;
       }
-      if (recognitionSegmentTimer !== null) {
+      const interrupted = interruptActiveUtterance(true, "userSpeaking");
+      if (interrupted && recognitionSegmentTimer !== null) {
         window.clearTimeout(recognitionSegmentTimer);
         recognitionSegmentTimer = null;
       }
-      const interrupted = interruptActiveUtterance(true, "userSpeaking");
       pendingUserRecognitionSegment ||= interrupted;
       heldReleaseReady = false;
       interruptionReleaseReady = false;
