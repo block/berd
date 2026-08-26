@@ -40,6 +40,20 @@ interface QueueAttemptLease {
 // the replacement owner from overlapping the still-live attempt.
 const queueAttemptLeaseBySession = new Map<string, QueueAttemptLease>();
 
+// LAWS/CHAT.md: the queue must resume sending when the session becomes ready.
+// Rejected attempts back off but never abandon the record — a rejection can be
+// silent (pre-commit ownership/readiness races around draft promotion) with no
+// follow-up store transition to re-trigger the drain.
+const MAX_AUTO_RETRY_DELAY_MS = 30_000;
+
+// Waiting for readiness is unbounded; actually dispatching and being rejected
+// is not. A persistent pre-commit failure is not a race: auto-compaction
+// returns false on every failed compaction and appends an error notification
+// per failure, and the failure itself sets the session back to idle, which
+// reads as a readiness edge and re-triggers the drain. Without a ceiling that
+// spins as fast as compaction can fail, growing the transcript every pass.
+const MAX_CONSECUTIVE_REJECTIONS = 5;
+
 function getQueuedMessageKey(
   queuedMessage: QueuedMessageRecord | null,
 ): string | null {
@@ -96,9 +110,16 @@ export function useMessageQueue(
   const dispatchReleasePayloadRef = useRef<
     QueuedMessageRecord["payload"] | null
   >(null);
-  const automaticallyRetriedPayloadRef = useRef<
-    QueuedMessageRecord["payload"] | null
-  >(null);
+  const autoRetryRef = useRef<{
+    payload: QueuedMessageRecord["payload"];
+    attempts: number;
+  } | null>(null);
+  // Deliberately survives readiness transitions, unlike autoRetryRef: the
+  // transition a failed send causes must not hand it a fresh retry budget.
+  const consecutiveRejectionsRef = useRef<{
+    payload: QueuedMessageRecord["payload"];
+    count: number;
+  } | null>(null);
   const suppressNextRenderIdleCycleRef = useRef(false);
   const dismissedRecordIdRef = useRef<string | null>(null);
   const queuedMessageKey = useMemo(
@@ -149,6 +170,16 @@ export function useMessageQueue(
 
       const key = getQueuedMessageKey(queuedMsg);
       if (!key) {
+        return false;
+      }
+
+      // Single choke point for the rejection ceiling, so every drain trigger
+      // (retry timer, readiness edge, lease release, store subscription) is
+      // covered rather than just the timer.
+      if (
+        consecutiveRejectionsRef.current?.payload === payload &&
+        consecutiveRejectionsRef.current.count >= MAX_CONSECUTIVE_REJECTIONS
+      ) {
         return false;
       }
 
@@ -277,31 +308,79 @@ export function useMessageQueue(
                 retryPayload,
               );
           }
-          if (
-            retryTimerRef.current === null &&
-            automaticallyRetriedPayloadRef.current !== retryPayload
-          ) {
+          if (autoRetryRef.current?.payload !== retryPayload) {
+            autoRetryRef.current = { payload: retryPayload, attempts: 0 };
+          }
+          const rejections =
+            consecutiveRejectionsRef.current?.payload === retryPayload
+              ? consecutiveRejectionsRef.current.count + 1
+              : 1;
+          consecutiveRejectionsRef.current = {
+            payload: retryPayload,
+            count: rejections,
+          };
+          if (rejections >= MAX_CONSECUTIVE_REJECTIONS) {
+            // Stop automatically. The record stays queued and showInComposer
+            // was forced true above, so it is visible and the user can resend.
+            autoRetryRef.current = null;
+            if (retryTimerRef.current !== null) {
+              clearTimeout(retryTimerRef.current);
+              retryTimerRef.current = null;
+            }
+            return;
+          }
+          const scheduleAutoRetry = () => {
+            if (retryTimerRef.current !== null) return;
+            const attempts = autoRetryRef.current?.attempts ?? 0;
+            const delayMs = Math.min(
+              1_000 * 2 ** attempts,
+              MAX_AUTO_RETRY_DELAY_MS,
+            );
             retryTimerRef.current = setTimeout(() => {
               retryTimerRef.current = null;
               const state = useChatStore.getState();
               const runtime = state.getSessionRuntime(sessionId);
               const retryHead = state.queuedMessageBySession[sessionId]?.[0];
               if (
-                !isQueuedSessionReady(runtime, isPreparationReadyRef.current) ||
                 getQueuedMessageKey(retryHead) !== key ||
                 retryHead?.payload !== retryPayload
               ) {
                 return;
               }
-              automaticallyRetriedPayloadRef.current = retryPayload;
+              if (
+                !isQueuedSessionReady(runtime, isPreparationReadyRef.current)
+              ) {
+                // Readiness can return without a transition this hook
+                // observes; keep the retry armed instead of abandoning the
+                // record. No dispatch was attempted, so this costs no rejection
+                // budget — but it must still back off, or an unready session
+                // polls at a flat one second forever.
+                lastAttemptRef.current = null;
+                if (autoRetryRef.current?.payload === retryPayload) {
+                  autoRetryRef.current = {
+                    payload: retryPayload,
+                    attempts: autoRetryRef.current.attempts + 1,
+                  };
+                }
+                scheduleAutoRetry();
+                return;
+              }
+              if (autoRetryRef.current?.payload === retryPayload) {
+                autoRetryRef.current = {
+                  payload: retryPayload,
+                  attempts: autoRetryRef.current.attempts + 1,
+                };
+              }
               idleCycleRef.current += 1;
               tryDrainQueuedMessage(retryHead);
-            }, 1_000);
-          }
+            }, delayMs);
+          };
+          scheduleAutoRetry();
           return;
         }
 
-        automaticallyRetriedPayloadRef.current = null;
+        autoRetryRef.current = null;
+        consecutiveRejectionsRef.current = null;
         lastAttemptRef.current = null;
         useChatStore
           .getState()
@@ -375,7 +454,11 @@ export function useMessageQueue(
       }
 
       if (editedCurrentRecord || advancedToNextRecord) {
-        automaticallyRetriedPayloadRef.current = null;
+        // A user edit or a new head is a materially different send, so the
+        // rejection budget resets here. Readiness edges below deliberately do
+        // not reset it.
+        autoRetryRef.current = null;
+        consecutiveRejectionsRef.current = null;
         if (retryTimerRef.current !== null) {
           clearTimeout(retryTimerRef.current);
           retryTimerRef.current = null;
@@ -383,7 +466,7 @@ export function useMessageQueue(
       }
 
       if (becameIdle || becameReadyWhileIdle) {
-        automaticallyRetriedPayloadRef.current = null;
+        autoRetryRef.current = null;
         if (retryTimerRef.current !== null) {
           clearTimeout(retryTimerRef.current);
           retryTimerRef.current = null;
@@ -434,7 +517,8 @@ export function useMessageQueue(
     }
     if (queuedMessageKey !== lastAttemptRef.current?.key) {
       lastAttemptRef.current = null;
-      automaticallyRetriedPayloadRef.current = null;
+      autoRetryRef.current = null;
+      consecutiveRejectionsRef.current = null;
       if (retryTimerRef.current !== null) {
         clearTimeout(retryTimerRef.current);
         retryTimerRef.current = null;

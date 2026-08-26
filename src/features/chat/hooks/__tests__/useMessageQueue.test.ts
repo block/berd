@@ -1279,7 +1279,10 @@ describe("useMessageQueue", () => {
     expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
   });
 
-  it("retries a retained pre-commit failure once while the session stays ready", async () => {
+  it("keeps retrying a retained pre-commit failure with backoff while the session stays ready", async () => {
+    // LAWS/CHAT.md: the queue must resume sending when the session is ready.
+    // Pre-commit rejections are silent and leave no store transition behind,
+    // so abandoning the record after a fixed retry count strands it forever.
     vi.useFakeTimers();
     const sendMessage = vi.fn().mockResolvedValue(false);
     useChatStore.getState().enqueueTransportReadyMessage("s1", {
@@ -1297,12 +1300,108 @@ describe("useMessageQueue", () => {
     expect(sendMessage).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(2_000);
     });
-    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(sendMessage).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_000);
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(4);
+
+    sendMessage.mockResolvedValue(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(5);
+    expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it("stops automatic retries for a persistently rejected payload despite readiness churn", async () => {
+    // A failed auto-compaction returns false, appends an error notification,
+    // and sets the session back to idle. That idle edge re-triggers the drain,
+    // so without a ceiling the send loops as fast as compaction can fail and
+    // grows the transcript every pass.
+    vi.useFakeTimers();
+    const sendMessage = vi.fn().mockResolvedValue(false);
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "queued",
+    });
+
+    renderHook(() => useMessageQueue("s1", "idle", sendMessage));
+    await act(async () => Promise.resolve());
+
+    for (let pass = 0; pass < 12; pass += 1) {
+      await act(async () => {
+        useChatStore.getState().setChatState("s1", "compacting");
+        useChatStore.getState().setChatState("s1", "idle");
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+    }
+
+    expect(sendMessage).toHaveBeenCalledTimes(5);
     expect(
       useChatStore.getState().queuedMessageBySession.s1?.[0]?.payload,
     ).toMatchObject({ text: "queued" });
+    vi.useRealTimers();
+  });
+
+  it("backs off the readiness wait instead of re-arming every second", async () => {
+    vi.useFakeTimers();
+    const sendMessage = vi.fn().mockResolvedValue(false);
+    useChatStore.getState().enqueueTransportReadyMessage("s1", {
+      persona: { kind: "inherit" },
+      text: "queued",
+    });
+
+    const { rerender } = renderHook(
+      ({ ready }: { ready: boolean }) =>
+        useMessageQueue(
+          "s1",
+          ready ? "idle" : "thinking",
+          sendMessage,
+          false,
+          false,
+          ready,
+        ),
+      { initialProps: { ready: true } },
+    );
+    await act(async () => Promise.resolve());
+    expect(sendMessage).toHaveBeenCalledOnce();
+
+    // Capture re-arm delays only; installing this earlier would intercept the
+    // scheduling that produces the first attempt.
+    const delays: number[] = [];
+    const fakeSetTimeout = globalThis.setTimeout;
+    globalThis.setTimeout = ((
+      fn: Parameters<typeof fakeSetTimeout>[0],
+      ms?: number,
+      ...rest: unknown[]
+    ) => {
+      if (typeof ms === "number" && ms >= 1_000) delays.push(ms);
+      return (
+        fakeSetTimeout as unknown as (
+          ...args: unknown[]
+        ) => ReturnType<typeof fakeSetTimeout>
+      )(fn, ms, ...rest);
+    }) as unknown as typeof globalThis.setTimeout;
+
+    try {
+      rerender({ ready: false });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600_000);
+      });
+    } finally {
+      globalThis.setTimeout = fakeSetTimeout;
+    }
+
+    expect(sendMessage).toHaveBeenCalledOnce();
+    expect(delays.slice(0, 5)).toEqual([2_000, 4_000, 8_000, 16_000, 30_000]);
+    expect(Math.max(...delays)).toBe(30_000);
+    // Flat one-second re-arming would be 600 wakeups over the same window.
+    expect(delays.length).toBeLessThan(40);
     vi.useRealTimers();
   });
 
@@ -1428,7 +1527,7 @@ describe("useMessageQueue", () => {
     });
   });
 
-  it("restores one automatic retry on every later readiness transition", async () => {
+  it("resets the retry backoff on every later readiness transition", async () => {
     vi.useFakeTimers();
     const sendMessage = vi.fn().mockReturnValue(false);
     useChatStore.getState().enqueueTransportReadyMessage("s1", {
@@ -1441,23 +1540,23 @@ describe("useMessageQueue", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(sendMessage).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    expect(sendMessage).toHaveBeenCalledTimes(3);
 
     act(() => {
       useChatStore.getState().setChatState("s1", "streaming");
       useChatStore.getState().setChatState("s1", "idle");
     });
-    expect(sendMessage).toHaveBeenCalledTimes(3);
+    expect(sendMessage).toHaveBeenCalledTimes(4);
 
+    // The idle transition cleared the backoff, so the next automatic retry
+    // fires at the initial one-second delay again.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(sendMessage).toHaveBeenCalledTimes(4);
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(60_000);
-    });
-    expect(sendMessage).toHaveBeenCalledTimes(4);
+    expect(sendMessage).toHaveBeenCalledTimes(5);
     expect(
       useChatStore.getState().queuedMessageBySession.s1?.[0]?.payload,
     ).toMatchObject({ text: "queued" });
