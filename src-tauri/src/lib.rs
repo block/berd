@@ -606,6 +606,7 @@ pub fn run() {
             commands::system::search_file_mentions,
             commands::system::read_image_attachment,
             commands::system::read_text_file,
+            commands::system::stat_file,
             commands::terminal::start_terminal,
             commands::terminal::write_terminal,
             commands::terminal::resize_terminal,

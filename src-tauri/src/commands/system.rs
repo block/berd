@@ -13,7 +13,7 @@ use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const DEFAULT_FILE_MENTION_LIMIT: usize = 12;
 const MAX_FILE_MENTION_LIMIT: usize = 32;
@@ -842,6 +842,167 @@ pub struct TextFilePayload {
     pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileStatPayload {
+    /// Decimal strings preserve exact identity across the JSON/JavaScript
+    /// boundary, including nanosecond timestamp precision and large files.
+    pub byte_size: String,
+    pub modified_at_ns: String,
+    /// Change time catches same-size rewrites whose modification time was
+    /// restored. It is available on Unix and Windows; other platforms omit it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub changed_at_ns: Option<String>,
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FileStatErrorKind {
+    /// The path does not exist. Deleted artifacts get distinct messaging in
+    /// the viewer, so this case must survive the IPC boundary.
+    Missing,
+    /// Any other metadata failure (permissions, transient I/O, not a file).
+    Other,
+}
+
+/// Structured `stat_file` failure. Tauri serializes the command's `Err`
+/// payload into the JavaScript rejection value, so the renderer can
+/// distinguish a deleted file from other metadata failures.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileStatError {
+    pub kind: FileStatErrorKind,
+    pub message: String,
+}
+
+impl FileStatError {
+    fn missing(message: String) -> Self {
+        Self {
+            kind: FileStatErrorKind::Missing,
+            message,
+        }
+    }
+
+    fn other(message: String) -> Self {
+        Self {
+            kind: FileStatErrorKind::Other,
+            message,
+        }
+    }
+}
+
+fn signed_unix_timestamp_ns(time: SystemTime) -> String {
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_nanos().to_string(),
+        Err(error) => format!("-{}", error.duration().as_nanos()),
+    }
+}
+
+#[cfg(windows)]
+fn windows_file_change_time_ns(path: &Path) -> Result<String, String> {
+    use std::fs::File;
+    use std::mem::{size_of, zeroed};
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FileBasicInfo, GetFileInformationByHandleEx, FILE_BASIC_INFO,
+    };
+
+    let file = File::open(path).map_err(|error| {
+        format!(
+            "Failed to open '{}' for change time: {}",
+            path.display(),
+            error
+        )
+    })?;
+    let mut info: FILE_BASIC_INFO = unsafe { zeroed() };
+    let succeeded = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileBasicInfo,
+            (&raw mut info).cast(),
+            size_of::<FILE_BASIC_INFO>() as u32,
+        )
+    };
+    if succeeded == 0 {
+        return Err(format!(
+            "Failed to read change time for '{}': {}",
+            path.display(),
+            io::Error::last_os_error()
+        ));
+    }
+
+    // Windows reports signed 100ns ticks from 1601. It is an opaque token for
+    // equality comparisons, so preserving that epoch avoids lossy conversion.
+    Ok((i128::from(info.ChangeTime) * 100).to_string())
+}
+
+fn stat_file_blocking(path: String) -> Result<FileStatPayload, FileStatError> {
+    let target = Path::new(&path);
+    let metadata = fs::metadata(target).map_err(|error| {
+        let message = format!("Failed to inspect '{}': {}", target.display(), error);
+        if error.kind() == io::ErrorKind::NotFound {
+            FileStatError::missing(message)
+        } else {
+            FileStatError::other(message)
+        }
+    })?;
+    if !metadata.is_file() {
+        return Err(FileStatError::other(format!(
+            "Path is not a file: {}",
+            target.display()
+        )));
+    }
+
+    let modified_at_ns = metadata
+        .modified()
+        .map(signed_unix_timestamp_ns)
+        .map_err(|error| {
+            FileStatError::other(format!(
+                "Failed to read modification time for '{}': {}",
+                target.display(),
+                error
+            ))
+        })?;
+
+    #[cfg(unix)]
+    let changed_at_ns = {
+        use std::os::unix::fs::MetadataExt;
+        let nanoseconds =
+            i128::from(metadata.ctime()) * 1_000_000_000 + i128::from(metadata.ctime_nsec());
+        Some(nanoseconds.to_string())
+    };
+    #[cfg(windows)]
+    let changed_at_ns = Some(windows_file_change_time_ns(target).map_err(FileStatError::other)?);
+    #[cfg(not(any(unix, windows)))]
+    let changed_at_ns = None;
+
+    Ok(FileStatPayload {
+        byte_size: metadata.len().to_string(),
+        modified_at_ns,
+        changed_at_ns,
+    })
+}
+
+async fn stat_file_with<F>(path: String, operation: F) -> Result<FileStatPayload, FileStatError>
+where
+    F: FnOnce(String) -> Result<FileStatPayload, FileStatError> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || operation(path))
+        .await
+        .map_err(|error| {
+            FileStatError::other(format!("Failed to inspect file metadata: {error}"))
+        })?
+}
+
+/// Return the metadata identity used by open artifact viewers to detect writes
+/// that do not appear in the main ACP session's tool events. Filesystem metadata
+/// calls are blocking and may wait on remote or removable filesystems, so keep
+/// them off Tauri's async command thread.
+#[tauri::command]
+pub async fn stat_file(path: String) -> Result<FileStatPayload, FileStatError> {
+    stat_file_with(path, stat_file_blocking).await
 }
 
 fn looks_binary(bytes: &[u8]) -> bool {
@@ -1994,8 +2155,9 @@ mod tests {
         get_or_build_file_mention_index_from_cache, inspect_attachment_path,
         inspect_attachment_paths, normalize_attachment_paths, normalize_roots, open_in_chrome_with,
         read_directory_entries, read_image_attachment, read_text_file,
-        search_file_mentions_blocking, write_agent_image_atomically, write_sibling_then_replace,
-        FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
+        search_file_mentions_blocking, signed_unix_timestamp_ns, stat_file_blocking,
+        stat_file_with, write_agent_image_atomically, write_sibling_then_replace,
+        FileMentionIndexCache, FileStatErrorKind, MAX_IMAGE_ATTACHMENT_BYTES, MAX_TEXT_FILE_BYTES,
     };
     use base64::Engine;
     use std::fs;
@@ -2010,7 +2172,7 @@ mod tests {
         Arc, Barrier, Mutex,
     };
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, UNIX_EPOCH};
     use tempfile::tempdir;
 
     /// Create a temp dir with `git init` so the ignore crate picks up `.gitignore`.
@@ -2846,6 +3008,72 @@ mod tests {
 
         assert_eq!(payload.mime_type, "image/png");
         assert!(!payload.base64.is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stat_file_async_command_moves_metadata_work_off_the_runtime_thread() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("notes.md");
+        fs::write(&path, "hello").expect("write");
+        let runtime_thread = std::thread::current().id();
+
+        let payload = stat_file_with(path.to_string_lossy().into_owned(), move |path| {
+            assert_ne!(std::thread::current().id(), runtime_thread);
+            stat_file_blocking(path)
+        })
+        .await
+        .expect("stat file");
+        assert_eq!(payload.byte_size, "5");
+        assert!(payload.modified_at_ns.parse::<i128>().expect("timestamp") > 0);
+        #[cfg(unix)]
+        assert!(payload.changed_at_ns.is_some());
+    }
+
+    #[test]
+    fn serializes_pre_epoch_times_as_signed_nanoseconds() {
+        let timestamp = UNIX_EPOCH - Duration::from_nanos(42);
+        assert_eq!(signed_unix_timestamp_ns(timestamp), "-42");
+    }
+
+    #[test]
+    fn stat_file_accepts_pre_epoch_modification_times() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("old-notes.md");
+        fs::write(&path, "hello").expect("write");
+        let file = fs::File::open(&path).expect("open");
+        let old_timestamp = UNIX_EPOCH - Duration::from_secs(1);
+        file.set_times(fs::FileTimes::new().set_modified(old_timestamp))
+            .expect("set pre-epoch mtime");
+
+        let payload =
+            stat_file_blocking(path.to_string_lossy().into_owned()).expect("stat old file");
+        assert_eq!(payload.modified_at_ns, "-1000000000");
+    }
+
+    #[test]
+    fn stat_file_rejects_directories() {
+        let dir = tempdir().expect("tempdir");
+        let error = stat_file_blocking(dir.path().to_string_lossy().into_owned())
+            .expect_err("directory should error");
+        assert_eq!(error.kind, FileStatErrorKind::Other);
+        assert!(
+            error.message.contains("not a file"),
+            "unexpected error: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn stat_file_reports_missing_files_with_the_missing_kind() {
+        let dir = tempdir().expect("tempdir");
+        let path = dir.path().join("deleted.md");
+        let error = stat_file_blocking(path.to_string_lossy().into_owned())
+            .expect_err("missing file should error");
+        assert_eq!(error.kind, FileStatErrorKind::Missing);
+        // The kind must cross the IPC boundary as the exact discriminant the
+        // renderer matches on.
+        let serialized = serde_json::to_value(&error).expect("serialize");
+        assert_eq!(serialized["kind"], "missing");
     }
 
     #[test]
