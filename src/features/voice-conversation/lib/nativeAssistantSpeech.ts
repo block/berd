@@ -1605,7 +1605,7 @@ export function startNativeAssistantSpeech(
         recognitionSegmentTimer = null;
       }
       const interrupted = interruptActiveUtterance(true, "userSpeaking");
-      pendingUserRecognitionSegment = interrupted;
+      pendingUserRecognitionSegment ||= interrupted;
       heldReleaseReady = false;
       interruptionReleaseReady = false;
       inspect();

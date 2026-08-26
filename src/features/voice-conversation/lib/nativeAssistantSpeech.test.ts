@@ -2957,6 +2957,40 @@ describe("native assistant speech stream", () => {
     });
   });
 
+  it("preserves an unresolved recognition segment across repeated VAD edges", async () => {
+    vi.useFakeTimers();
+    try {
+      startNativeAssistantSpeech("session-1", vi.fn());
+      useChatStore
+        .getState()
+        .setMessages("session-1", [
+          assistant([{ type: "text", text: "Interrupted reply." }]),
+        ]);
+      await vi.runAllTimersAsync();
+      const firstStreamId = mocks.start.mock.calls[0]?.[0] as string;
+
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      mocks.streamHandler?.({
+        streamId: firstStreamId,
+        state: "interrupted",
+        error: null,
+        delivery: { segments: [] },
+      });
+      useVoiceConversationStore.setState({ userSpeaking: false });
+      useVoiceConversationStore.setState({ userSpeaking: true });
+      useVoiceConversationStore.setState({ userSpeaking: false });
+
+      await vi.advanceTimersByTimeAsync(300);
+      expect(mocks.start).toHaveBeenCalledTimes(1);
+
+      finalizeVoiceTranscript("delayed-final-after-second-edge");
+      await vi.runAllTimersAsync();
+      expect(mocks.start).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("never starts a held reply when a newer finalized voice transcript arrives", async () => {
     useVoiceConversationStore.setState({ userSpeaking: true });
     startNativeAssistantSpeech("session-1", vi.fn());
