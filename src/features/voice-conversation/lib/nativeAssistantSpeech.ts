@@ -1630,13 +1630,10 @@ export function startNativeAssistantSpeech(
       if (heldReleaseTimer !== null) window.clearTimeout(heldReleaseTimer);
       if (pendingUserRecognitionSegment || hasInterruptedPlaybackHold) {
         pendingUserRecognitionSegment = true;
-        if (recognitionSegmentTimer !== null) {
-          window.clearTimeout(recognitionSegmentTimer);
-        }
         // VAD silence does not imply recognition is idle. Keep interrupted
         // playback held until a final transcript arrives or the unresolved
         // user-recognition segment hits a conservative bound.
-        recognitionSegmentTimer = window.setTimeout(() => {
+        recognitionSegmentTimer ??= window.setTimeout(() => {
           recognitionSegmentTimer = null;
           const current = useVoiceConversationStore.getState();
           if (
