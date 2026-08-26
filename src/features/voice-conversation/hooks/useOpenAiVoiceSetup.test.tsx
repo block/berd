@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getStatus: vi.fn<() => Promise<OpenAiVoiceStatus>>(),
   configChanged: null as ((providerId: string) => void) | null,
   finishListening: null as (() => void) | null,
+  listenerError: null as Error | null,
 }));
 
 vi.mock("../api/openAiVoice", () => ({
@@ -16,6 +17,7 @@ vi.mock("../api/openAiVoice", () => ({
 vi.mock("@/features/providers/api/credentials", () => ({
   onProviderConfigChanged: (listener: (providerId: string) => void) => {
     mocks.configChanged = listener;
+    if (mocks.listenerError) return Promise.reject(mocks.listenerError);
     return new Promise<() => void>((resolve) => {
       mocks.finishListening = () => resolve(() => undefined);
     });
@@ -47,6 +49,7 @@ describe("useOpenAiVoiceSetup", () => {
     vi.clearAllMocks();
     mocks.configChanged = null;
     mocks.finishListening = null;
+    mocks.listenerError = null;
   });
 
   it("keeps the latest credential refresh when responses resolve out of order", async () => {
@@ -78,6 +81,15 @@ describe("useOpenAiVoiceSetup", () => {
     expect(mocks.getStatus).not.toHaveBeenCalled();
 
     act(() => mocks.finishListening?.());
+
+    await waitFor(() => expect(result.current.status?.configured).toBe(true));
+  });
+
+  it("still loads status when listener registration fails", async () => {
+    mocks.listenerError = new Error("listener unavailable");
+    mocks.getStatus.mockResolvedValue(status(true));
+
+    const { result } = renderHook(() => useOpenAiVoiceSetup());
 
     await waitFor(() => expect(result.current.status?.configured).toBe(true));
   });

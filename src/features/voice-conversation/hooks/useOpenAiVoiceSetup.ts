@@ -32,12 +32,17 @@ export function useOpenAiVoiceSetup(enabled = true) {
     };
     void onProviderConfigChanged((providerId) => {
       if (providerId === "openai") refresh();
-    }).then((nextUnsubscribe) => {
-      if (active) {
-        unsubscribe = nextUnsubscribe;
-        refresh();
-      } else nextUnsubscribe();
-    });
+    }).then(
+      (nextUnsubscribe) => {
+        if (active) {
+          unsubscribe = nextUnsubscribe;
+          refresh();
+        } else nextUnsubscribe();
+      },
+      () => {
+        if (active) refresh();
+      },
+    );
     return () => {
       active = false;
       unsubscribe?.();
