@@ -29,4 +29,28 @@ describe("ResponseFeedbackControls", () => {
       }),
     );
   });
+
+  it("synchronizes the selected response across renderers", () => {
+    render(
+      <>
+        <ResponseFeedbackControls sessionId="session" messageId="message" />
+        <ResponseFeedbackControls sessionId="session" messageId="message" />
+      </>,
+    );
+
+    const goodButtons = screen.getAllByRole("button", { name: /good/i });
+    fireEvent.click(goodButtons[0]);
+    expect(goodButtons.every((button) => button.ariaPressed === "true")).toBe(
+      true,
+    );
+
+    fireEvent.click(goodButtons[1]);
+    expect(goodButtons.every((button) => button.ariaPressed === "false")).toBe(
+      true,
+    );
+    expect(sink.mock.calls.map(([event]) => event.response)).toEqual([
+      "good",
+      "cleared",
+    ]);
+  });
 });

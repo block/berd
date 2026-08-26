@@ -10,6 +10,7 @@ interface StoredResponseFeedback {
 }
 
 const RESPONSE_FEEDBACK_STORAGE_PREFIX = "berd:response-feedback:v1:";
+const RESPONSE_FEEDBACK_CHANGE_EVENT = "berd:response-feedback-change";
 const volatileRecords = new Map<string, StoredResponseFeedback>();
 const volatileOnlyKeys = new Set<string>();
 
@@ -93,6 +94,9 @@ function writeResponseFeedback(
   } catch {
     volatileOnlyKeys.add(key);
   }
+  window.dispatchEvent(
+    new CustomEvent(RESPONSE_FEEDBACK_CHANGE_EVENT, { detail: { key } }),
+  );
 }
 
 function emitResponseFeedback(
@@ -116,6 +120,36 @@ export function getResponseFeedbackSelection(
   messageId: string,
 ): ResponseFeedbackSelection | null {
   return readResponseFeedback(sessionId, messageId).response;
+}
+
+export function subscribeResponseFeedbackSelection(
+  sessionId: string,
+  messageId: string,
+  onStoreChange: () => void,
+): () => void {
+  if (typeof window === "undefined") return () => {};
+
+  const key = responseFeedbackStorageKey(sessionId, messageId);
+  const handleLocalChange = (event: Event) => {
+    if ((event as CustomEvent<{ key?: string }>).detail?.key === key) {
+      onStoreChange();
+    }
+  };
+  const handleStorageChange = (event: StorageEvent) => {
+    if (event.key === key || event.key === null) {
+      onStoreChange();
+    }
+  };
+
+  window.addEventListener(RESPONSE_FEEDBACK_CHANGE_EVENT, handleLocalChange);
+  window.addEventListener("storage", handleStorageChange);
+  return () => {
+    window.removeEventListener(
+      RESPONSE_FEEDBACK_CHANGE_EVENT,
+      handleLocalChange,
+    );
+    window.removeEventListener("storage", handleStorageChange);
+  };
 }
 
 export function setResponseFeedbackSelection(
