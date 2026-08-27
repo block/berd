@@ -61,6 +61,20 @@ describe("modelRecommendations", () => {
     );
   });
 
+  it("shows only the model name for Unity Catalog model ids", () => {
+    const [option] = providerModelOptionsFromIds("databricks_v2", [
+      "data_workflow_tools.production.fraud_detection_model",
+    ]);
+
+    expect(option).toEqual(
+      expect.objectContaining({
+        id: "data_workflow_tools.production.fraud_detection_model",
+        name: "Fraud_detection_model",
+        displayName: "Fraud_detection_model",
+      }),
+    );
+  });
+
   it("does not feature or rank generic custom provider models", () => {
     const options = providerModelOptionsFromIds("block_openai_compatible", [
       "z-model",
