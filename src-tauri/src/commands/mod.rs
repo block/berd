@@ -42,6 +42,7 @@ pub mod path_resolver;
 #[cfg(target_os = "macos")]
 mod pocket_audio_player;
 pub mod pocket_voice;
+pub mod pr_tracker;
 pub mod project_icons;
 pub mod pull_requests;
 pub mod renderer;

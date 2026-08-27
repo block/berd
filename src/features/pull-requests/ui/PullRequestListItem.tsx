@@ -49,7 +49,7 @@ export function PullRequestListItem({
       type="button"
       data-slot="pull-request-list-item"
       className={cn(
-        "group flex w-full min-w-0 items-start gap-2 overflow-hidden rounded-sm px-3 py-2.5 text-left text-foreground outline-none transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+        "group flex w-full min-w-0 items-start gap-2 overflow-hidden rounded-xl bg-muted/60 px-3 py-2.5 text-left normal-case text-foreground outline-none transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
         className,
       )}
       aria-label={ariaLabel}

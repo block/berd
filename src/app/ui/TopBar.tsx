@@ -10,7 +10,10 @@ import {
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useTopBarActions } from "@/app/contexts/TopBarActionsContext";
+import { RELATED_PULL_REQUESTS_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { BetaBadge } from "@/features/updates/ui/BetaBadge";
+import { PullRequestsPopover } from "@/features/work-status/PullRequestsPopover";
 import { cn } from "@/shared/lib/cn";
 import { TopBarIconButton } from "@/shared/ui/top-bar-icon-button";
 import { BerdIcon } from "@/shared/ui/icons/BerdIcon";
@@ -65,6 +68,8 @@ export function TopBar({
 }: TopBarProps) {
   const { t } = useTranslation(["sidebar", "feedback"]);
   const viewActions = useTopBarActions();
+  const pullRequestsEnabled =
+    useExperiment(RELATED_PULL_REQUESTS_EXPERIMENT_ID)?.enabled === true;
   const topBarTitle =
     breadcrumbs.find((breadcrumb) => breadcrumb.id === "chat-session")?.label ??
     breadcrumbs.find((breadcrumb) => breadcrumb.id === "skills")?.label ??
@@ -150,6 +155,7 @@ export function TopBar({
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-3 text-app-top-bar-control-fg [&_svg]:size-[length:var(--text-app-top-bar-icon)]">
+        {pullRequestsEnabled ? <PullRequestsPopover /> : null}
         {viewActions}
         <BetaBadge />
 

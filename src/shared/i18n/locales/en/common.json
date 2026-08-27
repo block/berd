@@ -166,5 +166,71 @@
     "output": "Output",
     "reasoning": "Reasoning",
     "totalCost": "Total cost"
+  },
+  "workStatus": {
+    "title": "PR Inbox",
+    "updated": "Updated {{time}}",
+    "collecting": "Loading PR Inbox…",
+    "updating": "Updating PR Inbox…",
+    "updatedNow": "PR Inbox updated.",
+    "refreshFailed": "PR Inbox could not be updated.",
+    "refresh": "Refresh PR Inbox",
+    "refreshing": "Refreshing PR Inbox",
+    "loading": "Loading PR Inbox",
+    "resize": "Resize PR Inbox",
+    "openError": "Couldn’t open the pull request. Try again.",
+    "topBarLabel_one": "PR Inbox, {{count}} open",
+    "topBarLabel_other": "PR Inbox, {{count}} open",
+    "truncated": "Showing the first {{count}} open pull requests.",
+    "noProject": "No project",
+    "empty": {
+      "title": "No open pull requests",
+      "description": "Pull requests you create will appear here."
+    },
+    "error": {
+      "title": "Pull requests aren’t available",
+      "description": "Check your connection and try refreshing.",
+      "authentication": "Sign in with GitHub CLI, then try again.",
+      "cliMissing": "Install GitHub CLI to load pull requests.",
+      "timeout": "GitHub took too long to respond. Try again.",
+      "database": "Berd couldn’t match pull requests to projects. Try again.",
+      "network": "Check your connection and try again.",
+      "rateLimited": "GitHub is rate limiting requests. Automatic refresh will retry in a few minutes.",
+      "unknown": "Pull requests couldn’t be loaded. Try again."
+    },
+    "githubDisconnected": {
+      "title": "Connect GitHub to see pull requests",
+      "description": "Sign in with GitHub CLI, then refresh to load pull requests authored by you."
+    },
+    "status": {
+      "draft": "Draft",
+      "awaitingApproval": "Awaiting approval",
+      "changesRequested": "Changes requested",
+      "checksFailing": "Checks failing",
+      "checksPending": "Checks pending",
+      "readyToMerge": "Ready to merge",
+      "mergeBlocked": "Merge blocked",
+      "error": "Error"
+    },
+    "preview": {
+      "ariaLabel": "Preview PR Inbox states",
+      "devOnly": "Dev only state testing",
+      "live": "Live data",
+      "noPrs": "No pull requests",
+      "githubDisconnected": "GitHub not connected",
+      "connectionError": "Connection error",
+      "rateLimited": "Rate limited",
+      "staleError": "Stale data with warning",
+      "truncated": "Truncated results",
+      "statuses": "PR statuses",
+      "titles": {
+        "draft": "Draft pull request",
+        "awaitingApproval": "Waiting for reviewer approval",
+        "changesRequested": "Reviewer requested changes",
+        "checksFailing": "Continuous integration checks are failing",
+        "readyToMerge": "Approved and ready to merge",
+        "mergeBlocked": "Merge is blocked by conflicts"
+      }
+    }
   }
 }
