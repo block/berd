@@ -834,13 +834,13 @@ impl SttPipeline {
     }
 
     fn new_openai(
+        api_key: String,
         input_muted: Arc<AtomicBool>,
         input_mute_epoch: Arc<AtomicU64>,
         assistant_speaking: Arc<AtomicBool>,
         assistant_vad_threshold: Arc<AtomicU32>,
         speech_vad_threshold: f32,
     ) -> Result<(Self, tokio_mpsc::Receiver<SttMessage>), String> {
-        let api_key = super::openai_audio::api_key()?;
         let (audio_tx, audio_rx) = mpsc::sync_channel(AUDIO_QUEUE_DEPTH);
         let (event_tx, event_rx) = tokio_mpsc::channel(64);
         let shutdown = Arc::new(AtomicBool::new(false));
@@ -1291,6 +1291,19 @@ pub async fn start_native_voice_conversation(
             "Download the macOS speech recognition model before starting a call.".to_string(),
         );
     }
+    let openai_api_key = if input_backend == VoiceInputBackend::Openai {
+        Some(super::openai_audio::api_key()?)
+    } else {
+        None
+    };
+    if openai_api_key.is_some() {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        while !webview_window.is_focused().unwrap_or(false)
+            && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
     let window_label = webview_window.label().to_string();
     let owner_id = native_owner_id(&session_id);
     let lifecycle_guard = state
@@ -1332,6 +1345,7 @@ pub async fn start_native_voice_conversation(
             speech_vad_threshold,
         ),
         VoiceInputBackend::Openai => SttPipeline::new_openai(
+            openai_api_key.expect("OpenAI key resolved for OpenAI input"),
             Arc::clone(&state.input_muted),
             Arc::clone(&state.input_mute_epoch),
             Arc::clone(&state.assistant_speaking),
