@@ -9,12 +9,14 @@ import {
   loadPersistedMessageQueues,
   persistMessageQueues,
 } from "./queuePersistence";
+import { useChatSessionStore, type ChatSession } from "./chatSessionStore";
 
 describe("queuePersistence", () => {
   beforeEach(() => {
     mockInvoke.mockReset();
     window.localStorage.clear();
     window.__TAURI_INTERNALS__ = {};
+    useChatSessionStore.setState({ sessions: [] });
   });
 
   it("loads inline image attachments from native persistence when localStorage is over quota", async () => {
@@ -263,6 +265,71 @@ describe("queuePersistence", () => {
       main: [{ recordId: "main-record" }],
       detached: [{ recordId: "detached-record" }],
     });
+  });
+
+  it("drops queue writes for sessions whose creation has not settled", async () => {
+    mockInvoke.mockResolvedValue(undefined);
+    useChatSessionStore.setState({
+      sessions: [
+        { id: "draft-1", creationState: "pending" } as unknown as ChatSession,
+        { id: "draft-2", creationState: "failed" } as unknown as ChatSession,
+      ],
+    });
+
+    persistMessageQueues(
+      {
+        "draft-1": [
+          {
+            kind: "transport-ready",
+            recordId: "pending-record",
+            payload: admitSystemInheritedQueuedMessage({ text: "pending" }),
+          },
+        ],
+        "draft-2": [
+          {
+            kind: "transport-ready",
+            recordId: "failed-record",
+            payload: admitSystemInheritedQueuedMessage({ text: "failed" }),
+          },
+        ],
+      },
+      ["draft-1", "draft-2"],
+    );
+
+    await vi.waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith("persist_message_queue_updates", {
+        serializedUpdates: JSON.stringify({ "draft-1": null, "draft-2": null }),
+      }),
+    );
+    expect(
+      window.localStorage.getItem("goose:chat-message-queues:v1"),
+    ).toBeNull();
+  });
+
+  it("persists queues again once the session id belongs to a settled session", async () => {
+    mockInvoke.mockResolvedValue(undefined);
+    useChatSessionStore.setState({
+      sessions: [{ id: "backend-1" } as unknown as ChatSession],
+    });
+
+    persistMessageQueues(
+      {
+        "backend-1": [
+          {
+            kind: "transport-ready",
+            recordId: "promoted-record",
+            payload: admitSystemInheritedQueuedMessage({ text: "promoted" }),
+          },
+        ],
+      },
+      ["backend-1"],
+    );
+
+    await vi.waitFor(() =>
+      expect(mockInvoke).toHaveBeenCalledWith("persist_message_queue_updates", {
+        serializedUpdates: expect.stringContaining("promoted-record"),
+      }),
+    );
   });
 
   it("writes only changed sessions through native read-modify-write persistence", async () => {

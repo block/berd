@@ -6,7 +6,6 @@ import {
   setSessionSystemPrompt,
 } from "@/shared/api/acpApi";
 import { getClient } from "@/shared/api/acpConnection";
-import type { GooseExtension } from "@aaif/goose-sdk";
 
 const INFERENCE_TIMEOUT_MS = 20000;
 
@@ -105,17 +104,13 @@ async function removeAllSessionExtensions(sessionId: string): Promise<void> {
     sessionId,
   });
   await Promise.all(
-    extensions.map((ext) =>
+    extensions.map(({ extensionKey }) =>
       client.goose.GooseUnstableSessionExtensionsRemove({
         sessionId,
-        name: sessionExtensionName(ext),
+        extensionKey,
       }),
     ),
   );
-}
-
-function sessionExtensionName(extension: GooseExtension): string {
-  return extension.type === "mcp" ? extension.server.name : extension.name;
 }
 
 /**

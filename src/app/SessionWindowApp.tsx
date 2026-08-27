@@ -42,6 +42,7 @@ import { useWorkspaceNameRequestQueue } from "@/features/chat/hooks/useWorkspace
 import { ProjectWorkspaceStartupNameDialog } from "@/features/projects/ui/ProjectWorkspaceStartupNameDialog";
 import { Button } from "@/shared/ui/button";
 import { SecurityConfirmationFallback } from "@/features/security/ui/SecurityConfirmationPanel";
+import { setVoiceConversationForegroundSession } from "@/features/voice-conversation/api/voiceConversation";
 import { useSecurityConfirmationStore } from "@/features/security/stores/securityConfirmationStore";
 
 type Phase = "loading" | "mirror" | "recoverable" | "ready" | "missing";
@@ -277,6 +278,16 @@ export function SessionWindowApp({
       cancelled = true;
     };
   }, [currentWindowLabelOverride, loadOwnedSession, sessionId]);
+
+  useEffect(() => {
+    const foregroundSessionId =
+      phase === "ready" || phase === "mirror" ? sessionId : null;
+    void setVoiceConversationForegroundSession(foregroundSessionId).catch(
+      (error) => {
+        console.warn("Failed to publish the foreground voice session", error);
+      },
+    );
+  }, [phase, sessionId]);
 
   useEffect(() => {
     if (phase !== "mirror" || !currentWindowLabel) {

@@ -47,6 +47,7 @@ vi.mock(
     releaseNativeVoiceConversationStartBlock: vi
       .fn()
       .mockResolvedValue(undefined),
+    setVoiceConversationForegroundSession: vi.fn().mockResolvedValue(undefined),
   }),
 );
 

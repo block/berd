@@ -20,11 +20,28 @@ export interface ManagedGooseProviderResolutionContext {
 
 const DATABRICKS_V2_PROVIDER_ID = "databricks_v2";
 
+export function filterDiscoveredModelIds(
+  config: Pick<RuntimeConfig, "goose">,
+  providerId: string,
+  modelIds: readonly string[],
+): string[] {
+  const prefixes = config.goose.modelProviders.find(
+    (provider) => provider.id === providerId,
+  )?.allowedModelIdPrefixes;
+  if (!prefixes) {
+    return [...modelIds];
+  }
+  return modelIds.filter((modelId) =>
+    prefixes.some((prefix) => modelId.startsWith(prefix)),
+  );
+}
+
 /**
  * Runtime model providers define provider policy and curated model metadata.
  * An empty list is the public/BYO contract: Berd does not own provider
  * selection. A non-empty list is a provider allowlist; its model inventory is
- * advisory and must not constrain models discovered from upstream providers.
+ * advisory. Discovered models remain unrestricted unless the provider declares
+ * `allowedModelIdPrefixes`.
  */
 export function hasManagedGooseProviderPolicy(
   config: Pick<RuntimeConfig, "goose">,
@@ -46,7 +63,8 @@ function defaultManagedProviderId(goose: RuntimeGooseConfig): string {
  * Resolve a Goose provider/model against runtime policy.
  *
  * - `null` means policy is unrestricted; the caller must preserve its values.
- * - Allowed providers and all of their upstream-discovered models stay selected.
+ * - Allowed providers and their permitted upstream-discovered models stay
+ *   selected.
  * - Disallowed/missing providers move to the runtime default provider.
  * - Existing model selections survive provider migration. A missing model uses
  *   the configured default, whose inventory entry is recommendation metadata.

@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 
-import { getSiriVoiceStatus } from "./siriVoice";
+import { getSiriVoiceStatus, startSiriVoiceStream } from "./siriVoice";
 
 describe("Siri voice API", () => {
   beforeEach(() => {
@@ -41,5 +41,24 @@ describe("Siri voice API", () => {
     expect(mocks.invoke).toHaveBeenCalledTimes(2);
     resolveRequest?.({ supported: true, voices: [] });
     await Promise.all([first, joined, separate]);
+  });
+
+  it("passes the resolved voice to stream playback", async () => {
+    mocks.invoke.mockResolvedValue(undefined);
+    const voice = { name: "Samantha", language: "en-US" };
+
+    await startSiriVoiceStream(
+      "stream-1",
+      voice,
+      "allowInterruptions",
+      "balanced",
+    );
+
+    expect(mocks.invoke).toHaveBeenCalledWith("start_siri_voice_stream", {
+      streamId: "stream-1",
+      voice,
+      interruptionMode: "allowInterruptions",
+      interruptionSensitivity: "balanced",
+    });
   });
 });

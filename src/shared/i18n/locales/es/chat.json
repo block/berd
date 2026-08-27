@@ -685,6 +685,9 @@
     "viewCode": "Código",
     "loading": "Cargando archivo…",
     "loadError": "No se pudo cargar este archivo.",
+    "fileDeleted": "Archivo eliminado del disco.",
+    "fileUnreadable": "El archivo cambió pero no se puede leer.",
+    "reload": "Volver a cargar",
     "imageAlt": "Vista previa de {{filename}}"
   },
   "artifactChips": {

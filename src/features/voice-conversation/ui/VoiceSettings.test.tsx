@@ -1,9 +1,13 @@
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { i18n } from "@/shared/i18n";
 import { renderWithProviders } from "@/test/render";
 import type { PocketVoiceStatus } from "../api/pocketVoice";
 import type { PocketVoiceSetup } from "../hooks/usePocketVoiceSetup";
+import type { MacSpeechSetup } from "../hooks/useMacSpeechSetup";
 import type { SiriVoiceSetup } from "../hooks/useSiriVoiceSetup";
+import type { VoiceInputBackend } from "../lib/voiceInputPreference";
 import type { VoiceOutputBackend } from "../lib/voiceOutputPreference";
 import { VoiceSettings } from "./VoiceSettings";
 
@@ -13,22 +17,71 @@ const setupState = vi.hoisted(() => ({
 const siriSetupState = vi.hoisted(() => ({
   current: null as SiriVoiceSetup | null,
 }));
+const macSpeechSetupState = vi.hoisted(() => ({
+  current: {
+    status: {
+      supported: false,
+      unavailableReason: "Apple speech recognition is unavailable.",
+      locale: "",
+      localeSupported: false,
+      modelInstalled: false,
+      installing: false,
+      progress: null,
+      error: null,
+      revision: 0,
+    },
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    install: vi.fn(),
+  } as MacSpeechSetup,
+}));
+const inputState = vi.hoisted(() => ({
+  backend: "parakeet" as VoiceInputBackend,
+}));
 const outputState = vi.hoisted(() => ({
   backend: "pocket" as VoiceOutputBackend,
+}));
+const interruptionState = vi.hoisted(() => ({
+  mode: "automatic" as "automatic" | "allowInterruptions" | "preventFeedback",
+}));
+const microphonePermissionState = vi.hoisted(() => ({
+  status: "authorized" as "notDetermined" | "denied" | "authorized" | "unknown",
+  openSettingsError: false,
+  openSettings: vi.fn(),
 }));
 
 vi.mock("../hooks/usePocketVoiceSetup", () => ({
   usePocketVoiceSetup: () => setupState.current,
+}));
+vi.mock("../hooks/useMacSpeechSetup", () => ({
+  useMacSpeechSetup: () => macSpeechSetupState.current,
 }));
 vi.mock("../hooks/useSiriVoiceSetup", () => ({
   useSiriVoiceSetup: () => siriSetupState.current,
   voiceKey: (voice: { name: string; language: string }) =>
     `${voice.name.toLowerCase()}|${voice.language.toLowerCase()}`,
 }));
+vi.mock("../hooks/useMicrophonePermission", () => ({
+  useMicrophonePermission: () => microphonePermissionState,
+}));
 vi.mock("../lib/voiceOutputPreference", () => ({
   useVoiceOutputPreference: () => ({
     backend: outputState.backend,
     setBackend: vi.fn(),
+  }),
+}));
+vi.mock("../lib/voiceInputPreference", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/voiceInputPreference")>()),
+  useVoiceInputPreference: () => ({
+    backend: inputState.backend,
+    setBackend: vi.fn(),
+  }),
+}));
+vi.mock("../lib/voiceInterruptionPreference", () => ({
+  useVoiceInterruptionPreference: () => ({
+    ...interruptionState,
+    setMode: vi.fn(),
   }),
 }));
 
@@ -112,9 +165,104 @@ function siriSetup(): SiriVoiceSetup {
 }
 
 describe("VoiceSettings", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await i18n.changeLanguage("en");
+    microphonePermissionState.status = "authorized";
+    microphonePermissionState.openSettingsError = false;
+    microphonePermissionState.openSettings.mockReset();
+    inputState.backend = "parakeet";
     outputState.backend = "pocket";
+    macSpeechSetupState.current = {
+      status: {
+        supported: false,
+        unavailableReason: "Apple speech recognition is unavailable.",
+        locale: "en-US",
+        localeSupported: false,
+        modelInstalled: false,
+        installing: false,
+        progress: null,
+        error: null,
+        revision: 0,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      install: vi.fn(),
+    };
+    interruptionState.mode = "automatic";
     siriSetupState.current = siriSetup();
+  });
+
+  it("shows interruption modes without VAD controls", () => {
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByRole("radiogroup", { name: "Interruptions" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Choose what happens when you speak while Berd is talking.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /^Automatic/ })).toBeChecked();
+    expect(
+      screen.getByText(
+        "Allows interruptions on most audio devices. Berd pauses listening on built-in Mac speakers or when the device name contains “speaker” or “altavoces.”",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Berd keeps listening on every audio device. You can interrupt, but speaker audio may be mistaken for your voice.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Berd pauses listening on every audio device. This prevents feedback, but you can’t interrupt.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Interruption sensitivity"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Advanced…" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not warn before macOS has requested microphone access", () => {
+    microphonePermissionState.status = "notDetermined";
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.queryByRole("button", { name: "Open Microphone Settings" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens macOS settings when microphone access was denied", async () => {
+    microphonePermissionState.status = "denied";
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByText(/Microphone access is turned off for Berd/),
+    ).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Open Microphone Settings" }),
+    );
+
+    expect(microphonePermissionState.openSettings).toHaveBeenCalledOnce();
+  });
+
+  it("shows localized guidance when microphone settings cannot open", () => {
+    microphonePermissionState.status = "denied";
+    microphonePermissionState.openSettingsError = true;
+    setupState.current = setup(pocketStatus());
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByText(/Couldn't open Microphone Settings/),
+    ).toBeInTheDocument();
   });
 
   it("uses one accessible speech output heading for the backend picker", () => {
@@ -161,8 +309,10 @@ describe("VoiceSettings", () => {
     expect(outputPicker).toHaveClass("w-full", "sm:w-auto");
     expect(
       screen.getByRole("heading", { name: "Speech output" }).parentElement
-        ?.parentElement,
+        ?.parentElement?.parentElement,
     ).toHaveClass("flex-col", "sm:flex-row");
+    expect(screen.getAllByText("Pocket TTS")).toHaveLength(1);
+    expect(screen.getAllByText("Parakeet STT")).toHaveLength(1);
   });
 
   it("keeps the Voice settings page open while Parakeet completes in place", () => {
@@ -205,12 +355,12 @@ describe("VoiceSettings", () => {
     expect(modelList).toHaveClass("divide-y", "divide-border");
     expect(modelList).not.toHaveClass("border", "rounded-md");
     expect(screen.getByTestId("voice-model-pocket")).toHaveClass(
-      "pr-4",
-      "py-4",
+      "py-2.5",
+      "pl-3.5",
+      "bg-muted/40",
     );
-    expect(screen.getByTestId("voice-model-pocket")).not.toHaveClass(
-      "pl-4",
-      "px-4",
+    expect(screen.getByTestId("voice-model-pocket")).not.toHaveTextContent(
+      "Pocket TTS",
     );
 
     setupState.current = setup({
@@ -231,9 +381,11 @@ describe("VoiceSettings", () => {
     });
     view.rerender(<VoiceSettings />);
 
-    expect(screen.getByText("Voice")).toBeInTheDocument();
-    expect(screen.getByText(/173.8 MB on disk/)).toBeInTheDocument();
-    expect(screen.getByText(/131.7 MB on disk/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Voice" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/173.8 MB · Installed/)).toBeInTheDocument();
+    expect(screen.getByText(/131.7 MB · Installed/)).toBeInTheDocument();
     expect(screen.queryByText("Preparing model")).not.toBeInTheDocument();
   });
 
@@ -362,5 +514,108 @@ describe("VoiceSettings", () => {
     expect(
       screen.queryByText(/No installed Siri voice is selected/),
     ).not.toBeInTheDocument();
+  });
+
+  it("identifies native macOS input while Siri status is unresolved", () => {
+    inputState.backend = "macos";
+    outputState.backend = "siri";
+    siriSetupState.current = {
+      ...siriSetup(),
+      status: null,
+      error: null,
+      statusError: null,
+      loading: true,
+    };
+    macSpeechSetupState.current = {
+      status: {
+        supported: true,
+        unavailableReason: null,
+        locale: "en-US",
+        localeSupported: true,
+        modelInstalled: false,
+        installing: false,
+        progress: null,
+        error: null,
+        revision: 1,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      install: vi.fn(),
+    };
+    setupState.current = setup(pocketStatus());
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(
+      screen.getByText(
+        "Apple's on-device dictation model is not installed. Download it below to use Voice Conversation.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Parakeet STT is not installed/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers the on-device dictation download for native macOS input", () => {
+    inputState.backend = "macos";
+    setupState.current = setup(pocketStatus({ pocketInstalled: true }));
+    macSpeechSetupState.current = {
+      status: {
+        supported: true,
+        unavailableReason: null,
+        locale: "en-US",
+        localeSupported: true,
+        modelInstalled: false,
+        installing: false,
+        progress: null,
+        error: null,
+        revision: 1,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      install: vi.fn(),
+    };
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(screen.getByText("On-device dictation")).toBeInTheDocument();
+    expect(screen.getByText("Not installed for en-US")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Apple's on-device dictation model is not installed. Download it below to use Voice Conversation.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Download model" }),
+    ).toBeEnabled();
+  });
+
+  it("hides Apple speech model details when speech recognition is ready", () => {
+    inputState.backend = "macos";
+    setupState.current = setup(pocketStatus({ pocketInstalled: true }));
+    macSpeechSetupState.current = {
+      status: {
+        supported: true,
+        unavailableReason: null,
+        locale: "en-CA",
+        localeSupported: true,
+        modelInstalled: true,
+        installing: false,
+        progress: null,
+        error: null,
+        revision: 1,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      install: vi.fn(),
+    };
+
+    renderWithProviders(<VoiceSettings />);
+
+    expect(screen.queryByText("On-device dictation")).not.toBeInTheDocument();
+    expect(screen.queryByText("Installed for en-CA")).not.toBeInTheDocument();
   });
 });

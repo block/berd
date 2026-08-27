@@ -35,6 +35,7 @@ import { getModelProviders } from "@/features/providers/providerCatalog";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import { setMultiWorkspaceEnabled } from "@/features/workspaces/multiWorkspacePreference";
 import { resolveSkillPillTone } from "@/features/skills/lib/resolveSkillPillTone";
+import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import type { AcpSessionInfo, AcpSessionsPage } from "@/shared/api/acp";
 import { createUserMessage, getTextContent } from "@/shared/types/messages";
 
@@ -71,6 +72,7 @@ const mocks = vi.hoisted(() => ({
   listPersonas: vi.fn(),
   createSkill: vi.fn(),
   listSkills: vi.fn(),
+  getVoiceConversationStatus: vi.fn(),
 }));
 
 vi.mock("@/shared/api/acp", () => ({
@@ -97,6 +99,21 @@ vi.mock("@/shared/api/acp", () => ({
   discoverAcpProviders: (...args: unknown[]) =>
     mocks.discoverAcpProviders(...args),
 }));
+
+vi.mock(
+  "@/features/voice-conversation/api/voiceConversation",
+  async (importOriginal) => {
+    const actual =
+      await importOriginal<
+        typeof import("@/features/voice-conversation/api/voiceConversation")
+      >();
+    return {
+      ...actual,
+      getVoiceConversationStatus: (...args: unknown[]) =>
+        mocks.getVoiceConversationStatus(...args),
+    };
+  },
+);
 
 vi.mock("@/features/chat/lib/sessionActivation", () => ({
   loadSessionMessages: (...args: unknown[]) =>
@@ -360,6 +377,18 @@ beforeEach(() => {
     providers: emptyModelProviderCache(),
     refreshingProviderIds: new Set(),
   });
+  useVoiceConversationStore.setState({
+    status: {
+      available: false,
+      unavailableReason: null,
+      lifecycle: "stopped",
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 0,
+    },
+    uiState: "off",
+  });
 
   window.localStorage.clear();
   setMultiWorkspaceEnabled(true);
@@ -403,6 +432,15 @@ beforeEach(() => {
   mocks.listProjects.mockResolvedValue([]);
   mocks.listPersonas.mockResolvedValue([]);
   mocks.listSkills.mockResolvedValue([]);
+  mocks.getVoiceConversationStatus.mockResolvedValue({
+    available: false,
+    unavailableReason: null,
+    lifecycle: "stopped",
+    sessionId: null,
+    ownerWindowLabel: null,
+    microphoneMuted: false,
+    revision: 0,
+  });
   mocks.updateSessionTitle.mockResolvedValue(undefined);
   mocks.moveSessionToProject.mockResolvedValue(undefined);
   mocks.updateProject.mockImplementation(
@@ -4040,11 +4078,20 @@ describe("info", () => {
     );
   });
 
-  it("get_context reports the app context from the navigation controller", async () => {
+  it("get_context reports app and active voice context", async () => {
     controller.getAppContext.mockReturnValue({
       view: "chat",
       activeSessionId: "session-2",
       activeProjectId: "project-9",
+    });
+    mocks.getVoiceConversationStatus.mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      lifecycle: "running",
+      sessionId: "session-2",
+      ownerWindowLabel: "main",
+      microphoneMuted: false,
+      revision: 4,
     });
 
     const result = (await dispatchCommand(
@@ -4055,13 +4102,94 @@ describe("info", () => {
       view: string;
       active_session_id: string | null;
       active_project_id: string | null;
+      voice_session_active: boolean;
       app_version: string;
     };
 
     expect(result.view).toBe("chat");
     expect(result.active_session_id).toBe("session-2");
     expect(result.active_project_id).toBe("project-9");
+    expect(result.voice_session_active).toBe(true);
     expect(result.app_version.length).toBeGreaterThan(0);
+  });
+
+  it("get_context preserves voice activity that starts during native refresh", async () => {
+    let resolveStatus!: (status: {
+      available: boolean;
+      unavailableReason: null;
+      lifecycle: "stopped";
+      sessionId: null;
+      ownerWindowLabel: null;
+      microphoneMuted: boolean;
+      revision: number;
+    }) => void;
+    mocks.getVoiceConversationStatus.mockReturnValue(
+      new Promise((resolve) => {
+        resolveStatus = resolve;
+      }),
+    );
+
+    const contextRequest = dispatchCommand(
+      "info",
+      { action: "get_context" },
+      ctx,
+    );
+    await vi.waitFor(() => {
+      expect(mocks.getVoiceConversationStatus).toHaveBeenCalledOnce();
+    });
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-2",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 5,
+      },
+      uiState: "listening",
+    });
+    resolveStatus({
+      available: false,
+      unavailableReason: null,
+      lifecycle: "stopped",
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 4,
+    });
+
+    await expect(contextRequest).resolves.toMatchObject({
+      voice_session_active: true,
+    });
+  });
+
+  it("get_context ignores renderer activity older than native voice state", async () => {
+    useVoiceConversationStore.setState({
+      status: {
+        available: true,
+        unavailableReason: null,
+        lifecycle: "running",
+        sessionId: "session-2",
+        ownerWindowLabel: "main",
+        microphoneMuted: false,
+        revision: 3,
+      },
+      uiState: "listening",
+    });
+    mocks.getVoiceConversationStatus.mockResolvedValue({
+      available: true,
+      unavailableReason: null,
+      lifecycle: "stopped",
+      sessionId: null,
+      ownerWindowLabel: null,
+      microphoneMuted: false,
+      revision: 4,
+    });
+
+    await expect(
+      dispatchCommand("info", { action: "get_context" }, ctx),
+    ).resolves.toMatchObject({ voice_session_active: false });
   });
 });
 

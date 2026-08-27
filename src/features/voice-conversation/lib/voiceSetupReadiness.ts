@@ -1,55 +1,28 @@
-import {
-  getPocketVoiceStatus,
-  type PocketVoiceStatus,
-} from "../api/pocketVoice";
-import { getSiriVoiceStatus, type SiriVoiceStatus } from "../api/siriVoice";
+import type { PocketVoiceStatus } from "../api/pocketVoice";
+import type { SiriVoiceStatus } from "../api/siriVoice";
+import type { MacSpeechStatus } from "../api/macSpeech";
+import type { VoiceInputBackend } from "./voiceInputPreference";
 import type { VoiceOutputBackend } from "./voiceOutputPreference";
 
 export function isVoiceSetupReady(
   pocket: PocketVoiceStatus | null,
+  macSpeech: MacSpeechStatus | null,
   siri: SiriVoiceStatus | null,
-  backend: VoiceOutputBackend,
+  inputBackend: VoiceInputBackend | null,
+  outputBackend: VoiceOutputBackend,
 ): boolean {
-  if (!pocket?.parakeetInstalled) return false;
-  if (backend === "pocket") return pocket.pocketInstalled;
+  if (inputBackend === null) return false;
+  const inputReady =
+    inputBackend === "macos"
+      ? Boolean(
+          macSpeech?.supported &&
+            macSpeech.localeSupported &&
+            macSpeech.modelInstalled,
+        )
+      : Boolean(pocket?.parakeetInstalled);
+  if (!inputReady) return false;
+  if (outputBackend === "pocket") return Boolean(pocket?.pocketInstalled);
   return Boolean(
     siri?.supported && siri.selectedVoice && siri.selectedVoiceInstalled,
   );
-}
-
-export async function refreshVoiceSetupReadiness(
-  backend: VoiceOutputBackend,
-  siriLanguage: string,
-): Promise<boolean> {
-  const [pocket, siri] = await Promise.all([
-    getPocketVoiceStatus(),
-    backend === "siri" ? getSiriVoiceStatus(siriLanguage) : null,
-  ]);
-  return isVoiceSetupReady(pocket, siri, backend);
-}
-
-export interface VoiceSetupSelection {
-  backend: VoiceOutputBackend;
-  siriLanguage: string;
-  revision: number;
-}
-
-export async function refreshStableVoiceSetupReadiness(
-  getSelection: () => VoiceSetupSelection,
-): Promise<boolean> {
-  for (;;) {
-    const selection = getSelection();
-    const ready = await refreshVoiceSetupReadiness(
-      selection.backend,
-      selection.siriLanguage,
-    );
-    const current = getSelection();
-    if (
-      current.backend === selection.backend &&
-      current.siriLanguage === selection.siriLanguage &&
-      current.revision === selection.revision
-    ) {
-      return ready;
-    }
-  }
 }

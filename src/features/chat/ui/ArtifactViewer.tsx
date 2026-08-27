@@ -7,7 +7,7 @@ import {
   ImageIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Artifact,
@@ -28,7 +28,13 @@ import {
 } from "@/shared/ui/dropdown-menu";
 import { Spinner } from "@/shared/ui/spinner";
 import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/toggle-group";
-import { readTextFile } from "@/shared/api/system";
+import {
+  fileStatErrorKind,
+  readTextFile,
+  statFile,
+  type FileStatErrorKind,
+} from "@/shared/api/system";
+import { cn } from "@/shared/lib/cn";
 import { revealInFileManager } from "@/shared/lib/fileManager";
 import { getPlatform } from "@/shared/lib/platform";
 import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
@@ -47,10 +53,80 @@ interface ArtifactViewerProps {
 }
 
 type MarkdownView = "preview" | "raw";
+type DiskStatus = "current" | "checking" | "diverged";
 
 interface TextState {
   status: "loading" | "loaded" | "error";
   contents: string;
+}
+
+interface FileFingerprint {
+  byteSize: string;
+  modifiedAtNs: string;
+  changedAtNs?: string;
+}
+
+const FOREGROUND_ARTIFACT_POLL_INTERVAL_MS = 1_500;
+const BACKGROUND_ARTIFACT_POLL_INTERVAL_MS = 10_000;
+// Consecutive failed poll cycles tolerated before the stale warning shows. A
+// single failure is routinely a file mid-rewrite or a transient I/O hiccup;
+// two in a row is a real divergence worth surfacing.
+const DIVERGENCE_STRIKE_THRESHOLD = 2;
+// Upper bound on any single stat/read/decode step of a freshness cycle. These
+// awaits cross IPC into filesystem calls that can hang indefinitely (stalled
+// network mounts, yanked removable media — the Rust side uses spawn_blocking
+// for exactly this reason), and an unbounded await here wedges the viewer: a
+// stuck forced refresh suppresses all polling via forcedRefreshInFlightRef,
+// and a stuck poll never reaches scheduleNextPoll. Ten seconds is comfortably
+// beyond any healthy local operation while still funneling a genuine hang
+// into the existing failure paths (error state, divergence strikes) before
+// the viewer reads as dead.
+const PRESENTATION_TIMEOUT_MS = 10_000;
+
+class PresentationTimeoutError extends Error {
+  constructor() {
+    super("Artifact presentation timed out");
+    this.name = "PresentationTimeoutError";
+  }
+}
+
+// Bounds one stat/read/decode step. On timeout the wrapper rejects with
+// PresentationTimeoutError so the caller's catch/finally blocks run — clearing
+// the in-flight flags and letting polling continue. A later settlement of the
+// underlying promise only re-settles the already-rejected wrapper, which is a
+// no-op per the Promise spec: the awaiting effect code never resumes, so a
+// timed-out operation cannot deliver stale bytes over newer state. (The
+// generation guards remain in place as an independent second line of
+// defense.) Attaching the rejection handler here also keeps a late failure of
+// the underlying promise from surfacing as an unhandled rejection.
+function withPresentationTimeout<T>(promise: Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timerId = window.setTimeout(
+      () => reject(new PresentationTimeoutError()),
+      PRESENTATION_TIMEOUT_MS,
+    );
+    promise.then(
+      (value) => {
+        window.clearTimeout(timerId);
+        resolve(value);
+      },
+      (error: unknown) => {
+        window.clearTimeout(timerId);
+        reject(error);
+      },
+    );
+  });
+}
+
+function sameFingerprint(
+  left: FileFingerprint,
+  right: FileFingerprint,
+): boolean {
+  return (
+    left.byteSize === right.byteSize &&
+    left.modifiedAtNs === right.modifiedAtNs &&
+    left.changedAtNs === right.changedAtNs
+  );
 }
 
 export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
@@ -65,6 +141,69 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
     status: "loading",
     contents: "",
   });
+  const textStateRef = useRef(textState);
+  const displayedPathRef = useRef(artifact.resolvedPath);
+  const fingerprintRef = useRef<FileFingerprint | null>(null);
+  const [diskStatus, setDiskStatus] = useState<DiskStatus>("checking");
+  const diskStatusRef = useRef<DiskStatus>(diskStatus);
+  const [divergedKind, setDivergedKind] = useState<FileStatErrorKind>("other");
+  const divergenceStrikesRef = useRef(0);
+  const [imageDiskRevision, setImageDiskRevision] = useState(0);
+  const imageDiskRevisionRef = useRef(0);
+  const [retryRevision, setRetryRevision] = useState(0);
+  const consumedRetryRevisionRef = useRef(0);
+  const renderedTextState: TextState =
+    displayedPathRef.current === artifact.resolvedPath
+      ? textState
+      : { status: "loading", contents: "" };
+  const contentReadRevision = artifact.revision;
+  const forcedRefreshGenerationRef = useRef(0);
+  const forcedRefreshInFlightRef = useRef(false);
+  const pollGenerationRef = useRef(0);
+  const loadedImageSrcRef = useRef<string | null>(null);
+  const pendingImageRef = useRef<{
+    src: string;
+    fingerprint: FileFingerprint;
+  } | null>(null);
+  const imageSrc = useMemo(
+    () =>
+      artifactImageSrc(
+        artifact.resolvedPath,
+        artifact.revision + imageDiskRevision,
+      ),
+    [artifact.resolvedPath, artifact.revision, imageDiskRevision],
+  );
+
+  const updateTextState = useCallback((next: TextState) => {
+    textStateRef.current = next;
+    setTextState(next);
+  }, []);
+  const updateDiskStatus = useCallback((next: DiskStatus) => {
+    diskStatusRef.current = next;
+    setDiskStatus(next);
+    // Any non-diverged outcome ends the current failure streak, so recovery
+    // both clears the warning and re-arms the full grace period.
+    if (next !== "diverged") divergenceStrikesRef.current = 0;
+  }, []);
+  const flagDiverged = useCallback(
+    (kind: FileStatErrorKind) => {
+      setDivergedKind(kind);
+      updateDiskStatus("diverged");
+    },
+    [updateDiskStatus],
+  );
+  // Polling failures get a grace period: one failed cycle is routinely a file
+  // mid-rewrite or a transient I/O error, so only consecutive failures flag
+  // the view as diverged. User-initiated reloads bypass this via flagDiverged.
+  const recordDivergenceStrike = useCallback(
+    (kind: FileStatErrorKind) => {
+      divergenceStrikesRef.current += 1;
+      if (divergenceStrikesRef.current >= DIVERGENCE_STRIKE_THRESHOLD) {
+        flagDiverged(kind);
+      }
+    },
+    [flagDiverged],
+  );
 
   // Escape closes the viewer — but only when nothing closer to the event
   // already handled it (open menus, dialogs, transcript search, etc.).
@@ -78,27 +217,316 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  // Load text contents for markdown. Images render straight from the path.
+  // Establish both the rendered content and the disk fingerprint. Re-reads of
+  // the same path retain last-good content while loading so tool-triggered and
+  // manual refreshes do not flash a spinner or reset the scroll container.
   useEffect(() => {
-    if (viewMode === "image") return;
     let cancelled = false;
-    setTextState({ status: "loading", contents: "" });
-    void readTextFile(artifact.resolvedPath)
-      .then((payload) => {
-        if (cancelled) return;
-        setTextState({ status: "loaded", contents: payload.contents });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setTextState({ status: "error", contents: "" });
-      });
+    const refreshGeneration = ++forcedRefreshGenerationRef.current;
+    // A forced ACP/manual refresh supersedes a poll already in flight. Polls
+    // never supersede forced work; they pause until it completes.
+    pollGenerationRef.current += 1;
+    forcedRefreshInFlightRef.current = true;
+    const isCurrentRefresh = () =>
+      !cancelled && refreshGeneration === forcedRefreshGenerationRef.current;
+    const finishRefresh = () => {
+      if (refreshGeneration === forcedRefreshGenerationRef.current) {
+        forcedRefreshInFlightRef.current = false;
+      }
+    };
+    const pathChanged = displayedPathRef.current !== artifact.resolvedPath;
+    if (pathChanged) {
+      displayedPathRef.current = artifact.resolvedPath;
+      fingerprintRef.current = null;
+      pendingImageRef.current = null;
+      loadedImageSrcRef.current = null;
+      consumedRetryRevisionRef.current = retryRevision;
+      updateTextState({ status: "loading", contents: "" });
+      imageDiskRevisionRef.current = 0;
+      setImageDiskRevision(0);
+    } else if (
+      viewMode !== "image" &&
+      textStateRef.current.status !== "loaded"
+    ) {
+      updateTextState({ status: "loading", contents: "" });
+    }
+    if (pathChanged || diskStatusRef.current !== "diverged") {
+      updateDiskStatus("checking");
+    }
+    // An unconsumed retry revision means the user pressed Reload. That intent
+    // matters on failure: the user asked "is the file back?", so the answer is
+    // immediate rather than smoothed over by the polling grace period.
+    const userReloadRequested =
+      retryRevision !== consumedRetryRevisionRef.current;
+
+    // Reading this value makes the ACP-driven revision an explicit input to
+    // this request even though only its change, not its numeric value, matters.
+    void contentReadRevision;
+    void (async () => {
+      try {
+        const before = await withPresentationTimeout(
+          statFile(artifact.resolvedPath),
+        );
+        if (!isCurrentRefresh()) return;
+
+        if (viewMode === "image") {
+          const shouldBustImageCache = userReloadRequested;
+          const candidateDiskRevision = shouldBustImageCache
+            ? imageDiskRevisionRef.current + 1
+            : imageDiskRevisionRef.current;
+          const candidateSrc = artifactImageSrc(
+            artifact.resolvedPath,
+            artifact.revision + candidateDiskRevision,
+          );
+          let confirmedFingerprint = before;
+          if (shouldBustImageCache) {
+            await withPresentationTimeout(preloadArtifactImage(candidateSrc));
+            if (!isCurrentRefresh()) return;
+            confirmedFingerprint = await withPresentationTimeout(
+              statFile(artifact.resolvedPath),
+            );
+            if (!isCurrentRefresh()) return;
+            if (!sameFingerprint(before, confirmedFingerprint)) {
+              // Torn write: the file changed while the image was decoding.
+              // Leave the current state alone and let the next cycle retry
+              // against the settled file.
+              return;
+            }
+            imageDiskRevisionRef.current = candidateDiskRevision;
+            consumedRetryRevisionRef.current = retryRevision;
+            setImageDiskRevision(candidateDiskRevision);
+          }
+          pendingImageRef.current = {
+            src: candidateSrc,
+            fingerprint: confirmedFingerprint,
+          };
+          if (loadedImageSrcRef.current === candidateSrc) {
+            fingerprintRef.current = before;
+            pendingImageRef.current = null;
+            updateDiskStatus("current");
+          }
+          return;
+        }
+
+        const payload = await withPresentationTimeout(
+          readTextFile(artifact.resolvedPath),
+        );
+        const after = await withPresentationTimeout(
+          statFile(artifact.resolvedPath),
+        );
+        if (!isCurrentRefresh()) return;
+        if (!sameFingerprint(before, after)) {
+          // Torn write: the file changed underneath the read, so neither the
+          // fetched contents nor a divergence verdict is trustworthy. Keep the
+          // current state and let the next poll cycle retry the settled file.
+          return;
+        }
+
+        fingerprintRef.current = after;
+        if (
+          textStateRef.current.contents !== payload.contents ||
+          textStateRef.current.status !== "loaded"
+        ) {
+          updateTextState({ status: "loaded", contents: payload.contents });
+        }
+        consumedRetryRevisionRef.current = retryRevision;
+        updateDiskStatus("current");
+      } catch (error) {
+        if (!isCurrentRefresh()) return;
+        const kind = fileStatErrorKind(error);
+        const hasLastGoodView = textStateRef.current.status === "loaded";
+        if (!hasLastGoodView) {
+          updateTextState({ status: "error", contents: "" });
+        }
+        if (userReloadRequested) {
+          // The user explicitly asked whether the file is back, so answer
+          // immediately instead of smoothing the failure over with the
+          // polling grace period.
+          consumedRetryRevisionRef.current = retryRevision;
+          flagDiverged(kind);
+        } else if (hasLastGoodView) {
+          // ACP-driven re-open of already-rendered content: tool writes
+          // routinely race the re-read, so give the failure the same grace
+          // as a polling failure.
+          recordDivergenceStrike(kind);
+        } else {
+          // Initial load (or path change) failure: there is no last-good view
+          // to protect, so the error state and warning show immediately.
+          flagDiverged(kind);
+        }
+      } finally {
+        finishRefresh();
+      }
+    })();
+
     return () => {
       cancelled = true;
+      if (refreshGeneration === forcedRefreshGenerationRef.current) {
+        forcedRefreshGenerationRef.current += 1;
+        forcedRefreshInFlightRef.current = false;
+      }
     };
-    // Depend on the artifact object, not just the path: the store creates a
-    // fresh object (with a bumped revision) when the same path is re-opened
-    // after the agent re-edits it, and the contents must be re-read then.
-  }, [artifact, viewMode]);
+  }, [
+    artifact.resolvedPath,
+    artifact.revision,
+    contentReadRevision,
+    flagDiverged,
+    recordDivergenceStrike,
+    retryRevision,
+    updateDiskStatus,
+    updateTextState,
+    viewMode,
+  ]);
+
+  // Tool events cannot account for shell writes, delegated subagents, or
+  // external editors. Poll the one open file while this document is visible,
+  // slowing down when the app is not focused and checking immediately when it
+  // returns to the foreground.
+  useEffect(() => {
+    let cancelled = false;
+    let checkInFlight = false;
+    let pollTimerId: number | null = null;
+
+    const checkForDiskChange = async () => {
+      if (
+        document.visibilityState === "hidden" ||
+        checkInFlight ||
+        forcedRefreshInFlightRef.current
+      ) {
+        return;
+      }
+      const pollGeneration = ++pollGenerationRef.current;
+      const isCurrentPoll = () =>
+        !cancelled &&
+        pollGeneration === pollGenerationRef.current &&
+        !forcedRefreshInFlightRef.current;
+      checkInFlight = true;
+      try {
+        const fingerprint = await withPresentationTimeout(
+          statFile(artifact.resolvedPath),
+        );
+        if (!isCurrentPoll()) return;
+        const previous = fingerprintRef.current;
+        if (
+          previous &&
+          sameFingerprint(previous, fingerprint) &&
+          diskStatusRef.current !== "diverged"
+        ) {
+          updateDiskStatus("current");
+          return;
+        }
+        // A diverged view always retries the content/decode even when stat has
+        // returned to the last fingerprint, so transient failures self-heal.
+
+        if (viewMode === "image") {
+          const candidateDiskRevision = imageDiskRevisionRef.current + 1;
+          const candidateSrc = artifactImageSrc(
+            artifact.resolvedPath,
+            artifact.revision + candidateDiskRevision,
+          );
+          await withPresentationTimeout(preloadArtifactImage(candidateSrc));
+          if (!isCurrentPoll()) return;
+          const confirmedFingerprint = await withPresentationTimeout(
+            statFile(artifact.resolvedPath),
+          );
+          if (!isCurrentPoll()) return;
+          if (!sameFingerprint(fingerprint, confirmedFingerprint)) {
+            // Torn write: the file changed while the image was decoding, so
+            // the decoded bytes are already stale. Neither flag nor strike —
+            // the next cycle retries against the settled file.
+            return;
+          }
+          pendingImageRef.current = {
+            src: candidateSrc,
+            fingerprint: confirmedFingerprint,
+          };
+          imageDiskRevisionRef.current = candidateDiskRevision;
+          setImageDiskRevision(candidateDiskRevision);
+          return;
+        }
+
+        const payload = await withPresentationTimeout(
+          readTextFile(artifact.resolvedPath),
+        );
+        if (!isCurrentPoll()) return;
+        const confirmedFingerprint = await withPresentationTimeout(
+          statFile(artifact.resolvedPath),
+        );
+        if (!isCurrentPoll()) return;
+        if (!sameFingerprint(fingerprint, confirmedFingerprint)) {
+          // Torn write: the fingerprint moved during the read, so the fetched
+          // contents describe no settled file version. Neither flag nor
+          // strike — the next cycle retries.
+          return;
+        }
+        fingerprintRef.current = confirmedFingerprint;
+        if (
+          textStateRef.current.contents !== payload.contents ||
+          textStateRef.current.status !== "loaded"
+        ) {
+          updateTextState({ status: "loaded", contents: payload.contents });
+        }
+        updateDiskStatus("current");
+      } catch (error) {
+        if (isCurrentPoll()) recordDivergenceStrike(fileStatErrorKind(error));
+      } finally {
+        checkInFlight = false;
+      }
+    };
+
+    const clearPollTimer = () => {
+      if (pollTimerId !== null) {
+        window.clearTimeout(pollTimerId);
+        pollTimerId = null;
+      }
+    };
+    const scheduleNextPoll = () => {
+      clearPollTimer();
+      if (cancelled || document.visibilityState === "hidden") return;
+
+      const interval = document.hasFocus()
+        ? FOREGROUND_ARTIFACT_POLL_INTERVAL_MS
+        : BACKGROUND_ARTIFACT_POLL_INTERVAL_MS;
+      pollTimerId = window.setTimeout(() => {
+        pollTimerId = null;
+        void checkForDiskChange().finally(scheduleNextPoll);
+      }, interval);
+    };
+    const handleFocus = () => {
+      clearPollTimer();
+      void checkForDiskChange().finally(scheduleNextPoll);
+    };
+    const handleBlur = () => {
+      scheduleNextPoll();
+    };
+    const handleVisibilityChange = () => {
+      clearPollTimer();
+      if (document.visibilityState !== "hidden") {
+        void checkForDiskChange().finally(scheduleNextPoll);
+      }
+    };
+
+    scheduleNextPoll();
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("blur", handleBlur);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      pollGenerationRef.current += 1;
+      clearPollTimer();
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("blur", handleBlur);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [
+    artifact.resolvedPath,
+    artifact.revision,
+    recordDivergenceStrike,
+    updateDiskStatus,
+    updateTextState,
+    viewMode,
+  ]);
 
   return (
     <Artifact className="h-full min-h-0 flex-1 rounded-none border-0 shadow-none">
@@ -181,13 +609,68 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
         </ArtifactActions>
       </ArtifactHeader>
 
-      <div className="flex-1 overflow-auto">
+      {diskStatus === "diverged" ? (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-3 border-b border-border bg-muted/60 px-4 py-2 text-xs text-muted-foreground"
+        >
+          <span>
+            {divergedKind === "missing"
+              ? t("artifactViewer.fileDeleted")
+              : t("artifactViewer.fileUnreadable")}
+          </span>
+          {/* A deleted file has nothing to reload; the strip is the whole
+              answer. Polling keeps retrying, so if the file reappears the
+              view heals without user action. */}
+          {divergedKind !== "missing" ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 shrink-0"
+              onClick={() => setRetryRevision((revision) => revision + 1)}
+            >
+              {t("artifactViewer.reload")}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Dim the stale body while diverged so the warning strip reads as
+          describing the content, not competing with it. "checking" stays at
+          full opacity — routine polls must not flicker the view. */}
+      <div
+        className={cn(
+          "flex-1 overflow-auto",
+          diskStatus === "diverged" && "opacity-60",
+        )}
+      >
         {viewMode === "image" ? (
-          <ImageBody artifact={artifact} />
+          <ImageBody
+            artifact={artifact}
+            src={imageSrc}
+            onLoad={(loadedSrc) => {
+              if (loadedSrc !== imageSrc) return;
+              loadedImageSrcRef.current = loadedSrc;
+              const pending = pendingImageRef.current;
+              if (pending?.src !== loadedSrc) return;
+              fingerprintRef.current = pending.fingerprint;
+              pendingImageRef.current = null;
+              updateDiskStatus("current");
+            }}
+            onLoadError={(failedSrc) => {
+              if (failedSrc !== imageSrc) return;
+              loadedImageSrcRef.current = null;
+              pendingImageRef.current = null;
+              // The rendered image failed to decode, so the view is already
+              // visibly broken — no grace period applies. The file may still
+              // exist (truncated, corrupt), so this is "other", not "missing".
+              flagDiverged("other");
+            }}
+          />
         ) : (
           <MarkdownBody
             markdownView={markdownView}
-            textState={textState}
+            textState={renderedTextState}
             onOpenExternally={() => {
               void openResolvedPath(artifact.resolvedPath).catch(() => {});
             }}
@@ -198,22 +681,40 @@ export function ArtifactViewer({ artifact, onClose }: ArtifactViewerProps) {
   );
 }
 
-function ImageBody({ artifact }: { artifact: OpenArtifact }) {
+function artifactImageSrc(path: string, revision: number): string {
+  const assetSrc = convertFileSrc(path, "asset");
+  return revision > 0 ? `${assetSrc}?rev=${revision}` : assetSrc;
+}
+
+function preloadArtifactImage(src: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve();
+    image.onerror = () => reject(new Error("Artifact image failed to load"));
+    image.src = src;
+  });
+}
+
+function ImageBody({
+  artifact,
+  src,
+  onLoad,
+  onLoadError,
+}: {
+  artifact: OpenArtifact;
+  src: string;
+  onLoad: (src: string) => void;
+  onLoadError: (src: string) => void;
+}) {
   const { t } = useTranslation("chat");
-  const src = useMemo(() => {
-    const assetSrc = convertFileSrc(artifact.resolvedPath, "asset");
-    // Re-opening the same path (agent re-edited the open image) must bypass
-    // the webview's cache for the unchanged asset URL.
-    return artifact.revision > 0
-      ? `${assetSrc}?rev=${artifact.revision}`
-      : assetSrc;
-  }, [artifact.resolvedPath, artifact.revision]);
   return (
     <div className="flex items-center justify-center p-4">
       <img
         src={src}
         alt={t("artifactViewer.imageAlt", { filename: artifact.filename })}
         className="h-auto max-w-full rounded-md"
+        onLoad={() => onLoad(src)}
+        onError={() => onLoadError(src)}
       />
     </div>
   );

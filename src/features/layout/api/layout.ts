@@ -11,7 +11,8 @@ export type LayoutItemKind =
   | "checklist"
   | "photo"
   | "automation"
-  | "skill";
+  | "skill"
+  | "prompt";
 
 export interface LayoutConstraints {
   minCenter: number;

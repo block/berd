@@ -7,10 +7,10 @@ use std::fs;
 use std::os::raw::c_char;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-#[cfg(target_os = "macos")]
+#[cfg(any(test, target_os = "macos"))]
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-#[cfg(target_os = "macos")]
+#[cfg(any(test, target_os = "macos"))]
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -18,9 +18,15 @@ use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 use tauri::{AppHandle, Manager};
 
-use super::native_voice::NativeVoiceState;
 #[cfg(target_os = "macos")]
-use super::pocket_voice::{effective_output_device_name, output_device_uses_speakers};
+use super::native_voice::AssistantSpeechGuard;
+use super::native_voice::{InterruptionSensitivity, NativeVoiceState};
+use super::pocket_voice::VoiceInterruptionMode;
+#[cfg(target_os = "macos")]
+use super::pocket_voice::{
+    effective_output_device_name, output_device_uses_speakers, playback_latency_safety_duration,
+    should_suppress_capture,
+};
 
 #[derive(Clone, Debug, Default)]
 pub struct SiriVoiceState {
@@ -56,6 +62,7 @@ enum SiriStreamCommand {
 #[serde(rename_all = "camelCase")]
 enum SiriStreamEventState {
     Started,
+    Progress,
     Completed,
     Interrupted,
     Failed,
@@ -68,16 +75,246 @@ struct SiriStreamEvent {
     stream_id: String,
     state: SiriStreamEventState,
     error: Option<String>,
+    delivery: Option<VoiceDeliveryProgress>,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VoiceDeliverySegment {
+    text: String,
+    played_frames: u64,
+    total_frames: u64,
+    synthesis_complete: bool,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct VoiceDeliveryProgress {
+    #[serde(rename = "sampleRate")]
+    sample_rate: u32,
+    segments: Vec<VoiceDeliverySegment>,
+}
+
+#[cfg(target_os = "macos")]
+struct SiriStreamOutcome {
+    state: SiriStreamEventState,
+    delivery: Option<VoiceDeliveryProgress>,
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct SiriStreamFailure {
+    error: String,
+    delivery: Option<VoiceDeliveryProgress>,
+}
+
+#[cfg(target_os = "macos")]
+impl From<String> for SiriStreamFailure {
+    fn from(error: String) -> Self {
+        Self {
+            error,
+            delivery: None,
+        }
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn delivery_with_played_audio(delivery: VoiceDeliveryProgress) -> Option<VoiceDeliveryProgress> {
+    delivery
+        .segments
+        .iter()
+        .any(|segment| segment.played_frames > 0)
+        .then_some(delivery)
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn capture_before_cancel<T>(snapshot: impl FnOnce() -> T, cancel: impl FnOnce()) -> T {
+    let delivery = snapshot();
+    cancel();
+    delivery
 }
 
 #[cfg(target_os = "macos")]
 const SIRI_STREAM_EVENT: &str = "siri-voice:stream-event";
 #[cfg(target_os = "macos")]
 const SIRI_STREAM_STALL_TIMEOUT: Duration = Duration::from_secs(60);
+#[cfg(target_os = "macos")]
+const PLAYBACK_PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(100);
 const MIN_PLAYBACK_SPEED: f32 = 0.5;
 const MAX_PLAYBACK_SPEED: f32 = 2.0;
 static SIRI_SETTINGS_LOCK: Mutex<()> = Mutex::new(());
 static SIRI_SETTINGS_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(any(test, target_os = "macos"))]
+struct SiriPlaybackLifetimeState<T> {
+    guard: Option<T>,
+    generation: u64,
+    cancelled: bool,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+struct SiriPlaybackLifetime<T> {
+    state: Mutex<SiriPlaybackLifetimeState<T>>,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+impl<T> Default for SiriPlaybackLifetime<T> {
+    fn default() -> Self {
+        Self {
+            state: Mutex::new(SiriPlaybackLifetimeState {
+                guard: None,
+                generation: 0,
+                cancelled: false,
+            }),
+        }
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+impl<T> SiriPlaybackLifetime<T> {
+    fn start(&self, create_guard: impl FnOnce() -> T) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.cancelled {
+            return;
+        }
+        state.generation = state.generation.wrapping_add(1);
+        if state.guard.is_none() {
+            state.guard = Some(create_guard());
+        }
+    }
+
+    fn begin_drain(&self) -> Option<u64> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.cancelled || state.guard.is_none() {
+            return None;
+        }
+        state.generation = state.generation.wrapping_add(1);
+        Some(state.generation)
+    }
+
+    fn release_if_current(&self, generation: u64) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if !state.cancelled && state.generation == generation {
+            state.guard.take();
+        }
+    }
+
+    fn is_active(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .guard
+            .is_some()
+    }
+
+    fn cancel(&self) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.cancelled = true;
+        state.generation = state.generation.wrapping_add(1);
+        state.guard.take();
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+enum SiriPlaybackMonitorEvent {
+    Started,
+    Drain(u64),
+    Shutdown,
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn run_siri_playback_monitor<T>(
+    receiver: mpsc::Receiver<SiriPlaybackMonitorEvent>,
+    lifetime: Arc<SiriPlaybackLifetime<T>>,
+    playback_latency_safety_duration: Duration,
+) {
+    let mut pending_release: Option<(u64, Instant)> = None;
+    loop {
+        let event = if let Some((_, deadline)) = pending_release {
+            match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(event) => Some(event),
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if let Some((generation, _)) = pending_release.take() {
+                        lifetime.release_if_current(generation);
+                    }
+                    continue;
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+        } else {
+            match receiver.recv() {
+                Ok(event) => Some(event),
+                Err(mpsc::RecvError) => return,
+            }
+        };
+
+        match event {
+            Some(SiriPlaybackMonitorEvent::Started) => pending_release = None,
+            Some(SiriPlaybackMonitorEvent::Drain(generation)) => {
+                pending_release = Some((
+                    generation,
+                    Instant::now() + playback_latency_safety_duration,
+                ));
+            }
+            Some(SiriPlaybackMonitorEvent::Shutdown) | None => return,
+        }
+    }
+}
+
+#[cfg(any(test, target_os = "macos"))]
+fn spawn_siri_playback_monitor_with<F>(
+    task: impl FnOnce() + Send + 'static,
+    spawn: F,
+) -> std::io::Result<std::thread::JoinHandle<()>>
+where
+    F: FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<std::thread::JoinHandle<()>>,
+{
+    spawn(Box::new(task))
+}
+
+#[cfg(target_os = "macos")]
+fn spawn_siri_playback_monitor<T: Send + 'static>(
+    receiver: mpsc::Receiver<SiriPlaybackMonitorEvent>,
+    lifetime: Arc<SiriPlaybackLifetime<T>>,
+    playback_latency_safety_duration: Duration,
+    failed: Arc<AtomicBool>,
+) -> std::io::Result<std::thread::JoinHandle<()>> {
+    spawn_siri_playback_monitor_with(
+        move || {
+            let monitor_lifetime = Arc::clone(&lifetime);
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_siri_playback_monitor(
+                    receiver,
+                    monitor_lifetime,
+                    playback_latency_safety_duration,
+                );
+            }))
+            .is_err()
+            {
+                failed.store(true, Ordering::SeqCst);
+                lifetime.cancel();
+            }
+        },
+        |task| {
+            std::thread::Builder::new()
+                .name("siri-playback-monitor".to_string())
+                .spawn(task)
+        },
+    )
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -210,6 +447,7 @@ unsafe extern "C" {
         voice_name: *const c_char,
         rate: f32,
         playback_started: Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
+        playback_stopped: Option<unsafe extern "C" fn(*mut std::ffi::c_void)>,
         context: *mut std::ffi::c_void,
         error_out: *mut *mut c_char,
     ) -> *mut std::ffi::c_void;
@@ -221,6 +459,7 @@ unsafe extern "C" {
     fn berd_siri_tts_stream_finish(stream: *mut std::ffi::c_void);
     fn berd_siri_tts_stream_is_finished(stream: *mut std::ffi::c_void) -> bool;
     fn berd_siri_tts_stream_progress(stream: *mut std::ffi::c_void) -> u64;
+    fn berd_siri_tts_stream_copy_delivery_json(stream: *mut std::ffi::c_void) -> *mut c_char;
     fn berd_siri_tts_stream_copy_error(stream: *mut std::ffi::c_void) -> *mut c_char;
     fn berd_siri_tts_stream_cancel(stream: *mut std::ffi::c_void);
     fn berd_siri_tts_stream_release(stream: *mut std::ffi::c_void);
@@ -320,6 +559,12 @@ fn bridge_error(error: *mut c_char, fallback: &str) -> String {
 struct SiriStreamCallbackContext {
     app: AppHandle,
     stream_id: String,
+    native_voice: NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
+    suppress_capture: bool,
+    playback_started: AtomicBool,
+    playback_lifetime: Arc<SiriPlaybackLifetime<AssistantSpeechGuard>>,
+    playback_monitor_sender: mpsc::Sender<SiriPlaybackMonitorEvent>,
 }
 
 #[cfg(target_os = "macos")]
@@ -330,14 +575,41 @@ unsafe extern "C" fn siri_playback_started(context: *mut std::ffi::c_void) {
     // SAFETY: The stream worker owns this boxed context until after the native
     // player has completed and been released.
     let context = unsafe { &*(context.cast::<SiriStreamCallbackContext>()) };
-    let _ = context.app.emit(
-        SIRI_STREAM_EVENT,
-        SiriStreamEvent {
-            stream_id: context.stream_id.clone(),
-            state: SiriStreamEventState::Started,
-            error: None,
-        },
-    );
+    context.playback_lifetime.start(|| {
+        context
+            .native_voice
+            .begin_assistant_speech(context.interruption_sensitivity, context.suppress_capture)
+    });
+    let _ = context
+        .playback_monitor_sender
+        .send(SiriPlaybackMonitorEvent::Started);
+    if !context.playback_started.swap(true, Ordering::AcqRel) {
+        let _ = context.app.emit(
+            SIRI_STREAM_EVENT,
+            SiriStreamEvent {
+                stream_id: context.stream_id.clone(),
+                state: SiriStreamEventState::Started,
+                error: None,
+                delivery: None,
+            },
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" fn siri_playback_stopped(context: *mut std::ffi::c_void) {
+    if context.is_null() {
+        return;
+    }
+    // SAFETY: The stream worker owns this boxed context until after the native
+    // player has completed and been released.
+    let context = unsafe { &*(context.cast::<SiriStreamCallbackContext>()) };
+    let Some(generation) = context.playback_lifetime.begin_drain() else {
+        return;
+    };
+    let _ = context
+        .playback_monitor_sender
+        .send(SiriPlaybackMonitorEvent::Drain(generation));
 }
 
 #[cfg(target_os = "macos")]
@@ -346,6 +618,7 @@ fn emit_stream_event(
     stream_id: &str,
     state: SiriStreamEventState,
     error: Option<String>,
+    delivery: Option<VoiceDeliveryProgress>,
 ) {
     let _ = app.emit(
         SIRI_STREAM_EVENT,
@@ -353,6 +626,7 @@ fn emit_stream_event(
             stream_id: stream_id.to_string(),
             state,
             error,
+            delivery,
         },
     );
 }
@@ -415,45 +689,84 @@ fn first_installed_voice(voices: &[SiriVoice]) -> Option<SiriVoiceSelection> {
         })
 }
 
-fn choose_installed_voice(
+fn resolve_voice_selection(
     preferred_voices: &[SiriVoice],
+    selected_voice: Option<&SiriVoiceSelection>,
     load_all_voices: impl FnOnce() -> Result<Vec<SiriVoice>, String>,
-) -> Result<Option<SiriVoiceSelection>, String> {
-    if let Some(selection) = first_installed_voice(preferred_voices) {
-        return Ok(Some(selection));
+) -> Result<(Option<SiriVoiceSelection>, bool), String> {
+    if let Some(selection) = selected_voice {
+        if find_voice(preferred_voices, selection).is_some_and(|voice| voice.installed) {
+            return Ok((Some(selection.clone()), true));
+        }
+    } else if let Some(selection) = first_installed_voice(preferred_voices) {
+        return Ok((Some(selection), true));
     }
 
-    Ok(first_installed_voice(&load_all_voices()?))
+    let all_voices = load_all_voices()?;
+    if let Some(selection) = selected_voice {
+        if find_voice(&all_voices, selection).is_some_and(|voice| voice.installed) {
+            return Ok((Some(selection.clone()), true));
+        }
+    }
+
+    let fallback = first_installed_voice(&all_voices);
+    Ok(match fallback {
+        Some(selection) => (Some(selection), true),
+        None => (selected_voice.cloned(), false),
+    })
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn resolve_stream_voice(
+    selection: &SiriVoiceSelection,
+    load_all_voices: impl FnOnce() -> Result<Vec<SiriVoice>, String>,
+) -> Result<SiriVoiceSelection, String> {
+    let voices = load_all_voices()?;
+    if find_voice(&voices, selection).is_some_and(|voice| voice.installed) {
+        return Ok(selection.clone());
+    }
+
+    first_installed_voice(&voices).ok_or_else(|| {
+        "No installed Siri voice is available. Open Voice settings to download one.".to_string()
+    })
 }
 
 fn status(app: &AppHandle, language_prefix: &str) -> Result<SiriVoiceStatus, String> {
     let voices = discover_voices(language_prefix)?;
     let available_languages = discover_languages()?;
     let path = settings_path(app)?;
-    let automatic_selection = if read_settings(&path).selected_voice.is_none() {
-        choose_installed_voice(&voices, || discover_voices(""))?
-    } else {
-        None
-    };
+    let previous_selection = read_settings(&path).selected_voice;
+    let (resolved_selection, resolved_selection_installed) =
+        resolve_voice_selection(&voices, previous_selection.as_ref(), || discover_voices(""))?;
     let settings = update_settings(&path, |settings| {
-        if settings.selected_voice.is_none() && automatic_selection.is_some() {
-            settings.selected_voice = automatic_selection;
+        if previous_selection.is_none()
+            && resolved_selection_installed
+            && settings.selected_voice == previous_selection
+            && settings.selected_voice != resolved_selection
+        {
+            settings.selected_voice = resolved_selection.clone();
             true
         } else {
             false
         }
     })?;
-    let selected_voice_installed = settings.selected_voice.as_ref().is_some_and(|selection| {
-        find_voice(&voices, selection).is_some_and(|voice| voice.installed)
-            || discover_voices(&selection.language)
-                .ok()
-                .and_then(|selected| find_voice(&selected, selection).cloned())
-                .is_some_and(|voice| voice.installed)
-    });
+    let (selected_voice, selected_voice_installed) =
+        if settings.selected_voice == previous_selection {
+            (resolved_selection, resolved_selection_installed)
+        } else {
+            let installed = settings.selected_voice.as_ref().is_some_and(|selection| {
+                find_voice(&voices, selection).is_some_and(|voice| voice.installed)
+                    || discover_voices(&selection.language)
+                        .ok()
+                        .and_then(|selected| find_voice(&selected, selection).cloned())
+                        .is_some_and(|voice| voice.installed)
+            });
+            (settings.selected_voice.clone(), installed)
+        };
     Ok(SiriVoiceStatus {
         supported: cfg!(target_os = "macos"),
         available_languages,
-        selected_voice: settings.selected_voice,
+        selected_voice,
         selected_voice_installed,
         playback_speed: settings
             .playback_speed
@@ -555,6 +868,12 @@ fn enqueue_native_stream(stream: *mut std::ffi::c_void, text: &str) -> Result<()
 }
 
 #[cfg(target_os = "macos")]
+fn siri_delivery_progress(stream: *mut std::ffi::c_void) -> Option<VoiceDeliveryProgress> {
+    let json = take_bridge_string(unsafe { berd_siri_tts_stream_copy_delivery_json(stream) })?;
+    serde_json::from_str(&json).ok()
+}
+
+#[cfg(target_os = "macos")]
 #[allow(clippy::too_many_arguments)]
 fn run_siri_stream(
     app: AppHandle,
@@ -563,14 +882,34 @@ fn run_siri_stream(
     speed: f32,
     active: Arc<AtomicBool>,
     receiver: mpsc::Receiver<SiriStreamCommand>,
-) -> Result<SiriStreamEventState, String> {
+    native_voice: NativeVoiceState,
+    interruption_sensitivity: InterruptionSensitivity,
+    suppress_capture: bool,
+    playback_latency_safety_duration: Duration,
+) -> Result<SiriStreamOutcome, SiriStreamFailure> {
     let language = CString::new(selection.language)
         .map_err(|_| "Siri voice language cannot contain NUL bytes".to_string())?;
     let name = CString::new(selection.name)
         .map_err(|_| "Siri voice name cannot contain NUL bytes".to_string())?;
+    let playback_lifetime = Arc::new(SiriPlaybackLifetime::default());
+    let playback_monitor_failed = Arc::new(AtomicBool::new(false));
+    let (playback_monitor_sender, playback_monitor_receiver) = mpsc::channel();
+    let playback_monitor = spawn_siri_playback_monitor(
+        playback_monitor_receiver,
+        Arc::clone(&playback_lifetime),
+        playback_latency_safety_duration,
+        Arc::clone(&playback_monitor_failed),
+    )
+    .map_err(|error| format!("Could not start Siri playback monitor: {error}"))?;
     let callback_context = Box::new(SiriStreamCallbackContext {
         app: app.clone(),
         stream_id: stream_id.clone(),
+        native_voice,
+        interruption_sensitivity,
+        suppress_capture,
+        playback_started: AtomicBool::new(false),
+        playback_lifetime: Arc::clone(&playback_lifetime),
+        playback_monitor_sender: playback_monitor_sender.clone(),
     });
     let callback_context = Box::into_raw(callback_context);
     let mut error = std::ptr::null_mut();
@@ -582,6 +921,7 @@ fn run_siri_stream(
             name.as_ptr(),
             speed,
             Some(siri_playback_started),
+            Some(siri_playback_stopped),
             callback_context.cast(),
             &mut error,
         )
@@ -589,7 +929,10 @@ fn run_siri_stream(
     if stream.is_null() {
         // SAFETY: Native creation failed, so no callback retained the box.
         unsafe { drop(Box::from_raw(callback_context)) };
-        return Err(bridge_error(error, "Could not start Siri voice stream"));
+        playback_lifetime.cancel();
+        let _ = playback_monitor_sender.send(SiriPlaybackMonitorEvent::Shutdown);
+        let _ = playback_monitor.join();
+        return Err(bridge_error(error, "Could not start Siri voice stream").into());
     }
 
     let result = (|| {
@@ -597,22 +940,54 @@ fn run_siri_stream(
         let mut first_chunk_pending = true;
         let mut finishing = false;
         let mut watchdog: Option<SiriStreamWatchdog> = None;
+        let mut last_progress_emit = Instant::now();
+        let mut last_delivery_json = String::new();
         loop {
+            if playback_monitor_failed.load(Ordering::SeqCst) {
+                return Err("Siri playback monitor failed".to_string());
+            }
             if !active.load(Ordering::SeqCst) {
+                let delivery = siri_delivery_progress(stream);
                 unsafe { berd_siri_tts_stream_cancel(stream) };
-                return Ok(SiriStreamEventState::Interrupted);
+                return Ok(SiriStreamOutcome {
+                    state: SiriStreamEventState::Interrupted,
+                    delivery,
+                });
             }
             if finishing && unsafe { berd_siri_tts_stream_is_finished(stream) } {
                 let native_error =
                     take_bridge_string(unsafe { berd_siri_tts_stream_copy_error(stream) });
-                return native_error.map_or(Ok(SiriStreamEventState::Completed), Err);
+                if let Some(error) = native_error {
+                    return Err(error);
+                }
+                if !playback_lifetime.is_active() {
+                    return Ok(SiriStreamOutcome {
+                        state: SiriStreamEventState::Completed,
+                        delivery: None,
+                    });
+                }
             }
             if let Some(watchdog) = watchdog.as_mut() {
                 let progress = unsafe { berd_siri_tts_stream_progress(stream) };
                 if watchdog.observe(progress, Instant::now()) {
-                    unsafe { berd_siri_tts_stream_cancel(stream) };
                     return Err("Siri synthesis stopped making progress".to_string());
                 }
+            }
+            if last_progress_emit.elapsed() >= PLAYBACK_PROGRESS_EMIT_INTERVAL {
+                if let Some(delivery) = siri_delivery_progress(stream) {
+                    let delivery_json = serde_json::to_string(&delivery).unwrap_or_default();
+                    if delivery_json != last_delivery_json {
+                        emit_stream_event(
+                            &app,
+                            &stream_id,
+                            SiriStreamEventState::Progress,
+                            None,
+                            Some(delivery),
+                        );
+                        last_delivery_json = delivery_json;
+                    }
+                }
+                last_progress_emit = Instant::now();
             }
 
             let command = match receiver.recv_timeout(Duration::from_millis(10)) {
@@ -664,33 +1039,62 @@ fn run_siri_stream(
                     ));
                 }
                 SiriStreamCommand::Stop => {
+                    let delivery = siri_delivery_progress(stream);
                     active.store(false, Ordering::SeqCst);
                     unsafe { berd_siri_tts_stream_cancel(stream) };
-                    return Ok(SiriStreamEventState::Interrupted);
+                    return Ok(SiriStreamOutcome {
+                        state: SiriStreamEventState::Interrupted,
+                        delivery,
+                    });
                 }
                 _ => {}
             }
         }
     })();
 
+    let result = result.map_err(|error| {
+        let delivery = capture_before_cancel(
+            || siri_delivery_progress(stream),
+            || unsafe { berd_siri_tts_stream_cancel(stream) },
+        )
+        .and_then(delivery_with_played_audio);
+        SiriStreamFailure { error, delivery }
+    });
+
+    unsafe { berd_siri_tts_stream_release(stream) };
     unsafe {
-        berd_siri_tts_stream_release(stream);
         drop(Box::from_raw(callback_context));
     }
+    playback_lifetime.cancel();
+    let _ = playback_monitor_sender.send(SiriPlaybackMonitorEvent::Shutdown);
+    let _ = playback_monitor.join();
     result
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri injects four runtime dependencies beside the stream payload.
 pub fn start_siri_voice_stream(
     app: AppHandle,
     webview_window: tauri::WebviewWindow,
     state: tauri::State<'_, SiriVoiceState>,
     native_voice: tauri::State<'_, NativeVoiceState>,
     stream_id: String,
+    voice: SiriVoiceSelection,
+    interruption_mode: VoiceInterruptionMode,
+    interruption_sensitivity: InterruptionSensitivity,
 ) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, webview_window, state, native_voice, stream_id);
+        let _ = (
+            app,
+            webview_window,
+            state,
+            native_voice,
+            stream_id,
+            voice,
+            interruption_mode,
+            interruption_sensitivity,
+        );
         Err("Siri TTS is only available on macOS".to_string())
     }
 
@@ -699,16 +1103,14 @@ pub fn start_siri_voice_stream(
         if stream_id.trim().is_empty() {
             return Err("Siri voice stream id cannot be empty".to_string());
         }
+        let voice = resolve_stream_voice(&voice, || discover_voices(""))?;
         let settings = read_settings(&settings_path(&app)?);
-        let selection = settings.selected_voice.ok_or_else(|| {
-            "Select an installed Siri voice in Voice settings before using Siri TTS".to_string()
-        })?;
         let active = begin_playback(&state, webview_window.label())?;
-        let capture_suppression =
-            output_device_uses_speakers(effective_output_device_name(None).as_deref()).then(|| {
-                log::info!("[voice-echo-guard] speaker output detected");
-                native_voice.suppress_capture()
-            });
+        let effective_output_device = effective_output_device_name(None);
+        let suppress_capture =
+            should_suppress_capture(interruption_mode, effective_output_device.as_deref());
+        let playback_latency_safety_duration =
+            playback_latency_safety_duration(effective_output_device.as_deref());
         let (sender, receiver) = mpsc::channel();
         {
             let mut runtime = state
@@ -722,27 +1124,38 @@ pub fn start_siri_voice_stream(
         }
         let playback_state = state.inner().clone();
         let playback_active = active.clone();
+        let native_voice_state = native_voice.inner().clone();
         tauri::async_runtime::spawn_blocking(move || {
-            let _capture_suppression = capture_suppression;
             let result = run_siri_stream(
                 app.clone(),
                 stream_id.clone(),
-                selection,
+                voice,
                 settings
                     .playback_speed
                     .clamp(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED),
                 active.clone(),
                 receiver,
+                native_voice_state,
+                interruption_sensitivity,
+                suppress_capture,
+                playback_latency_safety_duration,
             );
-            let (event_state, error) = match result {
-                Ok(state) => (state, None),
-                Err(_error) if !active.load(Ordering::SeqCst) => {
-                    (SiriStreamEventState::Interrupted, None)
+            let (event_state, error, delivery) = match result {
+                Ok(outcome) => (outcome.state, None, outcome.delivery),
+                Err(failure) if !active.load(Ordering::SeqCst) => {
+                    (SiriStreamEventState::Interrupted, None, failure.delivery)
                 }
-                Err(error) => (SiriStreamEventState::Failed, Some(error)),
+                Err(failure) => (
+                    SiriStreamEventState::Failed,
+                    Some(failure.error),
+                    failure.delivery,
+                ),
             };
-            emit_stream_event(&app, &stream_id, event_state, error);
             finish_playback(&playback_state, &playback_active);
+            // A terminal event hands stream ownership back to the renderer,
+            // which may immediately start a replacement stream. Release the
+            // backend playback token before publishing that handoff.
+            emit_stream_event(&app, &stream_id, event_state, error, delivery);
         });
         Ok(())
     }
@@ -1042,11 +1455,14 @@ mod tests {
         ];
 
         assert_eq!(
-            first_installed_voice(&voices),
-            Some(SiriVoiceSelection {
-                name: "Aaron".to_string(),
-                language: "en-US".to_string(),
-            })
+            resolve_voice_selection(&voices, None, || Ok(Vec::new())),
+            Ok((
+                Some(SiriVoiceSelection {
+                    name: "Aaron".to_string(),
+                    language: "en-US".to_string(),
+                }),
+                true,
+            ))
         );
     }
 
@@ -1060,7 +1476,7 @@ mod tests {
         }];
 
         assert_eq!(
-            choose_installed_voice(&filtered_voices, || {
+            resolve_voice_selection(&filtered_voices, None, || {
                 Ok(vec![SiriVoice {
                     name: "Catherine".to_string(),
                     language: "en-AU".to_string(),
@@ -1068,10 +1484,134 @@ mod tests {
                     installed: true,
                 }])
             }),
-            Ok(Some(SiriVoiceSelection {
+            Ok((
+                Some(SiriVoiceSelection {
+                    name: "Catherine".to_string(),
+                    language: "en-AU".to_string(),
+                }),
+                true,
+            ))
+        );
+    }
+
+    #[test]
+    fn unavailable_selection_falls_back_to_an_installed_siri_voice() {
+        let selected = SiriVoiceSelection {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+        };
+        let preferred_voices = vec![
+            SiriVoice {
+                name: "Aaron".to_string(),
+                language: "en-US".to_string(),
+                size_bytes: 10,
+                installed: false,
+            },
+            SiriVoice {
+                name: "Samantha".to_string(),
+                language: "en-US".to_string(),
+                size_bytes: 10,
+                installed: true,
+            },
+        ];
+
+        assert_eq!(
+            resolve_voice_selection(&preferred_voices, Some(&selected), || {
+                Ok(vec![
+                    SiriVoice {
+                        name: "Catherine".to_string(),
+                        language: "en-AU".to_string(),
+                        size_bytes: 10,
+                        installed: true,
+                    },
+                    preferred_voices[1].clone(),
+                ])
+            }),
+            Ok((
+                Some(SiriVoiceSelection {
+                    name: "Catherine".to_string(),
+                    language: "en-AU".to_string(),
+                }),
+                true,
+            ))
+        );
+    }
+
+    #[test]
+    fn unavailable_selection_is_preserved_when_no_siri_voice_is_installed() {
+        let selected = SiriVoiceSelection {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+        };
+        let voices = vec![SiriVoice {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+            size_bytes: 10,
+            installed: false,
+        }];
+
+        assert_eq!(
+            resolve_voice_selection(&voices, Some(&selected), || Ok(voices.clone())),
+            Ok((Some(selected), false))
+        );
+    }
+
+    #[test]
+    fn stream_voice_ingress_re_resolves_a_voice_removed_after_status() {
+        let selected = SiriVoiceSelection {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+        };
+        let status_catalog = vec![SiriVoice {
+            name: selected.name.clone(),
+            language: selected.language.clone(),
+            size_bytes: 10,
+            installed: true,
+        }];
+        assert!(find_voice(&status_catalog, &selected).is_some_and(|voice| voice.installed));
+
+        let current_catalog = vec![
+            SiriVoice {
+                installed: false,
+                ..status_catalog[0].clone()
+            },
+            SiriVoice {
                 name: "Catherine".to_string(),
                 language: "en-AU".to_string(),
-            }))
+                size_bytes: 10,
+                installed: true,
+            },
+        ];
+
+        assert_eq!(
+            resolve_stream_voice(&selected, || Ok(current_catalog)),
+            Ok(SiriVoiceSelection {
+                name: "Catherine".to_string(),
+                language: "en-AU".to_string(),
+            })
+        );
+    }
+
+    #[test]
+    fn stream_voice_ingress_rejects_when_no_siri_voice_is_installed() {
+        let selected = SiriVoiceSelection {
+            name: "Aaron".to_string(),
+            language: "en-US".to_string(),
+        };
+
+        assert_eq!(
+            resolve_stream_voice(&selected, || {
+                Ok(vec![SiriVoice {
+                    name: selected.name.clone(),
+                    language: selected.language.clone(),
+                    size_bytes: 10,
+                    installed: false,
+                }])
+            }),
+            Err(
+                "No installed Siri voice is available. Open Voice settings to download one."
+                    .to_string()
+            )
         );
     }
 
@@ -1090,6 +1630,149 @@ mod tests {
         assert!(begin_playback(&state, "next-window").is_ok());
     }
 
+    #[test]
+    fn siri_playback_monitor_reschedules_many_drain_gaps_on_one_thread() {
+        struct DropSignal(mpsc::SyncSender<()>);
+        impl Drop for DropSignal {
+            fn drop(&mut self) {
+                let _ = self.0.send(());
+            }
+        }
+
+        let (drop_sender, drop_receiver) = mpsc::sync_channel(1);
+        let lifetime = Arc::new(SiriPlaybackLifetime::default());
+        lifetime.start(|| DropSignal(drop_sender));
+        let (event_sender, event_receiver) = mpsc::channel();
+        let monitor_lifetime = Arc::clone(&lifetime);
+        let monitor = std::thread::Builder::new()
+            .name("siri-playback-monitor-test".to_string())
+            .spawn(move || {
+                run_siri_playback_monitor(
+                    event_receiver,
+                    monitor_lifetime,
+                    Duration::from_millis(20),
+                );
+            })
+            .expect("start monitor");
+
+        for _ in 0..100 {
+            let generation = lifetime.begin_drain().expect("drain active guard");
+            event_sender
+                .send(SiriPlaybackMonitorEvent::Drain(generation))
+                .expect("schedule drain");
+            lifetime.start(|| panic!("resumed buffering must retain the existing guard"));
+            event_sender
+                .send(SiriPlaybackMonitorEvent::Started)
+                .expect("cancel pending drain");
+        }
+
+        let final_drain = lifetime.begin_drain().expect("final drain");
+        event_sender
+            .send(SiriPlaybackMonitorEvent::Drain(final_drain))
+            .expect("schedule final drain");
+        drop_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("final drain releases guard");
+        assert!(!lifetime.is_active());
+        assert!(drop_receiver.try_recv().is_err());
+
+        event_sender
+            .send(SiriPlaybackMonitorEvent::Shutdown)
+            .expect("stop monitor");
+        monitor.join().expect("join monitor");
+    }
+
+    #[test]
+    fn cancelling_siri_playback_invalidates_a_pending_grace_release() {
+        struct DropCounter(Arc<AtomicU64>);
+        impl Drop for DropCounter {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let drops = Arc::new(AtomicU64::new(0));
+        let lifetime = Arc::new(SiriPlaybackLifetime::default());
+        lifetime.start(|| DropCounter(Arc::clone(&drops)));
+        let drain = lifetime.begin_drain().expect("drain before cancellation");
+        let (event_sender, event_receiver) = mpsc::channel();
+        let monitor_lifetime = Arc::clone(&lifetime);
+        let monitor = std::thread::Builder::new()
+            .name("siri-playback-cancel-test".to_string())
+            .spawn(move || {
+                run_siri_playback_monitor(
+                    event_receiver,
+                    monitor_lifetime,
+                    Duration::from_secs(60),
+                );
+            })
+            .expect("start monitor");
+        event_sender
+            .send(SiriPlaybackMonitorEvent::Drain(drain))
+            .expect("schedule drain");
+
+        lifetime.cancel();
+        assert!(!lifetime.is_active());
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+        event_sender
+            .send(SiriPlaybackMonitorEvent::Shutdown)
+            .expect("stop monitor");
+        monitor.join().expect("join monitor");
+        assert_eq!(drops.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn siri_playback_monitor_spawn_failure_is_reported_without_running_the_task() {
+        let ran = Arc::new(AtomicBool::new(false));
+        let task_ran = Arc::clone(&ran);
+        let result = spawn_siri_playback_monitor_with(
+            move || task_ran.store(true, Ordering::SeqCst),
+            |_task| Err(std::io::Error::other("injected spawn failure")),
+        );
+
+        assert_eq!(
+            result.expect_err("spawn must fail").to_string(),
+            "injected spawn failure"
+        );
+        assert!(!ran.load(Ordering::SeqCst));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn siri_playback_monitor_panic_cancels_the_lifetime_and_reports_failure() {
+        struct DropSignal(mpsc::SyncSender<()>);
+        impl Drop for DropSignal {
+            fn drop(&mut self) {
+                let _ = self.0.send(());
+            }
+        }
+
+        let (drop_sender, drop_receiver) = mpsc::sync_channel(1);
+        let lifetime = Arc::new(SiriPlaybackLifetime::default());
+        lifetime.start(|| DropSignal(drop_sender));
+        let drain = lifetime.begin_drain().expect("drain active guard");
+        let failed = Arc::new(AtomicBool::new(false));
+        let (event_sender, event_receiver) = mpsc::channel();
+        let monitor = spawn_siri_playback_monitor(
+            event_receiver,
+            Arc::clone(&lifetime),
+            Duration::MAX,
+            Arc::clone(&failed),
+        )
+        .expect("start monitor");
+
+        event_sender
+            .send(SiriPlaybackMonitorEvent::Drain(drain))
+            .expect("trigger monitor overflow panic");
+        drop_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("monitor panic cancels playback lifetime");
+        monitor.join().expect("panic is contained by monitor");
+
+        assert!(failed.load(Ordering::SeqCst));
+        assert!(!lifetime.is_active());
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn stream_watchdog_times_out_only_after_progress_stalls() {
@@ -1102,5 +1785,47 @@ mod tests {
             started + SIRI_STREAM_STALL_TIMEOUT + Duration::from_millis(1),
         ));
         assert!(watchdog.observe(2, started + SIRI_STREAM_STALL_TIMEOUT * 2,));
+    }
+
+    #[test]
+    fn failed_stream_retains_only_delivery_with_played_audio() {
+        use std::cell::RefCell;
+
+        let calls = RefCell::new(Vec::new());
+        let progress = VoiceDeliveryProgress {
+            sample_rate: 24_000,
+            segments: vec![VoiceDeliverySegment {
+                text: "Partly heard.".to_string(),
+                played_frames: 1_200,
+                total_frames: 4_800,
+                synthesis_complete: true,
+            }],
+        };
+        let progress = capture_before_cancel(
+            || {
+                calls.borrow_mut().push("snapshot");
+                progress
+            },
+            || calls.borrow_mut().push("cancel"),
+        );
+        assert_eq!(&*calls.borrow(), &["snapshot", "cancel"]);
+        assert_eq!(
+            delivery_with_played_audio(progress)
+                .expect("played audio is evidence")
+                .segments[0]
+                .played_frames,
+            1_200
+        );
+
+        let unheard = VoiceDeliveryProgress {
+            sample_rate: 24_000,
+            segments: vec![VoiceDeliverySegment {
+                text: "Not heard.".to_string(),
+                played_frames: 0,
+                total_frames: 4_800,
+                synthesis_complete: true,
+            }],
+        };
+        assert!(delivery_with_played_audio(unheard).is_none());
     }
 }

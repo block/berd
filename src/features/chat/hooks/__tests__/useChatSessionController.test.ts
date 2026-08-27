@@ -4685,10 +4685,7 @@ describe("useChatSessionController", () => {
           {
             id: "databricks_v2",
             displayName: "Databricks",
-            models: [
-              { id: "goose-gpt-5-5", name: "GPT-5.5" },
-              { id: "legacy-v1-model", name: "Legacy" },
-            ],
+            models: [{ id: "goose-gpt-5-5", name: "GPT-5.5" }],
           },
         ],
       },

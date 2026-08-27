@@ -63,12 +63,16 @@ import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSear
 import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
 import { useVoiceConversationController } from "@/features/voice-conversation/hooks/useVoiceConversationController";
 import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
+import { useMacSpeechSetup } from "@/features/voice-conversation/hooks/useMacSpeechSetup";
 import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
+import {
+  isMacSpeechAvailable,
+  useVoiceInputPreference,
+} from "@/features/voice-conversation/lib/voiceInputPreference";
 import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
 import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
-import { useVoiceConversationStore } from "@/features/voice-conversation/stores/voiceConversationStore";
 import {
   SecurityConfirmationPanel,
   useRegisterSecurityConfirmationSurface,
@@ -221,17 +225,20 @@ export function ChatView({
     useTerminalFallbackCwdPreference();
   const capabilities = useProfileCapabilities();
   const pocketVoiceSetup = usePocketVoiceSetup(capabilities.voiceConversation);
+  const macSpeechSetup = useMacSpeechSetup(capabilities.voiceConversation);
+  const voiceInput = useVoiceInputPreference(
+    isMacSpeechAvailable(macSpeechSetup.status, macSpeechSetup.loading),
+  );
   const voiceOutput = useVoiceOutputPreference();
   const siriVoiceSetup = useSiriVoiceSetup(
     capabilities.voiceConversation && voiceOutput.backend === "siri",
   );
   const voiceReady = isVoiceSetupReady(
     pocketVoiceSetup.status,
+    macSpeechSetup.status,
     siriVoiceSetup.status,
+    voiceInput.backend,
     voiceOutput.backend,
-  );
-  const requestVoiceConversationStart = useVoiceConversationStore(
-    (state) => state.requestStart,
   );
   const voiceConversation = useVoiceConversationController({
     sessionId,
@@ -242,8 +249,12 @@ export function ChatView({
     enabled: capabilities.voiceConversation,
     isGooseSession: controller.selectedProvider === "goose",
     pocketReady: voiceReady,
+    inputBackend: voiceInput.backend,
+    siriVoice:
+      siriVoiceSetup.status?.selectedVoiceInstalled === true
+        ? siriVoiceSetup.status.selectedVoice
+        : null,
     onPocketSetupRequired: () => {
-      requestVoiceConversationStart(sessionId);
       requestOpenSettings("voice", {
         returnTarget: { type: "voice-setup", sessionId },
       });

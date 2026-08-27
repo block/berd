@@ -143,10 +143,21 @@ export function isGooseModelProviderId(providerId: string): boolean {
   return FALLBACK_GOOSE_MODEL_PROVIDER_IDS.has(providerId);
 }
 
+export function modelDisplayNameFromId(providerId: string, id: string): string {
+  const firstDot = id.indexOf(".");
+  const lastDot = id.lastIndexOf(".");
+  const displayId =
+    providerId === "databricks_v2" && firstDot > 0 && lastDot > firstDot
+      ? id.slice(lastDot + 1)
+      : id;
+  return (
+    normalizedGooseModelDisplayName(displayId) ?? humanizeRawModelId(displayId)
+  );
+}
+
 function rawModelIdToOption(providerId: string, id: string): ModelOption {
   const providerName = formatProviderLabel(providerId);
-  const displayName =
-    normalizedGooseModelDisplayName(id) ?? humanizeRawModelId(id);
+  const displayName = modelDisplayNameFromId(providerId, id);
 
   return {
     id,
@@ -199,7 +210,5 @@ export function providerModelOptionsFromIds(
     return markGenericProviderModels(options);
   }
 
-  return markRecommendedGooseModels(
-    options.filter((model) => model.id.startsWith("goose-")),
-  );
+  return markRecommendedGooseModels(options);
 }

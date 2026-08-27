@@ -1,7 +1,10 @@
 import { getClient } from "@/shared/api/acpConnection";
 import { checkAllProviderStatus, listProviderSecrets } from "./api/credentials";
 import { getModelProviders } from "./providerCatalog";
-import { getCredentialedProviderIds } from "./lib/providerConnectionPolicy";
+import {
+  getCredentialedProviderIds,
+  isCredentialedProvider,
+} from "./lib/providerConnectionPolicy";
 import { connectedModelProviderIds } from "./lib/providerState";
 import { useProviderModelCacheStore } from "./stores/providerModelCacheStore";
 import { useDefaultProviderReadinessStore } from "./stores/defaultProviderReadinessStore";
@@ -16,6 +19,28 @@ import {
   getDefaultGooseModelName,
   getDefaultGooseModelProviderId,
 } from "@/features/runtime-config/defaults";
+
+export const MODEL_DISCOVERY_SECRET_LOOKUP_TIMEOUT_MS = 3_000;
+
+async function listProviderSecretsForDiscovery() {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timeoutId = setTimeout(
+      () => resolve(null),
+      MODEL_DISCOVERY_SECRET_LOOKUP_TIMEOUT_MS,
+    );
+  });
+
+  try {
+    return await Promise.race([listProviderSecrets(), timeout]);
+  } catch {
+    return null;
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
 
 /**
  * Providers eligible for default-provider recovery: Goose reports them
@@ -52,6 +77,34 @@ export async function getIntentionalConfiguredProviderIds(
     getModelProviders().filter((provider) => configuredIds.has(provider.id)),
     connectionSnapshot,
   );
+}
+
+/**
+ * Providers safe to probe for model inventory. A positive Goose status is
+ * enough for discovery, while stored credentials also cover OAuth providers
+ * whose field-only status probe cannot see the shared token cache. Unlike
+ * default recovery, this only refreshes provider-local cache state and never
+ * persists a provider selection.
+ */
+export async function getModelDiscoveryProviderIds(
+  statuses: Awaited<ReturnType<typeof checkAllProviderStatus>>,
+): Promise<string[]> {
+  const configuredIds = new Set(
+    statuses
+      .filter((status) => status.isConfigured)
+      .map((status) => status.providerId),
+  );
+  const secrets = await listProviderSecretsForDiscovery();
+  const credentialedIds: ReadonlySet<string> = secrets
+    ? getCredentialedProviderIds(secrets)
+    : new Set();
+  return getModelProviders()
+    .filter(
+      (provider) =>
+        configuredIds.has(provider.id) ||
+        isCredentialedProvider(provider, credentialedIds),
+    )
+    .map((provider) => provider.id);
 }
 
 export async function reconcileManagedDefaultProviderSelection(): Promise<{

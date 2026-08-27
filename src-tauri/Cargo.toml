@@ -71,7 +71,6 @@ tar = "0.4"
 # 1.13.5 and reintroduces the CI failure; re-pin it with
 # `cargo update -p sherpa-onnx-sys --precise 1.12.40`.
 sherpa-onnx = "~1.12.40"
-ssstretch = "0.1.0"
 semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -91,6 +90,7 @@ tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-process = "2"
 tauri-plugin-shell = "2"
+tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
 time = { version = "0.3", features = ["formatting"] }
@@ -103,6 +103,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Storage_FileSystem",
     "Win32_System_Com",
     "Win32_System_Threading",
     "Win32_UI_Shell",
@@ -110,9 +111,11 @@ windows-sys = { version = "0.59", features = [
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
+coreaudio-rs = "0.14.2"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSImage", "NSMenu", "NSMenuItem", "NSAlert", "NSButton", "NSControl", "NSCell", "NSResponder", "NSView"] }
+objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSRunningApplication", "NSImage", "NSMenu", "NSMenuItem", "NSAlert", "NSButton", "NSControl", "NSCell", "NSResponder", "NSView"] }
 objc2-avf-audio = { version = "0.3.2", features = ["AVAudioApplication", "block2"] }
+objc2-core-audio = "0.3.2"
 objc2-foundation = { version = "0.3.2", features = ["NSDictionary", "NSError", "NSFileManager", "NSObject", "NSProcessInfo", "NSString", "NSURL"] }
 objc2-user-notifications = "0.3.2"
 rodio = { version = "0.22", default-features = false, features = ["playback"] }

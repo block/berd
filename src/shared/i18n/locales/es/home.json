@@ -267,6 +267,19 @@
         "peach": "Durazno"
       }
     },
+    "promptPin": {
+      "label": "Prompt",
+      "description": "Un prompt guardado que se ejecuta con un clic",
+      "runAria": "Ejecutar prompt: {{title}}",
+      "editAria": "Editar prompt",
+      "dismiss": "Eliminar prompt",
+      "titlePlaceholder": "Título (opcional)",
+      "textPlaceholder": "Escribe un prompt para ejecutar...",
+      "agentLabel": "Agente",
+      "done": "Listo",
+      "emptyText": "Prompt sin título",
+      "agentUnavailable": "El agente adjunto ya no está disponible. Edita el prompt para elegir otro."
+    },
     "unpin": {
       "label": "Desanclar"
     },
@@ -336,6 +349,28 @@
         "automation": "Nada que fijar",
         "project": "Nada que fijar",
         "skill": "Nada que fijar"
+      }
+    },
+    "label": {
+      "label": "Etiqueta",
+      "description": "Texto colocado directamente en el lienzo de Inicio",
+      "dismiss": "Descartar etiqueta",
+      "placeholder": "Añade un encabezado…",
+      "fontSize": {
+        "label": "Tamaño de fuente en píxeles",
+        "decrease": "Reducir tamaño de fuente",
+        "increase": "Aumentar tamaño de fuente",
+        "unit": "píxeles"
+      },
+      "fontFamily": {
+        "label": "Familia tipográfica",
+        "options": {
+          "sans": "Inter",
+          "serif": "Fraunces",
+          "mono": "Geist Mono",
+          "comic": "Comic Relief",
+          "marker": "Permanent Marker"
+        }
       }
     }
   }

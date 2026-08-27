@@ -199,10 +199,6 @@
       "description": "Las compilaciones de desarrollo activan los experimentos de forma predeterminada. Desactiva experimentos individuales abajo cuando necesites el flujo estable.",
       "label": "Activar nuevos experimentos automáticamente"
     },
-    "avatarCollectionPage": {
-      "description": "Elige avatares de agentes en un lienzo de colección de pantalla completa y desplazable en lugar del selector integrado en el generador de agentes.",
-      "title": "Lienzo de colección de avatares"
-    },
     "berdyOnboarding": {
       "description": "Muestra la guía interactiva de introducción y ayuda de Berdy en Inicio.",
       "resetDescription": "Restaura el mensaje inicial de Berdy y lo centra en Inicio.",
@@ -234,6 +230,10 @@
       "resetAllPartial": "Se restableció la incorporación. Los agentes iniciales aparecerán cuando estén disponibles.",
       "resetAllSuccess": "Se restablecieron todas las experiencias de incorporación.",
       "title": "Incorporación"
+    },
+    "promptPins": {
+      "description": "Fija prompts guardados en Inicio que se ejecutan con un clic, opcionalmente con un agente adjunto.",
+      "title": "Pins de prompts"
     },
     "resetToAuto": "Restablecer a automático",
     "saveError": "No se pudo guardar el ajuste del experimento. Inténtalo de nuevo.",
@@ -872,8 +872,13 @@
     }
   },
   "voice": {
+    "backendMacSpeech": "Reconocimiento de voz de Apple",
+    "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
-    "backendSiri": "Voces de Siri (macOS)",
+    "backendSiri": "Voces de Siri",
+    "chooseVoice": "Elegir…",
+    "chooseVoiceLabel": "Elige una voz: {{voice}}",
+    "chooseVoiceTitle": "Elige una voz",
     "download": "Descargar modelo",
     "downloadVoice": "Descargar {{voice}}",
     "downloadingVoice": "Descargando {{voice}}",
@@ -886,16 +891,43 @@
       "verifying": "Verificando modelo"
     },
     "downloadProgress": "{{downloaded}} de {{total}}",
+    "inputBackendDescription": "Elige cómo Berd transcribe tu voz.",
+    "macSpeechDownloading": "Descargando el modelo de dictado… {{progress}} %",
+    "macSpeechLoading": "Comprobando el reconocimiento de voz de macOS…",
+    "macSpeechLocaleUnsupported": "El reconocimiento de voz de Apple no admite {{locale}}.",
+    "macSpeechModel": "Dictado en el dispositivo",
+    "macSpeechNotInstalled": "No instalado para {{locale}}",
+    "macSpeechSystemLocale": "el idioma del sistema",
+    "interruptionDescription": "Elige qué ocurre cuando hablas mientras Berd habla.",
+    "interruptionMode": "Interrupciones",
+    "interruptionModeDescriptions": {
+      "allowInterruptions": "Berd sigue escuchando en todos los dispositivos de audio. Puedes interrumpirlo, pero el audio de los altavoces podría confundirse con tu voz.",
+      "automatic": "Permite interrupciones en la mayoría de los dispositivos de audio. Berd deja de escuchar con los altavoces integrados del Mac o si el nombre del dispositivo contiene «speaker» o «altavoces».",
+      "preventFeedback": "Berd deja de escuchar en todos los dispositivos de audio. Esto evita la retroalimentación, pero no puedes interrumpirlo."
+    },
+    "interruptionModes": {
+      "allowInterruptions": "Permitir interrupciones",
+      "automatic": "Automático",
+      "preventFeedback": "Evitar retroalimentación"
+    },
     "modelInstalled": "Instalado",
-    "modelInstalledSize": "Instalado · {{size}} en disco",
+    "modelInstalledSize": "{{size}} · Instalado",
     "modelMissingSize": "No instalado · descarga de {{size}}",
     "modelNotInstalled": "No instalado",
     "notReadyInput": "Parakeet STT no está instalado. Descárgalo abajo para usar la conversación por voz.",
     "notReadyInputAndPocketOutput": "Parakeet STT y Pocket TTS no están instalados. Descarga ambos abajo para usar la conversación por voz.",
     "notReadyInputAndSiriOutput": "Parakeet STT no está instalado y no hay ninguna voz de Siri instalada seleccionada. Completa ambos pasos abajo para usar la conversación por voz.",
+    "notReadyMacInput": "El modelo de dictado de Apple no está instalado. Descárgalo abajo para usar la conversación por voz.",
+    "notReadyMacInputAndPocketOutput": "El modelo de dictado de Apple y Pocket TTS no están instalados. Completa ambos pasos abajo para usar la conversación por voz.",
+    "notReadyMacInputAndSiriOutput": "El modelo de dictado de Apple no está instalado y no hay ninguna voz de Siri instalada seleccionada. Completa ambos pasos abajo para usar la conversación por voz.",
     "notReadyPocketOutput": "Pocket TTS no está instalado. Descárgalo abajo para usar la conversación por voz.",
     "notReadySiriOutput": "No hay ninguna voz de Siri instalada seleccionada. Descarga o selecciona una abajo para usar la conversación por voz.",
     "notReadyTitle": "La conversación por voz no está lista",
+    "microphonePermissionDenied": "El acceso al micrófono está desactivado para Berd. Permite el acceso en Ajustes del Sistema para usar la conversación por voz.",
+    "microphonePermissionTitle": "Se requiere acceso al micrófono",
+    "noVoiceSelected": "No hay ninguna voz seleccionada",
+    "openMicrophoneSettings": "Abrir ajustes del micrófono",
+    "openMicrophoneSettingsError": "No se pudieron abrir los ajustes del micrófono. Abre Ajustes del Sistema y selecciona Privacidad y seguridad > Micrófono.",
     "outputBackendDescription": "Elige cómo Berd reproduce las respuestas del asistente.",
     "playbackSpeed": "Velocidad de reproducción",
     "playing": "Reproduciendo",
@@ -910,7 +942,6 @@
     "retryDownload": "Reintentar descarga del modelo",
     "settingsDescription": "Elige cómo habla Berd, instala el reconocimiento de voz y escucha las voces disponibles.",
     "siriLanguage": "Idioma",
-    "siriLanguageDescription": "Elige el idioma exacto y la voz regional que quieres usar.",
     "siriLoading": "Cargando voces de Siri…",
     "siriNoVoices": "No hay voces de Siri disponibles para este idioma.",
     "siriUnsupported": "Las voces de Siri solo están disponibles en macOS.",
@@ -918,6 +949,7 @@
     "speechOutput": "Salida de voz",
     "selectedVoice": "Voz seleccionada: {{voice}}",
     "useVoice": "Usar {{voice}}",
+    "voice": "Voz",
     "voiceLabel": "Voz de Pocket TTS"
   }
 }

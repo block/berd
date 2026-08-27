@@ -708,9 +708,338 @@ describe("MessageBubble", () => {
     expect(screen.getAllByText("One visible assistant response.")).toHaveLength(
       1,
     );
-    if (status === "interrupted") {
-      expect(block).toHaveClass("line-through");
-    }
+  });
+
+  it("strikes only the estimated unspoken suffix after barge-in", () => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text: "One. Two. Three.",
+            speech: {
+              status: "interrupted",
+              spokenThrough: "One. Two".length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const block = container.querySelector(
+      '[data-voice-speech-status="interrupted"]',
+    );
+    expect(block).toHaveTextContent("One. Two");
+    expect(block?.querySelector("[data-voice-unspoken]")).toHaveTextContent(
+      ". Three.",
+    );
+    expect(block?.querySelector("[data-voice-unspoken]")).not.toHaveTextContent(
+      "One. Two",
+    );
+    expect(block?.querySelector("del")).toBeNull();
+    expect(block?.querySelector(".sr-only")).toHaveTextContent("Not spoken:");
+  });
+
+  it("updates the strike when unchanged text becomes interrupted", () => {
+    const text = "One. Two. Three.";
+    const { container, rerender } = render(
+      <MessageBubble
+        message={assistantMessage([
+          { type: "text", text, speech: { status: "speaking" } },
+        ])}
+      />,
+    );
+    expect(container.querySelector("[data-voice-unspoken]")).toBeNull();
+
+    rerender(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text,
+            speech: {
+              status: "interrupted",
+              spokenThrough: "One. Two".length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    expect(container.querySelector("[data-voice-unspoken]")).toHaveTextContent(
+      ". Three.",
+    );
+  });
+
+  it("keeps required list and table children structurally valid", () => {
+    const text =
+      "- Heard item\n- Unheard item\n\n| Name |\n| --- |\n| Heard |\n| Unheard |";
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text,
+            speech: {
+              status: "interrupted",
+              spokenThrough: "- Heard item".length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const list = container.querySelector("ul");
+    expect(list).toBeInTheDocument();
+    expect(
+      [...(list?.children ?? [])].every((child) => child.tagName === "LI"),
+    ).toBe(true);
+    expect(list?.children[1]).toHaveTextContent("Unheard item");
+    expect(list?.children[1]).toHaveAttribute("data-voice-unspoken", "true");
+    const table = container.querySelector("table");
+    expect(table).toBeInTheDocument();
+    expect(table?.querySelector("tbody")?.parentElement).toBe(table);
+    expect(
+      [...(table?.querySelector("tbody")?.children ?? [])].every(
+        (child) => child.tagName === "TR",
+      ),
+    ).toBe(true);
+  });
+
+  it("strikes every paragraph after the estimated interruption cutoff", () => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text: "Heard text. Unheard first paragraph.\n\nUnheard second paragraph.\n\nUnheard third paragraph.",
+            speech: {
+              status: "interrupted",
+              spokenThrough: "Heard text.".length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const block = container.querySelector(
+      '[data-voice-speech-status="interrupted"]',
+    );
+    const paragraphs = block?.querySelectorAll("p");
+    expect(paragraphs).toHaveLength(3);
+    expect(
+      paragraphs?.[0]?.querySelector("[data-voice-unspoken]"),
+    ).toHaveTextContent("Unheard first paragraph.");
+    expect(
+      paragraphs?.[0]?.querySelector("[data-voice-unspoken]"),
+    ).not.toHaveTextContent("Heard text.");
+    expect(
+      paragraphs?.[1]?.querySelector("[data-voice-unspoken]"),
+    ).toHaveTextContent("Unheard second paragraph.");
+    expect(
+      paragraphs?.[2]?.querySelector("[data-voice-unspoken]"),
+    ).toHaveTextContent("Unheard third paragraph.");
+  });
+
+  it("preserves Markdown structure while striking the unspoken range", async () => {
+    const spoken = "Heard. ";
+    const text = `${spoken}**bold** [link](https://example.com)\n\n- list item\n\n\`inline\`\n\n\`\`\`ts\nconst value = 1;\n\`\`\``;
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text,
+            speech: {
+              status: "interrupted",
+              spokenThrough: spoken.length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const block = container.querySelector(
+      '[data-voice-speech-status="interrupted"]',
+    );
+    await waitFor(() => {
+      expect(
+        block?.querySelector('[data-streamdown="strong"][data-voice-unspoken]'),
+      ).toHaveTextContent("bold");
+      expect(
+        block?.querySelector(
+          'a[href="https://example.com/"][data-voice-unspoken]',
+        ),
+      ).toHaveTextContent("link");
+      expect(block?.querySelector("li[data-voice-unspoken]")).toHaveTextContent(
+        "list item",
+      );
+      expect(
+        block
+          ?.querySelector('[data-streamdown="inline-code"]')
+          ?.closest("[data-voice-unspoken]"),
+      ).toHaveTextContent("inline");
+      expect(
+        block?.querySelector(
+          '[data-voice-unspoken] [data-streamdown="code-block"]',
+        ),
+      ).toBeTruthy();
+      expect(block?.querySelector("pre code")).toHaveTextContent(
+        "const value = 1;",
+      );
+      expect(block?.querySelectorAll(".sr-only")).toHaveLength(1);
+    });
+  });
+
+  it("keeps void Markdown elements valid after the delivery boundary", async () => {
+    const spoken = "Heard.\n\n";
+    const text = `${spoken}![alt text](https://example.com/image.png)\n\n- [ ] task\n\nline  \nbreak\n\n---`;
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text,
+            speech: {
+              status: "interrupted",
+              spokenThrough: spoken.length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    await waitFor(() => {
+      const block = container.querySelector(
+        '[data-voice-speech-status="interrupted"]',
+      );
+      expect(block?.querySelector("img")).toBeInTheDocument();
+      expect(
+        block?.querySelector('input[type="checkbox"]'),
+      ).toBeInTheDocument();
+      expect(block?.querySelector("br")).toBeInTheDocument();
+      expect(block?.querySelector("hr")).toBeInTheDocument();
+      expect(block?.querySelector("img")).toHaveAttribute(
+        "data-voice-unspoken",
+        "true",
+      );
+      expect(block?.querySelector("img")).toHaveAttribute(
+        "alt",
+        "Not spoken: alt text",
+      );
+    });
+  });
+
+  it("conservatively marks an image intersected by the delivery boundary", async () => {
+    const text = "Heard ![multi word alt](https://example.com/image.png)";
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text,
+            speech: {
+              status: "interrupted",
+              spokenThrough: "Heard ![multi".length,
+              confidence: "low",
+            },
+          },
+        ])}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector("img")).toHaveAttribute(
+        "data-voice-unspoken",
+        "true",
+      );
+      expect(container.querySelector("img")).toHaveAttribute(
+        "alt",
+        "Not spoken: multi word alt",
+      );
+    });
+  });
+
+  it("preserves decorative image semantics at the delivery boundary", async () => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text: "![](https://example.com/decorative.png)",
+            speech: {
+              status: "notSpoken",
+            },
+          },
+        ])}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector("img")).toHaveAttribute("alt", "");
+      expect(container.querySelector(".sr-only")).toHaveTextContent(
+        "Not spoken:",
+      );
+    });
+  });
+
+  it("maps Markdown entities and escapes at the delivery boundary", () => {
+    const spoken = "Heard &amp;";
+    const text = `${spoken} escaped \\*asterisk\\*.`;
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text,
+            speech: {
+              status: "interrupted",
+              spokenThrough: spoken.length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const unheard = container.querySelector("[data-voice-unspoken]");
+    expect(unheard).toHaveTextContent("escaped *asterisk*.");
+    expect(unheard).not.toHaveTextContent("Heard &");
+  });
+
+  it("preserves provider-error presentation after interrupted delivery", () => {
+    const rawError =
+      "Ran into this error: thinking blocks in the latest assistant message cannot be modified";
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text: rawError,
+            speech: {
+              status: "interrupted",
+              spokenThrough: "Ran into this error:".length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const block = container.querySelector(
+      '[data-voice-speech-status="interrupted"]',
+    );
+    expect(block).toHaveTextContent(
+      "This chat can't continue with a Claude model",
+    );
+    expect(block?.querySelector("del")).toBeNull();
+    expect(block).not.toHaveTextContent(rawError);
   });
 
   it("renders multiple content blocks", () => {
@@ -1747,5 +2076,32 @@ describe("MessageBubble", () => {
     );
 
     expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("shows a speech failure while marking only its estimated unspoken suffix", () => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([
+          {
+            type: "text",
+            text: "An unusually long heard prefix. Unheard suffix.",
+            speech: {
+              status: "failed",
+              spokenThrough: "An unusually long heard prefix".length,
+              confidence: "medium",
+            },
+          },
+        ])}
+      />,
+    );
+
+    const block = container.querySelector(
+      '[data-voice-speech-status="failed"]',
+    );
+    expect(block).toHaveTextContent("Failed");
+    expect(block?.querySelector("[data-voice-unspoken]")).toHaveTextContent(
+      ". Unheard suffix.",
+    );
+    expect(block?.querySelector(".sr-only")).toHaveTextContent("Not spoken:");
   });
 });

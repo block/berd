@@ -47,6 +47,7 @@ void *berd_siri_tts_stream_create(
     const char *voice_name,
     float rate,
     BerdSiriTTSPlaybackStarted playback_started,
+    BerdSiriTTSPlaybackStarted playback_stopped,
     void *context,
     char **error_out
 );
@@ -54,6 +55,7 @@ bool berd_siri_tts_stream_enqueue(void *stream, const char *text, char **error_o
 void berd_siri_tts_stream_finish(void *stream);
 bool berd_siri_tts_stream_is_finished(void *stream);
 uint64_t berd_siri_tts_stream_progress(void *stream);
+char *berd_siri_tts_stream_copy_delivery_json(void *stream);
 char *berd_siri_tts_stream_copy_error(void *stream);
 void berd_siri_tts_stream_cancel(void *stream);
 void berd_siri_tts_stream_release(void *stream);
@@ -70,6 +72,27 @@ bool berd_siri_tts_speak(
     void *context,
     char **error_out
 );
+
+/// Opaque Pocket PCM player backed by AVAudioUnitTimePitch. Samples are
+/// mono, noninterleaved float PCM. Device ID 0 uses the system default.
+void *berd_pocket_audio_player_create(
+    uint32_t sample_rate,
+    float rate,
+    uint32_t output_device_id,
+    char **error_out
+);
+bool berd_pocket_audio_player_enqueue(
+    void *player,
+    const float *samples,
+    uint32_t frame_count,
+    char **error_out
+);
+bool berd_pocket_audio_player_set_rate(void *player, float rate, char **error_out);
+uint64_t berd_pocket_audio_player_completed_source_frames(void *player);
+uint64_t berd_pocket_audio_player_pending_buffers(void *player);
+bool berd_pocket_audio_player_failed(void *player);
+void berd_pocket_audio_player_stop(void *player);
+void berd_pocket_audio_player_release(void *player);
 
 /// Frees strings returned by this bridge.
 void berd_siri_tts_free_string(char *value);

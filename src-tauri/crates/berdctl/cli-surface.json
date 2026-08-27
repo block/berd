@@ -178,7 +178,7 @@
         "context": {
           "action": "get_context",
           "about": "Read what the user is looking at in the app right now",
-          "afterHelp": "Example:\n  berdctl info context --json\n\nResult:\n  {\"view\": \"...\", \"active_session_id\": \"...\"|null,\n   \"active_project_id\": \"...\"|null, \"app_version\": \"...\"}"
+          "afterHelp": "Example:\n  berdctl info context --json\n\nResult:\n  {\"view\": \"...\", \"active_session_id\": \"...\"|null,\n   \"active_project_id\": \"...\"|null, \"voice_session_active\": true|false,\n   \"app_version\": \"...\"}"
         }
       }
     }

@@ -33,3 +33,4 @@ export * from "./berd_app";
 export * from "./berd_chat";
 export * from "./berd_home";
 export * from "./berd_project";
+export * from "./berd_voice";

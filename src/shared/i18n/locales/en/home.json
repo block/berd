@@ -267,6 +267,19 @@
         "peach": "Peach"
       }
     },
+    "promptPin": {
+      "label": "Prompt",
+      "description": "A saved prompt that runs with one click",
+      "runAria": "Run prompt: {{title}}",
+      "editAria": "Edit prompt",
+      "dismiss": "Remove prompt",
+      "titlePlaceholder": "Title (optional)",
+      "textPlaceholder": "Write a prompt to run...",
+      "agentLabel": "Agent",
+      "done": "Done",
+      "emptyText": "Untitled prompt",
+      "agentUnavailable": "The attached agent is no longer available. Edit the prompt to choose another."
+    },
     "unpin": {
       "label": "Unpin"
     },
@@ -336,6 +349,28 @@
         "automation": "Nothing to pin",
         "project": "Nothing to pin",
         "skill": "Nothing to pin"
+      }
+    },
+    "label": {
+      "label": "Label",
+      "description": "Text placed directly on the Home canvas",
+      "dismiss": "Dismiss label",
+      "placeholder": "Add a heading…",
+      "fontSize": {
+        "label": "Font size in pixels",
+        "decrease": "Decrease font size",
+        "increase": "Increase font size",
+        "unit": "pixels"
+      },
+      "fontFamily": {
+        "label": "Font family",
+        "options": {
+          "sans": "Inter",
+          "serif": "Fraunces",
+          "mono": "Geist Mono",
+          "comic": "Comic Relief",
+          "marker": "Permanent Marker"
+        }
       }
     }
   }

@@ -99,6 +99,7 @@ import { useAppStartup } from "./hooks/useAppStartup";
 import { useCompletionNotifications } from "@/shared/hooks/useCompletionNotifications";
 import { useHomeSessionStateSync } from "./hooks/useHomeSessionStateSync";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
+import { runPinnedPrompt } from "@/features/home/lib/runPinnedPrompt";
 import { useProjectDialog } from "./hooks/useProjectDialog";
 import { useResizableSidebar } from "./hooks/useResizableSidebar";
 import {
@@ -229,14 +230,19 @@ import {
   blockVoiceConversationStarts,
   useVoiceConversationStore,
 } from "@/features/voice-conversation/stores/voiceConversationStore";
-import { listenToVoiceConversationOpenSession } from "@/features/voice-conversation/api/voiceConversation";
-import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
-import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
-import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
 import {
-  isVoiceSetupReady,
-  refreshStableVoiceSetupReadiness,
-} from "@/features/voice-conversation/lib/voiceSetupReadiness";
+  listenToVoiceConversationOpenSession,
+  setVoiceConversationForegroundSession,
+} from "@/features/voice-conversation/api/voiceConversation";
+import { usePocketVoiceSetup } from "@/features/voice-conversation/hooks/usePocketVoiceSetup";
+import { useMacSpeechSetup } from "@/features/voice-conversation/hooks/useMacSpeechSetup";
+import { useSiriVoiceSetup } from "@/features/voice-conversation/hooks/useSiriVoiceSetup";
+import {
+  isMacSpeechAvailable,
+  useVoiceInputPreference,
+} from "@/features/voice-conversation/lib/voiceInputPreference";
+import { useVoiceOutputPreference } from "@/features/voice-conversation/lib/voiceOutputPreference";
+import { isVoiceSetupReady } from "@/features/voice-conversation/lib/voiceSetupReadiness";
 import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
@@ -727,30 +733,24 @@ export function AppShell({
   const globalPocketVoiceSetup = usePocketVoiceSetup(
     capabilities.voiceConversation,
   );
+  const globalMacSpeechSetup = useMacSpeechSetup(
+    capabilities.voiceConversation,
+  );
+  const globalVoiceInput = useVoiceInputPreference(
+    isMacSpeechAvailable(
+      globalMacSpeechSetup.status,
+      globalMacSpeechSetup.loading,
+    ),
+  );
   const globalVoiceOutput = useVoiceOutputPreference();
   const globalSiriVoiceSetup = useSiriVoiceSetup(
     capabilities.voiceConversation && globalVoiceOutput.backend === "siri",
   );
-  const globalVoiceSetupSelectionRef = useRef({
-    backend: globalVoiceOutput.backend,
-    siriLanguage: globalSiriVoiceSetup.language,
-    revision: 0,
-  });
-  if (
-    globalVoiceSetupSelectionRef.current.backend !==
-      globalVoiceOutput.backend ||
-    globalVoiceSetupSelectionRef.current.siriLanguage !==
-      globalSiriVoiceSetup.language
-  ) {
-    globalVoiceSetupSelectionRef.current = {
-      backend: globalVoiceOutput.backend,
-      siriLanguage: globalSiriVoiceSetup.language,
-      revision: globalVoiceSetupSelectionRef.current.revision + 1,
-    };
-  }
   const globalVoiceReady = isVoiceSetupReady(
     globalPocketVoiceSetup.status,
+    globalMacSpeechSetup.status,
     globalSiriVoiceSetup.status,
+    globalVoiceInput.backend,
     globalVoiceOutput.backend,
   );
   const voiceConversationWasEnabledRef = useRef(capabilities.voiceConversation);
@@ -772,6 +772,14 @@ export function AppShell({
   }, [capabilities.voiceConversation, stopVoiceConversation]);
   const sessions = useChatSessionStore(selectSessions);
   const activeSessionId = useChatSessionStore(selectActiveSessionId);
+  useLayoutEffect(() => {
+    const foregroundSessionId = activeView === "chat" ? activeSessionId : null;
+    void setVoiceConversationForegroundSession(foregroundSessionId).catch(
+      (error) => {
+        console.warn("Failed to publish the foreground voice session", error);
+      },
+    );
+  }, [activeSessionId, activeView]);
   const messagesBySession = useChatStore((state) => state.messagesBySession);
   const previousActiveSessionIdRef = useRef(activeSessionId);
   useEffect(() => {
@@ -877,6 +885,8 @@ export function AppShell({
     useState<GlobalComposerPlacement>("docked");
   const [globalComposerStarterRequest, setGlobalComposerStarterRequest] =
     useState<GlobalComposerStarterRequest | null>(null);
+  const [retainGlobalComposerDraft, setRetainGlobalComposerDraft] =
+    useState(false);
   const globalComposerStarterRequestIdRef = useRef(0);
   const [chatComposerHandoffRequest, setChatComposerHandoffRequest] =
     useState(0);
@@ -911,8 +921,6 @@ export function AppShell({
   const [voiceSettingsReturnTarget, setVoiceSettingsReturnTarget] =
     useState<VoiceSetupReturnTarget | null>(null);
   const voiceSettingsReturnTargetRef = useRef(voiceSettingsReturnTarget);
-  const voiceSettingsReturnInFlightRef = useRef<string | null>(null);
-  const voiceSettingsReturnGenerationRef = useRef(0);
   voiceSettingsReturnTargetRef.current = voiceSettingsReturnTarget;
   const [homeSessionId, setHomeSessionId] = useState<string | null>(() =>
     loadStoredHomeSessionId(),
@@ -1405,6 +1413,11 @@ export function AppShell({
         ? (homeSession.executionTarget ?? null)
         : undefined
       : globalComposerExecutionTarget;
+  const currentGlobalComposerExecutionTargetRef = useRef(
+    currentGlobalComposerExecutionTarget,
+  );
+  currentGlobalComposerExecutionTargetRef.current =
+    currentGlobalComposerExecutionTarget;
   const targetLocation = useMemo(
     () =>
       getAppNavigationLocation(
@@ -3085,6 +3098,43 @@ export function AppShell({
     ],
   );
 
+  const handleRunPinnedPrompt = useCallback(
+    async (args: { text: string; agentId?: string }) => {
+      const agentState = useAgentStore.getState();
+      await runPinnedPrompt(args, {
+        personas: agentState.personas,
+        resolveExecutionTarget: (persona) => {
+          const cachedModels = [
+            ...useProviderModelCacheStore.getState().providers,
+          ].flatMap(([providerId, entry]) =>
+            entry.models.map((model) => ({
+              ...model,
+              providerId: model.providerId ?? providerId,
+            })),
+          );
+          return personaExecutionTarget(persona, {
+            providers: agentState.providers,
+            models: cachedModels,
+            catalogEntries: getProviderCatalog(),
+          });
+        },
+        resolveFallbackExecutionTarget: () =>
+          currentGlobalComposerExecutionTargetRef.current ?? undefined,
+        // Resolves on onSettled so the widget's launch guard holds until the
+        // session is created (or fails), not just until dispatch.
+        compose: (text, options) =>
+          new Promise<void>((resolve) => {
+            handleGlobalCompose(text, options, {
+              onSettled: () => resolve(),
+            });
+          }),
+        onAgentUnavailable: () =>
+          toast.error(t("home:widgets.promptPin.agentUnavailable")),
+      });
+    },
+    [handleGlobalCompose, t],
+  );
+
   const handleResolveBerdyAgent = useCallback(async (): Promise<
     string | null
   > => {
@@ -3229,6 +3279,19 @@ export function AppShell({
   const handleGlobalVoiceConversationStart = useCallback(
     (payload: GlobalComposerExpandPayload): Promise<boolean> => {
       if (!capabilities.voiceConversation) return Promise.resolve(false);
+      if (!globalVoiceReady) {
+        return new Promise<boolean>((resolve) => {
+          guardAppNavigation(
+            () => {
+              setRetainGlobalComposerDraft(true);
+              requestOpenSettings("voice");
+              resetGlobalComposerTransition();
+              resolve(false);
+            },
+            () => resolve(false),
+          );
+        });
+      }
       const options = payload.options;
       const project = options?.projectId
         ? projects.find((candidate) => candidate.id === options.projectId)
@@ -3284,13 +3347,6 @@ export function AppShell({
         chatState.setSkillDrafts(sessionId, payload.selectedSkills);
         chatState.setDraftAttachments(sessionId, options?.attachments ?? []);
         requestVoiceConversationStart(sessionId);
-        if (!globalVoiceReady) {
-          requestOpenSettings("voice", {
-            returnTarget: { type: "voice-setup", sessionId },
-          });
-          resetGlobalComposerTransition();
-          return true;
-        }
         handleNavigateToSession(sessionId);
         resetGlobalComposerTransition();
         return true;
@@ -3470,14 +3526,8 @@ export function AppShell({
       return false;
     }
 
-    if (voiceSettingsReturnInFlightRef.current === target.sessionId) {
-      return true;
-    }
-
     const session = useChatSessionStore.getState().getSession(target.sessionId);
     if (!session || session.archivedAt) {
-      voiceSettingsReturnGenerationRef.current += 1;
-      voiceSettingsReturnInFlightRef.current = null;
       voiceSettingsReturnTargetRef.current = null;
       setVoiceSettingsReturnTarget(null);
       useVoiceConversationStore
@@ -3486,59 +3536,32 @@ export function AppShell({
       return false;
     }
 
-    voiceSettingsReturnInFlightRef.current = target.sessionId;
-    const returnGeneration = ++voiceSettingsReturnGenerationRef.current;
-    void refreshStableVoiceSetupReadiness(
-      () => globalVoiceSetupSelectionRef.current,
-    )
-      .then((ready) => {
-        if (
-          !ready &&
-          voiceSettingsReturnGenerationRef.current === returnGeneration
-        ) {
-          useVoiceConversationStore
-            .getState()
-            .clearRequestedStart(target.sessionId);
-        }
-      })
-      .catch(() => {
-        // Preserve the requested start when readiness cannot be confirmed.
-        // The session controller will consume it only after its live status is ready.
-      })
-      .finally(() => {
-        if (
-          voiceSettingsReturnGenerationRef.current !== returnGeneration ||
-          voiceSettingsReturnTargetRef.current?.sessionId !== target.sessionId
-        ) {
-          return;
-        }
-        voiceSettingsReturnInFlightRef.current = null;
-        voiceSettingsReturnTargetRef.current = null;
-        setVoiceSettingsReturnTarget(null);
+    useVoiceConversationStore.getState().clearRequestedStart(target.sessionId);
+    voiceSettingsReturnTargetRef.current = null;
+    setVoiceSettingsReturnTarget(null);
 
-        const history = navigationHistoryRef.current;
-        const previousLocation =
-          history.index > 0 ? history.entries[history.index - 1] : null;
-        if (
-          previousLocation?.view === "chat" &&
-          previousLocation.sessionId === target.sessionId
-        ) {
-          history.index -= 1;
-        } else {
-          history.entries.splice(history.index, 0, {
-            view: "chat",
-            sessionId: target.sessionId,
-          });
-        }
-
-        clearSettingsSectionUrl();
-        setActiveSession(target.sessionId);
-        setActiveView("chat");
-        setChatActiveSession(target.sessionId);
-        useChatStore.getState().markSessionRead(target.sessionId);
-        void loadSessionMessagesAndPrepare(target.sessionId);
-        updateNavigationAvailability();
+    const history = navigationHistoryRef.current;
+    const previousLocation =
+      history.index > 0 ? history.entries[history.index - 1] : null;
+    if (
+      previousLocation?.view === "chat" &&
+      previousLocation.sessionId === target.sessionId
+    ) {
+      history.index -= 1;
+    } else {
+      history.entries.splice(history.index, 0, {
+        view: "chat",
+        sessionId: target.sessionId,
       });
+    }
+
+    clearSettingsSectionUrl();
+    setActiveSession(target.sessionId);
+    setActiveView("chat");
+    setChatActiveSession(target.sessionId);
+    useChatStore.getState().markSessionRead(target.sessionId);
+    void loadSessionMessagesAndPrepare(target.sessionId);
+    updateNavigationAvailability();
     return true;
   }, [
     setActiveSession,
@@ -3557,8 +3580,6 @@ export function AppShell({
     useVoiceConversationStore
       .getState()
       .clearRequestedStart(voiceSettingsReturnTarget.sessionId);
-    voiceSettingsReturnGenerationRef.current += 1;
-    voiceSettingsReturnInFlightRef.current = null;
     voiceSettingsReturnTargetRef.current = null;
     setVoiceSettingsReturnTarget(null);
   }, [activeSettingsSection, activeView, voiceSettingsReturnTarget]);
@@ -3654,9 +3675,10 @@ export function AppShell({
             .getState()
             .clearRequestedStart(currentVoiceTarget.sessionId);
         }
-        if (voiceSettingsReturnInFlightRef.current !== null) {
-          voiceSettingsReturnGenerationRef.current += 1;
-          voiceSettingsReturnInFlightRef.current = null;
+        if (nextVoiceTarget) {
+          useVoiceConversationStore
+            .getState()
+            .clearRequestedStart(nextVoiceTarget.sessionId);
         }
         voiceSettingsReturnTargetRef.current = nextVoiceTarget;
         setVoiceSettingsReturnTarget(nextVoiceTarget);
@@ -4589,8 +4611,19 @@ export function AppShell({
   const showGlobalComposer =
     canShowGlobalComposer &&
     (globalComposerPlacement !== "docked" || renderedLocation.view !== "chat");
+  const mountGlobalComposer = showGlobalComposer || retainGlobalComposerDraft;
   const showGlobalComposerShim =
     canShowGlobalComposer && globalComposerPlacement !== "docked";
+
+  useEffect(() => {
+    if (
+      retainGlobalComposerDraft &&
+      showGlobalComposer &&
+      globalComposerPlacement === "centered"
+    ) {
+      setRetainGlobalComposerDraft(false);
+    }
+  }, [globalComposerPlacement, retainGlobalComposerDraft, showGlobalComposer]);
 
   useEffect(() => {
     if (
@@ -5431,6 +5464,7 @@ export function AppShell({
               onTagHomeComposerAgent={handleTagHomeComposerAgent}
               onTagHomeComposerProject={handleTagHomeComposerProject}
               onTagHomeComposerSkill={handleTagHomeComposerSkill}
+              onRunPinnedPrompt={handleRunPinnedPrompt}
               onHydratePinnedChatSessions={hydratePinnedChatSessions}
               onLoggedOut={onLoggedOut}
               onStartProviderTroubleshootingChat={
@@ -5514,8 +5548,9 @@ export function AppShell({
                 onClick={dismissCenteredGlobalComposer}
               />
             ) : null}
-            {showGlobalComposer ? (
+            {mountGlobalComposer ? (
               <GlobalComposerPill
+                hidden={!showGlobalComposer}
                 elevated={renderedLocation.view === "settings"}
                 focusRequest={globalComposerFocusRequest}
                 onSend={handleGlobalCompose}

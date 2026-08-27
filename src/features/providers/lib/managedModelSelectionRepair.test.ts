@@ -82,6 +82,175 @@ describe("repairManagedGooseModelSelection", () => {
     });
   });
 
+  it("repairs a model excluded by the runtime prefix allowlist", async () => {
+    const filteredConfig: RuntimeConfig = {
+      ...managedConfig,
+      goose: {
+        ...managedConfig.goose,
+        modelProviders: [
+          {
+            ...managedConfig.goose.modelProviders[0],
+            allowedModelIdPrefixes: ["goose-", "team.approved."],
+          },
+        ],
+      },
+    };
+    useRuntimeConfigStore.setState({
+      config: filteredConfig,
+      result: {
+        status: "ready",
+        source: "endpoint",
+        config: filteredConfig,
+      },
+    });
+    vi.mocked(getClient).mockResolvedValue({
+      goose: {
+        GooseUnstableProvidersSupportedModelsList: vi.fn().mockResolvedValue({
+          models: ["goose-gpt-5-5", "other.schema.chat-model"],
+        }),
+      },
+    } as never);
+
+    await expect(
+      repairManagedGooseModelSelection(
+        {
+          providerId: "databricks_v2",
+          modelId: "other.schema.chat-model",
+        },
+        "session",
+      ),
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+    });
+  });
+
+  it("preserves a runtime-declared model outside the discovery allowlist", async () => {
+    const configuredModelId = "curated.special.model";
+    const filteredConfig: RuntimeConfig = {
+      ...managedConfig,
+      goose: {
+        ...managedConfig.goose,
+        modelProviders: [
+          {
+            ...managedConfig.goose.modelProviders[0],
+            allowedModelIdPrefixes: ["goose-"],
+            models: [
+              ...managedConfig.goose.modelProviders[0].models,
+              { id: configuredModelId, name: "Curated model" },
+            ],
+          },
+        ],
+      },
+    };
+    useRuntimeConfigStore.setState({ config: filteredConfig });
+    vi.mocked(getClient).mockResolvedValue({
+      goose: {
+        GooseUnstableProvidersSupportedModelsList: vi.fn().mockResolvedValue({
+          models: ["goose-gpt-5-5", configuredModelId],
+        }),
+      },
+    } as never);
+
+    await expect(
+      repairManagedGooseModelSelection(
+        { providerId: "databricks_v2", modelId: configuredModelId },
+        "session",
+      ),
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: configuredModelId,
+    });
+  });
+
+  it("preserves an allowed selection when discovery is temporarily partial", async () => {
+    const filteredConfig: RuntimeConfig = {
+      ...managedConfig,
+      goose: {
+        ...managedConfig.goose,
+        modelProviders: [
+          {
+            ...managedConfig.goose.modelProviders[0],
+            allowedModelIdPrefixes: ["goose-", "team.approved."],
+          },
+        ],
+      },
+    };
+    useRuntimeConfigStore.setState({ config: filteredConfig });
+    vi.mocked(getClient).mockResolvedValue({
+      goose: {
+        GooseUnstableProvidersSupportedModelsList: vi.fn().mockResolvedValue({
+          models: ["goose-gpt-5-5"],
+        }),
+      },
+    } as never);
+
+    await expect(
+      repairManagedGooseModelSelection(
+        {
+          providerId: "databricks_v2",
+          modelId: "team.approved.chat-model",
+        },
+        "session",
+      ),
+    ).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "team.approved.chat-model",
+    });
+  });
+
+  it("applies the current prefix policy when config changes during discovery", async () => {
+    let resolveInventory!: (value: { models: string[] }) => void;
+    const inventory = new Promise<{ models: string[] }>((resolve) => {
+      resolveInventory = resolve;
+    });
+    const initiallyAllowedConfig: RuntimeConfig = {
+      ...managedConfig,
+      goose: {
+        ...managedConfig.goose,
+        modelProviders: [
+          {
+            ...managedConfig.goose.modelProviders[0],
+            allowedModelIdPrefixes: ["team."],
+          },
+        ],
+      },
+    };
+    useRuntimeConfigStore.setState({ config: initiallyAllowedConfig });
+    vi.mocked(getClient).mockResolvedValue({
+      goose: {
+        GooseUnstableProvidersSupportedModelsList: vi
+          .fn()
+          .mockReturnValue(inventory),
+      },
+    } as never);
+
+    const repair = repairManagedGooseModelSelection(
+      { providerId: "databricks_v2", modelId: "team.chat-model" },
+      "session",
+    );
+    useRuntimeConfigStore.setState({
+      config: {
+        ...initiallyAllowedConfig,
+        goose: {
+          ...initiallyAllowedConfig.goose,
+          modelProviders: [
+            {
+              ...initiallyAllowedConfig.goose.modelProviders[0],
+              allowedModelIdPrefixes: ["goose-"],
+            },
+          ],
+        },
+      },
+    });
+    resolveInventory({ models: ["goose-gpt-5-5", "team.chat-model"] });
+
+    await expect(repair).resolves.toEqual({
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
+    });
+  });
+
   it("drops its cached inventory when the provider inventory refreshes", async () => {
     const supportedModelsList = vi
       .fn()

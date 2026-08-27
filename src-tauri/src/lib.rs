@@ -109,7 +109,21 @@ pub fn run() {
             .unwrap_or_else(|error| panic!("failed to initialize isolated E2E mode: {error}"));
     }
 
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // Single-instance enforcement: on Windows, a second launch exits early
+    // and focuses the existing window instead of starting a duplicate app
+    // (log files, db connections, goose serve, etc.). macOS handles this
+    // via RunEvent::Reopen further below.
+    #[cfg(target_os = "windows")]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }));
+
+    let builder = builder
         .plugin(tauri_plugin_shell::init())
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -609,6 +623,7 @@ pub fn run() {
             commands::system::search_file_mentions,
             commands::system::read_image_attachment,
             commands::system::read_text_file,
+            commands::system::stat_file,
             commands::terminal::start_terminal,
             commands::terminal::write_terminal,
             commands::terminal::resize_terminal,
@@ -643,6 +658,10 @@ pub fn run() {
             commands::siri_voice::flush_siri_voice_stream,
             commands::siri_voice::finish_siri_voice_stream,
             commands::siri_voice::stop_siri_voice,
+            commands::mac_speech::get_mac_speech_status,
+            commands::mac_speech::install_mac_speech_model,
+            commands::microphone_permission::get_microphone_permission_status,
+            commands::microphone_permission::open_microphone_privacy_settings,
             commands::native_voice::get_native_voice_conversation_status,
             commands::native_voice::block_native_voice_conversation_starts,
             commands::native_voice::release_native_voice_conversation_start_block,
@@ -653,6 +672,7 @@ pub fn run() {
             commands::native_voice::reject_native_voice_conversation_transcript,
             commands::native_voice::start_native_voice_conversation,
             commands::native_voice::stop_native_voice_conversation,
+            commands::native_voice::stop_native_voice_conversation_for_replacement,
             commands::native_voice::push_native_voice_audio,
             commands::voice_buddy::open_voice_conversation_session,
             commands::voice_buddy::show_voice_conversation_controls,
@@ -660,6 +680,7 @@ pub fn run() {
             commands::voice_buddy::stop_voice_conversation_from_buddy,
             commands::notifications::should_suppress_completion_notification,
             commands::voice_capture::register_voice_renderer_instance,
+            commands::voice_capture::set_voice_renderer_foreground_session,
             commands::window_session::get_session_window_support,
             commands::window_session::open_session_window,
             commands::window_session::release_session,

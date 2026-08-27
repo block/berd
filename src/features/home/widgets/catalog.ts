@@ -6,8 +6,11 @@ import { ClockWidget } from "./ClockWidget";
 import { OnboardingTourWidget } from "./OnboardingTourWidget";
 import { photoAspectRatioOf, photoShapeOf, PhotoWidget } from "./PhotoWidget";
 import { ProjectArtifactWidget } from "./ProjectArtifactWidget";
+import { PromptPinWidget } from "./PromptPinWidget";
+import { promptPinMode } from "./promptPinMode";
 import { SkillPinWidget } from "./SkillPinWidget";
 import { StickyNoteWidget } from "./StickyNoteWidget";
+import { LABEL_DEFAULT_SIZE } from "./labelWidgetModel";
 import { clockModeOf } from "./clockWidgetMode";
 import type {
   WidgetCatalogEntry,
@@ -36,6 +39,10 @@ const ONBOARDING_TOUR_AVATAR_PROFILE: WidgetSizeProfile = {
     lockAspectRatio: true,
   },
 };
+
+// One 20px content row (14px title text) plus the 16px padding the chat pin
+// card uses, so the two pins read as the same family on the canvas.
+const PROMPT_PIN_READY_HEIGHT = 52;
 
 const CLOCK_ANALOG_PROFILE: WidgetSizeProfile = {
   defaultSize: { width: 156, height: 156 },
@@ -123,26 +130,43 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
       minHeight: 156,
       maxHeight: 320,
     },
-    resolveProfile: (instance) =>
-      instance.state?.noteId === "onboarding:starter-tasks"
-        ? {
-            defaultSize: { width: 224, height: 196 },
-            sizeBounds: {
-              minWidth: 224,
-              maxWidth: 360,
-              minHeight: 156,
-              maxHeight: 320,
-            },
-          }
-        : {
-            defaultSize: { width: 224, height: 196 },
-            sizeBounds: {
-              minWidth: 184,
-              maxWidth: 360,
-              minHeight: 156,
-              maxHeight: 320,
-            },
+    resolveProfile: (instance) => {
+      if (instance.state?.noteId === "onboarding:starter-tasks") {
+        return {
+          defaultSize: { width: 224, height: 196 },
+          sizeBounds: {
+            minWidth: 224,
+            maxWidth: 360,
+            minHeight: 156,
+            maxHeight: 320,
           },
+        };
+      }
+      return {
+        defaultSize: { width: 224, height: 196 },
+        sizeBounds: {
+          minWidth: 184,
+          maxWidth: 360,
+          minHeight: 156,
+          maxHeight: 320,
+        },
+      };
+    },
+    Component: StickyNoteWidget,
+  },
+  {
+    id: "label",
+    category: "note",
+    labelKey: "widgets.label.label",
+    descriptionKey: "widgets.label.description",
+    defaultSize: LABEL_DEFAULT_SIZE,
+    sizeBounds: {
+      minWidth: LABEL_DEFAULT_SIZE.width,
+      maxWidth: LABEL_DEFAULT_SIZE.width,
+      minHeight: LABEL_DEFAULT_SIZE.height,
+      maxHeight: LABEL_DEFAULT_SIZE.height,
+    },
+    hideResizeHandle: true,
     Component: StickyNoteWidget,
   },
   {
@@ -339,6 +363,51 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
       maxHeight: 132,
     },
     Component: SkillPinWidget,
+  },
+  {
+    id: "promptPin",
+    category: "prompt",
+    labelKey: "widgets.promptPin.label",
+    descriptionKey: "widgets.promptPin.description",
+    // The editor needs room for a title, textarea, agent row, and Done; the
+    // ready card is a single title row. One frame size cannot serve both, and
+    // a frame taller than the card leaves dead drag surface with the resize
+    // handle floating below it — so each mode gets its own size profile.
+    defaultSize: { width: 280, height: 170 },
+    sizeBounds: {
+      minWidth: 220,
+      maxWidth: 420,
+      minHeight: 140,
+      maxHeight: 400,
+    },
+    resolveProfile: (instance) =>
+      promptPinMode(instance.state) === "ready"
+        ? {
+            // Height is pinned rather than a range. The ready card is one row
+            // of fixed-size content, so this is the only height that gives it
+            // the same 16px padding the chat pin uses. A range would also let
+            // a height persisted before this profile existed clamp to
+            // something taller than the row and read as dead padding —
+            // pinning it makes those instances self-heal on the next render.
+            defaultSize: { width: 280, height: PROMPT_PIN_READY_HEIGHT },
+            sizeBounds: {
+              minWidth: 200,
+              maxWidth: 420,
+              minHeight: PROMPT_PIN_READY_HEIGHT,
+              maxHeight: PROMPT_PIN_READY_HEIGHT,
+            },
+          }
+        : {
+            defaultSize: { width: 280, height: 170 },
+            sizeBounds: {
+              minWidth: 220,
+              maxWidth: 420,
+              minHeight: 140,
+              maxHeight: 400,
+            },
+          },
+    preservePositionOnProfileChange: true,
+    Component: PromptPinWidget,
   },
 ];
 

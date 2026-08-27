@@ -143,7 +143,11 @@ import {
 } from "@/shared/ui/pagination";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { Progress } from "@/shared/ui/progress";
-import { RadioGroup, RadioGroupItem } from "@/shared/ui/radio-group";
+import {
+  RadioGroup,
+  RadioGroupCard,
+  RadioGroupItem,
+} from "@/shared/ui/radio-group";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -317,7 +321,7 @@ const componentPageDescriptions: Partial<Record<string, string>> = {
   Progress:
     "Linear completion feedback tied to primary color and track tokens.",
   "Radio Group":
-    "Single-choice controls with grouped keyboard behavior and selected state tokens.",
+    "Single-choice controls with grouped keyboard behavior, selected state tokens, and an optional full-row card treatment.",
   "Resizable Handle": "Drag handle affordances for resizable panel layouts.",
   "Scroll Area":
     "Custom scroll containers that preserve overlay and scrollbar consistency.",
@@ -2627,16 +2631,32 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
   ),
   Progress: () => <Progress value={62} className="w-72" />,
   "Radio Group": () => (
-    <RadioGroup defaultValue="comfortable">
-      <Label className="items-center">
-        <RadioGroupItem value="compact" />
-        Compact
-      </Label>
-      <Label className="items-center">
-        <RadioGroupItem value="comfortable" />
-        Comfortable
-      </Label>
-    </RadioGroup>
+    <div className="grid w-80 gap-5">
+      <RadioGroup defaultValue="comfortable">
+        <Label className="items-center">
+          <RadioGroupItem value="compact" />
+          Compact
+        </Label>
+        <Label className="items-center">
+          <RadioGroupItem value="comfortable" />
+          Comfortable
+        </Label>
+      </RadioGroup>
+      <RadioGroup defaultValue="automatic" className="gap-2">
+        <RadioGroupCard
+          id="radio-card-automatic"
+          value="automatic"
+          label="Automatic"
+          description="Choose behavior based on the current audio output."
+        />
+        <RadioGroupCard
+          id="radio-card-prevent"
+          value="prevent"
+          label="Prevent feedback"
+          description="Pause listening while audio is playing."
+        />
+      </RadioGroup>
+    </div>
   ),
   "Resizable Handle": () => (
     <ResizablePanelGroup
@@ -4792,7 +4812,149 @@ function ProgressPage() {
 }
 
 function RadioGroupPage() {
-  return <GenericComponentPage name="Radio Group" />;
+  const [presentation, setPresentation] = useState<"item" | "card">("card");
+  const [selected, setSelected] = useState(true);
+  const [disabled, setDisabled] = useState(false);
+  const value = selected ? "option" : "";
+  const stateLabel = `${selected ? "Selected" : "Unselected"}${
+    disabled ? ", disabled" : ""
+  }`;
+  const colorRows: TokenColorRow[] =
+    presentation === "card"
+      ? [
+          {
+            anatomy: "Card surface",
+            state: stateLabel,
+            background: selected ? "muted" : "transparent",
+            textIcon: disabled ? "foreground / 50% opacity" : "foreground",
+            border: selected ? "primary" : "border",
+          },
+          ...(!disabled
+            ? [
+                {
+                  anatomy: "Card surface",
+                  state: "Focus visible",
+                  background: selected ? "muted" : "transparent",
+                  textIcon: "foreground",
+                  border: "ring + ring / 50%",
+                } satisfies TokenColorRow,
+              ]
+            : []),
+          {
+            anatomy: "Description",
+            state: stateLabel,
+            textIcon: disabled
+              ? "muted-foreground / 50% opacity"
+              : "muted-foreground",
+          },
+        ]
+      : [
+          {
+            anatomy: "Radio control",
+            state: stateLabel,
+            background: selected ? "primary" : "transparent",
+            textIcon: selected ? "background" : "none",
+            border: selected ? "none" : "input",
+          },
+          ...(!disabled
+            ? [
+                {
+                  anatomy: "Radio control",
+                  state: "Focus visible",
+                  background: selected ? "primary" : "transparent",
+                  textIcon: selected ? "background" : "none",
+                  border: "ring + ring / 50%",
+                } satisfies TokenColorRow,
+              ]
+            : []),
+        ];
+
+  return (
+    <>
+      <PageIntro
+        title="Radio Group"
+        description="Choose between compact radio items and full-row selectable cards with shared selected, hover, focus-visible, and disabled semantics."
+      />
+      <ComponentSpec name="Radio Group" />
+      <ComponentPlayground
+        description="Switch presentation and state to inspect the exact anatomy and semantic tokens used by the shared primitive."
+        preview={
+          <RadioGroup
+            value={value}
+            onValueChange={(value) => setSelected(value === "option")}
+            className="w-full max-w-sm"
+          >
+            {presentation === "card" ? (
+              <RadioGroupCard
+                id="radio-group-playground-option"
+                value="option"
+                label="Allow interruptions"
+                description="Listen while Berd is speaking."
+                disabled={disabled}
+              />
+            ) : (
+              <div className="flex items-center gap-2">
+                <RadioGroupItem
+                  id="radio-group-playground-option"
+                  value="option"
+                  disabled={disabled}
+                />
+                <Label htmlFor="radio-group-playground-option">Option</Label>
+              </div>
+            )}
+          </RadioGroup>
+        }
+        controls={[
+          {
+            id: "radio-group-presentation",
+            label: "Presentation",
+            type: "select",
+            value: presentation,
+            options: [
+              { label: "Card", value: "card" },
+              { label: "Item", value: "item" },
+            ],
+            onChange: (value) => setPresentation(value as "item" | "card"),
+          },
+          {
+            id: "radio-group-selected",
+            label: "Selected",
+            type: "switch",
+            checked: selected,
+            onChange: setSelected,
+          },
+          {
+            id: "radio-group-disabled",
+            label: "Disabled",
+            type: "switch",
+            checked: disabled,
+            onChange: setDisabled,
+          },
+        ]}
+        details={
+          <ComponentTokenDetails
+            colorRows={colorRows}
+            textRows={[
+              {
+                anatomy: presentation === "card" ? "Card label" : "Item label",
+                size: "text-sm",
+                weight: presentation === "card" ? "font-medium" : "font-normal",
+              },
+              ...(presentation === "card"
+                ? [
+                    {
+                      anatomy: "Card description",
+                      size: "text-xs",
+                      weight: "font-normal",
+                    } satisfies TokenTextRow,
+                  ]
+                : []),
+            ]}
+          />
+        }
+      />
+    </>
+  );
 }
 
 function ResizableHandlePage() {

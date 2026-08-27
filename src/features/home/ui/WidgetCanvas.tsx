@@ -284,6 +284,7 @@ export function WidgetCanvas({
   onSelectSession,
   onStartProjectChat,
   onOpenAutomation,
+  onRunPrompt,
   onCreatePersona,
   onCreateProject,
   onWorkspaceNameRequest,
@@ -799,6 +800,7 @@ export function WidgetCanvas({
                   onSelectSession={onSelectSession}
                   onStartProjectChat={onStartProjectChat}
                   onOpenAutomation={onOpenAutomation}
+                  onRunPrompt={onRunPrompt}
                   onCreatePersona={onCreatePersona}
                   onCreateProject={onCreateProject}
                   onWorkspaceNameRequest={onWorkspaceNameRequest}

@@ -1,8 +1,6 @@
 import { useCallback, useState } from "react";
-import type { ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  ArrowLeft,
   ChevronLeft,
   Copy,
   Download,
@@ -14,7 +12,6 @@ import {
   Trash2,
 } from "lucide-react";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
-import { isLibraryAvatarRef } from "@/shared/avatars/catalog";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Badge } from "@/shared/ui/badge";
@@ -41,16 +38,12 @@ import {
 import {
   AGENT_PROFILE_FIELDS_TRANSITION_NAME,
   getAgentAvatarTransitionName,
-  runAgentViewTransition,
 } from "@/features/agents/lib/agentViewTransitions";
 import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
 import { AgentProfileLayout } from "@/features/agents/ui/AgentProfileLayout";
 import { AgentIdentityRail } from "@/features/agents/ui/AgentIdentityRail";
 import { useAvatarLibrary } from "@/features/agents/hooks/useAvatarLibrary";
-import { AgentAvatarSection } from "@/features/agents/ui/AgentAvatarSection";
 import { AvatarCollectionOverlay } from "@/features/agents/ui/AvatarCollectionOverlay";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
-import { AVATAR_COLLECTION_PAGE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
   AVATAR_CUSTOMIZE_LABEL_CLASS,
   AVATAR_CUSTOMIZE_SURFACE_CLASS,
@@ -76,10 +69,6 @@ const SECONDARY_ACTION_CLASS =
 const OVERFLOW_TRIGGER_CLASS =
   "bg-surface-agent-profile-control-bg text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover";
 const ACTION_ICON_CLASS = "size-3";
-const AVATAR_FIELD_INPUT_CLASS =
-  "h-[42px] rounded-sm border-0 bg-surface-agent-profile-control-bg px-4 text-[14px] leading-[15px] text-surface-agent-profile-fg shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-surface-agent-profile-fg-placeholder hover:shadow-agent-profile-input-hover focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-agent-profile-input-focus";
-const AVATAR_FIELD_LABEL_CLASS =
-  "text-xs leading-4 font-medium text-surface-agent-profile-fg-muted";
 const INSTRUCTIONS_PANEL_CLASS =
   "relative h-[min(32rem,calc(100vh-var(--spacing-app-top-bar)-7rem))] min-h-0 w-full overflow-hidden rounded-md bg-surface-agent-profile-control-bg text-sm leading-relaxed text-surface-agent-profile-fg shadow-none";
 const INSTRUCTIONS_SCROLL_CLASS =
@@ -121,38 +110,15 @@ export function AgentDetailPage({
   } = usePinToHomeWidget({ kind: "agent", id: persona.id });
   const personaAvatarValue = normalizeAvatarUrl(persona.avatar) ?? "";
   const [avatarValue, setAvatarValue] = useState(personaAvatarValue);
-  const [avatarPreviewFailed, setAvatarPreviewFailed] = useState(false);
+  const [, setAvatarPreviewFailed] = useState(false);
   const [avatarSavePending, setAvatarSavePending] = useState(false);
-  const [showAvatarSection, setShowAvatarSection] = useState(false);
   const [showAvatarOverlay, setShowAvatarOverlay] = useState(false);
-  // Same gate as the agent builder: when on, avatar picking happens in the
-  // full-surface collection gallery instead of the inline customize section.
-  const avatarCollectionOverlayEnabled = Boolean(
-    useExperiment(AVATAR_COLLECTION_PAGE_EXPERIMENT_ID)?.enabled,
-  );
   const [previousPersonaAvatarValue, setPreviousPersonaAvatarValue] =
     useState(personaAvatarValue);
   const [previousPersonaId, setPreviousPersonaId] = useState(persona.id);
   const avatarLibrary = useAvatarLibrary(isEditable);
-  const trimmedAvatarValue = avatarValue.trim();
-  const normalizedAvatarValue = normalizeAvatarUrl(trimmedAvatarValue);
-  const customAvatarUrlValue = isLibraryAvatarRef(trimmedAvatarValue)
-    ? ""
-    : avatarValue;
-  const avatarUrlError =
-    trimmedAvatarValue.length > 0 && !normalizedAvatarValue
-      ? t("editor.avatarUrlInvalid")
-      : null;
+  const normalizedAvatarValue = normalizeAvatarUrl(avatarValue.trim());
   const avatarMedia = useAvatarMedia(normalizedAvatarValue ?? null);
-  const selectedLibraryAvatarRef =
-    normalizedAvatarValue && isLibraryAvatarRef(normalizedAvatarValue)
-      ? normalizedAvatarValue
-      : null;
-  const canSaveCustomAvatar =
-    Boolean(normalizedAvatarValue) &&
-    !isLibraryAvatarRef(normalizedAvatarValue ?? "") &&
-    normalizedAvatarValue !== personaAvatarValue &&
-    !avatarSavePending;
   const descriptionValue = getRealPersonaDescription(persona);
   const providerLabel = getPersonaProviderLabel(
     persona.provider,
@@ -190,23 +156,11 @@ export function AgentDetailPage({
 
   if (previousPersonaId !== persona.id) {
     setPreviousPersonaId(persona.id);
-    setShowAvatarSection(false);
     setShowAvatarOverlay(false);
   }
 
   const handleOpenAvatarSection = useCallback(() => {
-    // With the collection canvas experiment on, avatar picking opens the
-    // full-surface gallery takeover (same surface as the agent builder)
-    // instead of swapping the profile body for the inline customize section.
-    if (avatarCollectionOverlayEnabled) {
-      setShowAvatarOverlay(true);
-      return;
-    }
-    runAgentViewTransition(() => setShowAvatarSection(true));
-  }, [avatarCollectionOverlayEnabled]);
-
-  const handleCloseAvatarSection = useCallback(() => {
-    runAgentViewTransition(() => setShowAvatarSection(false));
+    setShowAvatarOverlay(true);
   }, []);
 
   const commitAvatar = useCallback(
@@ -220,8 +174,9 @@ export function AgentDetailPage({
         await onAvatarUpdate(persona, nextAvatar);
         setAvatarValue(nextAvatar ?? "");
         setAvatarPreviewFailed(false);
-      } catch {
+      } catch (error) {
         setAvatarValue(personaAvatarValue);
+        throw error;
       } finally {
         setAvatarSavePending(false);
       }
@@ -235,42 +190,13 @@ export function AgentDetailPage({
     ],
   );
 
-  const handleClearAvatar = useCallback(() => {
-    setAvatarValue("");
-    void commitAvatar(null);
-  }, [commitAvatar]);
-
-  const handleAvatarUrlChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
-      setAvatarValue(event.target.value);
-      setAvatarPreviewFailed(false);
-    },
-    [],
-  );
-
-  const handleSaveCustomAvatar = useCallback(() => {
-    if (!normalizedAvatarValue || avatarUrlError) {
-      return;
-    }
-
-    void commitAvatar(normalizedAvatarValue);
-  }, [avatarUrlError, commitAvatar, normalizedAvatarValue]);
-
-  const handleSelectAvatar = useCallback(
-    (nextAvatarRef: string) => {
+  const handleSelectOverlayAvatar = useCallback(
+    async (nextAvatarRef: string) => {
       setAvatarValue(nextAvatarRef);
       setAvatarPreviewFailed(false);
-      void commitAvatar(nextAvatarRef);
+      await commitAvatar(nextAvatarRef);
     },
     [commitAvatar],
-  );
-
-  const handleSelectOverlayAvatar = useCallback(
-    (nextAvatarRef: string) => {
-      setShowAvatarOverlay(false);
-      handleSelectAvatar(nextAvatarRef);
-    },
-    [handleSelectAvatar],
   );
 
   const handleCloseAvatarOverlay = useCallback(() => {
@@ -303,7 +229,7 @@ export function AgentDetailPage({
         )}
       </div>
 
-      {isEditable && !showAvatarSection ? (
+      {isEditable ? (
         <>
           <Button
             type="button"
@@ -439,25 +365,10 @@ export function AgentDetailPage({
           {persona.displayName}
         </h1>
       </div>
-      {!showAvatarSection ? (
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          {profileActions}
-        </div>
-      ) : null}
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+        {profileActions}
+      </div>
     </div>
-  );
-
-  const backToProfileControl = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      onClick={handleCloseAvatarSection}
-      className="h-9 bg-surface-agent-profile-control-bg px-3 text-sm text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover"
-    >
-      <ArrowLeft className="size-3.5" />
-      {t("editor.avatarBackToProfile")}
-    </Button>
   );
 
   const avatarCollectionOverlayNode = showAvatarOverlay ? (
@@ -478,58 +389,34 @@ export function AgentDetailPage({
           <AgentIdentityRail
             avatar={avatarPreview}
             leadingControl={null}
-            metadata={showAvatarSection ? [] : metadata}
-            modeControl={showAvatarSection ? backToProfileControl : null}
+            metadata={metadata}
+            modeControl={null}
           />
         }
       >
-        {showAvatarSection ? (
-          <AgentAvatarSection
-            avatarPreviewFailed={avatarPreviewFailed}
-            avatarPickerDisabled={avatarSavePending}
-            avatarUrlError={avatarUrlError}
-            avatarUrlInputId="agent-detail-avatar-url"
-            canSaveCustomAvatar={canSaveCustomAvatar}
-            clearDisabled={avatarSavePending}
-            customAvatarUrlValue={customAvatarUrlValue}
-            fieldGroupClassName="space-y-2"
-            fieldInputClassName={AVATAR_FIELD_INPUT_CLASS}
-            fieldLabelClassName={AVATAR_FIELD_LABEL_CLASS}
-            library={avatarLibrary}
-            onAvatarUrlChange={handleAvatarUrlChange}
-            onClearAvatar={handleClearAvatar}
-            onPreviewError={() => setAvatarPreviewFailed(true)}
-            onSaveCustomAvatar={handleSaveCustomAvatar}
-            onSelectAvatar={handleSelectAvatar}
-            selectedAvatarRef={selectedLibraryAvatarRef}
-            showClearAvatar={trimmedAvatarValue.length > 0}
-            title={t("editor.customizeAvatar")}
-          />
-        ) : (
-          <div className="space-y-6">
-            <section
-              className="agents-unpaired-enter space-y-3 pt-6"
-              style={{ animationDelay: "80ms" }}
-              aria-labelledby="agent-instructions"
-            >
-              <h2 id="agent-instructions" className={CONTEXT_LABEL_CLASS}>
-                {t("view.instructions")}
-              </h2>
-              <div className={INSTRUCTIONS_PANEL_CLASS}>
-                <section
-                  className={INSTRUCTIONS_SCROLL_CLASS}
-                  // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to focus this nested scroll region.
-                  tabIndex={0}
-                  aria-labelledby="agent-instructions"
-                >
-                  <MessageResponse className="min-w-0 pb-4 text-sm leading-relaxed">
-                    {persona.systemPrompt || " "}
-                  </MessageResponse>
-                </section>
-              </div>
-            </section>
-          </div>
-        )}
+        <div className="space-y-6">
+          <section
+            className="agents-unpaired-enter space-y-3 pt-6"
+            style={{ animationDelay: "80ms" }}
+            aria-labelledby="agent-instructions"
+          >
+            <h2 id="agent-instructions" className={CONTEXT_LABEL_CLASS}>
+              {t("view.instructions")}
+            </h2>
+            <div className={INSTRUCTIONS_PANEL_CLASS}>
+              <section
+                className={INSTRUCTIONS_SCROLL_CLASS}
+                // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to focus this nested scroll region.
+                tabIndex={0}
+                aria-labelledby="agent-instructions"
+              >
+                <MessageResponse className="min-w-0 pb-4 text-sm leading-relaxed">
+                  {persona.systemPrompt || " "}
+                </MessageResponse>
+              </section>
+            </div>
+          </section>
+        </div>
       </AgentProfileLayout>
       {avatarCollectionOverlayNode}
     </>

@@ -1539,6 +1539,36 @@ describe("transcript projection cache", () => {
     expect(second.heightRevision).not.toBe(first.heightRevision);
   });
 
+  it("invalidates render and height revisions when the interruption cutoff changes", () => {
+    const original = message(
+      "assistant-1",
+      "assistant",
+      "One. Two. Three.",
+      utc(2026, 6, 4, 10),
+    );
+    const interrupted = (spokenThrough: number) => ({
+      ...original,
+      content: original.content.map((content) =>
+        content.type === "text"
+          ? {
+              ...content,
+              speech: {
+                status: "interrupted" as const,
+                spokenThrough,
+                confidence: "medium" as const,
+              },
+            }
+          : content,
+      ),
+    });
+
+    const first = buildMessageRevisions(interrupted("One.".length));
+    const second = buildMessageRevisions(interrupted("One. Two.".length));
+
+    expect(second.renderRevision).not.toBe(first.renderRevision);
+    expect(second.heightRevision).not.toBe(first.heightRevision);
+  });
+
   it("includes user message origin in render and height revisions", () => {
     const original = message("user-1", "user", "same", utc(2026, 6, 4, 10));
     const withOrigin = {

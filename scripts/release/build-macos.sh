@@ -377,16 +377,15 @@ if [[ "$BUILD_KIND" == "custom" ]]; then
 
   if [[ "$VITE_BYO_KEY_PROVIDERS_VALUE" == "1" ]]; then
     echo "+++ :wrench: Removing bundled distribution provider values for BYO key providers"
-    # Strip every distribution-injected `goose serve` contribution, not just the
-    # host: a BYO-key build routes fast tasks through the user's own provider,
-    # so a bundled internal fastModelId would leak into it. This is the
-    # release-time twin of clear_default_databricks_provider_env in Rust, which
-    # is cfg(debug_assertions) and therefore covers BYO dev only.
+    # Strip every distribution-owned provider policy, not just the host: a
+    # BYO-key build must use the user's own models and fast-task routing. This is
+    # the release-time twin of clear_default_databricks_distribution_config in
+    # Rust, which is cfg(debug_assertions) and therefore covers BYO dev only.
     tmp="$(mktemp)"
     jq '
       .goose.modelProviders |= map(
         if .id == "databricks_v2" then
-          del(.fastModelId)
+          del(.fastModelId, .allowedModelIdPrefixes)
           | .endpointEnv |= del(.DATABRICKS_HOST)
           | if (.endpointEnv | length) == 0 then del(.endpointEnv) else . end
         else

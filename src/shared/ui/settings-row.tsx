@@ -16,7 +16,7 @@ interface SettingsRowProps
   children?: ReactNode;
   details?: ReactNode | ((context: SettingsRowSlotContext) => ReactNode);
   align?: "center" | "start";
-  layout?: "inline" | "stacked";
+  layout?: "inline" | "stacked" | "responsive";
   density?: "default" | "compact";
   labelId?: string;
   descriptionId?: string;
@@ -75,6 +75,8 @@ export function SettingsRow({
           "flex min-w-0 gap-4",
           align === "center" ? "items-center" : "items-start",
           layout === "stacked" && "flex-col items-stretch gap-3",
+          layout === "responsive" &&
+            "flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:gap-4",
         )}
       >
         {leading ? (
@@ -109,6 +111,7 @@ export function SettingsRow({
             className={cn(
               "min-w-0 shrink-0",
               layout === "stacked" && "w-full",
+              layout === "responsive" && "w-full sm:w-auto",
               actionClassName,
             )}
           >

@@ -8,13 +8,12 @@ import {
 import { useTranslation } from "react-i18next";
 import {
   IconAlertTriangle,
-  IconArrowLeft,
   IconLayoutSidebarLeftExpand,
   IconPhoto,
   IconSparkles,
   IconX,
 } from "@tabler/icons-react";
-import { avatarRef, isLibraryAvatarRef } from "@/shared/avatars/catalog";
+import { avatarRef } from "@/shared/avatars/catalog";
 import { normalizeAvatarUrl } from "@/shared/lib/avatarUrl";
 import { cn } from "@/shared/lib/cn";
 import type { AgentSourceEntry } from "@/shared/api/agents";
@@ -44,10 +43,7 @@ import {
   PLACEHOLDER_AGENT_BODY,
   promoteDraft,
 } from "@/features/agents/lib/agentBuilderSession";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
-import { AVATAR_COLLECTION_PAGE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { AvatarCollectionOverlay } from "@/features/agents/ui/AvatarCollectionOverlay";
-import { AvatarLibraryPicker } from "@/features/agents/ui/AvatarLibraryPicker";
 import { ProviderModelFields } from "@/features/agents/ui/PersonaFields/ProviderModelFields";
 import { FORM_FIELD_CLASS } from "@/shared/ui/form-field-tokens";
 import { hasRealAgentDescription } from "@/shared/api/agents";
@@ -130,6 +126,8 @@ export function AgentBuilderRail({
       onWritePersisted: handleWritePersisted,
     });
   const [isPromoting, setIsPromoting] = useState(false);
+  const saveAttemptKey = `${sessionId}:${targetAgentPath ?? "pending"}`;
+  const [attemptedSaveKey, setAttemptedSaveKey] = useState<string | null>(null);
   const [avatarPanel, setAvatarPanel] = useState<"closed" | "library">(
     "closed",
   );
@@ -139,15 +137,6 @@ export function AgentBuilderRail({
   const [failedMissingDraftRecoveryKey, setFailedMissingDraftRecoveryKey] =
     useState<string | null>(null);
   const avatarLibrary = useAvatarLibrary(true);
-  const avatarCollectionExperiment = useExperiment(
-    AVATAR_COLLECTION_PAGE_EXPERIMENT_ID,
-  );
-  // When on, "library" renders as the full-surface collection canvas overlay
-  // (portal over the whole app) instead of the inline picker. The chat +
-  // builder stay mounted underneath, so composer drafts, resize state, all survive the takeover.
-  const avatarCollectionOverlayEnabled = Boolean(
-    avatarCollectionExperiment?.enabled,
-  );
   const isWaitingForDraftTarget = !targetAgentPath;
   const missingDraftRecoveryKey = `${sessionId}:${targetAgentPath ?? "pending"}`;
   const [previousMissingDraftRecoveryKey, setPreviousMissingDraftRecoveryKey] =
@@ -197,20 +186,6 @@ export function AgentBuilderRail({
     typeof data?.properties?.avatar === "string" ? data.properties.avatar : "";
   const trimmedAvatar = avatarRaw.trim();
   const normalizedAvatar = normalizeAvatarUrl(trimmedAvatar);
-  const [selectedCollectionId, setSelectedCollectionId] = useState<
-    string | null
-  >(null);
-  const selectedCollectionLabel = useMemo(() => {
-    if (!selectedCollectionId) {
-      return null;
-    }
-    return (
-      avatarLibrary.catalog?.collections.find(
-        (collection) => collection.id === selectedCollectionId,
-      )?.label ?? null
-    );
-  }, [avatarLibrary.catalog, selectedCollectionId]);
-
   const provider = (data?.properties?.provider as string | undefined) ?? "";
   const modelProviderId =
     (data?.properties?.modelProviderId as string | undefined) ?? "";
@@ -232,9 +207,10 @@ export function AgentBuilderRail({
 
   const onSelectAvatar = useCallback(
     (selectedAvatarRef: string) => {
+      // Avatar selection joins the same working buffer as every other field.
+      // Existing-agent edits stay local until Save; drafts keep their normal
+      // debounced durability rather than making this field a separate commit.
       writeProperty("avatar", selectedAvatarRef);
-      setSelectedCollectionId(null);
-      setAvatarPanel("closed");
     },
     [writeProperty],
   );
@@ -261,10 +237,6 @@ export function AgentBuilderRail({
       : null;
   const effectiveAvatar =
     normalizedAvatar ?? (defaultAvatarId ? avatarRef(defaultAvatarId) : null);
-  const selectedAvatarRefValue =
-    effectiveAvatar && isLibraryAvatarRef(effectiveAvatar)
-      ? effectiveAvatar
-      : null;
   const selectedAvatarMediaState = useAvatarMediaState(effectiveAvatar);
 
   const onChangeProvider = useCallback(
@@ -326,14 +298,24 @@ export function AgentBuilderRail({
     contentFieldValue !== PLACEHOLDER_AGENT_BODY;
   const missingRequiredFields = [
     requiresNewDraftFields && !avatarRequired
-      ? t("builderRail.requiredAvatar")
+      ? { label: t("builderRail.requiredAvatar"), blocksSaveAttempt: true }
       : null,
-    !nameRequired ? t("builderRail.requiredName") : null,
-    !descriptionRequired ? t("builderRail.requiredDescription") : null,
+    !nameRequired
+      ? { label: t("builderRail.requiredName"), blocksSaveAttempt: true }
+      : null,
+    !descriptionRequired
+      ? {
+          label: t("builderRail.requiredDescription"),
+          blocksSaveAttempt: false,
+        }
+      : null,
     requiresNewDraftFields && !instructionsRequired
-      ? t("builderRail.requiredInstructions")
+      ? {
+          label: t("builderRail.requiredInstructions"),
+          blocksSaveAttempt: true,
+        }
       : null,
-  ].filter((field): field is string => field !== null);
+  ].filter((field) => field !== null);
   useEffect(() => {
     if (!data) {
       onSaveDraftHandlerChange?.(null);
@@ -415,6 +397,7 @@ export function AgentBuilderRail({
         : "idle";
 
   const handleSaveChanges = useCallback(async () => {
+    setAttemptedSaveKey(saveAttemptKey);
     if (!canPromoteDraft) {
       return;
     }
@@ -455,13 +438,18 @@ export function AgentBuilderRail({
     defaultAvatarId,
     onDraftPromoted,
     requiresNewDraftFields,
+    saveAttemptKey,
     saveNow,
     sessionId,
     trimmedAvatar.length,
     update,
   ]);
 
-  const saveButtonUnavailable = !canPromoteDraft;
+  const saveButtonUnavailable =
+    missingRequiredFields.some((field) => field.blocksSaveAttempt) ||
+    saveStatus === "saving" ||
+    isPromoting ||
+    blockingError;
   const footerNode = data ? (
     <div className="mt-4 border-t border-border/70 pt-4">
       <Button
@@ -489,7 +477,9 @@ export function AgentBuilderRail({
       >
         {missingRequiredFields.length > 0
           ? t("builderRail.completeRequiredFields", {
-              fields: missingRequiredFields.join(", "),
+              fields: missingRequiredFields
+                .map((field) => field.label)
+                .join(", "),
             })
           : saveStatus === "unsaved"
             ? t("builderRail.unsavedChanges")
@@ -524,52 +514,14 @@ export function AgentBuilderRail({
     </aside>
   );
 
-  // Rendered by both the compact rail and the full-page builder. Declared once
-  // so picker changes cannot be applied to one layout and silently missed in
-  // the other.
-  const avatarLibraryPickerNode = (
-    <AvatarLibraryPicker
-      library={avatarLibrary}
-      selectedAvatarRef={selectedAvatarRefValue}
-      onSelectAvatar={onSelectAvatar}
-      onPreviewError={() => {}}
-      selectedCollectionId={selectedCollectionId}
-      onSelectCollection={setSelectedCollectionId}
-    />
-  );
-
   const avatarCollectionOverlayNode =
-    avatarCollectionOverlayEnabled && avatarPanel === "library" ? (
+    avatarPanel === "library" ? (
       <AvatarCollectionOverlay
         library={avatarLibrary}
-        initialCollectionId={selectedCollectionId}
         onSelectAvatar={onSelectAvatar}
-        onClose={() => {
-          setSelectedCollectionId(null);
-          setAvatarPanel("closed");
-        }}
+        onClose={() => setAvatarPanel("closed")}
       />
     ) : null;
-
-  const pickerHeaderNode = (
-    <div className={cn(STICKY_HEADER_CLASS, "flex items-center gap-2")}>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-xs"
-        aria-label={t("builderRail.backToForm")}
-        onClick={() => {
-          if (selectedCollectionId) setSelectedCollectionId(null);
-          else setAvatarPanel("closed");
-        }}
-      >
-        <IconArrowLeft className="size-4" aria-hidden="true" />
-      </Button>
-      <h2 className="truncate text-sm font-normal text-foreground">
-        {selectedCollectionLabel ?? t("builderRail.chooseAvatarTitle")}
-      </h2>
-    </div>
-  );
 
   if (error === "parse") {
     return shell(
@@ -666,17 +618,6 @@ export function AgentBuilderRail({
     );
   }
 
-  // With the collection canvas experiment on, the "library" panel renders as
-  // the full-surface overlay (mounted below) instead of swapping the rail
-  // body, so the form stays visible underneath the frosted glass.
-  if (
-    avatarPanel === "library" &&
-    !fullPage &&
-    !avatarCollectionOverlayEnabled
-  ) {
-    return shell(pickerHeaderNode, avatarLibraryPickerNode);
-  }
-
   const avatarNode = (
     <section>
       <button
@@ -756,7 +697,9 @@ export function AgentBuilderRail({
           id="builder-rail-description"
           value={descriptionFieldValue}
           required
-          aria-invalid={!descriptionRequired}
+          aria-invalid={
+            attemptedSaveKey === saveAttemptKey && !descriptionRequired
+          }
           placeholder={t("builderRail.descriptionPlaceholder")}
           onChange={(event) => update({ description: event.target.value })}
           className={FIELD_CLASS}
@@ -824,35 +767,7 @@ export function AgentBuilderRail({
     </>
   );
 
-  const fullPageLeftColumn =
-    avatarPanel === "library" && !avatarCollectionOverlayEnabled ? (
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-8 py-6 xl:px-12 xl:py-8">
-        <div className="flex items-center gap-2 text-sm text-foreground">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            className="-ml-1 shrink-0"
-            aria-label={t("builderRail.backToForm")}
-            onClick={() => {
-              if (selectedCollectionId) {
-                setSelectedCollectionId(null);
-              } else {
-                setAvatarPanel("closed");
-              }
-            }}
-          >
-            <IconArrowLeft className="size-4" aria-hidden="true" />
-          </Button>
-          <h3 className="truncate text-sm font-normal text-foreground">
-            {selectedCollectionLabel ?? t("builderRail.chooseAvatarTitle")}
-          </h3>
-        </div>
-        {avatarLibraryPickerNode}
-      </div>
-    ) : (
-      <div className="flex flex-col">{avatarNode}</div>
-    );
+  const fullPageLeftColumn = <div className="flex flex-col">{avatarNode}</div>;
 
   if (fullPage) {
     return (

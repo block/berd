@@ -52,14 +52,6 @@ export interface SseExtensionConfig {
   bundled?: boolean;
 }
 
-export interface AcpExtensionConfig {
-  type: "acp";
-  name: string;
-  description: string;
-  id: string;
-  bundled?: boolean;
-}
-
 export interface FrontendExtensionConfig {
   type: "frontend";
   name: string;
@@ -87,7 +79,6 @@ export type ExtensionConfig =
   | PlatformExtensionConfig
   | StreamableHttpExtensionConfig
   | SseExtensionConfig
-  | AcpExtensionConfig
   | FrontendExtensionConfig
   | InlinePythonExtensionConfig;
 

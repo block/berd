@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { shareInFlight } from "@/shared/lib/shareInFlight";
+import type {
+  VoiceInterruptionMode,
+  VoiceInterruptionSensitivity,
+} from "../lib/voiceInterruptionPreference";
 
 export interface PocketVoice {
   id: string;
@@ -36,8 +40,21 @@ export interface PocketVoiceStatus {
 
 export interface PocketVoiceStreamEvent {
   streamId: string;
-  state: "started" | "completed" | "interrupted" | "failed";
+  state: "started" | "progress" | "completed" | "interrupted" | "failed";
   error: string | null;
+  delivery?: VoiceDeliveryProgress | null;
+}
+
+export interface VoiceDeliverySegment {
+  text: string;
+  playedFrames: number;
+  totalFrames: number;
+  synthesisComplete: boolean;
+}
+
+export interface VoiceDeliveryProgress {
+  sampleRate?: number;
+  segments: VoiceDeliverySegment[];
 }
 
 export type VoiceModelKind = "pocket" | "parakeet";
@@ -87,8 +104,16 @@ export function speakPocketVoice(text: string): Promise<void> {
   return invoke("speak_pocket_voice", { text });
 }
 
-export function startPocketVoiceStream(streamId: string): Promise<void> {
-  return invoke("start_pocket_voice_stream", { streamId });
+export function startPocketVoiceStream(
+  streamId: string,
+  interruptionMode: VoiceInterruptionMode,
+  interruptionSensitivity: VoiceInterruptionSensitivity,
+): Promise<void> {
+  return invoke("start_pocket_voice_stream", {
+    streamId,
+    interruptionMode,
+    interruptionSensitivity,
+  });
 }
 
 export function appendPocketVoiceStream(

@@ -242,7 +242,7 @@ describe("telemetry", () => {
       app_version: expect.any(String),
       environment: "production",
     });
-    // `user_id` is gone from the wire contract entirely — `berd-otlp-logs-v1`
+    // `user_id` is gone from the wire contract entirely — `berd-otlp-logs-v2`
     // rejects its presence — so nothing may reintroduce it.
     expect(record.attributes).not.toHaveProperty("user_id");
     // Emitted immediately (not backdated), so no explicit timestamp.
@@ -378,7 +378,7 @@ describe("telemetry", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Pinned as literals, not as the module's own constants: the gateway's
-    // `berd-otlp-logs-v1` schema accepts exactly these values — both renamed
+    // `berd-otlp-logs-v2` schema accepts exactly these values — both renamed
     // from `goose-internal` before any client shipped — so a revert is a
     // terminal 400 on every upload, and the dropped batch is never retried.
     expect(loggerProviderConfigs[0].resource.attributes).toMatchObject({

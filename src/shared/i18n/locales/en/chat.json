@@ -689,6 +689,9 @@
     "viewCode": "Code",
     "loading": "Loading file…",
     "loadError": "Couldn't load this file.",
+    "fileDeleted": "File deleted from disk.",
+    "fileUnreadable": "File changed but can't be read.",
+    "reload": "Reload",
     "imageAlt": "Preview of {{filename}}"
   },
   "artifactChips": {

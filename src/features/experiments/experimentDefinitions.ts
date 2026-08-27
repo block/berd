@@ -55,8 +55,6 @@ export const VOICE_CONVERSATION_EXPERIMENT_ID = "voice-conversation";
 export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
   "transcript-virtual-renderer";
 
-export const AVATAR_COLLECTION_PAGE_EXPERIMENT_ID = "avatar-collection-page";
-
 export const CHAT_ON_CANVAS_EXPERIMENT_ID = "chat-on-canvas";
 
 export const STARTER_TASKS_EXPERIMENT_ID = "onboarding-starter-tasks";
@@ -66,6 +64,8 @@ export const BERDY_ONBOARDING_EXPERIMENT_ID = "berdy-onboarding";
 export const SKILL_DISCOVERY_EXPERIMENT_ID = "skill-discovery";
 
 export const RELATED_PULL_REQUESTS_EXPERIMENT_ID = "related-pull-requests";
+
+export const PROMPT_PINS_EXPERIMENT_ID = "prompt-pins";
 
 export const EXPERIMENT_DEFINITIONS = [
   {
@@ -107,16 +107,6 @@ export const EXPERIMENT_DEFINITIONS = [
     manualEnableOnly: true,
   },
   {
-    id: AVATAR_COLLECTION_PAGE_EXPERIMENT_ID,
-    titleKey: "experiments.avatarCollectionPage.title",
-    descriptionKey: "experiments.avatarCollectionPage.description",
-    // Replaces the inline avatar picker in the agent builder with a
-    // full-surface, pannable collection canvas rendered as a frosted-glass
-    // takeover. Purely a UI swap over the same avatar library state; no
-    // backend authority. No explicit default, so it follows the global
-    // auto-enable preference: on in dev builds, off in production.
-  },
-  {
     id: BERDY_ONBOARDING_EXPERIMENT_ID,
     titleKey: "experiments.berdyOnboarding.title",
     descriptionKey: "experiments.berdyOnboarding.description",
@@ -126,5 +116,14 @@ export const EXPERIMENT_DEFINITIONS = [
     id: RELATED_PULL_REQUESTS_EXPERIMENT_ID,
     titleKey: "experiments.relatedPullRequests.title",
     descriptionKey: "experiments.relatedPullRequests.description",
+  },
+  {
+    id: PROMPT_PINS_EXPERIMENT_ID,
+    titleKey: "experiments.promptPins.title",
+    descriptionKey: "experiments.promptPins.description",
+    // Gates only the widget picker's "Prompt" row; already-pinned prompts
+    // keep rendering when disabled (user data is never hidden). No explicit
+    // default, so it follows the global auto-enable preference: on in dev
+    // builds, off in production.
   },
 ] as const satisfies readonly ExperimentDefinition[];

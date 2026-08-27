@@ -4,8 +4,10 @@ import type { ModelOption } from "@/features/chat/types";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { getClient } from "@/shared/api/acpConnection";
 import { notifyProviderModelInventoryInvalidated } from "../lib/providerModelInventoryEvents";
+import { filterDiscoveredModelIds } from "@/shared/runtime-config/modelProviderPolicy";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 
-const MODEL_CACHE_STORAGE_KEY = "goose:providerModelCache:v1";
+const MODEL_CACHE_STORAGE_KEY = "goose:providerModelCache:v2";
 const MODEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const inFlightRefreshes = new Map<string, Promise<void>>();
 const queuedForceRefreshes = new Map<string, Promise<void>>();
@@ -124,10 +126,7 @@ async function fetchProviderSupportedModels(
 export function isCachedModelInventoryAuthoritative(
   entry: CachedProviderModels | undefined,
 ): boolean {
-  return (
-    entry != null &&
-    (entry.runtimeManaged || (entry.models.length > 0 && entry.fetchedAt > 0))
-  );
+  return entry != null && (entry.runtimeManaged || entry.fetchedAt > 0);
 }
 
 function isStale(entry: CachedProviderModels | undefined): boolean {
@@ -260,9 +259,17 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
         });
 
         try {
-          const ids = await fetchProviderSupportedModels(providerId);
-          const discoveredModels = providerModelOptionsFromIds(providerId, ids);
-          if (discoveredModels.length === 0) {
+          const discoveredIds = await fetchProviderSupportedModels(providerId);
+          const allowedIds = filterDiscoveredModelIds(
+            useRuntimeConfigStore.getState().config,
+            providerId,
+            discoveredIds,
+          );
+          const discoveredModels = providerModelOptionsFromIds(
+            providerId,
+            allowedIds,
+          );
+          if (discoveredIds.length === 0) {
             if (
               !existing ||
               versionAtStart !== refreshVersion(providerId) ||

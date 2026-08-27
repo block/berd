@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   getDefaultVoiceOutputBackend,
   getVoiceOutputBackend,
+  setVoiceOutputBackend,
 } from "./voiceOutputPreference";
 
 const originalNavigator = globalThis.navigator;
@@ -18,6 +19,7 @@ describe("voice output preference", () => {
 
   afterEach(() => {
     window.localStorage.clear();
+    vi.restoreAllMocks();
     Object.defineProperty(globalThis, "navigator", {
       configurable: true,
       value: originalNavigator,
@@ -47,5 +49,17 @@ describe("voice output preference", () => {
     setPlatform("Macintosh");
     window.localStorage.setItem("goose:voice-output-backend", "siri");
     expect(getVoiceOutputBackend()).toBe("siri");
+  });
+
+  it("keeps an explicit Pocket choice when local storage rejects the write", () => {
+    setPlatform("Macintosh");
+    window.localStorage.setItem("goose:voice-output-backend", "siri");
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("storage unavailable");
+    });
+
+    setVoiceOutputBackend("pocket");
+
+    expect(getVoiceOutputBackend()).toBe("pocket");
   });
 });

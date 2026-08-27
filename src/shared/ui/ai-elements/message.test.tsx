@@ -11,6 +11,7 @@ import {
 
 const streamdownMocks = vi.hoisted(() => ({
   latestProps: undefined as Record<string, unknown> | undefined,
+  renderCount: 0,
 }));
 
 vi.mock("streamdown", () => ({
@@ -21,6 +22,7 @@ vi.mock("streamdown", () => ({
   },
   Streamdown: (props: Record<string, unknown>) => {
     streamdownMocks.latestProps = props;
+    streamdownMocks.renderCount += 1;
 
     return (
       <div data-testid="streamdown">
@@ -149,5 +151,27 @@ describe("MessageResponse mermaid controls", () => {
       expect(downloadDir).toHaveBeenCalled();
       expect(openPath).toHaveBeenCalledWith("/Users/test/Downloads");
     });
+  });
+});
+
+describe("MessageResponse voice delivery label", () => {
+  it("updates the accessible label when only the locale copy changes", () => {
+    streamdownMocks.renderCount = 0;
+    const { rerender } = render(
+      <MessageResponse strikethroughFrom={6} strikethroughLabel="Not spoken">
+        Heard. Unheard.
+      </MessageResponse>,
+    );
+    const firstRenderCount = streamdownMocks.renderCount;
+
+    rerender(
+      <MessageResponse strikethroughFrom={6} strikethroughLabel="No hablado">
+        Heard. Unheard.
+      </MessageResponse>,
+    );
+
+    expect(streamdownMocks.renderCount).toBeGreaterThan(firstRenderCount);
+    const plugins = streamdownMocks.latestProps?.rehypePlugins as unknown[][];
+    expect(plugins.at(-1)?.[2]).toBe("No hablado");
   });
 });

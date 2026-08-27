@@ -199,10 +199,6 @@
       "description": "Dev builds enable experiments by default. Turn off individual experiments below when you need the stable path.",
       "label": "Auto-enable new experiments"
     },
-    "avatarCollectionPage": {
-      "description": "Choose agent avatars on a full-screen, pannable collection canvas instead of the inline picker in the agent builder.",
-      "title": "Avatar collection canvas"
-    },
     "berdyOnboarding": {
       "description": "Show Berdy's interactive onboarding guide and help bubble on Home.",
       "resetDescription": "Restore Berdy's starter tooltip and center it on Home.",
@@ -234,6 +230,10 @@
       "resetAllPartial": "Onboarding was reset. Starter agents will appear when they're available.",
       "resetAllSuccess": "All onboarding experiences were reset.",
       "title": "Onboarding"
+    },
+    "promptPins": {
+      "description": "Pin saved prompts to Home that run with one click, optionally with an attached agent.",
+      "title": "Prompt pins"
     },
     "resetToAuto": "Reset to auto",
     "saveError": "Couldn't save the experiment setting. Try again.",
@@ -869,8 +869,13 @@
     }
   },
   "voice": {
+    "backendMacSpeech": "Apple speech recognition",
+    "backendParakeet": "Parakeet STT",
     "backendPocket": "Pocket TTS",
-    "backendSiri": "Siri voices (macOS)",
+    "backendSiri": "Siri voices",
+    "chooseVoice": "Choose…",
+    "chooseVoiceLabel": "Choose a voice: {{voice}}",
+    "chooseVoiceTitle": "Choose a voice",
     "download": "Download model",
     "downloadVoice": "Download {{voice}}",
     "downloadingVoice": "Downloading {{voice}}",
@@ -883,16 +888,43 @@
       "verifying": "Verifying model"
     },
     "downloadProgress": "{{downloaded}} of {{total}}",
+    "inputBackendDescription": "Choose how Berd transcribes your speech.",
+    "macSpeechDownloading": "Downloading dictation model… {{progress}}%",
+    "macSpeechLoading": "Checking macOS speech recognition…",
+    "macSpeechLocaleUnsupported": "Apple speech recognition does not support {{locale}}.",
+    "macSpeechModel": "On-device dictation",
+    "macSpeechNotInstalled": "Not installed for {{locale}}",
+    "macSpeechSystemLocale": "the system language",
+    "interruptionDescription": "Choose what happens when you speak while Berd is talking.",
+    "interruptionMode": "Interruptions",
+    "interruptionModeDescriptions": {
+      "allowInterruptions": "Berd keeps listening on every audio device. You can interrupt, but speaker audio may be mistaken for your voice.",
+      "automatic": "Allows interruptions on most audio devices. Berd pauses listening on built-in Mac speakers or when the device name contains “speaker” or “altavoces.”",
+      "preventFeedback": "Berd pauses listening on every audio device. This prevents feedback, but you can’t interrupt."
+    },
+    "interruptionModes": {
+      "allowInterruptions": "Allow interruptions",
+      "automatic": "Automatic",
+      "preventFeedback": "Prevent feedback"
+    },
     "modelInstalled": "Installed",
-    "modelInstalledSize": "Installed · {{size}} on disk",
+    "modelInstalledSize": "{{size}} · Installed",
     "modelMissingSize": "Not installed · {{size}} download",
     "modelNotInstalled": "Not installed",
     "notReadyInput": "Parakeet STT is not installed. Download it below to use Voice Conversation.",
     "notReadyInputAndPocketOutput": "Parakeet STT and Pocket TTS are not installed. Download both below to use Voice Conversation.",
     "notReadyInputAndSiriOutput": "Parakeet STT is not installed, and no installed Siri voice is selected. Complete both steps below to use Voice Conversation.",
+    "notReadyMacInput": "Apple's on-device dictation model is not installed. Download it below to use Voice Conversation.",
+    "notReadyMacInputAndPocketOutput": "Apple's on-device dictation model and Pocket TTS are not installed. Complete both steps below to use Voice Conversation.",
+    "notReadyMacInputAndSiriOutput": "Apple's on-device dictation model is not installed, and no installed Siri voice is selected. Complete both steps below to use Voice Conversation.",
     "notReadyPocketOutput": "Pocket TTS is not installed. Download it below to use Voice Conversation.",
     "notReadySiriOutput": "No installed Siri voice is selected. Download or select one below to use Voice Conversation.",
     "notReadyTitle": "Voice Conversation isn't ready",
+    "microphonePermissionDenied": "Microphone access is turned off for Berd. Allow access in System Settings to use Voice Conversation.",
+    "microphonePermissionTitle": "Microphone access is required",
+    "noVoiceSelected": "No voice selected",
+    "openMicrophoneSettings": "Open Microphone Settings",
+    "openMicrophoneSettingsError": "Couldn't open Microphone Settings. Open System Settings and select Privacy & Security > Microphone.",
     "outputBackendDescription": "Choose how Berd speaks assistant responses.",
     "playbackSpeed": "Playback speed",
     "playing": "Playing",
@@ -907,7 +939,6 @@
     "retryDownload": "Retry model download",
     "settingsDescription": "Choose how Berd speaks, install speech recognition, and preview available voices.",
     "siriLanguage": "Language",
-    "siriLanguageDescription": "Choose the exact language and regional voice you want to use.",
     "siriLoading": "Loading Siri voices…",
     "siriNoVoices": "No Siri voices are available for this language.",
     "siriUnsupported": "Siri voices are available on macOS only.",
@@ -915,6 +946,7 @@
     "speechOutput": "Speech output",
     "selectedVoice": "Selected voice: {{voice}}",
     "useVoice": "Use {{voice}}",
+    "voice": "Voice",
     "voiceLabel": "Pocket TTS voice"
   }
 }

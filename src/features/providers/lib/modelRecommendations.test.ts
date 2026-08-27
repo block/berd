@@ -47,6 +47,7 @@ describe("modelRecommendations", () => {
     expect(options.map((option) => option.id)).toEqual([
       "goose-gpt-5-5",
       "goose-claude-opus-4-8",
+      "claude-opus-4-8",
       "goose-gpt-5-5-mini",
     ]);
     expect(
@@ -55,6 +56,23 @@ describe("modelRecommendations", () => {
     expect(
       options.filter((option) => option.recommended).map((option) => option.id),
     ).toEqual(["goose-gpt-5-5", "goose-claude-opus-4-8", "goose-gpt-5-5-mini"]);
+    expect(options.find((option) => option.id === "claude-opus-4-8")).toEqual(
+      expect.objectContaining({ recommended: false, featured: false }),
+    );
+  });
+
+  it("shows only the model name for Unity Catalog model ids", () => {
+    const [option] = providerModelOptionsFromIds("databricks_v2", [
+      "data_workflow_tools.production.fraud_detection_model",
+    ]);
+
+    expect(option).toEqual(
+      expect.objectContaining({
+        id: "data_workflow_tools.production.fraud_detection_model",
+        name: "Fraud_detection_model",
+        displayName: "Fraud_detection_model",
+      }),
+    );
   });
 
   it("does not feature or rank generic custom provider models", () => {

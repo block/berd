@@ -192,6 +192,14 @@ describe("runtimeConfigSchema", () => {
       ["goose", "modelProviders", 0, "fastModelId"],
     ],
     [
+      "allowed model id prefix",
+      configWithProvider({
+        ...managedProvider,
+        allowedModelIdPrefixes: [" team.approved. "],
+      }),
+      ["goose", "modelProviders", 0, "allowedModelIdPrefixes", 0],
+    ],
+    [
       "model id",
       configWithProvider({
         ...managedProvider,
@@ -208,6 +216,43 @@ describe("runtimeConfigSchema", () => {
     [string, unknown, (string | number)[]]
   >)("rejects whitespace-padded %s", (_label, config, path) => {
     expectRuntimeConfigIssue(config, path, /leading or trailing whitespace/);
+  });
+
+  it("accepts a provider model id prefix allowlist", () => {
+    expect(() =>
+      runtimeConfigSchema.parse(
+        configWithProvider({
+          ...managedProvider,
+          allowedModelIdPrefixes: ["goose-", "team.approved."],
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects a model id prefix allowlist on another provider", () => {
+    expect(() =>
+      runtimeConfigSchema.parse(
+        configWithProvider({
+          ...managedProvider,
+          id: "other-managed",
+          allowedModelIdPrefixes: ["team."],
+        }),
+      ),
+    ).toThrow(/supported only for databricks_v2/);
+  });
+
+  it.each([
+    ["empty", []],
+    ["duplicate", ["goose-", "goose-"]],
+  ])("rejects a model id prefix allowlist that is %s", (_label, prefixes) => {
+    expect(() =>
+      runtimeConfigSchema.parse(
+        configWithProvider({
+          ...managedProvider,
+          allowedModelIdPrefixes: prefixes,
+        }),
+      ),
+    ).toThrow(/allowedModelIdPrefixes/);
   });
 
   it("accepts a provider that declares a fastModelId", () => {

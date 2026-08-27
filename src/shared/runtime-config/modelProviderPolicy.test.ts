@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RuntimeConfig } from "./schema";
 import {
+  filterDiscoveredModelIds,
   managedGooseSelectionChanged,
   resolveManagedGooseProviderSelection,
 } from "./modelProviderPolicy";
@@ -27,6 +28,42 @@ const managedConfig: RuntimeConfig = {
     ],
   },
 };
+
+describe("filterDiscoveredModelIds", () => {
+  it("preserves the provider inventory when no prefix policy is configured", () => {
+    expect(
+      filterDiscoveredModelIds(managedConfig, "other-managed", [
+        "first-model",
+        "second-model",
+      ]),
+    ).toEqual(["first-model", "second-model"]);
+  });
+
+  it("keeps only model ids matching the provider prefix allowlist", () => {
+    const config: RuntimeConfig = {
+      ...managedConfig,
+      goose: {
+        ...managedConfig.goose,
+        modelProviders: managedConfig.goose.modelProviders.map((provider) =>
+          provider.id === "databricks_v2"
+            ? {
+                ...provider,
+                allowedModelIdPrefixes: ["goose-", "team.approved."],
+              }
+            : provider,
+        ),
+      },
+    };
+
+    expect(
+      filterDiscoveredModelIds(config, "databricks_v2", [
+        "goose-gpt-5-5",
+        "team.approved.chat-model",
+        "other.schema.chat-model",
+      ]),
+    ).toEqual(["goose-gpt-5-5", "team.approved.chat-model"]);
+  });
+});
 
 describe("resolveManagedGooseProviderSelection", () => {
   it("returns unrestricted for an empty provider list", () => {

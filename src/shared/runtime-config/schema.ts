@@ -147,6 +147,18 @@ export const runtimeGooseModelProviderSchema = z
     customProvider: runtimeCustomProviderSchema.optional(),
     endpointEnv: endpointEnvSchema.optional(),
     modelInventoryMode: z.enum(modelInventoryModes).optional(),
+    // Omit to expose every provider-discovered model. Runtime-declared models
+    // are explicit and remain available regardless of this discovery policy.
+    allowedModelIdPrefixes: z
+      .array(
+        runtimeIdString("goose modelProvider allowedModelIdPrefixes entries"),
+      )
+      .min(1, "goose modelProvider allowedModelIdPrefixes must not be empty")
+      .refine(
+        hasUniqueTrimmedValues,
+        "goose modelProvider allowedModelIdPrefixes must not contain duplicates",
+      )
+      .optional(),
     // Model Goose's lightweight "fast" tasks run on (exported to `goose
     // serve` as GOOSE_FAST_MODEL). A served endpoint id the provider must be
     // able to route (databricks_v2 routes by model-name substring, e.g. a
@@ -181,6 +193,15 @@ export const runtimeGooseConfigSchema = z
         });
       }
       providerIds.add(providerId);
+
+      if (provider.allowedModelIdPrefixes && providerId !== "databricks_v2") {
+        ctx.addIssue({
+          code: "custom",
+          path: ["modelProviders", providerIndex, "allowedModelIdPrefixes"],
+          message:
+            "goose modelProvider allowedModelIdPrefixes is supported only for databricks_v2",
+        });
+      }
 
       if (
         provider.customProvider &&
