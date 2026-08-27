@@ -730,6 +730,7 @@ describe("desktop release workflow platform gate", () => {
       VITE_AUTOMATIONS: "0",
       VITE_BUILDERBOT: "0",
       VITE_FEEDBACK: "0",
+      VITE_FEEDBACK_SURVEYS: "0",
       VITE_MANAGED_CONNECTIONS: "0",
       VITE_VOICE_DICTATION: "0",
       VITE_BYO_KEY_PROVIDERS: "1",

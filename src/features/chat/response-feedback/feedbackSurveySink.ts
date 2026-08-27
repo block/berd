@@ -5,10 +5,9 @@ export interface FeedbackSurveySinkEvent {
   messageId: string;
   appearanceId: string;
   surveyType: "response";
-  eventSequence: number;
   eventType: "responded";
   response: FeedbackSurveyResponse;
 }
 
-/** Distribution-owned transport seam; stock Berd intentionally sends nothing. */
+/** Distribution-owned transport and ordering seam; stock Berd sends nothing. */
 export function feedbackSurveySink(_event: FeedbackSurveySinkEvent): void {}

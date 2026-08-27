@@ -14,7 +14,7 @@ describe("buildProfile", () => {
     vi.resetModules();
   });
 
-  it("defaults all six Block-service-dependent product families off", () => {
+  it("defaults distribution-specific product families off", () => {
     expect(getBuildFeatureState()).toEqual({
       authGate: false,
       agentTools: false,
@@ -22,6 +22,7 @@ describe("buildProfile", () => {
       builderbot: false,
       byoKeyProviders: true,
       feedback: false,
+      feedbackSurveys: false,
       managedConnections: false,
       telemetry: true,
       telemetryEnforced: false,
@@ -36,7 +37,7 @@ describe("buildProfile", () => {
     ["VITE_AGENT_TOOLS", "agentTools"],
     ["VITE_AUTOMATIONS", "automations"],
     ["VITE_BUILDERBOT", "builderbot"],
-    ["VITE_FEEDBACK", "feedback"],
+    ["VITE_FEEDBACK_SURVEYS", "feedbackSurveys"],
     ["VITE_MANAGED_CONNECTIONS", "managedConnections"],
     ["VITE_VOICE_DICTATION", "voiceDictation"],
   ] as const)("enables %s independently", async (env, feature) => {
@@ -50,11 +51,23 @@ describe("buildProfile", () => {
       "automations",
       "builderbot",
       "feedback",
+      "feedbackSurveys",
       "managedConnections",
       "voiceDictation",
     ] as const) {
       if (other !== feature) expect(enabled[other]).toBe(false);
     }
+  });
+
+  it("keeps VITE_FEEDBACK as the compatibility opt-in for issue feedback and surveys", async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_FEEDBACK", "1");
+    const { getBuildFeatureState: fresh } = await import("./buildProfile");
+
+    expect(fresh()).toMatchObject({
+      feedback: true,
+      feedbackSurveys: true,
+    });
   });
 
   it("disables bring-your-own-key providers when VITE_BYO_KEY_PROVIDERS is 0 (inverse-positive default-on)", async () => {

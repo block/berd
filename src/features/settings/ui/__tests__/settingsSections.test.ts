@@ -15,6 +15,7 @@ const enabledCapabilities: ProfileCapabilityState = {
   builderbot: true,
   doctor: true,
   feedback: true,
+  feedbackSurveys: true,
   telemetry: true,
   voiceDictation: true,
   voiceConversation: true,

@@ -23,6 +23,7 @@ export type ProfileCapabilityId =
   | "managedConnections"
   | "updates"
   | "feedback"
+  | "feedbackSurveys"
   | "doctor";
 
 type CapabilitySource =
@@ -101,6 +102,10 @@ export const PROFILE_CAPABILITY_REGISTRY: ProfileCapabilityRegistry = {
     feature: "feedback",
     requiresKgoose: true,
     runtimeConfigSection: "feedback",
+  },
+  feedbackSurveys: {
+    kind: "buildFeature",
+    feature: "feedbackSurveys",
   },
   doctor: { kind: "runtimeConfigSection", field: "doctor" },
 };

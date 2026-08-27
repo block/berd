@@ -733,7 +733,7 @@ export const MessageBubble = memo(function MessageBubble({
   const { isCopied: isCopyConfirmed, copyToClipboard } = useCopyToClipboard();
   const hasPersonaAvatar = Boolean(persona?.avatar);
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
-  const feedbackEnabled = useProfileCapability("feedback");
+  const feedbackSurveysEnabled = useProfileCapability("feedbackSurveys");
   const responseRatingEnabled = useRuntimeConfigStore(
     (state) => state.config.feedback?.responseRatingEnabled === true,
   );
@@ -894,7 +894,7 @@ export const MessageBubble = memo(function MessageBubble({
     actionsAlwaysVisible || isCopyConfirmed;
   const responseFeedback =
     canHostMessageActions &&
-    feedbackEnabled &&
+    feedbackSurveysEnabled &&
     responseRatingEnabled &&
     feedbackSessionId &&
     isResponseFeedbackEligible({

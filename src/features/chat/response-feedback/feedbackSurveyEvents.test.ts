@@ -8,35 +8,22 @@ const sink = vi.mocked(feedbackSurveySink);
 
 describe("feedbackSurveyEvents", () => {
   beforeEach(() => {
-    localStorage.clear();
     sink.mockClear();
   });
 
-  it("assigns a persistent session-wide event sequence", () => {
-    sendFeedbackSurveyEvent({
+  it("forwards survey identity and state to the distribution-owned sink", () => {
+    const event = {
       sessionId: "session",
       messageId: "message",
       appearanceId: "appearance",
-      surveyType: "response",
-      eventType: "responded",
-      response: "good",
-    });
-    sendFeedbackSurveyEvent({
-      sessionId: "session",
-      messageId: "message",
-      appearanceId: "appearance",
-      surveyType: "response",
-      eventType: "responded",
-      response: "bad",
-    });
+      surveyType: "response" as const,
+      eventType: "responded" as const,
+      response: "good" as const,
+    };
 
-    expect(sink).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ eventSequence: 1 }),
-    );
-    expect(sink).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ eventSequence: 2 }),
-    );
+    sendFeedbackSurveyEvent(event);
+
+    expect(sink).toHaveBeenCalledOnce();
+    expect(sink).toHaveBeenCalledWith(event);
   });
 });

@@ -11,6 +11,7 @@ declare global {
     readonly VITE_AUTOMATIONS?: string;
     readonly VITE_BUILDERBOT?: string;
     readonly VITE_FEEDBACK?: string;
+    readonly VITE_FEEDBACK_SURVEYS?: string;
     readonly VITE_BYO_KEY_PROVIDERS?: string;
     readonly VITE_TELEMETRY?: string;
     readonly VITE_VOICE_DICTATION?: string;

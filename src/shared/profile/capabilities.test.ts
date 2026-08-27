@@ -26,6 +26,7 @@ const enabledBuildFeatures: Record<BuildFeature, boolean> = {
   builderbot: true,
   byoKeyProviders: false,
   feedback: true,
+  feedbackSurveys: true,
   managedConnections: true,
   telemetry: true,
   telemetryEnforced: false,
@@ -230,6 +231,7 @@ describe("profile capabilities", () => {
       voiceConversation: true,
       managedConnections: false,
       feedback: false,
+      feedbackSurveys: true,
       agentTools: true,
       telemetry: true,
       doctor: true,
@@ -244,6 +246,30 @@ describe("profile capabilities", () => {
         experiments: [{ id: VOICE_CONVERSATION_EXPERIMENT_ID, enabled: true }],
       }).voiceConversation,
     ).toBe(true);
+  });
+
+  it("keeps feedback surveys independent of Kgoose issue feedback", () => {
+    expect(
+      resolve({
+        kgooseConfigured: false,
+        runtimeConfig: {
+          ...DEFAULT_RUNTIME_CONFIG,
+          feedback: { enabled: false, responseRatingEnabled: true },
+        },
+      }),
+    ).toMatchObject({
+      feedback: false,
+      feedbackSurveys: true,
+    });
+
+    expect(
+      resolve({
+        buildFeatures: {
+          ...enabledBuildFeatures,
+          feedbackSurveys: false,
+        },
+      }).feedbackSurveys,
+    ).toBe(false);
   });
 
   it("enables Kgoose-backed capabilities for an explicit distro or environment endpoint", () => {
