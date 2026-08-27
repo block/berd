@@ -109,7 +109,21 @@ pub fn run() {
             .unwrap_or_else(|error| panic!("failed to initialize isolated E2E mode: {error}"));
     }
 
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // Single-instance enforcement: on Windows, a second launch exits early
+    // and focuses the existing window instead of starting a duplicate app
+    // (log files, db connections, goose serve, etc.). macOS handles this
+    // via RunEvent::Reopen further below.
+    #[cfg(target_os = "windows")]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }));
+
+    let builder = builder
         .plugin(tauri_plugin_shell::init())
         .plugin(
             tauri_plugin_log::Builder::new()
