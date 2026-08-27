@@ -1,5 +1,8 @@
 import type { ModelOption } from "../types";
-import { normalizedGooseModelDisplayName } from "@/features/providers/lib/modelRecommendations";
+import {
+  modelDisplayNameFromId,
+  normalizedGooseModelDisplayName,
+} from "@/features/providers/lib/modelRecommendations";
 
 interface ModelDisplayLabelOptions {
   currentModelId?: string | null;
@@ -29,13 +32,25 @@ function getDefaultAvailableModelLabel(availableModels: ModelOption[] = []) {
   return model ? getModelDisplayName(model) : null;
 }
 
-function getExplicitModelIdLabel(modelId?: string | null) {
+function getExplicitModelIdLabel(
+  modelId?: string | null,
+  modelProviderId?: string | null,
+) {
   const selectedModelId = normalizeLabel(modelId);
-  if (!selectedModelId?.startsWith("goose-")) {
+  if (!selectedModelId) {
     return null;
   }
 
-  return normalizedGooseModelDisplayName(selectedModelId);
+  if (
+    modelProviderId === "databricks_v2" &&
+    selectedModelId.indexOf(".") !== selectedModelId.lastIndexOf(".")
+  ) {
+    return modelDisplayNameFromId(modelProviderId, selectedModelId);
+  }
+
+  return selectedModelId.startsWith("goose-")
+    ? normalizedGooseModelDisplayName(selectedModelId)
+    : null;
 }
 
 function findSelectedAvailableModel({
@@ -88,13 +103,19 @@ export function resolveDisplayModelLabel({
   }
 
   const selectedModelId = normalizeLabel(currentModelId);
-  const modelName = normalizeLabel(currentModelName);
+  const rawModelName = normalizeLabel(currentModelName);
+  const modelName =
+    rawModelName &&
+    currentModelProviderId === "databricks_v2" &&
+    rawModelName.indexOf(".") !== rawModelName.lastIndexOf(".")
+      ? modelDisplayNameFromId(currentModelProviderId, rawModelName)
+      : rawModelName;
   if (modelName && modelName !== selectedModelId) {
     return modelName;
   }
 
   return (
-    getExplicitModelIdLabel(selectedModelId) ??
+    getExplicitModelIdLabel(selectedModelId, currentModelProviderId) ??
     (availableModels.length > 0 ? selectedModelId : null)
   );
 }
