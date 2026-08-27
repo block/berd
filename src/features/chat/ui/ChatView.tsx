@@ -225,7 +225,7 @@ export function ChatView({
   const { fallbackCwd: terminalFallbackCwd } =
     useTerminalFallbackCwdPreference();
   const capabilities = useProfileCapabilities();
-  const sessionSurveySamplingRateBasisPoints = useRuntimeConfigStore(
+  const sessionSurveyOpportunityRateBasisPoints = useRuntimeConfigStore(
     (state) => state.config.feedback?.sessionSurveySamplingRateBasisPoints ?? 0,
   );
   const pocketVoiceSetup = usePocketVoiceSetup(capabilities.voiceConversation);
@@ -695,9 +695,9 @@ export function ChatView({
       messages={controller.messages}
       sessionCreatedAt={effectiveSession?.createdAt}
       sessionSurveySamplingRateBasisPoints={
-        isReadOnly || !capabilities.feedback
+        isReadOnly || !capabilities.feedbackSurveys
           ? 0
-          : sessionSurveySamplingRateBasisPoints
+          : sessionSurveyOpportunityRateBasisPoints
       }
       streamingMessageId={controller.streamingMessageId}
       responsePending={shouldShowLoadingIndicator}

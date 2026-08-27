@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/shared/ui/button";
 import {
   type ActiveSessionFeedbackSurvey,
-  isSessionFeedbackSurveyActive,
+  isSessionFeedbackSurveyPresentable,
   markSessionFeedbackSurveyAppeared,
   recordSessionFeedbackSurveyResponse,
   type SessionFeedbackSurveyResponse,
@@ -21,10 +21,11 @@ export function SessionFeedbackSurvey({
   const { t } = useTranslation("chat");
   const targetRef = useRef<HTMLFieldSetElement>(null);
   const dismissRef = useRef<HTMLButtonElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
   const intersectingRef = useRef(false);
   const focusedRef = useRef(false);
   const [visible, setVisible] = useState(() =>
-    isSessionFeedbackSurveyActive(sessionId, survey.appearanceId),
+    isSessionFeedbackSurveyPresentable(sessionId, survey.appearanceId),
   );
 
   useEffect(() => {
@@ -37,6 +38,13 @@ export function SessionFeedbackSurvey({
       if (isIntersecting) {
         markSessionFeedbackSurveyAppeared(sessionId, survey.appearanceId);
         if (!focusedRef.current) {
+          const activeElement = document.activeElement;
+          restoreFocusRef.current =
+            activeElement instanceof HTMLElement &&
+            activeElement !== document.body &&
+            !target.contains(activeElement)
+              ? activeElement
+              : null;
           dismissRef.current?.focus({ preventScroll: true });
           focusedRef.current = true;
         }
@@ -54,6 +62,13 @@ export function SessionFeedbackSurvey({
         response,
       );
       setVisible(false);
+      const restoreFocus = restoreFocusRef.current?.isConnected
+        ? restoreFocusRef.current
+        : document.querySelector<HTMLElement>(
+            "[data-testid='chat-composer']:not(:disabled)",
+          );
+      restoreFocus?.focus({ preventScroll: true });
+      restoreFocusRef.current = null;
     },
     [sessionId, survey.appearanceId],
   );

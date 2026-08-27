@@ -7,7 +7,7 @@ import {
 } from "./sessionFeedbackSurveyState";
 
 vi.mock("./sessionFeedbackSurveyState", () => ({
-  isSessionFeedbackSurveyActive: vi.fn(() => true),
+  isSessionFeedbackSurveyPresentable: vi.fn(() => true),
   markSessionFeedbackSurveyAppeared: vi.fn(),
   recordSessionFeedbackSurveyResponse: vi.fn(),
 }));
@@ -76,6 +76,9 @@ describe("SessionFeedbackSurvey", () => {
   });
 
   it("treats Escape as dismiss", () => {
+    const priorFocus = document.createElement("button");
+    document.body.append(priorFocus);
+    priorFocus.focus();
     render(
       <SessionFeedbackSurvey
         sessionId="session"
@@ -89,6 +92,50 @@ describe("SessionFeedbackSurvey", () => {
       "appearance",
       "dismissed",
     );
+    expect(priorFocus).toHaveFocus();
+    priorFocus.remove();
+  });
+
+  it("restores prior focus after a button response", () => {
+    const priorFocus = document.createElement("button");
+    document.body.append(priorFocus);
+    priorFocus.focus();
+    render(
+      <SessionFeedbackSurvey
+        sessionId="session"
+        survey={{ appearanceId: "appearance", messageId: "message" }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Good" }));
+
+    expect(recordSessionFeedbackSurveyResponse).toHaveBeenCalledWith(
+      "session",
+      "appearance",
+      "good",
+    );
+    expect(priorFocus).toHaveFocus();
+    priorFocus.remove();
+  });
+
+  it("falls back to the composer when prior focus disconnected", () => {
+    const priorFocus = document.createElement("button");
+    const composer = document.createElement("textarea");
+    composer.dataset.testid = "chat-composer";
+    document.body.append(priorFocus, composer);
+    priorFocus.focus();
+    render(
+      <SessionFeedbackSurvey
+        sessionId="session"
+        survey={{ appearanceId: "appearance", messageId: "message" }}
+      />,
+    );
+    priorFocus.remove();
+
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    expect(composer).toHaveFocus();
+    composer.remove();
   });
 
   it("ignores Escape outside the viewport", () => {

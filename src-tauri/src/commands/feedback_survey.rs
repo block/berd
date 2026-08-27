@@ -6,6 +6,9 @@ const SESSION_SURVEY_COOLDOWN_FILE: &str = "session-feedback-survey-cooldown-v1"
 const SESSION_SURVEY_COOLDOWN_MINIMUM_MS: u64 = 27 * 60 * 60 * 1_000;
 const SESSION_SURVEY_COOLDOWN_JITTER_MS: u64 = 2 * 60 * 60 * 1_000;
 
+/// Coordinates survey cooldown claims within one app process and restores the
+/// persisted deadline after restart. Independent app processes may race; this
+/// feedback path is intentionally best-effort.
 pub struct SessionFeedbackSurveyCooldownState {
     path: PathBuf,
     next_eligible_at_ms: Mutex<u64>,
@@ -98,7 +101,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cooldown_claim_is_atomic_and_persistent() {
+    fn cooldown_claim_is_process_atomic_and_persists_across_restart() {
         let dir = tempfile::tempdir().unwrap();
         let state = Arc::new(SessionFeedbackSurveyCooldownState::new(
             dir.path().to_path_buf(),

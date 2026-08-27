@@ -275,6 +275,18 @@ interface LiveStreamingTailSplit {
   startIndex: number;
 }
 
+function rowOwnsSessionFeedbackSurvey(
+  row: TranscriptRowDescriptor,
+  responseFeedbackRowIds: ReadonlySet<string>,
+  survey: ActiveSessionFeedbackSurvey | null | undefined,
+): boolean {
+  return Boolean(
+    survey &&
+      responseFeedbackRowIds.has(row.rowId) &&
+      (row.responseStartMessageId ?? row.messageId) === survey.messageId,
+  );
+}
+
 function formatDateSeparator(
   snapshot: TranscriptProjectionSnapshot,
   rowIndex: number,
@@ -1115,11 +1127,34 @@ function VirtualMessageTimelineSession({
       sessionEpoch,
     ],
   );
-  const stableRows = useStableTranscriptRows(snapshot.rows);
+  const projectedRows = useStableTranscriptRows(snapshot.rows);
   const responseFeedbackRowIds = useMemo(
-    () => selectResponseFeedbackRowIds(stableRows),
-    [stableRows],
+    () => selectResponseFeedbackRowIds(projectedRows),
+    [projectedRows],
   );
+  const stableRows = useMemo(() => {
+    if (!sessionFeedbackSurvey) {
+      return projectedRows;
+    }
+
+    return projectedRows.map((row) =>
+      rowOwnsSessionFeedbackSurvey(
+        row,
+        responseFeedbackRowIds,
+        sessionFeedbackSurvey,
+      )
+        ? {
+            ...row,
+            heightRevision: `${row.heightRevision}:session-survey:${sessionFeedbackSurvey.appearanceId}:${localeKey}`,
+            measurementPolicy: "measure-real" as const,
+            capabilities: {
+              ...row.capabilities,
+              canOffscreenRenderReal: true,
+            },
+          }
+        : row,
+    );
+  }, [localeKey, projectedRows, responseFeedbackRowIds, sessionFeedbackSurvey]);
   const [settlingAgentWorkMessageId, setSettlingAgentWorkMessageId] = useState<
     string | null
   >(null);
@@ -3499,11 +3534,12 @@ function VirtualMessageTimelineSession({
   );
 
   const sessionFeedbackSurveyForRow = (row: TranscriptRowDescriptor) =>
-    sessionFeedbackSurvey &&
-    responseFeedbackRowIds.has(row.rowId) &&
-    (row.responseStartMessageId ?? row.messageId) ===
-      sessionFeedbackSurvey.messageId
-      ? sessionFeedbackSurvey
+    rowOwnsSessionFeedbackSurvey(
+      row,
+      responseFeedbackRowIds,
+      sessionFeedbackSurvey,
+    )
+      ? (sessionFeedbackSurvey ?? undefined)
       : undefined;
   const renderRow = (
     row: TranscriptRowDescriptor,

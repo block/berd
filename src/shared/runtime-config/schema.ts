@@ -283,6 +283,8 @@ export const runtimeFeedbackConfigSchema = z
     enabled: z.boolean().optional(),
     projectKey: nonEmptyString("feedback projectKey").optional(),
     responseRatingEnabled: z.boolean().optional(),
+    // This is a per-eligible-completion opportunity hazard, not a percentage
+    // allocation of sessions.
     sessionSurveySamplingRateBasisPoints: z
       .number()
       .int()

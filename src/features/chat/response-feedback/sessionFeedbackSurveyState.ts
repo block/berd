@@ -118,6 +118,10 @@ async function claimSessionFeedbackSurveyUnqueued({
 }: SessionFeedbackSurveyClaimInput): Promise<ActiveSessionFeedbackSurvey | null> {
   let existing = readSessionRecord(sessionId);
   const createdAt = Date.parse(sessionCreatedAt);
+  if (existing?.appeared || existing?.response) {
+    return null;
+  }
+
   if (existing?.active && currentMessageIds.has(existing.active.messageId)) {
     return existing.active;
   }
@@ -125,9 +129,8 @@ async function claimSessionFeedbackSurveyUnqueued({
     existing = { ...existing, active: null };
     writeSessionRecord(sessionId, existing);
   }
+
   if (
-    existing?.appeared ||
-    existing?.response ||
     existing?.lastEvaluatedMessageId === messageId ||
     userTurnCount < SESSION_SURVEY_MINIMUM_USER_TURNS ||
     !Number.isFinite(createdAt) ||
@@ -136,17 +139,30 @@ async function claimSessionFeedbackSurveyUnqueued({
     return null;
   }
 
-  const rate = Math.min(10_000, Math.max(0, samplingRateBasisPoints));
-  if (rate === 0) return null;
+  const opportunityRateBasisPoints = Math.min(
+    10_000,
+    Math.max(0, samplingRateBasisPoints),
+  );
+  if (opportunityRateBasisPoints === 0) return null;
   const selected = await claimSessionFeedbackSurveyCooldown({
-    samplingRateBasisPoints: rate,
+    samplingRateBasisPoints: opportunityRateBasisPoints,
     random,
     cooldownRandom,
   }).catch(() => false);
+
+  const latest = readSessionRecord(sessionId);
+  if (latest?.appeared || latest?.response) {
+    return null;
+  }
+  if (latest?.active) {
+    return latest.active;
+  }
+
   const active = selected
     ? { appearanceId: crypto.randomUUID(), messageId }
     : null;
   writeSessionRecord(sessionId, {
+    ...latest,
     version: 1,
     lastEvaluatedMessageId: messageId,
     active,
@@ -177,11 +193,16 @@ export function claimSessionFeedbackSurvey(
   return claim;
 }
 
-export function isSessionFeedbackSurveyActive(
+export function isSessionFeedbackSurveyPresentable(
   sessionId: string,
   appearanceId: string,
 ): boolean {
-  return readSessionRecord(sessionId)?.active?.appearanceId === appearanceId;
+  const record = readSessionRecord(sessionId);
+  return (
+    record?.active?.appearanceId === appearanceId &&
+    !record.appeared &&
+    !record.response
+  );
 }
 
 export function markSessionFeedbackSurveyAppeared(

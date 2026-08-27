@@ -168,6 +168,7 @@ pub struct RuntimeFeedbackConfig {
     pub project_key: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub response_rating_enabled: Option<bool>,
+    /// Per-eligible-completion opportunity hazard, not a session allocation.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub session_survey_sampling_rate_basis_points: Option<u16>,
 }
