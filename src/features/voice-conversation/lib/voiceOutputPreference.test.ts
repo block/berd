@@ -26,10 +26,10 @@ describe("voice output preference", () => {
     });
   });
 
-  it("defaults to Pocket on macOS", () => {
+  it("defaults to Siri on macOS", () => {
     setPlatform("Macintosh");
-    expect(getDefaultVoiceOutputBackend()).toBe("pocket");
-    expect(getVoiceOutputBackend()).toBe("pocket");
+    expect(getDefaultVoiceOutputBackend()).toBe("siri");
+    expect(getVoiceOutputBackend()).toBe("siri");
   });
 
   it("defaults to Pocket and rejects persisted Siri off macOS", () => {
