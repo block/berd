@@ -56,8 +56,11 @@ import type {
 } from "@/shared/types/messages";
 import { Button } from "@/shared/ui/button";
 import { LinkifiedText } from "@/shared/ui/LinkifiedText";
+import { useProfileCapability } from "@/shared/profile/capabilities";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import { MessageBubbleActions } from "./MessageBubbleActions";
 import { MessageMetadataChip } from "./MessageMetadataChip";
+import { isResponseFeedbackEligible } from "../response-feedback/responseFeedbackState";
 import {
   couldOverflowUserMessagePreview,
   UserMessageClamp,
@@ -339,6 +342,7 @@ interface MessageBubbleProps {
   contentOverride?: readonly MessageContent[];
   contentContext?: readonly MessageContent[];
   actionMessageId?: string;
+  feedbackSessionId?: string;
   fragmentRole?: "single" | "start" | "middle" | "end";
   onCopy?: () => void;
   onRetryMessage?: (messageId: string) => void;
@@ -694,6 +698,7 @@ export const MessageBubble = memo(function MessageBubble({
   contentOverride,
   contentContext,
   actionMessageId = message.id,
+  feedbackSessionId,
   fragmentRole,
   onRetryMessage,
   onEditMessage,
@@ -728,6 +733,10 @@ export const MessageBubble = memo(function MessageBubble({
   const { isCopied: isCopyConfirmed, copyToClipboard } = useCopyToClipboard();
   const hasPersonaAvatar = Boolean(persona?.avatar);
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
+  const feedbackSurveysEnabled = useProfileCapability("feedbackSurveys");
+  const responseRatingEnabled = useRuntimeConfigStore(
+    (state) => state.config.feedback?.responseRatingEnabled === true,
+  );
   const runItCodeRenderers = useMemo<CustomRenderer[]>(
     () =>
       onRunShellCommand
@@ -883,6 +892,21 @@ export const MessageBubble = memo(function MessageBubble({
     showMessageActions || (!isUser && isStreaming && canHostMessageActions);
   const messageActionsArePersistentlyVisible =
     actionsAlwaysVisible || isCopyConfirmed;
+  const responseFeedback =
+    canHostMessageActions &&
+    feedbackSurveysEnabled &&
+    responseRatingEnabled &&
+    feedbackSessionId &&
+    isResponseFeedbackEligible({
+      message,
+      content,
+      isStreaming: Boolean(isStreaming),
+    })
+      ? {
+          sessionId: feedbackSessionId,
+          messageId: actionMessageId,
+        }
+      : undefined;
   const outerSpacingClassName =
     fragmentRole === "start"
       ? "pt-1 pb-0"
@@ -1124,6 +1148,7 @@ export const MessageBubble = memo(function MessageBubble({
                 !isUser && !isStreaming ? onJumpToResponseStart : undefined
               }
               onForkFromMessage={!isStreaming ? onForkFromMessage : undefined}
+              responseFeedback={responseFeedback}
               showJumpToResponseStartHint={
                 !isUser && !isStreaming ? showJumpToResponseStartHint : false
               }

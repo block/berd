@@ -15,6 +15,7 @@ import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { TranscriptSearchSkip } from "./TranscriptSearchSkip";
 import { MessageTimelineScrollContainer } from "./MessageTimelineScrollContainer";
+import { selectResponseFeedbackRowIds } from "../response-feedback/responseFeedbackRows";
 import type { Message } from "@/shared/types/messages";
 import {
   createTranscriptProjectionCache,
@@ -68,6 +69,7 @@ const GUTTER_RESPONSE_START_THRESHOLD_PX = 16;
 
 interface MessageTimelineProps extends MessageTimelineBubbleCallbacks {
   messages: Message[];
+  feedbackSessionId?: string;
   streamingMessageId?: string | null;
   scrollTargetMessageId?: string | null;
   scrollTargetQuery?: string | null;
@@ -117,6 +119,7 @@ function formatRowDateSeparator(
 
 export function MessageTimeline({
   messages,
+  feedbackSessionId,
   streamingMessageId,
   scrollTargetMessageId,
   scrollTargetQuery,
@@ -204,6 +207,10 @@ export function MessageTimeline({
         localeKey,
       }),
     [messages, nowBucket, streamingMessageId],
+  );
+  const responseFeedbackRowIds = useMemo(
+    () => selectResponseFeedbackRowIds(snapshot.rows),
+    [snapshot.rows],
   );
   const visibleMessages = useMemo(
     () =>
@@ -1474,6 +1481,11 @@ export function MessageTimeline({
           actionsAlwaysVisible={
             row.messageId === latestAssistantMessageId &&
             (row.responseStartMessageId ?? row.messageId) !== streamingMessageId
+          }
+          feedbackSessionId={
+            responseFeedbackRowIds.has(row.rowId)
+              ? feedbackSessionId
+              : undefined
           }
           showJumpToResponseStartHint={
             row.messageId === responseStartHintMessageId &&

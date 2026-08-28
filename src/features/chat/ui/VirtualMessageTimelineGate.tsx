@@ -38,7 +38,7 @@ export function VirtualMessageTimelineGate({
   );
 
   if (!loadedTranscript) {
-    return <MessageTimeline {...timelineProps} />;
+    return <MessageTimeline feedbackSessionId={sessionId} {...timelineProps} />;
   }
 
   return (

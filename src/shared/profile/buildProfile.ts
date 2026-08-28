@@ -5,6 +5,7 @@ export type BuildFeature =
   | "builderbot"
   | "byoKeyProviders"
   | "feedback"
+  | "feedbackSurveys"
   | "managedConnections"
   | "telemetry"
   | "telemetryEnforced"
@@ -16,8 +17,9 @@ export type BuildFeature =
 /**
  * Product families backed by Block-only services are positive opt-ins. A
  * normal public build has no value for these variables and therefore cannot
- * expose a path that depends on KGoose, G2, or Builderbot. Distributions may
- * restore each family independently by setting exactly its variable to `1`.
+ * expose a path that depends on KGoose, G2, or Builderbot. Human feedback
+ * surveys use the same opt-in posture because their transport is supplied by
+ * the distribution.
  */
 function readBuildFeatures(): Record<BuildFeature, boolean> {
   return {
@@ -29,6 +31,11 @@ function readBuildFeatures(): Record<BuildFeature, boolean> {
     builderbot: import.meta.env.VITE_BUILDERBOT === "1",
     byoKeyProviders: import.meta.env.VITE_BYO_KEY_PROVIDERS !== "0",
     feedback: import.meta.env.VITE_FEEDBACK === "1",
+    // Keep the existing broad opt-in working while allowing survey transports
+    // that do not include KGoose issue feedback.
+    feedbackSurveys:
+      import.meta.env.VITE_FEEDBACK_SURVEYS === "1" ||
+      import.meta.env.VITE_FEEDBACK === "1",
     managedConnections: import.meta.env.VITE_MANAGED_CONNECTIONS === "1",
     telemetry: import.meta.env.VITE_TELEMETRY !== "0",
     // Managed internal distributions force telemetry consent ON: the user

@@ -98,6 +98,15 @@ describe("runtimeConfigSchema", () => {
     );
   });
 
+  it("accepts distribution-owned response feedback policy", () => {
+    expect(
+      runtimeConfigSchema.parse({
+        ...DEFAULT_RUNTIME_CONFIG,
+        feedback: { enabled: true, responseRatingEnabled: true },
+      }).feedback,
+    ).toEqual({ enabled: true, responseRatingEnabled: true });
+  });
+
   it("accepts an empty managed-provider list as unrestricted policy", () => {
     expect(runtimeConfigSchema.parse(DEFAULT_RUNTIME_CONFIG)).toEqual(
       DEFAULT_RUNTIME_CONFIG,
