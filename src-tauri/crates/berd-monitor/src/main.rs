@@ -540,12 +540,22 @@ impl Drop for ProducerTree {
 
 struct ProducerProcess {
     child: std::process::Child,
-    tree: ProducerTree,
+    tree: Option<ProducerTree>,
 }
 
 impl ProducerProcess {
     fn terminate_and_wait(&mut self) {
-        terminate_producer_tree(&mut self.child, &self.tree);
+        self.terminate_and_wait_with(terminate_producer_tree);
+    }
+
+    fn terminate_and_wait_with(
+        &mut self,
+        terminate: impl FnOnce(&mut std::process::Child, &ProducerTree),
+    ) {
+        let Some(tree) = self.tree.take() else {
+            return;
+        };
+        terminate(&mut self.child, &tree);
         let _ = self.child.wait();
     }
 }
@@ -764,7 +774,7 @@ fn run_producer(
     };
     let mut producer = ProducerProcess {
         child,
-        tree: producer_tree,
+        tree: Some(producer_tree),
     };
     if let Err(error) = resume_producer(&producer.child) {
         return Err(io::Error::new(
@@ -1475,7 +1485,10 @@ mod tests {
             configure_producer(&mut command);
             let child = command.spawn()?;
             let tree = attach_producer_tree(&child)?;
-            let mut producer = ProducerProcess { child, tree };
+            let mut producer = ProducerProcess {
+                child,
+                tree: Some(tree),
+            };
             resume_producer(&producer.child)?;
             let direct_pid = producer.child.id();
             let mut descendant = String::new();
@@ -1497,6 +1510,31 @@ mod tests {
         }
         assert!(!test_process_exists(direct_pid));
         assert!(!test_process_exists(descendant_pid));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_producer_cleanup_disarms_drop() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "exec sleep 30"]);
+        configure_producer(&mut command);
+        let child = command.spawn().unwrap();
+        let tree = attach_producer_tree(&child).unwrap();
+        let mut producer = ProducerProcess {
+            child,
+            tree: Some(tree),
+        };
+        resume_producer(&producer.child).unwrap();
+        let mut termination_calls = 0;
+
+        producer.terminate_and_wait_with(|child, tree| {
+            termination_calls += 1;
+            terminate_producer_tree(child, tree);
+        });
+        producer.terminate_and_wait_with(|_, _| termination_calls += 1);
+        drop(producer);
+
+        assert_eq!(termination_calls, 1);
     }
 
     #[test]
@@ -1594,7 +1632,10 @@ mod tests {
         configure_producer(&mut command);
         let child = command.spawn().unwrap();
         let tree = attach_producer_tree(&child).unwrap();
-        let mut producer = ProducerProcess { child, tree };
+        let mut producer = ProducerProcess {
+            child,
+            tree: Some(tree),
+        };
         resume_producer(&producer.child).unwrap();
         let direct_pid = producer.child.id();
         let mut descendant = String::new();
