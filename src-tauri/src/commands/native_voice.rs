@@ -1671,7 +1671,14 @@ pub async fn stop_native_voice_conversation_for_replacement(
     Ok(status(&app, &state).await)
 }
 
-fn caller_owns_target(caller_window_label: &str, target_owner: Option<&str>) -> bool {
+fn caller_owns_target(
+    caller_window_label: &str,
+    target_owner: Option<&str>,
+    owns_foreground_session: bool,
+) -> bool {
+    if !owns_foreground_session {
+        return false;
+    }
     match target_owner {
         Some(owner_window_label) => owner_window_label == caller_window_label,
         None => caller_window_label == "main",
@@ -1685,12 +1692,22 @@ fn validate_voice_target_session(
     renderer_id: &str,
     renderer_epoch: u64,
     target_session_id: &str,
-    _foreground_generation: Option<u64>,
+    foreground_generation: Option<u64>,
 ) -> Result<(), String> {
-    capture.activate_renderer(webview_window.label(), renderer_id, renderer_epoch)?;
     let target_owner = window_sessions.label_for(target_session_id);
-    if !caller_owns_target(webview_window.label(), target_owner.as_deref()) {
-        return Err("The target session belongs to a different Berd window.".to_string());
+    let owns_foreground_session = capture.foreground_session_matches_generation(
+        webview_window.label(),
+        renderer_id,
+        renderer_epoch,
+        target_session_id,
+        foreground_generation,
+    )?;
+    if !caller_owns_target(
+        webview_window.label(),
+        target_owner.as_deref(),
+        owns_foreground_session,
+    ) {
+        return Err("The target session is no longer in the foreground.".to_string());
     }
     Ok(())
 }
@@ -2873,11 +2890,20 @@ mod tests {
 
     #[test]
     fn call_target_ownership_survives_focus_changes_and_rejects_other_windows() {
-        assert!(caller_owns_target("main", None));
-        assert!(!caller_owns_target("main", Some("session:target")));
-        assert!(caller_owns_target("session:target", Some("session:target"),));
-        assert!(!caller_owns_target("session:other", Some("session:target"),));
-        assert!(!caller_owns_target("voice-buddy", None));
+        assert!(caller_owns_target("main", None, true));
+        assert!(!caller_owns_target("main", None, false));
+        assert!(!caller_owns_target("main", Some("session:target"), true));
+        assert!(caller_owns_target(
+            "session:target",
+            Some("session:target"),
+            true,
+        ));
+        assert!(!caller_owns_target(
+            "session:other",
+            Some("session:target"),
+            true,
+        ));
+        assert!(!caller_owns_target("voice-buddy", None, true));
     }
 
     #[test]

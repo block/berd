@@ -215,7 +215,6 @@ impl VoiceCaptureState {
         )
     }
 
-    #[cfg(test)]
     pub fn foreground_session_matches_generation(
         &self,
         window_label: &str,
