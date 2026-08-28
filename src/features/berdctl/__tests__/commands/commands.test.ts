@@ -707,6 +707,7 @@ describe("sessions.create", () => {
         prompt: "what is 1+1",
         agent_id: "agent-7",
         model_id: "model-9",
+        from: "the test orchestrator",
       },
       ctx,
     );
@@ -733,7 +734,19 @@ describe("sessions.create", () => {
       useChatStore.getState().queuedMessageBySession["session-new"];
     expect(queued?.[0]).toMatchObject({
       kind: "transport-ready",
-      payload: { text: "what is 1+1" },
+      payload: {
+        text: "what is 1+1",
+        sendOptions: {
+          userMessageMetadata: {
+            origin: "berdctl_cross_session",
+            berdSenderLabel: "the test orchestrator",
+          },
+          acpGooseMetadata: {
+            origin: "berdctl_cross_session",
+            berdSenderLabel: "the test orchestrator",
+          },
+        },
+      },
     });
     expect(controller.openSession).not.toHaveBeenCalled();
   });

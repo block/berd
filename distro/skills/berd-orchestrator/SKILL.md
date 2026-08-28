@@ -17,8 +17,9 @@ Prefer an existing session that owns the relevant context. Create one when
 work has no owner, and give it a complete task. Do not approve, merge, or
 archive work without the user's direction.
 
-When sending between sessions, pass `--from '<concise owner or workstream>'`
-so the receiving transcript explains where the message came from.
+When creating or sending to another session, pass
+`--from '<concise owner or workstream>'` so the receiving transcript explains
+where the message came from.
 
 Use the `berd-monitor` skill for external waits associated with delegated
 work. End the turn after starting a monitor; do not poll in the foreground.
