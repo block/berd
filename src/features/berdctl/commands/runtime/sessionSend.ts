@@ -62,14 +62,21 @@ export function hasAcceptedBerdctlDelivery(
 ): boolean {
   const chatStore = useChatStore.getState();
   return (
-    (chatStore.messagesBySession[sessionId] ?? []).some(
-      (message) => message.metadata?.berdDeliveryId === deliveryId,
-    ) ||
+    hasAcceptedBerdctlDeliveryInTranscript(sessionId, deliveryId) ||
     (chatStore.queuedMessageBySession[sessionId] ?? []).some(
       (record) =>
         record.payload.sendOptions?.userMessageMetadata?.berdDeliveryId ===
         deliveryId,
     )
+  );
+}
+
+export function hasAcceptedBerdctlDeliveryInTranscript(
+  sessionId: string,
+  deliveryId: string,
+): boolean {
+  return (useChatStore.getState().messagesBySession[sessionId] ?? []).some(
+    (message) => message.metadata?.berdDeliveryId === deliveryId,
   );
 }
 
