@@ -167,6 +167,22 @@
     "errorDescription": "No se pudo iniciar la automatizacion. Intentalo de nuevo.",
     "started": "Automatizacion iniciada"
   },
+  "localSchedules": {
+    "actionError": "No se pudo actualizar la programación local.",
+    "description": "Tareas de recetas que Goose ejecuta dentro de Berd en esta computadora.",
+    "kill": "Detener ejecución",
+    "loadErrorDescription": "Berd no pudo leer el programador local de Goose.",
+    "loadErrorTitle": "No se pudieron cargar las programaciones locales",
+    "loading": "Cargando programaciones locales",
+    "paused": "En pausa",
+    "pause": "Pausar",
+    "remove": "Eliminar programación",
+    "removeDescription": "¿Eliminar la programación local \"{{name}}\"? El archivo de receta guardado se conserva.",
+    "removeTitle": "Eliminar programación local",
+    "resume": "Reanudar",
+    "running": "En ejecución",
+    "title": "Programaciones locales"
+  },
   "list": {
     "ariaLabel": "Lista de automatizaciones",
     "emptyBody": "Crea tu primera automatización para programar trabajo recurrente.",

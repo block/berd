@@ -24,6 +24,7 @@ Usage: berdctl <noun> <verb> [--json]
 - session: create, send, open, list, get, rename, fork, archive, move
 - folder: attach, detach, replace, set-cwd, list
 - project: create, list, get, archive
+- schedule: list, pause, unpause, kill, remove
 - agent: create, list
 - skill: create, list, get
 - info: context, harnesses, models

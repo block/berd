@@ -297,6 +297,11 @@ mod tests {
                 vec!["--project-id", "p", "--mode", "worktree"]
             }
             ("project", "archive") => vec!["--project-id", "p"],
+            ("schedule", "list") => vec![],
+            ("schedule", "pause") | ("schedule", "unpause") | ("schedule", "kill") => {
+                vec!["--schedule-id", "s"]
+            }
+            ("schedule", "remove") => vec!["--schedule-id", "s", "--confirm"],
             ("agent", "create") => vec!["--name", "n", "--system-prompt", "sp"],
             ("agent", "list") => vec![],
             ("skill", "create") => {

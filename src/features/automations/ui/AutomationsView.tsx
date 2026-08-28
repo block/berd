@@ -28,8 +28,17 @@ import {
 import { AutomationBuilderView } from "@/features/automations/ui/AutomationBuilderView";
 import type { AutomationBuilderLeaveAction } from "@/features/automations/ui/AutomationBuilderView";
 import { AutomationDetailPage } from "@/features/automations/ui/AutomationDetailPage";
+import {
+  killLocalScheduleRun,
+  listLocalSchedules,
+  LOCAL_SCHEDULES_QUERY_KEY,
+  pauseLocalSchedule,
+  removeLocalSchedule,
+  unpauseLocalSchedule,
+} from "@/features/automations/api/localSchedules";
 import { AutomationHistoryFeed } from "@/features/automations/ui/AutomationHistoryFeed";
 import { AutomationsOverview } from "@/features/automations/ui/AutomationsOverview";
+import { LocalSchedulesPanel } from "@/features/automations/ui/LocalSchedulesPanel";
 import { EmptyState } from "@/features/automations/ui/RunOutput";
 import { Badge } from "@/shared/ui/badge";
 import { PageHeaderButton } from "@/shared/ui/page-header-button";
@@ -112,6 +121,9 @@ export function AutomationsWorkbench({
     null,
   );
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [removeLocalScheduleId, setRemoveLocalScheduleId] = useState<
+    string | null
+  >(null);
 
   const setNavigationRoute = useCallback(
     (
@@ -138,6 +150,16 @@ export function AutomationsWorkbench({
   });
 
   const automations = useMemo(() => automationsData ?? [], [automationsData]);
+  const {
+    data: localSchedules = [],
+    error: localSchedulesError,
+    isLoading: isLocalSchedulesLoading,
+    refetch: refetchLocalSchedules,
+  } = useQuery({
+    queryKey: LOCAL_SCHEDULES_QUERY_KEY,
+    queryFn: listLocalSchedules,
+    refetchInterval: AUTOMATIONS_REFETCH_INTERVAL_MS,
+  });
 
   useEffect(() => {
     if (!automations.length) {
@@ -348,6 +370,38 @@ export function AutomationsWorkbench({
     },
   });
 
+  const localScheduleMutation = useMutation({
+    mutationFn: async ({
+      action,
+      scheduleId,
+    }: {
+      action: "pause" | "unpause" | "kill" | "remove";
+      scheduleId: string;
+    }) => {
+      switch (action) {
+        case "pause":
+          return pauseLocalSchedule(scheduleId);
+        case "unpause":
+          return unpauseLocalSchedule(scheduleId);
+        case "kill":
+          return killLocalScheduleRun(scheduleId);
+        case "remove":
+          return removeLocalSchedule(scheduleId);
+      }
+    },
+    onSuccess: async () => {
+      setRemoveLocalScheduleId(null);
+      await queryClient.invalidateQueries({
+        queryKey: LOCAL_SCHEDULES_QUERY_KEY,
+      });
+    },
+    onError: (error) => {
+      toast.error(t("localSchedules.actionError"), {
+        description: errorMessage(error, t("localSchedules.actionError")),
+      });
+    },
+  });
+
   const duplicateMutation = useMutation({
     mutationFn: (tile: AutomationTile) => {
       const request = buildDuplicateAutomationRequest(
@@ -463,7 +517,10 @@ export function AutomationsWorkbench({
       <>
         <PageHeaderButton
           type="button"
-          onClick={() => refetchAutomations()}
+          onClick={() => {
+            void refetchAutomations();
+            void refetchLocalSchedules();
+          }}
           aria-label={t("actions.refresh")}
           tooltip={t("actions.refresh")}
           leftIcon={<IconRefresh aria-hidden="true" />}
@@ -490,6 +547,7 @@ export function AutomationsWorkbench({
     openBuilder,
     refetchAutomations,
     refetchDetail,
+    refetchLocalSchedules,
     refreshMutate,
     setTopBarActions,
     t,
@@ -623,7 +681,49 @@ export function AutomationsWorkbench({
               </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="overview" className="mt-6">
+            <TabsContent value="overview" className="mt-6 space-y-6">
+              {isLocalSchedulesLoading ? (
+                <div
+                  role="status"
+                  className="h-[74px] rounded-xl border bg-card"
+                  aria-label={t("localSchedules.loading")}
+                />
+              ) : localSchedulesError ? (
+                <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+                  <div className="font-medium">
+                    {t("localSchedules.loadErrorTitle")}
+                  </div>
+                  <div className="mt-1 text-xs">
+                    {errorMessage(
+                      localSchedulesError,
+                      t("localSchedules.loadErrorDescription"),
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <LocalSchedulesPanel
+                  schedules={localSchedules}
+                  actions={{
+                    pending: localScheduleMutation.isPending,
+                    onPause: (scheduleId) =>
+                      localScheduleMutation.mutate({
+                        action: "pause",
+                        scheduleId,
+                      }),
+                    onUnpause: (scheduleId) =>
+                      localScheduleMutation.mutate({
+                        action: "unpause",
+                        scheduleId,
+                      }),
+                    onKill: (scheduleId) =>
+                      localScheduleMutation.mutate({
+                        action: "kill",
+                        scheduleId,
+                      }),
+                    onRemove: setRemoveLocalScheduleId,
+                  }}
+                />
+              )}
               {isAutomationsLoading ? (
                 <div className="space-y-3">
                   <div className="h-[86px] rounded-md bg-card" />
@@ -643,12 +743,12 @@ export function AutomationsWorkbench({
                   automations={automations}
                   onOpenDetail={openDetail}
                 />
-              ) : (
+              ) : localSchedules.length === 0 && !localSchedulesError ? (
                 <EmptyState
                   title={t("list.emptyTitle")}
                   body={t("list.emptyBody")}
                 />
-              )}
+              ) : null}
             </TabsContent>
 
             <TabsContent value="history" className="mt-6">
@@ -676,6 +776,29 @@ export function AutomationsWorkbench({
           </Tabs>
         )}
       </PageShell>
+
+      <ConfirmDialog
+        open={Boolean(removeLocalScheduleId)}
+        onOpenChange={(open) => {
+          if (!open) setRemoveLocalScheduleId(null);
+        }}
+        title={t("localSchedules.removeTitle")}
+        description={t("localSchedules.removeDescription", {
+          name: removeLocalScheduleId,
+        })}
+        cancelLabel={t("actions.cancel")}
+        confirmLabel={t("localSchedules.remove")}
+        loadingLabel={t("actions.deleting")}
+        isLoading={localScheduleMutation.isPending}
+        onConfirm={() => {
+          if (removeLocalScheduleId) {
+            localScheduleMutation.mutate({
+              action: "remove",
+              scheduleId: removeLocalScheduleId,
+            });
+          }
+        }}
+      />
 
       <ConfirmDialog
         open={Boolean(deleteAutomationId)}
